@@ -227,6 +227,7 @@ export interface PanelVisibilityState {
   sceneTree: boolean;
   viewport: boolean;
   inspector: boolean;
+  profiler: boolean;
   assetBrowser: boolean;
   assetsPreview: boolean;
   animation: boolean;
@@ -482,6 +483,7 @@ export const createInitialAppState = (): AppState => ({
       sceneTree: true,
       viewport: true,
       inspector: true,
+      profiler: true,
       assetBrowser: true,
       assetsPreview: true,
       animation: true,

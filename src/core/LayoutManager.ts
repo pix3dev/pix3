@@ -13,6 +13,7 @@ const PANEL_COMPONENT_TYPES = {
   sceneTree: 'scene-tree',
   viewport: 'viewport',
   inspector: 'inspector',
+  profiler: 'profiler',
   assetBrowser: 'asset-browser',
   assetsPreview: 'assets-preview',
   animation: 'animation',
@@ -27,6 +28,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.sceneTree]: 'pix3-scene-tree-panel',
   [PANEL_COMPONENT_TYPES.viewport]: 'pix3-editor-tab',
   [PANEL_COMPONENT_TYPES.inspector]: 'pix3-inspector-panel',
+  [PANEL_COMPONENT_TYPES.profiler]: 'pix3-profiler-panel',
   [PANEL_COMPONENT_TYPES.assetBrowser]: 'pix3-asset-browser-panel',
   [PANEL_COMPONENT_TYPES.assetsPreview]: 'pix3-assets-preview-panel',
   [PANEL_COMPONENT_TYPES.animation]: 'pix3-animation-panel',
@@ -39,6 +41,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.sceneTree]: 'Scene Tree',
   [PANEL_COMPONENT_TYPES.viewport]: 'Viewport',
   [PANEL_COMPONENT_TYPES.inspector]: 'Inspector',
+  [PANEL_COMPONENT_TYPES.profiler]: 'Profiler',
   [PANEL_COMPONENT_TYPES.assetBrowser]: 'Asset Browser',
   [PANEL_COMPONENT_TYPES.assetsPreview]: 'Assets Preview',
   [PANEL_COMPONENT_TYPES.animation]: 'Animation',
@@ -51,6 +54,7 @@ const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   sceneTree: true,
   viewport: true,
   inspector: true,
+  profiler: true,
   assetBrowser: true,
   assetsPreview: true,
   animation: false,
@@ -130,11 +134,22 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
       },
 
       {
-        type: 'component',
+        type: 'stack',
         width: 30,
-        componentType: PANEL_COMPONENT_TYPES.inspector,
-        title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.inspector],
-        isClosable: false,
+        content: [
+          {
+            type: 'component',
+            componentType: PANEL_COMPONENT_TYPES.inspector,
+            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.inspector],
+            isClosable: false,
+          },
+          {
+            type: 'component',
+            componentType: PANEL_COMPONENT_TYPES.profiler,
+            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.profiler],
+            isClosable: false,
+          },
+        ],
       },
     ],
   },
@@ -588,11 +603,13 @@ export class LayoutManagerService {
             | undefined;
 
           const componentType = itemInfo?.componentType;
-          if (
-            componentType !== PANEL_COMPONENT_TYPES.background &&
-            !this.isEditorTabComponentType(componentType)
-          )
+          if (!componentType || componentType === PANEL_COMPONENT_TYPES.background) return;
+
+          this.state.ui.focusedPanelId = componentType;
+
+          if (!this.isEditorTabComponentType(componentType)) {
             return;
+          }
 
           // IMPORTANT: Invalidate the cached editorStack because the active content changed
           // This ensures we get fresh contentItems array when reopening tabs after close
@@ -604,9 +621,6 @@ export class LayoutManagerService {
           if (parentStack) {
             this.editorStack = parentStack;
           }
-
-          if (!this.isEditorTabComponentType(componentType)) return;
-
           const tabId = itemInfo?.container?.state?.tabId;
           if (typeof tabId !== 'string' || !tabId) return;
           for (const listener of this.editorTabFocusedListeners) {
@@ -634,6 +648,7 @@ export class LayoutManagerService {
         previousPanelVisibility.sceneTree === nextPanelVisibility.sceneTree &&
         previousPanelVisibility.viewport === nextPanelVisibility.viewport &&
         previousPanelVisibility.inspector === nextPanelVisibility.inspector &&
+        previousPanelVisibility.profiler === nextPanelVisibility.profiler &&
         previousPanelVisibility.assetBrowser === nextPanelVisibility.assetBrowser &&
         previousPanelVisibility.assetsPreview === nextPanelVisibility.assetsPreview &&
         previousPanelVisibility.animation === nextPanelVisibility.animation &&
@@ -766,11 +781,12 @@ export class LayoutManagerService {
 
   private findMainEditorStack(node: ContentItem | null | undefined): Stack | null {
     if (!node) return null;
+    const componentNode = node as ComponentItem & { componentType?: string };
 
     if (
       node.type === 'component' &&
-      (this.isEditorTabComponentType((node as ComponentItem).componentType) ||
-        (node as ComponentItem).componentType === PANEL_COMPONENT_TYPES.background)
+      (this.isEditorTabComponentType(componentNode.componentType) ||
+        componentNode.componentType === PANEL_COMPONENT_TYPES.background)
     ) {
       return this.findClosestStack(
         node.parent ?? (node as { _parent?: ContentItem })._parent ?? null

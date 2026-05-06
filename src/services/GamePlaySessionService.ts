@@ -10,6 +10,7 @@ import {
 import { appState } from '@/state';
 import type { GameAspectRatio } from '@/state/AppState';
 import { OperationService } from '@/services/OperationService';
+import { ProfilerSessionService } from '@/services/ProfilerSessionService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
@@ -46,6 +47,9 @@ export class GamePlaySessionService {
 
   @inject(OperationService)
   private readonly operationService!: OperationService;
+
+  @inject(ProfilerSessionService)
+  private readonly profilerSessionService!: ProfilerSessionService;
 
   private initialized = false;
   private disposeUiSubscription?: () => void;
@@ -214,6 +218,7 @@ export class GamePlaySessionService {
     this.detachRuntime();
     this.activeHostKind = host.kind;
     this.updateHostRunningState(false);
+    this.profilerSessionService.beginSession(host.kind);
 
     const renderer = new RuntimeRenderer({
       antialias: true,
@@ -234,12 +239,14 @@ export class GamePlaySessionService {
 
     this.renderer = renderer;
     this.runner = runner;
+    this.profilerSessionService.bindRuntime(runner, renderer, host.kind);
 
     this.attachFocusListeners(host.windowRef);
 
     const activeSceneId = appState.scenes.activeSceneId;
     if (!activeSceneId) {
       console.warn('[GamePlaySessionService] No active scene to play.');
+      this.profilerSessionService.endSession();
       this.updateHostRunningState(false);
       return;
     }
@@ -249,6 +256,7 @@ export class GamePlaySessionService {
       this.updateHostRunningState(true);
       this.handleFocusPause();
     } catch (error) {
+      this.profilerSessionService.endSession();
       console.error('[GamePlaySessionService] Failed to start scene', error);
       this.updateHostRunningState(false);
       throw error;
@@ -258,6 +266,7 @@ export class GamePlaySessionService {
   private detachRuntime(): void {
     this.focusCleanup?.();
     this.focusCleanup = undefined;
+    this.profilerSessionService.endSession();
 
     if (this.runner) {
       this.runner.stop();

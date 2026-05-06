@@ -27,6 +27,19 @@ import { AudioPlayer } from '../nodes/AudioPlayer';
 import { LAYER_3D, LAYER_2D } from '../constants';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
+import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
+
+export interface SceneRunnerFrameSample {
+  readonly dt: number;
+  readonly elapsedTime: number;
+  readonly frameNumber: number;
+  readonly logicMs: number;
+  readonly renderMs: number;
+  readonly totalFrameMs: number;
+  readonly rendererStats: RuntimeRendererStatsSnapshot;
+}
+
+type SceneRunnerFrameListener = (sample: SceneRunnerFrameSample) => void;
 
 export class SceneRunner {
   private readonly sceneManager: SceneManager;
@@ -53,6 +66,7 @@ export class SceneRunner {
   /** Adaptive logical camera dimensions computed from viewportBaseSize + viewport aspect. */
   private logicalCameraSize = { width: 1, height: 1 };
   private readonly rootLayoutAuthoredSize: { width: number; height: number };
+  private readonly frameListeners = new Set<SceneRunnerFrameListener>();
 
   constructor(
     sceneManager: SceneManager,
@@ -176,6 +190,7 @@ export class SceneRunner {
     this.fixedTimeAccumulator = 0;
     this.elapsedTime = 0;
     this.frameNumber = 0;
+    this.isPaused = false;
 
     // Clear the runtime scene to release resources
     if (this.runtimeGraph) {
@@ -218,6 +233,7 @@ export class SceneRunner {
     if (!this.isRunning || this.isPaused) return;
 
     const dt = this.clock.getDelta();
+    const logicStart = performance.now();
 
     this.inputService.beginFrame();
     this.frameNumber += 1;
@@ -234,12 +250,32 @@ export class SceneRunner {
     this.ecsService.setInterpolationAlpha(alpha);
     this.ecsService.update(dt, alpha);
 
+    this.renderer.beginStatsFrame();
     this.updateNodes(dt);
     this.flushInstancedNodes();
+    const logicMs = performance.now() - logicStart;
+    const renderStart = performance.now();
     this.render();
+    const renderMs = performance.now() - renderStart;
+    this.notifyFrameListeners({
+      dt,
+      elapsedTime: this.elapsedTime,
+      frameNumber: this.frameNumber,
+      logicMs,
+      renderMs,
+      totalFrameMs: logicMs + renderMs,
+      rendererStats: this.renderer.getStatsSnapshot(),
+    });
 
     this.animationFrameId = requestAnimationFrame(this.tick);
   };
+
+  subscribeFrameStats(listener: SceneRunnerFrameListener): () => void {
+    this.frameListeners.add(listener);
+    return () => {
+      this.frameListeners.delete(listener);
+    };
+  }
 
   private updateNodes(dt: number): void {
     const graph = this.runtimeGraph;
@@ -625,6 +661,12 @@ export class SceneRunner {
 
     for (const child of node.children) {
       this.stopAudioPlayers(child);
+    }
+  }
+
+  private notifyFrameListeners(sample: SceneRunnerFrameSample): void {
+    for (const listener of this.frameListeners) {
+      listener(sample);
     }
   }
 }

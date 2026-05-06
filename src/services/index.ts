@@ -47,6 +47,14 @@ export {
 } from './DialogService';
 export { EditorTabService } from './EditorTabService';
 export { GamePlaySessionService } from './GamePlaySessionService';
+export {
+  ProfilerSessionService,
+  type ProfilerHistorySnapshot,
+  type ProfilerSessionSnapshot,
+  type ProfilerSessionStatus,
+  type ProfilerPerformanceSnapshot,
+  type ProfilerCountersSnapshot,
+} from './ProfilerSessionService';
 export { IconService, IconSize, type IconSizeValue } from './IconService';
 export { ScriptRegistry } from '@pix3/runtime';
 export { ScriptExecutionService } from './ScriptExecutionService';

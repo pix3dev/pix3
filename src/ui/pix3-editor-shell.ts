@@ -92,6 +92,7 @@ import './welcome/pix3-welcome';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
 import './assets-preview/assets-preview-panel';
+import './profiler/profiler-panel';
 import './animation-editor/animation-panel';
 import './viewport/game-tab';
 import './pix3-editor-shell.ts.css';
@@ -232,6 +233,7 @@ export class Pix3EditorShell extends ComponentBase {
 
   private disposeAuthSubscription?: () => void;
   private disposeSubscription?: () => void;
+  private disposeUiSubscription?: () => void;
   private disposeScenesSubscription?: () => void;
   private disposeProjectSubscription?: () => void;
   private disposeDialogsSubscription?: () => void;
@@ -251,6 +253,8 @@ export class Pix3EditorShell extends ComponentBase {
   private watchedScenePaths = new Map<string, string>();
   private tabsInitialized = false;
   private isResumingRouterTarget = false;
+  private previousIsPlaying = appState.ui.isPlaying;
+  private returnPanelAfterPlay: 'inspector' | 'profiler' | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -439,7 +443,8 @@ export class Pix3EditorShell extends ComponentBase {
     };
     window.addEventListener('hashchange', this.hashChangeHandler);
 
-    this.disposeSubscription = subscribe(appState.ui, () => {
+    this.disposeUiSubscription = subscribe(appState.ui, () => {
+      this.syncProfilerPanelFocusWithPlayMode();
       this.isLayoutReady = appState.ui.isLayoutReady;
       this.shellReady = this.isLayoutReady;
       this.requestUpdate();
@@ -535,6 +540,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeAuthSubscription = undefined;
     this.disposeSubscription?.();
     this.disposeSubscription = undefined;
+    this.disposeUiSubscription?.();
+    this.disposeUiSubscription = undefined;
     this.disposeScenesSubscription?.();
     this.disposeScenesSubscription = undefined;
     this.disposeProjectSubscription?.();
@@ -596,6 +603,28 @@ export class Pix3EditorShell extends ComponentBase {
       e.preventDefault();
       void this.commandDispatcher.executeById(commandId);
     }
+  }
+
+  private syncProfilerPanelFocusWithPlayMode(): void {
+    const isPlaying = appState.ui.isPlaying;
+    if (isPlaying === this.previousIsPlaying) {
+      return;
+    }
+
+    if (isPlaying) {
+      const focusedPanelId = appState.ui.focusedPanelId;
+      this.returnPanelAfterPlay =
+        focusedPanelId === 'inspector' || focusedPanelId === 'profiler'
+          ? focusedPanelId
+          : 'inspector';
+      this.layoutManager.focusPanel('profiler');
+    } else {
+      const panelToRestore = this.returnPanelAfterPlay ?? 'inspector';
+      this.layoutManager.focusPanel(panelToRestore);
+      this.returnPanelAfterPlay = null;
+    }
+
+    this.previousIsPlaying = isPlaying;
   }
 
   private handleAccountPopoverPointerDown(e: PointerEvent): void {

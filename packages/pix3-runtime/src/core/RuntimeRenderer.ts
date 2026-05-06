@@ -7,6 +7,15 @@ export interface RuntimeRendererOptions {
   shadows?: boolean;
 }
 
+export interface RuntimeRendererStatsSnapshot {
+  readonly calls: number;
+  readonly triangles: number;
+  readonly points: number;
+  readonly lines: number;
+  readonly geometries: number;
+  readonly textures: number;
+}
+
 export class RuntimeRenderer {
   private renderer: WebGLRenderer;
   private canvas: HTMLCanvasElement;
@@ -23,6 +32,7 @@ export class RuntimeRenderer {
       alpha: false,
       powerPreference: 'high-performance',
     });
+    this.renderer.info.autoReset = false;
 
     this.renderer.setPixelRatio(options.pixelRatio ?? window.devicePixelRatio);
     this.renderer.setClearColor(options.clearColor ?? '#000000');
@@ -71,6 +81,21 @@ export class RuntimeRenderer {
 
   render(scene: Scene, camera: Camera): void {
     this.renderer.render(scene, camera);
+  }
+
+  beginStatsFrame(): void {
+    this.renderer.info.reset();
+  }
+
+  getStatsSnapshot(): RuntimeRendererStatsSnapshot {
+    return {
+      calls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      points: this.renderer.info.render.points,
+      lines: this.renderer.info.render.lines,
+      geometries: this.renderer.info.memory.geometries,
+      textures: this.renderer.info.memory.textures,
+    };
   }
 
   setAutoClear(autoClear: boolean): void {
