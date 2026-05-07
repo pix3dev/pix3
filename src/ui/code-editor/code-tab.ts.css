@@ -1,0 +1,87 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.code-tab {
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100%;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(14, 17, 21, 0.96), rgba(10, 12, 15, 0.98)),
+    radial-gradient(circle at top left, rgba(255, 207, 51, 0.08), transparent 38%);
+  color: #d7dbe0;
+}
+
+.code-tab[data-state='loading'],
+.code-tab[data-state='error'] {
+  place-items: center;
+}
+
+.editor-host {
+  height: 100%;
+  min-height: 0;
+}
+
+.placeholder {
+  display: grid;
+  gap: 14px;
+  width: min(640px, calc(100% - 48px));
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(19, 23, 29, 0.88);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+.placeholder__title {
+  font: 600 15px/1.2 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  color: #f5f7fa;
+}
+
+.placeholder__body {
+  color: rgba(215, 219, 224, 0.8);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.placeholder__lines {
+  display: grid;
+  gap: 10px;
+}
+
+.placeholder__line {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 207, 51, 0.2),
+    rgba(255, 255, 255, 0.08)
+  );
+  background-size: 200% 100%;
+  animation: code-tab-shimmer 1.6s linear infinite;
+}
+
+.placeholder__line:nth-child(1) {
+  width: 92%;
+}
+
+.placeholder__line:nth-child(2) {
+  width: 86%;
+}
+
+.placeholder__line:nth-child(3) {
+  width: 78%;
+}
+
+@keyframes code-tab-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}

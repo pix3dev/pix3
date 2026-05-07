@@ -20,6 +20,7 @@ const PANEL_COMPONENT_TYPES = {
   logs: 'logs',
   background: 'background',
   game: 'game',
+  code: 'code',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -35,6 +36,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.logs]: 'pix3-logs-panel',
   [PANEL_COMPONENT_TYPES.background]: 'pix3-background',
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
+  [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -48,6 +50,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
   [PANEL_COMPONENT_TYPES.background]: 'Pix3',
   [PANEL_COMPONENT_TYPES.game]: 'Game',
+  [PANEL_COMPONENT_TYPES.code]: 'Code',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -313,7 +316,9 @@ export class LayoutManagerService {
             ? PANEL_COMPONENT_TYPES.game
             : tab.type === 'animation'
               ? PANEL_COMPONENT_TYPES.animation
-              : PANEL_COMPONENT_TYPES.viewport,
+              : tab.type === 'code'
+                ? PANEL_COMPONENT_TYPES.code
+                : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
         // PREVENT DRAGGING to enforce Single Document Interface
@@ -523,7 +528,8 @@ export class LayoutManagerService {
     return (
       componentType === PANEL_COMPONENT_TYPES.viewport ||
       componentType === PANEL_COMPONENT_TYPES.animation ||
-      componentType === PANEL_COMPONENT_TYPES.game
+      componentType === PANEL_COMPONENT_TYPES.game ||
+      componentType === PANEL_COMPONENT_TYPES.code
     );
   }
 
@@ -684,6 +690,10 @@ export class LayoutManagerService {
   private registerComponents(layout: GoldenLayout): void {
     Object.entries(PANEL_TAG_NAMES).forEach(([componentType, tagName]) => {
       layout.registerComponentFactoryFunction(componentType, container => {
+        if (componentType === PANEL_COMPONENT_TYPES.code) {
+          void import('@/ui/code-editor/code-tab');
+        }
+
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;
         if (this.isEditorTabComponentType(componentType)) {
           const tabTitle =

@@ -7,6 +7,7 @@ describe('AssetFileActivationService', () => {
     const service = new AssetFileActivationService();
     const editorTabService = {
       focusOrOpenAnimation: vi.fn().mockResolvedValue(undefined),
+      focusOrOpenCode: vi.fn().mockResolvedValue(undefined),
     };
 
     Object.defineProperty(service, 'editorTabService', {
@@ -26,5 +27,52 @@ describe('AssetFileActivationService', () => {
     expect(editorTabService.focusOrOpenAnimation).toHaveBeenCalledWith(
       'res://assets/walk.pix3anim'
     );
+  });
+
+  it('routes .ts, .js, and .json assets to code tabs', async () => {
+    const service = new AssetFileActivationService();
+    const editorTabService = {
+      focusOrOpenAnimation: vi.fn().mockResolvedValue(undefined),
+      focusOrOpenCode: vi.fn().mockResolvedValue(undefined),
+    };
+
+    Object.defineProperty(service, 'editorTabService', {
+      value: editorTabService,
+    });
+
+    const payloads: AssetActivation[] = [
+      {
+        name: 'player.ts',
+        path: 'scripts/player.ts',
+        kind: 'file',
+        resourcePath: 'res://scripts/player.ts',
+        extension: 'ts',
+      },
+      {
+        name: 'bootstrap.js',
+        path: 'scripts/bootstrap.js',
+        kind: 'file',
+        resourcePath: 'res://scripts/bootstrap.js',
+        extension: 'js',
+      },
+      {
+        name: 'config.json',
+        path: 'config.json',
+        kind: 'file',
+        resourcePath: 'res://config.json',
+        extension: 'json',
+      },
+    ];
+
+    for (const payload of payloads) {
+      await service.handleActivation(payload);
+    }
+
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(1, 'res://scripts/player.ts');
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(
+      2,
+      'res://scripts/bootstrap.js'
+    );
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(3, 'res://config.json');
   });
 });

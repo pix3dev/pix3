@@ -11,8 +11,8 @@ export class SaveActiveResourceCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'editor.save-active-resource',
     title: 'Save',
-    description: 'Save the active scene or animation document',
-    keywords: ['save', 'scene', 'animation', 'tab'],
+    description: 'Save the active scene, animation, or code document',
+    keywords: ['save', 'scene', 'animation', 'code', 'tab'],
     menuPath: 'file',
     keybinding: 'Mod+S',
     when: '!isInputFocused',
@@ -32,25 +32,29 @@ export class SaveActiveResourceCommand extends CommandBase<void, void> {
       };
     }
 
-    if (state.project.backend === 'cloud') {
+    const activeTab = state.tabs.tabs.find(tab => tab.id === state.tabs.activeTabId);
+    if (!activeTab) {
       return {
         canExecute: false,
-        reason: 'Cloud resources are synchronized automatically.',
+        reason: 'An active scene, animation, or code tab is required to save',
+        scope: 'service',
+      };
+    }
+
+    if (
+      state.project.backend === 'cloud' &&
+      activeTab.type !== 'code' &&
+      activeTab.type !== 'game'
+    ) {
+      return {
+        canExecute: false,
+        reason: 'Cloud scene and animation resources are synchronized automatically.',
         scope: 'external',
         recoverable: true,
       };
     }
 
-    const activeTab = state.tabs.tabs.find(tab => tab.id === state.tabs.activeTabId);
-    if (!activeTab) {
-      return {
-        canExecute: false,
-        reason: 'An active scene or animation tab is required to save',
-        scope: 'service',
-      };
-    }
-
-    if (activeTab.type !== 'scene' && activeTab.type !== 'animation') {
+    if (activeTab.type !== 'scene' && activeTab.type !== 'animation' && activeTab.type !== 'code') {
       return {
         canExecute: false,
         reason: 'The active tab does not support saving',

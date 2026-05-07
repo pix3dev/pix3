@@ -37,6 +37,13 @@ export { LoggingService, type LogLevel, type LogEntry, type LogListener } from '
 export { CommandRegistry, type CommandMenuItem, type MenuSection } from './CommandRegistry';
 export { KeybindingService } from './KeybindingService';
 export { FileWatchService } from './FileWatchService';
+export {
+  CodeDocumentService,
+  type CodeDocumentEvent,
+  type CodeDocumentEventReason,
+  type CodeDocumentLanguage,
+  type CodeDocumentSnapshot,
+} from './CodeDocumentService';
 export { LocalSyncService, type SyncResult } from './LocalSyncService';
 export { ProjectSyncService, type ProjectSyncDialogInstance } from './ProjectSyncService';
 export {

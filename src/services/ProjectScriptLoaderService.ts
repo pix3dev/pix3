@@ -50,7 +50,7 @@ export class ProjectScriptLoaderService {
   private debounceTimer: number | null = null;
   private readonly debounceMs = 300;
   private readonly scriptDirectories = ['scripts', 'src/scripts'] as const;
-  private readonly supportedSourceExtensions = ['.ts', '.css', '.glsl'] as const;
+  private readonly supportedSourceExtensions = ['.ts', '.js', '.css', '.glsl'] as const;
   private isPageActive = isDocumentActive(document);
   private pendingBuildWhileHidden = false;
   private readonly handlePageActivityChange = (): void => {
@@ -450,7 +450,10 @@ export class ProjectScriptLoaderService {
     try {
       const content = await this.storage.readTextFile(filePath);
 
-      if (filePath.endsWith('.ts') && !this.watchedFilePaths.has(filePath)) {
+      if (
+        (filePath.endsWith('.ts') || filePath.endsWith('.js')) &&
+        !this.watchedFilePaths.has(filePath)
+      ) {
         try {
           const handle = await this.storage.getFileHandle(filePath);
           if (handle) {
@@ -526,6 +529,7 @@ export class ProjectScriptLoaderService {
   private isLoadableDependencyPath(filePath: string): boolean {
     return (
       filePath.endsWith('.ts') ||
+      filePath.endsWith('.js') ||
       filePath.endsWith('.css') ||
       filePath.endsWith('.glsl') ||
       filePath.endsWith('.frag') ||
@@ -537,7 +541,10 @@ export class ProjectScriptLoaderService {
     const entryFiles: string[] = [];
 
     for (const [filePath, content] of files) {
-      if (!filePath.endsWith('.ts') || !this.isWithinScriptDirectory(filePath)) {
+      if (
+        !(filePath.endsWith('.ts') || filePath.endsWith('.js')) ||
+        !this.isWithinScriptDirectory(filePath)
+      ) {
         continue;
       }
 

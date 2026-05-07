@@ -108,7 +108,8 @@ export class ScriptCompilerService {
     }
 
     const effectiveEntryFiles = (
-      entryFiles ?? Array.from(files.keys()).filter(file => file.endsWith('.ts'))
+      entryFiles ??
+      Array.from(files.keys()).filter(file => file.endsWith('.ts') || file.endsWith('.js'))
     ).filter(file => files.has(file));
 
     if (effectiveEntryFiles.length === 0) {

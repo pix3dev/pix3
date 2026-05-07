@@ -15,6 +15,7 @@ import { AnimationEditorService } from '@/services/AnimationEditorService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 import { SceneManager } from '@pix3/runtime';
 import { subscribe } from 'valtio/vanilla';
+import { CodeDocumentService } from '@/services/CodeDocumentService';
 
 export type DirtyCloseDecision = 'save' | 'dont-save' | 'cancel';
 
@@ -41,10 +42,14 @@ export class EditorTabService {
   @inject(AnimationEditorService)
   private readonly animationEditorService!: AnimationEditorService;
 
+  @inject(CodeDocumentService)
+  private readonly codeDocumentService!: CodeDocumentService;
+
   private disposeSceneSubscription?: () => void;
   private disposeAnimationSubscription?: () => void;
   private disposeLayoutSubscription?: () => void;
   private disposeTabsSubscription?: () => void;
+  private disposeCodeDocumentsSubscription?: () => void;
   private handleBeforeUnload?: (e: BeforeUnloadEvent) => void;
   private readonly sceneLoadInFlight = new Map<string, Promise<void>>();
   private readonly animationLoadInFlight = new Map<string, Promise<void>>();
@@ -60,6 +65,10 @@ export class EditorTabService {
     });
 
     this.disposeAnimationSubscription = subscribe(appState.animations, () => {
+      this.syncResourceTabsFromDescriptors();
+    });
+
+    this.disposeCodeDocumentsSubscription = this.codeDocumentService.subscribeAll(() => {
       this.syncResourceTabsFromDescriptors();
     });
 
@@ -140,6 +149,8 @@ export class EditorTabService {
     this.disposeLayoutSubscription = undefined;
     this.disposeTabsSubscription?.();
     this.disposeTabsSubscription = undefined;
+    this.disposeCodeDocumentsSubscription?.();
+    this.disposeCodeDocumentsSubscription = undefined;
     if (this.handleBeforeUnload) {
       window.removeEventListener('beforeunload', this.handleBeforeUnload);
       this.handleBeforeUnload = undefined;
@@ -216,6 +227,10 @@ export class EditorTabService {
 
   async focusOrOpenAnimation(resourcePath: string): Promise<void> {
     await this.openResourceTab('animation', resourcePath);
+  }
+
+  async focusOrOpenCode(resourcePath: string): Promise<void> {
+    await this.openResourceTab('code', resourcePath);
   }
 
   remapSceneTabs(remapResourcePath: (resourcePath: string) => string | null): void {
@@ -374,11 +389,17 @@ export class EditorTabService {
   }
 
   getDirtyTabs(): EditorTab[] {
-    if (appState.project.backend === 'cloud') {
-      return [];
-    }
+    return appState.tabs.tabs.filter(tab => {
+      if (!tab.isDirty) {
+        return false;
+      }
 
-    return appState.tabs.tabs.filter(tab => tab.isDirty);
+      if (appState.project.backend !== 'cloud') {
+        return true;
+      }
+
+      return tab.type === 'code';
+    });
   }
 
   async saveDirtyTabs(): Promise<void> {
@@ -457,6 +478,9 @@ export class EditorTabService {
         return;
       case 'animation':
         await this.activateAnimationTab(tab);
+        return;
+      case 'code':
+        await this.activateCodeTab(tab);
         return;
       default:
         return;
@@ -549,6 +573,12 @@ export class EditorTabService {
     this.syncResourceTabsFromDescriptors();
   }
 
+  private async activateCodeTab(tab: EditorTab): Promise<void> {
+    this.animationEditorService.setActiveAssetPath(null);
+    await this.codeDocumentService.ensureLoaded(tab.resourceId);
+    this.syncResourceTabsFromDescriptors();
+  }
+
   private captureActiveContextState(): void {
     const activeTabId = appState.tabs.activeTabId;
     if (!activeTabId) return;
@@ -577,7 +607,7 @@ export class EditorTabService {
   }
 
   private async saveTabResource(tab: EditorTab): Promise<void> {
-    if (appState.project.backend === 'cloud') {
+    if (appState.project.backend === 'cloud' && tab.type !== 'code') {
       return;
     }
 
@@ -590,6 +620,10 @@ export class EditorTabService {
       case 'animation': {
         const animationId = this.deriveAnimationIdFromResource(tab.resourceId);
         await this.commandDispatcher.execute(new SaveAnimationCommand({ animationId }));
+        return;
+      }
+      case 'code': {
+        await this.codeDocumentService.save(tab.resourceId);
         return;
       }
       default:
@@ -674,7 +708,6 @@ export class EditorTabService {
 
   private syncResourceTabsFromDescriptors(): void {
     // Keep tab.isDirty/title aligned with loaded resource descriptor state.
-    const treatAsClean = appState.project.backend === 'cloud';
     let didChange = false;
     const nextTabs = appState.tabs.tabs.map(tab => {
       const descriptor = this.getResourceDescriptor(tab);
@@ -683,6 +716,7 @@ export class EditorTabService {
       }
 
       const fileTitle = this.deriveTitle(descriptor.filePath);
+      const treatAsClean = appState.project.backend === 'cloud' && tab.type !== 'code';
       const title = treatAsClean ? fileTitle : descriptor.isDirty ? `*${fileTitle}` : fileTitle;
       const isDirty = treatAsClean ? false : descriptor.isDirty;
 
@@ -743,6 +777,16 @@ export class EditorTabService {
         const animationId = this.deriveAnimationIdFromResource(tab.resourceId);
         return appState.animations.descriptors[animationId] ?? null;
       }
+      case 'code': {
+        const document = this.codeDocumentService.getDocument(tab.resourceId);
+        if (!document) {
+          return null;
+        }
+        return {
+          filePath: document.resourcePath,
+          isDirty: document.isDirty,
+        };
+      }
       default:
         return null;
     }
@@ -780,6 +824,11 @@ export class EditorTabService {
       if (appState.animations.activeAnimationId === animationId) {
         appState.animations.activeAnimationId = null;
       }
+      return;
+    }
+
+    if (tab.type === 'code') {
+      this.codeDocumentService.close(tab.resourceId);
     }
   }
 

@@ -10,7 +10,28 @@ export const DEFAULT_THEME: ThemeName = 'dark';
 export type SceneLoadState = 'idle' | 'loading' | 'ready' | 'error';
 export type AnimationLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
-export type EditorTabType = 'scene' | 'prefab' | 'script' | 'texture' | 'animation' | 'game';
+export type EditorTabType =
+  | 'scene'
+  | 'prefab'
+  | 'script'
+  | 'texture'
+  | 'animation'
+  | 'game'
+  | 'code';
+
+export interface CodeEditorSelectionState {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+}
+
+export interface CodeEditorContextState {
+  selection?: CodeEditorSelectionState;
+  scrollTop?: number;
+  scrollLeft?: number;
+  monacoViewState?: unknown;
+}
 
 export interface CameraState {
   position: { x: number; y: number; z: number };
@@ -35,6 +56,7 @@ export interface EditorTab {
   contextState?: {
     camera?: CameraState;
     selection?: TabSelectionState;
+    codeEditor?: CodeEditorContextState;
     [key: string]: unknown;
   };
 }

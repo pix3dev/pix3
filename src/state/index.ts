@@ -43,6 +43,8 @@ export type {
   AnimationsState,
   AppState,
   CameraState,
+  CodeEditorContextState,
+  CodeEditorSelectionState,
   CollabConnectionStatus,
   CollabRemoteUser,
   CollaborationState,
