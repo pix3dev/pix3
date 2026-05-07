@@ -1,10 +1,13 @@
 export interface AudioPlayback {
   stop: () => void;
+  ended: Promise<void>;
 }
 
 export interface PlayAudioOptions {
   volume?: number;
   loop?: boolean;
+  playbackRate?: number;
+  pan?: number;
 }
 
 type WebkitAudioContextCtor = new () => AudioContext;
@@ -126,6 +129,7 @@ export class AudioService {
         stop: () => {
           // no-op
         },
+        ended: Promise.resolve(),
       };
     }
 
@@ -138,34 +142,60 @@ export class AudioService {
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.loop = options?.loop ?? false;
+    source.playbackRate.value = Math.max(0.01, options?.playbackRate ?? 1);
 
     const gainNode = this.context.createGain();
-    gainNode.gain.value = options?.volume ?? 1.0;
+    gainNode.gain.value = Math.max(0, options?.volume ?? 1.0);
+
+    let outputNode: AudioNode = gainNode;
+    let pannerNode: StereoPannerNode | null = null;
+    if (typeof options?.pan === 'number' && typeof this.context.createStereoPanner === 'function') {
+      pannerNode = this.context.createStereoPanner();
+      pannerNode.pan.value = Math.max(-1, Math.min(1, options.pan));
+      gainNode.connect(pannerNode);
+      outputNode = pannerNode;
+    }
 
     source.connect(gainNode);
-    gainNode.connect(this.masterGain);
+    outputNode.connect(this.masterGain);
 
-    source.start();
+    let resolveEnded!: () => void;
+    const ended = new Promise<void>((resolve) => {
+      resolveEnded = resolve;
+    });
+
+    let finished = false;
+
+    const finalize = (): void => {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+      this.activePlaybacks.delete(playback);
+      source.disconnect();
+      gainNode.disconnect();
+      pannerNode?.disconnect();
+      resolveEnded();
+    };
 
     const playback: AudioPlayback = {
       stop: () => {
         try {
           source.stop();
-          source.disconnect();
-          gainNode.disconnect();
         } catch (err) {
           // Ignore errors if already stopped
         } finally {
-          this.activePlaybacks.delete(playback);
+          finalize();
         }
       },
+      ended,
     };
 
-    source.onended = () => {
-      this.activePlaybacks.delete(playback);
-    };
+    source.onended = finalize;
 
     this.activePlaybacks.add(playback);
+    source.start();
 
     return playback;
   }
