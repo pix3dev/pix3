@@ -48,6 +48,29 @@ describe('ProfilerPanel', () => {
           frameCount: 312,
           hostKind: 'popout',
         },
+        frameImpact: {
+          sampledFrameCount: 12,
+          windowDurationMs: 8000,
+          totalFrameTimeMs: 8000,
+          activities: [
+            {
+              label: 'Physics',
+              selfTimeMs: 120,
+              totalTimeMs: 180,
+              selfPercent: 9,
+              totalPercent: 13.5,
+              sampleCount: 12,
+            },
+            {
+              label: 'Audio',
+              selfTimeMs: 24,
+              totalTimeMs: 24,
+              selfPercent: 3,
+              totalPercent: 3,
+              sampleCount: 6,
+            },
+          ],
+        },
       })
     );
 
@@ -63,9 +86,21 @@ describe('ProfilerPanel', () => {
     expect(panel.textContent).toContain('34.2 MB');
     expect(panel.textContent).toContain('1:35');
     expect(panel.textContent).toContain('popout');
+    expect(panel.textContent).toContain('Frame Impact');
+    expect(panel.textContent).toContain('8.0 s');
+    expect(panel.textContent).toContain('Physics');
+    expect(panel.textContent).toContain('13.5%');
+    expect(panel.textContent).toContain('180 ms');
+    expect(panel.textContent).toContain('Count = frames where the activity appeared.');
+    expect(panel.textContent).toContain('6');
     expect(panel.querySelectorAll('.chart-card')).toHaveLength(2);
     expect(panel.querySelector('.fps-line')).not.toBeNull();
     expect(panel.querySelector('.chart-legend')).not.toBeNull();
+    expect(panel.querySelectorAll('.frame-impact-row')).toHaveLength(3);
+    const sectionTitles = [...panel.querySelectorAll('.profiler-section-title')].map(node =>
+      node.textContent?.trim()
+    );
+    expect(sectionTitles.at(-1)).toBe('Frame Impact');
   });
 
   it('renders fallback placeholder for unsupported metrics', async () => {
@@ -95,6 +130,27 @@ describe('ProfilerPanel', () => {
       node.textContent?.trim()
     );
     expect(values).toContain('—');
+  });
+
+  it('renders an empty frame impact state when the runtime does not publish activities', async () => {
+    const panel = document.createElement('pix3-profiler-panel') as ProfilerPanelElement;
+    stubPanelService(
+      panel,
+      createSnapshot({
+        status: 'running',
+        frameImpact: {
+          activities: [],
+          sampledFrameCount: 0,
+          windowDurationMs: 0,
+          totalFrameTimeMs: 0,
+        },
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(panel.textContent).toContain('No frame activity breakdown reported by the active runtime yet.');
   });
 });
 
@@ -136,6 +192,12 @@ function createSnapshot(overrides: Partial<ProfilerSessionSnapshot>): ProfilerSe
       frameTimeMs: [17.2, 16.7, 16.9, 16.3],
       logicMs: [5.8, 6.1, 5.7, 5.5],
       renderMs: [8.4, 8.1, 8.6, 8.2],
+    },
+    frameImpact: overrides.frameImpact ?? {
+      activities: [],
+      sampledFrameCount: 0,
+      windowDurationMs: 0,
+      totalFrameTimeMs: 0,
     },
   };
 }

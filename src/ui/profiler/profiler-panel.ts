@@ -1,6 +1,8 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { svg } from 'lit';
 import {
+  type ProfilerFrameImpactEntrySnapshot,
+  type ProfilerFrameImpactSnapshot,
   ProfilerSessionService,
   type ProfilerCountersSnapshot,
   type ProfilerHistorySnapshot,
@@ -11,6 +13,7 @@ import './profiler-panel.ts.css';
 import '../shared/pix3-panel';
 
 const IDLE_COPY = 'Profiler metrics appear here while Play mode is running.';
+const FRAME_IMPACT_EMPTY_COPY = 'No frame activity breakdown reported by the active runtime yet.';
 
 @customElement('pix3-profiler-panel')
 export class ProfilerPanel extends ComponentBase {
@@ -41,6 +44,10 @@ export class ProfilerPanel extends ComponentBase {
       frameTimeMs: [],
       logicMs: [],
       renderMs: [],
+    },
+    frameImpact: {
+      activities: [],
+      sampledFrameCount: 0,
     },
   };
 
@@ -83,6 +90,7 @@ export class ProfilerPanel extends ComponentBase {
                   this.renderPerformanceRows(this.snapshot.performance)
                 )}
                 ${this.renderSection('Session', this.renderCounterRows(this.snapshot.counters))}
+                ${this.renderFrameImpactSection(this.snapshot.frameImpact)}
               `}
         </div>
       </pix3-panel>
@@ -124,6 +132,74 @@ export class ProfilerPanel extends ComponentBase {
     return html`
       <div class="metric-label">${label}</div>
       <div class="metric-value">${value}</div>
+    `;
+  }
+
+  private renderFrameImpactSection(snapshot: ProfilerFrameImpactSnapshot) {
+    const sampledFrameCountLabel = `${snapshot.sampledFrameCount.toLocaleString('en-US')}f`;
+    return html`
+      <section class="profiler-section profiler-impact-section">
+        <div class="profiler-section-heading">
+          <h3 class="profiler-section-title">Frame Impact</h3>
+          <span class="profiler-section-meta"
+            >${this.formatImpactWindow(snapshot.windowDurationMs)} · ${sampledFrameCountLabel}</span
+          >
+        </div>
+        <p class="profiler-section-note">
+          100% = full frame time inside this window. Count = frames where the activity appeared.
+          Runtime rows are added automatically.
+        </p>
+        ${snapshot.activities.length === 0
+          ? html`<p class="profiler-empty-state">${FRAME_IMPACT_EMPTY_COPY}</p>`
+          : html`
+              <div class="frame-impact-table" role="table" aria-label="Frame impact table">
+                <div class="frame-impact-row frame-impact-row-header" role="row">
+                  <div class="frame-impact-header-cell" role="columnheader">Self (% · ms)</div>
+                  <div class="frame-impact-header-cell" role="columnheader">Total (% · ms)</div>
+                  <div class="frame-impact-header-cell" role="columnheader"
+                    >Activity · count/${sampledFrameCountLabel}</div
+                  >
+                </div>
+                ${snapshot.activities.map(activity => this.renderFrameImpactRow(activity))}
+              </div>
+            `}
+      </section>
+    `;
+  }
+
+  private renderFrameImpactRow(activity: ProfilerFrameImpactEntrySnapshot) {
+    return html`
+      <div class="frame-impact-row" role="row">
+        <div class="frame-impact-cell" role="cell">
+          ${this.renderFrameImpactValue(activity.selfPercent, activity.selfTimeMs, 'self')}
+        </div>
+        <div class="frame-impact-cell" role="cell">
+          ${this.renderFrameImpactValue(activity.totalPercent, activity.totalTimeMs, 'total')}
+        </div>
+        <div class="frame-impact-cell frame-impact-cell-activity" role="cell">
+          <span class="frame-impact-activity-label">${activity.label}</span>
+          <span class="frame-impact-activity-meta">${this.formatInteger(activity.sampleCount)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderFrameImpactValue(
+    percent: number | null,
+    timeMs: number,
+    variant: 'self' | 'total'
+  ) {
+    return html`
+      <div class="frame-impact-meter frame-impact-meter-${variant}">
+        <div
+          class="frame-impact-meter-fill"
+          style=${`width: ${this.toCssPercent(percent)}`}
+        ></div>
+        <div class="frame-impact-meter-content" title=${this.formatPercent(percent)}>
+          <span class="frame-impact-primary">${this.formatPercent(percent)}</span>
+          <span class="frame-impact-secondary">${this.formatImpactMilliseconds(timeMs)}</span>
+        </div>
+      </div>
     `;
   }
 
@@ -330,6 +406,30 @@ export class ProfilerPanel extends ComponentBase {
     return `${value.toFixed(1)} ms`;
   }
 
+  private formatPercent(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return '—';
+    }
+
+    return `${value.toFixed(1)}%`;
+  }
+
+  private formatImpactMilliseconds(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return '—';
+    }
+
+    if (value < 1) {
+      return `${value.toFixed(2)} ms`;
+    }
+
+    if (value < 100) {
+      return `${value.toFixed(1)} ms`;
+    }
+
+    return `${Math.round(value).toLocaleString('en-US')} ms`;
+  }
+
   private formatMegabytes(value: number | null): string {
     if (typeof value !== 'number' || !Number.isFinite(value)) {
       return '—';
@@ -343,6 +443,22 @@ export class ProfilerPanel extends ComponentBase {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private formatImpactWindow(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+      return '0.0 s';
+    }
+
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  private toCssPercent(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return '0%';
+    }
+
+    return `${Math.min(value, 100).toFixed(2)}%`;
   }
 }
 

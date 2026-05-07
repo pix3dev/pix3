@@ -54,6 +54,8 @@ export {
   type ProfilerSessionStatus,
   type ProfilerPerformanceSnapshot,
   type ProfilerCountersSnapshot,
+  type ProfilerFrameImpactSnapshot,
+  type ProfilerFrameImpactEntrySnapshot,
 } from './ProfilerSessionService';
 export { IconService, IconSize, type IconSizeValue } from './IconService';
 export { ScriptRegistry } from '@pix3/runtime';

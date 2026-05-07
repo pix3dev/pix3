@@ -12,7 +12,7 @@ import {
 import { SceneManager } from './SceneManager';
 import { RuntimeRenderer } from './RuntimeRenderer';
 import { InputService } from './InputService';
-import { SceneService } from './SceneService';
+import { SceneService, type FrameProfilerActivity } from './SceneService';
 import { AudioService } from './AudioService';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
@@ -37,6 +37,7 @@ export interface SceneRunnerFrameSample {
   readonly renderMs: number;
   readonly totalFrameMs: number;
   readonly rendererStats: RuntimeRendererStatsSnapshot;
+  readonly profilerActivities?: readonly FrameProfilerActivity[];
 }
 
 type SceneRunnerFrameListener = (sample: SceneRunnerFrameSample) => void;
@@ -67,6 +68,7 @@ export class SceneRunner {
   private logicalCameraSize = { width: 1, height: 1 };
   private readonly rootLayoutAuthoredSize: { width: number; height: number };
   private readonly frameListeners = new Set<SceneRunnerFrameListener>();
+  private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
 
   constructor(
     sceneManager: SceneManager,
@@ -191,6 +193,7 @@ export class SceneRunner {
     this.elapsedTime = 0;
     this.frameNumber = 0;
     this.isPaused = false;
+    this.currentFrameProfilerActivities = [];
 
     // Clear the runtime scene to release resources
     if (this.runtimeGraph) {
@@ -234,6 +237,7 @@ export class SceneRunner {
 
     const dt = this.clock.getDelta();
     const logicStart = performance.now();
+    this.currentFrameProfilerActivities = [];
 
     this.inputService.beginFrame();
     this.frameNumber += 1;
@@ -265,6 +269,7 @@ export class SceneRunner {
       renderMs,
       totalFrameMs: logicMs + renderMs,
       rendererStats: this.renderer.getStatsSnapshot(),
+      profilerActivities: this.getFrameProfilerActivitiesSnapshot(),
     });
 
     this.animationFrameId = requestAnimationFrame(this.tick);
@@ -458,7 +463,61 @@ export class SceneRunner {
       raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null {
         return runner.raycastViewport(normalizedX, normalizedY);
       },
+      reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void {
+        runner.reportFrameProfilerActivities(activities);
+      },
     });
+  }
+
+  private reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void {
+    this.currentFrameProfilerActivities = this.normalizeFrameProfilerActivities(activities);
+  }
+
+  private getFrameProfilerActivitiesSnapshot(): readonly FrameProfilerActivity[] | undefined {
+    if (this.currentFrameProfilerActivities.length === 0) {
+      return undefined;
+    }
+
+    return this.currentFrameProfilerActivities.map(activity => ({ ...activity }));
+  }
+
+  private normalizeFrameProfilerActivities(
+    activities: readonly FrameProfilerActivity[]
+  ): FrameProfilerActivity[] {
+    const normalized: FrameProfilerActivity[] = [];
+
+    for (const activity of activities) {
+      const label = typeof activity.label === 'string' ? activity.label.trim() : '';
+      if (!label) {
+        continue;
+      }
+
+      const selfTimeMs = this.normalizeFrameProfilerValue(activity.selfTimeMs);
+      if (selfTimeMs === null) {
+        continue;
+      }
+
+      const totalTimeMs = this.normalizeFrameProfilerValue(activity.totalTimeMs);
+      normalized.push(
+        totalTimeMs === null
+          ? { label, selfTimeMs }
+          : {
+              label,
+              selfTimeMs,
+              totalTimeMs: Math.max(totalTimeMs, selfTimeMs),
+            }
+      );
+    }
+
+    return normalized;
+  }
+
+  private normalizeFrameProfilerValue(value: number | undefined): number | null {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return null;
+    }
+
+    return value;
   }
 
   private runFixedUpdates(): void {

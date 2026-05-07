@@ -43,6 +43,26 @@ pix3-profiler-panel .profiler-section-title {
   color: var(--color-text-primary, #eee);
 }
 
+pix3-profiler-panel .profiler-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+pix3-profiler-panel .profiler-section-meta {
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-profiler-panel .profiler-section-note {
+  margin: -0.1rem 0 0;
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 pix3-profiler-panel .profiler-grid {
   display: grid;
   grid-template-columns: minmax(7rem, 8.5rem) minmax(0, 1fr);
@@ -62,6 +82,13 @@ pix3-profiler-panel .metric-value {
   color: #f4f7fb;
   text-align: left;
   font-size: 0.8rem;
+}
+
+pix3-profiler-panel .profiler-empty-state {
+  margin: 0;
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 pix3-profiler-panel .profiler-charts {
@@ -192,4 +219,110 @@ pix3-profiler-panel .chart-empty {
   height: 100%;
   color: var(--color-text-secondary, #aaa);
   font-size: 0.75rem;
+}
+
+pix3-profiler-panel .frame-impact-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+pix3-profiler-panel .frame-impact-row {
+  display: grid;
+  grid-template-columns: minmax(0, 6.6rem) minmax(0, 6.6rem) minmax(0, 1fr);
+  gap: 0.35rem;
+  align-items: center;
+}
+
+pix3-profiler-panel .frame-impact-row-header {
+  gap: 0.35rem;
+  padding: 0;
+  margin-bottom: 0.12rem;
+}
+
+pix3-profiler-panel .frame-impact-header-cell {
+  color: rgba(244, 247, 251, 0.72);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+pix3-profiler-panel .frame-impact-cell {
+  min-width: 0;
+}
+
+pix3-profiler-panel .frame-impact-meter {
+  position: relative;
+  overflow: hidden;
+  min-height: 1.55rem;
+  border: none;
+  border-radius: 0.35rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+    rgba(0, 0, 0, 0.16);
+}
+
+pix3-profiler-panel .frame-impact-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  pointer-events: none;
+}
+
+pix3-profiler-panel .frame-impact-meter-self .frame-impact-meter-fill {
+  background: linear-gradient(90deg, rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.42), rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14));
+}
+
+pix3-profiler-panel .frame-impact-meter-total .frame-impact-meter-fill {
+  background: linear-gradient(90deg, rgba(255, 221, 99, 0.5), rgba(255, 221, 99, 0.18));
+}
+
+pix3-profiler-panel .frame-impact-meter-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-height: 1.55rem;
+  padding: 0.18rem 0.38rem;
+  white-space: nowrap;
+}
+
+pix3-profiler-panel .frame-impact-primary {
+  color: #f8fbff;
+  font-size: 0.74rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-profiler-panel .frame-impact-secondary {
+  color: rgba(244, 247, 251, 0.72);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-profiler-panel .frame-impact-cell-activity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  min-height: 1.55rem;
+  padding: 0.04rem 0;
+  white-space: nowrap;
+}
+
+pix3-profiler-panel .frame-impact-activity-label {
+  color: #f4f7fb;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+pix3-profiler-panel .frame-impact-activity-meta {
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
 }

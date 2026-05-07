@@ -18,6 +18,12 @@ export interface ViewportInfo {
 
 export type ViewportChangeListener = (info: ViewportInfo) => void;
 
+export interface FrameProfilerActivity {
+  readonly label: string;
+  readonly selfTimeMs: number;
+  readonly totalTimeMs?: number;
+}
+
 /**
  * Delegate interface implemented by SceneRunner to expose scene internals
  * without creating circular dependencies.
@@ -33,6 +39,7 @@ export interface SceneServiceDelegate {
   getResourceManager(): ResourceManager;
   getECSService(): ECSService | null;
   raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null;
+  reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void;
 }
 
 /**
@@ -157,6 +164,10 @@ export class SceneService {
 
   raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null {
     return this.delegate?.raycastViewport(normalizedX, normalizedY) ?? null;
+  }
+
+  reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void {
+    this.delegate?.reportFrameProfilerActivities(activities);
   }
 
   // ── Viewport APIs ───────────────────────────────────────────────────────────

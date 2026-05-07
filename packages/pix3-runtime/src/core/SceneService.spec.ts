@@ -3,7 +3,7 @@ import { AssetLoader } from './AssetLoader';
 import { AudioService } from './AudioService';
 import { ECSService } from './ECSService';
 import { ResourceManager } from './ResourceManager';
-import { SceneService } from './SceneService';
+import { SceneService, type FrameProfilerActivity } from './SceneService';
 
 describe('SceneService viewport API', () => {
   const originalInnerWidth = window.innerWidth;
@@ -93,6 +93,7 @@ describe('SceneService viewport API', () => {
     service.setDelegate({
       getActiveCameraNode: () => null,
       getUICamera: () => null,
+      getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
       findNodeById: () => null,
       getAudioService: () => new AudioService(),
@@ -100,6 +101,7 @@ describe('SceneService viewport API', () => {
       getResourceManager: () => resources,
       getECSService: () => null,
       raycastViewport: () => null,
+      reportFrameProfilerActivities: () => undefined,
     });
 
     expect(service.getResourceManager()).toBe(resources);
@@ -120,6 +122,7 @@ describe('SceneService viewport API', () => {
     service.setDelegate({
       getActiveCameraNode: () => null,
       getUICamera: () => null,
+      getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
       findNodeById: () => null,
       getAudioService: () => new AudioService(),
@@ -127,9 +130,36 @@ describe('SceneService viewport API', () => {
       getResourceManager: () => new ResourceManager('/'),
       getECSService: () => ecsService,
       raycastViewport: () => hit as never,
+      reportFrameProfilerActivities: () => undefined,
     });
 
     expect(service.getECSService()).toBe(ecsService);
     expect(service.raycastViewport(0, 0)).toBe(hit);
+  });
+
+  it('forwards frame profiler activities to the active delegate', () => {
+    const service = new SceneService();
+    const reportFrameProfilerActivities = vi.fn();
+    const activities: readonly FrameProfilerActivity[] = [
+      { label: 'Physics', selfTimeMs: 1.5, totalTimeMs: 2.25 },
+    ];
+
+    service.setDelegate({
+      getActiveCameraNode: () => null,
+      getUICamera: () => null,
+      getLogicalCameraSize: () => ({ width: 0, height: 0 }),
+      setActiveCameraNode: () => undefined,
+      findNodeById: () => null,
+      getAudioService: () => new AudioService(),
+      getAssetLoader: () => new AssetLoader(new ResourceManager('/'), new AudioService()),
+      getResourceManager: () => new ResourceManager('/'),
+      getECSService: () => null,
+      raycastViewport: () => null,
+      reportFrameProfilerActivities,
+    });
+
+    service.reportFrameProfilerActivities(activities);
+
+    expect(reportFrameProfilerActivities).toHaveBeenCalledWith(activities);
   });
 });
