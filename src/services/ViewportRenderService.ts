@@ -288,16 +288,23 @@ export class ViewportRendererService {
 
     // Render loop will start on first attach/resume
 
-    const syncIfSceneContentChanged = () => {
+    const syncViewportSceneState = () => {
       const currentSceneId = appState.scenes.activeSceneId;
       const currentNodeDataChangeSignal = appState.scenes.nodeDataChangeSignal;
-      if (this.shouldSyncSceneContent(currentSceneId, currentNodeDataChangeSignal)) {
+
+      if (this.shouldSyncSceneContent(currentSceneId)) {
+        this.lastNodeDataChangeSignal = currentNodeDataChangeSignal;
         this.syncSceneContent();
+        return;
+      }
+
+      if (this.shouldRefreshSceneNodeData(currentNodeDataChangeSignal)) {
+        this.refreshSceneNodeData();
       }
     };
 
     const unsubscribeScenes = subscribe(appState.scenes, () => {
-      syncIfSceneContentChanged();
+      syncViewportSceneState();
       this.updateSelection();
       this.requestRender();
     });
@@ -384,21 +391,23 @@ export class ViewportRendererService {
     this.syncBaseViewportFrame();
 
     // Initial sync
-    syncIfSceneContentChanged();
+    syncViewportSceneState();
   }
 
-  private shouldSyncSceneContent(
-    currentSceneId: string | null,
-    currentNodeDataChangeSignal: number
-  ): boolean {
-    if (
-      currentSceneId === this.lastActiveSceneId &&
-      currentNodeDataChangeSignal === this.lastNodeDataChangeSignal
-    ) {
+  private shouldSyncSceneContent(currentSceneId: string | null): boolean {
+    if (currentSceneId === this.lastActiveSceneId) {
       return false;
     }
 
     this.lastActiveSceneId = currentSceneId;
+    return true;
+  }
+
+  private shouldRefreshSceneNodeData(currentNodeDataChangeSignal: number): boolean {
+    if (currentNodeDataChangeSignal === this.lastNodeDataChangeSignal) {
+      return false;
+    }
+
     this.lastNodeDataChangeSignal = currentNodeDataChangeSignal;
     return true;
   }
@@ -2722,6 +2731,26 @@ export class ViewportRendererService {
     } catch (err) {
       console.error('[ViewportRenderer] Error syncing scene content:', err);
     }
+  }
+
+  private refreshSceneNodeData(): void {
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) {
+      return;
+    }
+
+    const visit = (nodes: NodeBase[]) => {
+      for (const node of nodes) {
+        this.updateNodeTransform(node);
+        if (node.children.length > 0) {
+          visit(node.children);
+        }
+      }
+    };
+
+    visit(sceneGraph.rootNodes);
+    this.updateNodeIconPositions();
+    this.updateNodeIconVisibility();
   }
 
   /**

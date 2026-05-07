@@ -243,19 +243,66 @@ describe('ViewportRendererService', () => {
     expect(editorDirectionalLight.visible).toBe(true);
   });
 
-  it('tracks node data updates even when the active scene id does not change', () => {
+  it('only requires full scene sync when the active scene id changes', () => {
     const service = new ViewportRendererService();
 
     const shouldSyncSceneContent = (
       service as unknown as {
-        shouldSyncSceneContent: (sceneId: string | null, nodeDataChangeSignal: number) => boolean;
+        shouldSyncSceneContent: (sceneId: string | null) => boolean;
       }
     ).shouldSyncSceneContent.bind(service);
 
-    expect(shouldSyncSceneContent('scene-1', 0)).toBe(true);
-    expect(shouldSyncSceneContent('scene-1', 0)).toBe(false);
-    expect(shouldSyncSceneContent('scene-1', 1)).toBe(true);
-    expect(shouldSyncSceneContent('scene-1', 1)).toBe(false);
+    expect(shouldSyncSceneContent('scene-1')).toBe(true);
+    expect(shouldSyncSceneContent('scene-1')).toBe(false);
+    expect(shouldSyncSceneContent('scene-2')).toBe(true);
+    expect(shouldSyncSceneContent('scene-2')).toBe(false);
+  });
+
+  it('tracks node data updates without requiring a full scene rebuild', () => {
+    const service = new ViewportRendererService();
+
+    const shouldRefreshSceneNodeData = (
+      service as unknown as {
+        shouldRefreshSceneNodeData: (nodeDataChangeSignal: number) => boolean;
+      }
+    ).shouldRefreshSceneNodeData.bind(service);
+
+    expect(shouldRefreshSceneNodeData(0)).toBe(false);
+    expect(shouldRefreshSceneNodeData(1)).toBe(true);
+    expect(shouldRefreshSceneNodeData(1)).toBe(false);
+    expect(shouldRefreshSceneNodeData(2)).toBe(true);
+  });
+
+  it('refreshes existing node visuals when node data changes', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({ id: 'sprite-refresh-test', width: 64, height: 64 });
+
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getActiveSceneGraph: () => ({ rootNodes: [sprite] }),
+      },
+      configurable: true,
+    });
+
+    const updateNodeTransform = vi.spyOn(service, 'updateNodeTransform');
+    const updateNodeIconPositions = vi.spyOn(
+      service as unknown as { updateNodeIconPositions: () => void },
+      'updateNodeIconPositions'
+    );
+    const updateNodeIconVisibility = vi.spyOn(
+      service as unknown as { updateNodeIconVisibility: () => void },
+      'updateNodeIconVisibility'
+    );
+
+    (
+      service as unknown as {
+        refreshSceneNodeData: () => void;
+      }
+    ).refreshSceneNodeData();
+
+    expect(updateNodeTransform).toHaveBeenCalledWith(sprite);
+    expect(updateNodeIconPositions).toHaveBeenCalledOnce();
+    expect(updateNodeIconVisibility).toHaveBeenCalledOnce();
   });
 
   it('disables fallback editor lighting when the active scene contains explicit lights', () => {

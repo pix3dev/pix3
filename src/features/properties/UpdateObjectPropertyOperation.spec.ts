@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createInitialAppState } from '@/state/AppState';
-import { NodeBase, SceneManager } from '@pix3/runtime';
+import { NodeBase, SceneManager, Sprite2D } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { UpdateObjectPropertyOperation } from './UpdateObjectPropertyOperation';
 
@@ -32,8 +32,9 @@ const createOperationContext = (node: NodeBase) => {
   };
   const viewportRendererMock: Pick<
     ViewportRendererService,
-    'updateNodeVisibility' | 'updateSelection'
+    'updateNodeTransform' | 'updateNodeVisibility' | 'updateSelection'
   > = {
+    updateNodeTransform: vi.fn(),
     updateNodeVisibility: vi.fn(),
     updateSelection: vi.fn(),
   };
@@ -58,7 +59,7 @@ const createOperationContext = (node: NodeBase) => {
     requestedAt: Date.now(),
   } as OperationContext;
 
-  return { context, node, state };
+  return { context, node, state, viewportRendererMock };
 };
 
 describe('UpdateObjectPropertyOperation', () => {
@@ -92,6 +93,29 @@ describe('UpdateObjectPropertyOperation', () => {
     expect(node.visible).toBe(false);
     expect(node.properties.visible).toBe(false);
     expect(node.properties.initiallyVisible).toBe(true);
+  });
+
+  it('routes Sprite2D opacity changes through the viewport transform update path', async () => {
+    const sprite = new Sprite2D({
+      id: 'sprite-opacity-node',
+      name: 'Sprite',
+      width: 64,
+      height: 64,
+      opacity: 1,
+    });
+    const { context, viewportRendererMock } = createOperationContext(sprite);
+    const operation = new UpdateObjectPropertyOperation({
+      nodeId: sprite.nodeId,
+      propertyPath: 'opacity',
+      value: 0.35,
+    });
+
+    const result = await operation.perform(context);
+
+    expect(result.didMutate).toBe(true);
+    expect(sprite.opacity).toBe(0.35);
+    expect(viewportRendererMock.updateNodeTransform).toHaveBeenCalledWith(sprite);
+    expect(viewportRendererMock.updateSelection).not.toHaveBeenCalled();
   });
 
   it('keeps explicit initial visibility unchanged', async () => {
