@@ -35,10 +35,12 @@ import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
 import type { EditorPreviewContext, ScriptComponent } from '@pix3/runtime';
+import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
 import { SceneManager, InputService } from '@pix3/runtime';
 import { OperationService } from '@/services/OperationService';
 import { ResourceManager } from '@/services/ResourceManager';
+import { IconService } from '@/services/IconService';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import {
@@ -61,6 +63,7 @@ import {
   type Transform2DUpdateOptions,
   type Selection2DOverlay,
 } from '@/services/TransformTool2d';
+import { getNodeVisuals } from '@/ui/scene-tree/node-visuals.helper';
 import { isDocumentActive } from './page-activity';
 
 export type TransformMode = 'select' | 'translate' | 'rotate' | 'scale';
@@ -94,6 +97,9 @@ export class ViewportRendererService {
   @inject(ResourceManager)
   private readonly resourceManager!: ResourceManager;
 
+  @inject(IconService)
+  private readonly iconService!: IconService;
+
   @inject(AssetLoader)
   private readonly assetLoader!: AssetLoader;
 
@@ -123,6 +129,11 @@ export class ViewportRendererService {
   private uiControl2DVisuals = new Map<string, THREE.Group>();
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
+  private selection2DOverlayHud?: {
+    root: HTMLDivElement;
+    top: HTMLDivElement;
+    bottom: HTMLDivElement;
+  };
   private active2DTransform?: Active2DTransform;
   // Hover preview frame for 2D nodes (before selection)
   private hoverPreview2D?: { nodeId: string; frame: THREE.Group };
@@ -426,11 +437,15 @@ export class ViewportRendererService {
 
     if (this.canvasHost !== host) {
       this.canvasHost = host;
+      if (getComputedStyle(host).position === 'static') {
+        host.style.position = 'relative';
+      }
       try {
         host.appendChild(this.canvas);
       } catch {
         // ignore
       }
+      this.attachSelection2DOverlayHud();
     }
 
     // Ensure controls point at the active dom element.
@@ -1101,6 +1116,7 @@ export class ViewportRendererService {
     // Sync all 2D visuals after layout recalculation
     this.syncAll2DVisuals();
     this.syncBaseViewportFrame();
+    this.updateSelection2DOverlayHud();
 
     // Trigger a single frame render to ensure the viewport is updated
     // even if rendering is currently paused (e.g. window unfocused).
@@ -1464,6 +1480,8 @@ export class ViewportRendererService {
         this.viewportSize
       );
     }
+
+    this.updateSelection2DOverlayHud();
   }
 
   private createBaseViewportFrame(width: number, height: number): THREE.Group {
@@ -4380,6 +4398,7 @@ export class ViewportRendererService {
   private clear2DSelectionOverlay(): void {
     if (!this.selection2DOverlay || !this.scene) {
       this.selection2DOverlay = undefined;
+      this.hideSelection2DOverlayHud();
       return;
     }
 
@@ -4400,6 +4419,7 @@ export class ViewportRendererService {
     this.selection2DOverlay = undefined;
     this.active2DTransform = undefined;
     this.end2DInteraction();
+    this.hideSelection2DOverlayHud();
     console.debug('[ViewportRenderer] cleared 2D overlay');
   }
 
@@ -4555,6 +4575,7 @@ export class ViewportRendererService {
 
     // Apply zoom compensation immediately so handles have the correct screen-space size.
     this.refreshGizmoPositions();
+    this.updateSelection2DOverlayHud();
   }
 
   private refreshGizmoPositions(): void {
@@ -4587,6 +4608,302 @@ export class ViewportRendererService {
     this.selection2DOverlay.combinedBounds.copy(combinedBounds);
     this.selection2DOverlay.centerWorld.copy(center);
     this.sync2DServiceFrameThickness();
+  }
+
+  private attachSelection2DOverlayHud(): void {
+    if (!this.canvasHost) {
+      return;
+    }
+
+    if (!this.selection2DOverlayHud) {
+      const root = document.createElement('div');
+      root.dataset.pix3OverlayHud = 'selection-2d';
+      Object.assign(root.style, {
+        position: 'absolute',
+        inset: '0',
+        pointerEvents: 'none',
+        overflow: 'hidden',
+        zIndex: '4',
+      } satisfies Partial<CSSStyleDeclaration>);
+
+      const top = this.createSelection2DOverlayHudBadge();
+      const bottom = this.createSelection2DOverlayHudBadge();
+      root.append(top, bottom);
+
+      this.selection2DOverlayHud = { root, top, bottom };
+    }
+
+    if (this.selection2DOverlayHud.root.parentElement !== this.canvasHost) {
+      this.canvasHost.appendChild(this.selection2DOverlayHud.root);
+    }
+  }
+
+  private createSelection2DOverlayHudBadge(): HTMLDivElement {
+    const badge = document.createElement('div');
+    Object.assign(badge.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      display: 'none',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '6px',
+      padding: '4px 10px',
+      borderRadius: '8px',
+      border: '1px solid rgba(255, 255, 255, 0.16)',
+      background: 'rgba(78, 141, 245, 0.96)',
+      boxShadow: '0 10px 20px rgba(0, 0, 0, 0.24)',
+      color: '#ffffff',
+      fontFamily:
+        '"Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
+      fontSize: '12px',
+      fontWeight: '700',
+      lineHeight: '1.2',
+      whiteSpace: 'nowrap',
+      transform: 'translate(-50%, -50%)',
+    } satisfies Partial<CSSStyleDeclaration>);
+    return badge;
+  }
+
+  private updateSelection2DOverlayHud(): void {
+    this.attachSelection2DOverlayHud();
+
+    if (
+      !this.selection2DOverlay ||
+      !this.selection2DOverlayHud ||
+      !this.orthographicCamera ||
+      this.viewportSize.width <= 0 ||
+      this.viewportSize.height <= 0
+    ) {
+      this.hideSelection2DOverlayHud();
+      return;
+    }
+
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      this.hideSelection2DOverlayHud();
+      return;
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      this.hideSelection2DOverlayHud();
+      return;
+    }
+
+    const bounds = this.selection2DOverlay.combinedBounds;
+    const size = bounds.getSize(new THREE.Vector3());
+    const topWorld = new THREE.Vector3(
+      (bounds.min.x + bounds.max.x) / 2,
+      bounds.max.y,
+      bounds.max.z
+    );
+    const bottomWorld = new THREE.Vector3(
+      (bounds.min.x + bounds.max.x) / 2,
+      bounds.min.y,
+      bounds.max.z
+    );
+
+    const topScreen = this.projectWorldToOverlay(topWorld);
+    const bottomScreen = this.projectWorldToOverlay(bottomWorld);
+    if (!topScreen || !bottomScreen) {
+      this.hideSelection2DOverlayHud();
+      return;
+    }
+
+    const topBadgeData = this.getSelection2DOverlayTopBadgeData(
+      this.selection2DOverlay.nodeIds,
+      sceneGraph.nodeMap
+    );
+    const bottomBadgeText = this.getSelection2DOverlaySizeText(
+      this.selection2DOverlay.nodeIds,
+      sceneGraph.nodeMap,
+      size
+    );
+
+    this.renderSelection2DOverlayHudBadge(
+      this.selection2DOverlayHud.top,
+      topBadgeData.iconName,
+      topBadgeData.label,
+      topBadgeData.backgroundColor,
+      `${topBadgeData.label}${topBadgeData.typeLabel ? ` · ${topBadgeData.typeLabel}` : ''}`
+    );
+    this.renderSelection2DOverlayHudBadge(
+      this.selection2DOverlayHud.bottom,
+      null,
+      bottomBadgeText.text,
+      '#4e8df5',
+      bottomBadgeText.text
+    );
+
+    const rotateHandleScreen = this.getSelection2DOverlayRotateHandleScreenPosition();
+    const topAnchorY = rotateHandleScreen ? rotateHandleScreen.y - 10 : topScreen.y - 18;
+    this.selection2DOverlayHud.top.style.left = `${topScreen.x}px`;
+    this.selection2DOverlayHud.top.style.top = `${Math.max(14, topAnchorY)}px`;
+    this.selection2DOverlayHud.top.style.transform = 'translate(-50%, -100%)';
+
+    this.selection2DOverlayHud.bottom.style.left = `${bottomScreen.x}px`;
+    this.selection2DOverlayHud.bottom.style.top = `${Math.min(
+      this.viewportSize.height - 14,
+      bottomScreen.y + 18
+    )}px`;
+    this.selection2DOverlayHud.bottom.style.transform = 'translate(-50%, 0)';
+  }
+
+  private hideSelection2DOverlayHud(): void {
+    if (!this.selection2DOverlayHud) {
+      return;
+    }
+
+    this.selection2DOverlayHud.top.style.display = 'none';
+    this.selection2DOverlayHud.bottom.style.display = 'none';
+  }
+
+  private renderSelection2DOverlayHudBadge(
+    badge: HTMLDivElement,
+    iconName: string | null,
+    label: string,
+    backgroundColor: string,
+    title: string
+  ): void {
+    badge.replaceChildren();
+    badge.style.display = 'inline-flex';
+    badge.style.background = backgroundColor;
+    badge.title = title;
+
+    if (iconName) {
+      const icon = document.createElement('span');
+      icon.setAttribute('aria-hidden', 'true');
+      Object.assign(icon.style, {
+        width: '12px',
+        height: '12px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        lineHeight: '0',
+        flex: '0 0 auto',
+      } satisfies Partial<CSSStyleDeclaration>);
+      icon.innerHTML = this.iconService.getIconSvg(iconName, 12);
+      badge.appendChild(icon);
+    }
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    badge.appendChild(text);
+  }
+
+  private getSelection2DOverlayTopBadgeData(
+    nodeIds: string[],
+    nodeMap: Map<string, NodeBase>
+  ): {
+    iconName: string;
+    label: string;
+    backgroundColor: string;
+    typeLabel: string | null;
+  } {
+    if (nodeIds.length === 1) {
+      const node = nodeMap.get(nodeIds[0]);
+      if (node) {
+        const visuals = getNodeVisuals(node);
+        return {
+          iconName: visuals.icon,
+          label: node.name,
+          backgroundColor: '#4e8df5',
+          typeLabel: node.type,
+        };
+      }
+    }
+
+    return {
+      iconName: 'layers',
+      label: `${nodeIds.length} selected`,
+      backgroundColor: '#4e8df5',
+      typeLabel: null,
+    };
+  }
+
+  private getSelection2DOverlayRotateHandleScreenPosition(): { x: number; y: number } | null {
+    const rotationHandle = this.selection2DOverlay?.rotationHandle;
+    if (!rotationHandle) {
+      return null;
+    }
+
+    const worldPosition = rotationHandle.getWorldPosition(new THREE.Vector3());
+    return this.projectWorldToOverlay(worldPosition);
+  }
+
+  private getSelection2DOverlaySizeText(
+    nodeIds: string[],
+    nodeMap: Map<string, NodeBase>,
+    fallbackBoundsSize: THREE.Vector3
+  ): { text: string } {
+    if (nodeIds.length === 1) {
+      const node = nodeMap.get(nodeIds[0]);
+      if (node instanceof Node2D) {
+        const nodeSize = this.getNodeInspectorSize(node);
+        if (nodeSize) {
+          return {
+            text: `${this.formatOverlayDimension(nodeSize.width, nodeSize.widthPrecision)} x ${this.formatOverlayDimension(nodeSize.height, nodeSize.heightPrecision)}`,
+          };
+        }
+      }
+    }
+
+    return {
+      text: `${this.formatOverlayDimension(fallbackBoundsSize.x)} x ${this.formatOverlayDimension(fallbackBoundsSize.y)}`,
+    };
+  }
+
+  private getNodeInspectorSize(node: Node2D): {
+    width: number;
+    height: number;
+    widthPrecision: number;
+    heightPrecision: number;
+  } | null {
+    const sizedNode = node as Node2D & { width?: number; height?: number };
+    if (typeof sizedNode.width !== 'number' || typeof sizedNode.height !== 'number') {
+      return null;
+    }
+
+    const schemaGetter = (
+      node.constructor as { getPropertySchema?: () => { properties: PropertyDefinition[] } }
+    ).getPropertySchema;
+    const schema = typeof schemaGetter === 'function' ? schemaGetter() : null;
+    const widthPrecision =
+      schema?.properties.find((property: PropertyDefinition) => property.name === 'width')?.ui
+        ?.precision ?? 0;
+    const heightPrecision =
+      schema?.properties.find((property: PropertyDefinition) => property.name === 'height')?.ui
+        ?.precision ?? 0;
+
+    return {
+      width: sizedNode.width,
+      height: sizedNode.height,
+      widthPrecision,
+      heightPrecision,
+    };
+  }
+
+  private projectWorldToOverlay(world: THREE.Vector3): { x: number; y: number } | null {
+    if (!this.orthographicCamera || this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return null;
+    }
+
+    const projected = world.clone().project(this.orthographicCamera);
+    return {
+      x: ((projected.x + 1) / 2) * this.viewportSize.width,
+      y: ((1 - projected.y) / 2) * this.viewportSize.height,
+    };
+  }
+
+  private formatOverlayDimension(value: number, precision: number = 1): string {
+    const safePrecision = Math.max(0, precision);
+    const rounded = Number(value.toFixed(safePrecision));
+    if (safePrecision === 0) {
+      return String(Math.round(rounded));
+    }
+
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(safePrecision);
   }
 
   private create2DFrame(bounds: THREE.Box3): THREE.Group {
@@ -5252,6 +5569,8 @@ export class ViewportRendererService {
     this.lampIconTexture?.dispose();
     this.cameraIconTexture = undefined;
     this.lampIconTexture = undefined;
+    this.selection2DOverlayHud?.root.remove();
+    this.selection2DOverlayHud = undefined;
 
     // Dispose subscriptions
     this.disposers.forEach(dispose => dispose());

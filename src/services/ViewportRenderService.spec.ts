@@ -273,6 +273,84 @@ describe('ViewportRendererService', () => {
     expect(shouldRefreshSceneNodeData(2)).toBe(true);
   });
 
+  it('renders 2D overlay HUD badges for a single selected node', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-test',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    const rotationHandle = new THREE.Group();
+    rotationHandle.position.set(0, 60, 0);
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(129.4, 154.3, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        rotationHandle,
+      },
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    (
+      service as unknown as {
+        updateSelection2DOverlayHud: () => void;
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).updateSelection2DOverlayHud();
+
+    const hud = (
+      service as unknown as {
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).selection2DOverlayHud;
+
+    expect(hud?.top.textContent).toContain('Player');
+    expect(hud?.top.title).toBe('Player · Sprite2D');
+    expect(hud?.bottom.textContent).toBe('100 x 50');
+    expect(hud?.top.style.display).toBe('inline-flex');
+    expect(hud?.bottom.style.display).toBe('inline-flex');
+    expect(Number.parseFloat(hud?.top.style.top ?? '0')).toBeLessThan(90);
+  });
+
   it('refreshes existing node visuals when node data changes', () => {
     const service = new ViewportRendererService();
     const sprite = new Sprite2D({ id: 'sprite-refresh-test', width: 64, height: 64 });
