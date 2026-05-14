@@ -7,13 +7,15 @@ import { ViewportRendererService, type TransformMode } from '@/services/Viewport
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { IconService } from '@/services/IconService';
 import { Navigation2DController } from '@/services/Navigation2DController';
-import { SceneManager, Camera3D, NodeBase } from '@pix3/runtime';
+import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { selectObject } from '@/features/selection/SelectObjectCommand';
 import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstanceCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { toggleNavigationMode } from '@/features/viewport/ToggleNavigationModeCommand';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
+import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
+import type { Align2DActionId } from '@/features/alignment/types';
 import { renderViewportToolbar } from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
@@ -75,11 +77,24 @@ export class ViewportPanel extends ComponentBase {
   private canvas?: HTMLCanvasElement;
   private disposeSceneSubscription?: () => void;
   private disposeUiSubscription?: () => void;
+  private disposeSelectionSubscription?: () => void;
   private pointerDownPos?: { x: number; y: number };
   private pointerDownTime?: number;
   private isDragging = false;
   private readonly dragThreshold = 5; // pixels
   private isAssetDragOver = false;
+  @state()
+  private has2DSelection = false;
+
+  @state()
+  private canAlignToContainer = false;
+
+  @state()
+  private canAlignToSelectionBounds = false;
+
+  @state()
+  private canDistributeSelection = false;
+
   private static readonly ASSET_RESOURCE_MIME = 'application/x-pix3-asset-resource';
   private static readonly ASSET_PATH_MIME = 'application/x-pix3-asset-path';
   private static readonly IMAGE_EXTENSIONS = new Set([
@@ -104,9 +119,11 @@ export class ViewportPanel extends ComponentBase {
     // ResizeObserver will be set up in firstUpdated when host element is available
     this.disposeSceneSubscription = subscribe(appState.scenes, () => {
       this.syncViewportScene();
+      this.syncAlignmentToolbarState();
       this.requestUpdate();
     });
     this.syncViewportScene();
+    this.syncAlignmentToolbarState();
 
     // Initialize state from current appState values
     this.showGrid = appState.ui.showGrid;
@@ -123,6 +140,11 @@ export class ViewportPanel extends ComponentBase {
       this.showLighting = appState.ui.showLighting;
       this.navigationMode = appState.ui.navigationMode;
       this.editorCameraProjection = appState.ui.editorCameraProjection;
+      this.requestUpdate();
+    });
+
+    this.disposeSelectionSubscription = subscribe(appState.selection, () => {
+      this.syncAlignmentToolbarState();
       this.requestUpdate();
     });
 
@@ -149,6 +171,8 @@ export class ViewportPanel extends ComponentBase {
     this.disposeSceneSubscription = undefined;
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
+    this.disposeSelectionSubscription?.();
+    this.disposeSelectionSubscription = undefined;
     this.removeEventListener('pointerdown', this.handleCanvasPointerDown);
     this.removeEventListener('pointermove', this.handleCanvasPointerMove);
     this.removeEventListener('pointerup', this.handleCanvasPointerUp);
@@ -215,6 +239,10 @@ export class ViewportPanel extends ComponentBase {
               previewCameraItems,
               isPreviewCameraActive,
               editorCameraProjection: this.editorCameraProjection,
+              showAlignmentTools: this.has2DSelection,
+              canAlignToContainer: this.canAlignToContainer,
+              canAlignToSelectionBounds: this.canAlignToSelectionBounds,
+              canDistributeSelection: this.canDistributeSelection,
             },
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
@@ -227,6 +255,7 @@ export class ViewportPanel extends ComponentBase {
               onToggleLayer3D: () => this.toggleLayer3D(),
               onToggleLayer2D: () => this.toggleLayer2D(),
               onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
+              onRunAlignmentAction: action => this.handleAlignmentAction(action),
             },
             this.iconService
           )}
@@ -324,6 +353,58 @@ export class ViewportPanel extends ComponentBase {
 
   private syncViewportScene(): void {
     // Renderer now auto-attaches active scene via subscription; nothing to do here
+  }
+
+  private syncAlignmentToolbarState(): void {
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const selectedNodes = appState.selection.nodeIds
+      .map(nodeId => sceneGraph.nodeMap.get(nodeId) ?? null)
+      .filter((node): node is NodeBase => node !== null);
+
+    const selected2DNodes = selectedNodes.filter((node): node is Node2D => node instanceof Node2D);
+
+    if (selected2DNodes.length === 0) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const sharedParent = selected2DNodes[0]?.parentNode ?? null;
+    const sharesParent = selected2DNodes.every(node => node.parentNode === sharedParent);
+    const canAlignToContainer =
+      sharesParent && (sharedParent === null || sharedParent instanceof Node2D);
+
+    this.has2DSelection = true;
+    this.canAlignToContainer = canAlignToContainer;
+    this.canAlignToSelectionBounds = selected2DNodes.length > 1;
+    this.canDistributeSelection = selected2DNodes.length > 2;
+  }
+
+  private handleAlignmentAction(action: Align2DActionId): void {
+    void this.commandDispatcher.execute(align2DNodes(action)).then(didMutate => {
+      if (didMutate) {
+        this.viewportRenderer.requestRender();
+      }
+    });
   }
 
   private handlePreviewCameraSelect(itemId: string): void {

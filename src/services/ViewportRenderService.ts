@@ -78,6 +78,7 @@ const DEFAULT_2D_CAMERA_Z = 100;
 const DEFAULT_NODE_ICON_OPACITY = 0.95;
 const SELECTED_NODE_ICON_OPACITY = 0.38;
 const MIN_WORLD_BOUNDS_SIZE = 0.0001;
+const TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER = 1.25;
 const TWO_D_FIT_PADDING_MULTIPLIER = 1.15;
 
 @injectable()
@@ -145,6 +146,7 @@ export class ViewportRendererService {
   private activeTargetNodeId: string | null = null;
   private activeTargetDragNodeId: string | null = null;
   private lastActiveSceneId: string | null = null;
+  private lastNavigationMode = appState.ui.navigationMode;
   private lastNodeDataChangeSignal = appState.scenes.nodeDataChangeSignal;
   private viewportSize = { width: 0, height: 0 };
   private transformTool2d: TransformTool2d;
@@ -599,7 +601,10 @@ export class ViewportRendererService {
   }
 
   private syncNavigationMode(): void {
-    const is2DMode = appState.ui.navigationMode === '2d';
+    const nextNavigationMode = appState.ui.navigationMode;
+    const is2DMode = nextNavigationMode === '2d';
+    const entered2DMode = this.lastNavigationMode !== nextNavigationMode && is2DMode;
+
     this.setOrbitEnabled(!is2DMode);
     if (this.orthographicControls) {
       // Disable orthographic controls entirely in 2D mode.
@@ -613,6 +618,17 @@ export class ViewportRendererService {
       this.orthographicControls.enableZoom = false;
       this.orthographicControls.enablePan = false;
     }
+
+    if (entered2DMode) {
+      this.restoreZoomFromState();
+      this.requestRender();
+    }
+
+    this.lastNavigationMode = nextNavigationMode;
+  }
+
+  private hasMeasuredViewport(): boolean {
+    return this.viewportSize.width > 0 && this.viewportSize.height > 0;
   }
 
   private createEditorOrbitControls(): void {
@@ -921,21 +937,58 @@ export class ViewportRendererService {
     this.requestRender();
   }
 
+  private getTarget2DZoomForBounds(
+    bounds: THREE.Box3,
+    paddingMultiplier = TWO_D_FIT_PADDING_MULTIPLIER
+  ): number {
+    if (!this.orthographicCamera) {
+      return 1;
+    }
+
+    const size = bounds.getSize(new THREE.Vector3());
+    const paddedWidth = Math.max(size.x * paddingMultiplier, 1);
+    const paddedHeight = Math.max(size.y * paddingMultiplier, 1);
+    const baseWidth = Math.max(
+      Math.abs(this.orthographicCamera.right - this.orthographicCamera.left),
+      1
+    );
+    const baseHeight = Math.max(
+      Math.abs(this.orthographicCamera.top - this.orthographicCamera.bottom),
+      1
+    );
+
+    return Math.max(0.1, Math.min(baseWidth / paddedWidth, baseHeight / paddedHeight));
+  }
+
+  private getDefault2DViewState(): { center: THREE.Vector3; zoom: number } {
+    const viewportBaseBounds = this.getViewportBaseBounds();
+
+    return {
+      center: viewportBaseBounds.getCenter(new THREE.Vector3()),
+      zoom: this.getTarget2DZoomForBounds(
+        viewportBaseBounds,
+        TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER
+      ),
+    };
+  }
+
   private reset2DView(): void {
     if (!this.orthographicCamera) {
       return;
     }
 
+    const { center, zoom } = this.getDefault2DViewState();
+
     this.cancelPanMomentum();
     this.panVelocity.x = 0;
     this.panVelocity.y = 0;
 
-    this.orthographicCamera.position.set(0, 0, DEFAULT_2D_CAMERA_Z);
-    this.orthographicCamera.zoom = 1;
+    this.orthographicCamera.position.set(center.x, center.y, DEFAULT_2D_CAMERA_Z);
+    this.orthographicCamera.zoom = zoom;
     this.orthographicCamera.updateProjectionMatrix();
 
     if (this.orthographicControls) {
-      this.orthographicControls.target.set(0, 0, 0);
+      this.orthographicControls.target.set(center.x, center.y, 0);
       this.orthographicControls.update();
     }
 
@@ -966,17 +1019,7 @@ export class ViewportRendererService {
 
     const size = contentBounds.getSize(new THREE.Vector3());
     const center = contentBounds.getCenter(new THREE.Vector3());
-    const paddedWidth = Math.max(size.x * TWO_D_FIT_PADDING_MULTIPLIER, 1);
-    const paddedHeight = Math.max(size.y * TWO_D_FIT_PADDING_MULTIPLIER, 1);
-    const baseWidth = Math.max(
-      Math.abs(this.orthographicCamera.right - this.orthographicCamera.left),
-      1
-    );
-    const baseHeight = Math.max(
-      Math.abs(this.orthographicCamera.top - this.orthographicCamera.bottom),
-      1
-    );
-    const targetZoom = Math.max(0.1, Math.min(baseWidth / paddedWidth, baseHeight / paddedHeight));
+    const targetZoom = this.getTarget2DZoomForBounds(contentBounds);
 
     this.cancelPanMomentum();
     this.panVelocity.x = 0;
@@ -1045,6 +1088,8 @@ export class ViewportRendererService {
   resize(width: number, height: number): void {
     if (!this.renderer || !this.camera) return;
 
+    const hadMeasuredViewport = this.hasMeasuredViewport();
+
     this.viewportSize = { width, height };
 
     const pixelWidth = Math.ceil(width * window.devicePixelRatio);
@@ -1101,6 +1146,10 @@ export class ViewportRendererService {
     // Sync all 2D visuals after layout recalculation
     this.syncAll2DVisuals();
     this.syncBaseViewportFrame();
+
+    if (!hadMeasuredViewport && appState.scenes.activeSceneId) {
+      this.restoreZoomFromState();
+    }
 
     // Trigger a single frame render to ensure the viewport is updated
     // even if rendering is currently paused (e.g. window unfocused).
@@ -1320,6 +1369,16 @@ export class ViewportRendererService {
           ? height
           : DEFAULT_VIEWPORT_BASE_HEIGHT,
     };
+  }
+
+  getViewportBaseBounds(): THREE.Box3 {
+    const viewportBaseSize = this.getProjectViewportBaseSize();
+    const halfWidth = viewportBaseSize.width / 2;
+    const halfHeight = viewportBaseSize.height / 2;
+    return new THREE.Box3(
+      new THREE.Vector3(-halfWidth, -halfHeight, 0),
+      new THREE.Vector3(halfWidth, halfHeight, 0)
+    );
   }
 
   private getCrisp2DPosition(position: THREE.Vector3): { x: number; y: number; z: number } {
@@ -1847,6 +1906,7 @@ export class ViewportRendererService {
 
     const cameraState = appState.scenes.cameraStates[sceneId];
     if (!cameraState) {
+      this.reset2DView();
       return;
     }
 
@@ -2724,8 +2784,8 @@ export class ViewportRendererService {
 
       this.updateSelection();
 
-      // Restore zoom for 2D mode
-      if (appState.ui.navigationMode === '2d') {
+      // Restore 2D overlay camera whenever the scene changes once viewport sizing is known.
+      if (this.hasMeasuredViewport()) {
         this.restoreZoomFromState();
       }
     } catch (err) {
@@ -4407,6 +4467,10 @@ export class ViewportRendererService {
    * Get bounds for a single 2D node, NOT including its descendants.
    * Uses the node's own size/transform rather than recursively computing from children.
    */
+  getNode2DBounds(node: Node2D): THREE.Box3 {
+    return this.getNodeOnlyBounds(node);
+  }
+
   private getNodeOnlyBounds(node: Node2D): THREE.Box3 {
     const bounds = new THREE.Box3();
 

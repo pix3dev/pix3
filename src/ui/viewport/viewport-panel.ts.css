@@ -76,6 +76,17 @@
   color: rgba(240, 244, 250, 1);
 }
 
+.top-toolbar .toolbar-button:disabled {
+  background: rgba(42, 47, 58, 0.32);
+  color: rgba(240, 244, 250, 0.32);
+  cursor: not-allowed;
+}
+
+.top-toolbar .toolbar-button:disabled:hover {
+  background: rgba(42, 47, 58, 0.32);
+  color: rgba(240, 244, 250, 0.32);
+}
+
 .top-toolbar .toolbar-button[aria-pressed='true'] {
   background: rgba(var(--pix3-accent-rgb), 0.8);
   color: rgba(255, 255, 255, 1);

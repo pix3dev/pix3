@@ -36,7 +36,6 @@
   backdrop-filter: blur(14px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: auto;
-  flex-wrap: wrap;
 }
 
 .viewport-toolbar-shell {
@@ -51,6 +50,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.035);
+  flex: 0 0 auto;
 }
 
 .toolbar-separator {
@@ -137,11 +137,97 @@
   width: 100%;
   height: 100%;
   display: flex;
+  position: relative;
   touch-action: none;
+}
+
+.alignment-overlay-shell {
+  position: absolute;
+  top: 0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: max-content;
+  max-width: calc(100% - 1.5rem);
+  pointer-events: none;
+}
+
+.alignment-overlay {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: max-content;
+  max-width: 100%;
+  padding: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.85rem;
+  background: rgba(12, 15, 22, 0.88);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+
+.alignment-overlay::-webkit-scrollbar {
+  display: none;
+}
+
+.alignment-overlay .toolbar-group {
+  pointer-events: none;
+}
+
+.alignment-overlay .toolbar-button {
+  min-width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: rgba(42, 47, 58, 0.6);
+  color: rgba(240, 244, 250, 0.8);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.alignment-overlay .toolbar-button:hover {
+  background: rgba(42, 47, 58, 0.9);
+  color: rgba(240, 244, 250, 1);
+}
+
+.alignment-overlay .toolbar-button[aria-pressed='true'] {
+  background: rgba(var(--pix3-accent-rgb), 0.8);
+  color: rgba(255, 255, 255, 1);
+  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.3);
+}
+
+.alignment-overlay .toolbar-button[aria-pressed='true']:hover {
+  background: rgba(var(--pix3-accent-rgb), 1);
+}
+
+.alignment-overlay .toolbar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  line-height: 0;
+}
+
+.alignment-overlay .toolbar-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .viewport-host .viewport-canvas {
   flex: 1;
+  height: 100%;
   width: 100%;
   display: block;
   touch-action: none;

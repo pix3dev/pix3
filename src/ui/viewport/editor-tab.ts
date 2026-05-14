@@ -8,12 +8,14 @@ import { ViewportRendererService, type TransformMode } from '@/services/Viewport
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { IconService } from '@/services/IconService';
 import { Navigation2DController } from '@/services/Navigation2DController';
-import { SceneManager, Camera3D, NodeBase } from '@pix3/runtime';
+import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { selectObject } from '@/features/selection/SelectObjectCommand';
 import { toggleNavigationMode } from '@/features/viewport/ToggleNavigationModeCommand';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
-import { renderViewportToolbar } from './viewport-toolbar';
+import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
+import type { Align2DActionId } from '@/features/alignment/types';
+import { renderAlignmentToolbarOverlay, renderViewportToolbar } from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
 
@@ -64,6 +66,7 @@ export class EditorTabComponent extends ComponentBase {
   private disposeUiSubscription?: () => void;
   private disposeTabsSubscription?: () => void;
   private disposeScenesSubscription?: () => void;
+  private disposeSelectionSubscription?: () => void;
   private pointerDownPos?: { x: number; y: number };
   private pointerDownTime?: number;
   private isDragging = false;
@@ -71,6 +74,18 @@ export class EditorTabComponent extends ComponentBase {
   private singleTouchPanPointerId: number | null = null;
   private readonly dragThreshold = 5;
   private wheelCanvas?: HTMLCanvasElement;
+
+  @state()
+  private has2DSelection = false;
+
+  @state()
+  private canAlignToContainer = false;
+
+  @state()
+  private canAlignToSelectionBounds = false;
+
+  @state()
+  private canDistributeSelection = false;
 
   private readonly resizeObserver = new ResizeObserver(entries => {
     const entry = entries[0];
@@ -90,6 +105,7 @@ export class EditorTabComponent extends ComponentBase {
     this.showLighting = appState.ui.showLighting;
     this.navigationMode = appState.ui.navigationMode;
     this.editorCameraProjection = appState.ui.editorCameraProjection;
+    this.syncAlignmentToolbarState();
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.showGrid = appState.ui.showGrid;
@@ -106,6 +122,12 @@ export class EditorTabComponent extends ComponentBase {
     });
 
     this.disposeScenesSubscription = subscribe(appState.scenes, () => {
+      this.syncAlignmentToolbarState();
+      this.requestUpdate();
+    });
+
+    this.disposeSelectionSubscription = subscribe(appState.selection, () => {
+      this.syncAlignmentToolbarState();
       this.requestUpdate();
     });
 
@@ -138,6 +160,8 @@ export class EditorTabComponent extends ComponentBase {
     this.disposeTabsSubscription = undefined;
     this.disposeScenesSubscription?.();
     this.disposeScenesSubscription = undefined;
+    this.disposeSelectionSubscription?.();
+    this.disposeSelectionSubscription = undefined;
     this.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.renderRoot.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.wheelCanvas?.removeEventListener('wheel', this.handleWheel as EventListener, true);
@@ -176,6 +200,7 @@ export class EditorTabComponent extends ComponentBase {
       label: previewCameraLabel,
       isActive: isPreviewCameraActive,
     } = this.getPreviewCameraDropdownState();
+    const showAlignmentTools = isSceneTab && this.has2DSelection;
 
     return html`
       <section
@@ -198,6 +223,10 @@ export class EditorTabComponent extends ComponentBase {
               previewCameraItems,
               isPreviewCameraActive,
               editorCameraProjection: this.editorCameraProjection,
+              showAlignmentTools,
+              canAlignToContainer: isSceneTab && this.canAlignToContainer,
+              canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
+              canDistributeSelection: isSceneTab && this.canDistributeSelection,
             },
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
@@ -210,12 +239,26 @@ export class EditorTabComponent extends ComponentBase {
               onToggleLayer3D: () => this.toggleLayer3D(),
               onToggleLayer2D: () => this.toggleLayer2D(),
               onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
+              onRunAlignmentAction: action => this.handleAlignmentAction(action),
             },
             this.iconService
           )}
         </div>
 
-        <div class="viewport-host" part="canvas-host"></div>
+        <div class="viewport-host" part="canvas-host">
+          ${renderAlignmentToolbarOverlay(
+            {
+              showAlignmentTools,
+              canAlignToContainer: isSceneTab && this.canAlignToContainer,
+              canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
+              canDistributeSelection: isSceneTab && this.canDistributeSelection,
+            },
+            {
+              onRunAlignmentAction: action => this.handleAlignmentAction(action),
+            },
+            this.iconService
+          )}
+        </div>
       </section>
     `;
   }
@@ -250,9 +293,59 @@ export class EditorTabComponent extends ComponentBase {
     }
   }
 
+  private syncAlignmentToolbarState(): void {
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const selectedNodes = appState.selection.nodeIds
+      .map(nodeId => sceneGraph.nodeMap.get(nodeId) ?? null)
+      .filter((node): node is NodeBase => node !== null);
+    const selected2DNodes = selectedNodes.filter((node): node is Node2D => node instanceof Node2D);
+
+    if (selected2DNodes.length === 0) {
+      this.has2DSelection = false;
+      this.canAlignToContainer = false;
+      this.canAlignToSelectionBounds = false;
+      this.canDistributeSelection = false;
+      return;
+    }
+
+    const sharedParent = selected2DNodes[0]?.parentNode ?? null;
+    const sharesParent = selected2DNodes.every(node => node.parentNode === sharedParent);
+
+    this.has2DSelection = true;
+    this.canAlignToContainer =
+      sharesParent && (sharedParent === null || sharedParent instanceof Node2D);
+    this.canAlignToSelectionBounds = selected2DNodes.length > 1;
+    this.canDistributeSelection = selected2DNodes.length > 2;
+  }
+
   private handleTransformModeChange(mode: TransformMode): void {
     this.transformMode = mode;
     this.viewportRenderer.setTransformMode(mode);
+  }
+
+  private handleAlignmentAction(action: Align2DActionId): void {
+    void this.commandDispatcher.execute(align2DNodes(action)).then(didMutate => {
+      if (didMutate) {
+        this.viewportRenderer.requestRender();
+      }
+    });
   }
 
   private toggleGrid(): void {
@@ -372,13 +465,7 @@ export class EditorTabComponent extends ComponentBase {
   private handleCanvasPointerDown = (event: PointerEvent): void => {
     if (appState.tabs.activeTabId !== this.tabId) return;
 
-    const isToolbar = event
-      .composedPath()
-      .some(
-        el =>
-          el instanceof HTMLElement &&
-          (el.classList.contains('top-toolbar') || el.classList.contains('toolbar-button'))
-      );
+    const isToolbar = this.isToolbarInteraction(event);
     if (isToolbar) return;
 
     const canvas = this.viewportRenderer.getCanvasElement();
@@ -552,13 +639,7 @@ export class EditorTabComponent extends ComponentBase {
       this.navigation2D.endPan();
     }
 
-    const isToolbar = event
-      .composedPath()
-      .some(
-        el =>
-          el instanceof HTMLElement &&
-          (el.classList.contains('top-toolbar') || el.classList.contains('toolbar-button'))
-      );
+    const isToolbar = this.isToolbarInteraction(event);
     if (isToolbar) {
       this.pointerDownPos = undefined;
       this.pointerDownTime = undefined;
@@ -631,6 +712,21 @@ export class EditorTabComponent extends ComponentBase {
     this.pointerDownPos = undefined;
     this.pointerDownTime = undefined;
     this.isDragging = false;
+  }
+
+  private isToolbarInteraction(event: PointerEvent): boolean {
+    return event
+      .composedPath()
+      .some(
+        el =>
+          el instanceof HTMLElement &&
+          (el.classList.contains('top-toolbar') ||
+            el.classList.contains('alignment-overlay') ||
+            el.classList.contains('alignment-overlay-shell') ||
+            el.classList.contains('toolbar-group') ||
+            el.classList.contains('toolbar-button') ||
+            el.classList.contains('toolbar-dropdown-button'))
+      );
   }
 
   private shouldStartSingleTouchPan(

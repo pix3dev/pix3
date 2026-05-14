@@ -14,6 +14,8 @@ import {
 import { appState, resetAppState } from '@/state';
 
 describe('ViewportRendererService', () => {
+  const expectedDefault2DZoom = 1 / 1.25;
+
   afterEach(() => {
     resetAppState();
     vi.restoreAllMocks();
@@ -389,7 +391,7 @@ describe('ViewportRendererService', () => {
     expect(orbitControls.reset).not.toHaveBeenCalled();
     expect(orthographicCamera.position.x).toBe(0);
     expect(orthographicCamera.position.y).toBe(0);
-    expect(orthographicCamera.zoom).toBe(1);
+    expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
     expect(orthographicControls.target.x).toBe(0);
     expect(orthographicControls.target.y).toBe(0);
     expect(perspectiveCamera.position.x).toBe(11);
@@ -433,7 +435,101 @@ describe('ViewportRendererService', () => {
     expect(orbitControls.reset).not.toHaveBeenCalled();
     expect(orthographicCamera.position.x).toBe(0);
     expect(orthographicCamera.position.y).toBe(0);
-    expect(orthographicCamera.zoom).toBe(1);
+    expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
+  });
+
+  it('restores the padded default 2D view when entering 2D without saved camera state', () => {
+    resetAppState();
+    appState.scenes.activeSceneId = 'scene-2d';
+
+    const service = new ViewportRendererService();
+    const orthographicCamera = new THREE.OrthographicCamera(-960, 960, 540, -540, 0.1, 1000);
+    orthographicCamera.position.set(40, -25, 100);
+    orthographicCamera.zoom = 2;
+    const orthographicControls = {
+      enabled: true,
+      enableZoom: true,
+      enablePan: true,
+      target: new THREE.Vector3(15, -10, 0),
+      update: vi.fn(),
+    };
+    const requestRender = vi.fn();
+
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: orthographicCamera,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicControls', {
+      value: orthographicControls,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'requestRender', { value: requestRender, configurable: true });
+
+    appState.ui.navigationMode = '2d';
+
+    (
+      service as unknown as {
+        syncNavigationMode: () => void;
+      }
+    ).syncNavigationMode();
+
+    expect(orthographicCamera.position.x).toBe(0);
+    expect(orthographicCamera.position.y).toBe(0);
+    expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
+    expect(orthographicControls.target.x).toBe(0);
+    expect(orthographicControls.target.y).toBe(0);
+    expect(orthographicControls.enableZoom).toBe(false);
+    expect(orthographicControls.enablePan).toBe(false);
+    expect(requestRender).toHaveBeenCalledTimes(2);
+  });
+
+  it('applies the padded 2D default on first resize even before entering 2D navigation', () => {
+    resetAppState();
+    appState.ui.navigationMode = '3d';
+    appState.scenes.activeSceneId = 'scene-open';
+
+    const service = new ViewportRendererService();
+    const perspectiveCamera = new THREE.PerspectiveCamera();
+    const orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    orthographicCamera.position.set(60, -35, 100);
+    const orthographicControls = {
+      target: new THREE.Vector3(15, -10, 0),
+      update: vi.fn(),
+    };
+
+    Object.defineProperty(service, 'renderer', {
+      value: { setSize: vi.fn() },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'camera', { value: perspectiveCamera, configurable: true });
+    Object.defineProperty(service, 'perspectiveCamera', {
+      value: perspectiveCamera,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: orthographicCamera,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicControls', {
+      value: orthographicControls,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: { resizeRoot: vi.fn() },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'syncAll2DVisuals', { value: vi.fn(), configurable: true });
+    Object.defineProperty(service, 'syncBaseViewportFrame', { value: vi.fn(), configurable: true });
+    Object.defineProperty(service, 'requestRender', { value: vi.fn(), configurable: true });
+
+    service.resize(1280, 720);
+
+    expect(orthographicCamera.position.x).toBe(0);
+    expect(orthographicCamera.position.y).toBe(0);
+    expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
+    expect(orthographicControls.target.x).toBe(0);
+    expect(orthographicControls.target.y).toBe(0);
+    expect(appState.scenes.cameraStates['scene-open']?.zoom).toBeCloseTo(expectedDefault2DZoom);
   });
 
   it('maps drag pan deltas to exact 2D world offsets', () => {

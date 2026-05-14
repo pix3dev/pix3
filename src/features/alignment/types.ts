@@ -1,0 +1,17 @@
+export type Align2DActionId =
+  | 'container-left'
+  | 'container-center-x'
+  | 'container-right'
+  | 'container-top'
+  | 'container-center-y'
+  | 'container-bottom'
+  | 'selection-left'
+  | 'selection-center-x'
+  | 'selection-right'
+  | 'selection-top'
+  | 'selection-center-y'
+  | 'selection-bottom'
+  | 'distribute-gap-x'
+  | 'distribute-gap-y'
+  | 'distribute-center-x'
+  | 'distribute-center-y';

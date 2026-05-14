@@ -3,6 +3,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import type { TemplateResult } from 'lit';
 import { html } from 'lit';
 import feather from 'feather-icons';
+import { ALIGNMENT_ICON_SVGS } from '@/features/alignment/alignmentIcons';
 
 // Feather icon typing helper
 type FeatherIcon = { toSvg?: (opts?: Record<string, unknown>) => string };
@@ -237,6 +238,10 @@ export class IconService {
   <path d="M5.5 14L6.2 15.5L7.7 16.2L6.2 16.9L5.5 18.4L4.8 16.9L3.3 16.2L4.8 15.5L5.5 14Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
 </svg>`
     );
+
+    for (const [name, svg] of Object.entries(ALIGNMENT_ICON_SVGS)) {
+      this.customIcons.set(name, svg);
+    }
   }
 
   /**
