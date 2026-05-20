@@ -13,7 +13,7 @@ import { SceneManager } from './SceneManager';
 import { RuntimeRenderer } from './RuntimeRenderer';
 import { InputService } from './InputService';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
-import { AudioService } from './AudioService';
+import { AudioService, type ActiveAudioPlaybackSnapshot } from './AudioService';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
 import { Camera3D } from '../nodes/3D/Camera3D';
@@ -38,6 +38,7 @@ export interface SceneRunnerFrameSample {
   readonly totalFrameMs: number;
   readonly rendererStats: RuntimeRendererStatsSnapshot;
   readonly profilerActivities?: readonly FrameProfilerActivity[];
+  readonly activeAudioPlaybacks?: readonly ActiveAudioPlaybackSnapshot[];
 }
 
 type SceneRunnerFrameListener = (sample: SceneRunnerFrameSample) => void;
@@ -270,6 +271,7 @@ export class SceneRunner {
       totalFrameMs: logicMs + renderMs,
       rendererStats: this.renderer.getStatsSnapshot(),
       profilerActivities: this.getFrameProfilerActivitiesSnapshot(),
+      activeAudioPlaybacks: this.getActiveAudioPlaybackSnapshot(),
     });
 
     this.animationFrameId = requestAnimationFrame(this.tick);
@@ -479,6 +481,11 @@ export class SceneRunner {
     }
 
     return this.currentFrameProfilerActivities.map(activity => ({ ...activity }));
+  }
+
+  private getActiveAudioPlaybackSnapshot(): readonly ActiveAudioPlaybackSnapshot[] | undefined {
+    const snapshot = this.audioService.getActivePlaybackSnapshot();
+    return snapshot.length > 0 ? snapshot : undefined;
   }
 
   private normalizeFrameProfilerActivities(

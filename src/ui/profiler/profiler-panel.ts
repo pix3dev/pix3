@@ -1,6 +1,7 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { svg } from 'lit';
 import {
+  type ProfilerAudioSnapshot,
   type ProfilerFrameImpactEntrySnapshot,
   type ProfilerFrameImpactSnapshot,
   ProfilerSessionService,
@@ -14,6 +15,7 @@ import '../shared/pix3-panel';
 
 const IDLE_COPY = 'Profiler metrics appear here while Play mode is running.';
 const FRAME_IMPACT_EMPTY_COPY = 'No frame activity breakdown reported by the active runtime yet.';
+const AUDIO_EMPTY_COPY = 'No audio files have played in this session yet.';
 
 @customElement('pix3-profiler-panel')
 export class ProfilerPanel extends ComponentBase {
@@ -48,6 +50,12 @@ export class ProfilerPanel extends ComponentBase {
     frameImpact: {
       activities: [],
       sampledFrameCount: 0,
+      windowDurationMs: 0,
+      totalFrameTimeMs: 0,
+    },
+    audio: {
+      files: [],
+      activeInstanceCount: 0,
     },
   };
 
@@ -57,10 +65,14 @@ export class ProfilerPanel extends ComponentBase {
   @state()
   private chartWidth = 320;
 
+  @state()
+  private selectedAudioKey: string | null = null;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.disposeSubscription = this.profilerSessionService.subscribe(snapshot => {
       this.snapshot = snapshot;
+      this.syncSelectedAudioKey(snapshot);
       this.requestUpdate();
     });
   }
@@ -90,6 +102,7 @@ export class ProfilerPanel extends ComponentBase {
                   this.renderPerformanceRows(this.snapshot.performance)
                 )}
                 ${this.renderSection('Session', this.renderCounterRows(this.snapshot.counters))}
+                ${this.renderAudioSection(this.snapshot.audio)}
                 ${this.renderFrameImpactSection(this.snapshot.frameImpact)}
               `}
         </div>
@@ -132,6 +145,145 @@ export class ProfilerPanel extends ComponentBase {
     return html`
       <div class="metric-label">${label}</div>
       <div class="metric-value">${value}</div>
+    `;
+  }
+
+  private renderAudioSection(snapshot: ProfilerAudioSnapshot) {
+    const activeFileCount = snapshot.files.filter(file => file.isActive).length;
+    const selectedFile = snapshot.files.find(file => file.key === this.selectedAudioKey) ?? null;
+    const sectionMeta = [
+      `${snapshot.files.length.toLocaleString('en-US')} files`,
+      `${snapshot.activeInstanceCount.toLocaleString('en-US')} active`,
+    ];
+    if (activeFileCount > 0) {
+      sectionMeta.push(`${activeFileCount.toLocaleString('en-US')} playing`);
+    }
+
+    return html`
+      <section class="profiler-section profiler-audio-section">
+        <div class="profiler-section-heading">
+          <h3 class="profiler-section-title">Audio Files</h3>
+          <span class="profiler-section-meta">${sectionMeta.join(' · ')}</span>
+        </div>
+        <p class="profiler-section-note">
+          One tile per audio file. Green means the file is playing now; gray means it played
+          earlier in this session.
+        </p>
+        ${snapshot.files.length === 0
+          ? html`<p class="profiler-empty-state">${AUDIO_EMPTY_COPY}</p>`
+          : html`
+              <div class="audio-file-grid" role="list" aria-label="Audio files played this session">
+                ${snapshot.files.map(file => this.renderAudioFileCard(file))}
+              </div>
+              ${selectedFile ? this.renderAudioDetails(selectedFile) : null}
+            `}
+      </section>
+    `;
+  }
+
+  private renderAudioFileCard(file: ProfilerAudioSnapshot['files'][number]) {
+    const isSelected = this.selectedAudioKey === file.key;
+    const stateCopy = file.isActive ? 'playing' : 'idle';
+    const className = [
+      'audio-file-card',
+      file.isActive ? 'audio-file-card-active' : 'audio-file-card-inactive',
+      isSelected ? 'audio-file-card-selected' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    return html`
+      <button
+        type="button"
+        class=${className}
+        role="listitem"
+        data-audio-key=${file.key}
+        aria-pressed=${isSelected ? 'true' : 'false'}
+        title=${file.resourcePath ?? file.label}
+        @click=${() => this.toggleAudioSelection(file.key)}
+      >
+        <span class="audio-file-count">${file.activeInstanceCount.toLocaleString('en-US')}</span>
+        <span class="audio-file-name" title=${file.label}>${file.label}</span>
+        <span class="audio-file-state">${stateCopy}</span>
+      </button>
+    `;
+  }
+
+  private renderAudioDetails(file: ProfilerAudioSnapshot['files'][number]) {
+    const playbackRows = file.currentInstances.length > 0 ? file.currentInstances : [];
+    const fallbackPlayback = playbackRows.length === 0 ? file.lastPlayback : null;
+
+    return html`
+      <div class="audio-detail-card">
+        <div class="audio-detail-header">
+          <div>
+            <h4 class="audio-detail-title">${file.label}</h4>
+            ${file.resourcePath
+              ? html`<p class="audio-detail-subtitle">${file.resourcePath}</p>`
+              : null}
+          </div>
+          <span class=${`audio-detail-badge ${file.isActive ? 'audio-detail-badge-active' : 'audio-detail-badge-idle'}`}
+            >${file.isActive ? 'active' : 'inactive'}</span
+          >
+        </div>
+        <div class="audio-detail-grid">
+          ${this.renderAudioDetailRow('Name', file.label)}
+          ${this.renderAudioDetailRow('Bitrate', this.formatAudioBitrate(file.bitrateKbps))}
+          ${this.renderAudioDetailRow('Duration', this.formatAudioClipDuration(file.durationSeconds))}
+          ${this.renderAudioDetailRow('Active Instances', file.activeInstanceCount.toLocaleString('en-US'))}
+          ${this.renderAudioDetailRow('Sample Rate', this.formatAudioSampleRate(file.sampleRate))}
+          ${this.renderAudioDetailRow('Channels', this.formatInteger(file.channelCount))}
+        </div>
+        <div class="audio-detail-playback-section">
+          <div class="audio-detail-playback-heading">
+            ${playbackRows.length > 0 ? 'Playback Params' : 'Last Playback Params'}
+          </div>
+          ${playbackRows.length > 0
+            ? html`
+                <div class="audio-detail-playback-list">
+                  ${playbackRows.map((instance, index) =>
+                    this.renderAudioPlaybackDetails(instance, `Instance ${index + 1}`)
+                  )}
+                </div>
+              `
+            : fallbackPlayback
+              ? html`
+                  <div class="audio-detail-playback-list">
+                    ${this.renderAudioPlaybackDetails(fallbackPlayback, 'Last seen')}
+                  </div>
+                `
+              : html`<p class="profiler-empty-state">No playback details captured yet.</p>`}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderAudioDetailRow(label: string, value: string) {
+    return html`
+      <div class="audio-detail-label">${label}</div>
+      <div class="audio-detail-value">${value}</div>
+    `;
+  }
+
+  private renderAudioPlaybackDetails(
+    instance: ProfilerAudioSnapshot['files'][number]['currentInstances'][number],
+    label: string
+  ) {
+    const panLabel = this.formatAudioPan(instance.pan);
+
+    return html`
+      <div class="audio-detail-playback-row">
+        <div class="audio-detail-playback-row-header">
+          <span class="audio-detail-playback-row-title">${label}</span>
+          <span class="audio-detail-playback-row-age">${this.formatAudioElapsed(instance.elapsedMs)}</span>
+        </div>
+        <div class="audio-detail-playback-chips">
+          <span class="audio-instance-chip">${this.formatAudioVolume(instance.volume)}</span>
+          <span class="audio-instance-chip">${this.formatAudioRate(instance.playbackRate)}</span>
+          ${panLabel ? html`<span class="audio-instance-chip">${panLabel}</span>` : null}
+          ${instance.loop ? html`<span class="audio-instance-chip audio-instance-chip-loop">loop</span>` : null}
+        </div>
+      </div>
     `;
   }
 
@@ -249,6 +401,10 @@ export class ProfilerPanel extends ComponentBase {
         <div class="chart-surface">${chart}</div>
       </div>
     `;
+  }
+
+  private toggleAudioSelection(key: string) {
+    this.selectedAudioKey = this.selectedAudioKey === key ? null : key;
   }
 
   private renderLineChart(values: readonly number[], maxValue: number, lineClass: string) {
@@ -428,6 +584,101 @@ export class ProfilerPanel extends ComponentBase {
     }
 
     return `${Math.round(value).toLocaleString('en-US')} ms`;
+  }
+
+  private formatAudioElapsed(value: number): string {
+    if (!Number.isFinite(value) || value < 0) {
+      return '—';
+    }
+
+    if (value < 1000) {
+      return `${Math.round(value).toLocaleString('en-US')} ms`;
+    }
+
+    if (value < 10000) {
+      return `${(value / 1000).toFixed(1)} s`;
+    }
+
+    return `${Math.round(value / 1000).toLocaleString('en-US')} s`;
+  }
+
+  private formatAudioBitrate(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return '—';
+    }
+
+    if (value >= 1000) {
+      return `${(value / 1000).toFixed(2)} Mbps`;
+    }
+
+    return `${Math.round(value).toLocaleString('en-US')} kbps`;
+  }
+
+  private formatAudioClipDuration(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return '—';
+    }
+
+    if (value < 10) {
+      return `${value.toFixed(2)} s`;
+    }
+
+    if (value < 60) {
+      return `${value.toFixed(1)} s`;
+    }
+
+    const totalSeconds = Math.round(value);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private formatAudioSampleRate(value: number | null): string {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return '—';
+    }
+
+    const khz = value / 1000;
+    return `${khz % 1 === 0 ? khz.toFixed(0) : khz.toFixed(1)} kHz`;
+  }
+
+  private formatAudioVolume(value: number): string {
+    if (!Number.isFinite(value) || value < 0) {
+      return 'vol —';
+    }
+
+    return `vol ${Math.round(value * 100).toLocaleString('en-US')}%`;
+  }
+
+  private formatAudioRate(value: number): string {
+    if (!Number.isFinite(value) || value <= 0) {
+      return 'rate —';
+    }
+
+    return `rate ${value.toFixed(2)}x`;
+  }
+
+  private formatAudioPan(value: number | null): string | null {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return null;
+    }
+
+    return `pan ${value.toFixed(2)}`;
+  }
+
+  private syncSelectedAudioKey(snapshot: ProfilerSessionSnapshot): void {
+    if (snapshot.status === 'idle' || snapshot.audio.files.length === 0) {
+      this.selectedAudioKey = null;
+      return;
+    }
+
+    if (!this.selectedAudioKey) {
+      return;
+    }
+
+    if (!snapshot.audio.files.some(file => file.key === this.selectedAudioKey)) {
+      this.selectedAudioKey = null;
+    }
   }
 
   private formatMegabytes(value: number | null): string {

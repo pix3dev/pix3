@@ -26,6 +26,11 @@ export interface InstancingModelAsset {
   scene: GLTF['scene'];
 }
 
+export interface LoadedAudioMetadata {
+  readonly resourcePath: string;
+  readonly sizeBytes: number;
+}
+
 /**
  * AssetLoader is responsible for loading asset files from various URLs
  * and converting them to concrete NodeBase instances in the scene tree.
@@ -44,6 +49,7 @@ export class AssetLoader {
   private readonly animationResourceCache = new Map<string, AnimationResource>();
   private readonly animationResourceLoadInFlight = new Map<string, Promise<AnimationResource>>();
   private readonly audioLoadInFlight = new Map<string, Promise<AudioBuffer>>();
+  private readonly audioMetadataCache = new Map<string, LoadedAudioMetadata>();
 
   constructor(resources: ResourceManager, audioService?: AudioService) {
     this.resources = resources;
@@ -53,6 +59,11 @@ export class AssetLoader {
 
   getResourceManager(): ResourceManager {
     return this.resources;
+  }
+
+  getAudioMetadata(resourcePath: string): LoadedAudioMetadata | null {
+    const metadata = this.audioMetadataCache.get(resourcePath);
+    return metadata ? { ...metadata } : null;
   }
 
   /**
@@ -124,11 +135,13 @@ export class AssetLoader {
     const loadPromise = (async (): Promise<AudioBuffer> => {
       try {
         let arrayBuffer: ArrayBuffer;
+        let sizeBytes = 0;
         if (resourcePath.startsWith('res://')) {
           // Use readBlob directly for res:// paths, same as textures and models.
           // Fetching via normalized URL can return a dev-server HTML fallback page,
           // causing decodeAudioData to throw EncodingError.
           const blob = await this.resources.readBlob(resourcePath);
+          sizeBytes = blob.size;
           arrayBuffer = await blob.arrayBuffer();
         } else {
           try {
@@ -142,9 +155,15 @@ export class AssetLoader {
               throw new Error(`Unexpected HTML response for audio at ${url}`);
             }
             arrayBuffer = await response.arrayBuffer();
+            const contentLength = Number(response.headers.get('content-length'));
+            sizeBytes =
+              Number.isFinite(contentLength) && contentLength > 0
+                ? contentLength
+                : arrayBuffer.byteLength;
           } catch {
             // Fallback for embedded resources that are not directly fetchable by URL.
             const blob = await this.resources.readBlob(resourcePath);
+            sizeBytes = blob.size;
             arrayBuffer = await blob.arrayBuffer();
           }
         }
@@ -152,6 +171,10 @@ export class AssetLoader {
         const audioBuffer = await audioService.decodeAudioData(arrayBuffer);
 
         console.log(`[AssetLoader] Successfully loaded audio: ${resourcePath}`);
+        this.audioMetadataCache.set(resourcePath, {
+          resourcePath,
+          sizeBytes: Math.max(0, Math.round(sizeBytes || arrayBuffer.byteLength)),
+        });
         this.resources.setAudioBuffer(resourcePath, audioBuffer);
         return audioBuffer;
       } catch (err) {

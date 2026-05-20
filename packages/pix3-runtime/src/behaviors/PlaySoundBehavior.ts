@@ -140,8 +140,11 @@ export class PlaySoundBehavior extends Script {
       if (!currentAudioService) {
         return;
       }
+      const audioMetadata = assetLoader.getAudioMetadata(track);
 
       currentAudioService.play(buffer, {
+        resourcePath: track,
+        sizeBytes: audioMetadata?.sizeBytes,
         volume: this.getVolume(),
         loop: this.getLoop(),
       });

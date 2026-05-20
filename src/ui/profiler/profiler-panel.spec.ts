@@ -71,6 +71,142 @@ describe('ProfilerPanel', () => {
             },
           ],
         },
+        audio: {
+          activeInstanceCount: 3,
+          files: [
+            createAudioFile({
+              key: 'res://audio/hitStone.ogg',
+              label: 'hitStone.ogg',
+              resourcePath: 'res://audio/hitStone.ogg',
+              durationSeconds: 2,
+              channelCount: 2,
+              sampleRate: 48000,
+              bitrateKbps: 256,
+              activeInstanceCount: 2,
+              isActive: true,
+              lastPlayedAtMs: 1100,
+              currentInstances: [
+                createAudioPlayback({
+                  id: 'playback-1',
+                  label: 'hitStone.ogg',
+                  resourcePath: 'res://audio/hitStone.ogg',
+                  startedAtMs: 1000,
+                  elapsedMs: 450,
+                  loop: false,
+                  volume: 0.35,
+                  playbackRate: 1.05,
+                  pan: -0.1,
+                  durationSeconds: 2,
+                  channelCount: 2,
+                  sampleRate: 48000,
+                  bitrateKbps: 256,
+                }),
+                createAudioPlayback({
+                  id: 'playback-2',
+                  label: 'hitStone.ogg',
+                  resourcePath: 'res://audio/hitStone.ogg',
+                  startedAtMs: 1100,
+                  elapsedMs: 280,
+                  loop: false,
+                  volume: 0.35,
+                  playbackRate: 0.98,
+                  pan: 0.12,
+                  durationSeconds: 2,
+                  channelCount: 2,
+                  sampleRate: 48000,
+                  bitrateKbps: 256,
+                }),
+              ],
+              lastPlayback: createAudioPlayback({
+                id: 'playback-2',
+                label: 'hitStone.ogg',
+                resourcePath: 'res://audio/hitStone.ogg',
+                startedAtMs: 1100,
+                elapsedMs: 280,
+                loop: false,
+                volume: 0.35,
+                playbackRate: 0.98,
+                pan: 0.12,
+                durationSeconds: 2,
+                channelCount: 2,
+                sampleRate: 48000,
+                bitrateKbps: 256,
+              }),
+            }),
+            createAudioFile({
+              key: 'res://audio/lootPickup.ogg',
+              label: 'lootPickup.ogg',
+              resourcePath: 'res://audio/lootPickup.ogg',
+              durationSeconds: 1.5,
+              channelCount: 2,
+              sampleRate: 44100,
+              bitrateKbps: 192,
+              activeInstanceCount: 1,
+              isActive: true,
+              lastPlayedAtMs: 900,
+              currentInstances: [
+                createAudioPlayback({
+                  id: 'playback-3',
+                  label: 'lootPickup.ogg',
+                  resourcePath: 'res://audio/lootPickup.ogg',
+                  startedAtMs: 900,
+                  elapsedMs: 1200,
+                  loop: true,
+                  volume: 0.8,
+                  playbackRate: 1,
+                  pan: null,
+                  durationSeconds: 1.5,
+                  channelCount: 2,
+                  sampleRate: 44100,
+                  bitrateKbps: 192,
+                }),
+              ],
+              lastPlayback: createAudioPlayback({
+                id: 'playback-3',
+                label: 'lootPickup.ogg',
+                resourcePath: 'res://audio/lootPickup.ogg',
+                startedAtMs: 900,
+                elapsedMs: 1200,
+                loop: true,
+                volume: 0.8,
+                playbackRate: 1,
+                pan: null,
+                durationSeconds: 1.5,
+                channelCount: 2,
+                sampleRate: 44100,
+                bitrateKbps: 192,
+              }),
+            }),
+            createAudioFile({
+              key: 'res://audio/breakStone.ogg',
+              label: 'breakStone.ogg',
+              resourcePath: 'res://audio/breakStone.ogg',
+              durationSeconds: 1.4,
+              channelCount: 1,
+              sampleRate: 44100,
+              bitrateKbps: 192,
+              activeInstanceCount: 0,
+              isActive: false,
+              lastPlayedAtMs: 300,
+              currentInstances: [],
+              lastPlayback: createAudioPlayback({
+                id: 'playback-4',
+                label: 'breakStone.ogg',
+                resourcePath: 'res://audio/breakStone.ogg',
+                startedAtMs: 300,
+                elapsedMs: 801,
+                loop: false,
+                volume: 0.23,
+                playbackRate: 1.02,
+                pan: 0.04,
+                durationSeconds: 1.4,
+                channelCount: 1,
+                sampleRate: 44100,
+                bitrateKbps: 192,
+              }),
+            }),
+          ],
+        },
       })
     );
 
@@ -86,6 +222,13 @@ describe('ProfilerPanel', () => {
     expect(panel.textContent).toContain('34.2 MB');
     expect(panel.textContent).toContain('1:35');
     expect(panel.textContent).toContain('popout');
+    expect(panel.textContent).toContain('Audio Files');
+    expect(panel.textContent).toContain('3 files');
+    expect(panel.textContent).toContain('3 active');
+    expect(panel.textContent).toContain('2 playing');
+    expect(panel.textContent).toContain('hitStone.ogg');
+    expect(panel.textContent).toContain('lootPickup.ogg');
+    expect(panel.textContent).toContain('breakStone.ogg');
     expect(panel.textContent).toContain('Frame Impact');
     expect(panel.textContent).toContain('8.0 s');
     expect(panel.textContent).toContain('Physics');
@@ -94,6 +237,7 @@ describe('ProfilerPanel', () => {
     expect(panel.textContent).toContain('Count = frames where the activity appeared.');
     expect(panel.textContent).toContain('6');
     expect(panel.querySelectorAll('.chart-card')).toHaveLength(2);
+    expect(panel.querySelectorAll('.audio-file-card')).toHaveLength(3);
     expect(panel.querySelector('.fps-line')).not.toBeNull();
     expect(panel.querySelector('.chart-legend')).not.toBeNull();
     expect(panel.querySelectorAll('.frame-impact-row')).toHaveLength(3);
@@ -152,6 +296,101 @@ describe('ProfilerPanel', () => {
 
     expect(panel.textContent).toContain('No frame activity breakdown reported by the active runtime yet.');
   });
+
+  it('renders an empty audio state when the runtime reports no active sounds', async () => {
+    const panel = document.createElement('pix3-profiler-panel') as ProfilerPanelElement;
+    stubPanelService(
+      panel,
+      createSnapshot({
+        status: 'running',
+        audio: {
+          instances: [],
+        },
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(panel.textContent).toContain('No audio files have played in this session yet.');
+  });
+
+  it('opens audio details for the selected file tile', async () => {
+    const panel = document.createElement('pix3-profiler-panel') as ProfilerPanelElement;
+    stubPanelService(
+      panel,
+      createSnapshot({
+        status: 'running',
+        audio: {
+          activeInstanceCount: 1,
+          files: [
+            createAudioFile({
+              key: 'res://audio/breakStone.ogg',
+              label: 'breakStone.ogg',
+              resourcePath: 'res://audio/breakStone.ogg',
+              durationSeconds: 1.4,
+              channelCount: 1,
+              sampleRate: 44100,
+              bitrateKbps: 192,
+              activeInstanceCount: 1,
+              isActive: true,
+              lastPlayedAtMs: 300,
+              currentInstances: [
+                createAudioPlayback({
+                  id: 'playback-4',
+                  label: 'breakStone.ogg',
+                  resourcePath: 'res://audio/breakStone.ogg',
+                  startedAtMs: 300,
+                  elapsedMs: 801,
+                  loop: false,
+                  volume: 0.23,
+                  playbackRate: 1.02,
+                  pan: 0.04,
+                  durationSeconds: 1.4,
+                  channelCount: 1,
+                  sampleRate: 44100,
+                  bitrateKbps: 192,
+                }),
+              ],
+              lastPlayback: createAudioPlayback({
+                id: 'playback-4',
+                label: 'breakStone.ogg',
+                resourcePath: 'res://audio/breakStone.ogg',
+                startedAtMs: 300,
+                elapsedMs: 801,
+                loop: false,
+                volume: 0.23,
+                playbackRate: 1.02,
+                pan: 0.04,
+                durationSeconds: 1.4,
+                channelCount: 1,
+                sampleRate: 44100,
+                bitrateKbps: 192,
+              }),
+            }),
+          ],
+        },
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const tile = panel.querySelector('[data-audio-key="res://audio/breakStone.ogg"]') as HTMLButtonElement | null;
+    expect(tile).not.toBeNull();
+
+    tile?.click();
+    await panel.updateComplete;
+
+    expect(panel.textContent).toContain('Bitrate');
+    expect(panel.textContent).toContain('192 kbps');
+    expect(panel.textContent).toContain('1.40 s');
+    expect(panel.textContent).toContain('Playback Params');
+    expect(panel.textContent).toContain('vol 23%');
+    expect(panel.textContent).toContain('rate 1.02x');
+    expect(panel.textContent).toContain('pan 0.04');
+    expect(panel.querySelector('.audio-detail-card')).not.toBeNull();
+  });
 });
 
 function stubPanelService(panel: ProfilerPanelElement, snapshot: ProfilerSessionSnapshot): void {
@@ -199,5 +438,52 @@ function createSnapshot(overrides: Partial<ProfilerSessionSnapshot>): ProfilerSe
       windowDurationMs: 0,
       totalFrameTimeMs: 0,
     },
+    audio: {
+      files: overrides.audio?.files ?? [],
+      activeInstanceCount: overrides.audio?.activeInstanceCount ?? 0,
+    },
+  };
+}
+
+function createAudioFile(
+  overrides: Partial<ProfilerSessionSnapshot['audio']['files'][number]> & {
+    key: string;
+  }
+): ProfilerSessionSnapshot['audio']['files'][number] {
+  return {
+    key: overrides.key,
+    label: overrides.label ?? 'Unknown',
+    resourcePath: overrides.resourcePath ?? null,
+    durationSeconds: overrides.durationSeconds ?? null,
+    channelCount: overrides.channelCount ?? null,
+    sampleRate: overrides.sampleRate ?? null,
+    bitrateKbps: overrides.bitrateKbps ?? null,
+    activeInstanceCount: overrides.activeInstanceCount ?? 0,
+    isActive: overrides.isActive ?? false,
+    lastPlayedAtMs: overrides.lastPlayedAtMs ?? 0,
+    currentInstances: overrides.currentInstances ?? [],
+    lastPlayback: overrides.lastPlayback ?? null,
+  };
+}
+
+function createAudioPlayback(
+  overrides: Partial<ProfilerSessionSnapshot['audio']['files'][number]['currentInstances'][number]> & {
+    id: string;
+  }
+): ProfilerSessionSnapshot['audio']['files'][number]['currentInstances'][number] {
+  return {
+    id: overrides.id,
+    label: overrides.label ?? 'Unknown',
+    resourcePath: overrides.resourcePath ?? null,
+    startedAtMs: overrides.startedAtMs ?? 0,
+    elapsedMs: overrides.elapsedMs ?? 0,
+    loop: overrides.loop ?? false,
+    volume: overrides.volume ?? 1,
+    playbackRate: overrides.playbackRate ?? 1,
+    pan: overrides.pan ?? null,
+    durationSeconds: overrides.durationSeconds ?? null,
+    channelCount: overrides.channelCount ?? null,
+    sampleRate: overrides.sampleRate ?? null,
+    bitrateKbps: overrides.bitrateKbps ?? null,
   };
 }

@@ -161,11 +161,29 @@ describe('SceneRunner camera projection updates', () => {
 
   it('includes per-frame profiler activities in frame samples and resets missing reports', () => {
     const renderer = createRendererStub(320, 160);
+    const audioService = {
+      getActivePlaybackSnapshot: vi
+        .fn()
+        .mockReturnValueOnce([
+          {
+            id: 'playback-17',
+            label: 'hitStone',
+            startedAtMs: 1000,
+            elapsedMs: 125,
+            loop: false,
+            volume: 0.35,
+            playbackRate: 1.05,
+            pan: -0.1,
+          },
+        ])
+        .mockReturnValueOnce([]),
+      stopAll: vi.fn(),
+    } as unknown as AudioService;
     const runner = new SceneRunner(
       createSceneManagerStub(),
       renderer,
-      new AudioService(),
-      new AssetLoader(new ResourceManager('/'), new AudioService())
+      audioService,
+      new AssetLoader(new ResourceManager('/'))
     );
     const cameraNode = new Camera3D({
       id: 'runtime-profiler',
@@ -209,6 +227,19 @@ describe('SceneRunner camera projection updates', () => {
       { label: 'Physics', selfTimeMs: 1.5, totalTimeMs: 2.25 },
       { label: 'Audio', selfTimeMs: 0.25 },
     ]);
+    expect(samples[0]?.activeAudioPlaybacks).toEqual([
+      {
+        id: 'playback-17',
+        label: 'hitStone',
+        startedAtMs: 1000,
+        elapsedMs: 125,
+        loop: false,
+        volume: 0.35,
+        playbackRate: 1.05,
+        pan: -0.1,
+      },
+    ]);
     expect(samples[1]?.profilerActivities).toBeUndefined();
+    expect(samples[1]?.activeAudioPlaybacks).toBeUndefined();
   });
 });

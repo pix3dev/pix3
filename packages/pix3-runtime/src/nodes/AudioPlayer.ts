@@ -69,9 +69,12 @@ export class AudioPlayer extends NodeBase {
       if (!currentAudioService) {
         return;
       }
+      const audioMetadata = assetLoader.getAudioMetadata(this.audioTrack);
 
       this.stop();
       this.playback = currentAudioService.play(buffer, {
+        resourcePath: this.audioTrack,
+        sizeBytes: audioMetadata?.sizeBytes,
         loop: this.loop,
         volume: this.volume,
       });

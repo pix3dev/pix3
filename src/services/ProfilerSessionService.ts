@@ -1,5 +1,6 @@
 import { injectable } from '@/fw/di';
 import type {
+  ActiveAudioPlaybackSnapshot,
   FrameProfilerActivity,
   RuntimeRenderer,
   RuntimeRendererStatsSnapshot,
@@ -51,12 +52,33 @@ export interface ProfilerFrameImpactSnapshot {
   readonly totalFrameTimeMs: number;
 }
 
+export interface ProfilerAudioSnapshot {
+  readonly files: readonly ProfilerAudioFileSnapshot[];
+  readonly activeInstanceCount: number;
+}
+
+export interface ProfilerAudioFileSnapshot {
+  readonly key: string;
+  readonly label: string;
+  readonly resourcePath: string | null;
+  readonly durationSeconds: number | null;
+  readonly channelCount: number | null;
+  readonly sampleRate: number | null;
+  readonly bitrateKbps: number | null;
+  readonly activeInstanceCount: number;
+  readonly isActive: boolean;
+  readonly lastPlayedAtMs: number;
+  readonly currentInstances: readonly ActiveAudioPlaybackSnapshot[];
+  readonly lastPlayback: ActiveAudioPlaybackSnapshot | null;
+}
+
 export interface ProfilerSessionSnapshot {
   readonly status: ProfilerSessionStatus;
   readonly performance: ProfilerPerformanceSnapshot;
   readonly counters: ProfilerCountersSnapshot;
   readonly history: ProfilerHistorySnapshot;
   readonly frameImpact: ProfilerFrameImpactSnapshot;
+  readonly audio: ProfilerAudioSnapshot;
 }
 
 type ProfilerListener = (snapshot: ProfilerSessionSnapshot) => void;
@@ -70,6 +92,21 @@ interface MemoryPerformance extends Performance {
 interface ActivityFrameSample {
   readonly frameTimeMs: number;
   readonly activities: readonly FrameProfilerActivity[];
+}
+
+interface AudioFileSessionEntry {
+  key: string;
+  label: string;
+  resourcePath: string | null;
+  durationSeconds: number | null;
+  channelCount: number | null;
+  sampleRate: number | null;
+  bitrateKbps: number | null;
+  activeInstanceCount: number;
+  isActive: boolean;
+  lastPlayedAtMs: number;
+  currentInstances: ActiveAudioPlaybackSnapshot[];
+  lastPlayback: ActiveAudioPlaybackSnapshot | null;
 }
 
 const SAMPLE_WINDOW_SIZE = 30;
@@ -91,6 +128,7 @@ export class ProfilerSessionService {
   private readonly logicHistory: number[] = [];
   private readonly renderHistory: number[] = [];
   private readonly activityFrames: ActivityFrameSample[] = [];
+  private readonly audioFiles = new Map<string, AudioFileSessionEntry>();
   private previousFrameImpactOrder: string[] = [];
   private disposeRunnerSubscription?: () => void;
   private runtimeRenderer: RuntimeRenderer | null = null;
@@ -121,12 +159,21 @@ export class ProfilerSessionService {
         windowDurationMs: this.state.frameImpact.windowDurationMs,
         totalFrameTimeMs: this.state.frameImpact.totalFrameTimeMs,
       },
+      audio: {
+        files: this.state.audio.files.map(file => ({
+          ...file,
+          currentInstances: file.currentInstances.map(instance => ({ ...instance })),
+          lastPlayback: file.lastPlayback ? { ...file.lastPlayback } : null,
+        })),
+        activeInstanceCount: this.state.audio.activeInstanceCount,
+      },
     };
   }
 
   beginSession(hostKind: GameHostKind): void {
     this.frameTimesMs.length = 0;
     this.activityFrames.length = 0;
+    this.audioFiles.clear();
     this.previousFrameImpactOrder = [];
     this.runtimeRenderer = null;
     this.disposeRunnerSubscription?.();
@@ -151,6 +198,7 @@ export class ProfilerSessionService {
       },
       history: this.createEmptyHistory(),
       frameImpact: this.createEmptyFrameImpact(),
+      audio: this.createEmptyAudioSnapshot(),
     };
     this.notify();
   }
@@ -181,6 +229,7 @@ export class ProfilerSessionService {
     this.logicHistory.length = 0;
     this.renderHistory.length = 0;
     this.activityFrames.length = 0;
+    this.audioFiles.clear();
     this.previousFrameImpactOrder = [];
     this.state = this.createIdleSnapshot();
     this.notify();
@@ -225,6 +274,7 @@ export class ProfilerSessionService {
         renderMs: [...this.renderHistory],
       },
       frameImpact: this.createFrameImpactSnapshot(),
+      audio: this.createAudioSnapshot(sample.activeAudioPlaybacks),
     };
     this.notify();
   }
@@ -568,6 +618,7 @@ export class ProfilerSessionService {
       },
       history: this.createEmptyHistory(),
       frameImpact: this.createEmptyFrameImpact(),
+      audio: this.createEmptyAudioSnapshot(),
     };
   }
 
@@ -598,6 +649,139 @@ export class ProfilerSessionService {
       windowDurationMs: 0,
       totalFrameTimeMs: 0,
     };
+  }
+
+  private createAudioSnapshot(
+    instances: readonly ActiveAudioPlaybackSnapshot[] | undefined
+  ): ProfilerAudioSnapshot {
+    this.reconcileAudioFiles(instances);
+
+    const files = [...this.audioFiles.values()]
+      .map(entry => ({
+        key: entry.key,
+        label: entry.label,
+        resourcePath: entry.resourcePath,
+        durationSeconds: entry.durationSeconds,
+        channelCount: entry.channelCount,
+        sampleRate: entry.sampleRate,
+        bitrateKbps: entry.bitrateKbps,
+        activeInstanceCount: entry.activeInstanceCount,
+        isActive: entry.isActive,
+        lastPlayedAtMs: entry.lastPlayedAtMs,
+        currentInstances: entry.currentInstances.map(instance => ({ ...instance })),
+        lastPlayback: entry.lastPlayback ? { ...entry.lastPlayback } : null,
+      }))
+      .sort((left, right) => {
+        return (
+          Number(right.isActive) - Number(left.isActive) ||
+          right.activeInstanceCount - left.activeInstanceCount ||
+          right.lastPlayedAtMs - left.lastPlayedAtMs ||
+          left.label.localeCompare(right.label) ||
+          left.key.localeCompare(right.key)
+        );
+      });
+
+    return {
+      files,
+      activeInstanceCount: files.reduce(
+        (accumulator, file) => accumulator + file.activeInstanceCount,
+        0
+      ),
+    };
+  }
+
+  private createEmptyAudioSnapshot(): ProfilerAudioSnapshot {
+    return {
+      files: [],
+      activeInstanceCount: 0,
+    };
+  }
+
+  private reconcileAudioFiles(
+    instances: readonly ActiveAudioPlaybackSnapshot[] | undefined
+  ): void {
+    for (const entry of this.audioFiles.values()) {
+      entry.activeInstanceCount = 0;
+      entry.isActive = false;
+      entry.currentInstances = [];
+    }
+
+    for (const instance of instances ?? []) {
+      const nextInstance = { ...instance };
+      const key = this.getAudioFileKey(nextInstance);
+      const entry = this.audioFiles.get(key) ?? this.createAudioFileEntry(key, nextInstance);
+
+      entry.label = this.pickAudioLabel(entry.label, nextInstance);
+      entry.resourcePath = nextInstance.resourcePath ?? entry.resourcePath;
+      entry.durationSeconds = nextInstance.durationSeconds ?? entry.durationSeconds;
+      entry.channelCount = nextInstance.channelCount ?? entry.channelCount;
+      entry.sampleRate = nextInstance.sampleRate ?? entry.sampleRate;
+      entry.bitrateKbps = nextInstance.bitrateKbps ?? entry.bitrateKbps;
+      entry.activeInstanceCount += 1;
+      entry.isActive = true;
+      entry.currentInstances.push(nextInstance);
+
+      if (
+        !entry.lastPlayback ||
+        nextInstance.startedAtMs > entry.lastPlayedAtMs ||
+        (nextInstance.startedAtMs === entry.lastPlayedAtMs &&
+          nextInstance.id.localeCompare(entry.lastPlayback.id) > 0)
+      ) {
+        entry.lastPlayedAtMs = nextInstance.startedAtMs;
+        entry.lastPlayback = nextInstance;
+      }
+
+      this.audioFiles.set(key, entry);
+    }
+
+    for (const entry of this.audioFiles.values()) {
+      entry.currentInstances.sort(
+        (left, right) =>
+          right.startedAtMs - left.startedAtMs ||
+          right.elapsedMs - left.elapsedMs ||
+          left.id.localeCompare(right.id)
+      );
+    }
+  }
+
+  private getAudioFileKey(instance: ActiveAudioPlaybackSnapshot): string {
+    const resourcePath = instance.resourcePath?.trim();
+    if (resourcePath) {
+      return resourcePath;
+    }
+
+    return instance.label;
+  }
+
+  private createAudioFileEntry(
+    key: string,
+    instance: ActiveAudioPlaybackSnapshot
+  ): AudioFileSessionEntry {
+    return {
+      key,
+      label: this.pickAudioLabel(null, instance),
+      resourcePath: instance.resourcePath,
+      durationSeconds: instance.durationSeconds,
+      channelCount: instance.channelCount,
+      sampleRate: instance.sampleRate,
+      bitrateKbps: instance.bitrateKbps,
+      activeInstanceCount: 0,
+      isActive: false,
+      lastPlayedAtMs: instance.startedAtMs,
+      currentInstances: [],
+      lastPlayback: null,
+    };
+  }
+
+  private pickAudioLabel(
+    currentLabel: string | null,
+    instance: ActiveAudioPlaybackSnapshot
+  ): string {
+    if (instance.label !== 'Unknown') {
+      return instance.label;
+    }
+
+    return currentLabel ?? 'Unknown';
   }
 
   private notify(): void {

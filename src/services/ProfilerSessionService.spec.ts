@@ -52,6 +52,23 @@ describe('ProfilerSessionService', () => {
         { label: 'Physics', selfTimeMs: 1.5, totalTimeMs: 2.25 },
         { label: 'Audio', selfTimeMs: 0.5 },
       ],
+      activeAudioPlaybacks: [
+        createAudioPlayback({
+          id: 'playback-1',
+          label: 'hitStone.ogg',
+          resourcePath: 'res://audio/hitStone.ogg',
+          startedAtMs: 1000,
+          elapsedMs: 500,
+          loop: false,
+          volume: 0.35,
+          playbackRate: 1.05,
+          pan: -0.1,
+          durationSeconds: 2,
+          channelCount: 2,
+          sampleRate: 48000,
+          bitrateKbps: 256,
+        }),
+      ],
     });
 
     const snapshot = service.getSnapshot();
@@ -109,6 +126,150 @@ describe('ProfilerSessionService', () => {
     });
     expect(activitiesByLabel.get('Audio')?.selfPercent).toBeCloseTo(3, 5);
     expect(activitiesByLabel.get('Audio')?.totalPercent).toBeCloseTo(3, 5);
+    expect(snapshot.audio.activeInstanceCount).toBe(1);
+    expect(snapshot.audio.files).toEqual([
+      {
+        key: 'res://audio/hitStone.ogg',
+        label: 'hitStone.ogg',
+        resourcePath: 'res://audio/hitStone.ogg',
+        durationSeconds: 2,
+        channelCount: 2,
+        sampleRate: 48000,
+        bitrateKbps: 256,
+        activeInstanceCount: 1,
+        isActive: true,
+        lastPlayedAtMs: 1000,
+        currentInstances: [
+          createAudioPlayback({
+            id: 'playback-1',
+            label: 'hitStone.ogg',
+            resourcePath: 'res://audio/hitStone.ogg',
+            startedAtMs: 1000,
+            elapsedMs: 500,
+            loop: false,
+            volume: 0.35,
+            playbackRate: 1.05,
+            pan: -0.1,
+            durationSeconds: 2,
+            channelCount: 2,
+            sampleRate: 48000,
+            bitrateKbps: 256,
+          }),
+        ],
+        lastPlayback: createAudioPlayback({
+          id: 'playback-1',
+          label: 'hitStone.ogg',
+          resourcePath: 'res://audio/hitStone.ogg',
+          startedAtMs: 1000,
+          elapsedMs: 500,
+          loop: false,
+          volume: 0.35,
+          playbackRate: 1.05,
+          pan: -0.1,
+          durationSeconds: 2,
+          channelCount: 2,
+          sampleRate: 48000,
+          bitrateKbps: 256,
+        }),
+      },
+    ]);
+  });
+
+  it('keeps previously played files until the session stops and marks them inactive', () => {
+    const service = new ProfilerSessionService();
+    let frameListener: ((sample: SceneRunnerFrameSample) => void) | undefined;
+    const runner = {
+      subscribeFrameStats(listener: (sample: SceneRunnerFrameSample) => void) {
+        frameListener = listener;
+        return () => {
+          frameListener = undefined;
+        };
+      },
+    } as unknown as import('@pix3/runtime').SceneRunner;
+    const rendererStats: RuntimeRendererStatsSnapshot = {
+      calls: 1,
+      triangles: 2,
+      points: 0,
+      lines: 0,
+      geometries: 3,
+      textures: 4,
+    };
+    const renderer = {
+      getStatsSnapshot: vi.fn(() => rendererStats),
+    } as unknown as import('@pix3/runtime').RuntimeRenderer;
+
+    service.beginSession('tab');
+    service.bindRuntime(runner, renderer, 'tab');
+    frameListener?.({
+      dt: 1 / 60,
+      elapsedTime: 1,
+      frameNumber: 1,
+      logicMs: 2,
+      renderMs: 3,
+      totalFrameMs: 5,
+      rendererStats,
+      activeAudioPlaybacks: [
+        createAudioPlayback({
+          id: 'playback-7',
+          label: 'breakStone.ogg',
+          resourcePath: 'res://audio/breakStone.ogg',
+          startedAtMs: 100,
+          elapsedMs: 250,
+          loop: false,
+          volume: 0.4,
+          playbackRate: 0.98,
+          pan: 0,
+          durationSeconds: 1.4,
+          channelCount: 1,
+          sampleRate: 44100,
+          bitrateKbps: 192,
+        }),
+      ],
+    });
+
+    expect(service.getSnapshot().audio.files.map(file => file.label)).toEqual(['breakStone.ogg']);
+
+    frameListener?.({
+      dt: 1 / 60,
+      elapsedTime: 2,
+      frameNumber: 2,
+      logicMs: 2,
+      renderMs: 3,
+      totalFrameMs: 5,
+      rendererStats,
+    });
+
+    expect(service.getSnapshot().audio.activeInstanceCount).toBe(0);
+    expect(service.getSnapshot().audio.files).toEqual([
+      {
+        key: 'res://audio/breakStone.ogg',
+        label: 'breakStone.ogg',
+        resourcePath: 'res://audio/breakStone.ogg',
+        durationSeconds: 1.4,
+        channelCount: 1,
+        sampleRate: 44100,
+        bitrateKbps: 192,
+        activeInstanceCount: 0,
+        isActive: false,
+        lastPlayedAtMs: 100,
+        currentInstances: [],
+        lastPlayback: createAudioPlayback({
+          id: 'playback-7',
+          label: 'breakStone.ogg',
+          resourcePath: 'res://audio/breakStone.ogg',
+          startedAtMs: 100,
+          elapsedMs: 250,
+          loop: false,
+          volume: 0.4,
+          playbackRate: 0.98,
+          pan: 0,
+          durationSeconds: 1.4,
+          channelCount: 1,
+          sampleRate: 44100,
+          bitrateKbps: 192,
+        }),
+      },
+    ]);
   });
 
   it('aggregates frame impact entries across the rolling sample window', () => {
@@ -332,5 +493,29 @@ describe('ProfilerSessionService', () => {
     expect(snapshot.counters.hostKind).toBeNull();
     expect(snapshot.counters.frameCount).toBe(0);
     expect(snapshot.frameImpact.activities).toEqual([]);
+    expect(snapshot.audio.files).toEqual([]);
+    expect(snapshot.audio.activeInstanceCount).toBe(0);
   });
 });
+
+function createAudioPlayback(
+  overrides: Partial<import('@pix3/runtime').ActiveAudioPlaybackSnapshot> & {
+    id: string;
+  }
+): import('@pix3/runtime').ActiveAudioPlaybackSnapshot {
+  return {
+    id: overrides.id,
+    label: overrides.label ?? 'Unknown',
+    resourcePath: overrides.resourcePath ?? null,
+    startedAtMs: overrides.startedAtMs ?? 0,
+    elapsedMs: overrides.elapsedMs ?? 0,
+    loop: overrides.loop ?? false,
+    volume: overrides.volume ?? 1,
+    playbackRate: overrides.playbackRate ?? 1,
+    pan: overrides.pan ?? null,
+    durationSeconds: overrides.durationSeconds ?? null,
+    channelCount: overrides.channelCount ?? null,
+    sampleRate: overrides.sampleRate ?? null,
+    bitrateKbps: overrides.bitrateKbps ?? null,
+  };
+}
