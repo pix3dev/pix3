@@ -748,6 +748,7 @@ export class ViewportRendererService {
   }
 
   begin2DInteraction(): void {
+    this.resetOrbitInternalState();
     this.setOrbitEnabled(false);
     if (this.orthographicControls) {
       this.orthographicControls.enabled = false;
@@ -755,6 +756,7 @@ export class ViewportRendererService {
   }
 
   end2DInteraction(): void {
+    this.resetOrbitInternalState();
     this.syncNavigationMode();
   }
 
@@ -1032,7 +1034,6 @@ export class ViewportRendererService {
       return;
     }
 
-    const size = contentBounds.getSize(new THREE.Vector3());
     const center = contentBounds.getCenter(new THREE.Vector3());
     const targetZoom = this.getTarget2DZoomForBounds(contentBounds);
 

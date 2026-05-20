@@ -6,6 +6,19 @@ import styles from './game-tab.ts.css?raw';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
 
+interface AspectRatioPreset {
+  readonly value: GameAspectRatio;
+  readonly label: string;
+  readonly buttonLabel: string;
+}
+
+const ASPECT_RATIO_PRESETS: readonly AspectRatioPreset[] = [
+  { value: 'free', label: 'Free Aspect', buttonLabel: 'Free' },
+  { value: '16:9-landscape', label: '16:9 Landscape', buttonLabel: '16:9' },
+  { value: '16:9-portrait', label: '16:9 Portrait', buttonLabel: '9:16' },
+  { value: '4:3', label: '4:3', buttonLabel: '4:3' },
+];
+
 @customElement('pix3-game-tab')
 export class GameViewTab extends ComponentBase {
   static useShadowDom = true;
@@ -142,9 +155,13 @@ export class GameViewTab extends ComponentBase {
   }
 
   private isAspectRatio(value: string): value is GameAspectRatio {
-    return (
-      value === 'free' || value === '16:9-landscape' || value === '16:9-portrait' || value === '4:3'
-    );
+    return ASPECT_RATIO_PRESETS.some(preset => preset.value === value);
+  }
+
+  private setAspectRatio(aspectRatio: GameAspectRatio) {
+    this.aspectRatio = aspectRatio;
+    void this.gamePlaySessionService.setAspectRatio(aspectRatio);
+    requestAnimationFrame(() => this.handleResize());
   }
 
   private handleStopClick() {
@@ -165,9 +182,7 @@ export class GameViewTab extends ComponentBase {
       return;
     }
 
-    this.aspectRatio = target.value;
-    void this.gamePlaySessionService.setAspectRatio(target.value);
-    requestAnimationFrame(() => this.handleResize());
+    this.setAspectRatio(target.value);
   }
 
   private getPlaceholderTitle(): string {
@@ -221,15 +236,32 @@ export class GameViewTab extends ComponentBase {
 
           <div class="toolbar-separator"></div>
 
+          <div class="aspect-preset-toolbar" role="toolbar" aria-label="Aspect ratio presets">
+            ${ASPECT_RATIO_PRESETS.map(
+              preset => html`
+                <button
+                  type="button"
+                  class="toolbar-button aspect-preset-button ${this.aspectRatio === preset.value
+                    ? 'active'
+                    : ''}"
+                  title=${preset.label}
+                  aria-pressed=${String(this.aspectRatio === preset.value)}
+                  @click=${() => this.setAspectRatio(preset.value)}
+                >
+                  ${preset.buttonLabel}
+                </button>
+              `
+            )}
+          </div>
+
           <select
             class="aspect-selector"
             @change=${this.handleAspectChange}
             .value=${this.aspectRatio}
           >
-            <option value="free">Free Aspect</option>
-            <option value="16:9-landscape">16:9 Landscape</option>
-            <option value="16:9-portrait">16:9 Portrait</option>
-            <option value="4:3">4:3</option>
+            ${ASPECT_RATIO_PRESETS.map(
+              preset => html`<option value=${preset.value}>${preset.label}</option>`
+            )}
           </select>
         </div>
 

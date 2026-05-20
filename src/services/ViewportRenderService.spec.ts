@@ -561,6 +561,67 @@ describe('ViewportRendererService', () => {
     expect(requestRender).toHaveBeenCalledTimes(2);
   });
 
+  it('resets orbit state around 2D interactions so 3D orbit recovers after dragging 2D nodes', () => {
+    resetAppState();
+    appState.ui.navigationMode = '3d';
+
+    const service = new ViewportRendererService();
+    const orbitControls: {
+      enabled: boolean;
+      state: number;
+      _pointers: Array<{ pointerId: number }>;
+      _pointerPositions: Record<number, THREE.Vector2>;
+    } = {
+      enabled: true,
+      state: 0,
+      _pointers: [{ pointerId: 1 }],
+      _pointerPositions: { 1: new THREE.Vector2(10, 20) },
+    };
+    const orthographicControls = {
+      enabled: true,
+      enableZoom: true,
+      enablePan: true,
+      target: new THREE.Vector3(),
+      update: vi.fn(),
+    };
+
+    Object.defineProperty(service, 'orbitControls', {
+      value: orbitControls,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicControls', {
+      value: orthographicControls,
+      configurable: true,
+    });
+
+    (
+      service as unknown as {
+        begin2DInteraction: () => void;
+        end2DInteraction: () => void;
+      }
+    ).begin2DInteraction();
+
+    expect(orbitControls.enabled).toBe(false);
+    expect(orbitControls.state).toBe(-1);
+    expect(orbitControls._pointers).toHaveLength(0);
+    expect(Object.keys(orbitControls._pointerPositions)).toHaveLength(0);
+
+    orbitControls.state = 2;
+    orbitControls._pointers.push({ pointerId: 2 });
+    orbitControls._pointerPositions = { 2: new THREE.Vector2(30, 40) };
+
+    (
+      service as unknown as {
+        end2DInteraction: () => void;
+      }
+    ).end2DInteraction();
+
+    expect(orbitControls.enabled).toBe(true);
+    expect(orbitControls.state).toBe(-1);
+    expect(orbitControls._pointers).toHaveLength(0);
+    expect(Object.keys(orbitControls._pointerPositions)).toHaveLength(0);
+  });
+
   it('applies the padded 2D default on first resize even before entering 2D navigation', () => {
     resetAppState();
     appState.ui.navigationMode = '3d';
