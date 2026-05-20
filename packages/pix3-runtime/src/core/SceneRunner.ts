@@ -199,6 +199,7 @@ export class SceneRunner {
     // Clear the runtime scene to release resources
     if (this.runtimeGraph) {
       for (const rootNode of this.runtimeGraph.rootNodes) {
+        this.detachScripts(rootNode);
         this.stopAudioPlayers(rootNode);
       }
 
@@ -727,6 +728,34 @@ export class SceneRunner {
 
     for (const child of node.children) {
       this.stopAudioPlayers(child);
+    }
+  }
+
+  private detachScripts(node: NodeBase): void {
+    for (const component of node.components) {
+      if (component.onDetach) {
+        try {
+          component.onDetach();
+        } catch (error) {
+          console.error('[SceneRunner] Component onDetach failed during stop()', {
+            componentId: component.id,
+            nodeId: node.nodeId,
+            error,
+          });
+        }
+      }
+
+      if (component.resetStartedState) {
+        component.resetStartedState();
+      } else {
+        component._started = false;
+      }
+    }
+
+    for (const child of node.children) {
+      if (child instanceof NodeBase) {
+        this.detachScripts(child);
+      }
     }
   }
 

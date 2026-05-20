@@ -287,6 +287,12 @@ export class NodeBase extends Object3D {
     }
 
     const connections = this._signals.get(signalName) ?? new Set<SignalConnection>();
+    for (const connection of connections) {
+      if (connection.target === target && connection.method === method) {
+        return;
+      }
+    }
+
     connections.add({ target, method });
     this._signals.set(signalName, connections);
   }

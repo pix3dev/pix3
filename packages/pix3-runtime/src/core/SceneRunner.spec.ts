@@ -10,6 +10,7 @@ import { ResourceManager } from './ResourceManager';
 import { Script } from './ScriptComponent';
 import type { FrameProfilerActivity } from './SceneService';
 import { Camera3D } from '../nodes/3D/Camera3D';
+import { NodeBase } from '../nodes/NodeBase';
 
 function createRendererStub(width: number, height: number): RuntimeRenderer {
   const canvas = document.createElement('canvas');
@@ -54,6 +55,14 @@ class FrameProfilerScript extends Script {
 
   onUpdate(): void {
     this.scene?.reportFrameProfilerActivities(this.activities);
+  }
+}
+
+class LifecycleScript extends Script {
+  detachCalls = 0;
+
+  override onDetach(): void {
+    this.detachCalls += 1;
   }
 }
 
@@ -241,5 +250,36 @@ describe('SceneRunner camera projection updates', () => {
     ]);
     expect(samples[1]?.profilerActivities).toBeUndefined();
     expect(samples[1]?.activeAudioPlaybacks).toBeUndefined();
+  });
+
+  it('detaches runtime scripts and resets started state when stopping', () => {
+    const audioService = {
+      stopAll: vi.fn(),
+      getActivePlaybackSnapshot: vi.fn(() => []),
+    } as unknown as AudioService;
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      audioService,
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const rootNode = new NodeBase({ id: 'runtime-root', name: 'Runtime Root' });
+    const script = new LifecycleScript('lifecycle-script', 'LifecycleScript');
+    rootNode.addComponent(script);
+    script._started = true;
+
+    (runner as unknown as { runtimeGraph: SceneGraph; isRunning: boolean }).runtimeGraph = {
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [rootNode],
+      nodeMap: new Map([[rootNode.nodeId, rootNode]]),
+    };
+    (runner as unknown as { isRunning: boolean }).isRunning = true;
+
+    runner.stop();
+
+    expect(script.detachCalls).toBe(1);
+    expect(script._started).toBe(false);
+    expect(vi.mocked(audioService.stopAll)).toHaveBeenCalledTimes(1);
   });
 });
