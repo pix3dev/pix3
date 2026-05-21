@@ -34,7 +34,7 @@ import { Particles3D } from '@pix3/runtime';
 import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
-import type { EditorPreviewContext, ScriptComponent } from '@pix3/runtime';
+import type { EditorPreviewContext, SceneGraph, ScriptComponent } from '@pix3/runtime';
 import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
 import { SceneManager, InputService } from '@pix3/runtime';
@@ -4492,13 +4492,7 @@ export class ViewportRendererService {
     return this.getNodeOnlyBounds(node);
   }
 
-  private getNodeOnlyBounds(node: Node2D): THREE.Box3 {
-    const bounds = new THREE.Box3();
-
-    // Get world transform
-    node.updateWorldMatrix(true, false);
-    const worldMatrix = node.matrixWorld;
-
+  private getNodeOnlyLocalCorners(node: Node2D): THREE.Vector3[] {
     let corners: THREE.Vector3[];
 
     if (node instanceof Sprite2D) {
@@ -4546,9 +4540,74 @@ export class ViewportRendererService {
       ];
     }
 
+    return corners;
+  }
+
+  private getNodeOnlyWorldCorners(node: Node2D): THREE.Vector3[] {
+    node.updateWorldMatrix(true, false);
+    return this.getNodeOnlyLocalCorners(node).map(corner => corner.applyMatrix4(node.matrixWorld));
+  }
+
+  private rotateVectorZ(vector: THREE.Vector3, angle: number): THREE.Vector3 {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return new THREE.Vector3(
+      vector.x * cos - vector.y * sin,
+      vector.x * sin + vector.y * cos,
+      vector.z
+    );
+  }
+
+  private getSelection2DOverlayGeometry(
+    nodeIds: string[],
+    sceneGraph: SceneGraph,
+    combinedBounds: THREE.Box3
+  ): {
+    centerWorld: THREE.Vector3;
+    localBounds: THREE.Box3;
+    worldRotationZ: number;
+  } {
+    const centerWorld = combinedBounds.getCenter(new THREE.Vector3());
+    const localBounds = combinedBounds.clone().translate(centerWorld.clone().multiplyScalar(-1));
+
+    if (nodeIds.length !== 1) {
+      return { centerWorld, localBounds, worldRotationZ: 0 };
+    }
+
+    const node = sceneGraph.nodeMap.get(nodeIds[0]);
+    if (!(node instanceof Node2D)) {
+      return { centerWorld, localBounds, worldRotationZ: 0 };
+    }
+
+    const worldQuaternion = node.getWorldQuaternion(new THREE.Quaternion());
+    const worldRotationZ = new THREE.Euler().setFromQuaternion(worldQuaternion, 'XYZ').z;
+    const worldCorners = this.getNodeOnlyWorldCorners(node);
+    if (worldCorners.length === 0) {
+      return { centerWorld, localBounds, worldRotationZ };
+    }
+
+    const orientedCenterWorld = worldCorners
+      .reduce((sum, corner) => sum.add(corner), new THREE.Vector3())
+      .multiplyScalar(1 / worldCorners.length);
+    const orientedLocalBounds = new THREE.Box3();
+
+    for (const corner of worldCorners) {
+      const localCorner = this.rotateVectorZ(corner.clone().sub(orientedCenterWorld), -worldRotationZ);
+      orientedLocalBounds.expandByPoint(localCorner);
+    }
+
+    return {
+      centerWorld: orientedCenterWorld,
+      localBounds: orientedLocalBounds,
+      worldRotationZ,
+    };
+  }
+
+  private getNodeOnlyBounds(node: Node2D): THREE.Box3 {
+    const bounds = new THREE.Box3();
+
     // Transform corners to world space and expand bounds
-    for (const corner of corners) {
-      corner.applyMatrix4(worldMatrix);
+    for (const corner of this.getNodeOnlyWorldCorners(node)) {
       bounds.expandByPoint(corner);
     }
 
@@ -4611,19 +4670,22 @@ export class ViewportRendererService {
       return;
     }
 
-    const center = combinedBounds.getCenter(new THREE.Vector3());
+    const overlayGeometry = this.getSelection2DOverlayGeometry(node2DIds, sceneGraph, combinedBounds);
     console.debug('[ViewportRenderer] update2DOverlay: creating overlay', {
       node2DIds,
-      center,
+      center: overlayGeometry.centerWorld,
       combinedBounds,
+      worldRotationZ: overlayGeometry.worldRotationZ,
     });
 
     this.clear2DSelectionOverlay();
 
-    const frame = this.create2DFrame(combinedBounds);
-    const handles = this.create2DHandles(combinedBounds);
+    const frame = this.create2DFrame(overlayGeometry.localBounds);
+    const handles = this.create2DHandles(overlayGeometry.localBounds);
     const group = new THREE.Group();
     group.add(frame, ...handles);
+    group.position.copy(overlayGeometry.centerWorld);
+    group.rotation.set(0, 0, overlayGeometry.worldRotationZ);
     group.renderOrder = 1000;
     group.layers.set(1);
     this.scene.add(group);
@@ -4634,7 +4696,9 @@ export class ViewportRendererService {
       frame,
       nodeIds: node2DIds,
       combinedBounds,
-      centerWorld: center,
+      centerWorld: overlayGeometry.centerWorld,
+      localBounds: overlayGeometry.localBounds,
+      worldRotationZ: overlayGeometry.worldRotationZ,
       rotationHandle: handles.find(h => h.userData?.handleType === 'rotate'),
     };
 
@@ -4669,9 +4733,18 @@ export class ViewportRendererService {
       return;
     }
 
-    const center = combinedBounds.getCenter(new THREE.Vector3());
+    const overlayGeometry = this.getSelection2DOverlayGeometry(
+      this.selection2DOverlay.nodeIds,
+      sceneGraph,
+      combinedBounds
+    );
     this.selection2DOverlay.combinedBounds.copy(combinedBounds);
-    this.selection2DOverlay.centerWorld.copy(center);
+    this.selection2DOverlay.centerWorld.copy(overlayGeometry.centerWorld);
+    if (!this.selection2DOverlay.localBounds) {
+      this.selection2DOverlay.localBounds = new THREE.Box3();
+    }
+    this.selection2DOverlay.localBounds.copy(overlayGeometry.localBounds);
+    this.selection2DOverlay.worldRotationZ = overlayGeometry.worldRotationZ;
     this.sync2DServiceFrameThickness();
   }
 
@@ -4725,9 +4798,228 @@ export class ViewportRendererService {
       fontWeight: '700',
       lineHeight: '1.2',
       whiteSpace: 'nowrap',
+      transformOrigin: 'center center',
       transform: 'translate(-50%, -50%)',
     } satisfies Partial<CSSStyleDeclaration>);
     return badge;
+  }
+
+  private getSelection2DOverlayLocalBounds(overlay: Selection2DOverlay): THREE.Box3 {
+    if (overlay.localBounds) {
+      return overlay.localBounds;
+    }
+
+    return overlay.combinedBounds.clone().translate(overlay.centerWorld.clone().multiplyScalar(-1));
+  }
+
+  private normalizeSelection2DOverlayHudRotation(rotationDeg: number): number {
+    let normalized = ((rotationDeg % 360) + 360) % 360;
+    if (normalized > 180) {
+      normalized -= 360;
+    }
+    if (normalized > 90) {
+      normalized -= 180;
+    } else if (normalized < -90) {
+      normalized += 180;
+    }
+    return normalized;
+  }
+
+  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'):
+    | {
+        x: number;
+        y: number;
+        directionX: number;
+        directionY: number;
+        tangentX: number;
+        tangentY: number;
+        rotationDeg: number;
+      }
+    | null {
+    const overlay = this.selection2DOverlay;
+    if (!overlay) {
+      return null;
+    }
+
+    const localBounds = this.getSelection2DOverlayLocalBounds(overlay);
+    const centerX = (localBounds.min.x + localBounds.max.x) / 2;
+      const centerY = (localBounds.min.y + localBounds.max.y) / 2;
+    const z = (localBounds.min.z + localBounds.max.z) / 2;
+    const rotationZ = overlay.worldRotationZ ?? 0;
+      let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
+      let outwardLocal = new THREE.Vector3(0, 1, 0);
+      let tangentLocal = new THREE.Vector3(1, 0, 0);
+
+      if (edge === 'bottom') {
+        anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
+        outwardLocal = new THREE.Vector3(0, -1, 0);
+      } else if (edge === 'left') {
+        anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
+        outwardLocal = new THREE.Vector3(-1, 0, 0);
+        tangentLocal = new THREE.Vector3(0, 1, 0);
+      } else if (edge === 'right') {
+        anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
+        outwardLocal = new THREE.Vector3(1, 0, 0);
+        tangentLocal = new THREE.Vector3(0, 1, 0);
+      }
+
+    const anchorWorld = this.rotateVectorZ(anchorLocal, rotationZ).add(overlay.centerWorld);
+    const outwardWorld = this.rotateVectorZ(outwardLocal, rotationZ).multiplyScalar(10);
+    const tangentWorld = this.rotateVectorZ(tangentLocal, rotationZ).multiplyScalar(10);
+    const anchorScreen = this.projectWorldToOverlay(anchorWorld);
+    if (!anchorScreen) {
+      return null;
+    }
+
+    const outwardScreen = this.projectWorldToOverlay(anchorWorld.clone().add(outwardWorld));
+    const tangentScreen = this.projectWorldToOverlay(anchorWorld.clone().add(tangentWorld));
+    let directionX = 0;
+    let directionY = edge === 'top' ? -1 : 1;
+    let tangentX = 1;
+    let tangentY = 0;
+
+    if (outwardScreen) {
+      const deltaX = outwardScreen.x - anchorScreen.x;
+      const deltaY = outwardScreen.y - anchorScreen.y;
+      const length = Math.hypot(deltaX, deltaY);
+      if (length > 0.0001) {
+        directionX = deltaX / length;
+        directionY = deltaY / length;
+      }
+    }
+
+    if (tangentScreen) {
+      const deltaX = tangentScreen.x - anchorScreen.x;
+      const deltaY = tangentScreen.y - anchorScreen.y;
+      const length = Math.hypot(deltaX, deltaY);
+      if (length > 0.0001) {
+        tangentX = deltaX / length;
+        tangentY = deltaY / length;
+      }
+    }
+
+    return {
+      x: anchorScreen.x,
+      y: anchorScreen.y,
+      directionX,
+      directionY,
+      tangentX,
+      tangentY,
+      rotationDeg: this.normalizeSelection2DOverlayHudRotation(
+        MathUtils.radToDeg(Math.atan2(tangentY, tangentX))
+      ),
+    };
+  }
+
+  private getSelection2DOverlayHudAnchors():
+    | {
+        top: {
+          x: number;
+          y: number;
+          directionX: number;
+          directionY: number;
+          tangentX: number;
+          tangentY: number;
+          rotationDeg: number;
+        };
+        bottom: {
+          x: number;
+          y: number;
+          directionX: number;
+          directionY: number;
+          tangentX: number;
+          tangentY: number;
+          rotationDeg: number;
+        };
+      }
+    | null {
+    const anchors = (['top', 'bottom', 'left', 'right'] as const)
+      .map(edge => this.getSelection2DOverlayHudAnchor(edge))
+      .filter(
+        (
+          anchor
+        ): anchor is {
+          x: number;
+          y: number;
+          directionX: number;
+          directionY: number;
+          tangentX: number;
+          tangentY: number;
+          rotationDeg: number;
+        } => Boolean(anchor)
+      );
+
+    if (anchors.length === 0) {
+      return null;
+    }
+
+    let top = anchors[0];
+    let bottom = anchors[0];
+    for (const anchor of anchors) {
+      if (anchor.y < top.y) {
+        top = anchor;
+      }
+      if (anchor.y > bottom.y) {
+        bottom = anchor;
+      }
+    }
+
+    return { top, bottom };
+  }
+
+  private positionSelection2DOverlayHudBadge(
+    badge: HTMLDivElement,
+    anchor: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    },
+    offsetPx: number
+  ): void {
+    const x = Math.min(
+      this.viewportSize.width - 14,
+      Math.max(14, anchor.x + anchor.directionX * offsetPx)
+    );
+    const y = Math.min(
+      this.viewportSize.height - 14,
+      Math.max(14, anchor.y + anchor.directionY * offsetPx)
+    );
+
+    badge.style.left = `${x}px`;
+    badge.style.top = `${y}px`;
+    badge.style.transform = `translate(-50%, -50%) rotate(${anchor.rotationDeg}deg)`;
+  }
+
+  private getSelection2DOverlayHudBadgeOffset(
+    badge: HTMLDivElement,
+    anchor: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    },
+    rotateHandleScreen: { x: number; y: number } | null,
+    baseOffsetPx: number
+  ): number {
+    if (!rotateHandleScreen) {
+      return baseOffsetPx;
+    }
+
+    const projectedDistance =
+      (rotateHandleScreen.x - anchor.x) * anchor.directionX +
+      (rotateHandleScreen.y - anchor.y) * anchor.directionY;
+    if (projectedDistance <= 0) {
+      return baseOffsetPx;
+    }
+
+    return Math.max(baseOffsetPx, projectedDistance + badge.offsetHeight / 2 + 12);
   }
 
   private updateSelection2DOverlayHud(): void {
@@ -4738,7 +5030,8 @@ export class ViewportRendererService {
       !this.selection2DOverlayHud ||
       !this.orthographicCamera ||
       this.viewportSize.width <= 0 ||
-      this.viewportSize.height <= 0
+      this.viewportSize.height <= 0 ||
+      this.active2DTransform
     ) {
       this.hideSelection2DOverlayHud();
       return;
@@ -4756,25 +5049,14 @@ export class ViewportRendererService {
       return;
     }
 
-    const bounds = this.selection2DOverlay.combinedBounds;
+    const bounds = this.getSelection2DOverlayLocalBounds(this.selection2DOverlay);
     const size = bounds.getSize(new THREE.Vector3());
-    const topWorld = new THREE.Vector3(
-      (bounds.min.x + bounds.max.x) / 2,
-      bounds.max.y,
-      bounds.max.z
-    );
-    const bottomWorld = new THREE.Vector3(
-      (bounds.min.x + bounds.max.x) / 2,
-      bounds.min.y,
-      bounds.max.z
-    );
-
-    const topScreen = this.projectWorldToOverlay(topWorld);
-    const bottomScreen = this.projectWorldToOverlay(bottomWorld);
-    if (!topScreen || !bottomScreen) {
+    const anchors = this.getSelection2DOverlayHudAnchors();
+    if (!anchors) {
       this.hideSelection2DOverlayHud();
       return;
     }
+    const { top: topAnchor, bottom: bottomAnchor } = anchors;
 
     const topBadgeData = this.getSelection2DOverlayTopBadgeData(
       this.selection2DOverlay.nodeIds,
@@ -4802,17 +5084,25 @@ export class ViewportRendererService {
     );
 
     const rotateHandleScreen = this.getSelection2DOverlayRotateHandleScreenPosition();
-    const topAnchorY = rotateHandleScreen ? rotateHandleScreen.y - 10 : topScreen.y - 18;
-    this.selection2DOverlayHud.top.style.left = `${topScreen.x}px`;
-    this.selection2DOverlayHud.top.style.top = `${Math.max(14, topAnchorY)}px`;
-    this.selection2DOverlayHud.top.style.transform = 'translate(-50%, -100%)';
+    const topOffset = this.getSelection2DOverlayHudBadgeOffset(
+      this.selection2DOverlayHud.top,
+      topAnchor,
+      rotateHandleScreen,
+      18
+    );
+    const bottomOffset = this.getSelection2DOverlayHudBadgeOffset(
+      this.selection2DOverlayHud.bottom,
+      bottomAnchor,
+      rotateHandleScreen,
+      18
+    );
 
-    this.selection2DOverlayHud.bottom.style.left = `${bottomScreen.x}px`;
-    this.selection2DOverlayHud.bottom.style.top = `${Math.min(
-      this.viewportSize.height - 14,
-      bottomScreen.y + 18
-    )}px`;
-    this.selection2DOverlayHud.bottom.style.transform = 'translate(-50%, 0)';
+    this.positionSelection2DOverlayHudBadge(this.selection2DOverlayHud.top, topAnchor, topOffset);
+    this.positionSelection2DOverlayHudBadge(
+      this.selection2DOverlayHud.bottom,
+      bottomAnchor,
+      bottomOffset
+    );
   }
 
   private hideSelection2DOverlayHud(): void {
@@ -5220,6 +5510,7 @@ export class ViewportRendererService {
       // Set active handle for visual feedback (accent color during drag)
       this.transformTool2d.setActiveHandle(handle, this.selection2DOverlay);
       this.begin2DInteraction();
+      this.hideSelection2DOverlayHud();
       console.debug('[ViewportRenderer] start 2D transform', {
         handle,
         nodeIds: this.active2DTransform.nodeIds,

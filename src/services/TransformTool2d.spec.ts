@@ -332,6 +332,103 @@ describe('TransformTool2d', () => {
     });
   });
 
+  describe('rotated overlay geometry', () => {
+    const viewportSize = { width: 800, height: 600 };
+
+    it('rotates the frame and handles with the overlay group', () => {
+      const localBounds = new THREE.Box3(
+        new THREE.Vector3(-50, -25, 0),
+        new THREE.Vector3(50, 25, 0)
+      );
+      const overlay: Selection2DOverlay = {
+        group: new THREE.Group(),
+        handles: tool.createHandles(localBounds),
+        frame: tool.createFrame(localBounds),
+        nodeIds: ['test-node'],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(50, 75, 0),
+          new THREE.Vector3(150, 125, 0)
+        ),
+        centerWorld: new THREE.Vector3(100, 100, 0),
+        localBounds,
+        worldRotationZ: Math.PI / 4,
+      };
+
+      overlay.group.add(overlay.frame, ...overlay.handles);
+
+      const camera = createCamera();
+      tool.updateHandlePositions(overlay, camera, viewportSize);
+
+      expect(overlay.group.rotation.z).toBeCloseTo(Math.PI / 4);
+
+      const eastHandle = overlay.handles.find(item => item.userData?.handleType === 'scale-e');
+      expect(eastHandle).toBeDefined();
+
+      const eastHandleWorld = eastHandle!.getWorldPosition(new THREE.Vector3());
+      const expectedOffset = new THREE.Vector3(50, 0, 0).applyAxisAngle(
+        new THREE.Vector3(0, 0, 1),
+        Math.PI / 4
+      );
+
+      expect(eastHandleWorld.x).toBeCloseTo(100 + expectedOffset.x, 5);
+      expect(eastHandleWorld.y).toBeCloseTo(100 + expectedOffset.y, 5);
+    });
+
+    it('resizes along the rotated local axis', () => {
+      const sprite = new Sprite2D({
+        id: 'sprite-rotated-resize',
+        name: 'Sprite Rotated Resize',
+        width: 100,
+        height: 50,
+      });
+      sprite.rotation.z = Math.PI / 2;
+      sprite.updateWorldMatrix(true, false);
+
+      const sceneGraph: SceneGraph = {
+        version: '1.0',
+        rootNodes: [sprite],
+        nodeMap: new Map([[sprite.nodeId, sprite]]),
+        metadata: {},
+      };
+      const transform: Active2DTransform = {
+        nodeIds: [sprite.nodeId],
+        handle: 'scale-e',
+        startPointerWorld: new THREE.Vector3(0, 50, 0),
+        startStates: new Map([
+          [
+            sprite.nodeId,
+            {
+              position: sprite.position.clone(),
+              rotation: sprite.rotation.z,
+              scale: new THREE.Vector2(sprite.scale.x, sprite.scale.y),
+              width: sprite.width,
+              height: sprite.height,
+              worldPosition: sprite.getWorldPosition(new THREE.Vector3()),
+              worldRotationZ: sprite.rotation.z,
+            },
+          ],
+        ]),
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-25, -50, 0),
+          new THREE.Vector3(25, 50, 0)
+        ),
+        startCenterWorld: new THREE.Vector3(0, 0, 0),
+        anchorWorld: new THREE.Vector3(0, -50, 0),
+        anchorLocal: new THREE.Vector3(-50, 0, 0),
+        startSize: new THREE.Vector2(100, 50),
+        overlayRotationZ: Math.PI / 2,
+      };
+      const camera = createCamera();
+
+      tool.updateTransform(400, 200, transform, sceneGraph, camera, viewportSize);
+
+      expect(sprite.width).toBeCloseTo(150);
+      expect(sprite.height).toBeCloseTo(50);
+      expect(sprite.position.x).toBeCloseTo(0);
+      expect(sprite.position.y).toBeCloseTo(25);
+    });
+  });
+
   describe('axis-constrained move', () => {
     const viewportSize = { width: 800, height: 600 };
 

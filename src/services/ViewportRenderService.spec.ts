@@ -325,6 +325,11 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(129.4, 154.3, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        worldRotationZ: 0,
         rotationHandle,
       },
       configurable: true,
@@ -351,6 +356,327 @@ describe('ViewportRendererService', () => {
     expect(hud?.top.style.display).toBe('inline-flex');
     expect(hud?.bottom.style.display).toBe('inline-flex');
     expect(Number.parseFloat(hud?.top.style.top ?? '0')).toBeLessThan(90);
+    expect(hud?.top.style.transform).toContain('rotate(0deg)');
+    expect(hud?.bottom.style.transform).toContain('rotate(0deg)');
+  });
+
+  it('moves the size badge farther when the rotation handle is visually below the selection', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-bottom-clearance',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    const rotationHandle = new THREE.Group();
+    rotationHandle.position.set(0, -60, 0);
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        worldRotationZ: 0,
+        rotationHandle,
+      },
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    (
+      service as unknown as {
+        updateSelection2DOverlayHud: () => void;
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).updateSelection2DOverlayHud();
+
+    const hud = (
+      service as unknown as {
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).selection2DOverlayHud;
+
+    expect(Number.parseFloat(hud?.bottom.style.top ?? '0')).toBeGreaterThan(215);
+  });
+
+  it('rotates and reanchors 2D overlay HUD badges to the current overlay angle', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-rotated',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-25, -50, 0),
+          new THREE.Vector3(25, 50, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        worldRotationZ: Math.PI / 2,
+      },
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    (
+      service as unknown as {
+        updateSelection2DOverlayHud: () => void;
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).updateSelection2DOverlayHud();
+
+    const hud = (
+      service as unknown as {
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).selection2DOverlayHud;
+
+    expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(200, 0);
+    expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(200, 0);
+    expect(Number.parseFloat(hud?.top.style.top ?? '0')).toBeLessThan(120);
+    expect(Number.parseFloat(hud?.bottom.style.top ?? '0')).toBeGreaterThan(180);
+    expect(hud?.top.style.transform).toContain('rotate(0deg)');
+    expect(hud?.bottom.style.transform).toContain('rotate(0deg)');
+  });
+
+  it('keeps HUD badges readable and swaps them to the visual top and bottom edges', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-readable',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-53.1, -53.1, 0),
+          new THREE.Vector3(53.1, 53.1, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        worldRotationZ: (3 * Math.PI) / 4,
+      },
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    (
+      service as unknown as {
+        updateSelection2DOverlayHud: () => void;
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).updateSelection2DOverlayHud();
+
+    const hud = (
+      service as unknown as {
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).selection2DOverlayHud;
+
+    expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeLessThan(190);
+    expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeGreaterThan(210);
+    expect(Number.parseFloat(hud?.top.style.top ?? '0')).toBeLessThan(130);
+    expect(Number.parseFloat(hud?.bottom.style.top ?? '0')).toBeGreaterThan(170);
+    expect(hud?.top.style.transform).toContain('rotate(-45deg)');
+    expect(hud?.bottom.style.transform).toContain('rotate(-45deg)');
+  });
+
+  it('hides 2D overlay HUD badges while a 2D transform is active', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-hide',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        worldRotationZ: 0,
+      },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'active2DTransform', {
+      value: {},
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    (
+      service as unknown as {
+        updateSelection2DOverlayHud: () => void;
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).updateSelection2DOverlayHud();
+
+    const hud = (
+      service as unknown as {
+        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      }
+    ).selection2DOverlayHud;
+
+    expect(hud?.top.style.display).toBe('none');
+    expect(hud?.bottom.style.display).toBe('none');
   });
 
   it('refreshes existing node visuals when node data changes', () => {

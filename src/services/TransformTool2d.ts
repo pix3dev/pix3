@@ -42,6 +42,8 @@ export interface Selection2DOverlay {
   nodeIds: string[];
   combinedBounds: THREE.Box3;
   centerWorld: THREE.Vector3;
+  localBounds?: THREE.Box3;
+  worldRotationZ?: number;
   rotationHandle?: THREE.Object3D;
 }
 
@@ -55,6 +57,7 @@ export interface Active2DTransform {
   anchorWorld: THREE.Vector3;
   anchorLocal: THREE.Vector3;
   startSize: THREE.Vector2;
+  overlayRotationZ?: number;
   moveConstraintAxis?: 'x' | 'y' | null;
 }
 
@@ -179,6 +182,33 @@ export class TransformTool2d {
       this.frameWidthCssPx * worldUnitsPerCssPixel.x,
       this.frameWidthCssPx * worldUnitsPerCssPixel.y
     );
+  }
+
+  private getOverlayLocalBounds(overlay: Selection2DOverlay): THREE.Box3 {
+    if (overlay.localBounds) {
+      return overlay.localBounds;
+    }
+
+    const center = overlay.combinedBounds.getCenter(new THREE.Vector3());
+    return overlay.combinedBounds.clone().translate(center.multiplyScalar(-1));
+  }
+
+  private rotateVectorZ(vector: THREE.Vector3, angle: number): THREE.Vector3 {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return new THREE.Vector3(
+      vector.x * cos - vector.y * sin,
+      vector.x * sin + vector.y * cos,
+      vector.z
+    );
+  }
+
+  private worldToOverlayLocal(
+    worldPoint: THREE.Vector3,
+    centerWorld: THREE.Vector3,
+    rotationZ: number
+  ): THREE.Vector3 {
+    return this.rotateVectorZ(worldPoint.clone().sub(centerWorld), -rotationZ);
   }
 
   /**
@@ -432,7 +462,7 @@ export class TransformTool2d {
     orthographicCamera: THREE.OrthographicCamera,
     viewportSize: { width: number; height: number }
   ): void {
-    const bounds = overlay.combinedBounds;
+    const bounds = this.getOverlayLocalBounds(overlay);
     const min = bounds.min;
     const max = bounds.max;
     const width = max.x - min.x;
@@ -443,6 +473,10 @@ export class TransformTool2d {
     const midX = (min.x + max.x) / 2;
     const midY = (min.y + max.y) / 2;
     const center = bounds.getCenter(new THREE.Vector3());
+    const rotationZ = overlay.worldRotationZ ?? 0;
+
+    overlay.group.position.copy(overlay.centerWorld);
+    overlay.group.rotation.set(0, 0, rotationZ);
 
     const frameThickness = this.getFrameThicknessWorldSize(orthographicCamera, viewportSize);
     const handleSize = this.getHandleWorldSize(orthographicCamera, viewportSize);
@@ -504,7 +538,7 @@ export class TransformTool2d {
       }
     }
 
-    overlay.centerWorld.copy(center);
+    overlay.group.updateMatrixWorld(true);
   }
 
   /**
@@ -563,10 +597,15 @@ export class TransformTool2d {
     }
 
     // Fall back to 'move' if pointer is inside the selection bounds
-    const bounds = overlay.combinedBounds;
+    const bounds = this.getOverlayLocalBounds(overlay);
+    const localPoint = this.worldToOverlayLocal(
+      point,
+      overlay.centerWorld,
+      overlay.worldRotationZ ?? 0
+    );
     if (point) {
-      const inX = point.x >= bounds.min.x && point.x <= bounds.max.x;
-      const inY = point.y >= bounds.min.y && point.y <= bounds.max.y;
+      const inX = localPoint.x >= bounds.min.x && localPoint.x <= bounds.max.x;
+      const inY = localPoint.y >= bounds.min.y && localPoint.y <= bounds.max.y;
 
       if (inX && inY) {
         return 'move';
@@ -625,10 +664,12 @@ export class TransformTool2d {
       }
     }
 
-    const size = combinedBounds.getSize(new THREE.Vector3());
+    const overlayBounds = this.getOverlayLocalBounds(overlay);
+    const size = overlayBounds.getSize(new THREE.Vector3());
     const startSize = new THREE.Vector2(size.x, size.y);
+    const overlayRotationZ = overlay.worldRotationZ ?? 0;
     const anchorLocal = this.getAnchorLocal(handle, startSize);
-    const anchorWorld = anchorLocal.clone().add(centerWorld);
+    const anchorWorld = this.rotateVectorZ(anchorLocal, overlayRotationZ).add(centerWorld);
 
     return {
       nodeIds,
@@ -640,6 +681,7 @@ export class TransformTool2d {
       anchorWorld,
       anchorLocal,
       startSize,
+      overlayRotationZ,
       moveConstraintAxis: null,
     };
   }
@@ -699,6 +741,7 @@ export class TransformTool2d {
       anchorWorld,
       anchorLocal,
       startSize,
+      overlayRotationZ = 0,
     } = transform;
 
     if (handle === 'move') {
@@ -755,7 +798,7 @@ export class TransformTool2d {
         }
       }
     } else {
-      const localPoint = pointerWorld.clone().sub(startCenterWorld);
+      const localPoint = this.worldToOverlayLocal(pointerWorld, startCenterWorld, overlayRotationZ);
       let width = startSize.x;
       let height = startSize.y;
 
@@ -811,7 +854,9 @@ export class TransformTool2d {
       const scaleFactorY = height / startSize.y;
 
       const anchorLocalNew = this.getAnchorLocal(handle, new THREE.Vector2(width, height));
-      const newCenterWorld = anchorWorld.clone().sub(anchorLocalNew);
+      const newCenterWorld = anchorWorld
+        .clone()
+        .sub(this.rotateVectorZ(anchorLocalNew, overlayRotationZ));
 
       for (const [nodeId, startState] of startStates) {
         const node = sceneGraph.nodeMap.get(nodeId);
@@ -819,11 +864,13 @@ export class TransformTool2d {
           const startWorldPos =
             startState.worldPosition ?? node.getWorldPosition(new THREE.Vector3());
           const offsetFromCenter = startWorldPos.clone().sub(startCenterWorld);
-          const scaledOffset = new THREE.Vector3(
-            offsetFromCenter.x * scaleFactorX,
-            offsetFromCenter.y * scaleFactorY,
-            0
+          const localOffset = this.rotateVectorZ(offsetFromCenter, -overlayRotationZ);
+          const scaledLocalOffset = new THREE.Vector3(
+            localOffset.x * scaleFactorX,
+            localOffset.y * scaleFactorY,
+            localOffset.z
           );
+          const scaledOffset = this.rotateVectorZ(scaledLocalOffset, overlayRotationZ);
           const newPos = newCenterWorld.clone().add(scaledOffset);
           this.setNodeWorldPosition(node, newPos);
 
