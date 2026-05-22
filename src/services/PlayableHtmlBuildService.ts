@@ -17,6 +17,21 @@ export interface PlayableHtmlBuildOptions extends ProjectBuildOptions {
   readonly title?: string;
 }
 
+export interface PlayableHtmlAssetSizeEntry {
+  readonly path: string;
+  readonly rawBytes: number;
+  readonly base64Bytes: number;
+}
+
+export interface PlayableHtmlBundleSizeReport {
+  readonly outputHtmlBytes: number;
+  readonly rawAssetsBytes: number;
+  readonly base64AssetsBytes: number;
+  readonly base64ExpansionBytes: number;
+  readonly codeAndWrapperBytes: number;
+  readonly assetEntries: readonly PlayableHtmlAssetSizeEntry[];
+}
+
 export interface PlayableHtmlBuildArtifact {
   readonly html: string;
   readonly runtimeBundleCode: string;
@@ -24,15 +39,35 @@ export interface PlayableHtmlBuildArtifact {
   readonly sceneCount: number;
   readonly assetCount: number;
   readonly fileCount: number;
+  readonly sizeReport: PlayableHtmlBundleSizeReport;
   readonly warnings: readonly string[];
   readonly bundleWarnings: readonly string[];
   readonly externalModuleIds: readonly string[];
 }
 
+interface EmbeddedAssetsBuildStats {
+  readonly entries: PlayableHtmlAssetSizeEntry[];
+  readonly rawTotalBytes: number;
+  readonly base64TotalBytes: number;
+}
+
 interface PreparedBundlerFiles {
   readonly files: Map<string, string>;
   readonly warnings: string[];
+  readonly embeddedAssetsStats: EmbeddedAssetsBuildStats;
 }
+
+const RUNTIME_SOURCE_LOADERS = import.meta.glob(
+  [
+    '../../packages/pix3-runtime/src/**/*.ts',
+    '../../packages/pix3-runtime/src/**/*.js',
+    '../../packages/pix3-runtime/src/**/*.json',
+  ],
+  {
+    query: '?raw',
+    import: 'default',
+  }
+) as Record<string, () => Promise<string>>;
 
 const THREE_VENDOR_SOURCE_LOADERS = {
   ...import.meta.glob('../../node_modules/three/build/**/*.js', {
@@ -71,6 +106,7 @@ const GENERATED_REFLECT_METADATA_MODULE_PATH = 'virtual/generated/reflect-metada
 const GENERATED_IOS_HAPTICS_MODULE_PATH = 'virtual/generated/ios-haptics.ts';
 const GENERATED_LIT_DECORATORS_MODULE_PATH = 'virtual/generated/lit-decorators.ts';
 const REGISTER_PROJECT_SCRIPTS_PATH = 'src/register-project-scripts.ts';
+const RUNTIME_SOURCE_PREFIX = 'pix3-runtime/src/';
 const RAPIER_VENDOR_MODULE_PATH = 'vendor/rapier/rapier.mjs';
 const THREE_VENDOR_PREFIX = 'vendor/three/';
 const YAML_VENDOR_PREFIX = 'vendor/yaml/';
@@ -100,14 +136,16 @@ export class PlayableHtmlBuildService {
     });
 
     const warnings = [...model.warnings, ...prepared.warnings];
+    const html = this.renderHtmlDocument(options.title?.trim() || model.projectName, compilation.code);
 
     return {
-      html: this.renderHtmlDocument(options.title?.trim() || model.projectName, compilation.code),
+      html,
       runtimeBundleCode: compilation.code,
       entryScenePath: model.entryScenePath,
       sceneCount: model.scenePaths.length,
       assetCount: model.assetPaths.length,
       fileCount: prepared.files.size,
+      sizeReport: this.buildBundleSizeReport(html, prepared.embeddedAssetsStats),
       warnings,
       bundleWarnings: compilation.warnings,
       externalModuleIds: compileOptions.externalModules ?? [],
@@ -137,6 +175,7 @@ export class PlayableHtmlBuildService {
   private async prepareBundlerFiles(model: RuntimeProjectBuildModel): Promise<PreparedBundlerFiles> {
     const files = new Map(model.files);
     const warnings: string[] = [];
+    const embeddedAssetsModule = await this.buildEmbeddedAssetsModule(model.assetPaths, warnings);
 
     files.set(
       REGISTER_PROJECT_SCRIPTS_PATH,
@@ -164,12 +203,13 @@ export class PlayableHtmlBuildService {
         '',
       ].join('\n')
     );
-    files.set(
-      GENERATED_EMBEDDED_ASSETS_MODULE_PATH,
-      await this.buildEmbeddedAssetsModule(model.assetPaths, warnings)
-    );
+    files.set(GENERATED_EMBEDDED_ASSETS_MODULE_PATH, embeddedAssetsModule.moduleSource);
 
-    return { files, warnings };
+    return {
+      files,
+      warnings,
+      embeddedAssetsStats: embeddedAssetsModule.stats,
+    };
   }
 
   private buildStaticProjectScriptRegistrar(projectScriptFiles: ReadonlyMap<string, string>): string {
@@ -242,22 +282,64 @@ export class PlayableHtmlBuildService {
   private async buildEmbeddedAssetsModule(
     assetPaths: readonly string[],
     warnings: string[]
-  ): Promise<string> {
+  ): Promise<{
+    readonly moduleSource: string;
+    readonly stats: EmbeddedAssetsBuildStats;
+  }> {
     const embeddedAssets: Record<string, { base64: string; mimeType: string }> = {};
+    const entries: PlayableHtmlAssetSizeEntry[] = [];
 
     for (const assetPath of assetPaths) {
       try {
         const blob = await this.storage.readBlob(assetPath);
+        const base64 = await this.encodeBlobToBase64(blob);
+
         embeddedAssets[assetPath] = {
-          base64: await this.encodeBlobToBase64(blob),
+          base64,
           mimeType: this.resolveMimeType(assetPath, blob),
         };
+        entries.push({
+          path: assetPath,
+          rawBytes: blob.size,
+          base64Bytes: this.measureUtf8Bytes(base64),
+        });
       } catch {
         warnings.push(`Failed to embed asset for playable export: ${assetPath}`);
       }
     }
 
-    return `export const embeddedAssets = ${JSON.stringify(embeddedAssets)};\n`;
+    return {
+      moduleSource: `export const embeddedAssets = ${JSON.stringify(embeddedAssets)};\n`,
+      stats: {
+        entries,
+        rawTotalBytes: entries.reduce((sum, entry) => sum + entry.rawBytes, 0),
+        base64TotalBytes: entries.reduce((sum, entry) => sum + entry.base64Bytes, 0),
+      },
+    };
+  }
+
+  private buildBundleSizeReport(
+    html: string,
+    embeddedAssetsStats: EmbeddedAssetsBuildStats
+  ): PlayableHtmlBundleSizeReport {
+    const outputHtmlBytes = this.measureUtf8Bytes(html);
+    const rawAssetsBytes = embeddedAssetsStats.rawTotalBytes;
+    const base64AssetsBytes = embeddedAssetsStats.base64TotalBytes;
+
+    return {
+      outputHtmlBytes,
+      rawAssetsBytes,
+      base64AssetsBytes,
+      base64ExpansionBytes: Math.max(0, base64AssetsBytes - rawAssetsBytes),
+      codeAndWrapperBytes: Math.max(0, outputHtmlBytes - base64AssetsBytes),
+      assetEntries: [...embeddedAssetsStats.entries].sort((left, right) => {
+        if (right.rawBytes !== left.rawBytes) {
+          return right.rawBytes - left.rawBytes;
+        }
+
+        return left.path.localeCompare(right.path);
+      }),
+    };
   }
 
   private async loadBundlerDependency(
@@ -272,6 +354,11 @@ export class PlayableHtmlBuildService {
       return null;
     }
 
+    const runtimeSource = await this.loadRuntimeModuleSource(filePath);
+    if (runtimeSource !== null) {
+      return runtimeSource;
+    }
+
     const vendorSource = await this.loadVendorModuleSource(filePath);
     if (vendorSource !== null) {
       return vendorSource;
@@ -282,6 +369,25 @@ export class PlayableHtmlBuildService {
     } catch {
       return null;
     }
+  }
+
+  private async loadRuntimeModuleSource(filePath: string): Promise<string | null> {
+    if (!filePath.startsWith(RUNTIME_SOURCE_PREFIX)) {
+      return null;
+    }
+
+    for (const candidatePath of this.getRuntimeSourceCandidates(filePath)) {
+      const loader =
+        RUNTIME_SOURCE_LOADERS[`../../packages/pix3-runtime/src/${candidatePath}`] ?? null;
+
+      if (!loader) {
+        continue;
+      }
+
+      return await loader();
+    }
+
+    return null;
   }
 
   private async loadVendorModuleSource(filePath: string): Promise<string | null> {
@@ -420,6 +526,33 @@ export class PlayableHtmlBuildService {
     }
 
     return btoa(binary);
+  }
+
+  private getRuntimeSourceCandidates(filePath: string): string[] {
+    const relativePath = filePath.slice(RUNTIME_SOURCE_PREFIX.length).replaceAll('\\', '/');
+    if (!relativePath) {
+      return [];
+    }
+
+    const candidates = [relativePath];
+    if (!/\.[^/]+$/.test(relativePath)) {
+      candidates.push(
+        `${relativePath}.ts`,
+        `${relativePath}.js`,
+        `${relativePath}.json`,
+        `${relativePath}/index.ts`,
+        `${relativePath}/index.js`,
+        `${relativePath}/index.json`
+      );
+    }
+
+    return Array.from(
+      new Set(candidates.map(candidate => candidate.replace(/^\/+/, '').replace(/\/+/g, '/')))
+    );
+  }
+
+  private measureUtf8Bytes(value: string): number {
+    return new TextEncoder().encode(value).length;
   }
 
   private toRelativeImportPath(fromPath: string, targetPath: string): string {

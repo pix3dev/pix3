@@ -6,10 +6,18 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { DialogService } from '@/services/DialogService';
+import {
+  DialogService,
+  type DialogExpandableSection,
+} from '@/services/DialogService';
 import { LoggingService } from '@/services/LoggingService';
 import { PlayableExportDialogService } from '@/services/PlayableExportDialogService';
-import { PlayableHtmlBuildService } from '@/services/PlayableHtmlBuildService';
+import { PlayableExportProgressDialogService } from '@/services/PlayableExportProgressDialogService';
+import {
+  PlayableHtmlBuildService,
+  type PlayableHtmlBuildArtifact,
+  type PlayableHtmlBundleSizeReport,
+} from '@/services/PlayableHtmlBuildService';
 
 type SaveFilePickerFn = (options?: unknown) => Promise<FileSystemFileHandle>;
 type WindowWithSavePicker = Window & {
@@ -37,6 +45,9 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
 
   @inject(PlayableExportDialogService)
   private readonly playableExportDialogService!: PlayableExportDialogService;
+
+  @inject(PlayableExportProgressDialogService)
+  private readonly playableExportProgressDialogService!: PlayableExportProgressDialogService;
 
   @inject(LoggingService)
   private readonly loggingService!: LoggingService;
@@ -75,7 +86,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
         return { didMutate: false, payload: undefined };
       }
 
-      const artifact = await this.playableHtmlBuildService.buildPlayableHtml(context, {
+      const artifact = await this.buildPlayableHtmlWithProgress(context, {
         title: projectName,
         entryScenePath,
       });
@@ -99,6 +110,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
         scenes: artifact.sceneCount,
         assets: artifact.assetCount,
         files: artifact.fileCount,
+        sizeReport: artifact.sizeReport,
         warnings: allWarnings.length,
         durationMs: elapsedMs,
       });
@@ -106,6 +118,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       await this.dialogService.showConfirmation({
         title: 'Playable HTML Exported',
         message: this.buildSuccessMessage(artifact, deliveryMethod, elapsedMs),
+        expandableSection: this.buildEmbeddedAssetsSection(artifact.sizeReport),
         confirmLabel: 'OK',
         cancelLabel: 'Close',
       });
@@ -131,6 +144,37 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       didMutate: false,
       payload: undefined,
     };
+  }
+
+  private async buildPlayableHtmlWithProgress(
+    context: CommandContext,
+    options: {
+      title: string;
+      entryScenePath: string;
+    }
+  ): Promise<PlayableHtmlBuildArtifact> {
+    this.playableExportProgressDialogService.showDialog({
+      title: 'Building Playable HTML',
+      message: 'Bundling scripts and embedding project assets into a single HTML file.',
+    });
+    await this.waitForProgressDialogPaint();
+
+    try {
+      return await this.playableHtmlBuildService.buildPlayableHtml(context, options);
+    } finally {
+      this.playableExportProgressDialogService.close();
+    }
+  }
+
+  private async waitForProgressDialogPaint(): Promise<void> {
+    await new Promise<void>(resolve => {
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => resolve());
+        return;
+      }
+
+      window.setTimeout(() => resolve(), 0);
+    });
   }
 
   private async promptForEntryScenePath(context: CommandContext): Promise<string | null> {
@@ -188,14 +232,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   }
 
   private buildSuccessMessage(
-    artifact: {
-      entryScenePath: string;
-      sceneCount: number;
-      assetCount: number;
-      fileCount: number;
-      warnings: readonly string[];
-      bundleWarnings: readonly string[];
-    },
+    artifact: PlayableHtmlBuildArtifact,
     deliveryMethod: Exclude<HtmlDeliveryMethod, 'cancelled'>,
     elapsedMs: number
   ): string {
@@ -215,8 +252,64 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
       `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}, Generated files: ${artifact.fileCount}\n` +
       `Completed in ${(elapsedMs / 1000).toFixed(2)}s.` +
+      this.buildBundleSizeReportSection(artifact.sizeReport) +
       warningSection
     );
+  }
+
+  private buildBundleSizeReportSection(report: PlayableHtmlBundleSizeReport): string {
+    const lines = this.buildBundleSizeSummaryLines(report);
+    if (lines.length === 0) {
+      return '';
+    }
+
+    return `\n\nBundle size report:\n${lines.join('\n')}`;
+  }
+
+  private buildBundleSizeSummaryLines(report: PlayableHtmlBundleSizeReport): string[] {
+    return [
+      `  Output HTML: ${this.formatBytes(report.outputHtmlBytes)} (${report.outputHtmlBytes} bytes)`,
+      `  Embedded assets (raw): ${this.formatBytes(report.rawAssetsBytes)} (${this.formatPercent(report.rawAssetsBytes, report.outputHtmlBytes)} of output)`,
+      `  Embedded assets (base64 payload): ${this.formatBytes(report.base64AssetsBytes)} (${this.formatPercent(report.base64AssetsBytes, report.outputHtmlBytes)} of output)`,
+      `  Base64 expansion overhead: +${this.formatBytes(report.base64ExpansionBytes)} (${this.formatPercent(report.base64ExpansionBytes, report.outputHtmlBytes)} of output)`,
+      `  JS/HTML + metadata wrapper: ${this.formatBytes(report.codeAndWrapperBytes)} (${this.formatPercent(report.codeAndWrapperBytes, report.outputHtmlBytes)} of output)`,
+    ];
+  }
+
+  private buildEmbeddedAssetsSection(
+    report: PlayableHtmlBundleSizeReport
+  ): DialogExpandableSection | undefined {
+    if (report.assetEntries.length === 0) {
+      return undefined;
+    }
+
+    return {
+      title: 'Embedded assets by source size',
+      items: report.assetEntries.map(
+        entry =>
+          `${entry.path}: ${this.formatBytes(entry.rawBytes)} raw -> ${this.formatBytes(entry.base64Bytes)} base64`
+      ),
+      maxHeightPx: 260,
+    };
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(2)} KiB`;
+    }
+
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+  }
+
+  private formatPercent(part: number, whole: number): string {
+    if (whole <= 0) {
+      return '0.00%';
+    }
+
+    return `${((part / whole) * 100).toFixed(2)}%`;
   }
 
   private toSuggestedFileName(projectName: string): string {

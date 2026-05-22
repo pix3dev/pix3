@@ -1,5 +1,11 @@
 import { injectable, ServiceContainer } from '@/fw/di';
 
+export interface DialogExpandableSection {
+  title: string;
+  items: readonly string[];
+  maxHeightPx?: number;
+}
+
 export interface DialogOptions {
   title: string;
   message: string;
@@ -12,6 +18,7 @@ export interface DialogOptions {
   requiredInputValue?: string;
   requiredInputPlaceholder?: string;
   disclaimer?: string;
+  expandableSection?: DialogExpandableSection;
 }
 
 export interface DialogInstance {

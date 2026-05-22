@@ -1,4 +1,5 @@
 import { ComponentBase, customElement, html, property, state } from '@/fw';
+import type { DialogExpandableSection } from '@/services/DialogService';
 import './pix3-confirm-dialog.ts.css';
 
 @customElement('pix3-confirm-dialog')
@@ -39,6 +40,9 @@ export class ConfirmDialog extends ComponentBase {
   @property({ type: String })
   public disclaimer: string = '';
 
+  @property({ attribute: false })
+  public expandableSection: DialogExpandableSection | null = null;
+
   @state()
   private confirmationInput: string = '';
 
@@ -51,6 +55,8 @@ export class ConfirmDialog extends ComponentBase {
   }
 
   protected render() {
+    const expandableSection = this.expandableSection;
+
     return html`
       <div
         class="dialog-backdrop"
@@ -60,7 +66,7 @@ export class ConfirmDialog extends ComponentBase {
         }}
       >
         <div
-          class="dialog-content"
+          class="dialog-content ${expandableSection ? 'dialog-content--with-expandable' : ''}"
           role="alertdialog"
           aria-modal="true"
           @click=${(e: Event) => e.stopPropagation()}
@@ -69,6 +75,7 @@ export class ConfirmDialog extends ComponentBase {
           <h2 class="dialog-title">${this.title}</h2>
           <p class="dialog-message">${this.message}</p>
           ${this.disclaimer ? html`<p class="dialog-disclaimer">${this.disclaimer}</p>` : null}
+          ${this.renderExpandableSection(expandableSection)}
           ${this.requiresExactConfirmation
             ? html`
                 <label class="dialog-confirmation">
@@ -113,6 +120,33 @@ export class ConfirmDialog extends ComponentBase {
           </div>
         </div>
       </div>
+    `;
+  }
+
+  private renderExpandableSection(expandableSection: DialogExpandableSection | null) {
+    if (!expandableSection || expandableSection.items.length === 0) {
+      return null;
+    }
+
+    const maxHeightPx = Math.max(120, expandableSection.maxHeightPx ?? 240);
+
+    return html`
+      <details
+        class="dialog-expandable"
+        style=${`--dialog-expandable-max-height: ${maxHeightPx}px;`}
+      >
+        <summary class="dialog-expandable__summary">
+          <span class="dialog-expandable__title">${expandableSection.title}</span>
+          <span class="dialog-expandable__count">${expandableSection.items.length}</span>
+        </summary>
+        <div class="dialog-expandable__body">
+          <ul class="dialog-expandable__list">
+            ${expandableSection.items.map(
+              item => html`<li class="dialog-expandable__item">${item}</li>`
+            )}
+          </ul>
+        </div>
+      </details>
     `;
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '@/core/command';
 import type { ProjectBuildService, RuntimeProjectBuildModel } from './ProjectBuildService';
 import type { ProjectStorageService } from './ProjectStorageService';
-import type { ScriptCompilerService } from './ScriptCompilerService';
+import type { ScriptCompilerService, VirtualBundleOptions } from './ScriptCompilerService';
 import { PlayableHtmlBuildService } from './PlayableHtmlBuildService';
 
 const createContext = (): CommandContext => {
@@ -37,7 +37,6 @@ describe('PlayableHtmlBuildService', () => {
       files: new Map([
         ['src/main.ts', "import './register-project-scripts';\nconsole.log('boot');\n"],
         ['src/register-project-scripts.ts', 'placeholder\n'],
-        ['pix3-runtime/src/index.ts', 'export class Script {}\n'],
       ]),
       warnings: ['model warning'],
     };
@@ -107,6 +106,15 @@ describe('PlayableHtmlBuildService', () => {
     expect(bundlerFiles.get('virtual/generated/lit-decorators.ts')).toContain(
       'export const property'
     );
+    const fileLoader = (bundleOptions as VirtualBundleOptions).fileLoader;
+    expect(typeof fileLoader).toBe('function');
+    await expect(
+      fileLoader?.('pix3-runtime/src/index.ts', {
+        importer: 'src/main.ts',
+        requestedImportPath: '@pix3/runtime',
+        namespace: 'virtual-fs',
+      })
+    ).resolves.toContain("export * from './core/ResourceManager';");
     expect(bundleOptions).toMatchObject({
       entryFiles: ['src/main.ts'],
       entryStrategy: 'import-only',
@@ -132,6 +140,21 @@ describe('PlayableHtmlBuildService', () => {
     expect(artifact.sceneCount).toBe(1);
     expect(artifact.assetCount).toBe(2);
     expect(artifact.fileCount).toBeGreaterThan(model.files.size);
+    expect(artifact.sizeReport.outputHtmlBytes).toBe(new TextEncoder().encode(artifact.html).length);
+    expect(artifact.sizeReport.rawAssetsBytes).toBeGreaterThan(0);
+    expect(artifact.sizeReport.base64AssetsBytes).toBeGreaterThan(
+      artifact.sizeReport.rawAssetsBytes
+    );
+    expect(artifact.sizeReport.base64ExpansionBytes).toBe(
+      artifact.sizeReport.base64AssetsBytes - artifact.sizeReport.rawAssetsBytes
+    );
+    expect(artifact.sizeReport.codeAndWrapperBytes).toBe(
+      artifact.sizeReport.outputHtmlBytes - artifact.sizeReport.base64AssetsBytes
+    );
+    expect(artifact.sizeReport.assetEntries.map(entry => entry.path)).toEqual([
+      'scenes/main.pix3scene',
+      'assets/hero.png',
+    ]);
     expect(artifact.bundleWarnings).toEqual(['bundle warning']);
     expect(artifact.warnings).toContain('model warning');
     expect(artifact.externalModuleIds).toEqual([]);

@@ -52,4 +52,33 @@ describe('ConfirmDialog', () => {
       detail: { dialogId: 'dialog-1' },
     });
   });
+
+  it('renders expandable details with a scrollable body when provided', async () => {
+    const dialog = document.createElement('pix3-confirm-dialog') as ConfirmDialog;
+    dialog.dialogId = 'dialog-2';
+    dialog.title = 'Playable HTML Exported';
+    dialog.message = 'Bundle size report summary.';
+    dialog.expandableSection = {
+      title: 'Embedded assets by source size',
+      items: ['asset-a.png: 10 KiB raw -> 13 KiB base64', 'asset-b.png: 8 KiB raw -> 10 KiB base64'],
+      maxHeightPx: 180,
+    };
+    document.body.appendChild(dialog);
+    await dialog.updateComplete;
+
+    const details = dialog.querySelector('.dialog-expandable') as HTMLDetailsElement | null;
+    const items = Array.from(dialog.querySelectorAll('.dialog-expandable__item')).map(node =>
+      node.textContent?.trim()
+    );
+    const body = dialog.querySelector('.dialog-expandable__body') as HTMLDivElement | null;
+
+    expect(details).not.toBeNull();
+    expect(details?.textContent).toContain('Embedded assets by source size');
+    expect(items).toEqual([
+      'asset-a.png: 10 KiB raw -> 13 KiB base64',
+      'asset-b.png: 8 KiB raw -> 10 KiB base64',
+    ]);
+    expect(details?.getAttribute('style')).toContain('--dialog-expandable-max-height: 180px;');
+    expect(body?.className).toContain('dialog-expandable__body');
+  });
 });

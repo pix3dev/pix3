@@ -31,6 +31,10 @@ import {
   PlayableExportDialogService,
   type PlayableExportDialogInstance,
 } from '@/services/PlayableExportDialogService';
+import {
+  PlayableExportProgressDialogService,
+  type PlayableExportProgressDialogInstance,
+} from '@/services/PlayableExportProgressDialogService';
 import { ScriptExecutionService } from '@/services/ScriptExecutionService';
 import { AutoloadService } from '@/services/AutoloadService';
 import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
@@ -90,6 +94,7 @@ import './shared/pix3-editor-settings-dialog';
 import './shared/pix3-animation-auto-slice-dialog';
 import './shared/pix3-node-type-picker';
 import './shared/pix3-playable-export-dialog';
+import './shared/pix3-playable-export-progress-dialog';
 import './shared/pix3-status-bar';
 import './shared/pix3-background';
 import './collab/collab-participants-strip';
@@ -174,6 +179,9 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(PlayableExportDialogService)
   private readonly playableExportDialogService!: PlayableExportDialogService;
 
+  @inject(PlayableExportProgressDialogService)
+  private readonly playableExportProgressDialogService!: PlayableExportProgressDialogService;
+
   @inject(ScriptExecutionService)
   private readonly scriptExecutionService!: ScriptExecutionService;
 
@@ -229,6 +237,9 @@ export class Pix3EditorShell extends ComponentBase {
   private activePlayableExportDialog: PlayableExportDialogInstance | null = null;
 
   @state()
+  private activePlayableExportProgressDialog: PlayableExportProgressDialogInstance | null = null;
+
+  @state()
   private isAuthModalOpen = false;
 
   @state()
@@ -255,6 +266,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeCreateProjectSubscription?: () => void;
   private disposeNodeTypePickerSubscription?: () => void;
   private disposePlayableExportDialogSubscription?: () => void;
+  private disposePlayableExportProgressDialogSubscription?: () => void;
   private disposeBehaviorPickerSubscription?: () => void;
   private disposeScriptCreatorSubscription?: () => void;
   private disposeAnimationAutoSliceSubscription?: () => void;
@@ -391,6 +403,12 @@ export class Pix3EditorShell extends ComponentBase {
         this.requestUpdate();
       }
     );
+
+    this.disposePlayableExportProgressDialogSubscription =
+      this.playableExportProgressDialogService.subscribe(dialog => {
+        this.activePlayableExportProgressDialog = dialog;
+        this.requestUpdate();
+      });
 
     // Touch injected services to avoid unused var lint error (they are singletons for side-effects)
     void this._projectScriptLoader;
@@ -582,6 +600,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeNodeTypePickerSubscription = undefined;
     this.disposePlayableExportDialogSubscription?.();
     this.disposePlayableExportDialogSubscription = undefined;
+    this.disposePlayableExportProgressDialogSubscription?.();
+    this.disposePlayableExportProgressDialogSubscription = undefined;
     this.disposeBehaviorPickerSubscription?.();
     this.disposeBehaviorPickerSubscription = undefined;
     this.disposeScriptCreatorSubscription?.();
@@ -839,7 +859,7 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderProjectSettingsHost()} ${this.renderProjectSyncHost()}
         ${this.renderEditorSettingsHost()} ${this.renderAnimationAutoSliceHost()}
         ${this.renderCreateProjectHost()} ${this.renderNodeTypePickerHost()}
-        ${this.renderPlayableExportDialogHost()}
+        ${this.renderPlayableExportDialogHost()} ${this.renderPlayableExportProgressDialogHost()}
         ${this.renderAuthModal()}
       </div>
     `;
@@ -1194,6 +1214,7 @@ export class Pix3EditorShell extends ComponentBase {
               .requiredInputValue=${dialog.options.requiredInputValue || ''}
               .requiredInputPlaceholder=${dialog.options.requiredInputPlaceholder || ''}
               .disclaimer=${dialog.options.disclaimer || ''}
+              .expandableSection=${dialog.options.expandableSection ?? null}
             ></pix3-confirm-dialog>
           `
         )}
@@ -1339,6 +1360,22 @@ export class Pix3EditorShell extends ComponentBase {
           .scenePaths=${this.activePlayableExportDialog.scenePaths}
           .selectedScenePath=${this.activePlayableExportDialog.selectedScenePath}
         ></pix3-playable-export-dialog>
+      </div>
+    `;
+  }
+
+  private renderPlayableExportProgressDialogHost() {
+    if (!this.activePlayableExportProgressDialog) {
+      return null;
+    }
+
+    return html`
+      <div class="playable-export-progress-dialog-host">
+        <pix3-playable-export-progress-dialog
+          .dialogId=${this.activePlayableExportProgressDialog.id}
+          .title=${this.activePlayableExportProgressDialog.title}
+          .message=${this.activePlayableExportProgressDialog.message}
+        ></pix3-playable-export-progress-dialog>
       </div>
     `;
   }
