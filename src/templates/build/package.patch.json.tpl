@@ -5,6 +5,7 @@
     "dev": "vite"
   },
   "dependencies": {
+    "@pix3/runtime": "file:.yalc/@pix3/runtime",
     "lit": "^3.3.1",
     "reflect-metadata": "^0.2.2",
     "three": "^0.183.2",

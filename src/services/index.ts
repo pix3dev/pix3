@@ -72,6 +72,11 @@ export { ProjectScriptLoaderService } from './ProjectScriptLoaderService';
 export { BehaviorPickerService } from './BehaviorPickerService';
 export { NodeTypePickerService, type NodeTypePickerInstance } from './NodeTypePickerService';
 export {
+  PlayableExportDialogService,
+  type PlayableExportDialogInstance,
+  type PlayableExportDialogOptions,
+} from './PlayableExportDialogService';
+export {
   AssetsPreviewService,
   type AssetPreviewItem,
   type AssetThumbnailStatus,
@@ -89,8 +94,14 @@ export {
   ScriptCompilerService,
   type CompilationResult,
   type CompilationError,
+  type VirtualBundleOptions,
 } from './ScriptCompilerService';
 export { ProjectBuildService, type ProjectBuildResult } from './ProjectBuildService';
+export {
+  PlayableHtmlBuildService,
+  type PlayableHtmlBuildOptions,
+  type PlayableHtmlBuildArtifact,
+} from './PlayableHtmlBuildService';
 export { Navigation2DController } from './Navigation2DController';
 export {
   CollaborationService,

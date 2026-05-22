@@ -652,6 +652,7 @@ Happy creating! 🎨
     const normalized = normalizeProjectManifest(manifest);
     const payload = {
       version: normalized.version,
+      defaultExportScenePath: normalized.defaultExportScenePath,
       viewportBaseSize: {
         width: normalized.viewportBaseSize.width,
         height: normalized.viewportBaseSize.height,
@@ -727,6 +728,16 @@ Happy creating! 🎨
     ) as ProjectManifest['metadata'];
 
     let didChange = nextMetadata !== (manifest.metadata ?? {});
+    const nextDefaultExportScenePath =
+      this.remapProjectPath(
+        manifest.defaultExportScenePath,
+        sourcePath,
+        targetPath,
+        movedKind
+      ) ?? manifest.defaultExportScenePath;
+    if (nextDefaultExportScenePath !== manifest.defaultExportScenePath) {
+      didChange = true;
+    }
     const nextAutoloads = manifest.autoloads.map(entry => {
       const nextScriptPath =
         this.remapProjectPath(entry.scriptPath, sourcePath, targetPath, movedKind) ??
@@ -747,6 +758,7 @@ Happy creating! 🎨
 
     await this.saveProjectManifest({
       ...manifest,
+      defaultExportScenePath: nextDefaultExportScenePath,
       metadata: nextMetadata,
       autoloads: nextAutoloads,
     });

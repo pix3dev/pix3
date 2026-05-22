@@ -7,6 +7,7 @@ export interface AutoloadConfig {
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
+  defaultExportScenePath?: string;
   viewportBaseSize: {
     width: number;
     height: number;
@@ -35,6 +36,19 @@ const normalizeViewportBaseSize = (
     width: Math.max(MIN_VIEWPORT_BASE_SIZE, width),
     height: Math.max(MIN_VIEWPORT_BASE_SIZE, height),
   };
+};
+
+const normalizeDefaultExportScenePath = (input: unknown): string | undefined => {
+  if (typeof input !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  return trimmed.startsWith('res://') ? trimmed.slice(6) : trimmed;
 };
 
 export const createDefaultProjectManifest = (): ProjectManifest => ({
@@ -81,6 +95,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
         ? record.version
         : DEFAULT_PROJECT_MANIFEST_VERSION,
     autoloads,
+    defaultExportScenePath: normalizeDefaultExportScenePath(record.defaultExportScenePath),
     viewportBaseSize: normalizeViewportBaseSize(record.viewportBaseSize),
     metadata:
       record.metadata && typeof record.metadata === 'object'

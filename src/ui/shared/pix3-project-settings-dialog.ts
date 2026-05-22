@@ -30,11 +30,15 @@ export class ProjectSettingsDialog extends ComponentBase {
   private localAbsolutePath: string = '';
 
   @state()
+  private defaultExportScenePath: string = '';
+
+  @state()
   private viewportBaseWidth: string = '1920';
 
   @state()
   private viewportBaseHeight: string = '1080';
 
+  private defaultExportScenePathDirty = false;
   private viewportBaseWidthDirty = false;
   private viewportBaseHeightDirty = false;
 
@@ -59,11 +63,9 @@ export class ProjectSettingsDialog extends ComponentBase {
     super.connectedCallback();
     this.projectName = appState.project.projectName ?? '';
     this.localAbsolutePath = appState.project.localAbsolutePath ?? '';
-    this.syncViewportBaseSizeFromManifest();
+    this.syncFormFieldsFromManifest();
     this.disposeProjectSubscription = subscribe(appState.project, () => {
-      if (!this.viewportBaseWidthDirty && !this.viewportBaseHeightDirty) {
-        this.syncViewportBaseSizeFromManifest();
-      }
+      this.syncFormFieldsFromManifest();
       this.requestUpdate();
     });
   }
@@ -110,6 +112,24 @@ export class ProjectSettingsDialog extends ComponentBase {
                         (this.projectName = (e.target as HTMLInputElement).value)}
                       placeholder="My Awesome Project"
                     />
+                  </div>
+
+                  <div class="settings-field">
+                    <label for="defaultExportScenePath">Default Export Scene Path</label>
+                    <input
+                      id="defaultExportScenePath"
+                      type="text"
+                      .value=${this.defaultExportScenePath}
+                      @input=${(e: InputEvent) => {
+                        this.defaultExportScenePath = (e.target as HTMLInputElement).value;
+                        this.defaultExportScenePathDirty = true;
+                      }}
+                      placeholder="src/assets/scenes/main.pix3scene"
+                    />
+                    <div class="hint">
+                      Project-relative scene path used as the default startup scene for playable
+                      export. You can override it in the export dialog.
+                    </div>
                   </div>
 
                   <div class="settings-field">
@@ -282,6 +302,7 @@ export class ProjectSettingsDialog extends ComponentBase {
     const operation = new UpdateProjectSettingsOperation({
       projectName: this.projectName.trim() || undefined,
       localAbsolutePath: this.localAbsolutePath.trim() || null,
+      defaultExportScenePath: this.defaultExportScenePath.trim() || null,
       viewportBaseWidth: Number.isFinite(parsedViewportBaseWidth)
         ? Math.max(64, Math.round(parsedViewportBaseWidth))
         : 1920,
@@ -291,19 +312,29 @@ export class ProjectSettingsDialog extends ComponentBase {
     });
 
     await this.operationService.invokeAndPush(operation);
+    this.defaultExportScenePathDirty = false;
     this.viewportBaseWidthDirty = false;
     this.viewportBaseHeightDirty = false;
     this.projectSettingsService.close();
   }
 
-  private syncViewportBaseSizeFromManifest(): void {
-    const baseSize = appState.project.manifest?.viewportBaseSize;
-    if (!baseSize) {
+  private syncFormFieldsFromManifest(): void {
+    const manifest = appState.project.manifest;
+    if (!manifest) {
       return;
     }
 
-    this.viewportBaseWidth = String(baseSize.width);
-    this.viewportBaseHeight = String(baseSize.height);
+    if (!this.defaultExportScenePathDirty) {
+      this.defaultExportScenePath = manifest.defaultExportScenePath ?? '';
+    }
+
+    if (!this.viewportBaseWidthDirty) {
+      this.viewportBaseWidth = String(manifest.viewportBaseSize.width);
+    }
+
+    if (!this.viewportBaseHeightDirty) {
+      this.viewportBaseHeight = String(manifest.viewportBaseSize.height);
+    }
   }
 
   private async onAddAutoload(): Promise<void> {

@@ -5,19 +5,25 @@ import type {
   OperationMetadata,
 } from '@/core/Operation';
 import { Node2D, SceneManager } from '@pix3/runtime';
-import { createDefaultProjectManifest, type ProjectManifest } from '@/core/ProjectManifest';
+import {
+  createDefaultProjectManifest,
+  normalizeProjectManifest,
+  type ProjectManifest,
+} from '@/core/ProjectManifest';
 import { ProjectService } from '@/services/ProjectService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 
 export interface UpdateProjectSettingsParams {
   projectName?: string;
   localAbsolutePath?: string | null;
+  defaultExportScenePath?: string | null;
   viewportBaseWidth?: number;
   viewportBaseHeight?: number;
 }
 
 interface ProjectManifestSnapshotLike {
   version: string;
+  defaultExportScenePath?: string;
   viewportBaseSize: {
     width: number;
     height: number;
@@ -32,6 +38,7 @@ interface ProjectManifestSnapshotLike {
 
 const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest => ({
   version: manifest.version,
+  defaultExportScenePath: manifest.defaultExportScenePath,
   viewportBaseSize: {
     width: manifest.viewportBaseSize.width,
     height: manifest.viewportBaseSize.height,
@@ -96,17 +103,23 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       this.params.viewportBaseHeight !== undefined
         ? this.params.viewportBaseHeight
         : prevManifest.viewportBaseSize.height;
-    const nextManifest: ProjectManifest = {
+    const nextDefaultExportScenePath =
+      this.params.defaultExportScenePath !== undefined
+        ? this.params.defaultExportScenePath
+        : prevManifest.defaultExportScenePath;
+    const nextManifest = normalizeProjectManifest({
       ...prevManifest,
+      defaultExportScenePath: nextDefaultExportScenePath,
       viewportBaseSize: {
         width: nextViewportBaseWidth,
         height: nextViewportBaseHeight,
       },
-    };
+    });
 
     if (
       prevName === newName &&
       prevPath === newPath &&
+      prevManifest.defaultExportScenePath === nextManifest.defaultExportScenePath &&
       prevManifest.viewportBaseSize.width === nextManifest.viewportBaseSize.width &&
       prevManifest.viewportBaseSize.height === nextManifest.viewportBaseSize.height
     ) {

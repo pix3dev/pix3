@@ -44,10 +44,36 @@ export interface VirtualFileLoadContext {
   namespace: VirtualNamespace;
 }
 
-type VirtualFileLoader = (
+export type VirtualFileLoader = (
   filePath: string,
   context: VirtualFileLoadContext
 ) => Promise<string | null>;
+
+export type VirtualEntryStrategy = 're-export' | 'import-only';
+
+export interface VirtualBundleOptions {
+  readonly entryFiles?: readonly string[];
+  readonly fileLoader?: VirtualFileLoader;
+  readonly externalModules?: readonly string[];
+  readonly moduleAliases?: Readonly<Record<string, string>>;
+  readonly define?: Readonly<Record<string, string>>;
+  readonly entryStrategy?: VirtualEntryStrategy;
+}
+
+interface VirtualFileSystemPluginOptions {
+  readonly fileLoader?: VirtualFileLoader;
+  readonly externalModules: readonly string[];
+  readonly moduleAliases: Readonly<Record<string, string>>;
+}
+
+const DEFAULT_EXTERNAL_MODULES = [
+  '@pix3/runtime',
+  'three',
+  'three/*',
+  '@dimforge/rapier3d-compat',
+  '@dimforge/*',
+  'ios-haptics',
+] as const;
 
 @injectable()
 export class ScriptCompilerService {
@@ -99,6 +125,17 @@ export class ScriptCompilerService {
     entryFiles?: string[],
     fileLoader?: VirtualFileLoader
   ): Promise<CompilationResult> {
+    return this.bundleVirtualProject(files, {
+      entryFiles,
+      fileLoader,
+      entryStrategy: 're-export',
+    });
+  }
+
+  async bundleVirtualProject(
+    files: Map<string, string>,
+    options: VirtualBundleOptions = {}
+  ): Promise<CompilationResult> {
     if (!this.initialized) {
       await this.init();
     }
@@ -108,7 +145,7 @@ export class ScriptCompilerService {
     }
 
     const effectiveEntryFiles = (
-      entryFiles ??
+      options.entryFiles ??
       Array.from(files.keys()).filter(file => file.endsWith('.ts') || file.endsWith('.js'))
     ).filter(file => files.has(file));
 
@@ -116,8 +153,18 @@ export class ScriptCompilerService {
       return { code: '', warnings: [] };
     }
 
-    // Create a virtual entry point that exports all entry files
-    const entryPoint = this.createEntryPoint(effectiveEntryFiles);
+    const entryPoint = this.createEntryPoint(
+      effectiveEntryFiles,
+      options.entryStrategy ?? 're-export'
+    );
+    const externalModules = options.externalModules ?? DEFAULT_EXTERNAL_MODULES;
+    const moduleAliases = options.moduleAliases ?? {};
+    const define = {
+      'import.meta.env.BASE_URL': JSON.stringify('/'),
+      'import.meta.env.DEV': 'true',
+      'import.meta.env.PROD': 'false',
+      ...(options.define ?? {}),
+    };
 
     try {
       const result = await esbuild.build({
@@ -131,22 +178,17 @@ export class ScriptCompilerService {
         format: 'esm',
         platform: 'browser',
         target: 'es2022',
-        define: {
-          'import.meta.env.BASE_URL': JSON.stringify('/'),
-          'import.meta.env.DEV': 'true',
-          'import.meta.env.PROD': 'false',
-        },
-        external: [
-          '@pix3/runtime',
-          'three',
-          'three/*',
-          '@dimforge/rapier3d-compat',
-          '@dimforge/*',
-          'ios-haptics',
-        ],
+        define,
+        external: [...externalModules],
         write: false,
         logLevel: 'silent',
-        plugins: [this.createVirtualFileSystemPlugin(files, fileLoader)],
+        plugins: [
+          this.createVirtualFileSystemPlugin(files, {
+            fileLoader: options.fileLoader,
+            externalModules,
+            moduleAliases,
+          }),
+        ],
       });
 
       const warnings = result.warnings.map(w => this.formatMessage(w));
@@ -169,19 +211,24 @@ export class ScriptCompilerService {
   /**
    * Create a virtual entry point that imports and re-exports all user scripts
    */
-  private createEntryPoint(entryFiles: string[]): string {
-    const exports: string[] = [];
+  private createEntryPoint(entryFiles: string[], strategy: VirtualEntryStrategy): string {
+    const statements: string[] = [];
 
     for (const filePath of entryFiles) {
       // Preserve the full virtual path so entry imports resolve the same way as
       // every other relative import inside the bundle.
       const importPath = `./${filePath}`.replace(/\.ts$/, '');
 
+      if (strategy === 'import-only') {
+        statements.push(`import '${importPath}';`);
+        continue;
+      }
+
       const exportName = this.pathToExportName(filePath);
-      exports.push(`export * as ${exportName} from '${importPath}';`);
+      statements.push(`export * as ${exportName} from '${importPath}';`);
     }
 
-    return exports.join('\n');
+    return statements.join('\n');
   }
 
   /**
@@ -196,14 +243,27 @@ export class ScriptCompilerService {
    */
   private createVirtualFileSystemPlugin(
     files: Map<string, string>,
-    fileLoader?: VirtualFileLoader
+    options: VirtualFileSystemPluginOptions
   ): esbuild.Plugin {
     return {
       name: 'virtual-fs',
       setup: build => {
         build.onResolve({ filter: /.*/ }, args => {
           return (async () => {
-            if (this.isExternalModule(args.path)) {
+            const aliased = this.resolveAliasedModuleImport(args.path, options.moduleAliases);
+            if (aliased) {
+              return {
+                path: aliased,
+                namespace: 'virtual-fs',
+                pluginData: {
+                  importer: args.importer,
+                  requestedImportPath: args.path,
+                  namespace: 'virtual-fs',
+                },
+              };
+            }
+
+            if (this.isExternalModule(args.path, options.externalModules)) {
               return { path: args.path, external: true };
             }
 
@@ -213,7 +273,7 @@ export class ScriptCompilerService {
                 args.path,
                 args.importer,
                 files,
-                fileLoader
+                options.fileLoader
               );
               if (resolved) {
                 return {
@@ -246,8 +306,8 @@ export class ScriptCompilerService {
           let contents = files.get(args.path);
           const context = this.getVirtualFileLoadContext(args.pluginData, args.path, 'virtual-fs');
 
-          if (contents === undefined && fileLoader) {
-            contents = (await fileLoader(args.path, context)) ?? undefined;
+          if (contents === undefined && options.fileLoader) {
+            contents = (await options.fileLoader(args.path, context)) ?? undefined;
             if (contents !== undefined) {
               files.set(args.path, contents);
             }
@@ -274,8 +334,8 @@ export class ScriptCompilerService {
           let contents = files.get(args.path);
           const context = this.getVirtualFileLoadContext(args.pluginData, args.path, 'virtual-raw');
 
-          if (contents === undefined && fileLoader) {
-            contents = (await fileLoader(args.path, context)) ?? undefined;
+          if (contents === undefined && options.fileLoader) {
+            contents = (await options.fileLoader(args.path, context)) ?? undefined;
             if (contents !== undefined) {
               files.set(args.path, contents);
             }
@@ -311,14 +371,43 @@ export class ScriptCompilerService {
     };
   }
 
-  private isExternalModule(path: string): boolean {
-    return (
-      path.startsWith('@pix3/') ||
-      path === 'three' ||
-      path.startsWith('three/') ||
-      path.startsWith('@dimforge/') ||
-      path === 'ios-haptics'
-    );
+  private isExternalModule(path: string, externalModules: readonly string[]): boolean {
+    return externalModules.some(pattern => this.matchesExternalModulePattern(path, pattern));
+  }
+
+  private matchesExternalModulePattern(path: string, pattern: string): boolean {
+    if (pattern.endsWith('/*')) {
+      const prefix = pattern.slice(0, -1);
+      return path.startsWith(prefix);
+    }
+
+    return path === pattern;
+  }
+
+  private resolveAliasedModuleImport(
+    importPath: string,
+    moduleAliases: Readonly<Record<string, string>>
+  ): string | null {
+    const directMatch = moduleAliases[importPath];
+    if (typeof directMatch === 'string' && directMatch.length > 0) {
+      return this.normalizePath(directMatch);
+    }
+
+    for (const [alias, target] of Object.entries(moduleAliases)) {
+      if (!alias.endsWith('/*') || !target.endsWith('/*')) {
+        continue;
+      }
+
+      const aliasPrefix = alias.slice(0, -1);
+      if (!importPath.startsWith(aliasPrefix)) {
+        continue;
+      }
+
+      const targetPrefix = target.slice(0, -1);
+      return this.normalizePath(`${targetPrefix}${importPath.slice(aliasPrefix.length)}`);
+    }
+
+    return null;
   }
 
   private resolveVirtualImport(

@@ -150,6 +150,7 @@ export class CloudProjectService {
     const manifestYaml = stringify(
       {
         version: options.manifest.version,
+        defaultExportScenePath: options.manifest.defaultExportScenePath,
         viewportBaseSize: options.manifest.viewportBaseSize,
         metadata: options.manifest.metadata ?? {},
         autoloads: options.manifest.autoloads.map(entry => ({

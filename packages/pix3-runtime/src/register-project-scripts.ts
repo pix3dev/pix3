@@ -25,8 +25,24 @@ function isScriptCtor(value: unknown): value is (new (id: string, type: string) 
 
 export function registerProjectScripts(registry: ScriptRegistry): void {
   const modules = {
-    ...import.meta.glob('../scripts/**/*.ts', { eager: true }),
-    ...import.meta.glob('../src/scripts/**/*.ts', { eager: true }),
+    ...import.meta.glob(
+      [
+        '../scripts/**/*.ts',
+        '!../scripts/**/*.spec.ts',
+        '!../scripts/**/*.test.ts',
+        '!../scripts/**/*.d.ts',
+      ],
+      { eager: true }
+    ),
+    ...import.meta.glob(
+      [
+        '../src/scripts/**/*.ts',
+        '!../src/scripts/**/*.spec.ts',
+        '!../src/scripts/**/*.test.ts',
+        '!../src/scripts/**/*.d.ts',
+      ],
+      { eager: true }
+    ),
   };
 
   for (const [sourceFile, exportsMap] of Object.entries(modules)) {

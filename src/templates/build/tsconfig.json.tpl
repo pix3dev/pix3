@@ -8,12 +8,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "strict": true,
-    "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@pix3/runtime": ["./pix3-runtime/src"],
-      "@pix3/runtime/*": ["./pix3-runtime/src/*"]
-    }
+    "skipLibCheck": true
   },
-  "include": ["src", "pix3-runtime/src"]
+  "include": ["src"]
 }

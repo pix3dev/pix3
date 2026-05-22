@@ -27,6 +27,10 @@ import {
   NodeTypePickerService,
   type NodeTypePickerInstance,
 } from '@/services/NodeTypePickerService';
+import {
+  PlayableExportDialogService,
+  type PlayableExportDialogInstance,
+} from '@/services/PlayableExportDialogService';
 import { ScriptExecutionService } from '@/services/ScriptExecutionService';
 import { AutoloadService } from '@/services/AutoloadService';
 import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
@@ -49,6 +53,7 @@ import { OpenProjectSettingsCommand } from '@/features/project/OpenProjectSettin
 import { OpenProjectSyncCommand } from '@/features/project/OpenProjectSyncCommand';
 import { OpenProjectInIdeCommand } from '@/features/project/OpenProjectInIdeCommand';
 import { BuildProjectCommand } from '@/features/project/BuildProjectCommand';
+import { ExportPlayableHtmlCommand } from '@/features/project/ExportPlayableHtmlCommand';
 import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
@@ -84,6 +89,7 @@ import './shared/pix3-project-sync-dialog';
 import './shared/pix3-editor-settings-dialog';
 import './shared/pix3-animation-auto-slice-dialog';
 import './shared/pix3-node-type-picker';
+import './shared/pix3-playable-export-dialog';
 import './shared/pix3-status-bar';
 import './shared/pix3-background';
 import './collab/collab-participants-strip';
@@ -165,6 +171,9 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(NodeTypePickerService)
   private readonly nodeTypePickerService!: NodeTypePickerService;
 
+  @inject(PlayableExportDialogService)
+  private readonly playableExportDialogService!: PlayableExportDialogService;
+
   @inject(ScriptExecutionService)
   private readonly scriptExecutionService!: ScriptExecutionService;
 
@@ -217,6 +226,9 @@ export class Pix3EditorShell extends ComponentBase {
   private activeNodeTypePicker: NodeTypePickerInstance | null = null;
 
   @state()
+  private activePlayableExportDialog: PlayableExportDialogInstance | null = null;
+
+  @state()
   private isAuthModalOpen = false;
 
   @state()
@@ -242,6 +254,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeEditorSettingsSubscription?: () => void;
   private disposeCreateProjectSubscription?: () => void;
   private disposeNodeTypePickerSubscription?: () => void;
+  private disposePlayableExportDialogSubscription?: () => void;
   private disposeBehaviorPickerSubscription?: () => void;
   private disposeScriptCreatorSubscription?: () => void;
   private disposeAnimationAutoSliceSubscription?: () => void;
@@ -281,6 +294,7 @@ export class Pix3EditorShell extends ComponentBase {
     const projectSyncCommand = new OpenProjectSyncCommand();
     const openProjectInIdeCommand = new OpenProjectInIdeCommand();
     const buildProjectCommand = new BuildProjectCommand();
+    const exportPlayableHtmlCommand = new ExportPlayableHtmlCommand();
     const newProjectCommand = new NewProjectCommand();
     const closeProjectCommand = new CloseProjectCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
@@ -318,6 +332,7 @@ export class Pix3EditorShell extends ComponentBase {
       projectSyncCommand,
       openProjectInIdeCommand,
       buildProjectCommand,
+      exportPlayableHtmlCommand,
       selectModeCommand,
       translateModeCommand,
       rotateModeCommand,
@@ -369,6 +384,13 @@ export class Pix3EditorShell extends ComponentBase {
       this.activeNodeTypePicker = picker;
       this.requestUpdate();
     });
+
+    this.disposePlayableExportDialogSubscription = this.playableExportDialogService.subscribe(
+      dialog => {
+        this.activePlayableExportDialog = dialog;
+        this.requestUpdate();
+      }
+    );
 
     // Touch injected services to avoid unused var lint error (they are singletons for side-effects)
     void this._projectScriptLoader;
@@ -558,6 +580,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeCreateProjectSubscription = undefined;
     this.disposeNodeTypePickerSubscription?.();
     this.disposeNodeTypePickerSubscription = undefined;
+    this.disposePlayableExportDialogSubscription?.();
+    this.disposePlayableExportDialogSubscription = undefined;
     this.disposeBehaviorPickerSubscription?.();
     this.disposeBehaviorPickerSubscription = undefined;
     this.disposeScriptCreatorSubscription?.();
@@ -815,6 +839,7 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderProjectSettingsHost()} ${this.renderProjectSyncHost()}
         ${this.renderEditorSettingsHost()} ${this.renderAnimationAutoSliceHost()}
         ${this.renderCreateProjectHost()} ${this.renderNodeTypePickerHost()}
+        ${this.renderPlayableExportDialogHost()}
         ${this.renderAuthModal()}
       </div>
     `;
@@ -1298,6 +1323,26 @@ export class Pix3EditorShell extends ComponentBase {
     `;
   }
 
+  private renderPlayableExportDialogHost() {
+    if (!this.activePlayableExportDialog) {
+      return null;
+    }
+
+    return html`
+      <div
+        class="playable-export-dialog-host"
+        @playable-export-confirmed=${(e: CustomEvent) => this.onPlayableExportConfirmed(e)}
+        @playable-export-cancelled=${(e: CustomEvent) => this.onPlayableExportCancelled(e)}
+      >
+        <pix3-playable-export-dialog
+          .dialogId=${this.activePlayableExportDialog.id}
+          .scenePaths=${this.activePlayableExportDialog.scenePaths}
+          .selectedScenePath=${this.activePlayableExportDialog.selectedScenePath}
+        ></pix3-playable-export-dialog>
+      </div>
+    `;
+  }
+
   private onNodeTypeSelected(e: CustomEvent): void {
     const { pickerId, nodeTypeId } = e.detail as {
       pickerId?: string;
@@ -1318,6 +1363,28 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     this.nodeTypePickerService.cancel(pickerId);
+  }
+
+  private onPlayableExportConfirmed(e: CustomEvent): void {
+    const { dialogId, scenePath } = e.detail as {
+      dialogId?: string;
+      scenePath?: string;
+    };
+
+    if (typeof dialogId !== 'string' || typeof scenePath !== 'string') {
+      return;
+    }
+
+    this.playableExportDialogService.confirm(dialogId, scenePath);
+  }
+
+  private onPlayableExportCancelled(e: CustomEvent): void {
+    const { dialogId } = e.detail as { dialogId?: string };
+    if (typeof dialogId !== 'string') {
+      return;
+    }
+
+    this.playableExportDialogService.cancel(dialogId);
   }
 
   /**

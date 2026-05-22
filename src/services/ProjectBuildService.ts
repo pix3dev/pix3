@@ -1,5 +1,5 @@
 import { injectable, inject } from '@/fw/di';
-import { FileSystemAPIService } from './FileSystemAPIService';
+import { ProjectStorageService } from './ProjectStorageService';
 import type { CommandContext } from '@/core/command';
 
 interface BuildPackagePatch {
@@ -17,8 +17,28 @@ export interface ProjectBuildResult {
   readonly packageJsonUpdated: boolean;
 }
 
+export interface ProjectBuildOptions {
+  readonly entryScenePath?: string;
+}
+
+export interface RuntimeProjectBuildModel {
+  readonly projectName: string;
+  readonly scenePaths: readonly string[];
+  readonly entryScenePath: string;
+  readonly assetPaths: readonly string[];
+  readonly projectScriptFiles: ReadonlyMap<string, string>;
+  readonly files: ReadonlyMap<string, string>;
+  readonly warnings: readonly string[];
+}
+
 const RUNTIME_BUILD_COMMAND = 'vite build';
 const RUNTIME_DEV_COMMAND = 'vite';
+const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
+const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;
+const RELATIVE_IMPORT_PATTERN =
+  /\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const PROJECT_SOURCE_IMPORT_SUFFIXES = ['', '.ts', '.js', '.json', '/index.ts', '/index.js', '/index.json'] as const;
 
 const templateFiles = import.meta.glob('../templates/build/**/*.tpl', {
   query: '?raw',
@@ -26,69 +46,57 @@ const templateFiles = import.meta.glob('../templates/build/**/*.tpl', {
   eager: true,
 }) as Record<string, string>;
 
-const runtimeSourceFiles = import.meta.glob('../../packages/pix3-runtime/src/**/*.{ts,d.ts}', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
-
-const runtimeConfigFiles = import.meta.glob('../../packages/pix3-runtime/package.json', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-}) as Record<string, string>;
+const runtimeSourceFiles = import.meta.glob(
+  [
+    '../../packages/pix3-runtime/src/main.ts',
+    '../../packages/pix3-runtime/src/register-project-scripts.ts',
+  ],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }
+) as Record<string, string>;
 
 // Entry-point files that ship in the user's src/ folder (not part of the library).
 const RUNTIME_SRC_ENTRY_FILES = new Set(['main.ts', 'register-project-scripts.ts']);
 
 @injectable()
 export class ProjectBuildService {
-  @inject(FileSystemAPIService)
-  private readonly fs!: FileSystemAPIService;
+  @inject(ProjectStorageService)
+  private readonly fs!: ProjectStorageService;
 
-  async buildFromTemplates(context: CommandContext): Promise<ProjectBuildResult> {
+  async buildRuntimeProjectModel(
+    context: CommandContext,
+    options: ProjectBuildOptions = {}
+  ): Promise<RuntimeProjectBuildModel> {
     const scenePaths = await this.collectScenePaths(context);
-    const activeScenePath = this.getActiveScenePath(context);
-    const normalizedActiveScenePath =
-      activeScenePath && scenePaths.includes(activeScenePath)
-        ? activeScenePath
-        : (scenePaths[0] ?? '');
+    const warnings: string[] = [];
+    const entryScenePath = this.resolveEntryScenePath(context, scenePaths, options, warnings);
+    const projectScriptFiles = await this.collectProjectScriptFiles();
+    const assetPaths = await this.collectAssetPaths(scenePaths, projectScriptFiles, warnings);
+    const projectName = context.state.project.projectName ?? 'Pix3 Project';
 
-    const assetPaths = await this.collectAssetPaths(scenePaths);
-
-    const replacements: Record<string, string> = {
-      PROJECT_NAME: context.state.project.projectName ?? 'Pix3 Project',
-      ACTIVE_SCENE_PATH: normalizedActiveScenePath,
+    return {
+      projectName,
+      scenePaths,
+      entryScenePath,
+      assetPaths,
+      projectScriptFiles,
+      files: this.buildGeneratedFiles(projectName, scenePaths, entryScenePath, assetPaths),
+      warnings,
     };
+  }
+
+  async buildFromTemplates(
+    context: CommandContext,
+    options: ProjectBuildOptions = {}
+  ): Promise<ProjectBuildResult> {
+    const model = await this.buildRuntimeProjectModel(context, options);
 
     let createdDirectories = 0;
-    let writtenFiles = 0;
     const ensuredDirectories = new Set<string>();
-
-    for (const [templatePath, templateContents] of Object.entries(templateFiles)) {
-      const relativeOutputPath = this.toOutputPath(templatePath);
-      if (!relativeOutputPath) {
-        continue;
-      }
-      const rendered = this.renderTemplate(templateContents, replacements);
-      await this.ensureParentDirectory(relativeOutputPath, ensuredDirectories);
-      if (ensuredDirectories.has(this.getDirectoryPart(relativeOutputPath))) {
-        createdDirectories = ensuredDirectories.size;
-      }
-      await this.fs.writeTextFile(relativeOutputPath, rendered);
-      writtenFiles += 1;
-    }
-
-    const sceneManifest = this.buildSceneManifestTs(scenePaths, normalizedActiveScenePath);
-    const sceneManifestPath = 'src/generated/scene-manifest.ts';
-    await this.ensureParentDirectory(sceneManifestPath, ensuredDirectories);
-    await this.fs.writeTextFile(sceneManifestPath, sceneManifest);
-    writtenFiles += 1;
-    writtenFiles += await this.copyRuntimeSources(ensuredDirectories);
-
-    const assetManifest = JSON.stringify({ files: assetPaths }, null, 2) + '\n';
-    await this.fs.writeTextFile('asset-manifest.json', assetManifest);
-    writtenFiles += 1;
+    const writtenFiles = await this.writeGeneratedFiles(model.files, ensuredDirectories);
 
     const packageJsonUpdated = await this.mergePackageJsonPatch();
     createdDirectories = ensuredDirectories.size;
@@ -96,10 +104,43 @@ export class ProjectBuildService {
     return {
       writtenFiles,
       createdDirectories,
-      sceneCount: scenePaths.length,
-      assetCount: assetPaths.length,
+      sceneCount: model.scenePaths.length,
+      assetCount: model.assetPaths.length,
       packageJsonUpdated,
     };
+  }
+
+  private resolveEntryScenePath(
+    context: CommandContext,
+    scenePaths: readonly string[],
+    options: ProjectBuildOptions,
+    warnings: string[]
+  ): string {
+    const requestedEntryScenePath = this.normalizeResourcePath(options.entryScenePath ?? '');
+    const activeScenePath = this.getActiveScenePath(context);
+    const configuredDefaultScenePath = this.getDefaultExportScenePath(context);
+
+    if (requestedEntryScenePath && !scenePaths.includes(requestedEntryScenePath)) {
+      warnings.push(`Requested entry scene was not found in build inputs: ${requestedEntryScenePath}`);
+    }
+
+    if (
+      configuredDefaultScenePath &&
+      !scenePaths.includes(configuredDefaultScenePath) &&
+      configuredDefaultScenePath !== requestedEntryScenePath
+    ) {
+      warnings.push(
+        `Configured default export scene was not found in build inputs: ${configuredDefaultScenePath}`
+      );
+    }
+
+    return requestedEntryScenePath && scenePaths.includes(requestedEntryScenePath)
+      ? requestedEntryScenePath
+      : activeScenePath && scenePaths.includes(activeScenePath)
+        ? activeScenePath
+        : configuredDefaultScenePath && scenePaths.includes(configuredDefaultScenePath)
+          ? configuredDefaultScenePath
+          : (scenePaths[0] ?? '');
   }
 
   private async collectScenePaths(context: CommandContext): Promise<string[]> {
@@ -130,7 +171,16 @@ export class ProjectBuildService {
     return this.normalizeResourcePath(descriptor.filePath);
   }
 
-  private async collectAssetPaths(scenePaths: string[]): Promise<string[]> {
+  private getDefaultExportScenePath(context: CommandContext): string {
+    const configured = context.state.project.manifest?.defaultExportScenePath;
+    return typeof configured === 'string' ? this.normalizeResourcePath(configured) : '';
+  }
+
+  private async collectAssetPaths(
+    scenePaths: string[],
+    projectScriptFiles: ReadonlyMap<string, string>,
+    warnings: string[]
+  ): Promise<string[]> {
     const files = new Set<string>();
 
     for (const scenePath of scenePaths) {
@@ -138,19 +188,46 @@ export class ProjectBuildService {
 
       try {
         const sceneContents = await this.fs.readTextFile(scenePath);
-        const matches = sceneContents.matchAll(/res:\/\/([^\s"'\])]+)/g);
-        for (const match of matches) {
-          const resourcePath = (match[1] ?? '').trim();
-          if (resourcePath.length > 0) {
-            files.add(resourcePath);
-          }
-        }
+        this.collectResourcePathsFromText(sceneContents, files);
       } catch {
-        // Keep building even if one scene cannot be scanned.
+        warnings.push(`Failed to scan scene for asset references: ${scenePath}`);
       }
     }
 
+    const projectSourceFiles = await this.collectProjectSourceDependencies(projectScriptFiles);
+    for (const sourceContents of projectSourceFiles.values()) {
+      this.collectResourcePathsFromText(sourceContents, files);
+    }
+
     return Array.from(files).sort((a, b) => a.localeCompare(b));
+  }
+
+  private async collectProjectScriptFiles(): Promise<ReadonlyMap<string, string>> {
+    const filePaths = new Set<string>();
+
+    for (const directoryPath of PROJECT_SCRIPT_DIRECTORIES) {
+      const discovered = await this.discoverFilesByExtension(directoryPath, '.ts');
+      for (const filePath of discovered) {
+        if (!this.isProjectRuntimeScriptPath(filePath)) {
+          continue;
+        }
+
+        filePaths.add(filePath);
+      }
+    }
+
+    const files = new Map<string, string>();
+    const sortedPaths = Array.from(filePaths).sort((a, b) => a.localeCompare(b));
+
+    for (const filePath of sortedPaths) {
+      try {
+        files.set(filePath, await this.fs.readTextFile(filePath));
+      } catch {
+        // Skip script files that disappear during discovery.
+      }
+    }
+
+    return files;
   }
 
   private async discoverFilesByExtension(
@@ -178,6 +255,125 @@ export class ProjectBuildService {
     }
 
     return result;
+  }
+
+  private async collectProjectSourceDependencies(
+    entryFiles: ReadonlyMap<string, string>
+  ): Promise<ReadonlyMap<string, string>> {
+    const files = new Map(entryFiles);
+    const queue = Array.from(entryFiles.keys());
+    const visited = new Set<string>();
+
+    while (queue.length > 0) {
+      const filePath = queue.shift();
+      if (!filePath || visited.has(filePath)) {
+        continue;
+      }
+
+      visited.add(filePath);
+      const contents = files.get(filePath);
+      if (typeof contents !== 'string') {
+        continue;
+      }
+
+      for (const importPath of this.collectRelativeImportSpecifiers(contents)) {
+        const resolvedPath = await this.resolveProjectSourceImport(filePath, importPath);
+        if (!resolvedPath || files.has(resolvedPath)) {
+          continue;
+        }
+
+        try {
+          files.set(resolvedPath, await this.fs.readTextFile(resolvedPath));
+          queue.push(resolvedPath);
+        } catch {
+          // Ignore missing or non-text dependencies during asset discovery.
+        }
+      }
+    }
+
+    return files;
+  }
+
+  private collectRelativeImportSpecifiers(contents: string): string[] {
+    const imports = new Set<string>();
+
+    for (const match of contents.matchAll(RELATIVE_IMPORT_PATTERN)) {
+      const importPath = (match[1] ?? match[2] ?? '').trim();
+      if (!importPath.startsWith('./') && !importPath.startsWith('../')) {
+        continue;
+      }
+
+      imports.add(importPath);
+    }
+
+    return Array.from(imports.values());
+  }
+
+  private async resolveProjectSourceImport(
+    importerPath: string,
+    importPath: string
+  ): Promise<string | null> {
+    const cleanImportPath = importPath.split('?')[0]?.split('#')[0]?.trim() ?? '';
+    if (!cleanImportPath) {
+      return null;
+    }
+
+    const basePath = this.resolveRelativeImportPath(importerPath, cleanImportPath);
+    const candidates = new Set<string>();
+
+    for (const suffix of PROJECT_SOURCE_IMPORT_SUFFIXES) {
+      candidates.add(`${basePath}${suffix}`);
+    }
+
+    for (const candidate of candidates) {
+      try {
+        await this.fs.readTextFile(candidate);
+        return candidate;
+      } catch {
+        // Try the next candidate path.
+      }
+    }
+
+    return null;
+  }
+
+  private resolveRelativeImportPath(importerPath: string, importPath: string): string {
+    const baseSegments = importerPath.split('/').slice(0, -1);
+    const importSegments = importPath.split('/');
+    const resolvedSegments = [...baseSegments];
+
+    for (const segment of importSegments) {
+      if (!segment || segment === '.') {
+        continue;
+      }
+
+      if (segment === '..') {
+        resolvedSegments.pop();
+        continue;
+      }
+
+      resolvedSegments.push(segment);
+    }
+
+    return resolvedSegments.join('/');
+  }
+
+  private collectResourcePathsFromText(contents: string, files: Set<string>): void {
+    for (const match of contents.matchAll(RESOURCE_PATH_PATTERN)) {
+      const resourcePath = (match[1] ?? '').trim();
+      if (this.isConcreteResourcePath(resourcePath)) {
+        files.add(resourcePath);
+      }
+    }
+  }
+
+  private isConcreteResourcePath(resourcePath: string): boolean {
+    return resourcePath.length > 0 && !resourcePath.includes('${') && !resourcePath.includes('`');
+  }
+
+  private isProjectRuntimeScriptPath(filePath: string): boolean {
+    const normalized = filePath.trim().toLowerCase();
+    return !EXCLUDED_PROJECT_SCRIPT_SUFFIXES.some(suffix => normalized.endsWith(suffix));
   }
 
   private async mergePackageJsonPatch(): Promise<boolean> {
@@ -217,8 +413,29 @@ export class ProjectBuildService {
     return true;
   }
 
-  private async copyRuntimeSources(ensuredDirectories: Set<string>): Promise<number> {
-    let writtenFiles = 0;
+  private buildGeneratedFiles(
+    projectName: string,
+    scenePaths: readonly string[],
+    entryScenePath: string,
+    assetPaths: readonly string[]
+  ): ReadonlyMap<string, string> {
+    const replacements: Record<string, string> = {
+      PROJECT_NAME: projectName,
+      ACTIVE_SCENE_PATH: entryScenePath,
+    };
+    const files = new Map<string, string>();
+
+    for (const [templatePath, templateContents] of Object.entries(templateFiles)) {
+      const relativeOutputPath = this.toOutputPath(templatePath);
+      if (!relativeOutputPath) {
+        continue;
+      }
+
+      files.set(relativeOutputPath, this.renderTemplate(templateContents, replacements));
+    }
+
+    files.set('src/generated/scene-manifest.ts', this.buildSceneManifestTs(scenePaths, entryScenePath));
+    files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
     for (const [sourcePath, sourceContents] of Object.entries(runtimeSourceFiles)) {
       const outputPath = this.toRuntimeOutputPath(sourcePath);
@@ -226,19 +443,21 @@ export class ProjectBuildService {
         continue;
       }
 
-      await this.ensureParentDirectory(outputPath, ensuredDirectories);
-      await this.fs.writeTextFile(outputPath, sourceContents);
-      writtenFiles += 1;
+      files.set(outputPath, sourceContents);
     }
 
-    for (const [sourcePath, sourceContents] of Object.entries(runtimeConfigFiles)) {
-      const outputPath = this.toRuntimeOutputPath(sourcePath);
-      if (!outputPath) {
-        continue;
-      }
+    return files;
+  }
 
+  private async writeGeneratedFiles(
+    files: ReadonlyMap<string, string>,
+    ensuredDirectories: Set<string>
+  ): Promise<number> {
+    let writtenFiles = 0;
+
+    for (const [outputPath, contents] of files) {
       await this.ensureParentDirectory(outputPath, ensuredDirectories);
-      await this.fs.writeTextFile(outputPath, sourceContents);
+      await this.fs.writeTextFile(outputPath, contents);
       writtenFiles += 1;
     }
 
@@ -252,9 +471,7 @@ export class ProjectBuildService {
   ): void {
     const map = this.ensureStringMap(target, key);
     for (const [dep, version] of Object.entries(patch)) {
-      if (!(dep in map)) {
-        map[dep] = version;
-      }
+      map[dep] = version;
     }
   }
 
@@ -335,8 +552,8 @@ export class ProjectBuildService {
       if (RUNTIME_SRC_ENTRY_FILES.has(relativePath)) {
         return `src/${relativePath}`;
       }
-      // All other library files go into pix3-runtime/src/.
-      return `pix3-runtime/src/${relativePath}`;
+      // Runtime library code resolves from the linked @pix3/runtime package.
+      return null;
     }
 
     return null;

@@ -279,9 +279,13 @@ export default defineConfig({
   root: projectDir,
   base: './',
   resolve: {
-    alias: {
-      '@pix3/runtime': resolve(projectDir, 'pix3-runtime/src'),
-    },
+    alias: [
+      {
+        find: /^three$/,
+        replacement: resolve(projectDir, 'node_modules/three/build/three.module.js'),
+      },
+    ],
+    dedupe: ['three'],
   },
   build: {
     outDir: resolve(projectDir, 'dist'),

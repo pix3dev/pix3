@@ -23,28 +23,27 @@
     "noEmit": true,
     "rootDir": ".",
     /* Path mapping */
-    "baseUrl": ".",
     "paths": {
       "@/*": [
-        "src/*"
+        "./src/*"
       ],
       "@/core/*": [
-        "src/core/*"
+        "./src/core/*"
       ],
       "@/services/*": [
-        "src/services/*"
+        "./src/services/*"
       ],
       "@/state/*": [
-        "src/state/*"
+        "./src/state/*"
       ],
       "@/fw/*": [
-        "src/fw/*"
+        "./src/fw/*"
       ],
       "@pix3/runtime": [
-        "packages/pix3-runtime/src"
+        "./packages/pix3-runtime/src"
       ],
       "@pix3/runtime/*": [
-        "packages/pix3-runtime/src/*"
+        "./packages/pix3-runtime/src/*"
       ]
     },
     /* Linting */

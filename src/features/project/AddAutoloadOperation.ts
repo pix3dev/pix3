@@ -19,6 +19,7 @@ export interface AddAutoloadParams {
 
 interface ProjectManifestSnapshotLike {
   version: string;
+  defaultExportScenePath?: string;
   viewportBaseSize: {
     width: number;
     height: number;
@@ -33,6 +34,7 @@ interface ProjectManifestSnapshotLike {
 
 const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest => ({
   version: manifest.version,
+  defaultExportScenePath: manifest.defaultExportScenePath,
   viewportBaseSize: {
     width: manifest.viewportBaseSize.width,
     height: manifest.viewportBaseSize.height,

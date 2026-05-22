@@ -80,7 +80,7 @@ export class BuildProjectCommand extends CommandBase<void, void> {
       );
       this.loggingService.info(`[Runtime Build] Completed in ${(elapsedMs / 1000).toFixed(2)}s`);
       this.loggingService.info(
-        `[Runtime Build] Next: Run 'npm install', then 'npm run dev' or 'npm run build' in pix3-runtime`
+        `[Runtime Build] Next: Run 'yalc add @pix3/runtime', then 'npm install', then 'npm run dev' or 'npm run build' in the generated project`
       );
 
       await this.dialogService.showConfirmation({
@@ -89,7 +89,7 @@ export class BuildProjectCommand extends CommandBase<void, void> {
           `✓ Generated ${result.writtenFiles} file(s) across ${result.createdDirectories} director(ies).\n` +
           `Scenes: ${result.sceneCount}, Assets: ${result.assetCount}.\n` +
           `Completed in ${(elapsedMs / 1000).toFixed(2)}s.\n\n` +
-          'Next steps:\n1) cd pix3-runtime\n2) npm install\n3) npm run dev (or npm run build)',
+          'Next steps:\n1) yalc add @pix3/runtime\n2) npm install\n3) npm run dev (or npm run build)',
         confirmLabel: 'OK',
         cancelLabel: 'Close',
       });
