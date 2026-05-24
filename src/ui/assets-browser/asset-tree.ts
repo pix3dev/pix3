@@ -720,17 +720,17 @@ export class AssetTree extends ComponentBase {
       >
         ${node.kind === 'directory'
           ? html`<button
-              class="expander"
-              data-expanded=${node.expanded ? 'true' : 'false'}
+              type="button"
+              class="expander expander--visible expander--button ${node.expanded
+                ? ''
+                : 'expander--collapsed'}"
               @click=${(e: Event) => {
                 e.stopPropagation();
                 this.toggleNode(node);
               }}
-              aria-label="Toggle folder"
-            >
-              ${this.caretIcon()}
-            </button>`
-          : html`<span class="expander-placeholder"></span>`}
+              aria-label=${node.expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            ></button>`
+          : html`<span class="expander" aria-hidden="true"></span>`}
         ${node.kind === 'directory' ? this.folderIcon(!!node.expanded) : this.fileIcon()}
         ${node.editing
           ? html`<input
@@ -1093,19 +1093,15 @@ export class AssetTree extends ComponentBase {
     const title = open ? 'Open folder' : 'Closed folder';
 
     return html`<span class="icon folder" role="img" aria-label=${title} title=${title}>
-      ${this.iconService.getIcon('folder-solid', 24)}
+      ${this.iconService.getIcon('folder-solid', 16)}
     </span>`;
   }
 
   private fileIcon() {
     const title = 'File';
     return html`<span class="icon file" role="img" aria-label=${title} title=${title}>
-      ${this.iconService.getIcon('file-solid', 24)}
+      ${this.iconService.getIcon('file-solid', 16)}
     </span>`;
-  }
-
-  private caretIcon() {
-    return this.iconService.getIcon('chevron-right-caret', 12);
   }
 
   protected render() {
