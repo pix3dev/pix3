@@ -775,7 +775,8 @@ Happy creating! 🎨
 
     const nextDescriptors: typeof appState.scenes.descriptors = {};
     const nextHierarchies: typeof appState.scenes.hierarchies = {};
-    const nextCameraStates: typeof appState.scenes.cameraStates = {};
+    const nextEditorCameraStates: typeof appState.scenes.editorCameraStates = {};
+    const nextNavigation2DCameraStates: typeof appState.scenes.navigation2DCameraStates = {};
     let nextActiveSceneId = appState.scenes.activeSceneId;
 
     for (const [sceneId, descriptor] of Object.entries(appState.scenes.descriptors)) {
@@ -837,8 +838,13 @@ Happy creating! 🎨
         }
       }
 
-      if (appState.scenes.cameraStates[sceneId]) {
-        nextCameraStates[nextSceneId] = appState.scenes.cameraStates[sceneId];
+      if (appState.scenes.editorCameraStates[sceneId]) {
+        nextEditorCameraStates[nextSceneId] = appState.scenes.editorCameraStates[sceneId];
+      }
+
+      if (appState.scenes.navigation2DCameraStates[sceneId]) {
+        nextNavigation2DCameraStates[nextSceneId] =
+          appState.scenes.navigation2DCameraStates[sceneId];
       }
 
       if (nextActiveSceneId === sceneId) {
@@ -852,7 +858,8 @@ Happy creating! 🎨
 
     appState.scenes.descriptors = nextDescriptors;
     appState.scenes.hierarchies = nextHierarchies;
-    appState.scenes.cameraStates = nextCameraStates;
+    appState.scenes.editorCameraStates = nextEditorCameraStates;
+    appState.scenes.navigation2DCameraStates = nextNavigation2DCameraStates;
     appState.scenes.activeSceneId = nextActiveSceneId;
 
     if (nextActiveSceneId && nextDescriptors[nextActiveSceneId]) {
@@ -1210,7 +1217,8 @@ Happy creating! 🎨
     appState.scenes.lastLoadedAt = null;
     appState.scenes.pendingScenePaths = [];
     appState.scenes.nodeDataChangeSignal = 0;
-    appState.scenes.cameraStates = {};
+    appState.scenes.editorCameraStates = {};
+    appState.scenes.navigation2DCameraStates = {};
     appState.scenes.previewCameraNodeIds = {};
     appState.tabs.tabs = [];
     appState.tabs.activeTabId = null;

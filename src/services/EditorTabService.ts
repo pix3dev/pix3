@@ -533,7 +533,7 @@ export class EditorTabService {
     if (camera) {
       this.viewportRenderer.applyCameraState(camera);
     } else {
-      const sceneCamera = appState.scenes.cameraStates[sceneId];
+      const sceneCamera = appState.scenes.editorCameraStates[sceneId];
       if (sceneCamera) {
         this.viewportRenderer.applyCameraState(sceneCamera);
       }
@@ -592,7 +592,7 @@ export class EditorTabService {
       const camera = this.viewportRenderer.captureCameraState();
       if (camera) {
         tab.contextState = { ...(tab.contextState ?? {}), camera };
-        appState.scenes.cameraStates[sceneId] = camera;
+        appState.scenes.editorCameraStates[sceneId] = camera;
       }
 
       // Save selection state.
@@ -797,9 +797,8 @@ export class EditorTabService {
       const sceneId = this.deriveSceneIdFromResource(tab.resourceId);
       delete appState.scenes.descriptors[sceneId];
       delete appState.scenes.hierarchies[sceneId];
-      if (appState.scenes.cameraStates[sceneId]) {
-        delete appState.scenes.cameraStates[sceneId];
-      }
+      delete appState.scenes.editorCameraStates[sceneId];
+      delete appState.scenes.navigation2DCameraStates[sceneId];
 
       if (appState.scenes.activeSceneId === sceneId) {
         appState.scenes.activeSceneId = null;

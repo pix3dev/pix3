@@ -994,7 +994,9 @@ describe('ViewportRendererService', () => {
     expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
     expect(orthographicControls.target.x).toBe(0);
     expect(orthographicControls.target.y).toBe(0);
-    expect(appState.scenes.cameraStates['scene-open']?.zoom).toBeCloseTo(expectedDefault2DZoom);
+    expect(appState.scenes.navigation2DCameraStates['scene-open']?.zoom).toBeCloseTo(
+      expectedDefault2DZoom
+    );
   });
 
   it('maps drag pan deltas to exact 2D world offsets', () => {
@@ -1058,7 +1060,7 @@ describe('ViewportRendererService', () => {
 
     service.zoom2D(1.2);
 
-    const savedState = appState.scenes.cameraStates['scene-2d'];
+    const savedState = appState.scenes.navigation2DCameraStates['scene-2d'];
     expect(savedState?.zoom).toBeCloseTo(2.1);
     expect(savedState?.position.x).toBeCloseTo(140);
     expect(savedState?.position.y).toBeCloseTo(-80);
@@ -1074,6 +1076,55 @@ describe('ViewportRendererService', () => {
     expect(orthographicControls.target.x).toBeCloseTo(140);
     expect(orthographicControls.target.y).toBeCloseTo(-80);
     expect(orthographicCamera.zoom).toBeCloseTo(2.1);
+  });
+
+  it('ignores saved editor camera state when entering 2d navigation', () => {
+    resetAppState();
+    appState.scenes.activeSceneId = 'scene-2d';
+    appState.scenes.editorCameraStates['scene-2d'] = {
+      position: { x: 55, y: -35, z: 240 },
+      target: { x: 12, y: -9, z: 18 },
+      zoom: 0.4,
+    };
+
+    const service = new ViewportRendererService();
+    const orthographicCamera = new THREE.OrthographicCamera(-960, 960, 540, -540, 0.1, 1000);
+    orthographicCamera.position.set(40, -25, 100);
+    orthographicCamera.zoom = 2;
+    const orthographicControls = {
+      enabled: true,
+      enableZoom: true,
+      enablePan: true,
+      target: new THREE.Vector3(15, -10, 0),
+      update: vi.fn(),
+    };
+
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: orthographicCamera,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicControls', {
+      value: orthographicControls,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'requestRender', { value: vi.fn(), configurable: true });
+
+    appState.ui.navigationMode = '2d';
+
+    (
+      service as unknown as {
+        syncNavigationMode: () => void;
+      }
+    ).syncNavigationMode();
+
+    expect(orthographicCamera.position.x).toBe(0);
+    expect(orthographicCamera.position.y).toBe(0);
+    expect(orthographicCamera.zoom).toBeCloseTo(expectedDefault2DZoom);
+    expect(orthographicControls.target.x).toBe(0);
+    expect(orthographicControls.target.y).toBe(0);
+    expect(appState.scenes.navigation2DCameraStates['scene-2d']?.zoom).toBeCloseTo(
+      expectedDefault2DZoom
+    );
   });
 
   it('ticks previewable components in editor mode', () => {

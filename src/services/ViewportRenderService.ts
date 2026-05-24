@@ -1901,7 +1901,7 @@ export class ViewportRendererService {
       return;
     }
 
-    appState.scenes.cameraStates[sceneId] = {
+    appState.scenes.navigation2DCameraStates[sceneId] = {
       position: {
         x: this.orthographicCamera.position.x,
         y: this.orthographicCamera.position.y,
@@ -1923,7 +1923,7 @@ export class ViewportRendererService {
     const sceneId = appState.scenes.activeSceneId;
     if (!sceneId || !this.orthographicCamera || !this.orthographicControls) return;
 
-    const cameraState = appState.scenes.cameraStates[sceneId];
+    const cameraState = appState.scenes.navigation2DCameraStates[sceneId];
     if (!cameraState) {
       this.reset2DView();
       return;

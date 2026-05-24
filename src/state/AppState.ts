@@ -103,8 +103,10 @@ export interface ScenesState {
   /** Counter incremented when node data (properties, scripts) changes but hierarchy remains unchanged. */
   nodeDataChangeSignal: number;
 
-  /** Per-scene camera state keyed by scene id. */
-  cameraStates: Record<string, CameraState>;
+  /** Per-scene editor viewport camera state keyed by scene id. */
+  editorCameraStates: Record<string, CameraState>;
+  /** Per-scene 2D navigation camera state keyed by scene id. */
+  navigation2DCameraStates: Record<string, CameraState>;
   /** Per-scene camera node used for the viewport preview inset. */
   previewCameraNodeIds: Record<string, string | null>;
 }
@@ -471,7 +473,8 @@ export const createInitialAppState = (): AppState => ({
     lastLoadedAt: null,
     pendingScenePaths: [],
     nodeDataChangeSignal: 0,
-    cameraStates: {},
+    editorCameraStates: {},
+    navigation2DCameraStates: {},
     previewCameraNodeIds: {},
   },
   animations: {

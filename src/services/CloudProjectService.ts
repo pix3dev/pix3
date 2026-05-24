@@ -328,7 +328,8 @@ export class CloudProjectService {
     appState.scenes.lastLoadedAt = null;
     appState.scenes.pendingScenePaths = [];
     appState.scenes.nodeDataChangeSignal = 0;
-    appState.scenes.cameraStates = {};
+    appState.scenes.editorCameraStates = {};
+    appState.scenes.navigation2DCameraStates = {};
     appState.scenes.previewCameraNodeIds = {};
     appState.tabs.tabs = [];
     appState.tabs.activeTabId = null;
