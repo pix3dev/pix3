@@ -10,12 +10,18 @@ import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { KeybindingService } from '@/services/KeybindingService';
 import { NodeRegistry } from '@/services/NodeRegistry';
 import { NodeTypePickerService } from '@/services/NodeTypePickerService';
+import { AddModelCommand } from '@/features/scene/AddModelCommand';
+import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
 import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstanceCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { SceneManager } from '@pix3/runtime';
 import { ServiceContainer } from '@/fw/di';
+import {
+  classifySceneCreateAssetResource,
+  deriveAssetNodeName,
+} from '@/ui/shared/asset-drag-drop';
 import { DropdownPortal } from '../shared/dropdown-portal';
 import {
   isPrefabChildNode,
@@ -40,19 +46,6 @@ interface NodeAssetDropDetail {
   position: 'before' | 'inside' | 'after';
   resourcePath: string;
 }
-
-const IMAGE_EXTENSIONS = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'svg',
-  'tif',
-  'tiff',
-  'avif',
-]);
 
 @customElement('pix3-scene-tree-panel')
 export class SceneTreePanel extends ComponentBase {
@@ -660,7 +653,12 @@ export class SceneTreePanel extends ComponentBase {
       }
     }
 
-    if (this.isPrefabResource(resourcePath)) {
+    const assetKind = classifySceneCreateAssetResource(resourcePath);
+    if (!assetKind) {
+      return;
+    }
+
+    if (assetKind === 'prefab') {
       const command = new CreatePrefabInstanceCommand({
         prefabPath: resourcePath,
         parentNodeId,
@@ -670,35 +668,37 @@ export class SceneTreePanel extends ComponentBase {
       return;
     }
 
-    if (this.isImageResource(resourcePath)) {
+    if (assetKind === 'image') {
       const command = new CreateSprite2DCommand({
         texturePath: resourcePath,
-        spriteName: this.deriveSpriteName(resourcePath),
+        spriteName: deriveAssetNodeName(resourcePath, 'Sprite2D'),
+        parentNodeId,
+        insertIndex,
+      });
+      await this.commandDispatcher.execute(command);
+      return;
+    }
+
+    if (assetKind === 'animation') {
+      const command = new CreateAnimatedSprite2DCommand({
+        nodeName: deriveAssetNodeName(resourcePath, 'AnimatedSprite2D'),
+        animationResourcePath: resourcePath,
+        parentNodeId,
+        insertIndex,
+      });
+      await this.commandDispatcher.execute(command);
+      return;
+    }
+
+    if (assetKind === 'model') {
+      const command = new AddModelCommand({
+        modelPath: resourcePath,
+        modelName: deriveAssetNodeName(resourcePath, 'Model'),
         parentNodeId,
         insertIndex,
       });
       await this.commandDispatcher.execute(command);
     }
-  }
-
-  private isPrefabResource(resourcePath: string): boolean {
-    return resourcePath.toLowerCase().endsWith('.pix3scene');
-  }
-
-  private isImageResource(resourcePath: string): boolean {
-    const normalized = resourcePath.toLowerCase().split('?')[0].split('#')[0];
-    const extension = normalized.includes('.') ? (normalized.split('.').pop() ?? '') : '';
-    return IMAGE_EXTENSIONS.has(extension);
-  }
-
-  private deriveSpriteName(resourcePath: string): string {
-    const normalized = resourcePath.replace(/\\/g, '/');
-    const fileName = normalized.split('/').pop() ?? 'Sprite2D';
-    const dotIndex = fileName.lastIndexOf('.');
-    if (dotIndex <= 0) {
-      return fileName || 'Sprite2D';
-    }
-    return fileName.slice(0, dotIndex) || 'Sprite2D';
   }
 
   private onNodeDragStart(event: CustomEvent): void {

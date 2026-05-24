@@ -7,11 +7,15 @@ import {
   type AssetPreviewItem,
   type AssetsPreviewSnapshot,
 } from '@/services';
+import {
+  ASSET_PATH_LIST_MIME,
+  ASSET_PATH_MIME,
+  ASSET_RESOURCE_LIST_MIME,
+  ASSET_RESOURCE_MIME,
+  toProjectResourcePath,
+} from '@/ui/shared/asset-drag-drop';
 import './assets-preview-panel.ts.css';
 import '../shared/pix3-panel';
-
-const ASSET_RESOURCE_LIST_MIME = 'application/x-pix3-asset-resource-list';
-const ASSET_PATH_LIST_MIME = 'application/x-pix3-asset-path-list';
 
 @customElement('pix3-assets-preview-panel')
 export class AssetsPreviewPanel extends ComponentBase {
@@ -130,13 +134,13 @@ export class AssetsPreviewPanel extends ComponentBase {
       candidate => candidate.kind === 'file' && this.selectedPaths.has(candidate.path)
     );
     const itemsToDrag = selectedItems.length > 0 ? selectedItems : [item];
-    const resourcePaths = itemsToDrag.map(candidate => this.toResourcePath(candidate.path));
+    const resourcePaths = itemsToDrag.map(candidate => toProjectResourcePath(candidate.path));
     const plainPaths = itemsToDrag.map(candidate => candidate.path);
-    const resourcePath = resourcePaths[0] ?? this.toResourcePath(item.path);
+    const resourcePath = resourcePaths[0] ?? toProjectResourcePath(item.path);
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData('text/plain', plainPaths.join('\n'));
-    event.dataTransfer.setData('application/x-pix3-asset-path', plainPaths[0] ?? item.path);
-    event.dataTransfer.setData('application/x-pix3-asset-resource', resourcePath);
+    event.dataTransfer.setData(ASSET_PATH_MIME, plainPaths[0] ?? item.path);
+    event.dataTransfer.setData(ASSET_RESOURCE_MIME, resourcePath);
     event.dataTransfer.setData(ASSET_PATH_LIST_MIME, JSON.stringify(plainPaths));
     event.dataTransfer.setData(ASSET_RESOURCE_LIST_MIME, JSON.stringify(resourcePaths));
     event.dataTransfer.setData('text/uri-list', resourcePath);
@@ -200,19 +204,11 @@ export class AssetsPreviewPanel extends ComponentBase {
       name: item.name,
       path: item.path,
       kind: item.kind,
-      resourcePath: this.toResourcePath(item.path),
+      resourcePath: toProjectResourcePath(item.path),
       extension: item.extension,
     };
 
     await this.assetFileActivationService.handleActivation(activation);
-  }
-
-  private toResourcePath(path: string): string {
-    const normalizedPath = path
-      .replace(/\\+/g, '/')
-      .replace(/^(\.?\/)+/, '')
-      .replace(/^\/+/, '');
-    return `res://${normalizedPath}`;
   }
 
   private buildTooltip(item: AssetPreviewItem): string {

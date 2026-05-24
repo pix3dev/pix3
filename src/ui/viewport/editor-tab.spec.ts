@@ -1,0 +1,279 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { appState, resetAppState } from '@/state';
+import { ASSET_RESOURCE_MIME } from '@/ui/shared/asset-drag-drop';
+import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
+import type { CreateSprite2DOperationParams } from '@/features/scene/CreateSprite2DOperation';
+import { Group2D, Sprite2D, type NodeBase, type SceneGraph } from '@pix3/runtime';
+import { Vector2 } from 'three';
+
+const { EditorTabComponent } = await import('./editor-tab');
+
+describe('EditorTabComponent', () => {
+  beforeEach(() => {
+    resetAppState();
+
+    if (!globalThis.ResizeObserver) {
+      globalThis.ResizeObserver = class {
+        disconnect(): void {}
+        observe(): void {}
+        unobserve(): void {}
+      } as typeof ResizeObserver;
+    }
+  });
+
+  afterEach(() => {
+    resetAppState();
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('accepts asset drags on the internal shadow DOM panel surface', async () => {
+    const panel = new EditorTabComponent();
+    stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const dropSurface = panel.shadowRoot?.querySelector<HTMLElement>('.panel');
+    expect(dropSurface).not.toBeNull();
+
+    const dataTransfer = createDataTransfer([ASSET_RESOURCE_MIME]);
+    const dragOverEvent = new Event('dragover', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dragOverEvent, 'dataTransfer', {
+      value: dataTransfer,
+      configurable: true,
+    });
+
+    dropSurface?.dispatchEvent(dragOverEvent);
+    await panel.updateComplete;
+
+    expect(dragOverEvent.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe('copy');
+    expect(
+      panel.shadowRoot?.querySelector('.panel')?.classList.contains('panel--asset-dragover')
+    ).toBe(true);
+  });
+
+  it('creates a sprite command on image drop in the editor tab', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const dropSurface = panel.shadowRoot?.querySelector<HTMLElement>('.panel');
+    expect(dropSurface).not.toBeNull();
+
+    const dropEvent = new Event('drop', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dropEvent, 'dataTransfer', {
+      value: createDataTransfer(['text/uri-list'], {
+        'text/uri-list': 'res://assets/hero.png',
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(dropEvent, 'clientX', { value: 160, configurable: true });
+    Object.defineProperty(dropEvent, 'clientY', { value: 120, configurable: true });
+
+    dropSurface?.dispatchEvent(dropEvent);
+
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledWith(
+      expect.any(CreateSprite2DCommand)
+    );
+  });
+
+  it('creates a sprite command when the image is dropped on the viewport host', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const host = panel.shadowRoot?.querySelector<HTMLElement>('.viewport-host');
+    expect(host).not.toBeNull();
+
+    const dropEvent = new Event('drop', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dropEvent, 'dataTransfer', {
+      value: createDataTransfer(['text/uri-list'], {
+        'text/uri-list': 'res://assets/hero.png',
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(dropEvent, 'clientX', { value: 160, configurable: true });
+    Object.defineProperty(dropEvent, 'clientY', { value: 120, configurable: true });
+
+    host?.dispatchEvent(dropEvent);
+
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledWith(
+      expect.any(CreateSprite2DCommand)
+    );
+  });
+
+  it('parents dropped sprites into the compatible 2D container under the cursor', async () => {
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    const containerNode = new Group2D({
+      id: 'container-node',
+      name: 'UI Layer',
+      position: new Vector2(50, 60),
+    });
+    const childNode = new Sprite2D({
+      id: 'child-node',
+      name: 'Existing Sprite',
+      texturePath: 'res://assets/existing.png',
+      position: new Vector2(10, 15),
+      width: 32,
+      height: 32,
+    });
+    containerNode.add(childNode);
+    containerNode.updateWorldMatrix(true, true);
+
+    services.viewportRenderer.raycastObject.mockReturnValue(childNode as NodeBase);
+    services.viewportRenderer.resolve2DAssetDropPosition.mockReturnValue(new Vector2(110, 220));
+    services.sceneManager.getSceneGraph.mockReturnValue({
+      rootNodes: [containerNode],
+      nodeMap: new Map<string, NodeBase>([
+        [containerNode.nodeId, containerNode],
+        [childNode.nodeId, childNode],
+      ]),
+    } as unknown as SceneGraph);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const host = panel.shadowRoot?.querySelector<HTMLElement>('.viewport-host');
+    expect(host).not.toBeNull();
+
+    const dropEvent = new Event('drop', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dropEvent, 'dataTransfer', {
+      value: createDataTransfer(['text/uri-list'], {
+        'text/uri-list': 'res://assets/hero.png',
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(dropEvent, 'clientX', { value: 160, configurable: true });
+    Object.defineProperty(dropEvent, 'clientY', { value: 120, configurable: true });
+
+    host?.dispatchEvent(dropEvent);
+
+    const command = services.commandDispatcher.execute.mock.calls[0]?.[0];
+    expect(command).toBeInstanceOf(CreateSprite2DCommand);
+    const params = (command as unknown as { params: CreateSprite2DOperationParams }).params;
+    expect(params.parentNodeId).toBe('container-node');
+    expect(params.position?.x).toBeCloseTo(60);
+    expect(params.position?.y).toBeCloseTo(160);
+  });
+});
+
+function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
+  const stubCanvas = document.createElement('canvas');
+  vi.spyOn(stubCanvas, 'getBoundingClientRect').mockReturnValue({
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    bottom: 240,
+    right: 320,
+    width: 320,
+    height: 240,
+    toJSON: () => ({}),
+  });
+
+  const commandDispatcher = {
+    execute: vi.fn<(command: unknown) => Promise<boolean>>(async () => false),
+    executeById: vi.fn<(id: string) => Promise<boolean>>(async () => false),
+  };
+  const viewportRenderer = {
+    initialize: vi.fn(),
+    attachToHost: vi.fn(),
+    pause: vi.fn(),
+    requestRender: vi.fn(),
+    resize: vi.fn(),
+    raycastObject: vi.fn<(x: number, y: number) => NodeBase | null>(() => null),
+    resolve2DAssetDropPosition: vi.fn<(x: number, y: number) => Vector2 | null>(
+      () => new Vector2(10, 20)
+    ),
+    setTransformMode: vi.fn(),
+    updateSelection: vi.fn(),
+    getCanvasElement: vi.fn(() => stubCanvas),
+    get2DHandleAt: vi.fn(() => 'idle'),
+    has2DTransform: vi.fn(() => false),
+  };
+  const sceneManager = {
+    getSceneGraph: vi.fn<(sceneId: string) => SceneGraph | null>(() => null),
+  };
+
+  Object.defineProperty(panel, 'viewportRenderer', {
+    value: viewportRenderer,
+    configurable: true,
+  });
+
+  Object.defineProperty(panel, 'commandDispatcher', {
+    value: commandDispatcher,
+    configurable: true,
+  });
+
+  Object.defineProperty(panel, 'iconService', {
+    value: {
+      getIcon: vi.fn(() => 'icon'),
+    },
+    configurable: true,
+  });
+
+  Object.defineProperty(panel, 'navigation2D', {
+    value: {
+      startPan: vi.fn(),
+      endPan: vi.fn(),
+      updatePan: vi.fn(),
+      clearTouchState: vi.fn(),
+      handleWheel: vi.fn(),
+      isTouchGestureActive: vi.fn(() => false),
+      isTouchPointerTracked: vi.fn(() => false),
+      startTouchPointer: vi.fn(),
+      updateTouchPointer: vi.fn(() => false),
+      endTouchPointer: vi.fn(() => false),
+      updateTouchPan: vi.fn(),
+    },
+    configurable: true,
+  });
+
+  Object.defineProperty(panel, 'sceneManager', {
+    value: sceneManager,
+    configurable: true,
+  });
+
+  return {
+    commandDispatcher,
+    viewportRenderer,
+    sceneManager,
+  };
+}
+
+function createDataTransfer(
+  types: string[],
+  values: Record<string, string> = {}
+): DataTransfer {
+  return {
+    dropEffect: 'none',
+    getData: vi.fn((type: string) => values[type] ?? ''),
+    types,
+  } as unknown as DataTransfer;
+}

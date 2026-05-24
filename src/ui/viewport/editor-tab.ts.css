@@ -27,6 +27,12 @@
     inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.5);
 }
 
+.panel--asset-dragover {
+  box-shadow:
+    inset 0 0 0 2px var(--pix3-nav-border),
+    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.6);
+}
+
 .top-toolbar {
   display: flex;
   align-items: center;

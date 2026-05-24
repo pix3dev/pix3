@@ -16,6 +16,11 @@ import {
   selectObjectRange,
 } from '@/features/selection/SelectObjectCommand';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import {
+  classifySceneCreateAssetResource,
+  getDroppedAssetResourcePath,
+  hasAssetDragData,
+} from '@/ui/shared/asset-drag-drop';
 
 import './scene-tree-node.ts.css';
 
@@ -55,21 +60,6 @@ interface NodeAssetDropDetail {
   position: 'before' | 'inside' | 'after';
   resourcePath: string;
 }
-
-const ASSET_RESOURCE_MIME = 'application/x-pix3-asset-resource';
-const ASSET_PATH_MIME = 'application/x-pix3-asset-path';
-const IMAGE_EXTENSIONS = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'svg',
-  'tif',
-  'tiff',
-  'avif',
-]);
 
 @customElement('pix3-scene-tree-node')
 export class SceneTreeNodeComponent extends ComponentBase {
@@ -641,7 +631,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
     event.preventDefault();
     event.stopPropagation();
 
-    const hasAssetResource = this.getDroppedResourcePath(event.dataTransfer ?? null) !== null;
+    const hasAssetResource = hasAssetDragData(event.dataTransfer ?? null);
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = hasAssetResource ? 'copy' : 'move';
     }
@@ -752,38 +742,12 @@ export class SceneTreeNodeComponent extends ComponentBase {
   }
 
   private getDroppedResourcePath(dataTransfer: DataTransfer | null): string | null {
-    if (!dataTransfer) {
-      return null;
-    }
-
-    const fromResource = dataTransfer.getData(ASSET_RESOURCE_MIME);
-    const fromPath = dataTransfer.getData(ASSET_PATH_MIME);
-    const plain = dataTransfer.getData('text/plain');
-    const raw = fromResource || fromPath || plain;
-    if (!raw) {
-      return null;
-    }
-
-    const normalized = raw.trim().replace(/\\/g, '/');
-    const resourcePath = normalized.startsWith('res://')
-      ? normalized
-      : `res://${normalized.replace(/^\/+/, '')}`;
-
-    if (!this.isPrefabResource(resourcePath) && !this.isImageResource(resourcePath)) {
+    const resourcePath = getDroppedAssetResourcePath(dataTransfer);
+    if (!resourcePath || !classifySceneCreateAssetResource(resourcePath)) {
       return null;
     }
 
     return resourcePath;
-  }
-
-  private isPrefabResource(resourcePath: string): boolean {
-    return resourcePath.toLowerCase().endsWith('.pix3scene');
-  }
-
-  private isImageResource(resourcePath: string): boolean {
-    const normalized = resourcePath.toLowerCase().split('?')[0].split('#')[0];
-    const extension = normalized.includes('.') ? (normalized.split('.').pop() ?? '') : '';
-    return IMAGE_EXTENSIONS.has(extension);
   }
 
   private async performReparent(

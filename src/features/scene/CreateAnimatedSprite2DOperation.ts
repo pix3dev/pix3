@@ -1,4 +1,6 @@
 import { CreateNodeOperationBase } from '@/core/CreateNodeOperationBase';
+import type { OperationContext } from '@/core/Operation';
+import { resolve2DParentForCreation } from '@/features/scene/node-placement';
 import { AnimatedSprite2D, type SceneGraph } from '@pix3/runtime';
 import { Vector2 } from 'three';
 
@@ -6,6 +8,7 @@ export interface CreateAnimatedSprite2DOperationParams {
   nodeName?: string;
   position?: Vector2;
   parentNodeId?: string | null;
+  insertIndex?: number;
   animationResourcePath?: string | null;
   currentClip?: string;
 }
@@ -29,6 +32,16 @@ export class CreateAnimatedSprite2DOperation extends CreateNodeOperationBase<Cre
 
   protected getNodeTypeName(): string {
     return 'AnimatedSprite2D';
+  }
+
+  protected resolveParentNode(
+    sceneGraph: SceneGraph,
+    _context: OperationContext,
+    params: CreateAnimatedSprite2DOperationParams
+  ): SceneGraph['rootNodes'][0] | null {
+    return resolve2DParentForCreation(sceneGraph, params.parentNodeId ?? null, null) as
+      | SceneGraph['rootNodes'][0]
+      | null;
   }
 
   protected createNode(params: CreateAnimatedSprite2DOperationParams, nodeId: string) {

@@ -9,12 +9,22 @@ import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { IconService } from '@/services/IconService';
 import { Navigation2DController } from '@/services/Navigation2DController';
 import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
+import { Vector2, Vector3 } from 'three';
 import { selectObject } from '@/features/selection/SelectObjectCommand';
+import { AddModelCommand } from '@/features/scene/AddModelCommand';
+import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
+import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { toggleNavigationMode } from '@/features/viewport/ToggleNavigationModeCommand';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
 import type { Align2DActionId } from '@/features/alignment/types';
+import {
+  classifySceneCreateAssetResource,
+  deriveAssetNodeName,
+  getDroppedAssetResourcePath,
+  hasAssetDragData,
+} from '@/ui/shared/asset-drag-drop';
 import { renderAlignmentToolbarOverlay, renderViewportToolbar } from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
@@ -86,6 +96,9 @@ export class EditorTabComponent extends ComponentBase {
 
   @state()
   private canDistributeSelection = false;
+
+  @state()
+  private isAssetDragOver = false;
 
   private readonly resizeObserver = new ResizeObserver(entries => {
     const entry = entries[0];
@@ -204,11 +217,15 @@ export class EditorTabComponent extends ComponentBase {
 
     return html`
       <section
-        class="panel"
+        class="panel ${this.isAssetDragOver ? 'panel--asset-dragover' : ''}"
         role="region"
         aria-label="Editor tab"
         tabindex="0"
         data-nav-mode="${this.navigationMode}"
+        @dragenter=${this.handleDragOver}
+        @dragover=${this.handleDragOver}
+        @drop=${this.handleDrop}
+        @dragleave=${this.handleDragLeave}
       >
         <div class="viewport-toolbar-shell">
           ${renderViewportToolbar(
@@ -245,7 +262,14 @@ export class EditorTabComponent extends ComponentBase {
           )}
         </div>
 
-        <div class="viewport-host" part="canvas-host">
+        <div
+          class="viewport-host"
+          part="canvas-host"
+          @dragenter=${this.handleDragOver}
+          @dragover=${this.handleDragOver}
+          @drop=${this.handleDrop}
+          @dragleave=${this.handleDragLeave}
+        >
           ${renderAlignmentToolbarOverlay(
             {
               showAlignmentTools,
@@ -261,6 +285,188 @@ export class EditorTabComponent extends ComponentBase {
         </div>
       </section>
     `;
+  }
+
+  private handleDragOver = (event: DragEvent): void => {
+    if (!hasAssetDragData(event.dataTransfer ?? null)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    this.isAssetDragOver = true;
+  };
+
+  private handleDragLeave = (_event: DragEvent): void => {
+    this.isAssetDragOver = false;
+  };
+
+  private handleDrop = (event: DragEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const resourcePath = getDroppedAssetResourcePath(event.dataTransfer ?? null);
+    this.isAssetDragOver = false;
+    if (!resourcePath) {
+      return;
+    }
+
+    const assetKind = classifySceneCreateAssetResource(resourcePath);
+    if (!assetKind || assetKind === 'prefab') {
+      return;
+    }
+
+    const screenPoint = this.getViewportScreenPoint(event);
+
+    if (assetKind === 'image') {
+      const placement = this.resolve2DAssetDropPlacement(screenPoint);
+      const command = new CreateSprite2DCommand({
+        texturePath: resourcePath,
+        spriteName: deriveAssetNodeName(resourcePath, 'Sprite2D'),
+        parentNodeId: placement.parentNodeId,
+        position: placement.position,
+      });
+      void this.commandDispatcher.execute(command);
+      return;
+    }
+
+    if (assetKind === 'animation') {
+      const placement = this.resolve2DAssetDropPlacement(screenPoint);
+      const command = new CreateAnimatedSprite2DCommand({
+        nodeName: deriveAssetNodeName(resourcePath, 'AnimatedSprite2D'),
+        animationResourcePath: resourcePath,
+        parentNodeId: placement.parentNodeId,
+        position: placement.position,
+      });
+      void this.commandDispatcher.execute(command);
+      return;
+    }
+
+    if (assetKind === 'model') {
+      const command = new AddModelCommand({
+        modelPath: resourcePath,
+        modelName: deriveAssetNodeName(resourcePath, 'Model'),
+        viewportScreenPoint: screenPoint,
+      });
+      void this.commandDispatcher.execute(command);
+    }
+  };
+
+  private getViewportScreenPoint(event: DragEvent): { x: number; y: number } | null {
+    const canvas = this.viewportRenderer.getCanvasElement();
+    if (!canvas) {
+      return null;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      return null;
+    }
+
+    return {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    };
+  }
+
+  private resolve2DAssetDropPlacement(screenPoint: { x: number; y: number } | null): {
+    parentNodeId?: string | null;
+    position?: Vector2;
+  } {
+    const worldPoint = screenPoint
+      ? this.viewportRenderer.resolve2DAssetDropPosition(screenPoint.x, screenPoint.y)
+      : null;
+    const parentNode = screenPoint ? this.resolve2DDropParentNode(screenPoint) : null;
+
+    if (!worldPoint) {
+      return {
+        parentNodeId: parentNode?.nodeId,
+      };
+    }
+
+    if (!parentNode) {
+      return {
+        position: worldPoint,
+      };
+    }
+
+    parentNode.updateWorldMatrix(true, false);
+    const localPosition = parentNode.worldToLocal(new Vector3(worldPoint.x, worldPoint.y, 0));
+    return {
+      parentNodeId: parentNode.nodeId,
+      position: new Vector2(localPosition.x, localPosition.y),
+    };
+  }
+
+  private resolve2DDropParentNode(screenPoint: { x: number; y: number }): Node2D | null {
+    const normalizedPoint = this.getViewportNormalizedPoint(screenPoint);
+    const hitNode = normalizedPoint
+      ? this.viewportRenderer.raycastObject(normalizedPoint.x, normalizedPoint.y)
+      : null;
+    const hitParent = this.getCompatible2DDropParent(hitNode);
+    if (hitParent) {
+      return hitParent;
+    }
+
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      return null;
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      return null;
+    }
+
+    const selectedNodeId = appState.selection.primaryNodeId ?? appState.selection.nodeIds[0] ?? null;
+    const selectedNode = selectedNodeId ? (sceneGraph.nodeMap.get(selectedNodeId) ?? null) : null;
+    const selectedParent = this.getCompatible2DDropParent(selectedNode);
+    if (selectedParent) {
+      return selectedParent;
+    }
+
+    const uiLayer = sceneGraph.rootNodes.find(
+      node => node instanceof Node2D && node.isContainer && node.name === 'UI Layer'
+    );
+    if (uiLayer instanceof Node2D) {
+      return uiLayer;
+    }
+
+    const compatibleRootNodes = sceneGraph.rootNodes.filter(
+      (node): node is Node2D => node instanceof Node2D && node.isContainer
+    );
+    return compatibleRootNodes.length === 1 ? compatibleRootNodes[0] ?? null : null;
+  }
+
+  private getCompatible2DDropParent(node: NodeBase | null): Node2D | null {
+    if (node instanceof Node2D && node.isContainer) {
+      return node;
+    }
+
+    const parentNode = node?.parentNode;
+    return parentNode instanceof Node2D && parentNode.isContainer ? parentNode : null;
+  }
+
+  private getViewportNormalizedPoint(screenPoint: { x: number; y: number }): {
+    x: number;
+    y: number;
+  } | null {
+    const canvas = this.viewportRenderer.getCanvasElement();
+    if (!canvas) {
+      return null;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      return null;
+    }
+
+    return {
+      x: screenPoint.x / bounds.width,
+      y: screenPoint.y / bounds.height,
+    };
   }
 
   private syncActiveState(): void {

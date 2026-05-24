@@ -623,7 +623,7 @@ export class ViewportRendererService {
     this.setOrbitEnabled(!is2DMode);
     if (this.orthographicControls) {
       // Disable orthographic controls entirely in 2D mode.
-      // We handle pan/zoom gestures manually in ViewportPanel and call pan2D/zoom2D.
+      // We handle pan/zoom gestures manually in EditorTabComponent and call pan2D/zoom2D.
       // Keeping it enabled would cause it to intercept and swallow wheel/pointer events
       // via internal event.stopPropagation(), preventing the UI components from
       // receiving them for our custom gesture handling.
@@ -1888,6 +1888,41 @@ export class ViewportRendererService {
     }
 
     this.saveZoomToState();
+  }
+
+  resolve2DAssetDropPosition(screenX: number, screenY: number): THREE.Vector2 | null {
+    const worldPoint = this.screenToWorld2D(screenX, screenY);
+    if (!worldPoint) {
+      return null;
+    }
+
+    return new THREE.Vector2(worldPoint.x, worldPoint.y);
+  }
+
+  resolve3DAssetDropPosition(
+    screenX: number,
+    screenY: number,
+    objectSize?: THREE.Vector3 | null
+  ): THREE.Vector3 | null {
+    if (!this.camera) {
+      return null;
+    }
+
+    const ndc = this.toNdc(screenX, screenY);
+    if (!ndc) {
+      return this.resolve3DAssetDropFallback(objectSize);
+    }
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, this.camera);
+
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const intersection = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, intersection)) {
+      return intersection;
+    }
+
+    return this.resolve3DAssetDropFallback(objectSize);
   }
 
   /**
@@ -5629,6 +5664,37 @@ export class ViewportRendererService {
     const { width, height } = this.viewportSize;
     if (width <= 0 || height <= 0) return null;
     return new THREE.Vector2((screenX / width) * 2 - 1, -(screenY / height) * 2 + 1);
+  }
+
+  private resolve3DAssetDropFallback(objectSize?: THREE.Vector3 | null): THREE.Vector3 | null {
+    if (!this.camera) {
+      return null;
+    }
+
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    if (forward.lengthSq() === 0) {
+      forward.set(0, 0, -1);
+    }
+    forward.normalize();
+
+    if (this.camera instanceof THREE.PerspectiveCamera) {
+      const maxDim = Math.max(objectSize?.x ?? 1, objectSize?.y ?? 1, objectSize?.z ?? 1, 0.001);
+      const fov = MathUtils.degToRad(this.camera.fov);
+      const distance = Math.max(
+        (maxDim * 1.5) / Math.tan(fov / 2),
+        this.camera.near + maxDim,
+        1
+      );
+
+      return this.camera.position.clone().add(forward.multiplyScalar(distance));
+    }
+
+    const orbitDistance = this.orbitControls
+      ? this.camera.position.distanceTo(this.orbitControls.target)
+      : Math.max(objectSize?.length() ?? 1, 10);
+
+    return this.camera.position.clone().add(forward.multiplyScalar(Math.max(orbitDistance, 1)));
   }
 
   private screenToWorld2D(screenX: number, screenY: number): THREE.Vector3 | null {

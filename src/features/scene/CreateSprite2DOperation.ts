@@ -1,5 +1,6 @@
 import { CreateNodeOperationBase } from '@/core/CreateNodeOperationBase';
 import type { OperationContext } from '@/core/Operation';
+import { resolve2DParentForCreation } from '@/features/scene/node-placement';
 import { AssetLoader, Sprite2D, type SceneGraph } from '@pix3/runtime';
 import { Vector2 } from 'three';
 
@@ -28,6 +29,16 @@ export class CreateSprite2DOperation extends CreateNodeOperationBase<CreateSprit
   }
   protected getNodeTypeName(): string {
     return 'Sprite2D';
+  }
+
+  protected resolveParentNode(
+    sceneGraph: SceneGraph,
+    _context: OperationContext,
+    params: CreateSprite2DOperationParams
+  ): SceneGraph['rootNodes'][0] | null {
+    return resolve2DParentForCreation(sceneGraph, params.parentNodeId ?? null, null) as
+      | SceneGraph['rootNodes'][0]
+      | null;
   }
 
   protected async createNode(

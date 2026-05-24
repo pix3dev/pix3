@@ -4,15 +4,24 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { MeshInstance } from '@pix3/runtime';
-import { SceneManager } from '@pix3/runtime';
-import { AssetLoader } from '@pix3/runtime';
-import { attachNode, detachNode, resolveDefault3DParent } from '@/features/scene/node-placement';
+import { AssetLoader, MeshInstance, Node3D, SceneManager } from '@pix3/runtime';
+import { Box3, Vector3 } from 'three';
+import { ViewportRendererService } from '@/services/ViewportRenderService';
+import {
+  insertNodeAtIndex,
+  removeNodeFromSceneGraph,
+  resolveDefault3DParent,
+  resolvePlacementParent,
+} from '@/features/scene/node-placement';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 
 export interface AddModelOperationParams {
   modelPath: string; // res:// path to .glb/.gltf file
   modelName?: string;
+  parentNodeId?: string | null;
+  insertIndex?: number;
+  position?: Vector3;
+  viewportScreenPoint?: { x: number; y: number } | null;
 }
 
 export class AddModelOperation implements Operation<OperationInvokeResult> {
@@ -63,27 +72,56 @@ export class AddModelOperation implements Operation<OperationInvokeResult> {
       return { didMutate: false };
     }
 
-    const targetParent = resolveDefault3DParent(sceneGraph);
-    attachNode(sceneGraph, node, targetParent);
+    const hasExplicitHierarchyPlacement =
+      this.params.parentNodeId !== undefined || typeof this.params.insertIndex === 'number';
+    const explicitParent = resolvePlacementParent(sceneGraph, this.params.parentNodeId ?? null);
+    const defaultParent = resolveDefault3DParent(sceneGraph);
+    const targetParent =
+      explicitParent instanceof Node3D
+        ? explicitParent
+        : hasExplicitHierarchyPlacement
+          ? null
+          : defaultParent instanceof Node3D
+            ? defaultParent
+            : null;
+    const parentNodeId = targetParent?.nodeId ?? null;
+
+    const dropPosition = this.resolveDropPosition(context, node);
+    if (dropPosition) {
+      this.applyWorldPosition(node, targetParent, dropPosition);
+    }
+
+    const insertIndex = insertNodeAtIndex(sceneGraph, node, targetParent, this.params.insertIndex);
+    sceneGraph.nodeMap.set(node.nodeId, node);
 
     SceneStateUpdater.updateHierarchyState(state, activeSceneId, sceneGraph);
     SceneStateUpdater.markSceneDirty(state, activeSceneId);
+    SceneStateUpdater.selectNode(state, node.nodeId);
     state.scenes.lastLoadedAt = Date.now();
+
+    const resolveCommittedParent = () => {
+      const parent = resolvePlacementParent(sceneGraph, parentNodeId);
+      return parent instanceof Node3D ? parent : null;
+    };
 
     return {
       didMutate: true,
       commit: {
         label: `Add model: ${modelName}`,
         undo: () => {
-          detachNode(sceneGraph, node, targetParent);
+          removeNodeFromSceneGraph(sceneGraph, node);
+          sceneGraph.nodeMap.delete(node.nodeId);
           SceneStateUpdater.updateHierarchyState(state, activeSceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, activeSceneId);
+          SceneStateUpdater.clearSelectionIfTargeted(state, node.nodeId);
           state.scenes.lastLoadedAt = Date.now();
         },
         redo: () => {
-          attachNode(sceneGraph, node, targetParent);
+          insertNodeAtIndex(sceneGraph, node, resolveCommittedParent(), insertIndex);
+          sceneGraph.nodeMap.set(node.nodeId, node);
           SceneStateUpdater.updateHierarchyState(state, activeSceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, activeSceneId);
+          SceneStateUpdater.selectNode(state, node.nodeId);
           state.scenes.lastLoadedAt = Date.now();
         },
       },
@@ -94,5 +132,40 @@ export class AddModelOperation implements Operation<OperationInvokeResult> {
     // Extract filename from path, e.g., "res://models/cube.glb" -> "cube"
     const match = modelPath.match(/\/([^/]+)\.(glb|gltf)$/i);
     return match ? match[1] : 'Model';
+  }
+
+  private resolveDropPosition(
+    context: OperationContext,
+    node: MeshInstance
+  ): Vector3 | null {
+    if (this.params.position) {
+      return this.params.position.clone();
+    }
+
+    const screenPoint = this.params.viewportScreenPoint;
+    if (!screenPoint) {
+      return null;
+    }
+
+    const viewportRenderer = context.container.getService<ViewportRendererService>(
+      context.container.getOrCreateToken(ViewportRendererService)
+    );
+    const modelBounds = new Box3().setFromObject(node);
+    const modelSize = modelBounds.getSize(new Vector3());
+
+    return viewportRenderer.resolve3DAssetDropPosition(screenPoint.x, screenPoint.y, modelSize);
+  }
+
+  private applyWorldPosition(
+    node: MeshInstance,
+    parentNode: Node3D | null,
+    worldPosition: Vector3
+  ): void {
+    if (parentNode) {
+      node.position.copy(parentNode.worldToLocal(worldPosition.clone()));
+      return;
+    }
+
+    node.position.copy(worldPosition);
   }
 }

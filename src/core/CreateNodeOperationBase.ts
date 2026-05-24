@@ -1,12 +1,22 @@
 import type { SceneGraph } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { SceneStateUpdater } from './SceneStateUpdater';
+import {
+  insertNodeAtIndex,
+  removeNodeFromSceneGraph,
+  resolvePlacementParent,
+  type IndexedNodePlacement,
+} from '@/features/scene/node-placement';
 import type {
   Operation,
   OperationContext,
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
+
+const isIndexedNodePlacement = (params: unknown): params is IndexedNodePlacement => {
+  return typeof params === 'object' && params !== null;
+};
 
 export abstract class CreateNodeOperationBase<TParams> implements Operation<OperationInvokeResult> {
   protected abstract getMetadataId(): string;
@@ -47,6 +57,21 @@ export abstract class CreateNodeOperationBase<TParams> implements Operation<Oper
     return this.getNodeTypeName();
   }
 
+  protected getPlacementParams(params: TParams = this.params): IndexedNodePlacement {
+    return isIndexedNodePlacement(params) ? params : {};
+  }
+
+  protected resolveParentNode(
+    sceneGraph: SceneGraph,
+    _context: OperationContext,
+    params: TParams
+  ): SceneGraph['rootNodes'][0] | null {
+    const placement = this.getPlacementParams(params);
+    return resolvePlacementParent(sceneGraph, placement.parentNodeId ?? null) as
+      | SceneGraph['rootNodes'][0]
+      | null;
+  }
+
   async perform(context: OperationContext): Promise<OperationInvokeResult> {
     const { state, container } = context;
     const sceneId = state.scenes.activeSceneId;
@@ -70,36 +95,39 @@ export abstract class CreateNodeOperationBase<TParams> implements Operation<Oper
 
     const nodeId = this.generateNodeId();
     const node = await this.createNode(this.params, nodeId, context);
+    const placement = this.getPlacementParams();
+    const parentNode = this.resolveParentNode(sceneGraph, context, this.params);
+    const parentNodeId = parentNode?.nodeId ?? null;
+    const insertIndex = insertNodeAtIndex(sceneGraph, node, parentNode, placement.insertIndex);
+    const createdNodeId = node.nodeId;
 
-    sceneGraph.rootNodes.push(node);
-    sceneGraph.nodeMap.set(nodeId, node);
+    sceneGraph.nodeMap.set(createdNodeId, node);
 
     SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
     SceneStateUpdater.markSceneDirty(state, sceneId);
-    SceneStateUpdater.selectNode(state, nodeId);
+    SceneStateUpdater.selectNode(state, createdNodeId);
 
     const nodeName = this.getNodeName();
+    const resolveCommittedParent = () => resolvePlacementParent(sceneGraph, parentNodeId);
 
     return {
       didMutate: true,
       commit: {
         label: `Create ${nodeName}`,
         undo: () => {
-          sceneGraph.rootNodes = sceneGraph.rootNodes.filter(
-            (n: { nodeId: string }) => n.nodeId !== nodeId
-          );
-          sceneGraph.nodeMap.delete(nodeId);
+          removeNodeFromSceneGraph(sceneGraph, node);
+          sceneGraph.nodeMap.delete(createdNodeId);
 
           SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, sceneId);
-          SceneStateUpdater.clearSelectionIfTargeted(state, nodeId);
+          SceneStateUpdater.clearSelectionIfTargeted(state, createdNodeId);
         },
         redo: () => {
-          sceneGraph.rootNodes.push(node);
-          sceneGraph.nodeMap.set(nodeId, node);
+          insertNodeAtIndex(sceneGraph, node, resolveCommittedParent(), insertIndex);
+          sceneGraph.nodeMap.set(createdNodeId, node);
           SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, sceneId);
-          SceneStateUpdater.selectNode(state, nodeId);
+          SceneStateUpdater.selectNode(state, createdNodeId);
         },
       },
     };
