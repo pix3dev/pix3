@@ -67,13 +67,11 @@ export class Button2D extends UIControl2D {
         super.tick(dt);
         if (!this.input) return;
 
-        const pointer = this.input.pointerPosition;
         const isDown = this.input.isPointerDown;
+        const pointerWorld = this.getPointerWorldPosition();
+        if (!pointerWorld) return;
 
-        const pointerWorldX = pointer.x - this.input.width / 2;
-        const pointerWorldY = (this.input.height / 2) - pointer.y;
-
-        this.updatePointerState(pointerWorldX, pointerWorldY, isDown);
+        this.updatePointerState(pointerWorld.x, pointerWorld.y, isDown);
     }
 
     protected override onPress(isPressed: boolean): void {

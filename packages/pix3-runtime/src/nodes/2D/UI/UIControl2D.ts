@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { ScrollContainer2D } from './ScrollContainer2D';
 
 export interface UIControl2DProps extends Node2DProps {
   enabled?: boolean;
@@ -138,7 +139,7 @@ export abstract class UIControl2D extends Node2D {
     isDown: boolean
   ): void {
     const pointerPos = new Vector2(pointerWorldX, pointerWorldY);
-    const isInBounds = this.isPointInBounds(pointerPos);
+    const isInBounds = this.isPointerAllowedByAncestorScrollContainers(pointerPos) && this.isPointInBounds(pointerPos);
 
     // Handle hover state
     if (isInBounds && !this.isHovering && this.enabled) {
@@ -191,6 +192,20 @@ export abstract class UIControl2D extends Node2D {
    */
   protected onPress(_isPressed: boolean): void {
     // Default: no visual change
+  }
+
+  private isPointerAllowedByAncestorScrollContainers(pointerPos: Vector2): boolean {
+    let currentParent = this.parent;
+    while (currentParent) {
+      if (currentParent instanceof ScrollContainer2D) {
+        if (!currentParent.isPointInViewportBounds(pointerPos) || currentParent.hasActivePointerCapture()) {
+          return false;
+        }
+      }
+      currentParent = currentParent.parent;
+    }
+
+    return true;
   }
 
   /**

@@ -11,6 +11,7 @@ import { CreateMeshInstanceCommand } from '@/features/scene/CreateMeshInstanceCo
 import { CreateSprite3DCommand } from '@/features/scene/CreateSprite3DCommand';
 import { CreateJoystick2DCommand } from '@/features/scene/CreateJoystick2DCommand';
 import { CreateButton2DCommand } from '@/features/scene/CreateButton2DCommand';
+import { CreateScrollContainer2DCommand } from '@/features/scene/CreateScrollContainer2DCommand';
 import { CreateSlider2DCommand } from '@/features/scene/CreateSlider2DCommand';
 import { CreateBar2DCommand } from '@/features/scene/CreateBar2DCommand';
 import { CreateCheckbox2DCommand } from '@/features/scene/CreateCheckbox2DCommand';
@@ -111,6 +112,18 @@ export class NodeRegistry {
       icon: 'gamepad',
       keywords: ['create', 'joystick', '2d', 'input', 'control'],
       order: 3,
+    });
+    this.registerNodeType({
+      id: 'scrollcontainer2d',
+      displayName: 'ScrollContainer2D',
+      description: 'Scrollable 2D viewport container for overflow content',
+      category: '2D',
+      subcategory: 'UI',
+      commandClass: CreateScrollContainer2DCommand,
+      color: '#96cbf6ff',
+      icon: 'layout',
+      keywords: ['create', 'scroll', 'container', '2d', 'ui', 'viewport', 'panel'],
+      order: 3.5,
     });
     this.registerNodeType({
       id: 'button2d',

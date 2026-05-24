@@ -12,8 +12,8 @@ export class Group2D extends Node2D {
   private _width: number;
   private _height: number;
 
-  constructor(props: Group2DProps) {
-    super(props, 'Group2D');
+  constructor(props: Group2DProps, nodeType: string = 'Group2D') {
+    super(props, nodeType);
 
     this._width = Number.isFinite(props.width) ? Math.max(0, props.width ?? 0) : 100;
     this._height = Number.isFinite(props.height) ? Math.max(0, props.height ?? 0) : 100;

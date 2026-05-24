@@ -15,6 +15,7 @@ import { Bar2D } from '../nodes/2D/UI/Bar2D';
 import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
 import { InventorySlot2D } from '../nodes/2D/UI/InventorySlot2D';
 import { Label2D } from '../nodes/2D/UI/Label2D';
+import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
 import { DirectionalLightNode } from '../nodes/3D/DirectionalLightNode';
 import { PointLightNode } from '../nodes/3D/PointLightNode';
 import { SpotLightNode } from '../nodes/3D/SpotLightNode';
@@ -274,6 +275,23 @@ export class SceneSaver {
       }
 
       props.transform = transform;
+    } else if (node instanceof ScrollContainer2D) {
+      props.width = node.width;
+      props.height = node.height;
+
+      const transform: Record<string, unknown> = {
+        position: [node.position.x, node.position.y],
+        scale: [node.scale.x, node.scale.y],
+        rotation: MathUtils.radToDeg(node.rotation.z),
+      };
+      props.transform = transform;
+
+      const layout = node.serializeLayout();
+      if (layout) {
+        props.layout = layout;
+      } else {
+        delete props.layout;
+      }
     } else if (node instanceof Group2D) {
       // Serialize Group2D with size properties
       props.width = node.width;
@@ -319,7 +337,21 @@ export class SceneSaver {
     }
 
     // Serialize specific node type properties
-    if (node instanceof Sprite2D) {
+    if (node instanceof ScrollContainer2D) {
+      props.scrollY = node.scrollY;
+      props.dragScrollEnabled = node.dragScrollEnabled;
+      props.wheelScrollEnabled = node.wheelScrollEnabled;
+      props.inertiaEnabled = node.inertiaEnabled;
+      props.showScrollbar = node.showScrollbar;
+      props.wheelSensitivity = node.wheelSensitivity;
+      props.dragThreshold = node.dragThreshold;
+      props.inertiaDamping = node.inertiaDamping;
+      props.scrollbarWidth = node.scrollbarWidth;
+      props.scrollbarMinHeight = node.scrollbarMinHeight;
+      props.scrollbarInset = node.scrollbarInset;
+      props.scrollbarColor = node.scrollbarColor;
+      props.scrollbarTrackColor = node.scrollbarTrackColor;
+    } else if (node instanceof Sprite2D) {
       if (node.texture) {
         props.texture = { ...node.texture };
       }

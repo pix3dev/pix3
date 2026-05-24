@@ -33,6 +33,7 @@ export * from './nodes/2D/UI/UIControl2D';
 export * from './nodes/2D/UI/Joystick2D';
 export * from './nodes/2D/UI/Button2D';
 export * from './nodes/2D/UI/Label2D';
+export * from './nodes/2D/UI/ScrollContainer2D';
 export * from './nodes/2D/UI/Slider2D';
 export * from './nodes/2D/UI/Bar2D';
 export * from './nodes/2D/UI/Checkbox2D';

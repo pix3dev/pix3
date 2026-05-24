@@ -92,13 +92,11 @@ export class Checkbox2D extends UIControl2D {
         super.tick(dt);
         if (!this.input) return;
 
-        const pointer = this.input.pointerPosition;
         const isDown = this.input.isPointerDown;
+        const pointerWorld = this.getPointerWorldPosition();
+        if (!pointerWorld) return;
 
-        const pointerWorldX = pointer.x - this.input.width / 2;
-        const pointerWorldY = (this.input.height / 2) - pointer.y;
-
-        if (!this.isPressed && isDown && this.isPointInBounds(new Vector2(pointerWorldX, pointerWorldY)) && this.enabled) {
+        if (!this.isPressed && isDown && this.isPointInBounds(pointerWorld) && this.enabled) {
             this.isPressed = true;
             this.toggle();
         } else if (this.isPressed && !isDown) {

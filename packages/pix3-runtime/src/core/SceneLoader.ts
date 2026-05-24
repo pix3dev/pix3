@@ -23,6 +23,7 @@ import { Bar2D } from '../nodes/2D/UI/Bar2D';
 import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
 import { InventorySlot2D } from '../nodes/2D/UI/InventorySlot2D';
 import { Label2D } from '../nodes/2D/UI/Label2D';
+import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
 import { AudioPlayer } from '../nodes/AudioPlayer';
 import type { SceneGraph } from './SceneManager';
 
@@ -198,6 +199,22 @@ export interface Node2DProperties {
 export interface Group2DProperties extends Node2DProperties {
   width?: number;
   height?: number;
+}
+
+export interface ScrollContainer2DProperties extends Group2DProperties {
+  scrollY?: number;
+  dragScrollEnabled?: boolean;
+  wheelScrollEnabled?: boolean;
+  inertiaEnabled?: boolean;
+  showScrollbar?: boolean;
+  wheelSensitivity?: number;
+  dragThreshold?: number;
+  inertiaDamping?: number;
+  scrollbarWidth?: number;
+  scrollbarMinHeight?: number;
+  scrollbarInset?: number;
+  scrollbarColor?: string;
+  scrollbarTrackColor?: string;
 }
 
 export interface ParseSceneOptions {
@@ -1021,6 +1038,40 @@ export class SceneLoader {
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, 100),
           height: this.asNumber(props.height, 100),
+        });
+      }
+      case 'ScrollContainer2D': {
+        const props = baseProps.properties as ScrollContainer2DProperties & Record<string, unknown>;
+        const transform = this.asRecord(props.transform);
+
+        return new ScrollContainer2D({
+          ...baseProps,
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation:
+            typeof (transform?.rotation ?? props.rotation) === 'number'
+              ? ((transform?.rotation ?? props.rotation) as number)
+              : 0,
+          layout: this.parseNode2DLayout(props),
+          opacity: this.asNumber(props.opacity, undefined),
+          width: this.asNumber(props.width, 100),
+          height: this.asNumber(props.height, 100),
+          scrollY: this.asNumber(props.scrollY, 0),
+          dragScrollEnabled:
+            typeof props.dragScrollEnabled === 'boolean' ? props.dragScrollEnabled : undefined,
+          wheelScrollEnabled:
+            typeof props.wheelScrollEnabled === 'boolean' ? props.wheelScrollEnabled : undefined,
+          inertiaEnabled:
+            typeof props.inertiaEnabled === 'boolean' ? props.inertiaEnabled : undefined,
+          showScrollbar: typeof props.showScrollbar === 'boolean' ? props.showScrollbar : undefined,
+          wheelSensitivity: this.asNumber(props.wheelSensitivity, undefined),
+          dragThreshold: this.asNumber(props.dragThreshold, undefined),
+          inertiaDamping: this.asNumber(props.inertiaDamping, undefined),
+          scrollbarWidth: this.asNumber(props.scrollbarWidth, undefined),
+          scrollbarMinHeight: this.asNumber(props.scrollbarMinHeight, undefined),
+          scrollbarInset: this.asNumber(props.scrollbarInset, undefined),
+          scrollbarColor: this.asString(props.scrollbarColor),
+          scrollbarTrackColor: this.asString(props.scrollbarTrackColor),
         });
       }
       case 'Joystick2D': {

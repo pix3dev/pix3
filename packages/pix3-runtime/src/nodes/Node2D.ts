@@ -44,6 +44,7 @@ export class Node2D extends NodeBase {
   private _verticalAlign: Node2DVerticalAlign;
   private readonly authoredLayoutPosition = new Vector2();
   private readonly authoredLayoutSize = new Vector2();
+  protected readonly tmpPointerWorld = new Vector2();
   private hasAuthoredLayoutSize = false;
   private readonly opacityMaterials: Set<Material> = new Set();
   private visibleOpacity: number;
@@ -203,6 +204,31 @@ export class Node2D extends NodeBase {
   setAuthoredLayoutSize(width: number, height: number): void {
     this.authoredLayoutSize.set(Math.max(0, width), Math.max(0, height));
     this.hasAuthoredLayoutSize = true;
+  }
+
+  protected getPointerWorldPosition(target: Vector2 = this.tmpPointerWorld): Vector2 | null {
+    const input = this.input;
+    if (!input) {
+      return null;
+    }
+
+    const inputWidth = Math.max(1, input.width);
+    const inputHeight = Math.max(1, input.height);
+    const logicalCameraSize = this.scene?.getLogicalCameraSize();
+    const worldWidth =
+      logicalCameraSize && Number.isFinite(logicalCameraSize.width) && logicalCameraSize.width > 0
+        ? logicalCameraSize.width
+        : inputWidth;
+    const worldHeight =
+      logicalCameraSize && Number.isFinite(logicalCameraSize.height) && logicalCameraSize.height > 0
+        ? logicalCameraSize.height
+        : inputHeight;
+
+    target.set(
+      (input.pointerPosition.x / inputWidth) * worldWidth - worldWidth / 2,
+      worldHeight / 2 - (input.pointerPosition.y / inputHeight) * worldHeight
+    );
+    return target;
   }
 
   applyAnchoredLayoutRecursive(

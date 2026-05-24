@@ -36,6 +36,7 @@ export class RuntimeRenderer {
 
     this.renderer.setPixelRatio(options.pixelRatio ?? window.devicePixelRatio);
     this.renderer.setClearColor(options.clearColor ?? '#000000');
+    this.renderer.localClippingEnabled = true;
 
     if (options.shadows) {
       this.renderer.shadowMap.enabled = true;

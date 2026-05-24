@@ -102,11 +102,12 @@ export class Joystick2D extends Node2D {
             return;
         }
 
-        const pointer = this.input.pointerPosition;
         const isDown = this.input.isPointerDown;
+        const pointerWorld = this.getPointerWorldPosition();
+        if (!pointerWorld) return;
 
-        const pointerWorldX = pointer.x - this.input.width / 2;
-        const pointerWorldY = (this.input.height / 2) - pointer.y;
+        const pointerWorldX = pointerWorld.x;
+        const pointerWorldY = pointerWorld.y;
 
         if (this.floating) {
             if (!this.isDragging && isDown && !this.input.isHoveringUI) {
