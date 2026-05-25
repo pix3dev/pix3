@@ -7,7 +7,9 @@ import type {
 import type { AppStateSnapshot } from '@/state';
 
 export interface SelectObjectParams {
-  nodeId: string | null;
+  nodeId?: string | null;
+  nodeIds?: string[];
+  primaryNodeId?: string | null;
   additive?: boolean;
   range?: boolean;
   makePrimary?: boolean;
@@ -30,13 +32,22 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
 
   async perform(context: OperationContext): Promise<OperationInvokeResult> {
     const { state, snapshot } = context;
-    const { nodeId, additive = false, range = false, makePrimary = false } = this.params;
+    const {
+      nodeId = null,
+      nodeIds,
+      primaryNodeId = null,
+      additive = false,
+      range = false,
+      makePrimary = false,
+    } = this.params;
 
     const prevNodeIds = [...snapshot.selection.nodeIds];
     const prevPrimaryId = snapshot.selection.primaryNodeId;
 
     const { newNodeIds, newPrimaryNodeId } = this.computeSelection(snapshot, {
       nodeId,
+      nodeIds,
+      primaryNodeId,
       additive,
       range,
       makePrimary,
@@ -72,9 +83,30 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
 
   private computeSelection(
     snapshot: AppStateSnapshot,
-    opts: Required<Omit<SelectObjectParams, 'nodeId'>> & { nodeId: string | null }
+    opts: Required<Omit<SelectObjectParams, 'nodeId' | 'nodeIds' | 'primaryNodeId'>> & {
+      nodeId: string | null;
+      nodeIds?: string[];
+      primaryNodeId: string | null;
+    }
   ): { newNodeIds: string[]; newPrimaryNodeId: string | null } {
-    const { nodeId, additive, range, makePrimary } = opts;
+    const { nodeId, nodeIds, primaryNodeId, additive, range, makePrimary } = opts;
+
+    if (Array.isArray(nodeIds)) {
+      const uniqueNodeIds = Array.from(
+        new Set(nodeIds.filter((id): id is string => typeof id === 'string' && id.length > 0))
+      );
+      const nextPrimaryNodeId =
+        uniqueNodeIds.length === 0
+          ? null
+          : primaryNodeId && uniqueNodeIds.includes(primaryNodeId)
+            ? primaryNodeId
+            : uniqueNodeIds[0] ?? null;
+
+      return {
+        newNodeIds: uniqueNodeIds,
+        newPrimaryNodeId: nextPrimaryNodeId,
+      };
+    }
 
     if (nodeId === null) {
       return { newNodeIds: [], newPrimaryNodeId: null };

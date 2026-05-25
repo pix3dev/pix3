@@ -83,6 +83,7 @@ const SELECTED_NODE_ICON_OPACITY = 0.38;
 const MIN_WORLD_BOUNDS_SIZE = 0.0001;
 const TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER = 1.25;
 const TWO_D_FIT_PADDING_MULTIPLIER = 1.15;
+const MARQUEE_PREVIEW_2D_COLOR = 0xffcf33;
 
 @injectable()
 export class ViewportRendererService {
@@ -138,6 +139,7 @@ export class ViewportRendererService {
   private active2DTransform?: Active2DTransform;
   // Hover preview frame for 2D nodes (before selection)
   private hoverPreview2D?: { nodeId: string; frame: THREE.Group };
+  private marqueePreview2DFrames = new Map<string, THREE.Group>();
   private animationId?: number;
   private isPaused = true;
   private isWindowFocused = isDocumentActive(document);
@@ -1484,6 +1486,14 @@ export class ViewportRendererService {
       }
     }
 
+    for (const frame of this.marqueePreview2DFrames.values()) {
+      const width = frame.userData.frameWidth as number | undefined;
+      const height = frame.userData.frameHeight as number | undefined;
+      if (typeof width === 'number' && typeof height === 'number') {
+        this.updateRectFrameEdges(frame, width, height, thickness);
+      }
+    }
+
     for (const visualRoot of this.group2DVisuals.values()) {
       const sizeGroup = visualRoot.userData.sizeGroup as THREE.Group | undefined;
       if (!sizeGroup) {
@@ -2181,6 +2191,102 @@ export class ViewportRendererService {
     return null;
   }
 
+  getSelectable2DNodeIdsInScreenRect(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number
+  ): string[] {
+    if (!this.orthographicCamera || !appState.ui.showLayer2D) {
+      return [];
+    }
+
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      return [];
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      return [];
+    }
+
+    const selectionRect = this.normalizeScreenRect(startX, startY, endX, endY);
+    const hitNodeIds: string[] = [];
+
+    const collectHits = (nodes: NodeBase[]): void => {
+      for (const node of nodes) {
+        if (this.isScreenRectSelectable2DNode(node)) {
+          const screenRect = this.getNode2DScreenRect(node);
+          if (screenRect && this.screenRectsIntersect(selectionRect, screenRect)) {
+            hitNodeIds.push(node.nodeId);
+          }
+        }
+
+        if (node.children.length > 0) {
+          collectHits(node.children);
+        }
+      }
+    };
+
+    collectHits(sceneGraph.rootNodes);
+    return hitNodeIds;
+  }
+
+  set2DMarqueePreviewNodeIds(nodeIds: string[]): boolean {
+    if (!this.scene) {
+      return false;
+    }
+
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      return this.clear2DMarqueePreview();
+    }
+
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      return this.clear2DMarqueePreview();
+    }
+
+    const nextNodeIds = Array.from(
+      new Set(nodeIds.filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0))
+    );
+    const nextNodeIdSet = new Set(nextNodeIds);
+    let changed = false;
+
+    for (const [nodeId, frame] of this.marqueePreview2DFrames) {
+      if (!nextNodeIdSet.has(nodeId)) {
+        this.dispose2DPreviewFrame(frame);
+        this.marqueePreview2DFrames.delete(nodeId);
+        changed = true;
+      }
+    }
+
+    for (const nodeId of nextNodeIds) {
+      if (this.marqueePreview2DFrames.has(nodeId)) {
+        continue;
+      }
+
+      const node = sceneGraph.nodeMap.get(nodeId);
+      if (
+        !(node instanceof Node2D) ||
+        Boolean(node.properties.locked) ||
+        !this.isVisibleInHierarchy(node) ||
+        !this.get2DVisual(node)
+      ) {
+        continue;
+      }
+
+      const frame = this.create2DHoverPreviewFrame(this.getNodeOnlyBounds(node), MARQUEE_PREVIEW_2D_COLOR);
+      frame.userData.isMarqueePreview = true;
+      this.scene.add(frame);
+      this.marqueePreview2DFrames.set(nodeId, frame);
+      changed = true;
+    }
+
+    return changed;
+  }
+
   private raycastNodeIcon(screenX: number, screenY: number): string | null {
     if (!this.camera || this.nodeIcons.size === 0 || !appState.ui.showLayer3D) {
       return null;
@@ -2339,6 +2445,80 @@ export class ViewportRendererService {
     }
 
     return null;
+  }
+
+  private normalizeScreenRect(startX: number, startY: number, endX: number, endY: number): {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  } {
+    return {
+      left: Math.min(startX, endX),
+      right: Math.max(startX, endX),
+      top: Math.min(startY, endY),
+      bottom: Math.max(startY, endY),
+    };
+  }
+
+  private screenRectsIntersect(
+    a: { left: number; right: number; top: number; bottom: number },
+    b: { left: number; right: number; top: number; bottom: number }
+  ): boolean {
+    return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+  }
+
+  private getNode2DScreenRect(node: Node2D): {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  } | null {
+    const projectedCorners = this.getNodeOnlyWorldCorners(node)
+      .map(corner => this.projectWorldToOverlay(corner))
+      .filter(
+        (
+          point
+        ): point is {
+          x: number;
+          y: number;
+        } => point !== null
+      );
+
+    if (projectedCorners.length === 0) {
+      return null;
+    }
+
+    let left = projectedCorners[0].x;
+    let right = projectedCorners[0].x;
+    let top = projectedCorners[0].y;
+    let bottom = projectedCorners[0].y;
+
+    for (let i = 1; i < projectedCorners.length; i += 1) {
+      const point = projectedCorners[i];
+      left = Math.min(left, point.x);
+      right = Math.max(right, point.x);
+      top = Math.min(top, point.y);
+      bottom = Math.max(bottom, point.y);
+    }
+
+    return { left, right, top, bottom };
+  }
+
+  private isScreenRectSelectable2DNode(node: NodeBase): node is Node2D {
+    if (!(node instanceof Node2D) || node instanceof Group2D) {
+      return false;
+    }
+
+    if (!(node instanceof AnimatedSprite2D || node instanceof Sprite2D || node instanceof UIControl2D)) {
+      return false;
+    }
+
+    if (Boolean(node.properties.locked) || !this.isVisibleInHierarchy(node)) {
+      return false;
+    }
+
+    return Boolean(this.get2DVisual(node));
   }
 
   private isVisibleInHierarchy(object: THREE.Object3D): boolean {
@@ -5409,21 +5589,41 @@ export class ViewportRendererService {
       return false;
     }
 
-    if (this.scene && this.hoverPreview2D.frame) {
-      this.scene.remove(this.hoverPreview2D.frame);
-      // Dispose all geometries and materials in the group
-      this.hoverPreview2D.frame.traverse(obj => {
-        if (obj instanceof THREE.Mesh && obj.geometry) {
-          obj.geometry.dispose();
-          if (obj.material instanceof THREE.Material) {
-            obj.material.dispose();
-          }
-        }
-      });
-    }
+    this.dispose2DPreviewFrame(this.hoverPreview2D.frame);
 
     this.hoverPreview2D = undefined;
     return true;
+  }
+
+  clear2DMarqueePreview(): boolean {
+    if (this.marqueePreview2DFrames.size === 0) {
+      return false;
+    }
+
+    for (const frame of this.marqueePreview2DFrames.values()) {
+      this.dispose2DPreviewFrame(frame);
+    }
+    this.marqueePreview2DFrames.clear();
+    return true;
+  }
+
+  private dispose2DPreviewFrame(frame: THREE.Group | undefined): void {
+    if (!frame) {
+      return;
+    }
+
+    if (this.scene) {
+      this.scene.remove(frame);
+    }
+
+    frame.traverse(obj => {
+      if (obj instanceof THREE.Mesh && obj.geometry) {
+        obj.geometry.dispose();
+        if (obj.material instanceof THREE.Material) {
+          obj.material.dispose();
+        }
+      }
+    });
   }
 
   /**
@@ -5962,6 +6162,8 @@ export class ViewportRendererService {
     this.clearNodeIcons();
 
     this.clear2DSelectionOverlay();
+    this.clear2DHoverPreview();
+    this.clear2DMarqueePreview();
 
     for (const gizmo of this.targetGizmos.values()) {
       gizmo.traverse(child => {

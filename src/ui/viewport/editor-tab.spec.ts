@@ -181,6 +181,155 @@ describe('EditorTabComponent', () => {
     expect(params.position?.x).toBeCloseTo(60);
     expect(params.position?.y).toBeCloseTo(160);
   });
+
+  it('toggles viewport selection on ctrl click', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    const hitNode = new Sprite2D({
+      id: 'sprite-toggle',
+      name: 'Toggle Sprite',
+      texturePath: 'res://assets/toggle.png',
+      width: 32,
+      height: 32,
+    });
+    services.viewportRenderer.raycastObject.mockReturnValue(hitNode as NodeBase);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1, ctrlKey: true })
+    );
+    panel.dispatchEvent(
+      createPointerEvent('pointerup', { clientX: 120, clientY: 90, ctrlKey: true })
+    );
+
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    const command = services.commandDispatcher.execute.mock.calls[0]?.[0] as {
+      params?: {
+        nodeId?: string | null;
+        additive?: boolean;
+      };
+    };
+    expect(command.params).toEqual({ nodeId: 'sprite-toggle', additive: true });
+  });
+
+  it('toggles a selected 2d node on ctrl click instead of starting move transform', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.ui.navigationMode = '2d';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    const hitNode = new Sprite2D({
+      id: 'sprite-selected-toggle',
+      name: 'Selected Sprite',
+      texturePath: 'res://assets/selected-toggle.png',
+      width: 32,
+      height: 32,
+    });
+    services.viewportRenderer.get2DHandleAt.mockReturnValue('move');
+    services.viewportRenderer.raycastObject.mockReturnValue(hitNode as NodeBase);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1, ctrlKey: true })
+    );
+    panel.dispatchEvent(
+      createPointerEvent('pointerup', { clientX: 120, clientY: 90, ctrlKey: true })
+    );
+
+    expect(services.viewportRenderer.start2DTransform).not.toHaveBeenCalled();
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    const command = services.commandDispatcher.execute.mock.calls[0]?.[0] as {
+      params?: {
+        nodeId?: string | null;
+        additive?: boolean;
+      };
+    };
+    expect(command.params).toEqual({ nodeId: 'sprite-selected-toggle', additive: true });
+  });
+
+  it('keeps selection unchanged on ctrl click in empty viewport space', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.selection.nodeIds = ['selected-node'];
+    appState.selection.primaryNodeId = 'selected-node';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 80, clientY: 60, buttons: 1, metaKey: true })
+    );
+    panel.dispatchEvent(
+      createPointerEvent('pointerup', { clientX: 80, clientY: 60, metaKey: true })
+    );
+
+    expect(services.commandDispatcher.execute).not.toHaveBeenCalled();
+    expect(appState.selection.nodeIds).toEqual(['selected-node']);
+    expect(appState.selection.primaryNodeId).toBe('selected-node');
+  });
+
+  it('selects intersecting 2D nodes with a marquee drag in 2d navigation mode', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.ui.navigationMode = '2d';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    services.viewportRenderer.getSelectable2DNodeIdsInScreenRect.mockReturnValue([
+      'node-1',
+      'node-2',
+    ]);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 20, clientY: 30, buttons: 1 })
+    );
+    panel.dispatchEvent(
+      createPointerEvent('pointermove', { clientX: 70, clientY: 90, buttons: 1 })
+    );
+    await panel.updateComplete;
+
+    const marquee = panel.shadowRoot?.querySelector('.viewport-marquee-selection');
+    expect(marquee).not.toBeNull();
+    expect(services.viewportRenderer.set2DMarqueePreviewNodeIds).toHaveBeenCalledWith([
+      'node-1',
+      'node-2',
+    ]);
+
+    panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 70, clientY: 90 }));
+
+    expect(services.viewportRenderer.getSelectable2DNodeIdsInScreenRect).toHaveBeenCalledWith(
+      20,
+      30,
+      70,
+      90
+    );
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    const command = services.commandDispatcher.execute.mock.calls[0]?.[0] as {
+      params?: {
+        nodeIds?: string[];
+        primaryNodeId?: string | null;
+      };
+    };
+    expect(command.params).toEqual({ nodeIds: ['node-1', 'node-2'], primaryNodeId: 'node-1' });
+    expect(services.viewportRenderer.clear2DMarqueePreview).toHaveBeenCalled();
+
+    await panel.updateComplete;
+    expect(panel.shadowRoot?.querySelector('.viewport-marquee-selection')).toBeNull();
+  });
 });
 
 function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
@@ -215,6 +364,12 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
     updateSelection: vi.fn(),
     getCanvasElement: vi.fn(() => stubCanvas),
     get2DHandleAt: vi.fn(() => 'idle'),
+    start2DTransform: vi.fn(),
+    getSelectable2DNodeIdsInScreenRect: vi.fn<(x1: number, y1: number, x2: number, y2: number) => string[]>(
+      () => []
+    ),
+    set2DMarqueePreviewNodeIds: vi.fn<(nodeIds: string[]) => boolean>(() => false),
+    clear2DMarqueePreview: vi.fn<() => boolean>(() => false),
     has2DTransform: vi.fn(() => false),
   };
   const sceneManager = {
@@ -276,4 +431,35 @@ function createDataTransfer(
     getData: vi.fn((type: string) => values[type] ?? ''),
     types,
   } as unknown as DataTransfer;
+}
+
+function createPointerEvent(
+  type: string,
+  init: {
+    clientX: number;
+    clientY: number;
+    button?: number;
+    buttons?: number;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+  }
+): PointerEvent {
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  }) as PointerEvent;
+
+  Object.defineProperties(event, {
+    clientX: { value: init.clientX, configurable: true },
+    clientY: { value: init.clientY, configurable: true },
+    button: { value: init.button ?? 0, configurable: true },
+    buttons: { value: init.buttons ?? 0, configurable: true },
+    ctrlKey: { value: init.ctrlKey ?? false, configurable: true },
+    metaKey: { value: init.metaKey ?? false, configurable: true },
+    pointerType: { value: 'mouse', configurable: true },
+    pointerId: { value: 1, configurable: true },
+  });
+
+  return event;
 }

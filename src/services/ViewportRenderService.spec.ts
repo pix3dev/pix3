@@ -167,6 +167,168 @@ describe('ViewportRendererService', () => {
     expect(loadSpy).not.toHaveBeenCalled();
   });
 
+  it('returns selectable 2D node ids in scene order for a screen rectangle', () => {
+    resetAppState();
+    appState.ui.showLayer2D = true;
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const service = new ViewportRendererService();
+    const frontSprite = new Sprite2D({
+      id: 'sprite-front',
+      name: 'Front',
+      width: 100,
+      height: 80,
+    });
+    frontSprite.position.set(0, 0, 0);
+
+    const leftSprite = new Sprite2D({
+      id: 'sprite-left',
+      name: 'Left',
+      width: 80,
+      height: 40,
+    });
+    leftSprite.position.set(-120, 40, 0);
+
+    const hiddenSprite = new Sprite2D({
+      id: 'sprite-hidden',
+      name: 'Hidden',
+      width: 90,
+      height: 40,
+    });
+    hiddenSprite.position.set(-40, 0, 0);
+    hiddenSprite.visible = false;
+
+    const lockedSprite = new Sprite2D({
+      id: 'sprite-locked',
+      name: 'Locked',
+      width: 90,
+      height: 40,
+    });
+    lockedSprite.position.set(90, 0, 0);
+    lockedSprite.properties.locked = true;
+
+    const rootNodes = [frontSprite, hiddenSprite, leftSprite, lockedSprite];
+    const nodeMap = new Map(rootNodes.map(node => [node.nodeId, node]));
+
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({ rootNodes, nodeMap }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+
+    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+      rootNodes.map(node => [node.nodeId, new THREE.Group()])
+    );
+
+    const hitNodeIds = service.getSelectable2DNodeIdsInScreenRect(90, 90, 240, 175);
+
+    expect(hitNodeIds).toEqual(['sprite-front', 'sprite-left']);
+  });
+
+  it('matches rotated 2D nodes when their projected bounds intersect the marquee rectangle', () => {
+    resetAppState();
+    appState.ui.showLayer2D = true;
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const service = new ViewportRendererService();
+    const rotatedSprite = new Sprite2D({
+      id: 'sprite-rotated',
+      name: 'Rotated',
+      width: 80,
+      height: 40,
+    });
+    rotatedSprite.position.set(70, 45, 0);
+    rotatedSprite.rotation.set(0, 0, Math.PI / 4);
+
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          rootNodes: [rotatedSprite],
+          nodeMap: new Map([[rotatedSprite.nodeId, rotatedSprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'orthographicCamera', {
+      value: new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+
+    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map([
+      [rotatedSprite.nodeId, new THREE.Group()],
+    ]);
+
+    const hitNodeIds = service.getSelectable2DNodeIdsInScreenRect(230, 65, 300, 140);
+
+    expect(hitNodeIds).toEqual(['sprite-rotated']);
+  });
+
+  it('creates and clears marquee preview frames for intersecting 2D nodes', () => {
+    resetAppState();
+    appState.ui.showLayer2D = true;
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const service = new ViewportRendererService();
+    const scene = new THREE.Scene();
+    const firstSprite = new Sprite2D({ id: 'sprite-preview-1', width: 80, height: 50 });
+    const secondSprite = new Sprite2D({ id: 'sprite-preview-2', width: 60, height: 40 });
+    secondSprite.position.set(80, 0, 0);
+
+    const rootNodes = [firstSprite, secondSprite];
+    const nodeMap = new Map(rootNodes.map(node => [node.nodeId, node]));
+
+    Object.defineProperty(service, 'scene', {
+      value: scene,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({ rootNodes, nodeMap }),
+      },
+      configurable: true,
+    });
+
+    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+      rootNodes.map(node => [node.nodeId, new THREE.Group()])
+    );
+
+    expect(service.set2DMarqueePreviewNodeIds([firstSprite.nodeId, secondSprite.nodeId])).toBe(
+      true
+    );
+    expect(
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
+        marqueePreview2DFrames.size
+    ).toBe(2);
+
+    expect(service.set2DMarqueePreviewNodeIds([secondSprite.nodeId])).toBe(true);
+    expect(
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
+        marqueePreview2DFrames.size
+    ).toBe(1);
+
+    expect(service.clear2DMarqueePreview()).toBe(true);
+    expect(
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
+        marqueePreview2DFrames.size
+    ).toBe(0);
+  });
+
   it('keeps selected camera icons visible with reduced opacity', () => {
     resetAppState();
     appState.ui.showLayer3D = true;

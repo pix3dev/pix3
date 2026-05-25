@@ -10,7 +10,11 @@ import { IconService } from '@/services/IconService';
 import { Navigation2DController } from '@/services/Navigation2DController';
 import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { Vector2, Vector3 } from 'three';
-import { selectObject } from '@/features/selection/SelectObjectCommand';
+import {
+  selectObject,
+  selectObjects,
+  toggleObjectSelection,
+} from '@/features/selection/SelectObjectCommand';
 import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
@@ -79,11 +83,16 @@ export class EditorTabComponent extends ComponentBase {
   private disposeSelectionSubscription?: () => void;
   private pointerDownPos?: { x: number; y: number };
   private pointerDownTime?: number;
+  private marqueeSelectionStart?: { x: number; y: number };
+  private marqueeSelectionNodeIds: string[] = [];
   private isDragging = false;
   private touchGestureInProgress = false;
   private singleTouchPanPointerId: number | null = null;
   private readonly dragThreshold = 5;
   private wheelCanvas?: HTMLCanvasElement;
+
+  @state()
+  private marqueeSelectionRect?: { left: number; top: number; width: number; height: number };
 
   @state()
   private has2DSelection = false;
@@ -270,6 +279,12 @@ export class EditorTabComponent extends ComponentBase {
           @drop=${this.handleDrop}
           @dragleave=${this.handleDragLeave}
         >
+          ${this.marqueeSelectionRect
+            ? html`<div
+                class="viewport-marquee-selection"
+                style=${this.getMarqueeSelectionStyle(this.marqueeSelectionRect)}
+              ></div>`
+            : null}
           ${renderAlignmentToolbarOverlay(
             {
               showAlignmentTools,
@@ -679,6 +694,8 @@ export class EditorTabComponent extends ComponentBase {
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
     const handleType = this.viewportRenderer.get2DHandleAt?.(screenX, screenY) ?? 'idle';
+    const isSelectionModifier = event.ctrlKey || event.metaKey;
+    this.clearMarqueeSelection();
     const shouldStartSingleTouchPan =
       event.pointerType === 'touch' &&
       this.shouldStartSingleTouchPan(handleType, screenX, screenY, canvas, rect);
@@ -715,7 +732,7 @@ export class EditorTabComponent extends ComponentBase {
       return;
     }
 
-    if (handleType && handleType !== 'idle') {
+    if (handleType && handleType !== 'idle' && !isSelectionModifier) {
       this.viewportRenderer.start2DTransform?.(screenX, screenY, handleType);
       this.pointerDownPos = { x: event.clientX, y: event.clientY };
       this.pointerDownTime = Date.now();
@@ -732,6 +749,9 @@ export class EditorTabComponent extends ComponentBase {
 
     this.pointerDownPos = { x: event.clientX, y: event.clientY };
     this.pointerDownTime = Date.now();
+    this.marqueeSelectionStart = this.shouldStartMarqueeSelection(event, handleType, screenX, screenY)
+      ? { x: screenX, y: screenY }
+      : undefined;
     this.isDragging = false;
   };
 
@@ -807,6 +827,30 @@ export class EditorTabComponent extends ComponentBase {
     const dx = event.clientX - this.pointerDownPos.x;
     const dy = event.clientY - this.pointerDownPos.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (this.marqueeSelectionStart && appState.ui.navigationMode === '2d') {
+      if (distance > this.dragThreshold) {
+        const marqueeSelectionRect = this.createMarqueeSelectionRect(this.marqueeSelectionStart, {
+          x: screenX,
+          y: screenY,
+        });
+        this.marqueeSelectionRect = marqueeSelectionRect;
+        this.updateMarqueeSelectionPreview(
+          this.viewportRenderer.getSelectable2DNodeIdsInScreenRect(
+            marqueeSelectionRect.left,
+            marqueeSelectionRect.top,
+            marqueeSelectionRect.left + marqueeSelectionRect.width,
+            marqueeSelectionRect.top + marqueeSelectionRect.height
+          )
+        );
+        this.isDragging = true;
+      } else {
+        this.marqueeSelectionRect = undefined;
+        this.clearMarqueeSelectionPreview();
+      }
+      return;
+    }
+
     if (distance > this.dragThreshold) {
       this.isDragging = true;
     }
@@ -864,9 +908,14 @@ export class EditorTabComponent extends ComponentBase {
 
     const canvas = this.viewportRenderer.getCanvasElement();
     if (!canvas) {
-      this.pointerDownPos = undefined;
-      this.pointerDownTime = undefined;
-      this.isDragging = false;
+      this.clearPointerInteraction();
+      return;
+    }
+
+    const marqueeSelectionRect = this.marqueeSelectionRect;
+    if (marqueeSelectionRect) {
+      void this.commandDispatcher.execute(selectObjects(this.marqueeSelectionNodeIds));
+      this.clearPointerInteraction();
       return;
     }
 
@@ -881,17 +930,17 @@ export class EditorTabComponent extends ComponentBase {
 
       const hitNode = this.viewportRenderer.raycastObject(normalizedX, normalizedY);
       if (hitNode) {
-        const command = selectObject(hitNode.nodeId);
-        this.commandDispatcher.execute(command);
-      } else {
+        const command = event.ctrlKey || event.metaKey
+          ? toggleObjectSelection(hitNode.nodeId)
+          : selectObject(hitNode.nodeId);
+        void this.commandDispatcher.execute(command);
+      } else if (!(event.ctrlKey || event.metaKey)) {
         const command = selectObject(null);
-        this.commandDispatcher.execute(command);
+        void this.commandDispatcher.execute(command);
       }
     }
 
-    this.pointerDownPos = undefined;
-    this.pointerDownTime = undefined;
-    this.isDragging = false;
+    this.clearPointerInteraction();
   };
 
   private handleCanvasPointerCancel = (event: PointerEvent): void => {
@@ -918,6 +967,73 @@ export class EditorTabComponent extends ComponentBase {
     this.pointerDownPos = undefined;
     this.pointerDownTime = undefined;
     this.isDragging = false;
+    this.clearMarqueeSelection();
+  }
+
+  private clearMarqueeSelection(): void {
+    this.marqueeSelectionStart = undefined;
+    this.marqueeSelectionRect = undefined;
+    this.clearMarqueeSelectionPreview();
+  }
+
+  private updateMarqueeSelectionPreview(nodeIds: string[]): void {
+    this.marqueeSelectionNodeIds = nodeIds;
+    const didChange = this.viewportRenderer.set2DMarqueePreviewNodeIds?.(nodeIds) ?? false;
+    if (didChange) {
+      this.viewportRenderer.requestRender();
+    }
+  }
+
+  private clearMarqueeSelectionPreview(): void {
+    this.marqueeSelectionNodeIds = [];
+    const didChange = this.viewportRenderer.clear2DMarqueePreview?.() ?? false;
+    if (didChange) {
+      this.viewportRenderer.requestRender();
+    }
+  }
+
+  private shouldStartMarqueeSelection(
+    event: PointerEvent,
+    handleType: string,
+    screenX: number,
+    screenY: number
+  ): boolean {
+    if (
+      appState.ui.navigationMode !== '2d' ||
+      event.pointerType === 'touch' ||
+      event.button !== 0 ||
+      handleType !== 'idle'
+    ) {
+      return false;
+    }
+
+    const normalizedPoint = this.getViewportNormalizedPoint({ x: screenX, y: screenY });
+    if (!normalizedPoint) {
+      return false;
+    }
+
+    return this.viewportRenderer.raycastObject(normalizedPoint.x, normalizedPoint.y) === null;
+  }
+
+  private createMarqueeSelectionRect(
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): { left: number; top: number; width: number; height: number } {
+    const left = Math.min(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const width = Math.abs(end.x - start.x);
+    const height = Math.abs(end.y - start.y);
+
+    return { left, top, width, height };
+  }
+
+  private getMarqueeSelectionStyle(rect: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }): string {
+    return `left: ${rect.left}px; top: ${rect.top}px; width: ${rect.width}px; height: ${rect.height}px;`;
   }
 
   private isToolbarInteraction(event: PointerEvent): boolean {
