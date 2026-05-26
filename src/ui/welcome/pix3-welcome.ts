@@ -54,6 +54,9 @@ export class Pix3Welcome extends ComponentBase {
     ? Pix3Welcome.DEFAULT_TAB_AUTHENTICATED
     : Pix3Welcome.DEFAULT_TAB_UNAUTHENTICATED;
 
+  @state()
+  private projectError: string | null = appState.project.errorMessage;
+
   protected firstUpdated(): void {
     Promise.resolve().then(() => {
       this.loadRecents();
@@ -86,6 +89,7 @@ export class Pix3Welcome extends ComponentBase {
     this.disposeProjectSubscription = subscribe(appState.project, () => {
       try {
         this.loadRecents();
+        this.projectError = appState.project.errorMessage;
         if (appState.project.status === 'ready') {
           // Notify host/shell that project is ready so it can remove the welcome component
           try {
@@ -125,7 +129,12 @@ export class Pix3Welcome extends ComponentBase {
   }
 
   private onOpen = async (): Promise<void> => {
-    await this.projectService.openProjectViaPicker();
+    this.projectError = null;
+    try {
+      await this.projectService.openProjectViaPicker();
+    } catch (error) {
+      this.captureProjectOpenError(error);
+    }
   };
 
   private onStartNew = async (): Promise<void> => {
@@ -163,8 +172,19 @@ export class Pix3Welcome extends ComponentBase {
       return;
     }
 
-    await this.projectService.openRecentProject(entry);
+    this.projectError = null;
+    try {
+      await this.projectService.openRecentProject(entry);
+    } catch (error) {
+      this.captureProjectOpenError(error);
+    }
   };
+
+  private captureProjectOpenError(error: unknown): void {
+    this.projectError =
+      appState.project.errorMessage ??
+      (error instanceof Error ? error.message : 'Failed to open project');
+  }
 
   private formatTime(ts: number): string {
     try {
@@ -333,6 +353,10 @@ export class Pix3Welcome extends ComponentBase {
               </button>
             </div>
           </div>
+
+          ${this.projectError
+            ? html`<div class="recent-error welcome-error" role="alert">${this.projectError}</div>`
+            : null}
 
           <div class="recent-list project-tabs">
             <div class="project-tabs__nav" role="tablist" aria-label="Project sources">

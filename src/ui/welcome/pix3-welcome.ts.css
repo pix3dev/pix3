@@ -379,6 +379,12 @@ pix3-welcome {
   line-height: 1.45;
 }
 
+.welcome-error {
+  margin-top: 0;
+  margin-bottom: 1.25rem;
+  text-align: left;
+}
+
 @media (max-width: 720px) {
   .welcome-card {
     width: min(92vw, 50rem);

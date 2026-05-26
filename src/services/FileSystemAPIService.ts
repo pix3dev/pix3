@@ -43,6 +43,8 @@ export interface ReadSceneResult<TScene = unknown> {
 }
 
 const DEFAULT_RESOURCE_PREFIX = 'res://';
+const VSCODE_INTEGRATED_BROWSER_DIRECTORY_PICKER_MESSAGE =
+  'Opening local folders is not supported in the VS Code integrated browser. Open Pix3 in Chrome or another standalone Chromium browser to choose a project directory.';
 
 type PermissionMode = 'read' | 'readwrite';
 export type { PermissionMode };
@@ -111,7 +113,7 @@ export class FileSystemAPIService {
       this.directoryHandle = handle;
       return handle;
     } catch (error) {
-      throw this.normalizeError(error, 'Failed to request project directory');
+      throw this.normalizeDirectoryPickerError(error);
     }
   }
 
@@ -282,6 +284,12 @@ export class FileSystemAPIService {
 
       const picker = globalWindow?.showDirectoryPicker;
       if (typeof picker !== 'function') {
+        if (this.isVsCodeElectronEnvironment()) {
+          throw new FileSystemAPIError(
+            'unsupported',
+            VSCODE_INTEGRATED_BROWSER_DIRECTORY_PICKER_MESSAGE
+          );
+        }
         throw new FileSystemAPIError(
           'unsupported',
           'showDirectoryPicker is not available in this environment.'
@@ -362,6 +370,31 @@ export class FileSystemAPIService {
       return name;
     }
     return `${base.replace(/\\+/g, '/').replace(/\/$/, '')}/${name}`;
+  }
+
+  private normalizeDirectoryPickerError(error: unknown): FileSystemAPIError {
+    if (
+      error instanceof DOMException &&
+      error.name === 'AbortError' &&
+      this.isVsCodeElectronEnvironment()
+    ) {
+      return new FileSystemAPIError(
+        'unsupported',
+        VSCODE_INTEGRATED_BROWSER_DIRECTORY_PICKER_MESSAGE,
+        error
+      );
+    }
+
+    return this.normalizeError(error, 'Failed to request project directory');
+  }
+
+  private isVsCodeElectronEnvironment(): boolean {
+    if (typeof navigator === 'undefined') {
+      return false;
+    }
+
+    const userAgent = navigator.userAgent ?? '';
+    return userAgent.includes('Code/') && userAgent.includes('Electron/');
   }
 
   private normalizeError(error: unknown, message: string): FileSystemAPIError {

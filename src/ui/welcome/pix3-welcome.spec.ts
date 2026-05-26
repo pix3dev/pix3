@@ -205,4 +205,81 @@ describe('Pix3Welcome', () => {
     );
     expect(cloudProjectService.deleteProject).toHaveBeenCalledWith('project-owned');
   });
+
+  it('renders project open errors from app state', async () => {
+    resetAppState();
+
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(ProjectService),
+      ProjectServiceStub,
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(IconService), IconServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(
+      container.getOrCreateToken(ProjectLifecycleService),
+      ProjectLifecycleServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(CloudProjectService),
+      CloudProjectServiceStub,
+      'singleton'
+    );
+
+    const welcome = document.createElement('pix3-welcome') as TestWelcomeElement;
+    document.body.appendChild(welcome);
+    await welcome.updateComplete;
+
+    appState.project.status = 'error';
+    appState.project.errorMessage =
+      'Opening local folders is not supported in the VS Code integrated browser.';
+    await Promise.resolve();
+    await welcome.updateComplete;
+
+    const errorMessage = welcome.querySelector('.welcome-error');
+    expect(errorMessage?.textContent).toContain('VS Code integrated browser');
+  });
+
+  it('renders picker failures from the open button without leaking the rejection', async () => {
+    resetAppState();
+
+    const pickerFailure = new Error('Directory picker failed');
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(ProjectService),
+      class extends ProjectServiceStub {
+        openProjectViaPicker = vi.fn(async () => {
+          throw pickerFailure;
+        });
+      },
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(IconService), IconServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(
+      container.getOrCreateToken(ProjectLifecycleService),
+      ProjectLifecycleServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(CloudProjectService),
+      CloudProjectServiceStub,
+      'singleton'
+    );
+
+    const welcome = document.createElement('pix3-welcome') as TestWelcomeElement;
+    document.body.appendChild(welcome);
+    await welcome.updateComplete;
+
+    const openButton = welcome.querySelector('.action-btn') as HTMLButtonElement;
+    openButton.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await welcome.updateComplete;
+
+    const errorMessage = welcome.querySelector('.welcome-error');
+    expect(errorMessage?.textContent).toContain('Directory picker failed');
+  });
 });
