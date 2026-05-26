@@ -84,7 +84,7 @@ export class AssetsPreviewPanel extends ComponentBase {
       <button
         class="assets-preview-item ${isSelected ? 'is-selected' : ''}"
         title=${this.buildTooltip(item)}
-        ?draggable=${item.kind === 'file'}
+        draggable=${item.kind === 'file' ? 'true' : 'false'}
         @click=${(event: MouseEvent) => this.onItemSelected(event, item)}
         @dblclick=${() => {
           void this.onItemDoubleClick(item);

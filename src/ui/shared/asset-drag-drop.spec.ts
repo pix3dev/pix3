@@ -59,6 +59,15 @@ describe('asset-drag-drop', () => {
     expect(hasAssetDragData(transfer as DataTransfer)).toBe(true);
   });
 
+  it('treats uri-list payloads as asset drags during dragover', () => {
+    const transfer = {
+      types: ['text/uri-list'],
+      getData: () => '',
+    };
+
+    expect(hasAssetDragData(transfer as DataTransfer)).toBe(true);
+  });
+
   it('classifies supported scene-create asset types and derives node names from file names', () => {
     expect(classifySceneCreateAssetResource('res://assets/hero.png')).toBe('image');
     expect(classifySceneCreateAssetResource('res://animations/walk.pix3anim')).toBe('animation');

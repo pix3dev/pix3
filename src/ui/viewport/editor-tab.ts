@@ -117,6 +117,10 @@ export class EditorTabComponent extends ComponentBase {
     this.viewportRenderer.resize(width, height);
   });
 
+  private readonly handleViewportFocusIn = (): void => {
+    appState.editorContext.focusedArea = 'viewport';
+  };
+
   connectedCallback(): void {
     super.connectedCallback();
 
@@ -157,6 +161,7 @@ export class EditorTabComponent extends ComponentBase {
       passive: false,
       capture: true,
     });
+    this.addEventListener('focusin', this.handleViewportFocusIn);
     this.addEventListener('pointerdown', this.handleCanvasPointerDown);
     this.addEventListener('pointermove', this.handleCanvasPointerMove);
     this.addEventListener('pointerup', this.handleCanvasPointerUp);
@@ -188,6 +193,7 @@ export class EditorTabComponent extends ComponentBase {
     this.renderRoot.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.wheelCanvas?.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.wheelCanvas = undefined;
+    this.removeEventListener('focusin', this.handleViewportFocusIn);
     this.removeEventListener('pointerdown', this.handleCanvasPointerDown);
     this.removeEventListener('pointermove', this.handleCanvasPointerMove);
     this.removeEventListener('pointerup', this.handleCanvasPointerUp);
@@ -689,6 +695,8 @@ export class EditorTabComponent extends ComponentBase {
     const isToolbar = this.isToolbarInteraction(event);
     if (isToolbar) return;
 
+    this.focusViewportRegion();
+
     const canvas = this.viewportRenderer.getCanvasElement();
     const rect = canvas?.getBoundingClientRect() ?? this.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
@@ -754,6 +762,12 @@ export class EditorTabComponent extends ComponentBase {
       : undefined;
     this.isDragging = false;
   };
+
+  private focusViewportRegion(): void {
+    const panelElement = this.renderRoot.querySelector<HTMLElement>('.panel');
+    panelElement?.focus({ preventScroll: true });
+    appState.editorContext.focusedArea = 'viewport';
+  }
 
   private handleCanvasPointerMove = (event: PointerEvent): void => {
     if (appState.tabs.activeTabId !== this.tabId) return;

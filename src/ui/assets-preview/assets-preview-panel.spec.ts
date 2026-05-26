@@ -90,6 +90,41 @@ describe('AssetsPreviewPanel', () => {
     expect(panel.querySelector('.thumb-spinner')).not.toBeNull();
   });
 
+  it('marks file tiles as explicitly draggable, including icon-only assets', async () => {
+    const panel = document.createElement('pix3-assets-preview-panel') as AssetsPreviewPanelElement;
+    stubPanelServices(
+      panel,
+      createSnapshot([
+        createItem({
+          name: 'sprite.png',
+          path: 'assets/sprite.png',
+          kind: 'file',
+          previewType: 'image',
+          thumbnailUrl: 'blob://sprite',
+        }),
+        createItem({
+          name: 'logic.ts',
+          path: 'assets/logic.ts',
+          kind: 'file',
+          previewType: 'icon',
+        }),
+        createItem({
+          name: 'textures',
+          path: 'assets/textures',
+          kind: 'directory',
+        }),
+      ])
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const items = panel.querySelectorAll<HTMLButtonElement>('.assets-preview-item');
+    expect(items[0]?.getAttribute('draggable')).toBe('true');
+    expect(items[1]?.getAttribute('draggable')).toBe('true');
+    expect(items[2]?.getAttribute('draggable')).toBe('false');
+  });
+
   it('requests a model thumbnail when selecting a 3D asset', async () => {
     const panel = document.createElement('pix3-assets-preview-panel') as AssetsPreviewPanelElement;
     const services = stubPanelServices(

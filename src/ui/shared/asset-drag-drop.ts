@@ -69,7 +69,13 @@ export const hasAssetDragData = (dataTransfer: DataTransfer | null): boolean => 
 
   const rawTypes = dataTransfer.types;
   const types = rawTypes ? Array.from(rawTypes) : [];
-  return types.includes(ASSET_RESOURCE_MIME) || types.includes(ASSET_PATH_MIME);
+  return (
+    types.includes(ASSET_RESOURCE_LIST_MIME) ||
+    types.includes(ASSET_PATH_LIST_MIME) ||
+    types.includes(ASSET_RESOURCE_MIME) ||
+    types.includes(ASSET_PATH_MIME) ||
+    types.includes('text/uri-list')
+  );
 };
 
 export const getAssetExtension = (resourcePath: string): string => {

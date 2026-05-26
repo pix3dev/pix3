@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState, resetAppState } from '@/state';
 import { ASSET_RESOURCE_MIME } from '@/ui/shared/asset-drag-drop';
+import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import type { CreateSprite2DOperationParams } from '@/features/scene/CreateSprite2DOperation';
 import { Group2D, Sprite2D, type NodeBase, type SceneGraph } from '@pix3/runtime';
@@ -39,6 +40,36 @@ describe('EditorTabComponent', () => {
     expect(dropSurface).not.toBeNull();
 
     const dataTransfer = createDataTransfer([ASSET_RESOURCE_MIME]);
+    const dragOverEvent = new Event('dragover', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dragOverEvent, 'dataTransfer', {
+      value: dataTransfer,
+      configurable: true,
+    });
+
+    dropSurface?.dispatchEvent(dragOverEvent);
+    await panel.updateComplete;
+
+    expect(dragOverEvent.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe('copy');
+    expect(
+      panel.shadowRoot?.querySelector('.panel')?.classList.contains('panel--asset-dragover')
+    ).toBe(true);
+  });
+
+  it('accepts uri-list asset drags on the internal shadow DOM panel surface', async () => {
+    const panel = new EditorTabComponent();
+    stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const dropSurface = panel.shadowRoot?.querySelector<HTMLElement>('.panel');
+    expect(dropSurface).not.toBeNull();
+
+    const dataTransfer = createDataTransfer(['text/uri-list']);
     const dragOverEvent = new Event('dragover', {
       bubbles: true,
       cancelable: true,
@@ -120,6 +151,57 @@ describe('EditorTabComponent', () => {
     expect(services.commandDispatcher.execute).toHaveBeenCalledWith(
       expect.any(CreateSprite2DCommand)
     );
+  });
+
+  it('creates an animated sprite command when a .pix3anim asset is dropped on the viewport host', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const host = panel.shadowRoot?.querySelector<HTMLElement>('.viewport-host');
+    expect(host).not.toBeNull();
+
+    const dropEvent = new Event('drop', {
+      bubbles: true,
+      cancelable: true,
+    }) as DragEvent;
+    Object.defineProperty(dropEvent, 'dataTransfer', {
+      value: createDataTransfer(['text/uri-list'], {
+        'text/uri-list': 'res://animations/walk.pix3anim',
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(dropEvent, 'clientX', { value: 160, configurable: true });
+    Object.defineProperty(dropEvent, 'clientY', { value: 120, configurable: true });
+
+    host?.dispatchEvent(dropEvent);
+
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    expect(services.commandDispatcher.execute).toHaveBeenCalledWith(
+      expect.any(CreateAnimatedSprite2DCommand)
+    );
+  });
+
+  it('switches keyboard shortcut context to the viewport when the viewport host is clicked', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.editorContext.focusedArea = 'scene-tree';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const host = panel.shadowRoot?.querySelector<HTMLElement>('.viewport-host');
+    expect(host).not.toBeNull();
+
+    host?.dispatchEvent(createPointerEvent('pointerdown', { clientX: 120, clientY: 90 }));
+
+    expect(appState.editorContext.focusedArea).toBe('viewport');
   });
 
   it('parents dropped sprites into the compatible 2D container under the cursor', async () => {
