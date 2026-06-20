@@ -9,6 +9,7 @@ import {
   PlaneGeometry,
 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { ScrollContainer2D } from './ScrollContainer2D';
 
@@ -111,6 +112,7 @@ export abstract class UIControl2D extends Node2D {
     loader.load(
       path,
       texture => {
+        configure2DTexture(texture);
         this.applySkinTexture(texture);
       },
       undefined,
@@ -258,7 +260,8 @@ export abstract class UIControl2D extends Node2D {
       logicalHeight: height,
       dpr,
     };
-    texture.needsUpdate = true;
+    // sRGB + mipmaps disabled (see configure2DTexture for the why).
+    configure2DTexture(texture);
     return texture;
   }
 

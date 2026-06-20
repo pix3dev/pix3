@@ -1,5 +1,6 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
+import { configure2DTexture } from '../../core/configure-2d-texture';
 import type { PropertySchema } from '../../fw/property-schema';
 import {
   findAnimationClip,
@@ -379,11 +380,8 @@ export class AnimatedSprite2D extends Node2D {
 
   private cloneTexture(texture: Texture): Texture {
     const nextTexture = texture.clone();
-    if ('colorSpace' in nextTexture) {
-      (nextTexture as Texture & { colorSpace: string }).colorSpace = 'srgb';
-    } else if ('encoding' in nextTexture) {
-      (nextTexture as Texture & { encoding: number }).encoding = 3001;
-    }
+    // sRGB + mipmaps disabled (see configure2DTexture for the why).
+    configure2DTexture(nextTexture);
     return nextTexture;
   }
 

@@ -76,6 +76,13 @@ The mental model that spans many files:
 
 `src/main.ts` exposes `@pix3/runtime`, `three`, rapier, and the GLTFLoader to **user scripts** at runtime by attaching them to `window` and building a blob-URL **import map**. This lets in-editor user scripts `import { ... } from '@pix3/runtime'` against the live engine instance. Rapier (physics) is lazy-loaded (`src/core/lazy-rapier.ts`) and its export keys are baked in at build time via the Vite `define` `__PIX3_RAPIER_EXPORT_KEYS__` to keep its ~2 MB wasm out of the main bundle.
 
+### 2D overlay rendering (non-obvious)
+
+The 2D layer is a separate render pass with an orthographic camera, drawn over the 3D pass after a `clearDepth()`. Two things about it are easy to break:
+
+- **Draw order is hierarchy-driven, not depth-driven.** All 2D materials use `depthTest: false`, so `renderOrder` is the *only* thing that decides stacking. `assign2DRenderOrder(roots)` (`packages/pix3-runtime/src/core/render-order-2d.ts`) walks the 2D node tree and assigns `renderOrder` by DFS — a node later/deeper in the tree draws on top. It runs every frame before the 2D pass in **both** renderers: the runtime (`SceneRunner.reflowRoot2DNodes`) and the editor (`ViewportRenderService.requestRender`). So **node order in the scene tree = paint order** (Godot-like). Within a node, its own meshes are ordered by their *authored* `renderOrder` (e.g. Button2D skin 999 < label 1001) — never add-order, because `UIControl2D` adds its label in `super()` before subclasses add their skin. Meshes that must float above a node's *children* (e.g. a ScrollContainer scrollbar) set `userData[OVERLAY_2D_FLAG] = true`.
+- **2D textures must disable mipmaps.** Always run loaded/canvas textures for 2D nodes through `configure2DTexture()` (`packages/pix3-runtime/src/core/configure-2d-texture.ts`): sRGB + `generateMipmaps = false` + `LinearFilter`. On some ANGLE/D3D11 backends (Adreno / Windows on ARM) mipmapped NPOT 2D textures upload as transparent black and get cached that way, so sprites/labels render semi-transparent with opacity varying by zoom. The editor applies the same fix in `ViewportRenderService.configureSpriteTexture`. (3D textures keep mipmaps.)
+
 ## Conventions worth flagging
 
 - **No `any`.** ESLint flags it (`@typescript-eslint/no-explicit-any: warn`); `strict`, `noUnusedLocals/Parameters`, `noUncheckedSideEffectImports` are all on. Prefix intentionally-unused vars/args with `_`.

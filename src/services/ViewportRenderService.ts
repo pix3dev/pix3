@@ -34,6 +34,7 @@ import { Particles3D } from '@pix3/runtime';
 import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
+import { assign2DRenderOrder } from '@pix3/runtime';
 import type { EditorPreviewContext, SceneGraph, ScriptComponent } from '@pix3/runtime';
 import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
@@ -1289,6 +1290,12 @@ export class ViewportRendererService {
 
     // Render 2D layer with orthographic camera if enabled
     if (appState.ui.showLayer2D && this.orthographicCamera) {
+      // Draw order for 2D scene content follows the scene-graph hierarchy.
+      const sceneGraph = this.sceneManager.getActiveSceneGraph();
+      if (sceneGraph) {
+        assign2DRenderOrder(sceneGraph.rootNodes);
+      }
+
       const savedBackground = this.scene.background;
       this.scene.background = null;
       this.renderer.autoClear = false;

@@ -14,7 +14,6 @@
   display: flex;
   flex-direction: column;
   --pix3-nav-border: #fe9ebe;
-  box-shadow: inset 0 0 0 2px var(--pix3-nav-border);
 }
 
 .panel[data-nav-mode='2d'] {
@@ -22,24 +21,20 @@
 }
 
 .panel:focus-visible {
-  box-shadow:
-    inset 0 0 0 2px var(--pix3-nav-border),
-    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.5);
+  box-shadow: none;
 }
 
 .panel--asset-dragover {
-  box-shadow:
-    inset 0 0 0 2px var(--pix3-nav-border),
-    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.6);
+  box-shadow: none;
 }
 
 .top-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem;
-  background: rgba(12, 15, 22, 0.85);
-  backdrop-filter: blur(14px);
+  gap: 0.25rem;
+  min-height: 2.25rem;
+  padding: 0.18rem 0.35rem;
+  background: rgba(42, 47, 58, 0.6);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: auto;
 }
@@ -51,11 +46,11 @@
 .toolbar-group {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.2rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.6rem;
-  background: rgba(255, 255, 255, 0.035);
+  gap: 0.125rem;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   flex: 0 0 auto;
 }
 
@@ -73,7 +68,7 @@
 .toolbar-alignment-strip {
   display: inline-flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.45rem;
   min-width: 0;
   max-width: min(48rem, 55vw);
   overflow-x: auto;
@@ -87,15 +82,18 @@
 }
 
 .top-toolbar .toolbar-button {
-  min-width: 2rem;
-  height: 2rem;
+  min-width: 1.9rem;
+  height: 1.9rem;
   border: none;
-  border-radius: 0.5rem;
-  background: rgba(42, 47, 58, 0.6);
-  color: rgba(240, 244, 250, 0.8);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: rgba(240, 244, 250, 0.82);
   font-size: 0.875rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -104,19 +102,28 @@
 
 .top-toolbar .toolbar-button--layer,
 .top-toolbar .toolbar-button--mode {
-  min-width: 2.4rem;
-  padding: 0 0.55rem;
+  min-width: 2.25rem;
+  padding: 0 0.45rem;
+}
+
+.top-toolbar .toolbar-button--camera-projection .toolbar-icon {
+  width: 1.35rem;
+  height: 1.35rem;
 }
 
 .top-toolbar .toolbar-button:hover {
-  background: rgba(42, 47, 58, 0.9);
+  background: transparent;
   color: rgba(240, 244, 250, 1);
 }
 
+.top-toolbar .toolbar-button:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .top-toolbar .toolbar-button[aria-pressed='true'] {
-  background: rgba(var(--pix3-accent-rgb), 0.8);
-  color: rgba(255, 255, 255, 1);
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.3);
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: rgba(18, 20, 24, 0.95);
+  box-shadow: none;
 }
 
 .top-toolbar .toolbar-button[aria-pressed='true']:hover {
@@ -141,13 +148,37 @@
 .top-toolbar .toolbar-label {
   font-size: 0.71rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
+}
+
+.top-toolbar pix3-dropdown-button,
+.top-toolbar pix3-viewport-visibility-popover {
+  width: auto;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  min-height: 1.9rem;
+  padding: 0 0.35rem;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: rgba(240, 244, 250, 0.82);
+  --pix3-toolbar-button-background: transparent;
+  --pix3-toolbar-button-foreground: rgba(240, 244, 250, 0.82);
+}
+
+.top-toolbar pix3-dropdown-button:hover:not([disabled]),
+.top-toolbar pix3-viewport-visibility-popover:hover {
+  background: transparent;
+  color: rgba(240, 244, 250, 1);
+  transform: none;
+  --pix3-toolbar-button-foreground: rgba(240, 244, 250, 1);
 }
 
 .top-toolbar pix3-dropdown-button.toolbar-dropdown-button--active {
-  --pix3-toolbar-button-background: rgba(var(--pix3-accent-rgb), 0.8);
-  --pix3-toolbar-button-foreground: rgba(255, 255, 255, 1);
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.3);
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: rgba(18, 20, 24, 0.95);
+  --pix3-toolbar-button-background: rgba(var(--pix3-accent-rgb), 0.92);
+  --pix3-toolbar-button-foreground: rgba(18, 20, 24, 0.95);
+  box-shadow: none;
 }
 
 .top-toolbar pix3-dropdown-button.toolbar-dropdown-button--active:hover {
@@ -161,6 +192,27 @@
   display: flex;
   position: relative;
   touch-action: none;
+}
+
+.viewport-host::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--pix3-nav-border);
+}
+
+.panel:focus-visible .viewport-host::after {
+  box-shadow:
+    inset 0 0 0 2px var(--pix3-nav-border),
+    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.5);
+}
+
+.panel--asset-dragover .viewport-host::after {
+  box-shadow:
+    inset 0 0 0 2px var(--pix3-nav-border),
+    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.6);
 }
 
 .viewport-marquee-selection {
@@ -218,9 +270,9 @@
 }
 
 .transform-overlay .toolbar-button[aria-pressed='true'] {
-  background: rgba(var(--pix3-accent-rgb), 0.8);
-  color: rgba(255, 255, 255, 1);
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.3);
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: rgba(18, 20, 24, 0.95);
+  box-shadow: none;
 }
 
 .transform-overlay .toolbar-button[aria-pressed='true']:hover {

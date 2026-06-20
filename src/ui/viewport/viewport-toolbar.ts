@@ -187,7 +187,7 @@ export function renderViewportToolbar(
                 ariaLabel: 'Toggle navigation mode',
                 title: 'Toggle Navigation Mode (N)',
                 text: state.navigationMode === '3d' ? '3D' : '2D',
-                isPressed: state.navigationMode === '2d',
+                isPressed: true,
                 onClick: handlers.onToggleNavigationMode,
                 extraClass: 'toolbar-button--mode',
               },
@@ -228,22 +228,50 @@ export function renderViewportToolbar(
       <div class="toolbar-spacer"></div>
 
       <div class="toolbar-group" role="toolbar" aria-label="Viewport visibility settings">
+        ${renderToolbarButton(
+          {
+            ariaLabel: `Editor camera projection: ${formatEditorCameraProjection(
+              state.editorCameraProjection
+            )}`,
+            title: `Switch editor camera to ${formatEditorCameraProjection(
+              getNextEditorCameraProjection(state.editorCameraProjection)
+            )}`,
+            iconName:
+              state.editorCameraProjection === 'perspective'
+                ? 'camera-projection-perspective'
+                : 'camera-projection-orthographic',
+            isPressed: state.editorCameraProjection === 'orthographic',
+            onClick: () =>
+              handlers.onSetEditorCameraProjection(
+                getNextEditorCameraProjection(state.editorCameraProjection)
+              ),
+            extraClass: 'toolbar-button--camera-projection',
+          },
+          iconService
+        )}
         <pix3-viewport-visibility-popover
           .showGrid=${state.showGrid}
           .showLighting=${state.showLighting}
           .showLayer2D=${state.showLayer2D}
           .showLayer3D=${state.showLayer3D}
-          .editorCameraProjection=${state.editorCameraProjection}
           @toggle-grid=${() => handlers.onToggleGrid()}
           @toggle-lighting=${() => handlers.onToggleLighting()}
           @toggle-layer-2d=${() => handlers.onToggleLayer2D()}
           @toggle-layer-3d=${() => handlers.onToggleLayer3D()}
-          @projection-change=${(e: CustomEvent<{ projection: EditorCameraProjection }>) =>
-            handlers.onSetEditorCameraProjection(e.detail.projection)}
         ></pix3-viewport-visibility-popover>
       </div>
     </div>
   `;
+}
+
+function getNextEditorCameraProjection(
+  projection: EditorCameraProjection
+): EditorCameraProjection {
+  return projection === 'perspective' ? 'orthographic' : 'perspective';
+}
+
+function formatEditorCameraProjection(projection: EditorCameraProjection): string {
+  return projection === 'perspective' ? 'Perspective' : 'Orthographic';
 }
 
 function renderAlignmentToolbarGroups(

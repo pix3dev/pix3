@@ -25,6 +25,7 @@ import { Particles3D } from '../nodes/3D/Particles3D';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 import { AudioPlayer } from '../nodes/AudioPlayer';
 import { LAYER_3D, LAYER_2D } from '../constants';
+import { assign2DRenderOrder } from './render-order-2d';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
 import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
@@ -719,6 +720,9 @@ export class SceneRunner {
         node.applyAnchoredLayoutRecursive(currentRootSize, this.rootLayoutAuthoredSize);
       }
     }
+
+    // Draw order for the 2D overlay pass follows the scene-graph hierarchy.
+    assign2DRenderOrder(this.runtimeGraph.rootNodes);
   }
 
   private stopAudioPlayers(node: NodeBase): void {

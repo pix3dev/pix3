@@ -2,6 +2,7 @@ import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
+import { configure2DTexture } from '../../core/configure-2d-texture';
 
 export interface SpriteAnchor2D {
   x: number;
@@ -118,14 +119,8 @@ export class Sprite2D extends Node2D {
    * Resizes the mesh if the texture provides dimensions and width/height were not specified.
    */
   setTexture(texture: Texture): void {
-    console.log(`[Sprite2D] setTexture called for "${this.name}"`, texture);
-
-    // Set color space for proper rendering
-    if ('colorSpace' in texture) {
-      (texture as any).colorSpace = 'srgb';
-    } else if ('encoding' in texture) {
-      (texture as any).encoding = 3001; // sRGBEncoding
-    }
+    // sRGB + mipmaps disabled (see configure2DTexture for the why).
+    configure2DTexture(texture);
 
     this.material.map = texture;
     this.material.color.set('#ffffff'); // Reset to white once texture is loaded

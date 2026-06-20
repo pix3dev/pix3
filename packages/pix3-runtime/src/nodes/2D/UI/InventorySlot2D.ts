@@ -6,6 +6,7 @@ import {
     Vector2,
 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
 
 export interface InventorySlot2DProps extends UIControl2DProps {
@@ -119,7 +120,8 @@ export class InventorySlot2D extends UIControl2D {
         ctx.fillText(String(this.quantity), 60, 60);
 
         const texture = new CanvasTexture(canvas);
-        texture.needsUpdate = true;
+        // sRGB + mipmaps disabled (see configure2DTexture for the why).
+        configure2DTexture(texture);
         return texture;
     }
 

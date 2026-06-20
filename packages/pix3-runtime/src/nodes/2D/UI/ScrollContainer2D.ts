@@ -11,6 +11,7 @@ import {
 
 import { Group2D, type Group2DProps } from '../Group2D';
 import { Node2D } from '../../Node2D';
+import { OVERLAY_2D_FLAG } from '../../../core/render-order-2d';
 import type { PropertySchema } from '../../../fw/property-schema';
 
 export interface ScrollContainer2DProps extends Group2DProps {
@@ -111,8 +112,12 @@ export class ScrollContainer2D extends Group2D {
         this.registerOpacityMaterial(this.trackMaterial, 0.18);
         this.registerOpacityMaterial(this.thumbMaterial, 0.92);
 
+        // The scrollbar must float above the scrolled content (which is added as
+        // child nodes), so mark it as an overlay for the 2D render-order pass.
+        // The renderOrder values order the track below the thumb within the overlay.
         this.trackMesh = new Mesh(this.trackGeometry, this.trackMaterial);
         this.trackMesh.renderOrder = 1000;
+        this.trackMesh.userData[OVERLAY_2D_FLAG] = true;
         this.trackMesh.position.z = 0.25;
         this.trackMesh.visible = false;
         this.trackMesh.name = `${this.name}-ScrollbarTrack`;
@@ -120,6 +125,7 @@ export class ScrollContainer2D extends Group2D {
 
         this.thumbMesh = new Mesh(this.thumbGeometry, this.thumbMaterial);
         this.thumbMesh.renderOrder = 1001;
+        this.thumbMesh.userData[OVERLAY_2D_FLAG] = true;
         this.thumbMesh.position.z = 0.3;
         this.thumbMesh.visible = false;
         this.thumbMesh.name = `${this.name}-ScrollbarThumb`;

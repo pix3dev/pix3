@@ -189,6 +189,26 @@ export class IconService {
 </svg>`
     );
 
+    this.customIcons.set(
+      'camera-projection-perspective',
+      `<svg viewBox="0 0 24 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 2L20 6.5V14L12 17L4 14V6.5L12 2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M4 6.5L12 10.5L20 6.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M12 10.5V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M4 14L1.5 15.5M20 14L22.5 15.5M4 6.5L1.5 5M20 6.5L22.5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+</svg>`
+    );
+
+    this.customIcons.set(
+      'camera-projection-orthographic',
+      `<svg viewBox="0 0 24 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 2.25L20.5 6.5V13.5L12 15.75L3.5 13.5V6.5L12 2.25Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M12 2.25V15.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M3.5 6.5L12 10.25L20.5 6.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M7.25 8.15V14.45M16.75 8.15V14.45" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+</svg>`
+    );
+
     // Gamepad icon for Joystick2D nodes
     this.customIcons.set(
       'gamepad',

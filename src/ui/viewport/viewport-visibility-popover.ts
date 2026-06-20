@@ -1,5 +1,4 @@
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
-import type { EditorCameraProjection } from '@/state';
 import { IconService } from '@/services/IconService';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import './viewport-visibility-popover.ts.css';
@@ -20,9 +19,6 @@ export class ViewportVisibilityPopover extends ComponentBase {
 
   @property({ type: Boolean })
   showLayer3D = false;
-
-  @property({ type: String })
-  editorCameraProjection: EditorCameraProjection = 'perspective';
 
   @state()
   private isOpen = false;
@@ -107,21 +103,10 @@ export class ViewportVisibilityPopover extends ComponentBase {
     this.dispatchEvent(new CustomEvent(eventName, { bubbles: true, composed: true }));
   }
 
-  private emitProjectionChange(projection: EditorCameraProjection): void {
-    this.dispatchEvent(
-      new CustomEvent<{ projection: EditorCameraProjection }>('projection-change', {
-        detail: { projection },
-        bubbles: true,
-        composed: true,
-      })
-    );
-  }
-
   protected render() {
     return html`
       <div class="visibility-popover__trigger">
         <span class="visibility-popover__icon">${this.iconService.getIcon('eye')}</span>
-        <span class="visibility-popover__label">Visibility</span>
         <span class="visibility-popover__caret"
           >${this.iconService.getIcon('chevron-down-caret', 12)}</span
         >
@@ -154,35 +139,6 @@ export class ViewportVisibilityPopover extends ComponentBase {
             'toggle-layer-3d',
             'Show or hide the 3D layer'
           )}
-        </div>
-        <div class="visibility-popover__section">
-          <div class="visibility-popover__title">Editor Camera</div>
-          <div class="visibility-popover__projection">
-            <button
-              class="visibility-popover__projection-button ${this.editorCameraProjection ===
-              'perspective'
-                ? 'is-active'
-                : ''}"
-              @click=${(event: Event) => {
-                event.stopPropagation();
-                this.emitProjectionChange('perspective');
-              }}
-            >
-              Perspective
-            </button>
-            <button
-              class="visibility-popover__projection-button ${this.editorCameraProjection ===
-              'orthographic'
-                ? 'is-active'
-                : ''}"
-              @click=${(event: Event) => {
-                event.stopPropagation();
-                this.emitProjectionChange('orthographic');
-              }}
-            >
-              Orthographic
-            </button>
-          </div>
         </div>
       </div>
     `;

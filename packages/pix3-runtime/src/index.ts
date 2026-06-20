@@ -17,6 +17,8 @@ export * from './core/AnimationResource';
 export * from './core/ecs';
 export * from './core/ECSService';
 export * from './core/raycast';
+export * from './core/render-order-2d';
+export * from './core/configure-2d-texture';
 
 // Nodes
 export * from './nodes/NodeBase';

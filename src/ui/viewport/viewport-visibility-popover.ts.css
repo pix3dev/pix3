@@ -2,7 +2,7 @@ pix3-viewport-visibility-popover {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
-  padding: 0 0.7rem;
+  padding: 0 0.55rem;
   border-radius: 0.5rem;
   background: var(--pix3-toolbar-button-background, rgba(60, 68, 82, 0.32));
   color: var(--pix3-toolbar-button-foreground, rgba(245, 247, 250, 0.95));
@@ -31,7 +31,7 @@ pix3-viewport-visibility-popover:active {
 .visibility-popover__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.25rem;
 }
 
 .visibility-popover__icon,
@@ -39,12 +39,6 @@ pix3-viewport-visibility-popover:active {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.visibility-popover__label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
 }
 
 .visibility-popover__menu {
@@ -66,12 +60,6 @@ pix3-viewport-visibility-popover:active {
   flex-direction: column;
   gap: 0.3rem;
   padding: 0.35rem;
-}
-
-.visibility-popover__section + .visibility-popover__section {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  margin-top: 0.35rem;
-  padding-top: 0.65rem;
 }
 
 .visibility-popover__title {
@@ -149,41 +137,6 @@ pix3-viewport-visibility-popover:active {
 
 .visibility-popover__switch.is-on .visibility-popover__switch-thumb {
   transform: translateX(0.9rem);
-}
-
-.visibility-popover__projection {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem;
-  padding: 0.15rem 0.35rem 0.35rem;
-}
-
-.visibility-popover__projection-button {
-  min-height: 2rem;
-  padding: 0 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.6rem;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(245, 247, 250, 0.84);
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.visibility-popover__projection-button:hover,
-.visibility-popover__projection-button:focus-visible {
-  outline: none;
-  background: rgba(var(--pix3-accent-rgb), 0.14);
-}
-
-.visibility-popover__projection-button.is-active {
-  background: rgba(var(--pix3-accent-rgb), 0.85);
-  border-color: rgba(var(--pix3-accent-rgb), 0.95);
-  color: rgba(20, 18, 10, 0.95);
 }
 
 .pix3-dropdown-portal .visibility-popover__menu {
