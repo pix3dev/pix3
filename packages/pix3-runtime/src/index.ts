@@ -19,6 +19,7 @@ export * from './core/ECSService';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
+export * from './core/game-debug';
 
 // Nodes
 export * from './nodes/NodeBase';

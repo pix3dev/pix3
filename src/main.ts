@@ -123,3 +123,10 @@ import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';
 import './ui/assets-browser/asset-browser-panel';
 import './ui/pix3-editor-shell';
+
+// Dev-only debugging bridge for external tooling (Chrome DevTools / MCP).
+// The dynamic import + statically-false guard keeps this module (and its deps)
+// out of the production PWA bundle.
+if (import.meta.env.DEV) {
+  void import('./core/debug-bridge').then(({ installDebugBridge }) => installDebugBridge());
+}
