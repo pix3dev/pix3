@@ -956,6 +956,37 @@ export class ViewportRendererService {
     this.requestRender();
   }
 
+  /**
+   * Zoom the active viewport camera by a multiplicative factor.
+   * `factor > 1` zooms in, `factor < 1` zooms out. Works in both 2D and 3D modes.
+   */
+  zoomBy(factor: number): void {
+    if (!Number.isFinite(factor) || factor <= 0) {
+      return;
+    }
+
+    if (appState.ui.navigationMode === '2d') {
+      this.zoom2D(factor);
+      return;
+    }
+
+    if (!this.camera || !this.orbitControls) return;
+
+    if (this.camera instanceof THREE.PerspectiveCamera) {
+      // Dolly the camera toward/away from the orbit target.
+      const target = this.orbitControls.target;
+      const offset = this.camera.position.clone().sub(target);
+      offset.multiplyScalar(1 / factor);
+      this.camera.position.copy(target).add(offset);
+    } else {
+      this.camera.zoom = Math.max(0.1, this.camera.zoom * factor);
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.orbitControls.update();
+    this.requestRender();
+  }
+
   private getTarget2DZoomForBounds(
     bounds: THREE.Box3,
     paddingMultiplier = TWO_D_FIT_PADDING_MULTIPLIER

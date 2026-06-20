@@ -67,6 +67,8 @@ import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
 import { ToggleLayer3DCommand } from '@/features/viewport/ToggleLayer3DCommand';
 import { ZoomDefaultCommand } from '@/features/viewport/ZoomDefaultCommand';
 import { ZoomAllCommand } from '@/features/viewport/ZoomAllCommand';
+import { ZoomInCommand } from '@/features/viewport/ZoomInCommand';
+import { ZoomOutCommand } from '@/features/viewport/ZoomOutCommand';
 import { ToggleLightingCommand } from '@/features/viewport/ToggleLightingCommand';
 import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigationModeCommand';
 import { appState } from '@/state';
@@ -321,6 +323,8 @@ export class Pix3EditorShell extends ComponentBase {
     const toggleLayer3DCommand = new ToggleLayer3DCommand();
     const zoomDefaultCommand = new ZoomDefaultCommand();
     const zoomAllCommand = new ZoomAllCommand();
+    const zoomInCommand = new ZoomInCommand();
+    const zoomOutCommand = new ZoomOutCommand();
     const toggleLightingCommand = new ToggleLightingCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
 
@@ -354,6 +358,8 @@ export class Pix3EditorShell extends ComponentBase {
       toggleLayer3DCommand,
       zoomDefaultCommand,
       zoomAllCommand,
+      zoomInCommand,
+      zoomOutCommand,
       toggleLightingCommand,
       toggleNavigationModeCommand
     );

@@ -241,8 +241,6 @@ export class ViewportPanel extends ComponentBase {
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
               onToggleNavigationMode: () => this.toggleNavigationMode(),
-              onZoomDefault: () => this.zoomDefault(),
-              onZoomAll: () => this.zoomAll(),
               onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
               onToggleGrid: () => this.toggleGrid(),
               onToggleLighting: () => this.toggleLighting(),
@@ -604,14 +602,6 @@ export class ViewportPanel extends ComponentBase {
 
   private toggleNavigationMode(): void {
     void this.commandDispatcher.execute(toggleNavigationMode());
-  }
-
-  private zoomDefault(): void {
-    void this.commandDispatcher.executeById('view.zoom-default');
-  }
-
-  private zoomAll(): void {
-    void this.commandDispatcher.executeById('view.zoom-all');
   }
 
   private handleCanvasPointerDown = (event: PointerEvent): void => {

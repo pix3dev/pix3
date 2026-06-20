@@ -26,8 +26,6 @@ export interface ViewportToolbarState {
 export interface ViewportToolbarHandlers {
   readonly onTransformModeChange?: (mode: TransformMode) => void;
   readonly onToggleNavigationMode?: () => void;
-  readonly onZoomDefault: () => void;
-  readonly onZoomAll: () => void;
   readonly onSelectPreviewCamera: (itemId: string) => void;
   readonly onToggleGrid: () => void;
   readonly onToggleLighting: () => void;
@@ -35,6 +33,12 @@ export interface ViewportToolbarHandlers {
   readonly onToggleLayer2D: () => void;
   readonly onSetEditorCameraProjection: (projection: EditorCameraProjection) => void;
   readonly onRunAlignmentAction?: (action: Align2DActionId) => void;
+}
+
+export interface ViewportZoomOverlayHandlers {
+  readonly onZoomIn: () => void;
+  readonly onZoomOut: () => void;
+  readonly onZoomAll: () => void;
 }
 
 export interface AlignmentToolbarState {
@@ -176,26 +180,6 @@ export function renderViewportToolbar(
       @pointerdown=${(e: Event) => e.stopPropagation()}
       @pointerup=${(e: Event) => e.stopPropagation()}
     >
-      ${state.transformMode !== null && handlers.onTransformModeChange
-        ? html`
-            <div class="toolbar-group" role="toolbar" aria-label="Transform tools">
-              ${TRANSFORM_MODES.map(({ mode, iconName, label }) =>
-                renderToolbarButton(
-                  {
-                    ariaLabel: label,
-                    title: label,
-                    iconName,
-                    isPressed: state.transformMode === mode,
-                    isActive: state.transformMode === mode,
-                    onClick: () => handlers.onTransformModeChange?.(mode),
-                  },
-                  iconService
-                )
-              )}
-            </div>
-          `
-        : null}
-
       <div class="toolbar-group" role="toolbar" aria-label="Viewport controls">
         ${handlers.onToggleNavigationMode && state.navigationMode
           ? renderToolbarButton(
@@ -226,24 +210,6 @@ export function renderViewportToolbar(
             handlers.onSelectPreviewCamera(e.detail.id);
           }}
         ></pix3-dropdown-button>
-        ${renderToolbarButton(
-          {
-            ariaLabel: 'Reset zoom',
-            title: 'Reset Zoom (Home)',
-            iconName: 'zoom-default',
-            onClick: handlers.onZoomDefault,
-          },
-          iconService
-        )}
-        ${renderToolbarButton(
-          {
-            ariaLabel: 'Show all',
-            title: 'Show All (F)',
-            iconName: 'zoom-all',
-            onClick: handlers.onZoomAll,
-          },
-          iconService
-        )}
       </div>
 
       <div class="toolbar-spacer"></div>
@@ -262,6 +228,96 @@ export function renderViewportToolbar(
           @projection-change=${(e: CustomEvent<{ projection: EditorCameraProjection }>) =>
             handlers.onSetEditorCameraProjection(e.detail.projection)}
         ></pix3-viewport-visibility-popover>
+      </div>
+    </div>
+  `;
+}
+
+const ZOOM_OVERLAY_BUTTONS: readonly {
+  readonly key: 'in' | 'out' | 'all';
+  readonly iconName: string;
+  readonly ariaLabel: string;
+  readonly title: string;
+}[] = [
+  { key: 'in', iconName: 'zoom-in', ariaLabel: 'Zoom in', title: 'Zoom In (=)' },
+  { key: 'out', iconName: 'zoom-out', ariaLabel: 'Zoom out', title: 'Zoom Out (-)' },
+  { key: 'all', iconName: 'zoom-fit', ariaLabel: 'Show all', title: 'Show All (F)' },
+];
+
+export function renderViewportZoomOverlay(
+  handlers: ViewportZoomOverlayHandlers,
+  iconService: IconService
+): TemplateResult {
+  const onClickByKey: Record<'in' | 'out' | 'all', () => void> = {
+    in: handlers.onZoomIn,
+    out: handlers.onZoomOut,
+    all: handlers.onZoomAll,
+  };
+
+  return html`
+    <div
+      class="zoom-overlay-shell"
+      @click=${(e: Event) => e.stopPropagation()}
+      @pointerdown=${(e: Event) => e.stopPropagation()}
+      @pointerup=${(e: Event) => e.stopPropagation()}
+      @wheel=${(e: Event) => e.stopPropagation()}
+    >
+      <div class="zoom-overlay" role="toolbar" aria-label="Viewport zoom">
+        ${ZOOM_OVERLAY_BUTTONS.map(({ key, iconName, ariaLabel, title }) =>
+          renderToolbarButton(
+            {
+              ariaLabel,
+              title,
+              iconName,
+              onClick: onClickByKey[key],
+            },
+            iconService
+          )
+        )}
+      </div>
+    </div>
+  `;
+}
+
+export interface TransformToolbarState {
+  readonly transformMode: TransformMode | null;
+}
+
+export interface TransformToolbarHandlers {
+  readonly onTransformModeChange?: (mode: TransformMode) => void;
+}
+
+export function renderTransformToolbarOverlay(
+  state: TransformToolbarState,
+  handlers: TransformToolbarHandlers,
+  iconService: IconService
+): TemplateResult | null {
+  if (state.transformMode === null || !handlers.onTransformModeChange) {
+    return null;
+  }
+
+  return html`
+    <div
+      class="transform-overlay-shell"
+      @click=${(e: Event) => e.stopPropagation()}
+      @pointerdown=${(e: Event) => e.stopPropagation()}
+      @pointerup=${(e: Event) => e.stopPropagation()}
+      @wheel=${(e: Event) => e.stopPropagation()}
+    >
+      <div class="transform-overlay" role="toolbar" aria-label="Transform tools">
+        ${TRANSFORM_MODES.map(({ mode, iconName, label }) =>
+          renderToolbarButton(
+            {
+              ariaLabel: label,
+              title: label,
+              iconName,
+              isPressed: state.transformMode === mode,
+              isActive: state.transformMode === mode,
+              onClick: () => handlers.onTransformModeChange?.(mode),
+            },
+            iconService
+          )
+        )}
       </div>
     </div>
   `;

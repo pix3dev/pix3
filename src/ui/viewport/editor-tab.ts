@@ -29,7 +29,12 @@ import {
   getDroppedAssetResourcePath,
   hasAssetDragData,
 } from '@/ui/shared/asset-drag-drop';
-import { renderAlignmentToolbarOverlay, renderViewportToolbar } from './viewport-toolbar';
+import {
+  renderAlignmentToolbarOverlay,
+  renderTransformToolbarOverlay,
+  renderViewportToolbar,
+  renderViewportZoomOverlay,
+} from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
 
@@ -263,8 +268,6 @@ export class EditorTabComponent extends ComponentBase {
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
               onToggleNavigationMode: () => this.toggleNavigationMode(),
-              onZoomDefault: () => this.zoomDefault(),
-              onZoomAll: () => this.zoomAll(),
               onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
               onToggleGrid: () => this.toggleGrid(),
               onToggleLighting: () => this.toggleLighting(),
@@ -291,6 +294,15 @@ export class EditorTabComponent extends ComponentBase {
                 style=${this.getMarqueeSelectionStyle(this.marqueeSelectionRect)}
               ></div>`
             : null}
+          ${renderTransformToolbarOverlay(
+            {
+              transformMode: isSceneTab ? this.transformMode : null,
+            },
+            {
+              onTransformModeChange: m => this.handleTransformModeChange(m),
+            },
+            this.iconService
+          )}
           ${renderAlignmentToolbarOverlay(
             {
               showAlignmentTools,
@@ -303,6 +315,16 @@ export class EditorTabComponent extends ComponentBase {
             },
             this.iconService
           )}
+          ${isSceneTab
+            ? renderViewportZoomOverlay(
+                {
+                  onZoomIn: () => this.zoomIn(),
+                  onZoomOut: () => this.zoomOut(),
+                  onZoomAll: () => this.zoomAll(),
+                },
+                this.iconService
+              )
+            : null}
         </div>
       </section>
     `;
@@ -596,8 +618,12 @@ export class EditorTabComponent extends ComponentBase {
     this.commandDispatcher.execute(command);
   }
 
-  private zoomDefault(): void {
-    void this.commandDispatcher.executeById('view.zoom-default');
+  private zoomIn(): void {
+    void this.commandDispatcher.executeById('view.zoom-in');
+  }
+
+  private zoomOut(): void {
+    void this.commandDispatcher.executeById('view.zoom-out');
   }
 
   private handlePreviewCameraSelect(itemId: string): void {
@@ -1057,8 +1083,12 @@ export class EditorTabComponent extends ComponentBase {
         el =>
           el instanceof HTMLElement &&
           (el.classList.contains('top-toolbar') ||
+            el.classList.contains('transform-overlay') ||
+            el.classList.contains('transform-overlay-shell') ||
             el.classList.contains('alignment-overlay') ||
             el.classList.contains('alignment-overlay-shell') ||
+            el.classList.contains('zoom-overlay') ||
+            el.classList.contains('zoom-overlay-shell') ||
             el.classList.contains('toolbar-group') ||
             el.classList.contains('toolbar-button') ||
             el.classList.contains('toolbar-dropdown-button'))
