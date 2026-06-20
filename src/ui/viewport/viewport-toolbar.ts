@@ -212,6 +212,19 @@ export function renderViewportToolbar(
         ></pix3-dropdown-button>
       </div>
 
+      ${renderAlignmentToolbarGroups(
+        {
+          showAlignmentTools: state.showAlignmentTools,
+          canAlignToContainer: state.canAlignToContainer,
+          canAlignToSelectionBounds: state.canAlignToSelectionBounds,
+          canDistributeSelection: state.canDistributeSelection,
+        },
+        {
+          onRunAlignmentAction: handlers.onRunAlignmentAction,
+        },
+        iconService
+      )}
+
       <div class="toolbar-spacer"></div>
 
       <div class="toolbar-group" role="toolbar" aria-label="Viewport visibility settings">
@@ -229,6 +242,83 @@ export function renderViewportToolbar(
             handlers.onSetEditorCameraProjection(e.detail.projection)}
         ></pix3-viewport-visibility-popover>
       </div>
+    </div>
+  `;
+}
+
+function renderAlignmentToolbarGroups(
+  state: AlignmentToolbarState,
+  handlers: AlignmentToolbarHandlers,
+  iconService: IconService
+): TemplateResult | null {
+  const showContainerAlignment =
+    state.showAlignmentTools && state.canAlignToContainer && Boolean(handlers.onRunAlignmentAction);
+  const showSelectionAlignment =
+    state.showAlignmentTools &&
+    state.canAlignToSelectionBounds &&
+    Boolean(handlers.onRunAlignmentAction);
+  const showDistribution =
+    state.showAlignmentTools &&
+    state.canDistributeSelection &&
+    Boolean(handlers.onRunAlignmentAction);
+
+  if (!showContainerAlignment && !showSelectionAlignment && !showDistribution) {
+    return null;
+  }
+
+  return html`
+    <div class="toolbar-alignment-strip" role="toolbar" aria-label="2D alignment tools">
+      ${showSelectionAlignment
+        ? html`
+            <div class="toolbar-group" role="group" aria-label="Align to selection bounds">
+              ${SELECTION_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
+                renderToolbarButton(
+                  {
+                    ariaLabel: label,
+                    title: label,
+                    iconName,
+                    onClick: () => handlers.onRunAlignmentAction?.(action),
+                  },
+                  iconService
+                )
+              )}
+            </div>
+          `
+        : null}
+      ${showContainerAlignment
+        ? html`
+            <div class="toolbar-group" role="group" aria-label="Align to container">
+              ${CONTAINER_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
+                renderToolbarButton(
+                  {
+                    ariaLabel: label,
+                    title: label,
+                    iconName,
+                    onClick: () => handlers.onRunAlignmentAction?.(action),
+                  },
+                  iconService
+                )
+              )}
+            </div>
+          `
+        : null}
+      ${showDistribution
+        ? html`
+            <div class="toolbar-group" role="group" aria-label="Distribute selection">
+              ${DISTRIBUTION_ACTIONS.map(({ action, iconName, label }) =>
+                renderToolbarButton(
+                  {
+                    ariaLabel: label,
+                    title: label,
+                    iconName,
+                    onClick: () => handlers.onRunAlignmentAction?.(action),
+                  },
+                  iconService
+                )
+              )}
+            </div>
+          `
+        : null}
     </div>
   `;
 }
@@ -318,91 +408,6 @@ export function renderTransformToolbarOverlay(
             iconService
           )
         )}
-      </div>
-    </div>
-  `;
-}
-
-export function renderAlignmentToolbarOverlay(
-  state: AlignmentToolbarState,
-  handlers: AlignmentToolbarHandlers,
-  iconService: IconService
-): TemplateResult | null {
-  const showContainerAlignment =
-    state.showAlignmentTools && state.canAlignToContainer && Boolean(handlers.onRunAlignmentAction);
-  const showSelectionAlignment =
-    state.showAlignmentTools &&
-    state.canAlignToSelectionBounds &&
-    Boolean(handlers.onRunAlignmentAction);
-  const showDistribution =
-    state.showAlignmentTools &&
-    state.canDistributeSelection &&
-    Boolean(handlers.onRunAlignmentAction);
-
-  if (!showContainerAlignment && !showSelectionAlignment && !showDistribution) {
-    return null;
-  }
-
-  return html`
-    <div
-      class="alignment-overlay-shell"
-      @click=${(e: Event) => e.stopPropagation()}
-      @pointerdown=${(e: Event) => e.stopPropagation()}
-      @pointerup=${(e: Event) => e.stopPropagation()}
-      @wheel=${(e: Event) => e.stopPropagation()}
-    >
-      <div class="alignment-overlay" role="toolbar" aria-label="2D alignment tools">
-        ${showSelectionAlignment
-          ? html`
-              <div class="toolbar-group" role="group" aria-label="Align to selection bounds">
-                ${SELECTION_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
-                  renderToolbarButton(
-                    {
-                      ariaLabel: label,
-                      title: label,
-                      iconName,
-                      onClick: () => handlers.onRunAlignmentAction?.(action),
-                    },
-                    iconService
-                  )
-                )}
-              </div>
-            `
-          : null}
-        ${showContainerAlignment
-          ? html`
-              <div class="toolbar-group" role="group" aria-label="Align to container">
-                ${CONTAINER_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
-                  renderToolbarButton(
-                    {
-                      ariaLabel: label,
-                      title: label,
-                      iconName,
-                      onClick: () => handlers.onRunAlignmentAction?.(action),
-                    },
-                    iconService
-                  )
-                )}
-              </div>
-            `
-          : null}
-        ${showDistribution
-          ? html`
-              <div class="toolbar-group" role="group" aria-label="Distribute selection">
-                ${DISTRIBUTION_ACTIONS.map(({ action, iconName, label }) =>
-                  renderToolbarButton(
-                    {
-                      ariaLabel: label,
-                      title: label,
-                      iconName,
-                      onClick: () => handlers.onRunAlignmentAction?.(action),
-                    },
-                    iconService
-                  )
-                )}
-              </div>
-            `
-          : null}
       </div>
     </div>
   `;

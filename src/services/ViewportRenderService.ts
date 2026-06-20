@@ -832,21 +832,21 @@ export class ViewportRendererService {
   private ensureNodeIconTextures(): void {
     if (!this.cameraIconTexture) {
       new THREE.TextureLoader().load('/cam.png', texture => {
-        texture.colorSpace = THREE.SRGBColorSpace;
+        this.configureSpriteTexture(texture);
         this.cameraIconTexture = texture;
         this.refreshNodeIconMaterials('camera');
       });
     }
     if (!this.lampIconTexture) {
       new THREE.TextureLoader().load('/lamp.png', texture => {
-        texture.colorSpace = THREE.SRGBColorSpace;
+        this.configureSpriteTexture(texture);
         this.lampIconTexture = texture;
         this.refreshNodeIconMaterials('light');
       });
     }
     if (!this.particlesIconTexture) {
       new THREE.TextureLoader().load('/particles.png', texture => {
-        texture.colorSpace = THREE.SRGBColorSpace;
+        this.configureSpriteTexture(texture);
         this.particlesIconTexture = texture;
         this.refreshNodeIconMaterials('particles');
       });
@@ -3862,8 +3862,22 @@ export class ViewportRendererService {
     };
   }
 
-  private applySrgbColorSpace(texture: THREE.Texture): void {
+  /**
+   * Configure a texture for 2D/sprite display: sRGB color space with mipmaps
+   * disabled.
+   *
+   * Mipmap generation for these (frequently non-power-of-two) sprite textures is
+   * broken on some ANGLE/D3D11 backends (notably Qualcomm Adreno on Windows on
+   * ARM): the first GPU upload samples as transparent black and three.js caches
+   * that empty upload (the texture version never changes afterwards), so the
+   * sprite stays permanently invisible — with the apparent opacity varying by
+   * the sampled mip level, i.e. by camera zoom or sprite size. Sprites are drawn
+   * roughly 1:1 in the orthographic viewport, so mipmaps add no value here.
+   */
+  private configureSpriteTexture(texture: THREE.Texture): void {
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
   }
 
   private applyTextureToSprite2DMaterial(node: Sprite2D, material: THREE.MeshBasicMaterial): void {
@@ -3883,7 +3897,7 @@ export class ViewportRendererService {
           blobUrl,
           texture => {
             try {
-              this.applySrgbColorSpace(texture);
+              this.configureSpriteTexture(texture);
               material.map = texture;
               material.color.set(0xffffff);
               material.transparent = true;
@@ -3904,7 +3918,7 @@ export class ViewportRendererService {
         if (scheme === 'http' || scheme === 'https' || scheme === '') {
           try {
             const texture = textureLoader.load(texturePath);
-            this.applySrgbColorSpace(texture);
+            this.configureSpriteTexture(texture);
             material.map = texture;
             material.color.set(0xffffff);
             material.transparent = true;
@@ -4092,7 +4106,7 @@ export class ViewportRendererService {
           blobUrl,
           texture => {
             try {
-              this.applySrgbColorSpace(texture);
+              this.configureSpriteTexture(texture);
               resolve(texture);
             } finally {
               URL.revokeObjectURL(blobUrl);
@@ -4112,7 +4126,7 @@ export class ViewportRendererService {
       if (scheme === 'http' || scheme === 'https' || scheme === '') {
         try {
           const texture = textureLoader.load(texturePath);
-          this.applySrgbColorSpace(texture);
+          this.configureSpriteTexture(texture);
           return texture;
         } catch {
           return null;
@@ -4280,6 +4294,7 @@ export class ViewportRendererService {
           blobUrl,
           texture => {
             try {
+              this.configureSpriteTexture(texture);
               node.setTexture(texture);
             } finally {
               URL.revokeObjectURL(blobUrl);
@@ -4298,6 +4313,7 @@ export class ViewportRendererService {
           const texture = textureLoader.load(currentTexturePath, undefined, undefined, () => {
             console.warn('[ViewportRenderer] Failed to load Sprite3D texture', currentTexturePath);
           });
+          this.configureSpriteTexture(texture);
           node.setTexture(texture);
           return;
         }
@@ -4332,6 +4348,7 @@ export class ViewportRendererService {
           blobUrl,
           texture => {
             try {
+              this.configureSpriteTexture(texture);
               node.setTexture(texture);
             } finally {
               URL.revokeObjectURL(blobUrl);
@@ -4353,6 +4370,7 @@ export class ViewportRendererService {
               currentTexturePath
             );
           });
+          this.configureSpriteTexture(texture);
           node.setTexture(texture);
           return;
         }
@@ -4485,7 +4503,7 @@ export class ViewportRendererService {
           blobUrl,
           texture => {
             try {
-              this.applySrgbColorSpace(texture);
+              this.configureSpriteTexture(texture);
               material.map = texture;
               material.color.set(0xffffff);
               material.transparent = true;
@@ -4505,7 +4523,7 @@ export class ViewportRendererService {
         if (scheme === 'http' || scheme === 'https' || scheme === '') {
           try {
             const texture = textureLoader.load(texturePath);
-            this.applySrgbColorSpace(texture);
+            this.configureSpriteTexture(texture);
             material.map = texture;
             material.color.set(0xffffff);
             material.transparent = true;
@@ -4573,7 +4591,7 @@ export class ViewportRendererService {
     ctx.fillText(node.label, x, logicalHeight / 2);
 
     const texture = new THREE.CanvasTexture(canvas);
-    this.applySrgbColorSpace(texture);
+    this.configureSpriteTexture(texture);
     texture.needsUpdate = true;
 
     const geometry = new THREE.PlaneGeometry(logicalWidth, logicalHeight);

@@ -30,7 +30,6 @@ import {
   hasAssetDragData,
 } from '@/ui/shared/asset-drag-drop';
 import {
-  renderAlignmentToolbarOverlay,
   renderTransformToolbarOverlay,
   renderViewportToolbar,
   renderViewportZoomOverlay,
@@ -300,18 +299,6 @@ export class EditorTabComponent extends ComponentBase {
             },
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
-            },
-            this.iconService
-          )}
-          ${renderAlignmentToolbarOverlay(
-            {
-              showAlignmentTools,
-              canAlignToContainer: isSceneTab && this.canAlignToContainer,
-              canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
-              canDistributeSelection: isSceneTab && this.canDistributeSelection,
-            },
-            {
-              onRunAlignmentAction: action => this.handleAlignmentAction(action),
             },
             this.iconService
           )}
@@ -1085,8 +1072,6 @@ export class EditorTabComponent extends ComponentBase {
           (el.classList.contains('top-toolbar') ||
             el.classList.contains('transform-overlay') ||
             el.classList.contains('transform-overlay-shell') ||
-            el.classList.contains('alignment-overlay') ||
-            el.classList.contains('alignment-overlay-shell') ||
             el.classList.contains('zoom-overlay') ||
             el.classList.contains('zoom-overlay-shell') ||
             el.classList.contains('toolbar-group') ||
