@@ -19,7 +19,14 @@ import { ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
 import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
-import { SceneManager, NodeBase, getGameDebug } from '@pix3/runtime';
+import {
+  SceneManager,
+  NodeBase,
+  getGameDebug,
+  getRuntimeSceneRoot,
+  getPhysicsDebugSource,
+  isPhysicsDebugEnabled,
+} from '@pix3/runtime';
 
 // ---------------------------------------------------------------------------
 // JSON-safe serialisation
@@ -141,6 +148,32 @@ function activeGraph() {
   return service<SceneManager>(SceneManager).getActiveSceneGraph();
 }
 
+/**
+ * The topmost live Object3D ancestor of the scene (the THREE.Scene root). Climb
+ * from a NodeBase root so objects added straight to the scene root (e.g. game
+ * droppable sprites) are reachable, not just the authored NodeBase tree.
+ */
+function liveSceneRoot(): Object3DLike | null {
+  // During play the game runs on an isolated CLONE in SceneRunner's own scene —
+  // spawned objects (droppables, falling clusters) live there, NOT in the
+  // authored graph. Prefer the live runtime root when a scene is running.
+  const runtimeRoot = getRuntimeSceneRoot() as Object3DLike | null;
+  if (runtimeRoot) return runtimeRoot;
+
+  // Fallback (edit mode / no runtime): climb from the authored NodeBase graph.
+  const graph = activeGraph();
+  if (!graph) return null;
+  type Linked = Object3DLike & { parent?: Linked | null };
+  const first = graph.rootNodes[0] as unknown as Linked | undefined;
+  if (!first) return null;
+  let node: Linked = first;
+  let guard = 0;
+  while (node.parent && guard++ < 64) {
+    node = node.parent;
+  }
+  return node;
+}
+
 function transformOf(node: NodeBase): TransformDTO {
   return {
     position: { x: node.position.x, y: node.position.y, z: node.position.z },
@@ -168,6 +201,105 @@ function nodeToDTO(node: NodeBase, depth: number): NodeDTO {
     dto.childCount = childNodes.length;
   }
   return dto;
+}
+
+// ---------------------------------------------------------------------------
+// Live Three.js object tree (play-mode runtime instances)
+// ---------------------------------------------------------------------------
+
+/**
+ * During play, games spawn raw Three.js objects (sprites, instanced meshes,
+ * falling-cluster meshes) as children of authored nodes — they are NOT NodeBase
+ * and so never appear in `scene()`. This walks the *actual* Object3D tree so
+ * tooling/the Runtime panel can see the live render hierarchy.
+ */
+interface Object3DLike {
+  name?: string;
+  type?: string;
+  uuid?: string;
+  visible?: boolean;
+  renderOrder?: number;
+  position?: { x: number; y: number; z: number };
+  matrixWorld?: { elements: number[] };
+  children?: unknown[];
+  userData?: Record<string, unknown>;
+  count?: number;
+  isInstancedMesh?: boolean;
+}
+
+interface LiveObjectDTO {
+  threeType: string;
+  name: string;
+  uuid: string | null;
+  visible: boolean;
+  renderOrder: number;
+  /** World-space position read from matrixWorld (updated every play frame). */
+  worldPos: { x: number; y: number; z: number } | null;
+  isNodeBase: boolean;
+  nodeId: string | null;
+  /** Instance count for InstancedMesh (else null). */
+  instances: number | null;
+  flags: { droppable?: boolean; gizmo?: boolean; overlay2D?: boolean };
+  childCount: number;
+  children?: LiveObjectDTO[];
+}
+
+function liveObjectToDTO(obj: Object3DLike, depth: number): LiveObjectDTO {
+  const ctorName = (obj as { constructor?: { name?: string } }).constructor?.name;
+  const m = obj.matrixWorld?.elements;
+  const worldPos =
+    m && m.length >= 15
+      ? { x: round3(m[12]), y: round3(m[13]), z: round3(m[14]) }
+      : obj.position
+        ? { x: round3(obj.position.x), y: round3(obj.position.y), z: round3(obj.position.z) }
+        : null;
+  const ud = obj.userData ?? {};
+  const rawChildren = Array.isArray(obj.children) ? (obj.children as Object3DLike[]) : [];
+  const isNode = obj instanceof NodeBase;
+
+  const dto: LiveObjectDTO = {
+    threeType: obj.type || ctorName || 'Object3D',
+    name: obj.name || '',
+    uuid: obj.uuid ?? null,
+    visible: obj.visible !== false,
+    renderOrder: obj.renderOrder ?? 0,
+    worldPos,
+    isNodeBase: isNode,
+    nodeId: isNode ? (obj as unknown as NodeBase).nodeId : null,
+    instances: obj.isInstancedMesh ? (obj.count ?? null) : null,
+    flags: {
+      droppable: 'droppableItemRef' in ud || undefined,
+      gizmo: ud.isGizmo === true || undefined,
+      overlay2D: ud.overlay2D === true || undefined,
+    },
+    childCount: rawChildren.length,
+  };
+
+  if (rawChildren.length > 0 && depth > 0) {
+    dto.children = rawChildren.slice(0, MAX_ARRAY).map(child => liveObjectToDTO(child, depth - 1));
+  }
+  return dto;
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+/** Flatten the live tree to a filtered list (for searching spawned objects). */
+function flattenLive(
+  obj: Object3DLike,
+  predicate: (dto: LiveObjectDTO, raw: Object3DLike) => boolean,
+  out: LiveObjectDTO[],
+  budget: { n: number }
+): void {
+  if (budget.n <= 0) return;
+  const dto = liveObjectToDTO(obj, 0);
+  if (predicate(dto, obj)) {
+    out.push(dto);
+    budget.n -= 1;
+  }
+  const children = Array.isArray(obj.children) ? (obj.children as Object3DLike[]) : [];
+  for (const child of children) flattenLive(child, predicate, out, budget);
 }
 
 function componentToDTO(component: unknown, index: number): ComponentDTO {
@@ -260,6 +392,32 @@ export interface Pix3DebugBridge {
   /** Current selection (node IDs only — resolve detail with `node(id)`). */
   selection(): { nodeIds: string[]; primaryNodeId: string | null; hoveredNodeId: string | null };
 
+  /**
+   * Live Three.js object tree under the scene roots — the *actual* render
+   * hierarchy during play, including raw sprites/meshes/instanced-meshes that
+   * games spawn outside the NodeBase graph (which `scene()` cannot see).
+   */
+  liveScene(maxDepth?: number): { roots: LiveObjectDTO[] } | null;
+  /**
+   * Search the live object tree by name/type substring, or the token
+   * `'droppable'` to list every object tagged with a `droppableItemRef`.
+   */
+  liveFind(query: string, limit?: number): LiveObjectDTO[];
+
+  /**
+   * Summary of the live physics-debug source (collider wireframe geometry the
+   * running game exposes). Counts only — the raw Float32Array buffers stay live
+   * for per-frame rendering and are not serialised here. Null if no source.
+   */
+  physicsDebug(): {
+    available: boolean;
+    /** Whether the collider wireframe overlay is currently toggled on. */
+    enabled: boolean;
+    bodies: number | null;
+    vertexCount: number;
+    segments: number;
+  } | null;
+
   // --- play mode (through commands → keeps appState.ui in sync + undoable) ---
   readonly play: {
     status(): { isPlaying: boolean; playModeStatus: string };
@@ -308,6 +466,9 @@ function createBridge(): Pix3DebugBridge {
         'node(id)': 'One node in full detail (transform, properties, components).',
         'find(text)': 'Search nodes by name/type substring.',
         'selection()': 'Selected node IDs.',
+        'liveScene(maxDepth=4)': 'Live Three.js object tree (play-mode runtime instances, incl. raw sprites/meshes).',
+        'liveFind(query,limit=50)': "Search live objects by name/type, or 'droppable' for tagged items.",
+        'physicsDebug()': 'Summary of collider wireframe buffers exposed by the running game (counts only).',
         'play.status() / play.start() / play.stop() / play.restart()': 'Play-mode control.',
         'setProperty({nodeId,propertyPath,value})': 'Edit a property (undoable).',
         'command(id)': "Run a command by id, e.g. 'history.undo'.",
@@ -364,6 +525,46 @@ function createBridge(): Pix3DebugBridge {
         nodeIds: [...appState.selection.nodeIds],
         primaryNodeId: appState.selection.primaryNodeId,
         hoveredNodeId: appState.selection.hoveredNodeId,
+      };
+    },
+
+    liveScene(maxDepth = 4) {
+      const root = liveSceneRoot();
+      if (!root) return null;
+      return { roots: [liveObjectToDTO(root, maxDepth)] };
+    },
+
+    liveFind(query, limit = 50) {
+      const root = liveSceneRoot();
+      if (!root) return [];
+      const needle = query.toLowerCase();
+      const wantDroppable = needle === 'droppable' || needle === 'droppables';
+      const out: LiveObjectDTO[] = [];
+      const budget = { n: limit };
+      const predicate = (dto: LiveObjectDTO, raw: Object3DLike): boolean => {
+        if (wantDroppable) {
+          return !!(raw.userData && 'droppableItemRef' in raw.userData);
+        }
+        return dto.threeType.toLowerCase().includes(needle) || dto.name.toLowerCase().includes(needle);
+      };
+      flattenLive(root, predicate, out, budget);
+      return out;
+    },
+
+    physicsDebug() {
+      const source = getPhysicsDebugSource();
+      if (!source) return null;
+      const buffers = source() as
+        | { vertices?: ArrayLike<number>; bodies?: number }
+        | null;
+      const vertexCount = buffers?.vertices?.length ?? 0;
+      return {
+        available: !!buffers,
+        enabled: isPhysicsDebugEnabled(),
+        bodies: typeof buffers?.bodies === 'number' ? buffers.bodies : null,
+        vertexCount,
+        // 3 floats per point, 2 points per line segment.
+        segments: Math.floor(vertexCount / 6),
       };
     },
 

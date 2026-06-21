@@ -64,3 +64,101 @@ export function getGameDebug(): GameDebugProvider | null {
   const store = globalThis as unknown as GameDebugGlobal;
   return store[GAME_DEBUG_GLOBAL_KEY] ?? null;
 }
+
+/**
+ * Well-known global key for the **live runtime scene root** (a THREE.Object3D).
+ *
+ * `SceneRunner` runs the game on an isolated *clone* of the scene in its own
+ * `THREE.Scene` — separate from the editor's authoring graph. Tooling that wants
+ * to inspect the *actually running* objects (spawned sprites, instanced meshes,
+ * falling clusters) must walk this root, not the authored scene graph. Stored on
+ * `globalThis` so it bridges across runtime module instances.
+ */
+export const RUNTIME_SCENE_GLOBAL_KEY = '__PIX3_RUNTIME_SCENE__';
+
+type RuntimeSceneGlobal = Record<string, object | null | undefined>;
+
+/**
+ * Register (or clear, with `null`) the live runtime scene root. Called by
+ * `SceneRunner` on scene start/stop. Dev tooling reads it via
+ * {@link getRuntimeSceneRoot}.
+ */
+export function registerRuntimeSceneRoot(root: object | null): void {
+  const store = globalThis as unknown as RuntimeSceneGlobal;
+  store[RUNTIME_SCENE_GLOBAL_KEY] = root ?? undefined;
+}
+
+/** The live runtime scene root (THREE.Object3D) if a scene is running, else null. */
+export function getRuntimeSceneRoot(): object | null {
+  const store = globalThis as unknown as RuntimeSceneGlobal;
+  return store[RUNTIME_SCENE_GLOBAL_KEY] ?? null;
+}
+
+/**
+ * Collider/line-segment buffers for visualising physics colliders. Mirrors the
+ * shape returned by Rapier's `World.debugRender()`: a flat list of line-segment
+ * endpoints (`vertices`, 3 floats per point, 2 points per segment) and optional
+ * per-vertex RGBA `colors` (4 floats per point).
+ */
+export interface PhysicsDebugBuffers {
+  vertices: Float32Array | number[];
+  colors?: Float32Array | number[];
+}
+
+/** A pull-based source the editor calls each frame to draw collider wireframes. */
+export type PhysicsDebugSource = () => PhysicsDebugBuffers | null;
+
+/**
+ * Well-known global key for the **live physics-debug source**. Physics lives in
+ * the game (e.g. a Rapier `World`), opaque to the editor; a game registers a
+ * pull function here so dev tooling can read collider geometry on demand without
+ * a per-frame JSON round-trip. Stored on `globalThis` to bridge module copies.
+ */
+export const PHYSICS_DEBUG_GLOBAL_KEY = '__PIX3_PHYSICS_DEBUG__';
+
+type PhysicsDebugGlobal = Record<string, PhysicsDebugSource | null | undefined>;
+
+/**
+ * Register (or clear, with `null`) the live physics-debug source. A game calls
+ * this from its runner's start/detach (typically wrapping `world.debugRender()`).
+ * Returns a disposer that clears it.
+ */
+export function registerPhysicsDebugSource(source: PhysicsDebugSource | null): () => void {
+  const store = globalThis as unknown as PhysicsDebugGlobal;
+  store[PHYSICS_DEBUG_GLOBAL_KEY] = source ?? undefined;
+  return () => {
+    if (store[PHYSICS_DEBUG_GLOBAL_KEY] === source) {
+      delete store[PHYSICS_DEBUG_GLOBAL_KEY];
+    }
+  };
+}
+
+/** The registered physics-debug source, if any. Call it to pull current buffers. */
+export function getPhysicsDebugSource(): PhysicsDebugSource | null {
+  const store = globalThis as unknown as PhysicsDebugGlobal;
+  return store[PHYSICS_DEBUG_GLOBAL_KEY] ?? null;
+}
+
+/**
+ * Well-known global key for the **collider-debug visibility flag**. The editor's
+ * collider toggle writes it; the runtime's `SceneRunner` reads it every frame to
+ * decide whether to draw the physics wireframe overlay (pulling geometry from
+ * the registered {@link PhysicsDebugSource}). Stored on `globalThis` so it
+ * bridges module copies — the editor, in-editor user scripts, and the running
+ * game may each resolve a separate copy of this module.
+ */
+export const PHYSICS_DEBUG_ENABLED_KEY = '__PIX3_PHYSICS_DEBUG_ENABLED__';
+
+type PhysicsDebugEnabledGlobal = Record<string, boolean | undefined>;
+
+/** Enable or disable collider wireframe rendering in the runtime. */
+export function setPhysicsDebugEnabled(enabled: boolean): void {
+  const store = globalThis as unknown as PhysicsDebugEnabledGlobal;
+  store[PHYSICS_DEBUG_ENABLED_KEY] = enabled;
+}
+
+/** Whether collider wireframe rendering is currently enabled (defaults to false). */
+export function isPhysicsDebugEnabled(): boolean {
+  const store = globalThis as unknown as PhysicsDebugEnabledGlobal;
+  return store[PHYSICS_DEBUG_ENABLED_KEY] === true;
+}

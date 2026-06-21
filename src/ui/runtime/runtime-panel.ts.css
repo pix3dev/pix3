@@ -1,0 +1,173 @@
+pix3-runtime-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+pix3-runtime-panel .runtime-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+pix3-runtime-panel .runtime-filter {
+  flex: 1 1 auto;
+  min-width: 4rem;
+  height: 1.5rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 13, 15, 0.6);
+  color: rgba(245, 247, 250, 0.92);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-runtime-panel .runtime-filter:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-runtime-panel .runtime-live-toggle,
+pix3-runtime-panel .runtime-refresh {
+  flex: 0 0 auto;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.78);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-runtime-panel .runtime-live-toggle.is-live {
+  color: #5ec27a;
+  border-color: rgba(94, 194, 122, 0.4);
+}
+
+pix3-runtime-panel .runtime-live-toggle:hover,
+pix3-runtime-panel .runtime-refresh:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+pix3-runtime-panel .runtime-count {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  color: rgba(245, 247, 250, 0.4);
+  white-space: nowrap;
+}
+
+pix3-runtime-panel .runtime-placeholder {
+  padding: 1rem;
+  color: rgba(245, 247, 250, 0.5);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+pix3-runtime-panel .runtime-tree {
+  overflow: auto;
+  height: 100%;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  user-select: none;
+}
+
+pix3-runtime-panel .runtime-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.06rem 0.3rem 0.06rem 0;
+  border-radius: 0.15rem;
+  cursor: default;
+  white-space: nowrap;
+}
+
+pix3-runtime-panel .runtime-row:hover {
+  background: rgba(56, 62, 74, 0.22);
+}
+
+pix3-runtime-panel .runtime-row.is-selected {
+  background: rgba(var(--pix3-accent-rgb), 0.22);
+  outline: 1px solid rgba(var(--pix3-accent-rgb), 0.35);
+}
+
+pix3-runtime-panel .runtime-row.is-match .runtime-type {
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-runtime-panel .runtime-twisty {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  min-width: 0.9rem;
+  height: 0.9rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.45);
+  font-size: 0.55rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-runtime-panel .runtime-twisty.is-leaf {
+  cursor: default;
+}
+
+pix3-runtime-panel .runtime-type {
+  color: rgba(245, 247, 250, 0.92);
+  font-weight: 500;
+}
+
+pix3-runtime-panel .runtime-name {
+  color: rgba(245, 247, 250, 0.6);
+  font-style: italic;
+}
+
+pix3-runtime-panel .runtime-pos {
+  margin-left: auto;
+  padding-left: 0.6rem;
+  color: rgba(245, 247, 250, 0.4);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.66rem;
+}
+
+pix3-runtime-panel .runtime-badge {
+  flex: 0 0 auto;
+  padding: 0 0.28rem;
+  border-radius: 0.5rem;
+  font-size: 0.6rem;
+  line-height: 1.2;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+pix3-runtime-panel .badge-drop {
+  background: rgba(255, 207, 51, 0.18);
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-runtime-panel .badge-inst {
+  background: rgba(120, 170, 255, 0.16);
+  color: #93b8ff;
+}
+
+pix3-runtime-panel .badge-gizmo {
+  background: rgba(150, 150, 160, 0.16);
+  color: rgba(220, 222, 228, 0.8);
+}
+
+pix3-runtime-panel .badge-hidden {
+  background: rgba(255, 120, 120, 0.14);
+  color: #ff9a9a;
+}
+
+pix3-runtime-panel .runtime-more {
+  color: rgba(245, 247, 250, 0.38);
+  font-style: italic;
+  cursor: default;
+}

@@ -29,6 +29,8 @@ import { assign2DRenderOrder } from './render-order-2d';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
 import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
+import { registerRuntimeSceneRoot, isPhysicsDebugEnabled } from './game-debug';
+import { PhysicsDebugOverlay } from './physics-debug-overlay';
 
 export interface SceneRunnerFrameSample {
   readonly dt: number;
@@ -71,6 +73,8 @@ export class SceneRunner {
   private readonly rootLayoutAuthoredSize: { width: number; height: number };
   private readonly frameListeners = new Set<SceneRunnerFrameListener>();
   private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
+  /** Lazily created collider wireframe overlay (only while physics debug is on). */
+  private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
 
   constructor(
     sceneManager: SceneManager,
@@ -147,6 +151,11 @@ export class SceneRunner {
       this.scene.add(node);
     }
 
+    // Expose the live runtime scene root for dev tooling (the editor debug
+    // bridge / Runtime panel). This is the *running clone*, not the authored
+    // graph — the only place spawned objects (droppables, clusters) live.
+    registerRuntimeSceneRoot(this.scene);
+
     this.applyInitialVisibility(this.runtimeGraph.rootNodes);
 
     // Attach InputService to renderer
@@ -183,6 +192,11 @@ export class SceneRunner {
 
   stop(): void {
     this.isRunning = false;
+    registerRuntimeSceneRoot(null);
+    if (this.physicsDebugOverlay) {
+      this.physicsDebugOverlay.dispose();
+      this.physicsDebugOverlay = null;
+    }
     this.clock.stop();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -392,6 +406,18 @@ export class SceneRunner {
     } else {
       this.renderer.setAutoClear(true);
       this.renderer.clear();
+    }
+
+    // Pass 1.5: Physics collider debug overlay (world-space wireframes drawn on
+    // top of the 3D pass). Pull-based: the running game publishes its collider
+    // geometry via registerPhysicsDebugSource; this only renders when the editor
+    // has toggled it on. Drawn before the 2D overlay so UI stays on top.
+    if (this.activeCamera && isPhysicsDebugEnabled()) {
+      if (!this.physicsDebugOverlay) {
+        this.physicsDebugOverlay = new PhysicsDebugOverlay();
+      }
+      this.renderer.setAutoClear(false);
+      this.physicsDebugOverlay.render(this.renderer, this.activeCamera.camera);
     }
 
     // Pass 2: 2D Overlay

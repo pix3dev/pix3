@@ -41,6 +41,9 @@ export class GameViewTab extends ComponentBase {
   @state()
   private isGamePopoutOpen = appState.ui.isGamePopoutOpen;
 
+  @state()
+  private showColliders = appState.ui.showPhysicsColliders;
+
   private gameContainer?: HTMLElement;
   private viewportContainer?: HTMLElement;
   private resizeObserver?: ResizeObserver;
@@ -79,6 +82,7 @@ export class GameViewTab extends ComponentBase {
       this.aspectRatio = appState.ui.gameAspectRatio;
       this.isPlaying = appState.ui.isPlaying;
       this.isGamePopoutOpen = appState.ui.isGamePopoutOpen;
+      this.showColliders = appState.ui.showPhysicsColliders;
       requestAnimationFrame(() => this.handleResize());
       this.requestUpdate();
     });
@@ -176,6 +180,10 @@ export class GameViewTab extends ComponentBase {
     void this.commandDispatcher.executeById('game.open-popout-window');
   }
 
+  private handleCollidersClick() {
+    void this.commandDispatcher.executeById('view.toggle-colliders');
+  }
+
   private handleAspectChange(e: Event) {
     const target = e.target as HTMLSelectElement;
     if (!this.isAspectRatio(target.value)) {
@@ -232,6 +240,17 @@ export class GameViewTab extends ComponentBase {
           <button class="toolbar-button" @click=${this.handlePopoutClick} title="Open Game Window">
             <span style="margin-right: 4px;">▣</span>
             ${this.isGamePopoutOpen ? 'Focus Window' : 'Open Window'}
+          </button>
+
+          <div class="toolbar-separator"></div>
+
+          <button
+            class="toolbar-button ${this.showColliders ? 'active' : ''}"
+            @click=${this.handleCollidersClick}
+            title="Toggle physics collider wireframes"
+            aria-pressed=${String(this.showColliders)}
+          >
+            <span style="margin-right: 4px;">▦</span> Colliders
           </button>
 
           <div class="toolbar-separator"></div>

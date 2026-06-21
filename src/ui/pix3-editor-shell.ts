@@ -70,6 +70,7 @@ import { ZoomAllCommand } from '@/features/viewport/ZoomAllCommand';
 import { ZoomInCommand } from '@/features/viewport/ZoomInCommand';
 import { ZoomOutCommand } from '@/features/viewport/ZoomOutCommand';
 import { ToggleLightingCommand } from '@/features/viewport/ToggleLightingCommand';
+import { ToggleCollidersCommand } from '@/features/viewport/ToggleCollidersCommand';
 import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigationModeCommand';
 import { appState } from '@/state';
 import { ProjectService } from '@/services';
@@ -326,6 +327,7 @@ export class Pix3EditorShell extends ComponentBase {
     const zoomInCommand = new ZoomInCommand();
     const zoomOutCommand = new ZoomOutCommand();
     const toggleLightingCommand = new ToggleLightingCommand();
+    const toggleCollidersCommand = new ToggleCollidersCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
 
     this.commandRegistry.registerMany(
@@ -361,6 +363,7 @@ export class Pix3EditorShell extends ComponentBase {
       zoomInCommand,
       zoomOutCommand,
       toggleLightingCommand,
+      toggleCollidersCommand,
       toggleNavigationModeCommand
     );
 

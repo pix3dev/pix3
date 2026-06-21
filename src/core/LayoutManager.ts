@@ -7,6 +7,7 @@ import {
   type ComponentItemConfig,
 } from 'golden-layout';
 import { injectable } from '@/fw/di';
+import { subscribe } from 'valtio/vanilla';
 import { appState, type AppState, type EditorTab, type PanelVisibilityState } from '@/state';
 
 const PANEL_COMPONENT_TYPES = {
@@ -21,6 +22,7 @@ const PANEL_COMPONENT_TYPES = {
   background: 'background',
   game: 'game',
   code: 'code',
+  runtime: 'runtime',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -37,6 +39,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.background]: 'pix3-background',
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
+  [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -51,6 +54,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.background]: 'Pix3',
   [PANEL_COMPONENT_TYPES.game]: 'Game',
   [PANEL_COMPONENT_TYPES.code]: 'Code',
+  [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -84,10 +88,21 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
         width: 20,
         content: [
           {
-            type: 'component',
-            componentType: PANEL_COMPONENT_TYPES.sceneTree,
-            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.sceneTree],
-            isClosable: false,
+            type: 'stack',
+            content: [
+              {
+                type: 'component',
+                componentType: PANEL_COMPONENT_TYPES.sceneTree,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.sceneTree],
+                isClosable: false,
+              },
+              {
+                type: 'component',
+                componentType: PANEL_COMPONENT_TYPES.runtime,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.runtime],
+                isClosable: true,
+              },
+            ],
           },
           {
             type: 'component',
@@ -163,6 +178,8 @@ export class LayoutManagerService {
   private layout: GoldenLayout | null = null;
   private readonly state: AppState;
   private container: HTMLElement | null = null;
+  private disposePlaySubscription?: () => void;
+  private lastIsPlaying = false;
   private editorStack: Stack | null = null;
   private editorTabContainers = new Map<string, ContentItem>();
   private editorTabItems = new Map<string, ContentItem>();
@@ -640,6 +657,18 @@ export class LayoutManagerService {
       // ignore
     }
 
+    // Bring the Runtime panel to the front when play mode starts, so live
+    // runtime instances are immediately visible.
+    this.lastIsPlaying = appState.ui.isPlaying;
+    this.disposePlaySubscription?.();
+    this.disposePlaySubscription = subscribe(appState.ui, () => {
+      const playing = appState.ui.isPlaying;
+      if (playing && !this.lastIsPlaying) {
+        this.focusPanel(PANEL_COMPONENT_TYPES.runtime);
+      }
+      this.lastIsPlaying = playing;
+    });
+
     // Inline logic from InitializeLayoutCommand
     const previousLayoutReady = this.state.ui.isLayoutReady;
     const previousPanelVisibility = { ...this.state.ui.panelVisibility };
@@ -672,6 +701,8 @@ export class LayoutManagerService {
   }
 
   dispose(): void {
+    this.disposePlaySubscription?.();
+    this.disposePlaySubscription = undefined;
     if (this.container && this.handleTabCloseClick) {
       this.container.removeEventListener('mousedown', this.handleTabCloseClick, true);
       this.handleTabCloseClick = undefined;
@@ -692,6 +723,9 @@ export class LayoutManagerService {
       layout.registerComponentFactoryFunction(componentType, container => {
         if (componentType === PANEL_COMPONENT_TYPES.code) {
           void import('@/ui/code-editor/code-tab');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.runtime) {
+          void import('@/ui/runtime/runtime-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;

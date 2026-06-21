@@ -289,6 +289,8 @@ export interface UIState {
   showGrid: boolean;
   /** Toggle for editor fallback lighting used when the scene has no explicit light sources */
   showLighting: boolean;
+  /** Toggle for the physics collider wireframe overlay in the running game preview */
+  showPhysicsColliders: boolean;
   /** Warn before leaving the page with unsaved changes */
   warnOnUnsavedUnload: boolean;
   /** Pause rendering when the window is unfocused for battery economy */
@@ -524,6 +526,7 @@ export const createInitialAppState = (): AppState => ({
     editorCameraProjection: 'perspective',
     showGrid: true,
     showLighting: true,
+    showPhysicsColliders: false,
     warnOnUnsavedUnload: true,
     pauseRenderingOnUnfocus: true,
     gameAspectRatio: 'free',

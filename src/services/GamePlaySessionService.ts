@@ -6,6 +6,7 @@ import {
   RuntimeRenderer,
   SceneManager,
   SceneRunner,
+  setPhysicsDebugEnabled,
 } from '@pix3/runtime';
 import { appState } from '@/state';
 import type { GameAspectRatio } from '@/state/AppState';
@@ -84,7 +85,12 @@ export class GamePlaySessionService {
     }
 
     this.initialized = true;
+    // Mirror the collider-debug toggle into the runtime's global flag, which the
+    // SceneRunner reads each frame. Set it once up front so the current value
+    // applies even before any further UI change fires the subscription.
+    setPhysicsDebugEnabled(appState.ui.showPhysicsColliders);
     this.disposeUiSubscription = subscribe(appState.ui, () => {
+      setPhysicsDebugEnabled(appState.ui.showPhysicsColliders);
       this.queueSync();
       this.updatePopoutPresentation();
     });
