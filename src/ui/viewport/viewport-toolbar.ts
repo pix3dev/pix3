@@ -9,6 +9,7 @@ import type { TransformMode } from '@/services/ViewportRenderService';
 export interface ViewportToolbarState {
   readonly transformMode: TransformMode | null;
   readonly showGrid: boolean;
+  readonly snapToGrid: boolean;
   readonly showLighting: boolean;
   readonly navigationMode: NavigationMode | null;
   readonly showLayer3D: boolean;
@@ -28,6 +29,7 @@ export interface ViewportToolbarHandlers {
   readonly onToggleNavigationMode?: () => void;
   readonly onSelectPreviewCamera: (itemId: string) => void;
   readonly onToggleGrid: () => void;
+  readonly onToggleSnapToGrid: () => void;
   readonly onToggleLighting: () => void;
   readonly onToggleLayer3D: () => void;
   readonly onToggleLayer2D: () => void;
@@ -228,6 +230,18 @@ export function renderViewportToolbar(
       <div class="toolbar-spacer"></div>
 
       <div class="toolbar-group" role="toolbar" aria-label="Viewport visibility settings">
+        ${renderToolbarButton(
+          {
+            ariaLabel: 'Toggle snap to grid',
+            title: `Snap to Grid: ${state.snapToGrid ? 'On' : 'Off'} (Shift+G)`,
+            iconName: 'snap',
+            isPressed: state.snapToGrid,
+            isActive: state.snapToGrid,
+            onClick: handlers.onToggleSnapToGrid,
+            extraClass: 'toolbar-button--snap',
+          },
+          iconService
+        )}
         ${renderToolbarButton(
           {
             ariaLabel: `Editor camera projection: ${formatEditorCameraProjection(

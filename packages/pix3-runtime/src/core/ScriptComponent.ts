@@ -124,6 +124,24 @@ export abstract class Script implements ScriptComponent {
     };
   }
 
+  /**
+   * Resolve another node in the scene by id, name, or slash-separated path of
+   * names. This is the unified addressing entry point for scripts — prefer it
+   * over walking `this.node` manually. When no scene service is available
+   * (e.g. some editor previews) it falls back to searching from the owning
+   * node's root.
+   */
+  protected findNode(query: string): NodeBase | null {
+    if (this.scene) {
+      return this.scene.findNode(query);
+    }
+    let root = this.node;
+    while (root?.parentNode) {
+      root = root.parentNode;
+    }
+    return root?.findNode(query) ?? null;
+  }
+
   onAttach?(node: NodeBase): void;
   onStart?(): void;
   onUpdate?(dt: number): void;

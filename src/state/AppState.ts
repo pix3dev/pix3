@@ -287,6 +287,10 @@ export interface UIState {
   editorCameraProjection: EditorCameraProjection;
   /** Toggle for showing the 3D grid helper */
   showGrid: boolean;
+  /** Snap dragged 2D nodes to a grid */
+  snapToGrid: boolean;
+  /** Grid cell size in world units used for 2D snapping */
+  grid2DSize: number;
   /** Toggle for editor fallback lighting used when the scene has no explicit light sources */
   showLighting: boolean;
   /** Toggle for the physics collider wireframe overlay in the running game preview */
@@ -525,6 +529,8 @@ export const createInitialAppState = (): AppState => ({
     showLayer3D: true,
     editorCameraProjection: 'perspective',
     showGrid: true,
+    snapToGrid: false,
+    grid2DSize: 16,
     showLighting: true,
     showPhysicsColliders: false,
     warnOnUnsavedUnload: true,

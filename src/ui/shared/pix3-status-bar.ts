@@ -1,6 +1,12 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { DialogService } from '@/services/DialogService';
 import { LoggingService } from '@/services/LoggingService';
+import {
+  BundleSizeService,
+  formatByteSize,
+  type BundleSizeReport,
+  type BundleSizeCategory,
+} from '@/services/BundleSizeService';
 import { UpdateCheckService, type UpdateCheckState } from '@/services/UpdateCheckService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
@@ -27,8 +33,17 @@ export class Pix3StatusBar extends ComponentBase {
   @inject(UpdateCheckService)
   private readonly updateCheckService!: UpdateCheckService;
 
+  @inject(BundleSizeService)
+  private readonly bundleSizeService!: BundleSizeService;
+
   @state()
   private currentMessage: StatusMessage | null = null;
+
+  @state()
+  private bundleSize: BundleSizeReport | null = null;
+
+  @state()
+  private bundleSizeComputing = false;
 
   @state()
   private projectName: string | null = null;
@@ -53,6 +68,11 @@ export class Pix3StatusBar extends ComponentBase {
     super.connectedCallback();
 
     this.disposeProjectSubscription = subscribe(appState.project, () => {
+      if (this.projectName !== appState.project.projectName) {
+        // Project changed — the previous size estimate no longer applies.
+        this.bundleSize = null;
+        this.bundleSizeComputing = false;
+      }
       this.projectName = appState.project.projectName;
     });
 
@@ -142,6 +162,7 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
+          ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`
@@ -150,6 +171,81 @@ export class Pix3StatusBar extends ComponentBase {
       </div>
     `;
   }
+
+  private renderBundleSize() {
+    const label = this.bundleSizeComputing
+      ? '…'
+      : this.bundleSize
+        ? formatByteSize(this.bundleSize.totalBytes)
+        : 'Size';
+    const title = this.bundleSizeComputing
+      ? 'Calculating project size…'
+      : this.bundleSize
+        ? `${this.buildBundleSizeBreakdown(this.bundleSize)}\nClick to recalculate`
+        : 'Click to calculate the project bundle size';
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-bundle-size"
+        title=${title}
+        ?disabled=${this.bundleSizeComputing}
+        @click=${this.onBundleSizeClick}
+      >
+        📦 ${label}
+      </button>
+    `;
+  }
+
+  private buildBundleSizeBreakdown(report: BundleSizeReport): string {
+    const labels: Record<BundleSizeCategory, string> = {
+      images: 'Images',
+      audio: 'Audio',
+      models: 'Models',
+      scenes: 'Scenes',
+      scripts: 'Scripts',
+      data: 'Data',
+      fonts: 'Fonts',
+      other: 'Other',
+    };
+    const order: BundleSizeCategory[] = [
+      'images',
+      'audio',
+      'models',
+      'scenes',
+      'scripts',
+      'data',
+      'fonts',
+      'other',
+    ];
+
+    const lines = order
+      .filter(category => report.byCategory[category].count > 0)
+      .map(
+        category =>
+          `${labels[category]}: ${formatByteSize(report.byCategory[category].bytes)} (${report.byCategory[category].count})`
+      );
+
+    return [
+      `Bundle size: ${formatByteSize(report.totalBytes)} · ${report.fileCount} files`,
+      ...lines,
+    ].join('\n');
+  }
+
+  private onBundleSizeClick = async (): Promise<void> => {
+    if (this.bundleSizeComputing) {
+      return;
+    }
+    this.bundleSizeComputing = true;
+    try {
+      this.bundleSize = await this.bundleSizeService.computeProjectSize();
+    } catch (error) {
+      console.error('[Pix3StatusBar] Failed to compute project bundle size', error);
+      this.showMessage('Failed to compute project size', 'error');
+    } finally {
+      this.bundleSizeComputing = false;
+    }
+  };
 
   private onUpdateIndicatorClick = async (): Promise<void> => {
     if (this.updateState.status !== 'update-available' || !this.updateState.latestVersion) {

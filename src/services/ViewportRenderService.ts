@@ -56,6 +56,7 @@ import {
   Transform2DCompleteOperation,
   type Transform2DState,
 } from '@/features/properties/Transform2DCompleteOperation';
+import { Nudge2DNodesOperation } from '@/features/properties/Nudge2DNodesOperation';
 import { TargetTransformOperation } from '@/features/properties/TargetTransformOperation';
 import {
   TransformTool2d,
@@ -5914,6 +5915,39 @@ export class ViewportRendererService {
     this.end2DInteraction();
     this.update2DSelectionOverlayForNodes(savedNodeIds);
     console.debug('[ViewportRenderer] complete 2D transform', { nodeIds });
+  }
+
+  /**
+   * Move all currently-selected 2D nodes by (dx, dy) in world units. Backs the
+   * arrow-key nudge commands. The whole move is a single, undoable history entry
+   * (even across a multi-node selection) and refreshes the selection overlay.
+   *
+   * @returns true if at least one node moved.
+   */
+  async nudgeSelected2DNodes(dx: number, dy: number): Promise<boolean> {
+    if (dx === 0 && dy === 0) {
+      return false;
+    }
+
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) {
+      return false;
+    }
+
+    const nodeIds = appState.selection.nodeIds.filter(
+      id => sceneGraph.nodeMap.get(id) instanceof Node2D
+    );
+    if (nodeIds.length === 0) {
+      return false;
+    }
+
+    const pushed = await this.operationService.invokeAndPush(
+      new Nudge2DNodesOperation({ dx, dy, nodeIds })
+    );
+
+    this.update2DSelectionOverlayForNodes(nodeIds);
+    this.requestRender();
+    return pushed;
   }
 
   private toNdc(screenX: number, screenY: number): THREE.Vector2 | null {

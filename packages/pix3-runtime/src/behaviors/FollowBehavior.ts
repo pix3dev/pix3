@@ -1,4 +1,4 @@
-import { MathUtils, Euler, Object3D, Quaternion, Vector3 } from 'three';
+import { MathUtils, Euler, Quaternion, Vector3 } from 'three';
 import { Script } from '../core/ScriptComponent';
 import type { PropertySchema } from '../fw/property-schema';
 import { NodeBase } from '../nodes/NodeBase';
@@ -312,27 +312,7 @@ export class FollowBehavior extends Script {
       return;
     }
 
-    let root: Object3D = this.node;
-    while (root.parent) {
-      root = root.parent;
-    }
-
-    this.targetNode = this.findNodeById(root, targetNodeId);
-  }
-
-  private findNodeById(root: Object3D, targetNodeId: string): NodeBase | null {
-    if (root instanceof NodeBase && root.nodeId === targetNodeId) {
-      return root;
-    }
-
-    for (const child of root.children) {
-      const candidate = this.findNodeById(child, targetNodeId);
-      if (candidate) {
-        return candidate;
-      }
-    }
-
-    return null;
+    this.targetNode = this.findNode(targetNodeId);
   }
 
   private getTargetNodeId(): string {

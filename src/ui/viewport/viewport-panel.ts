@@ -54,6 +54,9 @@ export class ViewportPanel extends ComponentBase {
   private showGrid = false;
 
   @state()
+  private snapToGrid = false;
+
+  @state()
   private showLayer2D = false;
 
   @state()
@@ -123,6 +126,7 @@ export class ViewportPanel extends ComponentBase {
 
     // Initialize state from current appState values
     this.showGrid = appState.ui.showGrid;
+    this.snapToGrid = appState.ui.snapToGrid;
     this.showLayer2D = appState.ui.showLayer2D;
     this.showLayer3D = appState.ui.showLayer3D;
     this.showLighting = appState.ui.showLighting;
@@ -131,6 +135,7 @@ export class ViewportPanel extends ComponentBase {
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.showGrid = appState.ui.showGrid;
+      this.snapToGrid = appState.ui.snapToGrid;
       this.showLayer2D = appState.ui.showLayer2D;
       this.showLayer3D = appState.ui.showLayer3D;
       this.showLighting = appState.ui.showLighting;
@@ -225,6 +230,7 @@ export class ViewportPanel extends ComponentBase {
             {
               transformMode: this.transformMode,
               showGrid: this.showGrid,
+              snapToGrid: this.snapToGrid,
               showLighting: this.showLighting,
               navigationMode: this.navigationMode,
               showLayer3D: this.showLayer3D,
@@ -243,6 +249,7 @@ export class ViewportPanel extends ComponentBase {
               onToggleNavigationMode: () => this.toggleNavigationMode(),
               onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
               onToggleGrid: () => this.toggleGrid(),
+              onToggleSnapToGrid: () => this.toggleSnapToGrid(),
               onToggleLighting: () => this.toggleLighting(),
               onToggleLayer3D: () => this.toggleLayer3D(),
               onToggleLayer2D: () => this.toggleLayer2D(),
@@ -586,6 +593,10 @@ export class ViewportPanel extends ComponentBase {
 
   private toggleGrid(): void {
     void this.commandDispatcher.executeById('view.toggle-grid');
+  }
+
+  private toggleSnapToGrid(): void {
+    void this.commandDispatcher.executeById('view.toggle-snap-to-grid');
   }
 
   private toggleLayer2D(): void {

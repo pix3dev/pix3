@@ -34,6 +34,7 @@ export interface SceneServiceDelegate {
   getLogicalCameraSize(): { width: number; height: number };
   setActiveCameraNode(camera: Camera3D | null): void;
   findNodeById(id: string): NodeBase | null;
+  getRootNodes(): NodeBase[];
   getAudioService(): AudioService;
   getAssetLoader(): AssetLoader;
   getResourceManager(): ResourceManager;
@@ -137,6 +138,65 @@ export class SceneService {
    */
   getActiveCamera(): Camera3D | null {
     return this.delegate?.getActiveCameraNode() ?? null;
+  }
+
+  // ── Node addressing ───────────────────────────────────────────────────────
+  //
+  // Unified scene-wide node lookup for scripts. Prefer `findNode()` which
+  // resolves a query as an id, a name, or a slash-separated path of names.
+
+  /** Root nodes of the running scene. */
+  getRootNodes(): NodeBase[] {
+    return this.delegate?.getRootNodes() ?? [];
+  }
+
+  /** Find a node anywhere in the scene by its unique id. */
+  findNodeById(id: string): NodeBase | null {
+    return this.delegate?.findNodeById(id) ?? null;
+  }
+
+  /** Find the first node anywhere in the scene whose name matches. */
+  findNodeByName(name: string): NodeBase | null {
+    for (const root of this.getRootNodes()) {
+      const match = root.findByName(name);
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve a slash-separated path of node names from the scene roots
+   * (e.g. `"UI/Panel/Title"`). The first segment matches a root node.
+   */
+  findNodeByPath(path: string): NodeBase | null {
+    const segments = path
+      .split('/')
+      .map(segment => segment.trim())
+      .filter(segment => segment.length > 0);
+    if (segments.length === 0) {
+      return null;
+    }
+
+    const [first, ...rest] = segments;
+    const rootMatch = this.getRootNodes().find(root => root.name === first) ?? null;
+    if (!rootMatch) {
+      return null;
+    }
+    return rest.length === 0 ? rootMatch : rootMatch.findByPath(rest.join('/'));
+  }
+
+  /**
+   * Unified node lookup: resolves a query that is a node id, a node name, or a
+   * slash-separated path of names. This is the recommended way for scripts to
+   * reference other nodes.
+   */
+  findNode(query: string): NodeBase | null {
+    if (query.includes('/')) {
+      return this.findNodeByPath(query);
+    }
+    return this.findNodeById(query) ?? this.findNodeByName(query);
   }
 
   /**

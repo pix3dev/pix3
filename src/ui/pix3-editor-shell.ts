@@ -73,6 +73,8 @@ import { ZoomOutCommand } from '@/features/viewport/ZoomOutCommand';
 import { ToggleLightingCommand } from '@/features/viewport/ToggleLightingCommand';
 import { ToggleCollidersCommand } from '@/features/viewport/ToggleCollidersCommand';
 import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigationModeCommand';
+import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
+import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
 import { ProjectService } from '@/services';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
@@ -329,6 +331,7 @@ export class Pix3EditorShell extends ComponentBase {
     const rotateModeCommand = new SetTransformModeCommand('rotate');
     const scaleModeCommand = new SetTransformModeCommand('scale');
     const toggleGridCommand = new ToggleGridCommand();
+    const toggleSnapToGridCommand = new ToggleSnapToGridCommand();
     const toggleLayer2DCommand = new ToggleLayer2DCommand();
     const toggleLayer3DCommand = new ToggleLayer3DCommand();
     const zoomDefaultCommand = new ZoomDefaultCommand();
@@ -338,6 +341,12 @@ export class Pix3EditorShell extends ComponentBase {
     const toggleLightingCommand = new ToggleLightingCommand();
     const toggleCollidersCommand = new ToggleCollidersCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
+
+    // Arrow-key nudge for selected 2D nodes (Shift = larger step).
+    const nudgeCommands = (['up', 'down', 'left', 'right'] as const).flatMap(direction => [
+      new NudgeNodesCommand({ direction, large: false }),
+      new NudgeNodesCommand({ direction, large: true }),
+    ]);
 
     this.commandRegistry.registerMany(
       undoCommand,
@@ -365,6 +374,7 @@ export class Pix3EditorShell extends ComponentBase {
       rotateModeCommand,
       scaleModeCommand,
       toggleGridCommand,
+      toggleSnapToGridCommand,
       toggleLayer2DCommand,
       toggleLayer3DCommand,
       zoomDefaultCommand,
@@ -373,7 +383,8 @@ export class Pix3EditorShell extends ComponentBase {
       zoomOutCommand,
       toggleLightingCommand,
       toggleCollidersCommand,
-      toggleNavigationModeCommand
+      toggleNavigationModeCommand,
+      ...nudgeCommands
     );
 
     // Subscribe to dialog changes

@@ -62,6 +62,9 @@ export class AnimatedSprite3D extends Node3D {
     this.mesh.name = `${this.name}-Mesh`;
     this.billboardPivot = this.mesh;
     this.add(this.billboardPivot);
+
+    // Drive the sprite material's alpha from the node opacity / fade APIs.
+    this.registerOpacityMaterial(this.material);
   }
 
   get currentFrame(): number {
@@ -224,6 +227,23 @@ export class AnimatedSprite3D extends Node3D {
           getValue: (node: unknown) => (node as AnimatedSprite3D).billboard,
           setValue: (node: unknown, value: unknown) => {
             (node as AnimatedSprite3D).billboard = Boolean(value);
+          },
+        },
+        {
+          name: 'opacity',
+          type: 'number',
+          ui: {
+            label: 'Opacity',
+            description: 'Sprite opacity (use show()/hide() to fade at runtime)',
+            group: 'Style',
+            step: 0.01,
+            precision: 2,
+            min: 0,
+            max: 1,
+          },
+          getValue: (node: unknown) => (node as AnimatedSprite3D).opacity,
+          setValue: (node: unknown, value: unknown) => {
+            (node as AnimatedSprite3D).opacity = Number(value);
           },
         },
       ],

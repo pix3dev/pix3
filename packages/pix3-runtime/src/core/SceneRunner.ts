@@ -478,6 +478,9 @@ export class SceneRunner {
       findNodeById(id: string): NodeBase | null {
         return runner.findNodeById(id);
       },
+      getRootNodes(): NodeBase[] {
+        return runner.runtimeGraph?.rootNodes ?? [];
+      },
       getAudioService(): AudioService {
         return runner.audioService;
       },

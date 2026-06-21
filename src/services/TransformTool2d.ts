@@ -64,6 +64,10 @@ export interface Active2DTransform {
 export interface Transform2DUpdateOptions {
   preserveAspectRatio?: boolean;
   constrainMoveToAxis?: boolean;
+  /** Snap moved nodes to a world-space grid. */
+  snapToGrid?: boolean;
+  /** Grid cell size in world units (used when snapToGrid is true). */
+  gridSize?: number;
 }
 
 export class TransformTool2d {
@@ -760,11 +764,25 @@ export class TransformTool2d {
         transform.moveConstraintAxis = null;
       }
 
+      const snapGrid =
+        options.snapToGrid && options.gridSize && options.gridSize > 0 ? options.gridSize : 0;
+      const constraintAxis = transform.moveConstraintAxis;
+
       for (const [nodeId, startState] of startStates) {
         const node = sceneGraph.nodeMap.get(nodeId);
         if (node && node instanceof Node2D) {
           const startWorld = startState.worldPosition ?? node.getWorldPosition(new THREE.Vector3());
           const newWorld = startWorld.clone().add(delta);
+          if (snapGrid > 0) {
+            // Snap each free axis to the nearest grid line; leave an
+            // axis-constrained drag's fixed axis untouched.
+            if (constraintAxis !== 'y') {
+              newWorld.x = Math.round(newWorld.x / snapGrid) * snapGrid;
+            }
+            if (constraintAxis !== 'x') {
+              newWorld.y = Math.round(newWorld.y / snapGrid) * snapGrid;
+            }
+          }
           this.setNodeWorldPosition(node, newWorld);
         }
       }

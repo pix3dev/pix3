@@ -159,6 +159,7 @@ export interface Sprite3DProperties {
   color?: string;
   billboard?: boolean;
   billboardRoll?: number;
+  opacity?: number;
 }
 
 export interface Particles3DProperties {
@@ -1491,6 +1492,7 @@ export class SceneLoader {
           playing: typeof props.playing === 'boolean' ? props.playing : undefined,
           loop: typeof props.loop === 'boolean' ? props.loop : undefined,
           billboard: typeof props.billboard === 'boolean' ? props.billboard : false,
+          opacity: this.asNumber(props.opacity, undefined),
         });
 
         // Load textures
@@ -1527,6 +1529,7 @@ export class SceneLoader {
           color: this.asString(props.color) ?? '#ffffff',
           billboard: typeof props.billboard === 'boolean' ? props.billboard : false,
           billboardRoll: this.asNumber(props.billboardRoll, 0),
+          opacity: this.asNumber(props.opacity, undefined),
         });
 
         if (sprite.texturePath) {

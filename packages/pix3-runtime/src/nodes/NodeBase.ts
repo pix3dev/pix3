@@ -151,6 +151,68 @@ export class NodeBase extends Object3D {
   }
 
   /**
+   * Find the first node in this subtree (including this node) whose name matches.
+   */
+  findByName(name: string): NodeBase | null {
+    if (this.name === name) {
+      return this;
+    }
+    for (const child of this.children) {
+      const match = child instanceof NodeBase ? child.findByName(name) : null;
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Return the direct child with the given name, or null.
+   */
+  getChildByName(name: string): NodeBase | null {
+    for (const child of this.children) {
+      if (child instanceof NodeBase && child.name === name) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resolve a slash-separated path of child names relative to this node
+   * (e.g. `"Panel/Title"`). Each segment matches a direct child by name.
+   */
+  findByPath(path: string): NodeBase | null {
+    const segments = path
+      .split('/')
+      .map(segment => segment.trim())
+      .filter(segment => segment.length > 0);
+    if (segments.length === 0) {
+      return null;
+    }
+    let current: NodeBase | null = this;
+    for (const segment of segments) {
+      current = current ? current.getChildByName(segment) : null;
+      if (!current) {
+        return null;
+      }
+    }
+    return current;
+  }
+
+  /**
+   * Unified lookup: resolves a query that is either a node id, a node name, or
+   * a slash-separated path of child names. Prefer this from scripts so node
+   * references don't depend on how the target was authored.
+   */
+  findNode(query: string): NodeBase | null {
+    if (query.includes('/')) {
+      return this.findByPath(query);
+    }
+    return this.findById(query) ?? this.findByName(query);
+  }
+
+  /**
    * Add a script component to this node.
    * If the node's scene is already running, calls onStart immediately.
    * @param component - The script component to add

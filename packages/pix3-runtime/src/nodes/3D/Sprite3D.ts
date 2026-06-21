@@ -79,6 +79,9 @@ export class Sprite3D extends Node3D {
     // Pivot used for billboarding so node transform can still define placement in world.
     this.billboardPivot = this.mesh;
     this.add(this.billboardPivot);
+
+    // Drive the sprite material's alpha from the node opacity / fade APIs.
+    this.registerOpacityMaterial(this.material);
   }
 
   get texturePath(): string | null {
@@ -256,6 +259,23 @@ export class Sprite3D extends Node3D {
           getValue: (node: unknown) => (node as Sprite3D).billboardRoll,
           setValue: (node: unknown, value: unknown) => {
             (node as Sprite3D).billboardRoll = Number(value);
+          },
+        },
+        {
+          name: 'opacity',
+          type: 'number',
+          ui: {
+            label: 'Opacity',
+            description: 'Sprite opacity (use show()/hide() to fade at runtime)',
+            group: 'Sprite',
+            step: 0.01,
+            precision: 2,
+            min: 0,
+            max: 1,
+          },
+          getValue: (node: unknown) => (node as Sprite3D).opacity,
+          setValue: (node: unknown, value: unknown) => {
+            (node as Sprite3D).opacity = Number(value);
           },
         },
         {

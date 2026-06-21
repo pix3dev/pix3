@@ -66,6 +66,9 @@ export class EditorTabComponent extends ComponentBase {
   private showGrid = false;
 
   @state()
+  private snapToGrid = false;
+
+  @state()
   private showLayer2D = false;
 
   @state()
@@ -130,6 +133,7 @@ export class EditorTabComponent extends ComponentBase {
 
     // Initialize state from current appState values
     this.showGrid = appState.ui.showGrid;
+    this.snapToGrid = appState.ui.snapToGrid;
     this.showLayer2D = appState.ui.showLayer2D;
     this.showLayer3D = appState.ui.showLayer3D;
     this.showLighting = appState.ui.showLighting;
@@ -139,6 +143,7 @@ export class EditorTabComponent extends ComponentBase {
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.showGrid = appState.ui.showGrid;
+      this.snapToGrid = appState.ui.snapToGrid;
       this.showLayer2D = appState.ui.showLayer2D;
       this.showLayer3D = appState.ui.showLayer3D;
       this.showLighting = appState.ui.showLighting;
@@ -251,6 +256,7 @@ export class EditorTabComponent extends ComponentBase {
             {
               transformMode: isSceneTab ? this.transformMode : null,
               showGrid: this.showGrid,
+              snapToGrid: this.snapToGrid,
               showLighting: this.showLighting,
               navigationMode: this.navigationMode,
               showLayer3D: this.showLayer3D,
@@ -269,6 +275,7 @@ export class EditorTabComponent extends ComponentBase {
               onToggleNavigationMode: () => this.toggleNavigationMode(),
               onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
               onToggleGrid: () => this.toggleGrid(),
+              onToggleSnapToGrid: () => this.toggleSnapToGrid(),
               onToggleLighting: () => this.toggleLighting(),
               onToggleLayer3D: () => this.toggleLayer3D(),
               onToggleLayer2D: () => this.toggleLayer2D(),
@@ -588,6 +595,10 @@ export class EditorTabComponent extends ComponentBase {
     void this.commandDispatcher.executeById('view.toggle-grid');
   }
 
+  private toggleSnapToGrid(): void {
+    void this.commandDispatcher.executeById('view.toggle-snap-to-grid');
+  }
+
   private toggleLayer2D(): void {
     void this.commandDispatcher.executeById('view.toggle-layer-2d');
   }
@@ -846,6 +857,9 @@ export class EditorTabComponent extends ComponentBase {
       this.viewportRenderer.update2DTransform?.(screenX, screenY, {
         preserveAspectRatio: event.shiftKey,
         constrainMoveToAxis: event.shiftKey,
+        // Hold Alt to temporarily invert the persistent snap setting.
+        snapToGrid: appState.ui.snapToGrid !== event.altKey,
+        gridSize: appState.ui.grid2DSize,
       });
       this.isDragging = true;
       return;

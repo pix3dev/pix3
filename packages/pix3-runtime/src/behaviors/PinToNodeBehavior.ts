@@ -90,7 +90,7 @@ export class PinToNodeBehavior extends Script {
         if (!root) return;
 
         if (this.targetNodeId) {
-            this.targetNode = this.findNodeById(root, this.targetNodeId);
+            this.targetNode = this.findNode(this.targetNodeId);
         }
 
         this.resolveProjectionCamera(root);
@@ -102,17 +102,6 @@ export class PinToNodeBehavior extends Script {
     override onDetach() {
         this._unsubscribeViewport?.();
         this._unsubscribeViewport = null;
-    }
-
-    private findNodeById(root: Object3D, id: string): NodeBase | null {
-        if (root instanceof NodeBase && root.nodeId === id) {
-            return root;
-        }
-        for (const child of root.children) {
-            const match = this.findNodeById(child, id);
-            if (match) return match;
-        }
-        return null;
     }
 
     private findCamera(node: Object3D) {
@@ -139,7 +128,7 @@ export class PinToNodeBehavior extends Script {
         if (!root) return;
 
         if (!this.targetNode && this.targetNodeId) {
-            this.targetNode = this.findNodeById(root, this.targetNodeId);
+            this.targetNode = this.findNode(this.targetNodeId);
         }
 
         const projectionCamera = this.resolveProjectionCamera(root);
