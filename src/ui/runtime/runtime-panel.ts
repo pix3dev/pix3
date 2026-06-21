@@ -1,9 +1,11 @@
 import { subscribe } from 'valtio/vanilla';
 import { repeat } from 'lit/directives/repeat.js';
 
-import { ComponentBase, customElement, html, state } from '@/fw';
+import { ComponentBase, customElement, html, state, inject } from '@/fw';
 import { appState } from '@/state';
-import { getRuntimeSceneRoot } from '@pix3/runtime';
+import { getRuntimeSceneRoot, SceneManager } from '@pix3/runtime';
+import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { selectObject } from '@/features/selection/SelectObjectCommand';
 
 import '../shared/pix3-panel';
 import './runtime-panel.ts.css';
@@ -34,6 +36,8 @@ interface LiveObject3D {
 
 interface RuntimeNode {
   uuid: string;
+  /** Authored node id (from NodeBase.userData.nodeId); null for raw spawned / non-NodeBase objects. */
+  nodeId: string | null;
   type: string;
   name: string;
   visible: boolean;
@@ -56,6 +60,12 @@ const REFRESH_INTERVAL_MS = 350;
 
 @customElement('pix3-runtime-panel')
 export class RuntimePanel extends ComponentBase {
+  @inject(CommandDispatcher)
+  private readonly commandDispatcher!: CommandDispatcher;
+
+  @inject(SceneManager)
+  private readonly sceneManager!: SceneManager;
+
   @state()
   private roots: RuntimeNode[] = [];
 
@@ -140,9 +150,7 @@ export class RuntimePanel extends ComponentBase {
     counter.n += 1;
     const m = obj.matrixWorld?.elements;
     const pos =
-      m && m.length >= 15
-        ? { x: round2(m[12]), y: round2(m[13]), z: round2(m[14]) }
-        : null;
+      m && m.length >= 15 ? { x: round2(m[12]), y: round2(m[13]), z: round2(m[14]) } : null;
     const ud = obj.userData ?? {};
     const rawChildren = Array.isArray(obj.children) ? obj.children : [];
 
@@ -156,6 +164,7 @@ export class RuntimePanel extends ComponentBase {
 
     return {
       uuid: obj.uuid,
+      nodeId: typeof ud.nodeId === 'string' ? ud.nodeId : null,
       type: obj.type || 'Object3D',
       name: obj.name || '',
       visible: obj.visible !== false,
@@ -213,6 +222,14 @@ export class RuntimePanel extends ComponentBase {
 
   private onRowClick(node: RuntimeNode): void {
     this.selectedUuid = node.uuid;
+    // Authored NodeBase clones carry their nodeId; selecting it drives the global
+    // selection so the Inspector mirrors this node's LIVE runtime values. Only
+    // dispatch when the id resolves in the authored scene graph — raw spawned
+    // objects (no nodeId) and runtime-only nodes (e.g. prefab-remapped ids) keep
+    // just the local highlight, so a click never blanks an unrelated selection.
+    if (node.nodeId && this.sceneManager.getActiveSceneGraph()?.nodeMap.has(node.nodeId)) {
+      void this.commandDispatcher.execute(selectObject(node.nodeId));
+    }
     // Log full detail for deeper inspection (positions, flags) via console.
     console.log('[Runtime]', node.type, node.name || '(unnamed)', {
       pos: node.pos,
@@ -348,7 +365,9 @@ export class RuntimePanel extends ComponentBase {
       if (this.filter) {
         return html`<p class="runtime-placeholder">No objects match “${this.filter}”.</p>`;
       }
-      return html`<p class="runtime-placeholder">No root objects for “${this.rootTypeFilter.toUpperCase()}”.</p>`;
+      return html`<p class="runtime-placeholder">
+        No root objects for “${this.rootTypeFilter.toUpperCase()}”.
+      </p>`;
     }
 
     return html`<div class="runtime-tree" role="tree">

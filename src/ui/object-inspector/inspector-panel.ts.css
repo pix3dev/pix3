@@ -57,6 +57,33 @@ pix3-panel {
   margin: 0.25rem 0 0 0;
 }
 
+/* Play-mode LIVE read-out: the Inspector mirrors the running game (read-only). */
+.inspector-live-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--pix3-accent-color, #ffcf33);
+  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
+  border: 1px solid rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.4);
+  border-radius: 999px;
+  padding: 0.04rem 0.4rem;
+  white-space: nowrap;
+}
+
+.inspector-live-badge--static {
+  color: var(--color-text-secondary, #aaa);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.inspector-body.is-play-mode .property-section--object {
+  border-left: 2px solid rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.5);
+  padding-left: 0.55rem;
+}
+
 /* Property Group Sections - organized by category */
 .property-group-section {
   display: flex;
