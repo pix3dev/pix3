@@ -47,6 +47,8 @@ interface RuntimeNode {
   children: RuntimeNode[];
 }
 
+type RootTypeFilter = 'all' | '3d' | '2d';
+
 const MAX_DEPTH = 10;
 const MAX_CHILDREN_PER_NODE = 250;
 const MAX_TOTAL_NODES = 5000;
@@ -65,6 +67,9 @@ export class RuntimePanel extends ComponentBase {
 
   @state()
   private filter = '';
+
+  @state()
+  private rootTypeFilter: RootTypeFilter = 'all';
 
   @state()
   private collapsed = new Set<string>();
@@ -176,12 +181,32 @@ export class RuntimePanel extends ComponentBase {
     }
   }
 
+  private setRootTypeFilter(filter: RootTypeFilter): void {
+    this.rootTypeFilter = filter;
+  }
+
   private toggleCollapse(uuid: string): void {
     const next = new Set(this.collapsed);
     if (next.has(uuid)) {
       next.delete(uuid);
     } else {
       next.add(uuid);
+    }
+    this.collapsed = next;
+  }
+
+  private collapseAll(): void {
+    const next = new Set<string>();
+    const stack = [...this.roots];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node.children.length > 0) {
+        next.add(node.uuid);
+        stack.push(...node.children);
+      }
     }
     this.collapsed = next;
   }
@@ -213,6 +238,14 @@ export class RuntimePanel extends ComponentBase {
     return node.children.some(child => this.subtreeMatches(child));
   }
 
+  /** Root type filter applies only to top-level runtime nodes. */
+  private rootMatchesType(node: RuntimeNode): boolean {
+    if (this.rootTypeFilter === 'all') {
+      return true;
+    }
+    return node.type.toLowerCase().includes(this.rootTypeFilter);
+  }
+
   protected render() {
     return html`
       <pix3-panel
@@ -220,26 +253,73 @@ export class RuntimePanel extends ComponentBase {
         actions-label="Runtime inspector controls"
       >
         <div slot="toolbar" class="runtime-toolbar">
-          <input
-            class="runtime-filter"
-            type="text"
-            placeholder="Filter type / name / 'droppable'"
-            .value=${this.filter}
-            @input=${this.onFilterInput}
-            aria-label="Filter runtime objects"
-          />
-          <button
-            type="button"
-            class="runtime-live-toggle ${this.live ? 'is-live' : ''}"
-            @click=${this.toggleLive}
-            title=${this.live ? 'Live updates on' : 'Live updates paused'}
-          >
-            ${this.live ? '● Live' : '⏸ Paused'}
-          </button>
-          <button type="button" class="runtime-refresh" @click=${() => this.refreshTree()}>
-            ↻
-          </button>
-          <span class="runtime-count">${this.nodeCount} objs</span>
+          <div class="runtime-toolbar-main">
+            <input
+              class="runtime-filter"
+              type="text"
+              placeholder="Filter type / name / 'droppable'"
+              .value=${this.filter}
+              @input=${this.onFilterInput}
+              aria-label="Filter runtime objects"
+            />
+            <button
+              type="button"
+              class="runtime-live-toggle ${this.live ? 'is-live' : ''}"
+              @click=${this.toggleLive}
+              title=${this.live ? 'Live updates on' : 'Live updates paused'}
+            >
+              ${this.live ? '● Live' : '⏸ Paused'}
+            </button>
+            <button type="button" class="runtime-refresh" @click=${() => this.refreshTree()}>
+              ↻
+            </button>
+            <span class="runtime-count">${this.nodeCount} objs</span>
+            <button
+              type="button"
+              class="runtime-collapse-all"
+              @click=${this.collapseAll}
+              title="Collapse all"
+              aria-label="Collapse all runtime nodes"
+            >
+              <svg viewBox="0 0 2000 2000" aria-hidden="true" focusable="false">
+                <path
+                  d="M3425 19984 c-93 -20 -235 -91 -312 -154 -197 -163 -292 -440 -238 -695 18 -87 77 -211 138 -290 72 -95 6040 -6052 6127 -6117 353 -261 795 -350 1210 -243 199 51 374 137 534 262 77 60 5939 5913 6062 6052 208 235 252 533 119 802 -73 148 -186 258 -339 329 -151 71 -339 88 -486 44 -60 -18 -173 -71 -223 -105 -18 -12 -1379 -1368 -3024 -3013 l-2993 -2991 -2992 2991 c-1646 1645 -3007 3001 -3025 3013 -50 34 -163 87 -223 105 -79 24 -248 29 -335 10z"
+                  transform="matrix(.1 0 0 -.1 0 2000)"
+                ></path>
+                <path
+                  d="M9795 7545 c-247 -39 -458 -127 -655 -273 -87 -65 -6055 -6022 -6127 -6117 -202 -265 -203 -613 -3 -879 93 -123 268 -230 430 -262 98 -19 232 -15 320 12 60 18 173 71 223 105 18 12 1379 1368 3025 3013 l2992 2991 2993 -2991 c1645 -1645 3006 -3001 3024 -3013 50 -34 163 -87 223 -105 251 -75 563 23 733 231 233 285 222 662 -27 944 -41 46 -1410 1419 -3042 3050 -2063 2061 -2994 2984 -3052 3027 -300 222 -703 323 -1057 267z"
+                  transform="matrix(.1 0 0 -.1 0 2000)"
+                ></path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="runtime-root-filter" role="group" aria-label="Root node type filter">
+            <button
+              type="button"
+              class="runtime-root-filter-btn ${this.rootTypeFilter === 'all' ? 'is-active' : ''}"
+              aria-pressed=${this.rootTypeFilter === 'all'}
+              @click=${() => this.setRootTypeFilter('all')}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              class="runtime-root-filter-btn ${this.rootTypeFilter === '3d' ? 'is-active' : ''}"
+              aria-pressed=${this.rootTypeFilter === '3d'}
+              @click=${() => this.setRootTypeFilter('3d')}
+            >
+              3D
+            </button>
+            <button
+              type="button"
+              class="runtime-root-filter-btn ${this.rootTypeFilter === '2d' ? 'is-active' : ''}"
+              aria-pressed=${this.rootTypeFilter === '2d'}
+              @click=${() => this.setRootTypeFilter('2d')}
+            >
+              2D
+            </button>
+          </div>
         </div>
 
         ${this.renderBody()}
@@ -259,12 +339,16 @@ export class RuntimePanel extends ComponentBase {
       </p>`;
     }
 
+    const rootsByType = this.roots.filter(node => this.rootMatchesType(node));
     const visibleRoots = this.filter
-      ? this.roots.filter(node => this.subtreeMatches(node))
-      : this.roots;
+      ? rootsByType.filter(node => this.subtreeMatches(node))
+      : rootsByType;
 
     if (visibleRoots.length === 0) {
-      return html`<p class="runtime-placeholder">No objects match “${this.filter}”.</p>`;
+      if (this.filter) {
+        return html`<p class="runtime-placeholder">No objects match “${this.filter}”.</p>`;
+      }
+      return html`<p class="runtime-placeholder">No root objects for “${this.rootTypeFilter.toUpperCase()}”.</p>`;
     }
 
     return html`<div class="runtime-tree" role="tree">

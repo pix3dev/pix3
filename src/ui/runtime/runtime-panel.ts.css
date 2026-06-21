@@ -6,6 +6,14 @@ pix3-runtime-panel {
 
 pix3-runtime-panel .runtime-toolbar {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.28rem;
+  width: 100%;
+}
+
+pix3-runtime-panel .runtime-toolbar-main {
+  display: flex;
   align-items: center;
   gap: 0.4rem;
   width: 100%;
@@ -59,6 +67,70 @@ pix3-runtime-panel .runtime-count {
   font-size: 0.66rem;
   color: rgba(245, 247, 250, 0.4);
   white-space: nowrap;
+}
+
+pix3-runtime-panel .runtime-collapse-all {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.78);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+pix3-runtime-panel .runtime-collapse-all:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+pix3-runtime-panel .runtime-collapse-all svg {
+  width: 0.78rem;
+  height: 0.78rem;
+  fill: currentcolor;
+}
+
+pix3-runtime-panel .runtime-root-filter {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: rgba(10, 13, 15, 0.5);
+}
+
+pix3-runtime-panel .runtime-root-filter-btn {
+  flex: 0 0 auto;
+  height: 1.35rem;
+  min-width: 2.1rem;
+  padding: 0 0.55rem;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: rgba(245, 247, 250, 0.64);
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+pix3-runtime-panel .runtime-root-filter-btn:last-child {
+  border-right: none;
+}
+
+pix3-runtime-panel .runtime-root-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+pix3-runtime-panel .runtime-root-filter-btn.is-active {
+  background: rgba(var(--pix3-accent-rgb), 0.2);
+  color: rgba(255, 236, 172, 0.95);
 }
 
 pix3-runtime-panel .runtime-placeholder {
