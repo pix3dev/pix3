@@ -16,11 +16,11 @@
 .top-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background: rgba(20, 20, 20, 0.9);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  height: 40px;
+  gap: 0.25rem;
+  min-height: 2.25rem;
+  padding: 0.18rem 0.35rem;
+  background: #2a2f3a99;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
@@ -30,50 +30,80 @@
   justify-content: center;
   border: none;
   background: transparent;
-  color: #eee;
-  padding: 4px 8px;
-  border-radius: 4px;
+  color: rgba(240, 244, 250, 0.82);
+  padding: 0;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.35rem;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 0.875rem;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.toolbar-icon-button {
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.toolbar-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.toolbar-svg-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .toolbar-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: rgba(240, 244, 250, 1);
 }
 
-.toolbar-button.active {
-  color: #4caf50;
+.toolbar-button:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.toolbar-button.active,
+.toolbar-button[aria-pressed='true'] {
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: rgba(18, 20, 24, 0.95);
+  box-shadow: none;
+}
+
+.toolbar-button.active:hover,
+.toolbar-button[aria-pressed='true']:hover {
+  background: rgba(var(--pix3-accent-rgb), 1);
 }
 
 .toolbar-separator {
   width: 1px;
-  height: 16px;
-  background: rgba(255, 255, 255, 0.2);
-  margin: 0 8px;
+  height: 1.25rem;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 0.25rem;
 }
 
 .aspect-preset-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 0.125rem;
 }
 
 .aspect-preset-button {
-  min-width: 42px;
-  padding: 4px 10px;
+  min-width: 2.25rem;
+  padding: 0 0.45rem;
   font-variant-numeric: tabular-nums;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
 }
 
 .aspect-preset-button.active {
-  color: #f5f7fa;
-  border-color: rgba(76, 175, 80, 0.55);
-  background: rgba(76, 175, 80, 0.18);
-}
-
-.aspect-preset-button[aria-pressed='true']:hover {
-  background: rgba(76, 175, 80, 0.24);
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: rgba(18, 20, 24, 0.95);
 }
 
 .viewport-container {
@@ -125,17 +155,7 @@
   color: rgba(245, 247, 250, 0.72);
 }
 
-/* Aspect Ratio Classes */
 .aspect-free {
   width: 100%;
   height: 100%;
-}
-
-select.aspect-selector {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #eee;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
 }

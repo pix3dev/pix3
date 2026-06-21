@@ -14,6 +14,13 @@ import type { RuntimeRenderer } from './RuntimeRenderer';
 const FALLBACK_COLLIDER_COLOR = 0x00e0a4;
 
 /**
+ * Minimum per-channel brightness for collider wireframes. Engines render
+ * sleeping/inactive bodies near-black, which vanishes over a dark scene; this
+ * floor keeps every collider readable while preserving the awake/asleep contrast.
+ */
+const COLLIDER_COLOR_FLOOR = 0.3;
+
+/**
  * Renders physics collider wireframes over the running scene.
  *
  * Physics lives in the game (e.g. a Rapier `World`), opaque to the runtime; a
@@ -98,7 +105,20 @@ export class PhysicsDebugOverlay {
         this.colorAttr.setUsage(DynamicDrawUsage);
         this.geometry.setAttribute('color', this.colorAttr);
       }
-      (this.colorAttr.array as Float32Array).set(colors);
+      // Lift RGB toward a visible floor. Physics engines (e.g. Rapier) draw
+      // sleeping/inactive bodies in a near-black colour, which is invisible over
+      // a dark scene — making it look like those colliders are missing entirely.
+      // The affine `floor + (1-floor)*c` keeps bright (awake) colliders bright
+      // while raising dark (sleeping) ones to a readable grey, preserving the
+      // awake/asleep contrast. Alpha is passed through untouched.
+      const dst = this.colorAttr.array as Float32Array;
+      const floatCountC = pointCount * 4;
+      for (let i = 0; i < floatCountC; i += 4) {
+        dst[i] = COLLIDER_COLOR_FLOOR + (1 - COLLIDER_COLOR_FLOOR) * colors[i];
+        dst[i + 1] = COLLIDER_COLOR_FLOOR + (1 - COLLIDER_COLOR_FLOOR) * colors[i + 1];
+        dst[i + 2] = COLLIDER_COLOR_FLOOR + (1 - COLLIDER_COLOR_FLOOR) * colors[i + 2];
+        dst[i + 3] = colors[i + 3];
+      }
       this.colorAttr.needsUpdate = true;
     }
     if (this.material.vertexColors !== hasColors) {

@@ -1,6 +1,7 @@
 import {
   Box3,
   Group,
+  LinearFilter,
   MathUtils,
   PerspectiveCamera,
   Texture,
@@ -78,6 +79,8 @@ export async function loadGltfFromBlob(
         );
       });
 
+      configurePreviewTextures(gltf.scene);
+
       return {
         gltf,
         cleanup: () => {
@@ -98,6 +101,8 @@ export async function loadGltfFromBlob(
       );
     });
 
+    configurePreviewTextures(gltf.scene);
+
     return {
       gltf,
       cleanup: () => undefined,
@@ -108,6 +113,40 @@ export async function loadGltfFromBlob(
     }
     throw error;
   }
+}
+
+/**
+ * Disable mipmaps on every texture of a freshly loaded preview model.
+ *
+ * On some ANGLE/D3D11 backends a mipmapped texture's higher mip levels upload
+ * corrupt (black), so a face that samples a high mip — the top of a cube at a
+ * grazing angle, or anything once the camera zooms out — renders black. The
+ * preview/thumbnail renderers orbit and zoom freely (and run at small sizes, so
+ * high mips are picked constantly), which makes the artifact obvious. Previews
+ * gain nothing from mipmaps, so dropping them + a linear filter removes the black
+ * at no visual cost. Mirrors the runtime's configure2DTexture() and the DeepCore
+ * block-texture fix (configureBlockColorTexture).
+ */
+export function configurePreviewTextures(root: Object3D): void {
+  root.traverse(object => {
+    const material = (object as Object3D & { material?: Material | Material[] }).material;
+    if (!material) {
+      return;
+    }
+
+    const materials = Array.isArray(material) ? material : [material];
+    for (const entry of materials) {
+      const materialRecord = entry as Material & Record<string, unknown>;
+      for (const key of TEXTURE_KEYS) {
+        const texture = materialRecord[key];
+        if (texture instanceof Texture && texture.generateMipmaps) {
+          texture.generateMipmaps = false;
+          texture.minFilter = LinearFilter;
+          texture.needsUpdate = true;
+        }
+      }
+    }
+  });
 }
 
 export function createCenteredPreviewRoot(modelRoot: Object3D): Group {
