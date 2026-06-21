@@ -32,6 +32,17 @@ export {
   type AnimationAutoSliceDialogParams,
   type AnimationAutoSliceDialogResult,
 } from './AnimationAutoSliceDialogService';
+export {
+  AssetImportService,
+  type AssetImportResult,
+  type AssetImportFailure,
+} from './AssetImportService';
+export {
+  AssetImportDialogService,
+  type AssetImportDialogInstance,
+  type AssetImportDialogParams,
+  type AssetImportDialogResult,
+} from './AssetImportDialogService';
 export { CommandDispatcher, resolveCommandDispatcher } from './CommandDispatcher';
 export { LoggingService, type LogLevel, type LogEntry, type LogListener } from './LoggingService';
 export { CommandRegistry, type CommandMenuItem, type MenuSection } from './CommandRegistry';

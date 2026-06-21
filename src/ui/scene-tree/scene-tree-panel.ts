@@ -178,7 +178,7 @@ export class SceneTreePanel extends ComponentBase {
         actions-label="Scene tree controls"
       >
         ${activeSceneName ? html`<span slot="subtitle">${activeSceneName}</span>` : null}
-        <pix3-toolbar slot="toolbar" label="Scene tree controls">
+        <pix3-toolbar slot="toolbar" variant="panel" label="Scene tree controls">
           <pix3-toolbar-button
             icon="plus-circle"
             aria-label="Create node"

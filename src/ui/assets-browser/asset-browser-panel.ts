@@ -2,6 +2,7 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { ref } from 'lit/directives/ref.js';
 import { appState } from '@/state';
 import { AssetFileActivationService, type AssetActivation, CommandDispatcher } from '@/services';
+import { AssetImportDialogService } from '@/services/AssetImportDialogService';
 import { DialogService } from '@/services/DialogService';
 import { ProjectService } from '@/services/ProjectService';
 import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
@@ -33,6 +34,9 @@ export class AssetBrowserPanel extends ComponentBase {
 
   @inject(DialogService)
   private readonly dialogService!: DialogService;
+
+  @inject(AssetImportDialogService)
+  private readonly assetImportDialogService!: AssetImportDialogService;
 
   @inject(CommandDispatcher)
   private readonly commandDispatcher!: CommandDispatcher;
@@ -69,6 +73,19 @@ export class AssetBrowserPanel extends ComponentBase {
       console.log('[AssetBrowserPanel] Folder creation initiated');
     } catch (error) {
       console.error('[AssetBrowserPanel] Failed to create folder:', error);
+    }
+  };
+
+  private onImportClick = async () => {
+    try {
+      const targetDirectory = this.assetTreeRef?.getTargetDirectory?.() ?? '.';
+      const result = await this.assetImportDialogService.showDialog({ targetDirectory });
+      if (result && result.importedPaths.length > 0) {
+        // Best-effort reveal of the first imported file once the tree refreshes.
+        await this.assetTreeRef?.selectPath(result.importedPaths[0]);
+      }
+    } catch (error) {
+      console.error('[AssetBrowserPanel] Failed to import assets:', error);
     }
   };
 
@@ -396,7 +413,7 @@ export class ${singletonName} extends Script {
         actions-label="Asset browser actions"
         @asset-activate=${this.onAssetActivate}
       >
-        <pix3-toolbar label="Asset browser tools" slot="toolbar">
+        <pix3-toolbar label="Asset browser tools" slot="toolbar" variant="panel">
           <pix3-dropdown-button
             icon="plus-circle"
             aria-label="Create"
@@ -416,6 +433,13 @@ export class ${singletonName} extends Script {
               }
             }}
           ></pix3-dropdown-button>
+          <pix3-toolbar-button
+            icon="upload"
+            label="Import"
+            title="Import assets into the selected folder"
+            ?disabled=${isReadOnly}
+            @click=${this.onImportClick}
+          ></pix3-toolbar-button>
           <pix3-toolbar-button
             icon="edit"
             label="Rename"

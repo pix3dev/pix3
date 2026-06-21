@@ -9,6 +9,7 @@ import { KeybindingService } from '@/services/KeybindingService';
 import { FileWatchService } from '@/services/FileWatchService';
 import { DialogService, type DialogInstance } from '@/services/DialogService';
 import { AnimationAutoSliceDialogService, type AnimationAutoSliceDialogInstance } from '@/services';
+import { AssetImportDialogService, type AssetImportDialogInstance } from '@/services';
 import {
   BehaviorPickerService,
   type ComponentPickerInstance,
@@ -95,6 +96,7 @@ import './shared/pix3-project-settings-dialog';
 import './shared/pix3-project-sync-dialog';
 import './shared/pix3-editor-settings-dialog';
 import './shared/pix3-animation-auto-slice-dialog';
+import './shared/pix3-asset-import-dialog';
 import './shared/pix3-node-type-picker';
 import './shared/pix3-playable-export-dialog';
 import './shared/pix3-playable-export-progress-dialog';
@@ -160,6 +162,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(AnimationAutoSliceDialogService)
   private readonly animationAutoSliceDialogService!: AnimationAutoSliceDialogService;
+
+  @inject(AssetImportDialogService)
+  private readonly assetImportDialogService!: AssetImportDialogService;
 
   @inject(ScriptCreatorService)
   private readonly scriptCreatorService!: ScriptCreatorService;
@@ -234,6 +239,9 @@ export class Pix3EditorShell extends ComponentBase {
   private activeAnimationAutoSliceDialog: AnimationAutoSliceDialogInstance | null = null;
 
   @state()
+  private activeAssetImportDialog: AssetImportDialogInstance | null = null;
+
+  @state()
   private activeNodeTypePicker: NodeTypePickerInstance | null = null;
 
   @state()
@@ -273,6 +281,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeBehaviorPickerSubscription?: () => void;
   private disposeScriptCreatorSubscription?: () => void;
   private disposeAnimationAutoSliceSubscription?: () => void;
+  private disposeAssetImportSubscription?: () => void;
   private onWelcomeProjectReady?: (e: Event) => void;
   private keyboardHandler?: (e: KeyboardEvent) => void;
   private accountPopoverPointerHandler?: (e: PointerEvent) => void;
@@ -395,6 +404,11 @@ export class Pix3EditorShell extends ComponentBase {
         this.requestUpdate();
       }
     );
+
+    this.disposeAssetImportSubscription = this.assetImportDialogService.subscribe(dialog => {
+      this.activeAssetImportDialog = dialog;
+      this.requestUpdate();
+    });
 
     this.disposeCreateProjectSubscription = this.projectLifecycleService.subscribe(dialog => {
       this.activeCreateProjectDialog = dialog;
@@ -617,6 +631,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeScriptCreatorSubscription = undefined;
     this.disposeAnimationAutoSliceSubscription?.();
     this.disposeAnimationAutoSliceSubscription = undefined;
+    this.disposeAssetImportSubscription?.();
+    this.disposeAssetImportSubscription = undefined;
     if (this.onWelcomeProjectReady) {
       this.removeEventListener(
         'pix3-welcome:project-ready',
@@ -867,9 +883,9 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderScriptCreatorHost()}
         ${this.renderProjectSettingsHost()} ${this.renderProjectSyncHost()}
         ${this.renderEditorSettingsHost()} ${this.renderAnimationAutoSliceHost()}
-        ${this.renderCreateProjectHost()} ${this.renderNodeTypePickerHost()}
-        ${this.renderPlayableExportDialogHost()} ${this.renderPlayableExportProgressDialogHost()}
-        ${this.renderAuthModal()}
+        ${this.renderAssetImportHost()} ${this.renderCreateProjectHost()}
+        ${this.renderNodeTypePickerHost()} ${this.renderPlayableExportDialogHost()}
+        ${this.renderPlayableExportProgressDialogHost()} ${this.renderAuthModal()}
       </div>
     `;
   }
@@ -1321,6 +1337,49 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     this.animationAutoSliceDialogService.cancel(dialogId);
+  }
+
+  private renderAssetImportHost() {
+    if (!this.activeAssetImportDialog) {
+      return null;
+    }
+
+    return html`
+      <div
+        class="asset-import-host"
+        @asset-import-confirmed=${(event: CustomEvent) => this.onAssetImportConfirmed(event)}
+        @asset-import-cancelled=${(event: CustomEvent) => this.onAssetImportCancelled(event)}
+      >
+        <pix3-asset-import-dialog
+          .dialogId=${this.activeAssetImportDialog.id}
+          .targetDirectory=${this.activeAssetImportDialog.params.targetDirectory}
+        ></pix3-asset-import-dialog>
+      </div>
+    `;
+  }
+
+  private onAssetImportConfirmed(event: CustomEvent): void {
+    const { dialogId, importedPaths } = event.detail as {
+      dialogId?: string;
+      importedPaths?: string[];
+    };
+
+    if (typeof dialogId !== 'string') {
+      return;
+    }
+
+    this.assetImportDialogService.confirm(dialogId, {
+      importedPaths: Array.isArray(importedPaths) ? importedPaths : [],
+    });
+  }
+
+  private onAssetImportCancelled(event: CustomEvent): void {
+    const { dialogId } = event.detail as { dialogId?: string };
+    if (typeof dialogId !== 'string') {
+      return;
+    }
+
+    this.assetImportDialogService.cancel(dialogId);
   }
 
   private renderCreateProjectHost() {

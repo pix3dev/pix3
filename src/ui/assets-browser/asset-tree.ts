@@ -50,6 +50,24 @@ export class AssetTree extends ComponentBase {
     return this.selectedPath;
   }
 
+  /**
+   * Resolves the directory that new assets should be placed in, based on the
+   * current selection: a selected folder is used directly, a selected file
+   * resolves to its parent directory, and no selection falls back to the
+   * project root (`.`).
+   */
+  public getTargetDirectory(): string {
+    const selected = this.selectedPath;
+    if (!selected) {
+      return '.';
+    }
+    const found = this.findNodeByPath(selected);
+    if (found?.node?.kind === 'directory') {
+      return selected;
+    }
+    return this.getParentPath(selected);
+  }
+
   @state()
   private draggedPath: string | null = null;
 

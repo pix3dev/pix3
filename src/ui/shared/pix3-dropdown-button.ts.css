@@ -38,6 +38,23 @@ pix3-dropdown-button[disabled] {
   pointer-events: none;
 }
 
+/* Panel variant — matches the viewport toolbar dropdown button. */
+pix3-toolbar[variant='panel'] pix3-dropdown-button {
+  width: auto;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  padding: 0 0.35rem;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: rgba(240, 244, 250, 0.82);
+}
+
+pix3-toolbar[variant='panel'] pix3-dropdown-button:hover:not([disabled]) {
+  background: transparent;
+  color: rgba(240, 244, 250, 1);
+  transform: none;
+}
+
 .dropdown__trigger {
   display: inline-flex;
   align-items: center;

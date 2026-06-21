@@ -186,9 +186,17 @@
 }
 
 .viewport-host {
-  flex: 1;
+  flex: 1 1 0;
   width: 100%;
-  height: 100%;
+  /* min-* 0 lets this flex item shrink to its container. Without it the default
+     min-height/min-width: auto resolves to the canvas's intrinsic (device-pixel
+     buffer) size, which forces the host taller than the Golden Layout cell and
+     makes the viewport slide under the bottom tab group. overflow: hidden clamps
+     the canvas and breaks the ResizeObserver -> resize -> grow feedback loop that
+     otherwise creeps the viewport downward after a resize. */
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   position: relative;
   touch-action: none;
@@ -352,7 +360,12 @@
 }
 
 .viewport-host .viewport-canvas {
-  flex: 1;
+  flex: 1 1 0;
+  /* The canvas keeps its device-pixel buffer size as HTML width/height attributes
+     (three.js setSize(..., false) does not touch inline CSS). min-*: 0 stops that
+     intrinsic size from acting as the flex min-content size. */
+  min-width: 0;
+  min-height: 0;
   height: 100%;
   width: 100%;
   display: block;

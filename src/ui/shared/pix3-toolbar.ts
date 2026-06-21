@@ -14,6 +14,14 @@ export class Pix3Toolbar extends ComponentBase {
   @property({ type: Boolean, reflect: true })
   dense = false;
 
+  /**
+   * Visual variant. `panel` matches the viewport toolbar aesthetic (translucent
+   * strip, transparent square buttons, accent-fill when toggled) and is used by
+   * the Scene Tree and Asset Browser panel toolbars.
+   */
+  @property({ reflect: true })
+  variant: 'default' | 'panel' = 'default';
+
   @inject(FocusRingService)
   private readonly focusRing!: FocusRingService;
 
