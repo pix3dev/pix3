@@ -637,6 +637,13 @@ export class SceneRunner {
 
     const intersections = this.raycaster.intersectObjects(this.scene.children, true);
     for (const intersection of intersections) {
+      // Three.js' Raycaster intentionally ignores Object3D.visible, but for
+      // input/picking a hidden node (or one nested under a hidden ancestor —
+      // e.g. a closed shop panel) must not intercept the ray.
+      if (!this.isObjectVisibleInHierarchy(intersection.object)) {
+        continue;
+      }
+
       const node = this.resolveNodeFromObject(intersection.object);
       if (!node) {
         continue;
@@ -666,6 +673,23 @@ export class SceneRunner {
     }
 
     return null;
+  }
+
+  /**
+   * True only if the object and every ancestor up to the scene root are visible.
+   * Mirrors how WebGLRenderer skips an invisible subtree, which Raycaster does not.
+   */
+  private isObjectVisibleInHierarchy(object: Object3D): boolean {
+    let current: Object3D | null = object;
+
+    while (current) {
+      if (!current.visible) {
+        return false;
+      }
+      current = current.parent;
+    }
+
+    return true;
   }
 
   private updateBillboardSprites(nodes: NodeBase[], camera: Camera): void {
