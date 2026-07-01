@@ -5576,13 +5576,20 @@ export class ViewportRendererService {
   private updateSelection2DOverlayHud(): void {
     this.attachSelection2DOverlayHud();
 
+    // Keep the HUD alive during resize/rotate: a plain move surfaces nothing,
+    // a resize keeps the live size badge, and a rotate swaps that badge for a
+    // live angle readout (the size is hidden until the pointer is released).
+    const activeHandle = this.active2DTransform?.handle;
+    const isMoving = activeHandle === 'move';
+    const isRotating = activeHandle === 'rotate';
+
     if (
       !this.selection2DOverlay ||
       !this.selection2DOverlayHud ||
       !this.orthographicCamera ||
       this.viewportSize.width <= 0 ||
       this.viewportSize.height <= 0 ||
-      this.active2DTransform
+      isMoving
     ) {
       this.hideSelection2DOverlayHud();
       return;
@@ -5613,11 +5620,17 @@ export class ViewportRendererService {
       this.selection2DOverlay.nodeIds,
       sceneGraph.nodeMap
     );
-    const bottomBadgeText = this.getSelection2DOverlaySizeText(
-      this.selection2DOverlay.nodeIds,
-      sceneGraph.nodeMap,
-      size
-    );
+    const bottomBadgeText = isRotating
+      ? this.getSelection2DOverlayAngleText(
+          this.selection2DOverlay.nodeIds,
+          sceneGraph.nodeMap,
+          this.selection2DOverlay.worldRotationZ ?? 0
+        )
+      : this.getSelection2DOverlaySizeText(
+          this.selection2DOverlay.nodeIds,
+          sceneGraph.nodeMap,
+          size
+        );
 
     this.renderSelection2DOverlayHudBadge(
       this.selection2DOverlayHud.top,
@@ -5758,6 +5771,33 @@ export class ViewportRendererService {
     return {
       text: `${this.formatOverlayDimension(fallbackBoundsSize.x)} x ${this.formatOverlayDimension(fallbackBoundsSize.y)}`,
     };
+  }
+
+  private getSelection2DOverlayAngleText(
+    nodeIds: string[],
+    nodeMap: Map<string, NodeBase>,
+    fallbackRotationZ: number
+  ): { text: string } {
+    let radians = fallbackRotationZ;
+    if (nodeIds.length === 1) {
+      const node = nodeMap.get(nodeIds[0]);
+      if (node instanceof Node2D) {
+        radians = node.rotation.z;
+      }
+    }
+
+    // Normalize to (-180, 180] for a readable live readout.
+    let degrees = MathUtils.radToDeg(radians) % 360;
+    if (degrees > 180) {
+      degrees -= 360;
+    } else if (degrees <= -180) {
+      degrees += 360;
+    }
+    if (Object.is(degrees, -0)) {
+      degrees = 0;
+    }
+
+    return { text: `${this.formatOverlayDimension(degrees, 1)}°` };
   }
 
   private getNodeInspectorSize(node: Node2D): {
@@ -6081,7 +6121,9 @@ export class ViewportRendererService {
       // Set active handle for visual feedback (accent color during drag)
       this.transformTool2d.setActiveHandle(handle, this.selection2DOverlay);
       this.begin2DInteraction();
-      this.hideSelection2DOverlayHud();
+      // Reflect the correct HUD state from the first frame: move hides it,
+      // resize keeps the live size badge, rotate shows the live angle badge.
+      this.updateSelection2DOverlayHud();
       console.debug('[ViewportRenderer] start 2D transform', {
         handle,
         nodeIds: this.active2DTransform.nodeIds,

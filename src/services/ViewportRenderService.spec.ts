@@ -748,14 +748,19 @@ describe('ViewportRendererService', () => {
     expect(hud?.bottom.style.transform).toContain('rotate(-45deg)');
   });
 
-  it('hides 2D overlay HUD badges while a 2D transform is active', () => {
+  const setupSelection2DOverlayHud = (
+    overrides: { active2DTransform?: unknown; rotationRadians?: number } = {}
+  ): { top: HTMLDivElement; bottom: HTMLDivElement } | undefined => {
     const service = new ViewportRendererService();
     const sprite = new Sprite2D({
-      id: 'sprite-hud-hide',
+      id: 'sprite-hud-transform',
       name: 'Player',
       width: 100,
       height: 50,
     });
+    if (typeof overrides.rotationRadians === 'number') {
+      sprite.rotation.z = overrides.rotationRadians;
+    }
     const host = document.createElement('div');
     document.body.appendChild(host);
 
@@ -797,13 +802,13 @@ describe('ViewportRendererService', () => {
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
         localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
-        worldRotationZ: 0,
+        worldRotationZ: overrides.rotationRadians ?? 0,
       },
       configurable: true,
       writable: true,
     });
     Object.defineProperty(service, 'active2DTransform', {
-      value: {},
+      value: overrides.active2DTransform,
       configurable: true,
       writable: true,
     });
@@ -812,18 +817,41 @@ describe('ViewportRendererService', () => {
     (
       service as unknown as {
         updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
       }
     ).updateSelection2DOverlayHud();
 
-    const hud = (
+    return (
       service as unknown as {
         selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
       }
     ).selection2DOverlayHud;
+  };
+
+  it('hides 2D overlay HUD badges while moving a 2D node', () => {
+    const hud = setupSelection2DOverlayHud({ active2DTransform: { handle: 'move' } });
 
     expect(hud?.top.style.display).toBe('none');
     expect(hud?.bottom.style.display).toBe('none');
+  });
+
+  it('keeps the live size badge visible while resizing a 2D node', () => {
+    const hud = setupSelection2DOverlayHud({ active2DTransform: { handle: 'scale-e' } });
+
+    expect(hud?.bottom.style.display).toBe('inline-flex');
+    expect(hud?.bottom.textContent).toBe('100 x 50');
+  });
+
+  it('shows a live angle badge in place of the size badge while rotating a 2D node', () => {
+    const hud = setupSelection2DOverlayHud({
+      active2DTransform: { handle: 'rotate' },
+      rotationRadians: Math.PI / 4,
+    });
+
+    expect(hud?.bottom.style.display).toBe('inline-flex');
+    expect(hud?.bottom.textContent).toBe('45°');
+    // The size readout is replaced by the angle while the identity stays on top.
+    expect(hud?.bottom.textContent).not.toContain('x');
+    expect(hud?.top.textContent).toContain('Player');
   });
 
   it('refreshes existing node visuals when node data changes', () => {
