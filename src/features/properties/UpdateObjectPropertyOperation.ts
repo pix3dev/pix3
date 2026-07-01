@@ -302,6 +302,17 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       'minValue',
       'maxValue',
       'handleSize',
+      // TiledSprite2D
+      'patchMode',
+      'sliceBorderLeft',
+      'sliceBorderRight',
+      'sliceBorderTop',
+      'sliceBorderBottom',
+      'drawCenter',
+      'axisStretchHorizontal',
+      'axisStretchVertical',
+      'tileScale',
+      'tileOffset',
     ].includes(propertyPath);
   }
 

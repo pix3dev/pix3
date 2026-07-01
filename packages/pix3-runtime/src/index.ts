@@ -19,6 +19,7 @@ export * from './core/ECSService';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
+export * from './core/tiled-sprite-geometry';
 export * from './core/game-debug';
 
 // Nodes
@@ -31,6 +32,7 @@ export * from './nodes/AudioPlayer';
 export * from './nodes/2D/Sprite2D';
 export * from './nodes/2D/AnimatedSprite2D';
 export * from './nodes/2D/ColorRect2D';
+export * from './nodes/2D/TiledSprite2D';
 export * from './nodes/2D/Group2D';
 export * from './nodes/2D/UI/UIControl2D';
 export * from './nodes/2D/UI/Joystick2D';

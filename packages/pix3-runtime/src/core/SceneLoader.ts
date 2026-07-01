@@ -7,6 +7,11 @@ import { MeshInstance } from '../nodes/3D/MeshInstance';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
 import { ColorRect2D } from '../nodes/2D/ColorRect2D';
+import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
+import type {
+  TiledSpriteAxisStretch,
+  TiledSpritePatchMode,
+} from './tiled-sprite-geometry';
 import { Group2D } from '../nodes/2D/Group2D';
 import { DirectionalLightNode } from '../nodes/3D/DirectionalLightNode';
 import { PointLightNode } from '../nodes/3D/PointLightNode';
@@ -982,6 +987,65 @@ export class SceneLoader {
         }
 
         return sprite;
+      }
+      case 'TiledSprite2D': {
+        const props = baseProps.properties as Record<string, unknown>;
+        const transform = this.asRecord(props.transform);
+        const texture = coerceTextureResource(props.texture ?? props.texturePath ?? null);
+        const texturePath = texture?.url ?? null;
+
+        const node = new TiledSprite2D({
+          ...baseProps,
+          properties: props,
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation:
+            typeof (transform?.rotation ?? props.rotation) === 'number'
+              ? ((transform?.rotation ?? props.rotation) as number)
+              : 0,
+          layout: this.parseNode2DLayout(props),
+          opacity: this.asNumber(props.opacity, undefined),
+          texture,
+          width: this.asNumber(props.width, undefined),
+          height: this.asNumber(props.height, undefined),
+          patchMode:
+            typeof props.patchMode === 'string'
+              ? (props.patchMode as TiledSpritePatchMode)
+              : undefined,
+          sliceBorder: {
+            left: this.asNumber(props.sliceBorderLeft, 0),
+            right: this.asNumber(props.sliceBorderRight, 0),
+            top: this.asNumber(props.sliceBorderTop, 0),
+            bottom: this.asNumber(props.sliceBorderBottom, 0),
+          },
+          drawCenter: typeof props.drawCenter === 'boolean' ? props.drawCenter : undefined,
+          axisStretchHorizontal:
+            typeof props.axisStretchHorizontal === 'string'
+              ? (props.axisStretchHorizontal as TiledSpriteAxisStretch)
+              : undefined,
+          axisStretchVertical:
+            typeof props.axisStretchVertical === 'string'
+              ? (props.axisStretchVertical as TiledSpriteAxisStretch)
+              : undefined,
+          tileScale: this.readVector2(props.tileScale, new Vector2(1, 1)),
+          tileOffset: this.readVector2(props.tileOffset, ZERO_VECTOR2),
+          anchor: this.readVector2(props.anchor, new Vector2(0.5, 0.5)),
+          color: typeof props.color === 'string' ? props.color : undefined,
+        });
+
+        if (texturePath) {
+          try {
+            const loadedTexture = await this.assetLoader.loadTexture(texturePath);
+            node.setTexture(loadedTexture);
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading texture for TiledSprite2D "${node.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return node;
       }
       case 'AudioPlayer': {
         const props = baseProps.properties as Record<string, unknown>;

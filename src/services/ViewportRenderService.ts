@@ -17,6 +17,8 @@ import { Node3D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import { findAnimationClip } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
+import { TiledSprite2D } from '@pix3/runtime';
+import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
@@ -128,6 +130,7 @@ export class ViewportRendererService {
   private group2DVisuals = new Map<string, THREE.Group>();
   private animatedSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite2DVisuals = new Map<string, THREE.Group>();
+  private tiledSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite3DTexturePaths = new Map<string, string | null>();
   private particles3DTexturePaths = new Map<string, string | null>();
   private uiControl2DVisuals = new Map<string, THREE.Group>();
@@ -1762,6 +1765,11 @@ export class ViewportRendererService {
           if (visualRoot) {
             this.syncAnimatedSprite2DVisual(node, visualRoot);
           }
+        } else if (node instanceof TiledSprite2D) {
+          const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
+          if (visualRoot) {
+            this.syncTiledSprite2DVisual(node, visualRoot);
+          }
         } else if (node instanceof Sprite2D) {
           const visualRoot = this.sprite2DVisuals.get(node.nodeId);
           if (visualRoot) {
@@ -2407,6 +2415,7 @@ export class ViewportRendererService {
     const candidates: THREE.Object3D[] = [
       ...this.animatedSprite2DVisuals.values(),
       ...this.sprite2DVisuals.values(),
+      ...this.tiledSprite2DVisuals.values(),
       ...this.uiControl2DVisuals.values(),
     ];
 
@@ -2549,7 +2558,14 @@ export class ViewportRendererService {
       return false;
     }
 
-    if (!(node instanceof AnimatedSprite2D || node instanceof Sprite2D || node instanceof UIControl2D)) {
+    if (
+      !(
+        node instanceof AnimatedSprite2D ||
+        node instanceof Sprite2D ||
+        node instanceof TiledSprite2D ||
+        node instanceof UIControl2D
+      )
+    ) {
       return false;
     }
 
@@ -2620,6 +2636,11 @@ export class ViewportRendererService {
       const visualRoot = this.animatedSprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
         this.syncAnimatedSprite2DVisual(node, visualRoot);
+      }
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        this.syncTiledSprite2DVisual(node, visualRoot);
       }
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.sprite2DVisuals.get(node.nodeId);
@@ -2711,6 +2732,11 @@ export class ViewportRendererService {
       }
     } else if (node instanceof AnimatedSprite2D) {
       const visualRoot = this.animatedSprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        visualRoot.visible = node.visible;
+      }
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
         visualRoot.visible = node.visible;
       }
@@ -3024,6 +3050,14 @@ export class ViewportRendererService {
         this.disposeObject3D(visual);
       }
       this.sprite2DVisuals.clear();
+
+      for (const visual of this.tiledSprite2DVisuals.values()) {
+        if (visual.parent) {
+          visual.parent.remove(visual);
+        }
+        this.disposeObject3D(visual);
+      }
+      this.tiledSprite2DVisuals.clear();
       this.sprite3DTexturePaths.clear();
       this.particles3DTexturePaths.clear();
 
@@ -3134,6 +3168,13 @@ export class ViewportRendererService {
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.createSprite2DVisual(node);
       this.sprite2DVisuals.set(node.nodeId, visualRoot);
+
+      const parent = parent2DVisualRoot ?? this.scene;
+      parent.add(visualRoot);
+      current2DVisualRoot = visualRoot;
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.createTiledSprite2DVisual(node);
+      this.tiledSprite2DVisuals.set(node.nodeId, visualRoot);
 
       const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
@@ -3937,6 +3978,226 @@ export class ViewportRendererService {
         }
       }
     })();
+  }
+
+  /**
+   * Create a visual representation for a TiledSprite2D node. Unlike the Sprite2D
+   * proxy (a unit quad scaled by a size group), the geometry is size-baked because
+   * its UVs depend on the rect size, borders, and texture — so it is rebuilt via
+   * the shared {@link buildTiledSpriteGeometry} whenever any of those change.
+   */
+  private createTiledSprite2DVisual(node: TiledSprite2D): THREE.Group {
+    const texWidth = node.textureWidth || 0;
+    const texHeight = node.textureHeight || 0;
+    const geometry = buildTiledSpriteGeometry(
+      this.tiledSprite2DGeometryParams(node, texWidth, texHeight)
+    );
+
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 1,
+    });
+    material.userData.baseOpacity = 1;
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    mesh.layers.set(LAYER_2D);
+    mesh.userData.isTiledSprite2DVisual = true;
+    mesh.userData.nodeId = node.nodeId;
+
+    const root = new THREE.Group();
+    root.position.copy(node.position);
+    root.rotation.copy(node.rotation);
+    root.scale.set(node.scale.x, node.scale.y, 1);
+    root.visible = node.visible;
+    root.layers.set(LAYER_2D);
+    root.add(mesh);
+
+    root.userData.isTiledSprite2DVisualRoot = true;
+    root.userData.nodeId = node.nodeId;
+    root.userData.tiledMesh = mesh;
+    root.userData.texturePath = node.texturePath ?? null;
+    root.userData.textureWidth = texWidth;
+    root.userData.textureHeight = texHeight;
+    root.userData.geometrySignature = this.tiledSprite2DSignature(node, texWidth, texHeight);
+
+    this.applyTextureToTiledSprite2DVisual(node, root);
+    this.apply2DVisualOpacity(node, root);
+
+    return root;
+  }
+
+  private tiledSprite2DGeometryParams(
+    node: TiledSprite2D,
+    textureWidth: number,
+    textureHeight: number
+  ): TiledSpriteGeometryParams {
+    return {
+      mode: node.patchMode,
+      width: node.width,
+      height: node.height,
+      textureWidth,
+      textureHeight,
+      border: { ...node.sliceBorder },
+      drawCenter: node.drawCenter,
+      axisStretchHorizontal: node.axisStretchHorizontal,
+      axisStretchVertical: node.axisStretchVertical,
+      tileScale: { x: node.tileScale.x, y: node.tileScale.y },
+      tileOffset: { x: node.tileOffset.x, y: node.tileOffset.y },
+    };
+  }
+
+  private tiledSprite2DSignature(
+    node: TiledSprite2D,
+    textureWidth: number,
+    textureHeight: number
+  ): string {
+    const b = node.sliceBorder;
+    return [
+      node.patchMode,
+      node.width,
+      node.height,
+      b.left,
+      b.right,
+      b.top,
+      b.bottom,
+      node.drawCenter,
+      node.axisStretchHorizontal,
+      node.axisStretchVertical,
+      node.tileScale.x,
+      node.tileScale.y,
+      node.tileOffset.x,
+      node.tileOffset.y,
+      textureWidth,
+      textureHeight,
+    ].join('|');
+  }
+
+  private rebuildTiledSprite2DGeometry(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (!mesh) {
+      return;
+    }
+    const texWidth = (visualRoot.userData.textureWidth as number) ?? 0;
+    const texHeight = (visualRoot.userData.textureHeight as number) ?? 0;
+    const geometry = buildTiledSpriteGeometry(
+      this.tiledSprite2DGeometryParams(node, texWidth, texHeight)
+    );
+    mesh.geometry.dispose();
+    mesh.geometry = geometry;
+    mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    visualRoot.userData.geometrySignature = this.tiledSprite2DSignature(node, texWidth, texHeight);
+  }
+
+  private applyTextureToTiledSprite2DVisual(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (!mesh || !(mesh.material instanceof THREE.MeshBasicMaterial)) {
+      return;
+    }
+    const material = mesh.material;
+    const texturePath = node.texturePath;
+    if (!texturePath) {
+      material.map = null;
+      material.needsUpdate = true;
+      return;
+    }
+
+    const onTextureReady = (texture: THREE.Texture) => {
+      // Latest-wins + liveness guard: a load can resolve after the proxy was
+      // disposed (leaking a rebuilt geometry) or after the node's texture was
+      // swapped again (a stale load overwriting a newer one). Bail in both cases.
+      if (this.tiledSprite2DVisuals.get(node.nodeId) !== visualRoot || node.texturePath !== texturePath) {
+        texture.dispose();
+        return;
+      }
+
+      this.configureSpriteTexture(texture);
+      material.map = texture;
+      material.color.set(0xffffff);
+      material.transparent = true;
+      material.needsUpdate = true;
+
+      const img = texture.image as
+        | { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+        | undefined;
+      const w = img?.naturalWidth ?? img?.width;
+      const h = img?.naturalHeight ?? img?.height;
+      if (w && h) {
+        visualRoot.userData.textureWidth = w;
+        visualRoot.userData.textureHeight = h;
+        // UVs (9-slice) and tile counts depend on the natural size — rebuild now.
+        this.rebuildTiledSprite2DGeometry(node, visualRoot);
+      }
+    };
+
+    const textureLoader = new THREE.TextureLoader();
+
+    void (async () => {
+      try {
+        const blob = await this.resourceManager.readBlob(texturePath);
+        const blobUrl = URL.createObjectURL(blob);
+        textureLoader.load(
+          blobUrl,
+          texture => {
+            try {
+              onTextureReady(texture);
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+          },
+          undefined,
+          () => {
+            URL.revokeObjectURL(blobUrl);
+          }
+        );
+      } catch {
+        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(texturePath);
+        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
+        if (scheme === 'http' || scheme === 'https' || scheme === '') {
+          try {
+            textureLoader.load(texturePath, texture => onTextureReady(texture));
+          } catch {
+            // Keep placeholder material
+          }
+        }
+      }
+    })();
+  }
+
+  private syncTiledSprite2DVisual(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    this.apply2DVisualTransform(node, visualRoot);
+    visualRoot.visible = node.visible;
+
+    // React to a texture swap before rebuilding geometry (natural size may change).
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (mesh && mesh.material instanceof THREE.MeshBasicMaterial) {
+      const currentTexturePath = node.texturePath ?? null;
+      const previousTexturePath = (visualRoot.userData.texturePath as string | null) ?? null;
+      if (currentTexturePath !== previousTexturePath) {
+        mesh.material.map = null;
+        mesh.material.needsUpdate = true;
+        visualRoot.userData.texturePath = currentTexturePath;
+        visualRoot.userData.textureWidth = 0;
+        visualRoot.userData.textureHeight = 0;
+        this.applyTextureToTiledSprite2DVisual(node, visualRoot);
+      }
+    }
+
+    const signature = this.tiledSprite2DSignature(
+      node,
+      (visualRoot.userData.textureWidth as number) ?? 0,
+      (visualRoot.userData.textureHeight as number) ?? 0
+    );
+    if (signature !== visualRoot.userData.geometrySignature) {
+      this.rebuildTiledSprite2DGeometry(node, visualRoot);
+    } else if (mesh) {
+      // Pivot can change without altering geometry.
+      mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    }
+
+    this.apply2DVisualOpacity(node, visualRoot);
   }
 
   private syncAnimatedSprite2DVisual(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
@@ -4767,8 +5028,8 @@ export class ViewportRendererService {
   private getNodeOnlyLocalCorners(node: Node2D): THREE.Vector3[] {
     let corners: THREE.Vector3[];
 
-    if (node instanceof Sprite2D) {
-      // Account for sprite anchor offset: the visual mesh is shifted from the
+    if (node instanceof Sprite2D || node instanceof TiledSprite2D) {
+      // Account for the anchor/pivot offset: the visual mesh is shifted from the
       // node origin by (0.5 - anchor) * size.  In node-local space the sprite
       // occupies  [-ax*w .. (1-ax)*w]  x  [-ay*h .. (1-ay)*h].
       const w = node.width ?? 64;
@@ -6007,6 +6268,9 @@ export class ViewportRendererService {
     if (node instanceof AnimatedSprite2D) {
       return this.animatedSprite2DVisuals.get(node.nodeId);
     }
+    if (node instanceof TiledSprite2D) {
+      return this.tiledSprite2DVisuals.get(node.nodeId);
+    }
     if (node instanceof Sprite2D) {
       return this.sprite2DVisuals.get(node.nodeId);
     }
@@ -6242,6 +6506,11 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.sprite2DVisuals.clear();
+
+    for (const visual of this.tiledSprite2DVisuals.values()) {
+      this.disposeObject3D(visual);
+    }
+    this.tiledSprite2DVisuals.clear();
     this.sprite3DTexturePaths.clear();
     this.particles3DTexturePaths.clear();
 

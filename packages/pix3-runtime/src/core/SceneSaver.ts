@@ -6,6 +6,7 @@ import { Node3D } from '../nodes/Node3D';
 import { Node2D } from '../nodes/Node2D';
 import { Group2D } from '../nodes/2D/Group2D';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
+import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
 import { UIControl2D } from '../nodes/2D/UI/UIControl2D';
@@ -368,6 +369,28 @@ export class SceneSaver {
       if (node.aspectRatioLocked) {
         props.aspectRatioLocked = true;
       }
+      if (node.anchor.x !== 0.5 || node.anchor.y !== 0.5) {
+        props.anchor = [
+          Math.round(node.anchor.x * 1000) / 1000,
+          Math.round(node.anchor.y * 1000) / 1000,
+        ];
+      }
+    } else if (node instanceof TiledSprite2D) {
+      if (node.texture) {
+        props.texture = { ...node.texture };
+      }
+      props.patchMode = node.patchMode;
+      props.width = node.width;
+      props.height = node.height;
+      props.sliceBorderLeft = node.sliceBorder.left;
+      props.sliceBorderRight = node.sliceBorder.right;
+      props.sliceBorderTop = node.sliceBorder.top;
+      props.sliceBorderBottom = node.sliceBorder.bottom;
+      props.drawCenter = node.drawCenter;
+      props.axisStretchHorizontal = node.axisStretchHorizontal;
+      props.axisStretchVertical = node.axisStretchVertical;
+      props.tileScale = [node.tileScale.x, node.tileScale.y];
+      props.tileOffset = [node.tileOffset.x, node.tileOffset.y];
       if (node.anchor.x !== 0.5 || node.anchor.y !== 0.5) {
         props.anchor = [
           Math.round(node.anchor.x * 1000) / 1000,
