@@ -100,7 +100,7 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
           ? null
           : primaryNodeId && uniqueNodeIds.includes(primaryNodeId)
             ? primaryNodeId
-            : uniqueNodeIds[0] ?? null;
+            : (uniqueNodeIds[0] ?? null);
 
       return {
         newNodeIds: uniqueNodeIds,

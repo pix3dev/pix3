@@ -729,12 +729,8 @@ Happy creating! 🎨
 
     let didChange = nextMetadata !== (manifest.metadata ?? {});
     const nextDefaultExportScenePath =
-      this.remapProjectPath(
-        manifest.defaultExportScenePath,
-        sourcePath,
-        targetPath,
-        movedKind
-      ) ?? manifest.defaultExportScenePath;
+      this.remapProjectPath(manifest.defaultExportScenePath, sourcePath, targetPath, movedKind) ??
+      manifest.defaultExportScenePath;
     if (nextDefaultExportScenePath !== manifest.defaultExportScenePath) {
       didChange = true;
     }

@@ -73,7 +73,9 @@ const createInMemoryFs = (initialFiles: Record<string, string>): InMemoryFs => {
         });
       }
 
-      return Array.from(entries.values()).sort((left, right) => left.path.localeCompare(right.path));
+      return Array.from(entries.values()).sort((left, right) =>
+        left.path.localeCompare(right.path)
+      );
     },
   };
 };
@@ -132,7 +134,9 @@ describe('ProjectBuildService', () => {
       'scripts/bootstrap.ts',
       'src/scripts/player.ts',
     ]);
-    expect(model.projectScriptFiles.get('scripts/bootstrap.ts')).toBe('export class Bootstrap {}\n');
+    expect(model.projectScriptFiles.get('scripts/bootstrap.ts')).toBe(
+      'export class Bootstrap {}\n'
+    );
     expect(model.files.get('index.html')).toContain('<!DOCTYPE html>');
     expect(model.files.get('src/generated/scene-manifest.ts')).toContain(
       'export const activeScenePath = "scenes/main.pix3scene";'
@@ -172,7 +176,7 @@ describe('ProjectBuildService', () => {
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
       'scenes/main.pix3scene': 'root:\n  node:\n',
       'scripts/bootstrap.ts':
-        "export async function loadScene(resourceManager: { readText(path: string): Promise<string> }, scenePath: string) {\n  return resourceManager.readText(`res://${scenePath}`);\n}\n",
+        'export async function loadScene(resourceManager: { readText(path: string): Promise<string> }, scenePath: string) {\n  return resourceManager.readText(`res://${scenePath}`);\n}\n',
       'src/scripts/runtime.ts':
         "export const activeScenePath = 'src/assets/scenes/main-scene.pix3scene';\nexport const currentScene = `res://${activeScenePath}`;\n",
     });
@@ -224,9 +228,7 @@ describe('ProjectBuildService', () => {
     expect(fs.files.get('src/register-project-scripts.ts')).toContain(
       '!../src/scripts/**/*.test.ts'
     );
-    expect(fs.files.get('src/register-project-scripts.ts')).toContain(
-      '!../src/scripts/**/*.d.ts'
-    );
+    expect(fs.files.get('src/register-project-scripts.ts')).toContain('!../src/scripts/**/*.d.ts');
     // Asset manifest at project root.
     expect(fs.files.has('asset-manifest.json')).toBe(true);
     // Runtime entry points are generated locally, but the engine resolves from @pix3/runtime via yalc.
@@ -253,7 +255,7 @@ describe('ProjectBuildService', () => {
     const viteConfig = fs.files.get('vite.config.ts');
     expect(viteConfig).toContain('classicScriptCompatibilityPlugin');
     expect(viteConfig).toContain('modulePreload: false');
-    expect(viteConfig).toContain("find: /^three$/");
+    expect(viteConfig).toContain('find: /^three$/');
     expect(viteConfig).toContain("dedupe: ['three']");
 
     const tsconfigJson = fs.files.get('tsconfig.json');
@@ -373,7 +375,7 @@ describe('ProjectBuildService', () => {
     await service.buildFromTemplates(context);
 
     expect(fs.files.get('src/generated/scene-manifest.ts')).toContain(
-      "export const activeScenePath = \"src/assets/scenes/intro.pix3scene\";"
+      'export const activeScenePath = "src/assets/scenes/intro.pix3scene";'
     );
   });
 
@@ -411,7 +413,7 @@ describe('ProjectBuildService', () => {
     });
 
     expect(fs.files.get('src/generated/scene-manifest.ts')).toContain(
-      "export const activeScenePath = \"src/assets/scenes/intro.pix3scene\";"
+      'export const activeScenePath = "src/assets/scenes/intro.pix3scene";'
     );
   });
 

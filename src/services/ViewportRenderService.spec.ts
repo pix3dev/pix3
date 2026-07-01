@@ -269,9 +269,9 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map([
-      [rotatedSprite.nodeId, new THREE.Group()],
-    ]);
+    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+      [[rotatedSprite.nodeId, new THREE.Group()]]
+    );
 
     const hitNodeIds = service.getSelectable2DNodeIdsInScreenRect(230, 65, 300, 140);
 
@@ -312,20 +312,20 @@ describe('ViewportRendererService', () => {
       true
     );
     expect(
-      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
-        marqueePreview2DFrames.size
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> })
+        .marqueePreview2DFrames.size
     ).toBe(2);
 
     expect(service.set2DMarqueePreviewNodeIds([secondSprite.nodeId])).toBe(true);
     expect(
-      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
-        marqueePreview2DFrames.size
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> })
+        .marqueePreview2DFrames.size
     ).toBe(1);
 
     expect(service.clear2DMarqueePreview()).toBe(true);
     expect(
-      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> }).
-        marqueePreview2DFrames.size
+      (service as unknown as { marqueePreview2DFrames: Map<string, THREE.Group> })
+        .marqueePreview2DFrames.size
     ).toBe(0);
   });
 
@@ -487,10 +487,7 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(129.4, 154.3, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
-        localBounds: new THREE.Box3(
-          new THREE.Vector3(-50, -25, 0),
-          new THREE.Vector3(50, 25, 0)
-        ),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
         worldRotationZ: 0,
         rotationHandle,
       },
@@ -572,10 +569,7 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(50, 25, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
-        localBounds: new THREE.Box3(
-          new THREE.Vector3(-50, -25, 0),
-          new THREE.Vector3(50, 25, 0)
-        ),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
         worldRotationZ: 0,
         rotationHandle,
       },
@@ -648,10 +642,7 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(25, 50, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
-        localBounds: new THREE.Box3(
-          new THREE.Vector3(-50, -25, 0),
-          new THREE.Vector3(50, 25, 0)
-        ),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
         worldRotationZ: Math.PI / 2,
       },
       configurable: true,
@@ -728,10 +719,7 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(53.1, 53.1, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
-        localBounds: new THREE.Box3(
-          new THREE.Vector3(-50, -25, 0),
-          new THREE.Vector3(50, 25, 0)
-        ),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
         worldRotationZ: (3 * Math.PI) / 4,
       },
       configurable: true,
@@ -808,10 +796,7 @@ describe('ViewportRendererService', () => {
           new THREE.Vector3(50, 25, 0)
         ),
         centerWorld: new THREE.Vector3(0, 0, 0),
-        localBounds: new THREE.Box3(
-          new THREE.Vector3(-50, -25, 0),
-          new THREE.Vector3(50, 25, 0)
-        ),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
         worldRotationZ: 0,
       },
       configurable: true,

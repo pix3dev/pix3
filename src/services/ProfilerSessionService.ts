@@ -281,7 +281,10 @@ export class ProfilerSessionService {
 
   private createFrameImpactActivities(sample: SceneRunnerFrameSample): FrameProfilerActivity[] {
     const customActivities = this.normalizeActivityFrame(sample.profilerActivities);
-    return [...customActivities, ...this.createRuntimeFrameImpactActivities(sample, customActivities)];
+    return [
+      ...customActivities,
+      ...this.createRuntimeFrameImpactActivities(sample, customActivities),
+    ];
   }
 
   private createRuntimeFrameImpactActivities(
@@ -442,19 +445,19 @@ export class ProfilerSessionService {
 
     const activities = this.orderFrameImpactActivities(
       [...aggregates.values()]
-      .map(entry => {
-        const selfTimeMs = entry.selfSum;
-        const totalTimeMs = entry.totalSum;
-        return {
-          label: entry.label,
-          selfTimeMs,
-          totalTimeMs,
-          selfPercent: this.toFrameImpactPercent(selfTimeMs, totalFrameTimeMs),
-          totalPercent: this.toFrameImpactPercent(totalTimeMs, totalFrameTimeMs),
-          sampleCount: entry.sampleCount,
-        } satisfies ProfilerFrameImpactEntrySnapshot;
-      })
-      .filter(activity => activity.totalTimeMs > 0 || activity.selfTimeMs > 0),
+        .map(entry => {
+          const selfTimeMs = entry.selfSum;
+          const totalTimeMs = entry.totalSum;
+          return {
+            label: entry.label,
+            selfTimeMs,
+            totalTimeMs,
+            selfPercent: this.toFrameImpactPercent(selfTimeMs, totalFrameTimeMs),
+            totalPercent: this.toFrameImpactPercent(totalTimeMs, totalFrameTimeMs),
+            sampleCount: entry.sampleCount,
+          } satisfies ProfilerFrameImpactEntrySnapshot;
+        })
+        .filter(activity => activity.totalTimeMs > 0 || activity.selfTimeMs > 0),
       totalFrameTimeMs
     );
 
@@ -467,10 +470,7 @@ export class ProfilerSessionService {
   }
 
   private getActivityFrameWindowDurationMs(): number {
-    return this.activityFrames.reduce(
-      (accumulator, frame) => accumulator + frame.frameTimeMs,
-      0
-    );
+    return this.activityFrames.reduce((accumulator, frame) => accumulator + frame.frameTimeMs, 0);
   }
 
   private orderFrameImpactActivities(
@@ -483,7 +483,9 @@ export class ProfilerSessionService {
     }
 
     const activityByLabel = new Map(activities.map(activity => [activity.label, activity]));
-    const previousLabels = this.previousFrameImpactOrder.filter(label => activityByLabel.has(label));
+    const previousLabels = this.previousFrameImpactOrder.filter(label =>
+      activityByLabel.has(label)
+    );
     const previousLabelSet = new Set(previousLabels);
     const newLabels = activities
       .map(activity => activity.label)
@@ -511,7 +513,9 @@ export class ProfilerSessionService {
           continue;
         }
 
-        if (!this.shouldPromoteFrameImpactActivity(currentActivity, previousActivity, thresholdMs)) {
+        if (
+          !this.shouldPromoteFrameImpactActivity(currentActivity, previousActivity, thresholdMs)
+        ) {
           continue;
         }
 
@@ -526,9 +530,7 @@ export class ProfilerSessionService {
     this.previousFrameImpactOrder = [...orderedLabels];
     return orderedLabels
       .map(label => activityByLabel.get(label))
-      .filter(
-        (activity): activity is ProfilerFrameImpactEntrySnapshot => activity !== undefined
-      );
+      .filter((activity): activity is ProfilerFrameImpactEntrySnapshot => activity !== undefined);
   }
 
   private compareFrameImpactActivities(
@@ -570,10 +572,7 @@ export class ProfilerSessionService {
     );
   }
 
-  private toFrameImpactPercent(
-    timeMs: number,
-    averageFrameTimeMs: number | null
-  ): number | null {
+  private toFrameImpactPercent(timeMs: number, averageFrameTimeMs: number | null): number | null {
     if (
       !Number.isFinite(timeMs) ||
       timeMs < 0 ||
@@ -697,9 +696,7 @@ export class ProfilerSessionService {
     };
   }
 
-  private reconcileAudioFiles(
-    instances: readonly ActiveAudioPlaybackSnapshot[] | undefined
-  ): void {
+  private reconcileAudioFiles(instances: readonly ActiveAudioPlaybackSnapshot[] | undefined): void {
     for (const entry of this.audioFiles.values()) {
       entry.activeInstanceCount = 0;
       entry.isActive = false;

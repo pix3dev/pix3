@@ -457,7 +457,8 @@ export class EditorTabComponent extends ComponentBase {
       return null;
     }
 
-    const selectedNodeId = appState.selection.primaryNodeId ?? appState.selection.nodeIds[0] ?? null;
+    const selectedNodeId =
+      appState.selection.primaryNodeId ?? appState.selection.nodeIds[0] ?? null;
     const selectedNode = selectedNodeId ? (sceneGraph.nodeMap.get(selectedNodeId) ?? null) : null;
     const selectedParent = this.getCompatible2DDropParent(selectedNode);
     if (selectedParent) {
@@ -474,7 +475,7 @@ export class EditorTabComponent extends ComponentBase {
     const compatibleRootNodes = sceneGraph.rootNodes.filter(
       (node): node is Node2D => node instanceof Node2D && node.isContainer
     );
-    return compatibleRootNodes.length === 1 ? compatibleRootNodes[0] ?? null : null;
+    return compatibleRootNodes.length === 1 ? (compatibleRootNodes[0] ?? null) : null;
   }
 
   private getCompatible2DDropParent(node: NodeBase | null): Node2D | null {
@@ -781,7 +782,12 @@ export class EditorTabComponent extends ComponentBase {
 
     this.pointerDownPos = { x: event.clientX, y: event.clientY };
     this.pointerDownTime = Date.now();
-    this.marqueeSelectionStart = this.shouldStartMarqueeSelection(event, handleType, screenX, screenY)
+    this.marqueeSelectionStart = this.shouldStartMarqueeSelection(
+      event,
+      handleType,
+      screenX,
+      screenY
+    )
       ? { x: screenX, y: screenY }
       : undefined;
     this.isDragging = false;
@@ -857,6 +863,7 @@ export class EditorTabComponent extends ComponentBase {
       this.viewportRenderer.update2DTransform?.(screenX, screenY, {
         preserveAspectRatio: event.shiftKey,
         constrainMoveToAxis: event.shiftKey,
+        snapRotation: event.shiftKey,
         // Hold Alt to temporarily invert the persistent snap setting.
         snapToGrid: appState.ui.snapToGrid !== event.altKey,
         gridSize: appState.ui.grid2DSize,
@@ -971,9 +978,10 @@ export class EditorTabComponent extends ComponentBase {
 
       const hitNode = this.viewportRenderer.raycastObject(normalizedX, normalizedY);
       if (hitNode) {
-        const command = event.ctrlKey || event.metaKey
-          ? toggleObjectSelection(hitNode.nodeId)
-          : selectObject(hitNode.nodeId);
+        const command =
+          event.ctrlKey || event.metaKey
+            ? toggleObjectSelection(hitNode.nodeId)
+            : selectObject(hitNode.nodeId);
         void this.commandDispatcher.execute(command);
       } else if (!(event.ctrlKey || event.metaKey)) {
         const command = selectObject(null);

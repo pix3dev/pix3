@@ -118,7 +118,17 @@ const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
 const ANIMATION_EXTENSIONS = new Set(['pix3anim']);
 const DEFAULT_ANIMATION_ASSET_DIRECTORY = 'res://animations';
-const PROPERTY_GROUP_ORDER = ['Transform', 'Patch', 'Size', 'Slice', 'Tile', 'Anchor', 'Style', 'Sprite', 'Animation'];
+const PROPERTY_GROUP_ORDER = [
+  'Transform',
+  'Patch',
+  'Size',
+  'Slice',
+  'Tile',
+  'Anchor',
+  'Style',
+  'Sprite',
+  'Animation',
+];
 const PROPERTY_GROUP_ORDER_INDEX = new Map(
   PROPERTY_GROUP_ORDER.map((groupName, index) => [groupName, index])
 );

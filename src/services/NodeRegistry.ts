@@ -111,7 +111,20 @@ export class NodeRegistry {
       commandClass: CreateTiledSprite2DCommand,
       color: '#96cbf6ff',
       icon: 'grid',
-      keywords: ['create', 'tiled', 'sprite', '2d', 'nine', 'slice', '9-patch', 'ninepatch', 'panel', 'tile', 'border', 'frame'],
+      keywords: [
+        'create',
+        'tiled',
+        'sprite',
+        '2d',
+        'nine',
+        'slice',
+        '9-patch',
+        'ninepatch',
+        'panel',
+        'tile',
+        'border',
+        'frame',
+      ],
       order: 2.3,
     });
     this.registerNodeType({

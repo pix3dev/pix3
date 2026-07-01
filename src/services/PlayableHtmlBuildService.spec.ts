@@ -80,13 +80,10 @@ describe('PlayableHtmlBuildService', () => {
     });
 
     expect(projectBuildService.buildRuntimeProjectModel).toHaveBeenCalledTimes(1);
-    expect(projectBuildService.buildRuntimeProjectModel).toHaveBeenCalledWith(
-      expect.any(Object),
-      {
-        title: 'Playable Build',
-        entryScenePath: 'scenes/main.pix3scene',
-      }
-    );
+    expect(projectBuildService.buildRuntimeProjectModel).toHaveBeenCalledWith(expect.any(Object), {
+      title: 'Playable Build',
+      entryScenePath: 'scenes/main.pix3scene',
+    });
 
     const [bundlerFiles, bundleOptions] = scriptCompiler.bundleVirtualProject.mock.calls[0] as [
       Map<string, string>,
@@ -123,9 +120,9 @@ describe('PlayableHtmlBuildService', () => {
         '@pix3/runtime': 'pix3-runtime/src/index.ts',
         '@pix3/runtime/*': 'pix3-runtime/src/*',
         '@dimforge/rapier3d-compat': 'vendor/rapier/rapier.mjs',
-        'three': 'vendor/three/build/three.module.js',
+        three: 'vendor/three/build/three.module.js',
         'three/*': 'vendor/three/*',
-        'yaml': 'vendor/yaml/browser/index.js',
+        yaml: 'vendor/yaml/browser/index.js',
         'lit/decorators.js': 'virtual/generated/lit-decorators.ts',
         'virtual:runtime-embedded-assets': 'virtual/generated/runtime-embedded-assets.ts',
         'reflect-metadata': 'virtual/generated/reflect-metadata.ts',
@@ -140,7 +137,9 @@ describe('PlayableHtmlBuildService', () => {
     expect(artifact.sceneCount).toBe(1);
     expect(artifact.assetCount).toBe(2);
     expect(artifact.fileCount).toBeGreaterThan(model.files.size);
-    expect(artifact.sizeReport.outputHtmlBytes).toBe(new TextEncoder().encode(artifact.html).length);
+    expect(artifact.sizeReport.outputHtmlBytes).toBe(
+      new TextEncoder().encode(artifact.html).length
+    );
     expect(artifact.sizeReport.rawAssetsBytes).toBeGreaterThan(0);
     expect(artifact.sizeReport.base64AssetsBytes).toBeGreaterThan(
       artifact.sizeReport.rawAssetsBytes

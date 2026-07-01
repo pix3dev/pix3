@@ -136,7 +136,10 @@ export class PlayableHtmlBuildService {
     });
 
     const warnings = [...model.warnings, ...prepared.warnings];
-    const html = this.renderHtmlDocument(options.title?.trim() || model.projectName, compilation.code);
+    const html = this.renderHtmlDocument(
+      options.title?.trim() || model.projectName,
+      compilation.code
+    );
 
     return {
       html,
@@ -161,9 +164,9 @@ export class PlayableHtmlBuildService {
         '@pix3/runtime': 'pix3-runtime/src/index.ts',
         '@pix3/runtime/*': 'pix3-runtime/src/*',
         '@dimforge/rapier3d-compat': RAPIER_VENDOR_MODULE_PATH,
-        'three': `${THREE_VENDOR_PREFIX}build/three.module.js`,
+        three: `${THREE_VENDOR_PREFIX}build/three.module.js`,
         'three/*': `${THREE_VENDOR_PREFIX}*`,
-        'yaml': `${YAML_VENDOR_PREFIX}browser/index.js`,
+        yaml: `${YAML_VENDOR_PREFIX}browser/index.js`,
         'lit/decorators.js': GENERATED_LIT_DECORATORS_MODULE_PATH,
         'virtual:runtime-embedded-assets': GENERATED_EMBEDDED_ASSETS_MODULE_PATH,
         'reflect-metadata': GENERATED_REFLECT_METADATA_MODULE_PATH,
@@ -172,7 +175,9 @@ export class PlayableHtmlBuildService {
     };
   }
 
-  private async prepareBundlerFiles(model: RuntimeProjectBuildModel): Promise<PreparedBundlerFiles> {
+  private async prepareBundlerFiles(
+    model: RuntimeProjectBuildModel
+  ): Promise<PreparedBundlerFiles> {
     const files = new Map(model.files);
     const warnings: string[] = [];
     const embeddedAssetsModule = await this.buildEmbeddedAssetsModule(model.assetPaths, warnings);
@@ -212,14 +217,19 @@ export class PlayableHtmlBuildService {
     };
   }
 
-  private buildStaticProjectScriptRegistrar(projectScriptFiles: ReadonlyMap<string, string>): string {
+  private buildStaticProjectScriptRegistrar(
+    projectScriptFiles: ReadonlyMap<string, string>
+  ): string {
     const scriptPaths = Array.from(projectScriptFiles.keys()).sort((a, b) => a.localeCompare(b));
     const imports: string[] = [];
     const moduleEntries: string[] = [];
 
     for (const [index, scriptPath] of scriptPaths.entries()) {
       const identifier = `module_${index}`;
-      const relativeImportPath = this.toRelativeImportPath(REGISTER_PROJECT_SCRIPTS_PATH, scriptPath);
+      const relativeImportPath = this.toRelativeImportPath(
+        REGISTER_PROJECT_SCRIPTS_PATH,
+        scriptPath
+      );
       imports.push(`import * as ${identifier} from '${relativeImportPath}';`);
       moduleEntries.push(`  ${JSON.stringify(scriptPath)}: ${identifier},`);
     }
@@ -232,13 +242,13 @@ export class PlayableHtmlBuildService {
       '    return false;',
       '  }',
       '',
-      "  const ctor = value as { prototype?: object; getPropertySchema?: unknown };",
+      '  const ctor = value as { prototype?: object; getPropertySchema?: unknown };',
       "  const hasSchema = typeof ctor.getPropertySchema === 'function';",
       '  if (!hasSchema) {',
       '    return false;',
       '  }',
       '',
-      "  const baseProto = (Script as unknown as { prototype?: object }).prototype;",
+      '  const baseProto = (Script as unknown as { prototype?: object }).prototype;',
       '  let current = ctor.prototype;',
       '  while (current) {',
       '    if (current === baseProto) {',
@@ -411,8 +421,7 @@ export class PlayableHtmlBuildService {
     }
 
     const relativePath = filePath.slice(THREE_VENDOR_PREFIX.length);
-    const loader =
-      THREE_VENDOR_SOURCE_LOADERS[`../../node_modules/three/${relativePath}`] ?? null;
+    const loader = THREE_VENDOR_SOURCE_LOADERS[`../../node_modules/three/${relativePath}`] ?? null;
 
     if (!loader) {
       return null;

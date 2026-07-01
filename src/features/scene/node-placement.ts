@@ -57,9 +57,7 @@ export const insertNodeAtIndex = (
 
     const maxIndex = parentNode.children.length - 1;
     const boundedIndex =
-      typeof index === 'number' && index >= 0
-        ? Math.max(0, Math.min(index, maxIndex))
-        : maxIndex;
+      typeof index === 'number' && index >= 0 ? Math.max(0, Math.min(index, maxIndex)) : maxIndex;
 
     if (boundedIndex < maxIndex) {
       parentNode.children.splice(boundedIndex, 0, parentNode.children.pop() as NodeBase);

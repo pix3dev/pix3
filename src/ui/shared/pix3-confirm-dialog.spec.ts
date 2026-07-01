@@ -60,7 +60,10 @@ describe('ConfirmDialog', () => {
     dialog.message = 'Bundle size report summary.';
     dialog.expandableSection = {
       title: 'Embedded assets by source size',
-      items: ['asset-a.png: 10 KiB raw -> 13 KiB base64', 'asset-b.png: 8 KiB raw -> 10 KiB base64'],
+      items: [
+        'asset-a.png: 10 KiB raw -> 13 KiB base64',
+        'asset-b.png: 8 KiB raw -> 10 KiB base64',
+      ],
       maxHeightPx: 180,
     };
     document.body.appendChild(dialog);

@@ -294,7 +294,9 @@ describe('ProfilerPanel', () => {
     document.body.appendChild(panel);
     await panel.updateComplete;
 
-    expect(panel.textContent).toContain('No frame activity breakdown reported by the active runtime yet.');
+    expect(panel.textContent).toContain(
+      'No frame activity breakdown reported by the active runtime yet.'
+    );
   });
 
   it('renders an empty audio state when the runtime reports no active sounds', async () => {
@@ -376,7 +378,9 @@ describe('ProfilerPanel', () => {
     document.body.appendChild(panel);
     await panel.updateComplete;
 
-    const tile = panel.querySelector('[data-audio-key="res://audio/breakStone.ogg"]') as HTMLButtonElement | null;
+    const tile = panel.querySelector(
+      '[data-audio-key="res://audio/breakStone.ogg"]'
+    ) as HTMLButtonElement | null;
     expect(tile).not.toBeNull();
 
     tile?.click();
@@ -467,7 +471,9 @@ function createAudioFile(
 }
 
 function createAudioPlayback(
-  overrides: Partial<ProfilerSessionSnapshot['audio']['files'][number]['currentInstances'][number]> & {
+  overrides: Partial<
+    ProfilerSessionSnapshot['audio']['files'][number]['currentInstances'][number]
+  > & {
     id: string;
   }
 ): ProfilerSessionSnapshot['audio']['files'][number]['currentInstances'][number] {

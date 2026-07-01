@@ -36,7 +36,12 @@
 }
 
 .placeholder__title {
-  font: 600 15px/1.2 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  font:
+    600 15px/1.2 'SF Mono',
+    'Monaco',
+    'Menlo',
+    'Consolas',
+    monospace;
   color: #f5f7fa;
 }
 

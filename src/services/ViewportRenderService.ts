@@ -2296,7 +2296,11 @@ export class ViewportRendererService {
     }
 
     const nextNodeIds = Array.from(
-      new Set(nodeIds.filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0))
+      new Set(
+        nodeIds.filter(
+          (nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0
+        )
+      )
     );
     const nextNodeIdSet = new Set(nextNodeIds);
     let changed = false;
@@ -2324,7 +2328,10 @@ export class ViewportRendererService {
         continue;
       }
 
-      const frame = this.create2DHoverPreviewFrame(this.getNodeOnlyBounds(node), MARQUEE_PREVIEW_2D_COLOR);
+      const frame = this.create2DHoverPreviewFrame(
+        this.getNodeOnlyBounds(node),
+        MARQUEE_PREVIEW_2D_COLOR
+      );
       frame.userData.isMarqueePreview = true;
       this.scene.add(frame);
       this.marqueePreview2DFrames.set(nodeId, frame);
@@ -2495,7 +2502,12 @@ export class ViewportRendererService {
     return null;
   }
 
-  private normalizeScreenRect(startX: number, startY: number, endX: number, endY: number): {
+  private normalizeScreenRect(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number
+  ): {
     left: number;
     right: number;
     top: number;
@@ -4108,7 +4120,10 @@ export class ViewportRendererService {
       // Latest-wins + liveness guard: a load can resolve after the proxy was
       // disposed (leaking a rebuilt geometry) or after the node's texture was
       // swapped again (a stale load overwriting a newer one). Bail in both cases.
-      if (this.tiledSprite2DVisuals.get(node.nodeId) !== visualRoot || node.texturePath !== texturePath) {
+      if (
+        this.tiledSprite2DVisuals.get(node.nodeId) !== visualRoot ||
+        node.texturePath !== texturePath
+      ) {
         texture.dispose();
         return;
       }
@@ -5125,7 +5140,10 @@ export class ViewportRendererService {
     const orientedLocalBounds = new THREE.Box3();
 
     for (const corner of worldCorners) {
-      const localCorner = this.rotateVectorZ(corner.clone().sub(orientedCenterWorld), -worldRotationZ);
+      const localCorner = this.rotateVectorZ(
+        corner.clone().sub(orientedCenterWorld),
+        -worldRotationZ
+      );
       orientedLocalBounds.expandByPoint(localCorner);
     }
 
@@ -5203,7 +5221,11 @@ export class ViewportRendererService {
       return;
     }
 
-    const overlayGeometry = this.getSelection2DOverlayGeometry(node2DIds, sceneGraph, combinedBounds);
+    const overlayGeometry = this.getSelection2DOverlayGeometry(
+      node2DIds,
+      sceneGraph,
+      combinedBounds
+    );
     console.debug('[ViewportRenderer] update2DOverlay: creating overlay', {
       node2DIds,
       center: overlayGeometry.centerWorld,
@@ -5358,17 +5380,15 @@ export class ViewportRendererService {
     return normalized;
   }
 
-  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'):
-    | {
-        x: number;
-        y: number;
-        directionX: number;
-        directionY: number;
-        tangentX: number;
-        tangentY: number;
-        rotationDeg: number;
-      }
-    | null {
+  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'): {
+    x: number;
+    y: number;
+    directionX: number;
+    directionY: number;
+    tangentX: number;
+    tangentY: number;
+    rotationDeg: number;
+  } | null {
     const overlay = this.selection2DOverlay;
     if (!overlay) {
       return null;
@@ -5376,25 +5396,25 @@ export class ViewportRendererService {
 
     const localBounds = this.getSelection2DOverlayLocalBounds(overlay);
     const centerX = (localBounds.min.x + localBounds.max.x) / 2;
-      const centerY = (localBounds.min.y + localBounds.max.y) / 2;
+    const centerY = (localBounds.min.y + localBounds.max.y) / 2;
     const z = (localBounds.min.z + localBounds.max.z) / 2;
     const rotationZ = overlay.worldRotationZ ?? 0;
-      let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
-      let outwardLocal = new THREE.Vector3(0, 1, 0);
-      let tangentLocal = new THREE.Vector3(1, 0, 0);
+    let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
+    let outwardLocal = new THREE.Vector3(0, 1, 0);
+    let tangentLocal = new THREE.Vector3(1, 0, 0);
 
-      if (edge === 'bottom') {
-        anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
-        outwardLocal = new THREE.Vector3(0, -1, 0);
-      } else if (edge === 'left') {
-        anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
-        outwardLocal = new THREE.Vector3(-1, 0, 0);
-        tangentLocal = new THREE.Vector3(0, 1, 0);
-      } else if (edge === 'right') {
-        anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
-        outwardLocal = new THREE.Vector3(1, 0, 0);
-        tangentLocal = new THREE.Vector3(0, 1, 0);
-      }
+    if (edge === 'bottom') {
+      anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
+      outwardLocal = new THREE.Vector3(0, -1, 0);
+    } else if (edge === 'left') {
+      anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
+      outwardLocal = new THREE.Vector3(-1, 0, 0);
+      tangentLocal = new THREE.Vector3(0, 1, 0);
+    } else if (edge === 'right') {
+      anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
+      outwardLocal = new THREE.Vector3(1, 0, 0);
+      tangentLocal = new THREE.Vector3(0, 1, 0);
+    }
 
     const anchorWorld = this.rotateVectorZ(anchorLocal, rotationZ).add(overlay.centerWorld);
     const outwardWorld = this.rotateVectorZ(outwardLocal, rotationZ).multiplyScalar(10);
@@ -5444,28 +5464,26 @@ export class ViewportRendererService {
     };
   }
 
-  private getSelection2DOverlayHudAnchors():
-    | {
-        top: {
-          x: number;
-          y: number;
-          directionX: number;
-          directionY: number;
-          tangentX: number;
-          tangentY: number;
-          rotationDeg: number;
-        };
-        bottom: {
-          x: number;
-          y: number;
-          directionX: number;
-          directionY: number;
-          tangentX: number;
-          tangentY: number;
-          rotationDeg: number;
-        };
-      }
-    | null {
+  private getSelection2DOverlayHudAnchors(): {
+    top: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    };
+    bottom: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    };
+  } | null {
     const anchors = (['top', 'bottom', 'left', 'right'] as const)
       .map(edge => this.getSelection2DOverlayHudAnchor(edge))
       .filter(
@@ -6232,11 +6250,7 @@ export class ViewportRendererService {
     if (this.camera instanceof THREE.PerspectiveCamera) {
       const maxDim = Math.max(objectSize?.x ?? 1, objectSize?.y ?? 1, objectSize?.z ?? 1, 0.001);
       const fov = MathUtils.degToRad(this.camera.fov);
-      const distance = Math.max(
-        (maxDim * 1.5) / Math.tan(fov / 2),
-        this.camera.near + maxDim,
-        1
-      );
+      const distance = Math.max((maxDim * 1.5) / Math.tan(fov / 2), this.camera.near + maxDim, 1);
 
       return this.camera.position.clone().add(forward.multiplyScalar(distance));
     }

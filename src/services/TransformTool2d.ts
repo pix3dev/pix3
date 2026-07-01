@@ -68,6 +68,10 @@ export interface Transform2DUpdateOptions {
   snapToGrid?: boolean;
   /** Grid cell size in world units (used when snapToGrid is true). */
   gridSize?: number;
+  /** Snap rotation to a fixed-degree grid (used with the rotate handle). */
+  snapRotation?: boolean;
+  /** Rotation snap increment in degrees (defaults to 5 when snapRotation is true). */
+  rotationSnapDegrees?: number;
 }
 
 export class TransformTool2d {
@@ -476,7 +480,6 @@ export class TransformTool2d {
     const z = (min.z + max.z) / 2;
     const midX = (min.x + max.x) / 2;
     const midY = (min.y + max.y) / 2;
-    const center = bounds.getCenter(new THREE.Vector3());
     const rotationZ = overlay.worldRotationZ ?? 0;
 
     overlay.group.position.copy(overlay.centerWorld);
@@ -795,7 +798,20 @@ export class TransformTool2d {
         pointerWorld.y - startCenterWorld.y,
         pointerWorld.x - startCenterWorld.x
       );
-      const deltaAngle = currentAngle - startAngle;
+      let deltaAngle = currentAngle - startAngle;
+
+      if (options.snapRotation) {
+        // Snap the overlay's resulting rotation to the nearest N-degree increment,
+        // then apply that snapped delta uniformly so multi-selection keeps its
+        // relative orientation. For a single node the overlay rotation equals the
+        // node's world rotation, so it lands exactly on the grid (e.g. 0/5/10°).
+        const stepDeg = options.rotationSnapDegrees ?? 5;
+        const step = (stepDeg * Math.PI) / 180;
+        if (step > 0) {
+          const targetRotation = Math.round((overlayRotationZ + deltaAngle) / step) * step;
+          deltaAngle = targetRotation - overlayRotationZ;
+        }
+      }
 
       for (const [nodeId, startState] of startStates) {
         const node = sceneGraph.nodeMap.get(nodeId);
