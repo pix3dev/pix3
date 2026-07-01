@@ -6,10 +6,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import {
-  DialogService,
-  type DialogExpandableSection,
-} from '@/services/DialogService';
+import { DialogService, type DialogExpandableSection } from '@/services/DialogService';
 import { LoggingService } from '@/services/LoggingService';
 import { PlayableExportDialogService } from '@/services/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/PlayableExportProgressDialogService';
@@ -90,6 +87,30 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
         title: projectName,
         entryScenePath,
       });
+
+      const allWarnings = [...artifact.warnings, ...artifact.bundleWarnings];
+      for (const warning of allWarnings) {
+        this.loggingService.warn(`[Playable Export] ${warning}`);
+      }
+
+      // The file picker must be opened from a live user gesture. Building the
+      // bundle is asynchronous and consumes the original command's transient
+      // activation, so we surface a "Save File" confirmation once the bundle
+      // is ready and only invoke `showSaveFilePicker` from within that click's
+      // microtask continuation, where the gesture is still valid.
+      const readyToSave = await this.dialogService.showConfirmation({
+        title: 'Playable HTML Ready',
+        message: this.buildReadyMessage(artifact),
+        expandableSection: this.buildEmbeddedAssetsSection(artifact.sizeReport),
+        confirmLabel: 'Save File',
+        cancelLabel: 'Cancel',
+      });
+
+      if (!readyToSave) {
+        this.loggingService.info('[Playable Export] Export cancelled before saving');
+        return { didMutate: false, payload: undefined };
+      }
+
       const suggestedName = this.toSuggestedFileName(projectName);
       const deliveryMethod = await this.deliverHtmlArtifact(artifact.html, suggestedName);
 
@@ -99,10 +120,6 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       }
 
       const elapsedMs = Date.now() - startTime;
-      const allWarnings = [...artifact.warnings, ...artifact.bundleWarnings];
-      for (const warning of allWarnings) {
-        this.loggingService.warn(`[Playable Export] ${warning}`);
-      }
 
       this.loggingService.info('[Playable Export] Export completed', {
         deliveryMethod,
@@ -118,7 +135,6 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       await this.dialogService.showConfirmation({
         title: 'Playable HTML Exported',
         message: this.buildSuccessMessage(artifact, deliveryMethod, elapsedMs),
-        expandableSection: this.buildEmbeddedAssetsSection(artifact.sizeReport),
         confirmLabel: 'OK',
         cancelLabel: 'Close',
       });
@@ -231,29 +247,39 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     return 'downloaded';
   }
 
-  private buildSuccessMessage(
-    artifact: PlayableHtmlBuildArtifact,
-    deliveryMethod: Exclude<HtmlDeliveryMethod, 'cancelled'>,
-    elapsedMs: number
-  ): string {
+  private buildReadyMessage(artifact: PlayableHtmlBuildArtifact): string {
     const warnings = [...artifact.warnings, ...artifact.bundleWarnings];
-    const deliveryLine =
-      deliveryMethod === 'saved'
-        ? 'Saved via the browser file picker.'
-        : 'Downloaded via the browser download flow.';
     const warningSection =
       warnings.length > 0
         ? `\n\nWarnings:\n${warnings.map(warning => `- ${warning}`).join('\n')}`
         : '';
 
     return (
-      `Standalone playable export is ready.\n\n` +
+      `Your standalone playable HTML bundle is built and ready to save.\n\n` +
+      `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
+      `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}, Generated files: ${artifact.fileCount}` +
+      this.buildBundleSizeReportSection(artifact.sizeReport) +
+      warningSection +
+      `\n\nClick "Save File" to choose where to write the .html file.`
+    );
+  }
+
+  private buildSuccessMessage(
+    artifact: PlayableHtmlBuildArtifact,
+    deliveryMethod: Exclude<HtmlDeliveryMethod, 'cancelled'>,
+    elapsedMs: number
+  ): string {
+    const deliveryLine =
+      deliveryMethod === 'saved'
+        ? 'Saved via the browser file picker.'
+        : 'Downloaded via the browser download flow.';
+
+    return (
+      `Standalone playable export complete.\n\n` +
       `${deliveryLine}\n` +
       `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
       `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}, Generated files: ${artifact.fileCount}\n` +
-      `Completed in ${(elapsedMs / 1000).toFixed(2)}s.` +
-      this.buildBundleSizeReportSection(artifact.sizeReport) +
-      warningSection
+      `Completed in ${(elapsedMs / 1000).toFixed(2)}s.`
     );
   }
 
