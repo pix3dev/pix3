@@ -1,5 +1,5 @@
 import type { SceneGraph } from '@pix3/runtime';
-import { SceneManager } from '@pix3/runtime';
+import { NodeBase, SceneManager } from '@pix3/runtime';
 import { SceneStateUpdater } from './SceneStateUpdater';
 import {
   insertNodeAtIndex,
@@ -101,7 +101,12 @@ export abstract class CreateNodeOperationBase<TParams> implements Operation<Oper
     const insertIndex = insertNodeAtIndex(sceneGraph, node, parentNode, placement.insertIndex);
     const createdNodeId = node.nodeId;
 
-    sceneGraph.nodeMap.set(createdNodeId, node);
+    // Register the ENTIRE created subtree, not just the root. A prefab instance
+    // (CreatePrefabInstanceOperation) returns a root with cloned children; if we
+    // only index the root, every subsequent lookup of a child via
+    // sceneGraph.nodeMap (inspector edits, gizmos, reparent, alignment) silently
+    // no-ops until a reload rebuilds the map.
+    this.registerSubtree(sceneManager, sceneGraph, node, sceneId);
 
     SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
     SceneStateUpdater.markSceneDirty(state, sceneId);
@@ -115,8 +120,8 @@ export abstract class CreateNodeOperationBase<TParams> implements Operation<Oper
       commit: {
         label: `Create ${nodeName}`,
         undo: () => {
+          this.unregisterSubtree(sceneManager, sceneGraph, node, sceneId);
           removeNodeFromSceneGraph(sceneGraph, node);
-          sceneGraph.nodeMap.delete(createdNodeId);
 
           SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, sceneId);
@@ -124,12 +129,59 @@ export abstract class CreateNodeOperationBase<TParams> implements Operation<Oper
         },
         redo: () => {
           insertNodeAtIndex(sceneGraph, node, resolveCommittedParent(), insertIndex);
-          sceneGraph.nodeMap.set(createdNodeId, node);
+          this.registerSubtree(sceneManager, sceneGraph, node, sceneId);
           SceneStateUpdater.updateHierarchyState(state, sceneId, sceneGraph);
           SceneStateUpdater.markSceneDirty(state, sceneId);
           SceneStateUpdater.selectNode(state, createdNodeId);
         },
       },
     };
+  }
+
+  private forEachInSubtree(
+    root: SceneGraph['rootNodes'][0],
+    visit: (node: SceneGraph['rootNodes'][0]) => void
+  ): void {
+    const stack: SceneGraph['rootNodes'][0][] = [root];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) {
+        continue;
+      }
+      visit(current);
+      for (const child of current.children) {
+        if (child instanceof NodeBase) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+
+  private registerSubtree(
+    sceneManager: SceneManager,
+    sceneGraph: SceneGraph,
+    root: SceneGraph['rootNodes'][0],
+    sceneId: string
+  ): void {
+    this.forEachInSubtree(root, node => {
+      sceneGraph.nodeMap.set(node.nodeId, node);
+      for (const group of node.groups) {
+        sceneManager.addNodeToGroup(node, group, sceneId);
+      }
+    });
+  }
+
+  private unregisterSubtree(
+    sceneManager: SceneManager,
+    sceneGraph: SceneGraph,
+    root: SceneGraph['rootNodes'][0],
+    sceneId: string
+  ): void {
+    this.forEachInSubtree(root, node => {
+      for (const group of node.groups) {
+        sceneManager.removeNodeFromGroup(node, group, sceneId);
+      }
+      sceneGraph.nodeMap.delete(node.nodeId);
+    });
   }
 }

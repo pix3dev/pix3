@@ -231,8 +231,8 @@ export class SceneTreeNodeComponent extends ComponentBase {
                     >${this.getInstanceFileName(this.node.instancePath)}</span
                   >`
                 : null}
-              ${this.node.isPrefabNode
-                ? html`<span class="tree-node__prefab-badge" title="Prefab-linked node">🔗</span>`
+              ${this.node.isPrefabRoot
+                ? html`<span class="tree-node__prefab-badge" title="Prefab instance root">🔗</span>`
                 : null}
               ${this.node.scripts.length > 0
                 ? html`

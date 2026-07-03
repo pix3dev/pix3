@@ -8,10 +8,7 @@ import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
 import { ColorRect2D } from '../nodes/2D/ColorRect2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
-import type {
-  TiledSpriteAxisStretch,
-  TiledSpritePatchMode,
-} from './tiled-sprite-geometry';
+import type { TiledSpriteAxisStretch, TiledSpritePatchMode } from './tiled-sprite-geometry';
 import { Group2D } from '../nodes/2D/Group2D';
 import { DirectionalLightNode } from '../nodes/3D/DirectionalLightNode';
 import { PointLightNode } from '../nodes/3D/PointLightNode';
@@ -432,6 +429,12 @@ export class SceneLoader {
     }
 
     const sourceRoot = prefabGraph.rootNodes[0];
+    // Reserve every id already present in the destination parse index plus the
+    // instance root id, so ids minted during this clone are unique against each
+    // other AND against nodes already loaded in the scene (clones aren't written
+    // to `index` until registerSubtree runs at the very end).
+    const reservedIds = new Set<string>(index.keys());
+    reservedIds.add(definition.id);
     const clonedRoot = await this.cloneNodeWithRuntimeIds(
       sourceRoot,
       definition.id,
@@ -439,7 +442,8 @@ export class SceneLoader {
       definition.id,
       normalizedInstancePath,
       this.normalizeLocalId(sourceRoot.nodeId),
-      normalizedInstancePath
+      normalizedInstancePath,
+      reservedIds
     );
 
     clonedRoot.name = definition.name ?? clonedRoot.name;
@@ -516,7 +520,8 @@ export class SceneLoader {
     instanceRootId: string,
     sourcePath: string,
     effectiveLocalId: string,
-    rootInstancePath: string | null
+    rootInstancePath: string | null,
+    reservedIds: Set<string>
   ): Promise<NodeBase> {
     const sourceMarker = this.getPrefabMarker(sourceNode);
     const localId = this.normalizeLocalId(sourceMarker?.localId ?? sourceNode.nodeId);
@@ -563,7 +568,8 @@ export class SceneLoader {
 
       const childRuntimeId = this.generateUniqueRuntimeNodeId(
         this.normalizeLocalId(child.nodeId),
-        globalIndex
+        globalIndex,
+        reservedIds
       );
       const childSourceMarker = this.getPrefabMarker(child);
       const childLocalId = this.normalizeLocalId(childSourceMarker?.localId ?? child.nodeId);
@@ -575,7 +581,8 @@ export class SceneLoader {
         instanceRootId,
         sourcePathForNode,
         childEffectiveLocalId,
-        null
+        null,
+        reservedIds
       );
       node.adoptChild(clonedChild);
     }
@@ -625,16 +632,21 @@ export class SceneLoader {
     }
   }
 
-  private generateUniqueRuntimeNodeId(seed: string, globalIndex: Map<string, NodeBase>): string {
+  private generateUniqueRuntimeNodeId(
+    seed: string,
+    globalIndex: Map<string, NodeBase>,
+    reserved: Set<string>
+  ): string {
     const base = seed.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'node';
     let nextId = base;
     let counter = 1;
 
-    while (globalIndex.has(nextId)) {
+    while (globalIndex.has(nextId) || reserved.has(nextId)) {
       nextId = `${base}-${counter}`;
       counter += 1;
     }
 
+    reserved.add(nextId);
     return nextId;
   }
 
@@ -755,11 +767,17 @@ export class SceneLoader {
 
     for (const [effectiveLocalId, entry] of Object.entries(overrides.byLocalId)) {
       const normalizedKey = this.normalizeLocalId(effectiveLocalId);
-      const candidateKey =
-        rootPrefix && !normalizedKey.startsWith(`${rootPrefix}/`) && normalizedKey !== rootPrefix
+      // Overrides are serialized root-relative (SceneSaver strips the root
+      // prefix), so re-add it FIRST. Trying the prefixed key before the raw key
+      // avoids the nested-prefab ambiguity where a stripped key like
+      // "root/child" could either be a root-relative path or a full path — the
+      // prefixed form ("<rootPrefix>/root/child") is the correct target, and the
+      // raw key remains as a fallback for legacy unstripped/full keys.
+      const prefixedKey =
+        rootPrefix && normalizedKey !== rootPrefix
           ? `${rootPrefix}/${normalizedKey}`
           : normalizedKey;
-      const target = map.get(normalizedKey) ?? map.get(candidateKey);
+      const target = map.get(prefixedKey) ?? map.get(normalizedKey);
       if (!target) {
         console.warn(`[SceneLoader] Override target "${effectiveLocalId}" not found in instance.`);
         continue;
@@ -918,7 +936,8 @@ export class SceneLoader {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
         const animationResourcePath =
-          typeof props.animationResourcePath === 'string' && props.animationResourcePath.trim().length > 0
+          typeof props.animationResourcePath === 'string' &&
+          props.animationResourcePath.trim().length > 0
             ? props.animationResourcePath.trim()
             : null;
 
@@ -1376,7 +1395,9 @@ export class SceneLoader {
           castShadow: typeof props.castShadow === 'boolean' ? props.castShadow : false,
           receiveShadow: typeof props.receiveShadow === 'boolean' ? props.receiveShadow : false,
           enablePerInstanceColor:
-            typeof props.enablePerInstanceColor === 'boolean' ? props.enablePerInstanceColor : false,
+            typeof props.enablePerInstanceColor === 'boolean'
+              ? props.enablePerInstanceColor
+              : false,
           frustumCulled: typeof props.frustumCulled === 'boolean' ? props.frustumCulled : undefined,
         });
       }
@@ -1393,7 +1414,8 @@ export class SceneLoader {
           color: props.color ?? '#ffffff',
           intensity: props.intensity ?? 1,
           castShadow: typeof props.castShadow === 'boolean' ? props.castShadow : true,
-          shadowCameraSize: typeof props.shadowCameraSize === 'number' ? props.shadowCameraSize : 20,
+          shadowCameraSize:
+            typeof props.shadowCameraSize === 'number' ? props.shadowCameraSize : 20,
           shadowMapSize: typeof props.shadowMapSize === 'number' ? props.shadowMapSize : 2048,
         });
       }
