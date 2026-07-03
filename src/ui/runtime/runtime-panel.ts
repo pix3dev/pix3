@@ -330,8 +330,11 @@ export class RuntimePanel extends ComponentBase {
   private refreshSelection(uuid: string): void {
     const target = this.findLiveObject(uuid);
     if (!target) {
-      this.selectedDetail = null;
-      this.clearHighlight();
+      // The object is gone (scene rebuilt/torn down). Drop the whole selection:
+      // clearing only the detail would leave selectedUuid dangling, so refreshTree
+      // would retry this dead lookup every tick with no way to clear it (the detail
+      // pane — and its clear button — is hidden once selectedDetail is null).
+      this.clearSelection();
       return;
     }
     this.selectedDetail = buildDetail(target);
@@ -386,10 +389,14 @@ export class RuntimePanel extends ComponentBase {
   }
 
   private clearHighlight(): void {
-    if (this.highlight?.parent) {
-      this.highlight.parent.remove(this.highlight);
+    if (this.highlight) {
+      this.highlight.parent?.remove(this.highlight);
+      // Box3Helper owns its own line geometry + material; dispose them so
+      // repeated select/clear cycles (or reconnects) don't leak GPU resources.
+      this.highlight.geometry.dispose();
+      (this.highlight.material as THREE.Material).dispose();
+      this.highlight = undefined;
     }
-    this.highlight = undefined;
   }
 
   /** A node matches the filter if its own type/name/flag matches. */
