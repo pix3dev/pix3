@@ -626,4 +626,123 @@ describe('TransformTool2d', () => {
       expect(sprite.height).toBeCloseTo(50);
     });
   });
+
+  describe('rotation snapping', () => {
+    const viewportSize = { width: 800, height: 600 };
+
+    const createCamera = (): THREE.OrthographicCamera => {
+      const camera = new THREE.OrthographicCamera(-400, 400, 300, -300, 0.1, 1000);
+      camera.position.z = 100;
+      camera.updateProjectionMatrix();
+      return camera;
+    };
+
+    const toScreen = (worldX: number, worldY: number) => ({
+      x: worldX + 400,
+      y: 300 - worldY,
+    });
+
+    const createSceneGraph = (sprite: Sprite2D): SceneGraph => ({
+      version: '1.0',
+      rootNodes: [sprite],
+      nodeMap: new Map([[sprite.nodeId, sprite]]),
+      metadata: {},
+    });
+
+    const createRotateTransform = (sprite: Sprite2D): Active2DTransform => {
+      sprite.updateWorldMatrix(true, false);
+      return {
+        nodeIds: [sprite.nodeId],
+        handle: 'rotate',
+        // Start pointer at angle 0 relative to the selection center.
+        startPointerWorld: new THREE.Vector3(100, 0, 0),
+        startStates: new Map([
+          [
+            sprite.nodeId,
+            {
+              position: sprite.position.clone(),
+              rotation: sprite.rotation.z,
+              scale: new THREE.Vector2(sprite.scale.x, sprite.scale.y),
+              width: sprite.width,
+              height: sprite.height,
+              worldPosition: sprite.getWorldPosition(new THREE.Vector3()),
+              worldRotationZ: sprite.rotation.z,
+            },
+          ],
+        ]),
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        startCenterWorld: new THREE.Vector3(0, 0, 0),
+        anchorWorld: new THREE.Vector3(0, 0, 0),
+        anchorLocal: new THREE.Vector3(0, 0, 0),
+        startSize: new THREE.Vector2(100, 50),
+        overlayRotationZ: 0,
+        moveConstraintAxis: null,
+      };
+    };
+
+    // Pointer position at a given angle (degrees) on a radius-100 circle.
+    const pointerAtAngle = (deg: number) => {
+      const rad = (deg * Math.PI) / 180;
+      return toScreen(100 * Math.cos(rad), 100 * Math.sin(rad));
+    };
+
+    it('snaps rotation to the nearest 5-degree increment while shift is held', () => {
+      const sprite = new Sprite2D({
+        id: 'sprite-rot-snap',
+        name: 'Sprite Rot',
+        width: 100,
+        height: 50,
+      });
+      const sceneGraph = createSceneGraph(sprite);
+      const transform = createRotateTransform(sprite);
+      const camera = createCamera();
+      const pointer = pointerAtAngle(12);
+
+      tool.updateTransform(pointer.x, pointer.y, transform, sceneGraph, camera, viewportSize, {
+        snapRotation: true,
+      });
+
+      expect(sprite.rotation.z).toBeCloseTo((10 * Math.PI) / 180);
+    });
+
+    it('rotates freely when shift is not held', () => {
+      const sprite = new Sprite2D({
+        id: 'sprite-rot-free',
+        name: 'Sprite Rot Free',
+        width: 100,
+        height: 50,
+      });
+      const sceneGraph = createSceneGraph(sprite);
+      const transform = createRotateTransform(sprite);
+      const camera = createCamera();
+      const pointer = pointerAtAngle(12);
+
+      tool.updateTransform(pointer.x, pointer.y, transform, sceneGraph, camera, viewportSize);
+
+      expect(sprite.rotation.z).toBeCloseTo((12 * Math.PI) / 180);
+    });
+
+    it('honours a custom rotation snap increment', () => {
+      const sprite = new Sprite2D({
+        id: 'sprite-rot-15',
+        name: 'Sprite Rot 15',
+        width: 100,
+        height: 50,
+      });
+      const sceneGraph = createSceneGraph(sprite);
+      const transform = createRotateTransform(sprite);
+      const camera = createCamera();
+      const pointer = pointerAtAngle(22);
+
+      tool.updateTransform(pointer.x, pointer.y, transform, sceneGraph, camera, viewportSize, {
+        snapRotation: true,
+        rotationSnapDegrees: 15,
+      });
+
+      expect(sprite.rotation.z).toBeCloseTo((15 * Math.PI) / 180);
+    });
+  });
 });

@@ -123,8 +123,7 @@ pix3-profiler-panel .audio-file-card:hover {
 
 pix3-profiler-panel .audio-file-card-active {
   background:
-    linear-gradient(180deg, rgba(58, 160, 98, 0.34), rgba(31, 93, 57, 0.26)),
-    rgba(14, 25, 18, 0.82);
+    linear-gradient(180deg, rgba(58, 160, 98, 0.34), rgba(31, 93, 57, 0.26)), rgba(14, 25, 18, 0.82);
   border-color: rgba(99, 215, 136, 0.36);
   box-shadow: 0 0 0 1px rgba(93, 208, 125, 0.08) inset;
 }
@@ -486,7 +485,11 @@ pix3-profiler-panel .frame-impact-meter-fill {
 }
 
 pix3-profiler-panel .frame-impact-meter-self .frame-impact-meter-fill {
-  background: linear-gradient(90deg, rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.42), rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14));
+  background: linear-gradient(
+    90deg,
+    rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.42),
+    rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14)
+  );
 }
 
 pix3-profiler-panel .frame-impact-meter-total .frame-impact-meter-fill {

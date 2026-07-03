@@ -38,7 +38,15 @@ const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as co
 const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;
 const RELATIVE_IMPORT_PATTERN =
   /\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-const PROJECT_SOURCE_IMPORT_SUFFIXES = ['', '.ts', '.js', '.json', '/index.ts', '/index.js', '/index.json'] as const;
+const PROJECT_SOURCE_IMPORT_SUFFIXES = [
+  '',
+  '.ts',
+  '.js',
+  '.json',
+  '/index.ts',
+  '/index.js',
+  '/index.json',
+] as const;
 
 const templateFiles = import.meta.glob('../templates/build/**/*.tpl', {
   query: '?raw',
@@ -121,7 +129,9 @@ export class ProjectBuildService {
     const configuredDefaultScenePath = this.getDefaultExportScenePath(context);
 
     if (requestedEntryScenePath && !scenePaths.includes(requestedEntryScenePath)) {
-      warnings.push(`Requested entry scene was not found in build inputs: ${requestedEntryScenePath}`);
+      warnings.push(
+        `Requested entry scene was not found in build inputs: ${requestedEntryScenePath}`
+      );
     }
 
     if (
@@ -434,7 +444,10 @@ export class ProjectBuildService {
       files.set(relativeOutputPath, this.renderTemplate(templateContents, replacements));
     }
 
-    files.set('src/generated/scene-manifest.ts', this.buildSceneManifestTs(scenePaths, entryScenePath));
+    files.set(
+      'src/generated/scene-manifest.ts',
+      this.buildSceneManifestTs(scenePaths, entryScenePath)
+    );
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
     for (const [sourcePath, sourceContents] of Object.entries(runtimeSourceFiles)) {

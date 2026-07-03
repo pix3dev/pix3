@@ -57,9 +57,7 @@ export class Pix3PlayableExportDialog extends ComponentBase {
               autofocus
             >
               ${this.scenePaths.map(
-                scenePath => html`
-                  <option value=${scenePath}>${scenePath}</option>
-                `
+                scenePath => html` <option value=${scenePath}>${scenePath}</option> `
               )}
             </select>
           </label>

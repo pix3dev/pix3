@@ -33,9 +33,7 @@ export class PlayableExportProgressDialogService {
     this.notifyListeners();
   }
 
-  subscribe(
-    listener: (dialog: PlayableExportProgressDialogInstance | null) => void
-  ): () => void {
+  subscribe(listener: (dialog: PlayableExportProgressDialogInstance | null) => void): () => void {
     this.listeners.add(listener);
     listener(this.activeDialog);
     return () => this.listeners.delete(listener);

@@ -66,7 +66,11 @@ function safeSerialize(value: unknown, depth = 2): Json {
     typeof obj.z === 'number' &&
     keys.every(k => k === 'x' || k === 'y' || k === 'z' || k === 'w');
   if (isPureVector) {
-    const vec: { [key: string]: Json } = { x: obj.x as number, y: obj.y as number, z: obj.z as number };
+    const vec: { [key: string]: Json } = {
+      x: obj.x as number,
+      y: obj.y as number,
+      z: obj.z as number,
+    };
     if (typeof obj.w === 'number') vec.w = obj.w;
     return vec;
   }
@@ -466,9 +470,12 @@ function createBridge(): Pix3DebugBridge {
         'node(id)': 'One node in full detail (transform, properties, components).',
         'find(text)': 'Search nodes by name/type substring.',
         'selection()': 'Selected node IDs.',
-        'liveScene(maxDepth=4)': 'Live Three.js object tree (play-mode runtime instances, incl. raw sprites/meshes).',
-        'liveFind(query,limit=50)': "Search live objects by name/type, or 'droppable' for tagged items.",
-        'physicsDebug()': 'Summary of collider wireframe buffers exposed by the running game (counts only).',
+        'liveScene(maxDepth=4)':
+          'Live Three.js object tree (play-mode runtime instances, incl. raw sprites/meshes).',
+        'liveFind(query,limit=50)':
+          "Search live objects by name/type, or 'droppable' for tagged items.",
+        'physicsDebug()':
+          'Summary of collider wireframe buffers exposed by the running game (counts only).',
         'play.status() / play.start() / play.stop() / play.restart()': 'Play-mode control.',
         'setProperty({nodeId,propertyPath,value})': 'Edit a property (undoable).',
         'command(id)': "Run a command by id, e.g. 'history.undo'.",
@@ -545,7 +552,9 @@ function createBridge(): Pix3DebugBridge {
         if (wantDroppable) {
           return !!(raw.userData && 'droppableItemRef' in raw.userData);
         }
-        return dto.threeType.toLowerCase().includes(needle) || dto.name.toLowerCase().includes(needle);
+        return (
+          dto.threeType.toLowerCase().includes(needle) || dto.name.toLowerCase().includes(needle)
+        );
       };
       flattenLive(root, predicate, out, budget);
       return out;
@@ -554,9 +563,7 @@ function createBridge(): Pix3DebugBridge {
     physicsDebug() {
       const source = getPhysicsDebugSource();
       if (!source) return null;
-      const buffers = source() as
-        | { vertices?: ArrayLike<number>; bodies?: number }
-        | null;
+      const buffers = source() as { vertices?: ArrayLike<number>; bodies?: number } | null;
       const vertexCount = buffers?.vertices?.length ?? 0;
       return {
         available: !!buffers,

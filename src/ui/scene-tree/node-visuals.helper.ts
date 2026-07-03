@@ -2,6 +2,7 @@ import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Node3D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
+import { TiledSprite2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import { Joystick2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
@@ -33,6 +34,9 @@ const NODE_3D_COLOR = '#fe9ebeff';
  * @returns An object with the color and icon name for the node.
  */
 export function getNodeVisuals(node: NodeBase): { color: string; icon: string } {
+  if (node instanceof TiledSprite2D) {
+    return { color: NODE_2D_COLOR, icon: 'grid' };
+  }
   if (node instanceof Sprite2D) {
     return { color: NODE_2D_COLOR, icon: 'image' };
   }

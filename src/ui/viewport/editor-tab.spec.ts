@@ -447,9 +447,9 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
     getCanvasElement: vi.fn(() => stubCanvas),
     get2DHandleAt: vi.fn(() => 'idle'),
     start2DTransform: vi.fn(),
-    getSelectable2DNodeIdsInScreenRect: vi.fn<(x1: number, y1: number, x2: number, y2: number) => string[]>(
-      () => []
-    ),
+    getSelectable2DNodeIdsInScreenRect: vi.fn<
+      (x1: number, y1: number, x2: number, y2: number) => string[]
+    >(() => []),
     set2DMarqueePreviewNodeIds: vi.fn<(nodeIds: string[]) => boolean>(() => false),
     clear2DMarqueePreview: vi.fn<() => boolean>(() => false),
     has2DTransform: vi.fn(() => false),
@@ -504,10 +504,7 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
   };
 }
 
-function createDataTransfer(
-  types: string[],
-  values: Record<string, string> = {}
-): DataTransfer {
+function createDataTransfer(types: string[], values: Record<string, string> = {}): DataTransfer {
   return {
     dropEffect: 'none',
     getData: vi.fn((type: string) => values[type] ?? ''),

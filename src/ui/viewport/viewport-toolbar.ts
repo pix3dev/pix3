@@ -278,9 +278,7 @@ export function renderViewportToolbar(
   `;
 }
 
-function getNextEditorCameraProjection(
-  projection: EditorCameraProjection
-): EditorCameraProjection {
+function getNextEditorCameraProjection(projection: EditorCameraProjection): EditorCameraProjection {
   return projection === 'perspective' ? 'orthographic' : 'perspective';
 }
 

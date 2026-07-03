@@ -18,10 +18,7 @@ import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { SceneManager } from '@pix3/runtime';
 import { ServiceContainer } from '@/fw/di';
-import {
-  classifySceneCreateAssetResource,
-  deriveAssetNodeName,
-} from '@/ui/shared/asset-drag-drop';
+import { classifySceneCreateAssetResource, deriveAssetNodeName } from '@/ui/shared/asset-drag-drop';
 import { DropdownPortal } from '../shared/dropdown-portal';
 import {
   isPrefabChildNode,

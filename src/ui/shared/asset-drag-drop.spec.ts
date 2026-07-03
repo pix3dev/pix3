@@ -32,7 +32,9 @@ describe('asset-drag-drop', () => {
       },
     };
 
-    expect(getDroppedAssetResourcePath(transfer as DataTransfer)).toBe('res://assets/walk.pix3anim');
+    expect(getDroppedAssetResourcePath(transfer as DataTransfer)).toBe(
+      'res://assets/walk.pix3anim'
+    );
   });
 
   it('falls back to text/uri-list when custom asset MIME data is unavailable', () => {

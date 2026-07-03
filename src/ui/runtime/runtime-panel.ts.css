@@ -140,9 +140,17 @@ pix3-runtime-panel .runtime-placeholder {
   line-height: 1.5;
 }
 
-pix3-runtime-panel .runtime-tree {
-  overflow: auto;
+pix3-runtime-panel .runtime-body {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+
+pix3-runtime-panel .runtime-tree {
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
   font-size: 0.72rem;
   line-height: 1.4;
   user-select: none;
@@ -242,4 +250,116 @@ pix3-runtime-panel .runtime-more {
   color: rgba(245, 247, 250, 0.38);
   font-style: italic;
   cursor: default;
+}
+
+pix3-runtime-panel .badge-node {
+  background: rgba(94, 194, 122, 0.16);
+  color: #7fd79a;
+}
+
+/* Detail pane (selected raw THREE.Object3D) */
+pix3-runtime-panel .runtime-detail {
+  flex: 0 0 auto;
+  max-height: 46%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 13, 15, 0.5);
+}
+
+pix3-runtime-panel .runtime-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex: 0 0 auto;
+}
+
+pix3-runtime-panel .runtime-detail-type {
+  color: rgba(245, 247, 250, 0.95);
+  font-weight: 600;
+  font-size: 0.74rem;
+}
+
+pix3-runtime-panel .runtime-detail-name {
+  color: rgba(245, 247, 250, 0.6);
+  font-style: italic;
+  font-size: 0.72rem;
+}
+
+pix3-runtime-panel .runtime-detail-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.2rem;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.5);
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+pix3-runtime-panel .runtime-detail-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 247, 250, 0.9);
+}
+
+pix3-runtime-panel .runtime-detail-body {
+  overflow: auto;
+  min-height: 0;
+  padding: 0.25rem 0.5rem 0.5rem;
+}
+
+pix3-runtime-panel .runtime-detail-section {
+  margin-top: 0.4rem;
+}
+
+pix3-runtime-panel .runtime-detail-section-title {
+  color: var(--pix3-accent-color, #ffcf33);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  margin-bottom: 0.15rem;
+}
+
+pix3-runtime-panel .runtime-kv {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.04rem 0;
+  font-size: 0.7rem;
+}
+
+pix3-runtime-panel .runtime-kv-key {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  color: rgba(245, 247, 250, 0.5);
+}
+
+pix3-runtime-panel .runtime-kv-val {
+  flex: 1 1 auto;
+  color: rgba(245, 247, 250, 0.9);
+  word-break: break-word;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+pix3-runtime-panel .runtime-kv-vec {
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-runtime-panel .runtime-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
 }

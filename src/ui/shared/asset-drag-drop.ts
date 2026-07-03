@@ -31,7 +31,9 @@ export const toProjectResourcePath = (path: string): string => {
   return normalizedPath.length > 0 ? `res://${normalizedPath}` : 'res://';
 };
 
-export const normalizeDroppedAssetResourcePath = (raw: string | null | undefined): string | null => {
+export const normalizeDroppedAssetResourcePath = (
+  raw: string | null | undefined
+): string | null => {
   if (!raw) {
     return null;
   }

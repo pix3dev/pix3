@@ -10,8 +10,7 @@ export class Pix3PlayableExportProgressDialog extends ComponentBase {
   public title: string = 'Building Playable HTML';
 
   @property({ type: String })
-  public message: string =
-    'Bundling scripts and embedding project assets into a single HTML file.';
+  public message: string = 'Bundling scripts and embedding project assets into a single HTML file.';
 
   protected render() {
     const titleId = this.dialogId ? `${this.dialogId}-title` : 'playable-export-progress-title';

@@ -17,6 +17,8 @@ import { Node3D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import { findAnimationClip } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
+import { TiledSprite2D } from '@pix3/runtime';
+import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
@@ -128,6 +130,7 @@ export class ViewportRendererService {
   private group2DVisuals = new Map<string, THREE.Group>();
   private animatedSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite2DVisuals = new Map<string, THREE.Group>();
+  private tiledSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite3DTexturePaths = new Map<string, string | null>();
   private particles3DTexturePaths = new Map<string, string | null>();
   private uiControl2DVisuals = new Map<string, THREE.Group>();
@@ -1762,6 +1765,11 @@ export class ViewportRendererService {
           if (visualRoot) {
             this.syncAnimatedSprite2DVisual(node, visualRoot);
           }
+        } else if (node instanceof TiledSprite2D) {
+          const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
+          if (visualRoot) {
+            this.syncTiledSprite2DVisual(node, visualRoot);
+          }
         } else if (node instanceof Sprite2D) {
           const visualRoot = this.sprite2DVisuals.get(node.nodeId);
           if (visualRoot) {
@@ -2288,7 +2296,11 @@ export class ViewportRendererService {
     }
 
     const nextNodeIds = Array.from(
-      new Set(nodeIds.filter((nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0))
+      new Set(
+        nodeIds.filter(
+          (nodeId): nodeId is string => typeof nodeId === 'string' && nodeId.length > 0
+        )
+      )
     );
     const nextNodeIdSet = new Set(nextNodeIds);
     let changed = false;
@@ -2316,7 +2328,10 @@ export class ViewportRendererService {
         continue;
       }
 
-      const frame = this.create2DHoverPreviewFrame(this.getNodeOnlyBounds(node), MARQUEE_PREVIEW_2D_COLOR);
+      const frame = this.create2DHoverPreviewFrame(
+        this.getNodeOnlyBounds(node),
+        MARQUEE_PREVIEW_2D_COLOR
+      );
       frame.userData.isMarqueePreview = true;
       this.scene.add(frame);
       this.marqueePreview2DFrames.set(nodeId, frame);
@@ -2407,6 +2422,7 @@ export class ViewportRendererService {
     const candidates: THREE.Object3D[] = [
       ...this.animatedSprite2DVisuals.values(),
       ...this.sprite2DVisuals.values(),
+      ...this.tiledSprite2DVisuals.values(),
       ...this.uiControl2DVisuals.values(),
     ];
 
@@ -2486,7 +2502,12 @@ export class ViewportRendererService {
     return null;
   }
 
-  private normalizeScreenRect(startX: number, startY: number, endX: number, endY: number): {
+  private normalizeScreenRect(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number
+  ): {
     left: number;
     right: number;
     top: number;
@@ -2549,7 +2570,14 @@ export class ViewportRendererService {
       return false;
     }
 
-    if (!(node instanceof AnimatedSprite2D || node instanceof Sprite2D || node instanceof UIControl2D)) {
+    if (
+      !(
+        node instanceof AnimatedSprite2D ||
+        node instanceof Sprite2D ||
+        node instanceof TiledSprite2D ||
+        node instanceof UIControl2D
+      )
+    ) {
       return false;
     }
 
@@ -2620,6 +2648,11 @@ export class ViewportRendererService {
       const visualRoot = this.animatedSprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
         this.syncAnimatedSprite2DVisual(node, visualRoot);
+      }
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        this.syncTiledSprite2DVisual(node, visualRoot);
       }
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.sprite2DVisuals.get(node.nodeId);
@@ -2711,6 +2744,11 @@ export class ViewportRendererService {
       }
     } else if (node instanceof AnimatedSprite2D) {
       const visualRoot = this.animatedSprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        visualRoot.visible = node.visible;
+      }
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.tiledSprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
         visualRoot.visible = node.visible;
       }
@@ -3024,6 +3062,14 @@ export class ViewportRendererService {
         this.disposeObject3D(visual);
       }
       this.sprite2DVisuals.clear();
+
+      for (const visual of this.tiledSprite2DVisuals.values()) {
+        if (visual.parent) {
+          visual.parent.remove(visual);
+        }
+        this.disposeObject3D(visual);
+      }
+      this.tiledSprite2DVisuals.clear();
       this.sprite3DTexturePaths.clear();
       this.particles3DTexturePaths.clear();
 
@@ -3134,6 +3180,13 @@ export class ViewportRendererService {
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.createSprite2DVisual(node);
       this.sprite2DVisuals.set(node.nodeId, visualRoot);
+
+      const parent = parent2DVisualRoot ?? this.scene;
+      parent.add(visualRoot);
+      current2DVisualRoot = visualRoot;
+    } else if (node instanceof TiledSprite2D) {
+      const visualRoot = this.createTiledSprite2DVisual(node);
+      this.tiledSprite2DVisuals.set(node.nodeId, visualRoot);
 
       const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
@@ -3937,6 +3990,229 @@ export class ViewportRendererService {
         }
       }
     })();
+  }
+
+  /**
+   * Create a visual representation for a TiledSprite2D node. Unlike the Sprite2D
+   * proxy (a unit quad scaled by a size group), the geometry is size-baked because
+   * its UVs depend on the rect size, borders, and texture — so it is rebuilt via
+   * the shared {@link buildTiledSpriteGeometry} whenever any of those change.
+   */
+  private createTiledSprite2DVisual(node: TiledSprite2D): THREE.Group {
+    const texWidth = node.textureWidth || 0;
+    const texHeight = node.textureHeight || 0;
+    const geometry = buildTiledSpriteGeometry(
+      this.tiledSprite2DGeometryParams(node, texWidth, texHeight)
+    );
+
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 1,
+    });
+    material.userData.baseOpacity = 1;
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    mesh.layers.set(LAYER_2D);
+    mesh.userData.isTiledSprite2DVisual = true;
+    mesh.userData.nodeId = node.nodeId;
+
+    const root = new THREE.Group();
+    root.position.copy(node.position);
+    root.rotation.copy(node.rotation);
+    root.scale.set(node.scale.x, node.scale.y, 1);
+    root.visible = node.visible;
+    root.layers.set(LAYER_2D);
+    root.add(mesh);
+
+    root.userData.isTiledSprite2DVisualRoot = true;
+    root.userData.nodeId = node.nodeId;
+    root.userData.tiledMesh = mesh;
+    root.userData.texturePath = node.texturePath ?? null;
+    root.userData.textureWidth = texWidth;
+    root.userData.textureHeight = texHeight;
+    root.userData.geometrySignature = this.tiledSprite2DSignature(node, texWidth, texHeight);
+
+    this.applyTextureToTiledSprite2DVisual(node, root);
+    this.apply2DVisualOpacity(node, root);
+
+    return root;
+  }
+
+  private tiledSprite2DGeometryParams(
+    node: TiledSprite2D,
+    textureWidth: number,
+    textureHeight: number
+  ): TiledSpriteGeometryParams {
+    return {
+      mode: node.patchMode,
+      width: node.width,
+      height: node.height,
+      textureWidth,
+      textureHeight,
+      border: { ...node.sliceBorder },
+      drawCenter: node.drawCenter,
+      axisStretchHorizontal: node.axisStretchHorizontal,
+      axisStretchVertical: node.axisStretchVertical,
+      tileScale: { x: node.tileScale.x, y: node.tileScale.y },
+      tileOffset: { x: node.tileOffset.x, y: node.tileOffset.y },
+    };
+  }
+
+  private tiledSprite2DSignature(
+    node: TiledSprite2D,
+    textureWidth: number,
+    textureHeight: number
+  ): string {
+    const b = node.sliceBorder;
+    return [
+      node.patchMode,
+      node.width,
+      node.height,
+      b.left,
+      b.right,
+      b.top,
+      b.bottom,
+      node.drawCenter,
+      node.axisStretchHorizontal,
+      node.axisStretchVertical,
+      node.tileScale.x,
+      node.tileScale.y,
+      node.tileOffset.x,
+      node.tileOffset.y,
+      textureWidth,
+      textureHeight,
+    ].join('|');
+  }
+
+  private rebuildTiledSprite2DGeometry(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (!mesh) {
+      return;
+    }
+    const texWidth = (visualRoot.userData.textureWidth as number) ?? 0;
+    const texHeight = (visualRoot.userData.textureHeight as number) ?? 0;
+    const geometry = buildTiledSpriteGeometry(
+      this.tiledSprite2DGeometryParams(node, texWidth, texHeight)
+    );
+    mesh.geometry.dispose();
+    mesh.geometry = geometry;
+    mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    visualRoot.userData.geometrySignature = this.tiledSprite2DSignature(node, texWidth, texHeight);
+  }
+
+  private applyTextureToTiledSprite2DVisual(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (!mesh || !(mesh.material instanceof THREE.MeshBasicMaterial)) {
+      return;
+    }
+    const material = mesh.material;
+    const texturePath = node.texturePath;
+    if (!texturePath) {
+      material.map = null;
+      material.needsUpdate = true;
+      return;
+    }
+
+    const onTextureReady = (texture: THREE.Texture) => {
+      // Latest-wins + liveness guard: a load can resolve after the proxy was
+      // disposed (leaking a rebuilt geometry) or after the node's texture was
+      // swapped again (a stale load overwriting a newer one). Bail in both cases.
+      if (
+        this.tiledSprite2DVisuals.get(node.nodeId) !== visualRoot ||
+        node.texturePath !== texturePath
+      ) {
+        texture.dispose();
+        return;
+      }
+
+      this.configureSpriteTexture(texture);
+      material.map = texture;
+      material.color.set(0xffffff);
+      material.transparent = true;
+      material.needsUpdate = true;
+
+      const img = texture.image as
+        | { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+        | undefined;
+      const w = img?.naturalWidth ?? img?.width;
+      const h = img?.naturalHeight ?? img?.height;
+      if (w && h) {
+        visualRoot.userData.textureWidth = w;
+        visualRoot.userData.textureHeight = h;
+        // UVs (9-slice) and tile counts depend on the natural size — rebuild now.
+        this.rebuildTiledSprite2DGeometry(node, visualRoot);
+      }
+    };
+
+    const textureLoader = new THREE.TextureLoader();
+
+    void (async () => {
+      try {
+        const blob = await this.resourceManager.readBlob(texturePath);
+        const blobUrl = URL.createObjectURL(blob);
+        textureLoader.load(
+          blobUrl,
+          texture => {
+            try {
+              onTextureReady(texture);
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+          },
+          undefined,
+          () => {
+            URL.revokeObjectURL(blobUrl);
+          }
+        );
+      } catch {
+        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(texturePath);
+        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
+        if (scheme === 'http' || scheme === 'https' || scheme === '') {
+          try {
+            textureLoader.load(texturePath, texture => onTextureReady(texture));
+          } catch {
+            // Keep placeholder material
+          }
+        }
+      }
+    })();
+  }
+
+  private syncTiledSprite2DVisual(node: TiledSprite2D, visualRoot: THREE.Group): void {
+    this.apply2DVisualTransform(node, visualRoot);
+    visualRoot.visible = node.visible;
+
+    // React to a texture swap before rebuilding geometry (natural size may change).
+    const mesh = visualRoot.userData.tiledMesh as THREE.Mesh | undefined;
+    if (mesh && mesh.material instanceof THREE.MeshBasicMaterial) {
+      const currentTexturePath = node.texturePath ?? null;
+      const previousTexturePath = (visualRoot.userData.texturePath as string | null) ?? null;
+      if (currentTexturePath !== previousTexturePath) {
+        mesh.material.map = null;
+        mesh.material.needsUpdate = true;
+        visualRoot.userData.texturePath = currentTexturePath;
+        visualRoot.userData.textureWidth = 0;
+        visualRoot.userData.textureHeight = 0;
+        this.applyTextureToTiledSprite2DVisual(node, visualRoot);
+      }
+    }
+
+    const signature = this.tiledSprite2DSignature(
+      node,
+      (visualRoot.userData.textureWidth as number) ?? 0,
+      (visualRoot.userData.textureHeight as number) ?? 0
+    );
+    if (signature !== visualRoot.userData.geometrySignature) {
+      this.rebuildTiledSprite2DGeometry(node, visualRoot);
+    } else if (mesh) {
+      // Pivot can change without altering geometry.
+      mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
+    }
+
+    this.apply2DVisualOpacity(node, visualRoot);
   }
 
   private syncAnimatedSprite2DVisual(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
@@ -4767,8 +5043,8 @@ export class ViewportRendererService {
   private getNodeOnlyLocalCorners(node: Node2D): THREE.Vector3[] {
     let corners: THREE.Vector3[];
 
-    if (node instanceof Sprite2D) {
-      // Account for sprite anchor offset: the visual mesh is shifted from the
+    if (node instanceof Sprite2D || node instanceof TiledSprite2D) {
+      // Account for the anchor/pivot offset: the visual mesh is shifted from the
       // node origin by (0.5 - anchor) * size.  In node-local space the sprite
       // occupies  [-ax*w .. (1-ax)*w]  x  [-ay*h .. (1-ay)*h].
       const w = node.width ?? 64;
@@ -4864,7 +5140,10 @@ export class ViewportRendererService {
     const orientedLocalBounds = new THREE.Box3();
 
     for (const corner of worldCorners) {
-      const localCorner = this.rotateVectorZ(corner.clone().sub(orientedCenterWorld), -worldRotationZ);
+      const localCorner = this.rotateVectorZ(
+        corner.clone().sub(orientedCenterWorld),
+        -worldRotationZ
+      );
       orientedLocalBounds.expandByPoint(localCorner);
     }
 
@@ -4942,7 +5221,11 @@ export class ViewportRendererService {
       return;
     }
 
-    const overlayGeometry = this.getSelection2DOverlayGeometry(node2DIds, sceneGraph, combinedBounds);
+    const overlayGeometry = this.getSelection2DOverlayGeometry(
+      node2DIds,
+      sceneGraph,
+      combinedBounds
+    );
     console.debug('[ViewportRenderer] update2DOverlay: creating overlay', {
       node2DIds,
       center: overlayGeometry.centerWorld,
@@ -5097,17 +5380,15 @@ export class ViewportRendererService {
     return normalized;
   }
 
-  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'):
-    | {
-        x: number;
-        y: number;
-        directionX: number;
-        directionY: number;
-        tangentX: number;
-        tangentY: number;
-        rotationDeg: number;
-      }
-    | null {
+  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'): {
+    x: number;
+    y: number;
+    directionX: number;
+    directionY: number;
+    tangentX: number;
+    tangentY: number;
+    rotationDeg: number;
+  } | null {
     const overlay = this.selection2DOverlay;
     if (!overlay) {
       return null;
@@ -5115,25 +5396,25 @@ export class ViewportRendererService {
 
     const localBounds = this.getSelection2DOverlayLocalBounds(overlay);
     const centerX = (localBounds.min.x + localBounds.max.x) / 2;
-      const centerY = (localBounds.min.y + localBounds.max.y) / 2;
+    const centerY = (localBounds.min.y + localBounds.max.y) / 2;
     const z = (localBounds.min.z + localBounds.max.z) / 2;
     const rotationZ = overlay.worldRotationZ ?? 0;
-      let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
-      let outwardLocal = new THREE.Vector3(0, 1, 0);
-      let tangentLocal = new THREE.Vector3(1, 0, 0);
+    let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
+    let outwardLocal = new THREE.Vector3(0, 1, 0);
+    let tangentLocal = new THREE.Vector3(1, 0, 0);
 
-      if (edge === 'bottom') {
-        anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
-        outwardLocal = new THREE.Vector3(0, -1, 0);
-      } else if (edge === 'left') {
-        anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
-        outwardLocal = new THREE.Vector3(-1, 0, 0);
-        tangentLocal = new THREE.Vector3(0, 1, 0);
-      } else if (edge === 'right') {
-        anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
-        outwardLocal = new THREE.Vector3(1, 0, 0);
-        tangentLocal = new THREE.Vector3(0, 1, 0);
-      }
+    if (edge === 'bottom') {
+      anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
+      outwardLocal = new THREE.Vector3(0, -1, 0);
+    } else if (edge === 'left') {
+      anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
+      outwardLocal = new THREE.Vector3(-1, 0, 0);
+      tangentLocal = new THREE.Vector3(0, 1, 0);
+    } else if (edge === 'right') {
+      anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
+      outwardLocal = new THREE.Vector3(1, 0, 0);
+      tangentLocal = new THREE.Vector3(0, 1, 0);
+    }
 
     const anchorWorld = this.rotateVectorZ(anchorLocal, rotationZ).add(overlay.centerWorld);
     const outwardWorld = this.rotateVectorZ(outwardLocal, rotationZ).multiplyScalar(10);
@@ -5183,28 +5464,26 @@ export class ViewportRendererService {
     };
   }
 
-  private getSelection2DOverlayHudAnchors():
-    | {
-        top: {
-          x: number;
-          y: number;
-          directionX: number;
-          directionY: number;
-          tangentX: number;
-          tangentY: number;
-          rotationDeg: number;
-        };
-        bottom: {
-          x: number;
-          y: number;
-          directionX: number;
-          directionY: number;
-          tangentX: number;
-          tangentY: number;
-          rotationDeg: number;
-        };
-      }
-    | null {
+  private getSelection2DOverlayHudAnchors(): {
+    top: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    };
+    bottom: {
+      x: number;
+      y: number;
+      directionX: number;
+      directionY: number;
+      tangentX: number;
+      tangentY: number;
+      rotationDeg: number;
+    };
+  } | null {
     const anchors = (['top', 'bottom', 'left', 'right'] as const)
       .map(edge => this.getSelection2DOverlayHudAnchor(edge))
       .filter(
@@ -5297,13 +5576,20 @@ export class ViewportRendererService {
   private updateSelection2DOverlayHud(): void {
     this.attachSelection2DOverlayHud();
 
+    // Keep the HUD alive during resize/rotate: a plain move surfaces nothing,
+    // a resize keeps the live size badge, and a rotate swaps that badge for a
+    // live angle readout (the size is hidden until the pointer is released).
+    const activeHandle = this.active2DTransform?.handle;
+    const isMoving = activeHandle === 'move';
+    const isRotating = activeHandle === 'rotate';
+
     if (
       !this.selection2DOverlay ||
       !this.selection2DOverlayHud ||
       !this.orthographicCamera ||
       this.viewportSize.width <= 0 ||
       this.viewportSize.height <= 0 ||
-      this.active2DTransform
+      isMoving
     ) {
       this.hideSelection2DOverlayHud();
       return;
@@ -5334,11 +5620,17 @@ export class ViewportRendererService {
       this.selection2DOverlay.nodeIds,
       sceneGraph.nodeMap
     );
-    const bottomBadgeText = this.getSelection2DOverlaySizeText(
-      this.selection2DOverlay.nodeIds,
-      sceneGraph.nodeMap,
-      size
-    );
+    const bottomBadgeText = isRotating
+      ? this.getSelection2DOverlayAngleText(
+          this.selection2DOverlay.nodeIds,
+          sceneGraph.nodeMap,
+          this.selection2DOverlay.worldRotationZ ?? 0
+        )
+      : this.getSelection2DOverlaySizeText(
+          this.selection2DOverlay.nodeIds,
+          sceneGraph.nodeMap,
+          size
+        );
 
     this.renderSelection2DOverlayHudBadge(
       this.selection2DOverlayHud.top,
@@ -5479,6 +5771,33 @@ export class ViewportRendererService {
     return {
       text: `${this.formatOverlayDimension(fallbackBoundsSize.x)} x ${this.formatOverlayDimension(fallbackBoundsSize.y)}`,
     };
+  }
+
+  private getSelection2DOverlayAngleText(
+    nodeIds: string[],
+    nodeMap: Map<string, NodeBase>,
+    fallbackRotationZ: number
+  ): { text: string } {
+    let radians = fallbackRotationZ;
+    if (nodeIds.length === 1) {
+      const node = nodeMap.get(nodeIds[0]);
+      if (node instanceof Node2D) {
+        radians = node.rotation.z;
+      }
+    }
+
+    // Normalize to (-180, 180] for a readable live readout.
+    let degrees = MathUtils.radToDeg(radians) % 360;
+    if (degrees > 180) {
+      degrees -= 360;
+    } else if (degrees <= -180) {
+      degrees += 360;
+    }
+    if (Object.is(degrees, -0)) {
+      degrees = 0;
+    }
+
+    return { text: `${this.formatOverlayDimension(degrees, 1)}°` };
   }
 
   private getNodeInspectorSize(node: Node2D): {
@@ -5802,7 +6121,9 @@ export class ViewportRendererService {
       // Set active handle for visual feedback (accent color during drag)
       this.transformTool2d.setActiveHandle(handle, this.selection2DOverlay);
       this.begin2DInteraction();
-      this.hideSelection2DOverlayHud();
+      // Reflect the correct HUD state from the first frame: move hides it,
+      // resize keeps the live size badge, rotate shows the live angle badge.
+      this.updateSelection2DOverlayHud();
       console.debug('[ViewportRenderer] start 2D transform', {
         handle,
         nodeIds: this.active2DTransform.nodeIds,
@@ -5971,11 +6292,7 @@ export class ViewportRendererService {
     if (this.camera instanceof THREE.PerspectiveCamera) {
       const maxDim = Math.max(objectSize?.x ?? 1, objectSize?.y ?? 1, objectSize?.z ?? 1, 0.001);
       const fov = MathUtils.degToRad(this.camera.fov);
-      const distance = Math.max(
-        (maxDim * 1.5) / Math.tan(fov / 2),
-        this.camera.near + maxDim,
-        1
-      );
+      const distance = Math.max((maxDim * 1.5) / Math.tan(fov / 2), this.camera.near + maxDim, 1);
 
       return this.camera.position.clone().add(forward.multiplyScalar(distance));
     }
@@ -6006,6 +6323,9 @@ export class ViewportRendererService {
     }
     if (node instanceof AnimatedSprite2D) {
       return this.animatedSprite2DVisuals.get(node.nodeId);
+    }
+    if (node instanceof TiledSprite2D) {
+      return this.tiledSprite2DVisuals.get(node.nodeId);
     }
     if (node instanceof Sprite2D) {
       return this.sprite2DVisuals.get(node.nodeId);
@@ -6242,6 +6562,11 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.sprite2DVisuals.clear();
+
+    for (const visual of this.tiledSprite2DVisuals.values()) {
+      this.disposeObject3D(visual);
+    }
+    this.tiledSprite2DVisuals.clear();
     this.sprite3DTexturePaths.clear();
     this.particles3DTexturePaths.clear();
 

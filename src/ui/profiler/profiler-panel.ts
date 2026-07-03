@@ -166,8 +166,8 @@ export class ProfilerPanel extends ComponentBase {
           <span class="profiler-section-meta">${sectionMeta.join(' · ')}</span>
         </div>
         <p class="profiler-section-note">
-          One tile per audio file. Green means the file is playing now; gray means it played
-          earlier in this session.
+          One tile per audio file. Green means the file is playing now; gray means it played earlier
+          in this session.
         </p>
         ${snapshot.files.length === 0
           ? html`<p class="profiler-empty-state">${AUDIO_EMPTY_COPY}</p>`
@@ -222,15 +222,22 @@ export class ProfilerPanel extends ComponentBase {
               ? html`<p class="audio-detail-subtitle">${file.resourcePath}</p>`
               : null}
           </div>
-          <span class=${`audio-detail-badge ${file.isActive ? 'audio-detail-badge-active' : 'audio-detail-badge-idle'}`}
+          <span
+            class=${`audio-detail-badge ${file.isActive ? 'audio-detail-badge-active' : 'audio-detail-badge-idle'}`}
             >${file.isActive ? 'active' : 'inactive'}</span
           >
         </div>
         <div class="audio-detail-grid">
           ${this.renderAudioDetailRow('Name', file.label)}
           ${this.renderAudioDetailRow('Bitrate', this.formatAudioBitrate(file.bitrateKbps))}
-          ${this.renderAudioDetailRow('Duration', this.formatAudioClipDuration(file.durationSeconds))}
-          ${this.renderAudioDetailRow('Active Instances', file.activeInstanceCount.toLocaleString('en-US'))}
+          ${this.renderAudioDetailRow(
+            'Duration',
+            this.formatAudioClipDuration(file.durationSeconds)
+          )}
+          ${this.renderAudioDetailRow(
+            'Active Instances',
+            file.activeInstanceCount.toLocaleString('en-US')
+          )}
           ${this.renderAudioDetailRow('Sample Rate', this.formatAudioSampleRate(file.sampleRate))}
           ${this.renderAudioDetailRow('Channels', this.formatInteger(file.channelCount))}
         </div>
@@ -275,13 +282,17 @@ export class ProfilerPanel extends ComponentBase {
       <div class="audio-detail-playback-row">
         <div class="audio-detail-playback-row-header">
           <span class="audio-detail-playback-row-title">${label}</span>
-          <span class="audio-detail-playback-row-age">${this.formatAudioElapsed(instance.elapsedMs)}</span>
+          <span class="audio-detail-playback-row-age"
+            >${this.formatAudioElapsed(instance.elapsedMs)}</span
+          >
         </div>
         <div class="audio-detail-playback-chips">
           <span class="audio-instance-chip">${this.formatAudioVolume(instance.volume)}</span>
           <span class="audio-instance-chip">${this.formatAudioRate(instance.playbackRate)}</span>
           ${panLabel ? html`<span class="audio-instance-chip">${panLabel}</span>` : null}
-          ${instance.loop ? html`<span class="audio-instance-chip audio-instance-chip-loop">loop</span>` : null}
+          ${instance.loop
+            ? html`<span class="audio-instance-chip audio-instance-chip-loop">loop</span>`
+            : null}
         </div>
       </div>
     `;
@@ -308,9 +319,9 @@ export class ProfilerPanel extends ComponentBase {
                 <div class="frame-impact-row frame-impact-row-header" role="row">
                   <div class="frame-impact-header-cell" role="columnheader">Self (% · ms)</div>
                   <div class="frame-impact-header-cell" role="columnheader">Total (% · ms)</div>
-                  <div class="frame-impact-header-cell" role="columnheader"
-                    >Activity · count/${sampledFrameCountLabel}</div
-                  >
+                  <div class="frame-impact-header-cell" role="columnheader">
+                    Activity · count/${sampledFrameCountLabel}
+                  </div>
                 </div>
                 ${snapshot.activities.map(activity => this.renderFrameImpactRow(activity))}
               </div>
@@ -330,7 +341,9 @@ export class ProfilerPanel extends ComponentBase {
         </div>
         <div class="frame-impact-cell frame-impact-cell-activity" role="cell">
           <span class="frame-impact-activity-label">${activity.label}</span>
-          <span class="frame-impact-activity-meta">${this.formatInteger(activity.sampleCount)}</span>
+          <span class="frame-impact-activity-meta"
+            >${this.formatInteger(activity.sampleCount)}</span
+          >
         </div>
       </div>
     `;
@@ -343,10 +356,7 @@ export class ProfilerPanel extends ComponentBase {
   ) {
     return html`
       <div class="frame-impact-meter frame-impact-meter-${variant}">
-        <div
-          class="frame-impact-meter-fill"
-          style=${`width: ${this.toCssPercent(percent)}`}
-        ></div>
+        <div class="frame-impact-meter-fill" style=${`width: ${this.toCssPercent(percent)}`}></div>
         <div class="frame-impact-meter-content" title=${this.formatPercent(percent)}>
           <span class="frame-impact-primary">${this.formatPercent(percent)}</span>
           <span class="frame-impact-secondary">${this.formatImpactMilliseconds(timeMs)}</span>

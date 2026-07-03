@@ -134,10 +134,7 @@ export class AddModelOperation implements Operation<OperationInvokeResult> {
     return match ? match[1] : 'Model';
   }
 
-  private resolveDropPosition(
-    context: OperationContext,
-    node: MeshInstance
-  ): Vector3 | null {
+  private resolveDropPosition(context: OperationContext, node: MeshInstance): Vector3 | null {
     if (this.params.position) {
       return this.params.position.clone();
     }

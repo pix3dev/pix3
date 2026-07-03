@@ -432,10 +432,12 @@ describe('ProfilerSessionService', () => {
         { label: 'Audio', selfTimeMs: 18, totalTimeMs: 18 },
       ],
     });
-    expect(service.getSnapshot().frameImpact.activities.map(activity => activity.label).slice(0, 2)).toEqual([
-      'Physics',
-      'Audio',
-    ]);
+    expect(
+      service
+        .getSnapshot()
+        .frameImpact.activities.map(activity => activity.label)
+        .slice(0, 2)
+    ).toEqual(['Physics', 'Audio']);
 
     frameListener?.({
       dt: 1,
@@ -450,10 +452,12 @@ describe('ProfilerSessionService', () => {
         { label: 'Audio', selfTimeMs: 10, totalTimeMs: 10 },
       ],
     });
-    expect(service.getSnapshot().frameImpact.activities.map(activity => activity.label).slice(0, 2)).toEqual([
-      'Physics',
-      'Audio',
-    ]);
+    expect(
+      service
+        .getSnapshot()
+        .frameImpact.activities.map(activity => activity.label)
+        .slice(0, 2)
+    ).toEqual(['Physics', 'Audio']);
 
     frameListener?.({
       dt: 1,
@@ -468,10 +472,12 @@ describe('ProfilerSessionService', () => {
         { label: 'Audio', selfTimeMs: 20, totalTimeMs: 20 },
       ],
     });
-    expect(service.getSnapshot().frameImpact.activities.map(activity => activity.label).slice(0, 2)).toEqual([
-      'Audio',
-      'Physics',
-    ]);
+    expect(
+      service
+        .getSnapshot()
+        .frameImpact.activities.map(activity => activity.label)
+        .slice(0, 2)
+    ).toEqual(['Audio', 'Physics']);
   });
 
   it('keeps unsupported JS heap as null', () => {

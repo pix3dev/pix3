@@ -18,6 +18,7 @@ import { CreateCheckbox2DCommand } from '@/features/scene/CreateCheckbox2DComman
 import { CreateInventorySlot2DCommand } from '@/features/scene/CreateInventorySlot2DCommand';
 import { CreateLabel2DCommand } from '@/features/scene/CreateLabel2DCommand';
 import { CreateColorRect2DCommand } from '@/features/scene/CreateColorRect2DCommand';
+import { CreateTiledSprite2DCommand } from '@/features/scene/CreateTiledSprite2DCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateAnimatedSprite3DCommand } from '@/features/scene/CreateAnimatedSprite3DCommand';
 import { CreateParticles3DCommand } from '@/features/scene/CreateParticles3DCommand';
@@ -101,6 +102,30 @@ export class NodeRegistry {
       icon: 'layout',
       keywords: ['create', 'color', 'rect', '2d', 'ui'],
       order: 2.2,
+    });
+    this.registerNodeType({
+      id: 'tiledsprite2d',
+      displayName: 'TiledSprite2D',
+      description: 'Tiling / 9-slice sprite for UI panels, frames, and bars',
+      category: '2D',
+      commandClass: CreateTiledSprite2DCommand,
+      color: '#96cbf6ff',
+      icon: 'grid',
+      keywords: [
+        'create',
+        'tiled',
+        'sprite',
+        '2d',
+        'nine',
+        'slice',
+        '9-patch',
+        'ninepatch',
+        'panel',
+        'tile',
+        'border',
+        'frame',
+      ],
+      order: 2.3,
     });
     this.registerNodeType({
       id: 'joystick2d',

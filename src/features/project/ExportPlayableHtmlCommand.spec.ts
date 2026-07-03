@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CommandContext } from '@/core/command';
+import type { DialogOptions } from '@/services/DialogService';
 import type { PlayableHtmlBuildArtifact } from '@/services/PlayableHtmlBuildService';
 
 import { ExportPlayableHtmlCommand } from './ExportPlayableHtmlCommand';
@@ -96,7 +97,7 @@ describe('ExportPlayableHtmlCommand', () => {
       buildPlayableHtml: vi.fn(async () => createBuildArtifact()),
     };
     const dialogService = {
-      showConfirmation: vi.fn(async () => true),
+      showConfirmation: vi.fn(async (_options: DialogOptions) => true),
     };
     const playableExportDialogService = {
       showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
@@ -111,7 +112,7 @@ describe('ExportPlayableHtmlCommand', () => {
       error: vi.fn(),
       warn: vi.fn(),
     };
-    const write = vi.fn(async () => undefined);
+    const write = vi.fn(async (_data: unknown) => undefined);
     const close = vi.fn(async () => undefined);
     const createWritable = vi.fn(async () => ({ write, close }));
     const showSaveFilePicker = vi.fn(async () => ({
@@ -182,9 +183,15 @@ describe('ExportPlayableHtmlCommand', () => {
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
     expect(close).toHaveBeenCalledTimes(1);
-    expect(dialogService.showConfirmation).toHaveBeenCalledWith(
+
+    // The bundle is built first, then a "Save File" confirmation is surfaced,
+    // and only then is the picker invoked from within that click's gesture.
+    expect(dialogService.showConfirmation).toHaveBeenCalledTimes(2);
+    const readyCall = dialogService.showConfirmation.mock.calls[0]?.[0];
+    expect(readyCall).toEqual(
       expect.objectContaining({
-        title: 'Playable HTML Exported',
+        title: 'Playable HTML Ready',
+        confirmLabel: 'Save File',
         message: expect.stringContaining('Bundle size report:'),
         expandableSection: {
           title: 'Embedded assets by source size',
@@ -193,11 +200,18 @@ describe('ExportPlayableHtmlCommand', () => {
         },
       })
     );
-    expect(dialogService.showConfirmation.mock.calls[0]?.[0]?.message).toContain(
-      'Output HTML: 1.00 KiB (1024 bytes)'
+    expect(readyCall?.message).toContain('Output HTML: 1.00 KiB (1024 bytes)');
+    expect(readyCall?.message).not.toContain('src/assets/textures/avatar.png');
+    expect(dialogService.showConfirmation.mock.invocationCallOrder[0]).toBeLessThan(
+      showSaveFilePicker.mock.invocationCallOrder[0]
     );
-    expect(dialogService.showConfirmation.mock.calls[0]?.[0]?.message).not.toContain(
-      'src/assets/textures/avatar.png'
+    expect(showSaveFilePicker.mock.invocationCallOrder[0]).toBeLessThan(
+      dialogService.showConfirmation.mock.invocationCallOrder[1]
+    );
+    expect(dialogService.showConfirmation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: 'Playable HTML Exported',
+      })
     );
     expect(result.didMutate).toBe(false);
   });
@@ -266,7 +280,11 @@ describe('ExportPlayableHtmlCommand', () => {
     expect(playableExportProgressDialogService.showDialog).toHaveBeenCalledTimes(1);
     expect(playableExportProgressDialogService.close).toHaveBeenCalledTimes(1);
     expect(loggingService.warn).toHaveBeenCalledWith('[Playable Export] warning');
-    expect(dialogService.showConfirmation).toHaveBeenCalledTimes(1);
+    // Once for the "Save File" prompt, once for the completion confirmation.
+    expect(dialogService.showConfirmation).toHaveBeenCalledTimes(2);
+    expect(dialogService.showConfirmation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'Playable HTML Exported' })
+    );
   });
 
   it('treats save picker abort as a cancelled export', async () => {
@@ -336,9 +354,90 @@ describe('ExportPlayableHtmlCommand', () => {
     expect(result.didMutate).toBe(false);
     expect(playableExportProgressDialogService.showDialog).toHaveBeenCalledTimes(1);
     expect(playableExportProgressDialogService.close).toHaveBeenCalledTimes(1);
-    expect(dialogService.showConfirmation).not.toHaveBeenCalled();
+    // Only the "Save File" prompt is shown; the picker abort skips the
+    // completion confirmation.
+    expect(dialogService.showConfirmation).toHaveBeenCalledTimes(1);
+    expect(dialogService.showConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Playable HTML Ready' })
+    );
     expect(loggingService.info).toHaveBeenCalledWith(
       '[Playable Export] Export cancelled during file selection'
+    );
+  });
+
+  it('cancels without opening the picker when the save prompt is dismissed', async () => {
+    const command = new ExportPlayableHtmlCommand();
+    const buildService = {
+      buildPlayableHtml: vi.fn(async () => createBuildArtifact()),
+    };
+    const dialogService = {
+      showConfirmation: vi.fn(async () => false),
+    };
+    const playableExportDialogService = {
+      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+    };
+    const playableExportProgressDialogService = {
+      showDialog: vi.fn(),
+      close: vi.fn(),
+    };
+    const loggingService = {
+      info: vi.fn(),
+      debug: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+    };
+    const showSaveFilePicker = vi.fn(async () => ({
+      name: 'Demo.html',
+      createWritable: vi.fn(),
+    }));
+
+    Object.defineProperty(window, 'showSaveFilePicker', {
+      value: showSaveFilePicker,
+      configurable: true,
+    });
+
+    Object.defineProperty(command, 'playableHtmlBuildService', {
+      value: buildService,
+      configurable: true,
+    });
+    Object.defineProperty(command, 'dialogService', {
+      value: dialogService,
+      configurable: true,
+    });
+    Object.defineProperty(command, 'playableExportDialogService', {
+      value: playableExportDialogService,
+      configurable: true,
+    });
+    Object.defineProperty(command, 'playableExportProgressDialogService', {
+      value: playableExportProgressDialogService,
+      configurable: true,
+    });
+    Object.defineProperty(command, 'loggingService', {
+      value: loggingService,
+      configurable: true,
+    });
+
+    const context = createContext({
+      project: { status: 'ready', projectName: 'Demo Project' },
+      scenes: {
+        descriptors: {
+          scene1: { filePath: 'scenes/main.pix3scene' },
+        },
+        activeSceneId: 'scene1',
+      },
+    });
+
+    const result = await command.execute(context);
+
+    expect(result.didMutate).toBe(false);
+    expect(buildService.buildPlayableHtml).toHaveBeenCalledTimes(1);
+    expect(showSaveFilePicker).not.toHaveBeenCalled();
+    expect(dialogService.showConfirmation).toHaveBeenCalledTimes(1);
+    expect(dialogService.showConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Playable HTML Ready' })
+    );
+    expect(loggingService.info).toHaveBeenCalledWith(
+      '[Playable Export] Export cancelled before saving'
     );
   });
 
