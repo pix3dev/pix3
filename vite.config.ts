@@ -55,6 +55,11 @@ export default defineConfig(async ({ mode }) => {
         },
       },
     },
+    // ES worker format is required: the background-removal worker uses dynamic import()
+    // (code-splitting) to lazy-load its engine libraries, which the default IIFE format rejects.
+    worker: {
+      format: 'es',
+    },
     server: {
       port: 8123,
       fs: {

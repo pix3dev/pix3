@@ -62,6 +62,7 @@ import { ExportPlayableHtmlCommand } from '@/features/project/ExportPlayableHtml
 import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
+import { OpenAssetGeneratorCommand } from '@/features/editor/OpenAssetGeneratorCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
@@ -324,6 +325,7 @@ export class Pix3EditorShell extends ComponentBase {
     const newProjectCommand = new NewProjectCommand();
     const closeProjectCommand = new CloseProjectCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
+    const openAssetGeneratorCommand = new OpenAssetGeneratorCommand();
 
     // Register viewport commands
     const selectModeCommand = new SetTransformModeCommand('select');
@@ -362,6 +364,7 @@ export class Pix3EditorShell extends ComponentBase {
       restartGameCommand,
       openGamePopoutWindowCommand,
       editorSettingsCommand,
+      openAssetGeneratorCommand,
       newProjectCommand,
       closeProjectCommand,
       projectSettingsCommand,

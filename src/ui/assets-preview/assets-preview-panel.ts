@@ -14,6 +14,8 @@ import {
   ASSET_RESOURCE_MIME,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
+import { EditorTabService } from '@/services/EditorTabService';
+import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import './assets-preview-panel.ts.css';
 import '../shared/pix3-panel';
 
@@ -28,6 +30,9 @@ export class AssetsPreviewPanel extends ComponentBase {
   @inject(IconService)
   private readonly iconService!: IconService;
 
+  @inject(EditorTabService)
+  private readonly editorTabService!: EditorTabService;
+
   @state()
   private snapshot: AssetsPreviewSnapshot = {
     selectedFolderPath: null,
@@ -39,9 +44,23 @@ export class AssetsPreviewPanel extends ComponentBase {
     items: [],
   };
 
+  @state()
+  private contextMenu: { item: AssetPreviewItem; x: number; y: number } | null = null;
+
   private disposePreviewSubscription?: () => void;
   private selectedPaths = new Set<string>();
   private lastSelectedPath: string | null = null;
+  private readonly contextMenuPortal = new DropdownPortal({ minWidth: '13rem' });
+  private readonly onGlobalPointerDown = (event: PointerEvent): void => {
+    if (this.contextMenu && !this.contextMenuPortal.contains(event.target as Node)) {
+      this.closeContextMenu();
+    }
+  };
+  private readonly onGlobalKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      this.closeContextMenu();
+    }
+  };
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -49,12 +68,28 @@ export class AssetsPreviewPanel extends ComponentBase {
       this.snapshot = snapshot;
       this.requestUpdate();
     });
+    window.addEventListener('pointerdown', this.onGlobalPointerDown, true);
+    window.addEventListener('keydown', this.onGlobalKeyDown);
   }
 
   disconnectedCallback(): void {
     this.disposePreviewSubscription?.();
     this.disposePreviewSubscription = undefined;
+    window.removeEventListener('pointerdown', this.onGlobalPointerDown, true);
+    window.removeEventListener('keydown', this.onGlobalKeyDown);
+    this.contextMenuPortal.close();
     super.disconnectedCallback();
+  }
+
+  protected updated(): void {
+    if (this.contextMenu && !this.contextMenuPortal.isOpen()) {
+      const menu = this.querySelector<HTMLElement>('.assets-preview-context-menu');
+      if (menu) {
+        this.contextMenuPortal.openAt(this.contextMenu.x, this.contextMenu.y, menu);
+      }
+    } else if (!this.contextMenu && this.contextMenuPortal.isOpen()) {
+      this.contextMenuPortal.close();
+    }
   }
 
   protected render() {
@@ -74,8 +109,50 @@ export class AssetsPreviewPanel extends ComponentBase {
                     ${this.snapshot.items.map(item => this.renderItem(item))}
                   </div>`}
         </div>
+        ${this.renderContextMenu()}
       </pix3-panel>
     `;
+  }
+
+  private renderContextMenu() {
+    if (!this.contextMenu) {
+      return null;
+    }
+    const item = this.contextMenu.item;
+    return html`
+      <div
+        class="assets-preview-context-menu"
+        role="menu"
+        @click=${(event: Event) => event.stopPropagation()}
+      >
+        <button type="button" role="menuitem" @click=${() => this.openInAssetGenerator(item)}>
+          Open in Asset Generator
+        </button>
+      </div>
+    `;
+  }
+
+  private onItemContextMenu(event: MouseEvent, item: AssetPreviewItem): void {
+    if (item.kind !== 'file' || item.previewType !== 'image') {
+      this.closeContextMenu();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.updateSelectionFromClick(event, item);
+    this.assetsPreviewService.selectItem(item.path);
+    this.contextMenu = { item, x: event.clientX, y: event.clientY };
+  }
+
+  private closeContextMenu(): void {
+    if (this.contextMenu) {
+      this.contextMenu = null;
+    }
+  }
+
+  private openInAssetGenerator(item: AssetPreviewItem): void {
+    this.closeContextMenu();
+    void this.editorTabService.focusOrOpenAssetGenerator(toProjectResourcePath(item.path));
   }
 
   private renderItem(item: AssetPreviewItem) {
@@ -89,6 +166,7 @@ export class AssetsPreviewPanel extends ComponentBase {
         @dblclick=${() => {
           void this.onItemDoubleClick(item);
         }}
+        @contextmenu=${(event: MouseEvent) => this.onItemContextMenu(event, item)}
         @dragstart=${(event: DragEvent) => this.onItemDragStart(event, item)}
       >
         <span class="thumb">

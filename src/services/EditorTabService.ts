@@ -89,16 +89,21 @@ export class EditorTabService {
         if (!projectId) return;
 
         const filteredTabs = appState.tabs.tabs.filter(
-          t => !t.resourceId.startsWith('templ://') && t.type !== 'game'
+          t =>
+            !t.resourceId.startsWith('templ://') &&
+            t.type !== 'game' &&
+            t.type !== 'asset-generator'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
         const activeTab = appState.tabs.tabs.find(t => t.id === savedActiveTabId);
 
-        // If the active tab is excluded (like game tab), use the previous active tab
+        // If the active tab is excluded (like game / asset-generator tabs), use a persisted tab
         if (
           activeTab &&
-          (activeTab.resourceId.startsWith('templ://') || activeTab.type === 'game')
+          (activeTab.resourceId.startsWith('templ://') ||
+            activeTab.type === 'game' ||
+            activeTab.type === 'asset-generator')
         ) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
@@ -233,6 +238,25 @@ export class EditorTabService {
     await this.openResourceTab('code', resourcePath);
   }
 
+  /**
+   * Open the Asset Generator editor. With `imageResourcePath` the generator opens bound to that
+   * image (context menu on an asset); without it, opens an empty generator (main menu). The empty
+   * generator uses a synthetic resource id so repeated opens re-focus the single instance.
+   */
+  async focusOrOpenAssetGenerator(imageResourcePath?: string): Promise<void> {
+    if (imageResourcePath) {
+      await this.openResourceTab(
+        'asset-generator',
+        imageResourcePath,
+        {},
+        true,
+        this.deriveTitle(imageResourcePath)
+      );
+      return;
+    }
+    await this.openResourceTab('asset-generator', 'asset-generator://new', {}, true, 'Asset Generator');
+  }
+
   remapSceneTabs(remapResourcePath: (resourcePath: string) => string | null): void {
     let didChange = false;
     let nextActiveTabId = appState.tabs.activeTabId;
@@ -318,6 +342,7 @@ export class EditorTabService {
       ).filter((t: { resourceId: string; type: string }) => {
         if (t.resourceId.startsWith('templ://')) return false;
         if (t.type === 'game') return false;
+        if (t.type === 'asset-generator') return false;
         return true;
       });
 

@@ -24,6 +24,8 @@
   "dependencies": {
     "@dimforge/rapier3d": "^0.19.3",
     "@hocuspocus/provider": "^2.15.0",
+    "@huggingface/transformers": "^4.2.0",
+    "@imgly/background-removal": "^1.7.0",
     "esbuild-wasm": "^0.24.0",
     "feather-icons": "^4.29.2",
     "golden-layout": "^2.6.0",

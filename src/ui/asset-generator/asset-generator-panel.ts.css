@@ -1,0 +1,621 @@
+pix3-asset-generator-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+pix3-asset-generator-panel .asset-generator {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--pix3-bg-primary, #1e1e1e);
+  color: var(--pix3-text-primary, #fff);
+  font-size: 0.9rem;
+}
+
+/* Toolbar --------------------------------------------------------------- */
+pix3-asset-generator-panel .ag-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--pix3-border, #333);
+  background: var(--pix3-bg-secondary, #262626);
+}
+
+pix3-asset-generator-panel .ag-title {
+  font-weight: 600;
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-asset-generator-panel .ag-model-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid var(--pix3-border, #333);
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+pix3-asset-generator-panel .ag-model-readout:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+pix3-asset-generator-panel .ag-model-readout-sep {
+  opacity: 0.5;
+}
+
+pix3-asset-generator-panel .ag-gear {
+  margin-left: 0.25rem;
+  opacity: 0.7;
+}
+
+pix3-asset-generator-panel .ag-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+pix3-asset-generator-panel .ag-bg-quality {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--pix3-text-muted, #999);
+}
+
+pix3-asset-generator-panel select,
+pix3-asset-generator-panel input[type='text'],
+pix3-asset-generator-panel textarea {
+  background: var(--pix3-bg-primary, #1e1e1e);
+  color: var(--pix3-text-primary, #fff);
+  border: 1px solid var(--pix3-border, #444);
+  border-radius: 4px;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
+pix3-asset-generator-panel .ag-toolbar-button,
+pix3-asset-generator-panel .ag-action-button {
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  border: 1px solid var(--pix3-border, #444);
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.15s;
+}
+
+pix3-asset-generator-panel .ag-toolbar-button:hover:not(:disabled),
+pix3-asset-generator-panel .ag-action-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+pix3-asset-generator-panel button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Workspace ------------------------------------------------------------- */
+pix3-asset-generator-panel .ag-workspace {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+pix3-asset-generator-panel .ag-sidebar {
+  flex: 0 0 320px;
+  width: 320px;
+  overflow-y: auto;
+  padding: 0.85rem;
+  border-right: 1px solid var(--pix3-border, #333);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+pix3-asset-generator-panel .ag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+pix3-asset-generator-panel .ag-field-label {
+  font-size: 0.78rem;
+  color: var(--pix3-text-muted, #999);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
+pix3-asset-generator-panel .ag-prompt-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pix3-border, #444);
+  border-radius: 8px;
+  background: var(--pix3-bg-primary, #1e1e1e);
+  overflow: visible;
+}
+
+pix3-asset-generator-panel .ag-prompt-box:focus-within {
+  border-color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-asset-generator-panel .ag-prompt {
+  resize: vertical;
+  min-height: 4.5rem;
+  max-height: 14rem;
+  border: none;
+  background: transparent;
+  border-radius: 8px 8px 0 0;
+}
+
+pix3-asset-generator-panel .ag-prompt:focus {
+  outline: none;
+}
+
+pix3-asset-generator-panel .ag-prompt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border-top: 1px solid var(--pix3-border, #444);
+}
+
+pix3-asset-generator-panel .ag-prompt-spacer {
+  flex: 1 1 auto;
+}
+
+pix3-asset-generator-panel .ag-key-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+pix3-asset-generator-panel .ag-key-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--pix3-border, #444);
+  background: var(--pix3-bg-secondary, #262626);
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+pix3-asset-generator-panel .ag-key-button.is-connected {
+  border-color: #66d19e;
+  background: rgba(80, 200, 120, 0.14);
+}
+
+pix3-asset-generator-panel .ag-model-select {
+  max-width: 12rem;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-prompt-toolbar .ag-generate-button {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.9rem;
+}
+
+/* Quick-settings popover anchored above the key button. */
+pix3-asset-generator-panel .ag-key-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 300px;
+  max-width: 80vw;
+  padding: 0.85rem;
+  border-radius: 8px;
+  background: var(--pix3-bg-secondary, #262626);
+  border: 1px solid var(--pix3-border, #444);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  z-index: 20;
+}
+
+pix3-asset-generator-panel .ag-popover-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--pix3-text-primary, #fff);
+}
+
+pix3-asset-generator-panel .ag-key-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+pix3-asset-generator-panel .ag-key-status {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+pix3-asset-generator-panel .ag-key-status.is-set {
+  background: rgba(80, 200, 120, 0.18);
+  color: #66d19e;
+}
+
+pix3-asset-generator-panel .ag-key-status.is-unset {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--pix3-text-muted, #888);
+}
+
+pix3-asset-generator-panel .ag-key-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+pix3-asset-generator-panel .ag-key-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-asset-generator-panel .ag-key-row button {
+  padding: 0.4rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid var(--pix3-border, #444);
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+pix3-asset-generator-panel .ag-key-row .ag-key-save {
+  border-color: var(--pix3-accent-color, #ffcf33);
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-asset-generator-panel .ag-key-row button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+pix3-asset-generator-panel .ag-popover-hint {
+  font-size: 0.75rem;
+  color: var(--pix3-text-muted, #888);
+  line-height: 1.4;
+}
+
+pix3-asset-generator-panel .ag-popover-hint a {
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-asset-generator-panel .ag-field-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+pix3-asset-generator-panel .ag-field-row .ag-field {
+  flex: 1 1 0;
+}
+
+/* References ------------------------------------------------------------ */
+pix3-asset-generator-panel .ag-references {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-references-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+pix3-asset-generator-panel .ag-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-reference {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--pix3-border, #444);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #0000;
+}
+
+pix3-asset-generator-panel .ag-reference img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+pix3-asset-generator-panel .ag-reference-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-asset-generator-panel .ag-references-hint,
+pix3-asset-generator-panel .ag-hint {
+  font-size: 0.75rem;
+  color: var(--pix3-text-muted, #777);
+}
+
+pix3-asset-generator-panel .ag-link-button {
+  background: none;
+  border: none;
+  color: var(--pix3-accent-color, #ffcf33);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+/* Generate -------------------------------------------------------------- */
+pix3-asset-generator-panel .ag-warning {
+  padding: 0.5rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255, 207, 51, 0.12);
+  color: var(--pix3-accent-color, #ffcf33);
+  font-size: 0.8rem;
+}
+
+pix3-asset-generator-panel .ag-generate-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+pix3-asset-generator-panel .ag-generate-button {
+  flex: 1 1 auto;
+  padding: 0.55rem 1rem;
+  border-radius: 4px;
+  border: none;
+  background: var(--pix3-accent-color, #ffcf33);
+  color: #000;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+pix3-asset-generator-panel .ag-generate-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+pix3-asset-generator-panel .ag-cancel-button {
+  padding: 0.55rem 0.9rem;
+  border-radius: 4px;
+  border: 1px solid var(--pix3-border, #444);
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+}
+
+pix3-asset-generator-panel .ag-error {
+  font-size: 0.8rem;
+  color: #ff6b6b;
+  white-space: pre-wrap;
+}
+
+pix3-asset-generator-panel .ag-success {
+  font-size: 0.8rem;
+  color: #66d19e;
+}
+
+/* Main / stage ---------------------------------------------------------- */
+pix3-asset-generator-panel .ag-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+pix3-asset-generator-panel .ag-stage {
+  flex: 1 1 auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 1rem;
+  background-color: #2b2b2b;
+  background-image:
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
+    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+
+pix3-asset-generator-panel .ag-stage-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+pix3-asset-generator-panel .ag-empty {
+  text-align: center;
+  color: var(--pix3-text-muted, #888);
+  max-width: 320px;
+}
+
+pix3-asset-generator-panel .ag-empty-title {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+  color: var(--pix3-text-secondary, #ccc);
+}
+
+pix3-asset-generator-panel .ag-empty-body {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+pix3-asset-generator-panel .ag-progress {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+pix3-asset-generator-panel .ag-progress-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  background: var(--pix3-bg-secondary, #262626);
+  border: 1px solid var(--pix3-border, #444);
+  font-size: 0.85rem;
+}
+
+pix3-asset-generator-panel .ag-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--pix3-accent-color, #ffcf33);
+  border-radius: 50%;
+  animation: ag-spin 0.8s linear infinite;
+}
+
+@keyframes ag-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+pix3-asset-generator-panel .ag-stage-error {
+  padding: 0.4rem 1rem;
+}
+
+/* Actions --------------------------------------------------------------- */
+pix3-asset-generator-panel .ag-actions {
+  flex: 0 0 auto;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--pix3-border, #333);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+pix3-asset-generator-panel .ag-save-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+pix3-asset-generator-panel .ag-save-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-asset-generator-panel .ag-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* History --------------------------------------------------------------- */
+pix3-asset-generator-panel .ag-history {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--pix3-border, #333);
+  padding: 0.5rem 0.75rem;
+  background: var(--pix3-bg-secondary, #262626);
+}
+
+pix3-asset-generator-panel .ag-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-history-strip {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+pix3-asset-generator-panel .ag-history-card {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+pix3-asset-generator-panel .ag-history-thumb {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--pix3-border, #444);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #2b2b2b;
+}
+
+pix3-asset-generator-panel .ag-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+pix3-asset-generator-panel .ag-history-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Drag overlay ---------------------------------------------------------- */
+pix3-asset-generator-panel .asset-generator.is-drag-active {
+  outline: 2px dashed var(--pix3-accent-color, #ffcf33);
+  outline-offset: -4px;
+}
+
+pix3-asset-generator-panel .ag-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 207, 51, 0.1);
+  color: var(--pix3-accent-color, #ffcf33);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 5;
+}

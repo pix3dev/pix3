@@ -17,7 +17,8 @@ export type EditorTabType =
   | 'texture'
   | 'animation'
   | 'game'
-  | 'code';
+  | 'code'
+  | 'asset-generator';
 
 export interface CodeEditorSelectionState {
   startLineNumber: number;

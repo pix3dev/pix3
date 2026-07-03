@@ -23,6 +23,7 @@ const PANEL_COMPONENT_TYPES = {
   game: 'game',
   code: 'code',
   runtime: 'runtime',
+  assetGenerator: 'asset-generator',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -40,6 +41,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
+  [PANEL_COMPONENT_TYPES.assetGenerator]: 'pix3-asset-generator-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -55,6 +57,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.game]: 'Game',
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
+  [PANEL_COMPONENT_TYPES.assetGenerator]: 'Asset Generator',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -335,7 +338,9 @@ export class LayoutManagerService {
               ? PANEL_COMPONENT_TYPES.animation
               : tab.type === 'code'
                 ? PANEL_COMPONENT_TYPES.code
-                : PANEL_COMPONENT_TYPES.viewport,
+                : tab.type === 'asset-generator'
+                  ? PANEL_COMPONENT_TYPES.assetGenerator
+                  : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
         // PREVENT DRAGGING to enforce Single Document Interface
@@ -546,7 +551,8 @@ export class LayoutManagerService {
       componentType === PANEL_COMPONENT_TYPES.viewport ||
       componentType === PANEL_COMPONENT_TYPES.animation ||
       componentType === PANEL_COMPONENT_TYPES.game ||
-      componentType === PANEL_COMPONENT_TYPES.code
+      componentType === PANEL_COMPONENT_TYPES.code ||
+      componentType === PANEL_COMPONENT_TYPES.assetGenerator
     );
   }
 
@@ -726,6 +732,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.runtime) {
           void import('@/ui/runtime/runtime-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.assetGenerator) {
+          void import('@/ui/asset-generator/asset-generator-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;
