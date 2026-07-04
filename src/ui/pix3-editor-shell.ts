@@ -63,6 +63,8 @@ import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenAssetGeneratorCommand } from '@/features/editor/OpenAssetGeneratorCommand';
+import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
+import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
@@ -326,6 +328,8 @@ export class Pix3EditorShell extends ComponentBase {
     const closeProjectCommand = new CloseProjectCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openAssetGeneratorCommand = new OpenAssetGeneratorCommand();
+    const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
+    const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
 
     // Register viewport commands
     const selectModeCommand = new SetTransformModeCommand('select');
@@ -365,6 +369,8 @@ export class Pix3EditorShell extends ComponentBase {
       openGamePopoutWindowCommand,
       editorSettingsCommand,
       openAssetGeneratorCommand,
+      focusAnimationTimelineCommand,
+      addAnimationPlayerCommand,
       newProjectCommand,
       closeProjectCommand,
       projectSettingsCommand,

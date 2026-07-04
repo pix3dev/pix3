@@ -478,7 +478,7 @@ function createBridge(): Pix3DebugBridge {
           'Summary of collider wireframe buffers exposed by the running game (counts only).',
         'play.status() / play.start() / play.stop() / play.restart()': 'Play-mode control.',
         'setProperty({nodeId,propertyPath,value})': 'Edit a property (undoable).',
-        'command(id)': "Run a command by id, e.g. 'history.undo'.",
+        'command(id)': "Run a command by id, e.g. 'edit.undo'.",
         'components(id)': 'Script components attached to a node.',
         'errors() / clearErrors()': 'Captured console/runtime errors (ring buffer).',
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',

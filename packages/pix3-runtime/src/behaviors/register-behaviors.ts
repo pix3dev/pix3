@@ -14,6 +14,7 @@ import { FollowBehavior } from './FollowBehavior';
 import { FadeBehavior } from './FadeBehavior';
 import { RadialProgressBehavior } from './RadialProgressBehavior';
 import { PlaySoundBehavior } from './PlaySoundBehavior';
+import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
 
 /**
  * Register all built-in script components
@@ -81,6 +82,15 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'UI',
     componentClass: RadialProgressBehavior,
     keywords: ['radial', 'progress', 'bar', 'circle', 'mask', 'ui'],
+  });
+
+  registry.registerComponent({
+    id: 'core:AnimationPlayer',
+    displayName: 'Animation Player',
+    description: 'Plays keyframe animation clips on this node and its descendants',
+    category: 'Animation',
+    componentClass: AnimationPlayerBehavior,
+    keywords: ['animation', 'keyframe', 'tween', 'timeline', 'player', 'clip'],
   });
 
   registry.registerComponent({

@@ -68,6 +68,12 @@ export * from './behaviors/PinToNodeBehavior';
 export * from './behaviors/FadeBehavior';
 export * from './behaviors/PlaySoundBehavior';
 
+// Keyframe animation
+export * from './animation/easing';
+export * from './animation/keyframe-types';
+export * from './animation/clip-evaluator';
+export * from './animation/AnimationPlayerBehavior';
+
 // Framework
 export * from './fw/property-schema';
 export * from './fw/property-schema-utils';

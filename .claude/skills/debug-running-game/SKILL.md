@@ -63,7 +63,7 @@ for the live list. Summary:
 | `play.status()` | `{isPlaying, playModeStatus}`. |
 | `play.start()` / `play.stop()` / `play.restart()` | Drive play mode via the `game.*` commands. |
 | `setProperty({nodeId, propertyPath, value})` | Edit a property — **undoable**. |
-| `command(id)` | Run any registered command by id (e.g. `history.undo`). |
+| `command(id)` | Run any registered command by id (e.g. `edit.undo`). |
 | `components(id)` | Script components on a node (`className`, `scriptId`, `state`). |
 | `errors()` / `clearErrors()` | Captured `console.error` / `window.onerror` / unhandled-rejection ring buffer (last 200). |
 | `physicsDebug()` | Collider-wireframe overlay status: `{available, enabled, bodies, vertexCount, segments}` — or `null` when the game registered no source. Counts only; the raw buffers stay live for rendering. |
@@ -124,7 +124,7 @@ async () => window.__PIX3_DEBUG__.setProperty({
 })
 ```
 `propertyPath` is the inspector property name (e.g. `position`, `opacity`,
-`text`). To undo: `() => window.__PIX3_DEBUG__.command('history.undo')`.
+`text`). To undo: `() => window.__PIX3_DEBUG__.command('edit.undo')`.
 
 **See it** — pair data with a `take_screenshot` of the viewport to confirm
 visual state, and `take_snapshot` for the DOM/a11y tree of editor chrome.

@@ -18,6 +18,7 @@ const PANEL_COMPONENT_TYPES = {
   assetBrowser: 'asset-browser',
   assetsPreview: 'assets-preview',
   animation: 'animation',
+  animationTimeline: 'animation-timeline',
   logs: 'logs',
   background: 'background',
   game: 'game',
@@ -36,6 +37,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.assetBrowser]: 'pix3-asset-browser-panel',
   [PANEL_COMPONENT_TYPES.assetsPreview]: 'pix3-assets-preview-panel',
   [PANEL_COMPONENT_TYPES.animation]: 'pix3-animation-panel',
+  [PANEL_COMPONENT_TYPES.animationTimeline]: 'pix3-animation-timeline-panel',
   [PANEL_COMPONENT_TYPES.logs]: 'pix3-logs-panel',
   [PANEL_COMPONENT_TYPES.background]: 'pix3-background',
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
@@ -52,6 +54,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.assetBrowser]: 'Asset Browser',
   [PANEL_COMPONENT_TYPES.assetsPreview]: 'Assets Preview',
   [PANEL_COMPONENT_TYPES.animation]: 'Animation',
+  [PANEL_COMPONENT_TYPES.animationTimeline]: 'Animation',
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
   [PANEL_COMPONENT_TYPES.background]: 'Pix3',
   [PANEL_COMPONENT_TYPES.game]: 'Game',
@@ -68,6 +71,7 @@ const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   assetBrowser: true,
   assetsPreview: true,
   animation: false,
+  animationTimeline: true,
   logs: true,
 };
 
@@ -142,6 +146,12 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
                 componentType: PANEL_COMPONENT_TYPES.assetsPreview,
                 title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assetsPreview],
                 isClosable: false,
+              },
+              {
+                type: 'component',
+                componentType: PANEL_COMPONENT_TYPES.animationTimeline,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.animationTimeline],
+                isClosable: true,
               },
               {
                 type: 'component',
@@ -693,6 +703,7 @@ export class LayoutManagerService {
         previousPanelVisibility.assetBrowser === nextPanelVisibility.assetBrowser &&
         previousPanelVisibility.assetsPreview === nextPanelVisibility.assetsPreview &&
         previousPanelVisibility.animation === nextPanelVisibility.animation &&
+        previousPanelVisibility.animationTimeline === nextPanelVisibility.animationTimeline &&
         previousPanelVisibility.logs === nextPanelVisibility.logs
       ) ||
       previousFocusedPanelId !== nextFocusedPanelId;
@@ -735,6 +746,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.assetGenerator) {
           void import('@/ui/asset-generator/asset-generator-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.animationTimeline) {
+          void import('@/ui/animation-timeline/animation-timeline-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;

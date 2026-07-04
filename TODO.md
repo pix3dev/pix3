@@ -4,7 +4,7 @@
 - [ ] move to constuctor injection in classes
 
 ## Редактор (Editor)
-- [ ] add transform animation timeline editor for nodes and tween animation support (Сложность: L)
+- [x] add transform animation timeline editor for nodes and tween animation support (Сложность: L)
 - [ ] add animation editor for animated sprites (Сложность: L)
 - [ ] add image compression option (Сложность: M)
 - [ ] add glb inspector, that will show how different parts of model affect size (Сложность: M)

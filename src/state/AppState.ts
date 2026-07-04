@@ -256,6 +256,7 @@ export interface PanelVisibilityState {
   assetBrowser: boolean;
   assetsPreview: boolean;
   animation: boolean;
+  animationTimeline: boolean;
   logs: boolean;
 }
 
@@ -519,6 +520,7 @@ export const createInitialAppState = (): AppState => ({
       assetBrowser: true,
       assetsPreview: true,
       animation: true,
+      animationTimeline: true,
       logs: true,
     },
     navigationMode: '3d',

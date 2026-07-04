@@ -1,8 +1,8 @@
 # Pix3 — Technical Specification
 
-Version: 1.15
+Version: 1.16
 
-Date: 2026-02-26
+Date: 2026-07-04
 
 ## 1. Introduction
 
@@ -645,6 +645,27 @@ The scene tree displays visual badges for prefab nodes:
 4. All instances referencing that prefab are rebuilt
 5. Property overrides are preserved during refresh
 
+## 6.16 Keyframe Animation System
+
+Godot/Unity-style keyframe animation of node properties with tweened interpolation and audio cues. Runtime lives in `packages/pix3-runtime/src/animation/`; the editor UI is the bottom-docked **Animation** timeline panel (`animation-timeline`).
+
+### 6.16.1 Runtime Model
+
+- **`core:AnimationPlayer`** is a built-in script component (`AnimationPlayerBehavior`), registered like other behaviors. It plays clips on its host node and the host's descendants.
+- Clip data lives in the component's `config.animations` (`KeyframeAnimationSet`), so it serializes with the scene verbatim — no SceneLoader/SceneSaver changes, and collaboration sync rides along with scene snapshots.
+- Data model (`animation/keyframe-types.ts`, all plain JSON): `KeyframeAnimationSet { version, clips[] }` → `KeyframeClip { name, duration, loop, tracks[] }` → property tracks (`{ targetPath, property, valueType, keys: [{ time, value, easing }] }`) and audio tracks (`{ keys: [{ time, audioPath, volume }] }`). Vector values are stored as arrays (`[x, y]`, `[x, y, z]`); rotations are stored in **degrees** (the property schema converts to radians internally). `normalizeKeyframeAnimationSet()` defensively coerces arbitrary data; the component's hidden `animations` schema property applies it on scene load.
+- **Track targeting** uses relative name paths from the host node (`''` = host itself, `'Child/GrandChild'` with `findByPath` semantics). Name paths survive prefab instancing (node ids are regenerated on instantiation, names are not); renaming a targeted node breaks the track and surfaces a warning icon in the timeline.
+- **Evaluation** (`animation/clip-evaluator.ts`): pure sampling (`sampleTrack`, hold semantics outside the key range, per-segment easing from the left key) plus a node-applying layer (`createClipBindings` resolves targets/schema once, `applyClipAtTime` writes through `PropertyDefinition.setValue`). Easing curves (`animation/easing.ts`): `linear`, `step`, and Penner sine/quad/cubic/expo/back/elastic/bounce × in/out/inOut. Discrete types (boolean/string) always step. Colors interpolate per sRGB channel.
+- **Playback**: `onUpdate(dt)` advances time × `speed`, applies the pose, and fires audio keys crossed in `(prev, next]` (shared boundary rule in `collectAudioKeysInRange`, loop-wrap aware). Non-looping clips clamp to the final pose and emit `animation_finished` on the host node; `play()` emits `animation_started`. Public API: `play(clipName?)`, `stop()`, `pause()/resume()`, `seek(t)`, `currentTime`, `duration`, `isPlaying`, `getAnimationSet()`, `invalidateBindings()`. `autoplay` config starts a clip in `onStart`.
+
+### 6.16.2 Editor
+
+- **Panel**: `pix3-animation-timeline-panel`, docked in the bottom stack next to Assets Preview/Logs. It binds to the `core:AnimationPlayer` of the selected node or its nearest ancestor; empty states offer adding the component (seeded with one clip) and creating clips. Toolbar: clip selector + clip actions (new/rename/duplicate/delete), preview transport, playhead readout, clip duration, loop, snap toggle + step, zoom, Add Track, add/delete key, easing selector for the selection.
+- **Editing** flows through a single operation, `animation-timeline.update-clips` (`UpdateAnimationPlayerClipsOperation`): an updater closure mutates a normalized draft of the set; undo/redo restore whole-set snapshots. Key drags commit per pointer-move with an `options.coalesceKey` plus the drag-start set as `previousSet`, so one history entry spans the whole drag. Pure helpers live in `features/animation-timeline/clip-edit-utils.ts`.
+- **Add Track** lists the host subtree with computed relative paths (ambiguous sibling names flagged), then the target's animatable schema properties (number/vector2/vector3/euler/color/boolean/string, minus hidden/read-only/already-tracked). New tracks seed a key at t=0 from the node's live value; "Add Key" captures the sampled value between keys or the live value on empty tracks. Audio keys are created by dragging audio assets onto an audio track lane.
+- **Preview** (`AnimationTimelinePreviewService`): scrubbing/playback samples clips onto live nodes **without** dirtying the scene, touching history, or bumping `nodeDataChangeSignal`. Original values are snapshotted per animated property on session start and restored on stop. Guards via `OperationService` events: scene saves restore authored values before serialization and re-apply after; undo/redo or any foreign mutating operation (including play-mode start) ends the preview; the panel's own clip edits refresh bindings in place. Audio keys are audible during preview playback (not while scrubbing).
+- Panel-local shortcuts (local keydown listener, not global keybindings): Space play/pause, Delete removes selected keys, arrows nudge keys/playhead by the snap step (Shift ×5), Home/End jump the playhead.
+
 ## 7. Scene File Format (\*.pix3scene)
 
 The scene file uses the YAML format to ensure readability for both humans and machines (including AI agents).
@@ -884,3 +905,4 @@ root:
 - **1.13 (2026-02-03):** Added Layout2D Node System section (6.5). Implemented Layout2D node class in `packages/pix3-runtime/src/nodes/2D/Layout2D.ts` with properties for width, height, resolutionPreset, and showViewportOutline. Added Layout2D YAML parsing support in SceneLoader with Layout2DProperties interface. Modified SceneManager to add `skipLayout2D` parameter to `resizeRoot()` and `findLayout2D()` helper method. Created CreateLayout2DCommand/Operation and UpdateLayout2DSizeCommand/Operation for mutation support. Updated ViewportRenderService with `layout2dVisuals` map, `createLayout2DVisual()` method (purple dashed border), and Layout2D handling in processNodeForRendering, syncAll2DVisuals, updateNodeTransform, and updateNodeVisibility. Removed isViewportContainer property from Group2D and all related logic. Updated startup scene template to use Layout2D root instead of Group2D. Layout2D size is now independent of editor viewport and only changeable via inspector properties.
 - **1.14 (2026-02-23):** Added project autoload manifest support (`pix3project.yaml`) with editor commands/operations for add/remove/toggle/reorder. Added node-local signal and group APIs, scene group serialization, and inspector group editing UI. Added Asset Browser create action `Create autoload script` that scaffolds a template script in `scripts/`, compiles scripts, and auto-registers the singleton in project autoloads.
 - **1.15 (2026-02-26):** Added Node Prefabs System section (6.15). Prefabs are `.pix3scene` files instanced via `instance:` YAML key. Added PrefabMetadata interface stored in node metadata with localId, effectiveLocalId, instanceRootId, sourcePath, and basePropertiesByLocalId. Added prefab-utils.ts with getPrefabMetadata, isPrefabNode, isPrefabInstanceRoot, isPrefabChildNode, and findPrefabInstanceRoot helpers. Implemented CreatePrefabInstanceOperation, SaveAsPrefabOperation, and RefreshPrefabInstancesOperation. Added corresponding commands. Inspector shows base prefab values with revert override capability. Scene tree displays prefab badges. FileWatchService triggers auto-refresh when prefab files change.
+- **1.16 (2026-07-04):** Added Keyframe Animation System section (6.16). New runtime module `packages/pix3-runtime/src/animation/` (easing curves, JSON keyframe clip model with defensive normalization, pure clip evaluator, `AnimationPlayerBehavior` registered as `core:AnimationPlayer`). Clips serialize inside the component `config`; tracks target nodes by relative name paths (prefab-safe). New bottom-docked Animation timeline panel (`animation-timeline`) with clip management, property/audio tracks, keyframe drag with snap and coalesced undo, per-key easing, and a scrub/playback preview service (`AnimationTimelinePreviewService`) that snapshots and restores node state without dirtying the scene, guarded against saves, undo/redo, and play-mode start.
