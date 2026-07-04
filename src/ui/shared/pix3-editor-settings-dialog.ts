@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { appState } from '@/state';
-import { EditorSettingsService } from '@/services/EditorSettingsService';
+import { EditorSettingsService, type EditorSettingsTab } from '@/services/EditorSettingsService';
 import { OperationService } from '@/services/OperationService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { AiImageSettingsService } from '@/services/AiImageSettingsService';
@@ -22,6 +22,9 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(ImageGenProviderRegistry)
   private readonly imageProviders!: ImageGenProviderRegistry;
+
+  @state()
+  private activeTab: EditorSettingsTab = 'general';
 
   @state()
   private warnOnUnsavedUnload = true;
@@ -64,6 +67,7 @@ export class EditorSettingsDialog extends ComponentBase {
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.activeTab = this.editorSettingsService.getInitialTab();
     this.warnOnUnsavedUnload = appState.ui.warnOnUnsavedUnload;
     this.pauseRenderingOnUnfocus = appState.ui.pauseRenderingOnUnfocus;
     this.navigation2D = { ...appState.ui.navigation2D };
@@ -83,74 +87,27 @@ export class EditorSettingsDialog extends ComponentBase {
         <div class="dialog-content" @click=${(e: Event) => e.stopPropagation()}>
           <h2 class="dialog-title">Editor Settings</h2>
 
+          <div class="settings-tabs" role="tablist">
+            <button
+              class="settings-tab ${this.activeTab === 'general' ? 'is-active' : ''}"
+              role="tab"
+              aria-selected=${this.activeTab === 'general'}
+              @click=${() => this.selectTab('general')}
+            >
+              General
+            </button>
+            <button
+              class="settings-tab ${this.activeTab === 'ai' ? 'is-active' : ''}"
+              role="tab"
+              aria-selected=${this.activeTab === 'ai'}
+              @click=${() => this.selectTab('ai')}
+            >
+              AI Generation
+            </button>
+          </div>
+
           <div class="settings-form">
-            <div class="settings-field">
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  .checked=${this.warnOnUnsavedUnload}
-                  @change=${this.onWarnToggle}
-                />
-                <span>Warn me about unsaved changes when leaving the page</span>
-              </label>
-              <div class="hint">
-                Disable this to skip the browser confirmation dialog on refresh or navigation.
-              </div>
-            </div>
-
-            <div class="settings-field">
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  .checked=${this.pauseRenderingOnUnfocus}
-                  @change=${this.onPauseToggle}
-                />
-                <span>Pause rendering when window is unfocused</span>
-              </label>
-              <div class="hint">
-                Reduces CPU/GPU usage and saves battery when you are working in another window.
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <h3 class="section-title">2D Navigation</h3>
-
-              <div class="settings-field">
-                <label class="slider-row">
-                  <span>Pan Sensitivity: ${this.navigation2D.panSensitivity.toFixed(2)}</span>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1.0"
-                    step="0.05"
-                    .value=${String(this.navigation2D.panSensitivity)}
-                    @input=${this.onPanSensitivityChange}
-                  />
-                </label>
-                <div class="hint">
-                  Controls how fast the camera pans with mouse wheel or trackpad gestures.
-                </div>
-              </div>
-
-              <div class="settings-field">
-                <label class="slider-row">
-                  <span>Zoom Sensitivity: ${this.navigation2D.zoomSensitivity.toFixed(4)}</span>
-                  <input
-                    type="range"
-                    min="0.001"
-                    max="0.01"
-                    step="0.0005"
-                    .value=${String(this.navigation2D.zoomSensitivity)}
-                    @input=${this.onZoomSensitivityChange}
-                  />
-                </label>
-                <div class="hint">
-                  Controls how fast the camera zooms with Ctrl+wheel or pinch gestures.
-                </div>
-              </div>
-            </div>
-
-            ${this.renderAiProvidersSection()}
+            ${this.activeTab === 'general' ? this.renderGeneralTab() : this.renderAiTab()}
           </div>
 
           <div class="dialog-actions">
@@ -160,6 +117,88 @@ export class EditorSettingsDialog extends ComponentBase {
         </div>
       </div>
     `;
+  }
+
+  private selectTab(tab: EditorSettingsTab): void {
+    this.activeTab = tab;
+  }
+
+  private renderGeneralTab() {
+    return html`
+      <div class="settings-field">
+        <label class="toggle-row">
+          <input
+            type="checkbox"
+            .checked=${this.warnOnUnsavedUnload}
+            @change=${this.onWarnToggle}
+          />
+          <span>Warn me about unsaved changes when leaving the page</span>
+        </label>
+        <div class="hint">
+          Disable this to skip the browser confirmation dialog on refresh or navigation.
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <label class="toggle-row">
+          <input
+            type="checkbox"
+            .checked=${this.pauseRenderingOnUnfocus}
+            @change=${this.onPauseToggle}
+          />
+          <span>Pause rendering when window is unfocused</span>
+        </label>
+        <div class="hint">
+          Reduces CPU/GPU usage and saves battery when you are working in another window.
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="section-title">2D Navigation</h3>
+
+        <div class="settings-field">
+          <label class="slider-row">
+            <span>Pan Sensitivity: ${this.navigation2D.panSensitivity.toFixed(2)}</span>
+            <input
+              type="range"
+              min="0.1"
+              max="1.0"
+              step="0.05"
+              .value=${String(this.navigation2D.panSensitivity)}
+              @input=${this.onPanSensitivityChange}
+            />
+          </label>
+          <div class="hint">
+            Controls how fast the camera pans with mouse wheel or trackpad gestures.
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label class="slider-row">
+            <span>Zoom Sensitivity: ${this.navigation2D.zoomSensitivity.toFixed(4)}</span>
+            <input
+              type="range"
+              min="0.001"
+              max="0.01"
+              step="0.0005"
+              .value=${String(this.navigation2D.zoomSensitivity)}
+              @input=${this.onZoomSensitivityChange}
+            />
+          </label>
+          <div class="hint">
+            Controls how fast the camera zooms with Ctrl+wheel or pinch gestures.
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderAiTab() {
+    const section = this.renderAiProvidersSection();
+    if (!section) {
+      return html`<div class="hint">No AI image providers are registered.</div>`;
+    }
+    return section;
   }
 
   private renderAiProvidersSection() {

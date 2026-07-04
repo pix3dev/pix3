@@ -34,10 +34,45 @@ pix3-editor-settings-dialog {
   color: var(--pix3-text-primary, #fff);
 }
 
+.settings-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--pix3-border, #444);
+}
+
+.settings-tab {
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+}
+
+.settings-tab:hover {
+  color: #fff;
+}
+
+.settings-tab.is-active {
+  color: var(--pix3-accent-color, #ffcf33);
+  border-bottom-color: var(--pix3-accent-color, #ffcf33);
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;
+}
+
+/* A section leading its tab shouldn't draw a separator above itself. */
+.settings-form > .settings-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .settings-field {

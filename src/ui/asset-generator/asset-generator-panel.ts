@@ -94,6 +94,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private saveMessage: string | null = null;
   @state() private saveError: string | null = null;
   @state() private isDragActive = false;
+  @state() private savePopoverOpen = false;
   @state() private apiKeyPopoverOpen = false;
   @state() private apiKeyInput = '';
   @state() private apiKeyBusy = false;
@@ -104,17 +105,28 @@ export class AssetGeneratorPanel extends ComponentBase {
   private disposeAiSettingsSubscription?: () => void;
   private abortController: AbortController | null = null;
   private readonly onDocPointerDown = (event: PointerEvent): void => {
-    if (!this.apiKeyPopoverOpen) {
-      return;
+    if (this.apiKeyPopoverOpen) {
+      const wrap = this.querySelector('.ag-key-wrap');
+      if (wrap && !wrap.contains(event.target as Node)) {
+        this.apiKeyPopoverOpen = false;
+      }
     }
-    const wrap = this.querySelector('.ag-key-wrap');
-    if (wrap && !wrap.contains(event.target as Node)) {
-      this.apiKeyPopoverOpen = false;
+    if (this.savePopoverOpen) {
+      const wrap = this.querySelector('.ag-save-wrap');
+      if (wrap && !wrap.contains(event.target as Node)) {
+        this.savePopoverOpen = false;
+      }
     }
   };
   private readonly onDocKeyDown = (event: KeyboardEvent): void => {
-    if (this.apiKeyPopoverOpen && event.key === 'Escape') {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    if (this.apiKeyPopoverOpen) {
       this.apiKeyPopoverOpen = false;
+    }
+    if (this.savePopoverOpen) {
+      this.savePopoverOpen = false;
     }
   };
   private readonly ownedUrls = new Set<string>();
@@ -260,9 +272,9 @@ export class AssetGeneratorPanel extends ComponentBase {
         ${this.renderToolbar()}
         <div class="ag-workspace">
           ${this.renderSidebar()}
-          <main class="ag-main">${this.renderStage()} ${this.renderActions()}</main>
+          <main class="ag-main">${this.renderStage()}</main>
         </div>
-        ${this.renderHistory()}
+        ${this.renderPromptBar()} ${this.renderHistory()}
         ${this.isDragActive
           ? html`<div class="ag-drop-overlay">Drop image to add as reference</div>`
           : null}
@@ -271,29 +283,18 @@ export class AssetGeneratorPanel extends ComponentBase {
   }
 
   private renderToolbar() {
-    const provider = this.providers.get(this.providerId);
-    const model = provider?.getModel(this.modelId);
     return html`
       <header class="ag-toolbar">
         <div class="ag-title">Asset Generator</div>
         <button
-          class="ag-model-readout"
-          title="Open AI provider settings"
+          class="ag-icon-button"
+          title="AI generation settings"
+          aria-label="AI generation settings"
           @click=${this.openSettings}
         >
-          <span>${provider?.label ?? 'No provider'}</span>
-          <span class="ag-model-readout-sep">·</span>
-          <span>${model?.label ?? (this.modelId || 'no model')}</span>
-          <span class="ag-gear">⚙</span>
+          ⚙
         </button>
         <div class="ag-toolbar-spacer"></div>
-        <button
-          class="ag-model-readout"
-          title="Background-removal engine — change in Editor Settings"
-          @click=${this.openSettings}
-        >
-          BG: ${this.bgEngine === 'imgly' ? 'imgly' : `BiRefNet · ${this.bgQuality}`}
-        </button>
         <button
           class="ag-toolbar-button"
           @click=${this.onRemoveBackground}
@@ -301,26 +302,95 @@ export class AssetGeneratorPanel extends ComponentBase {
         >
           ${this.bgBusy ? 'Removing…' : 'Remove background'}
         </button>
+        ${this.renderSaveMenu()}
       </header>
     `;
   }
 
+  private renderSaveMenu() {
+    return html`
+      <div class="ag-save-wrap">
+        <button
+          class="ag-toolbar-button ag-save-button ${this.savePopoverOpen ? 'is-open' : ''}"
+          title="Save options"
+          ?disabled=${!this.current}
+          @click=${this.toggleSavePopover}
+        >
+          💾 Save ▾
+        </button>
+        ${this.savePopoverOpen && this.current ? this.renderSavePopover() : null}
+      </div>
+    `;
+  }
+
+  private renderSavePopover() {
+    const projectReady = appState.project.status === 'ready';
+    return html`
+      <div class="ag-save-popover" @click=${(e: Event) => e.stopPropagation()}>
+        <div class="ag-popover-title">Save asset</div>
+        <input
+          class="ag-save-name"
+          type="text"
+          placeholder="folder/name.png"
+          .value=${this.saveName}
+          @input=${this.onSaveNameInput}
+        />
+        <div class="ag-save-actions">
+          <button
+            class="ag-action-button"
+            ?disabled=${!projectReady || !this.saveName.trim()}
+            @click=${this.onSaveToProject}
+          >
+            Save to project
+          </button>
+          <button
+            class="ag-action-button"
+            ?disabled=${!projectReady || !this.saveName.trim()}
+            @click=${this.onInsertSprite}
+          >
+            Insert as Sprite2D
+          </button>
+          ${this.boundImagePath
+            ? html`<button
+                class="ag-action-button"
+                ?disabled=${!projectReady}
+                @click=${this.onOverwriteOriginal}
+              >
+                Overwrite original
+              </button>`
+            : null}
+          <button class="ag-action-button" @click=${this.onDownload}>Download</button>
+        </div>
+        ${this.saveMessage ? html`<div class="ag-success">${this.saveMessage}</div>` : null}
+        ${this.saveError ? html`<div class="ag-error">${this.saveError}</div>` : null}
+        ${projectReady ? null : html`<div class="ag-hint">Open a project to save into it.</div>`}
+      </div>
+    `;
+  }
+
   private renderSidebar() {
+    const model = this.providers.get(this.providerId)?.getModel(this.modelId);
+    const maxReferences = model?.capabilities.maxReferenceImages ?? 0;
+    if (maxReferences <= 0) {
+      return null;
+    }
+    return html`<aside class="ag-sidebar">${this.renderReferences(maxReferences)}</aside>`;
+  }
+
+  private renderPromptBar() {
     const provider = this.providers.get(this.providerId);
     const model = provider?.getModel(this.modelId);
-    const caps = model?.capabilities;
     const models = provider?.models ?? [];
     const canGenerate =
       this.keyConfigured && this.prompt.trim().length > 0 && !this.generating && Boolean(model);
 
     return html`
-      <aside class="ag-sidebar">
-        ${this.renderReferences(caps?.maxReferenceImages ?? 0)}
-
+      <div class="ag-prompt-bar">
+        ${this.generateError ? html`<div class="ag-error">${this.generateError}</div>` : null}
         <div class="ag-prompt-box">
           <textarea
             class="ag-prompt"
-            rows="3"
+            rows="2"
             placeholder="Describe the image… Ctrl+Enter to generate."
             .value=${this.prompt}
             @input=${this.onPromptInput}
@@ -358,8 +428,7 @@ export class AssetGeneratorPanel extends ComponentBase {
             </button>
           </div>
         </div>
-        ${this.generateError ? html`<div class="ag-error">${this.generateError}</div>` : null}
-      </aside>
+      </div>
     `;
   }
 
@@ -516,55 +585,6 @@ export class AssetGeneratorPanel extends ComponentBase {
     return html`<div class="ag-progress-inner"><span class="ag-spinner"></span>${label}</div>`;
   }
 
-  private renderActions() {
-    if (!this.current) {
-      return null;
-    }
-    const projectReady = appState.project.status === 'ready';
-    return html`
-      <div class="ag-actions">
-        <div class="ag-save-row">
-          <input
-            class="ag-save-name"
-            type="text"
-            placeholder="folder/name.png"
-            .value=${this.saveName}
-            @input=${this.onSaveNameInput}
-          />
-          <button
-            class="ag-action-button"
-            ?disabled=${!projectReady || !this.saveName.trim()}
-            @click=${this.onSaveToProject}
-          >
-            Save to project
-          </button>
-        </div>
-        <div class="ag-action-buttons">
-          <button
-            class="ag-action-button"
-            ?disabled=${!projectReady || !this.saveName.trim()}
-            @click=${this.onInsertSprite}
-          >
-            Insert as Sprite2D
-          </button>
-          ${this.boundImagePath
-            ? html`<button
-                class="ag-action-button"
-                ?disabled=${!projectReady}
-                @click=${this.onOverwriteOriginal}
-              >
-                Overwrite original
-              </button>`
-            : null}
-          <button class="ag-action-button" @click=${this.onDownload}>Download</button>
-        </div>
-        ${this.saveMessage ? html`<div class="ag-success">${this.saveMessage}</div>` : null}
-        ${this.saveError ? html`<div class="ag-error">${this.saveError}</div>` : null}
-        ${projectReady ? null : html`<div class="ag-hint">Open a project to save into it.</div>`}
-      </div>
-    `;
-  }
-
   private renderHistory() {
     if (this.historyRecords.length === 0) {
       return null;
@@ -619,9 +639,17 @@ export class AssetGeneratorPanel extends ComponentBase {
     }
   }
 
+  private toggleSavePopover(): void {
+    this.savePopoverOpen = !this.savePopoverOpen;
+    if (this.savePopoverOpen) {
+      this.saveMessage = null;
+      this.saveError = null;
+    }
+  }
+
   private openFullSettings(): void {
     this.apiKeyPopoverOpen = false;
-    void this.editorSettings.showSettings();
+    void this.editorSettings.showSettings('ai');
   }
 
   private onPanelProviderChange(event: Event): void {
@@ -703,7 +731,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   }
 
   private openSettings(): void {
-    void this.editorSettings.showSettings();
+    void this.editorSettings.showSettings('ai');
   }
 
   // -- references ------------------------------------------------------------

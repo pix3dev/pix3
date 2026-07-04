@@ -5,6 +5,8 @@ import {
   loadEditorSettings,
 } from '@/features/editor/UpdateEditorSettingsOperation';
 
+export type EditorSettingsTab = 'general' | 'ai';
+
 export interface EditorSettingsDialogInstance {
   id: string;
   resolve: () => void;
@@ -19,6 +21,7 @@ export class EditorSettingsService {
   private listeners = new Set<(activeDialog: EditorSettingsDialogInstance | null) => void>();
   private nextId = 0;
   private initialized = false;
+  private initialTab: EditorSettingsTab = 'general';
 
   initialize(): void {
     if (this.initialized) {
@@ -31,10 +34,17 @@ export class EditorSettingsService {
     }
   }
 
-  public async showSettings(): Promise<void> {
+  /** The tab the dialog should open on; read once by the dialog in connectedCallback. */
+  public getInitialTab(): EditorSettingsTab {
+    return this.initialTab;
+  }
+
+  public async showSettings(initialTab: EditorSettingsTab = 'general'): Promise<void> {
     if (this.activeDialog) {
       return;
     }
+
+    this.initialTab = initialTab;
 
     return new Promise(resolve => {
       const id = `editor-settings-${this.nextId++}`;

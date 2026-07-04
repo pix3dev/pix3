@@ -31,42 +31,67 @@ pix3-asset-generator-panel .ag-title {
   color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-model-readout {
+pix3-asset-generator-panel .ag-icon-button {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.6rem;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border-radius: 4px;
   border: 1px solid var(--pix3-border, #333);
   background: transparent;
   color: var(--pix3-text-secondary, #ccc);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.95rem;
+  line-height: 1;
 }
 
-pix3-asset-generator-panel .ag-model-readout:hover {
+pix3-asset-generator-panel .ag-icon-button:hover {
   background: rgba(255, 255, 255, 0.06);
-}
-
-pix3-asset-generator-panel .ag-model-readout-sep {
-  opacity: 0.5;
-}
-
-pix3-asset-generator-panel .ag-gear {
-  margin-left: 0.25rem;
-  opacity: 0.7;
+  color: #fff;
 }
 
 pix3-asset-generator-panel .ag-toolbar-spacer {
   flex: 1 1 auto;
 }
 
-pix3-asset-generator-panel .ag-bg-quality {
+/* Save menu (toolbar) --------------------------------------------------- */
+pix3-asset-generator-panel .ag-save-wrap {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.78rem;
-  color: var(--pix3-text-muted, #999);
+}
+
+pix3-asset-generator-panel .ag-save-button.is-open {
+  border-color: var(--pix3-accent-color, #ffcf33);
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+pix3-asset-generator-panel .ag-save-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 260px;
+  max-width: 80vw;
+  padding: 0.85rem;
+  border-radius: 8px;
+  background: var(--pix3-bg-secondary, #262626);
+  border: 1px solid var(--pix3-border, #444);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  z-index: 20;
+}
+
+pix3-asset-generator-panel .ag-save-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-save-actions .ag-action-button {
+  width: 100%;
 }
 
 pix3-asset-generator-panel select,
@@ -111,14 +136,14 @@ pix3-asset-generator-panel .ag-workspace {
 }
 
 pix3-asset-generator-panel .ag-sidebar {
-  flex: 0 0 320px;
-  width: 320px;
+  flex: 0 0 148px;
+  width: 148px;
   overflow-y: auto;
-  padding: 0.85rem;
+  padding: 0.6rem;
   border-right: 1px solid var(--pix3-border, #333);
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.6rem;
 }
 
 pix3-asset-generator-panel .ag-field {
@@ -132,6 +157,17 @@ pix3-asset-generator-panel .ag-field-label {
   color: var(--pix3-text-muted, #999);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* Full-width prompt bar pinned to the bottom of the panel. */
+pix3-asset-generator-panel .ag-prompt-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--pix3-border, #333);
+  background: var(--pix3-bg-secondary, #262626);
 }
 
 /* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
@@ -317,11 +353,14 @@ pix3-asset-generator-panel .ag-references-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
+/* Single-column reference list in the narrow sidebar. */
 pix3-asset-generator-panel .ag-reference-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0.4rem;
 }
 
@@ -515,30 +554,10 @@ pix3-asset-generator-panel .ag-stage-error {
   padding: 0.4rem 1rem;
 }
 
-/* Actions --------------------------------------------------------------- */
-pix3-asset-generator-panel .ag-actions {
-  flex: 0 0 auto;
-  padding: 0.6rem 0.75rem;
-  border-top: 1px solid var(--pix3-border, #333);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-pix3-asset-generator-panel .ag-save-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
+/* Save popover inputs --------------------------------------------------- */
 pix3-asset-generator-panel .ag-save-name {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-pix3-asset-generator-panel .ag-action-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* History --------------------------------------------------------------- */
