@@ -147,6 +147,13 @@ pix3-assets-preview-panel .meta {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
+/* fixed => shrink-to-fit, so DropdownPortal measures the content width instead of
+   the full body width (otherwise the viewport clamp shoves the menu to the edge —
+   same trick as .pix3-dropdown-portal .dropdown__menu). */
+.pix3-dropdown-portal .assets-preview-context-menu {
+  position: fixed;
+}
+
 .assets-preview-context-menu button[role='menuitem'] {
   display: flex;
   align-items: center;

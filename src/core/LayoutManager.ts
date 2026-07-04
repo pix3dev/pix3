@@ -681,6 +681,10 @@ export class LayoutManagerService {
       const playing = appState.ui.isPlaying;
       if (playing && !this.lastIsPlaying) {
         this.focusPanel(PANEL_COMPONENT_TYPES.runtime);
+      } else if (!playing && this.lastIsPlaying) {
+        // Returning from play mode: bring the Scene Tree back to the front of its
+        // stack (play mode swapped it for the Runtime panel).
+        this.focusPanel(PANEL_COMPONENT_TYPES.sceneTree);
       }
       this.lastIsPlaying = playing;
     });
