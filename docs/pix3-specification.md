@@ -601,13 +601,14 @@ The `properties` block allows overriding base prefab values. Overrides are track
 
 ### 6.15.5 Prefab Operations
 
-Three operations manage prefab lifecycle:
+The prefab lifecycle is managed by these operations:
 
 1. **CreatePrefabInstanceOperation** - Instantiates a prefab file as nodes in the active scene
    - Parses the prefab file
    - Creates nodes with prefab metadata
    - Registers nodes in scene graph
    - Updates hierarchy state and selection
+   - Accepts an optional `viewportScreenPoint` to position a root-level drop at the cursor (Node2D vs Node3D resolved via `ViewportRendererService`)
 
 2. **SaveAsPrefabOperation** - Saves a selected node branch as a prefab file
    - Serializes the selected node and its children to YAML
@@ -620,6 +621,12 @@ Three operations manage prefab lifecycle:
    - Can target a specific prefab path or refresh all instances
    - Preserves property overrides while updating base structure
 
+4. **UnlinkPrefabInstanceOperation** (Unity "Unpack Prefab") - Converts an instance into plain, editable nodes
+   - Strips `__pix3Prefab` markers from the outer instance and clears its `instancePath`, so its nodes serialize as ordinary children
+   - **Nested instances stay linked**: their markers are re-rooted onto themselves (`instanceRootId`/`effectiveLocalId` recomputed relative to the nested root) and their `basePropertiesByLocalId` is rebuilt by freshly parsing the nested source prefab, so they keep round-tripping as `instance:` references with their overrides intact (empty-map fallback on read failure is lossless-but-verbose)
+   - Shallow (one level); undo/redo restore before/after marker+`instancePath` snapshots without a scene reparse, so node identity and the rest of undo history survive
+   - `OpenPrefabCommand` (not an operation; opens a tab) opens an instance's source prefab in its own scene tab, optionally pre-selecting the corresponding node by `localId`
+
 ### 6.15.6 Inspector Integration
 
 When inspecting a node that is part of a prefab instance:
@@ -628,20 +635,35 @@ When inspecting a node that is part of a prefab instance:
 - A "Revert" button allows resetting overridden properties to base values
 - Visual indicators distinguish between base values and overrides
 - `getPrefabBaseValueForProperty()` retrieves original values for comparison
+- Component actions are locked on instance nodes: **Add/Remove/Enable/Disable Component** and **component property value editors** are disabled on every instance node (component config is not serialized as an override), and the **name** field is disabled on instance children (the root keeps an editable name). See §6.15.8
+- **Default overrides (placement)**: on an instance **root**, `position`, `rotation`, `scale`, `name`, and the 2D anchored-layout keys (`layoutEnabled`, `horizontalAlign`, `verticalAlign`) describe where the instance sits in the host scene, not the prefab's content (Unity "default overrides"). They are **not** flagged as overrides and have no Revert button, even though they still serialize on the `instance:` definition — so moving, scaling, or anchoring an instance (e.g. pinning a panel to a window edge) is placement, not a content edit. The same properties on a child (or a nested-instance root) remain real content overrides. Implemented via `isInstancePlacementProperty` (`src/features/scene/prefab-utils.ts`)
 
 ### 6.15.7 Scene Tree Integration
 
-The scene tree displays visual badges for prefab nodes:
+The scene tree distinguishes prefab nodes:
 
-- **Prefab root** (🔗) - Marks the root of a prefab instance
-- **Prefab child** - Children within a prefab instance shown with linked indicator
-- Context menu includes "Save Branch as Prefab" action
+- **Prefab root** (🔗) - Marks the root of a prefab instance; accent-colored name
+- **Prefab child** - Dimmed row (~80% opacity), a small lock glyph, and a tooltip explaining the node is instance-locked
+- Instance roots are **collapsed by default** on scene load (once per load; user expand/collapse toggles are preserved afterward). Selecting a node still auto-expands its ancestors
+- **Double-click** a prefab node (root or child) opens its source prefab in a scene tab (a child pre-selects its corresponding node)
+- Context menu is prefab-aware: shows **Open Prefab** for any instance node and **Unlink Prefab Instance** for an instance root; hides Duplicate/Group/Delete/Save-as-Prefab for prefab children; keeps them for instance roots
 
-### 6.15.8 Auto-Refresh Workflow
+### 6.15.8 Structural Editing & Instance Lock
 
-1. User modifies and saves a prefab file externally (e.g., in VS Code)
+An instance's child structure is owned by its prefab file, and the save format only round-trips **property** overrides (`instance:` + root `properties:` + `overrides.byLocalId`). Structural edits inside an instance are therefore **not representable** and would be silently lost on save, so they are blocked at every entry point:
+
+- Dragging/reparenting a prefab child (blocked in `canDropNode` and refused at drag start)
+- Dropping or creating any node **inside** an instance subtree (blocked in `canDropNode`, the scene-tree asset-drop handler, and `node-placement` which redirects creation to the nearest non-prefab ancestor)
+- Duplicating or grouping prefab children (filtered in the operations; commands report a reason)
+- Adding/removing/toggling components and editing component property values on **any** instance node, and renaming prefab **children** (disabled in the Inspector; guarded in `AddComponentCommand`/`RemoveComponentCommand`/`UpdateComponentPropertyCommand`/`ToggleScriptEnabledCommand`)
+
+Instance **roots** stay fully editable structurally (move, delete, duplicate as a second instance, rename). To edit an instance's contents in place, either open the prefab (edit the source) or **Unlink** the instance to convert it to plain nodes (§6.15.5). Deleting a prefab child is also blocked (`DeleteObjectOperation`).
+
+### 6.15.9 Auto-Refresh Workflow
+
+1. User modifies and saves a prefab file externally (e.g., in VS Code) or in its own editor tab
 2. FileWatchService detects the file change
-3. EditorShell's `handleFileChanged()` triggers `RefreshPrefabInstancesCommand`
+3. EditorShell's `handleFileChanged()` triggers `RefreshPrefabInstancesCommand`; switching back to a scene tab also refreshes its instances on activation
 4. All instances referencing that prefab are rebuilt
 5. Property overrides are preserved during refresh
 

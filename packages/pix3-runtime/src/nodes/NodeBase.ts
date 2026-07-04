@@ -29,7 +29,7 @@ export class NodeBase extends Object3D {
   declare children: NodeBase[];
   readonly properties: Record<string, unknown>;
   readonly metadata: NodeMetadata;
-  readonly instancePath: string | null;
+  private _instancePath: string | null;
   /** Whether this node can have children. */
   isContainer: boolean = true;
   /** Script components attached to this node */
@@ -53,7 +53,7 @@ export class NodeBase extends Object3D {
     this.name = props.name ?? this.type;
     this.properties = { ...(props.properties ?? {}) };
     this.metadata = { ...(props.metadata ?? {}) };
-    this.instancePath = props.instancePath ?? null;
+    this._instancePath = props.instancePath ?? null;
     for (const group of props.groups ?? []) {
       if (typeof group === 'string' && group.trim().length > 0) {
         this.groups.add(group.trim());
@@ -74,6 +74,19 @@ export class NodeBase extends Object3D {
       metadata: this.metadata,
       properties: this.properties,
     };
+  }
+
+  /**
+   * res:// path of the prefab this node is an instance root of, or null. Set on
+   * instance roots at load time; mutated only by prefab operations (e.g. unlink,
+   * which clears it to convert the instance into plain scene nodes).
+   */
+  get instancePath(): string | null {
+    return this._instancePath;
+  }
+
+  setInstancePath(path: string | null): void {
+    this._instancePath = path;
   }
 
   get input(): import('../core/InputService').InputService | undefined {

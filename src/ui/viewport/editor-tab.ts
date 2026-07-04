@@ -18,6 +18,8 @@ import {
 import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
+import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstanceCommand';
+import { isPrefabNode } from '@/features/scene/prefab-utils';
 import { toggleNavigationMode } from '@/features/viewport/ToggleNavigationModeCommand';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
@@ -351,11 +353,20 @@ export class EditorTabComponent extends ComponentBase {
     }
 
     const assetKind = classifySceneCreateAssetResource(resourcePath);
-    if (!assetKind || assetKind === 'prefab') {
+    if (!assetKind) {
       return;
     }
 
     const screenPoint = this.getViewportScreenPoint(event);
+
+    if (assetKind === 'prefab') {
+      const command = new CreatePrefabInstanceCommand({
+        prefabPath: resourcePath,
+        viewportScreenPoint: screenPoint,
+      });
+      void this.commandDispatcher.execute(command);
+      return;
+    }
 
     if (assetKind === 'image') {
       const placement = this.resolve2DAssetDropPlacement(screenPoint);
@@ -479,12 +490,16 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private getCompatible2DDropParent(node: NodeBase | null): Node2D | null {
-    if (node instanceof Node2D && node.isContainer) {
+    // Never parent a newly created node inside a prefab instance — its structure
+    // is owned by the prefab and additions are discarded on save.
+    if (node instanceof Node2D && node.isContainer && !isPrefabNode(node)) {
       return node;
     }
 
     const parentNode = node?.parentNode;
-    return parentNode instanceof Node2D && parentNode.isContainer ? parentNode : null;
+    return parentNode instanceof Node2D && parentNode.isContainer && !isPrefabNode(parentNode)
+      ? parentNode
+      : null;
   }
 
   private getViewportNormalizedPoint(screenPoint: { x: number; y: number }): {

@@ -340,4 +340,63 @@ root:
     expect(childIds).toHaveLength(2);
     expect(new Set(childIds).size).toBe(2);
   });
+
+  it('round-trips a 2D anchor (align) override on an instance root through serialize -> parse', async () => {
+    // Regression: horizontalAlign/verticalAlign have a *function* `ui.readOnly`
+    // (editable only when layoutEnabled). The comparable-property capture used to
+    // treat that function as truthy and skip the prop, so an instance's anchor
+    // override was silently dropped on save and the instance snapped back to the
+    // prefab's centered position instead of sticking to the edge.
+    const prefabText = `
+version: 1.0.0
+root:
+  - id: shop-ui-root
+    type: Group2D
+    name: ShopUI
+    properties:
+      width: 824
+      height: 1064
+      transform:
+        position: [0, 0]
+`;
+    const sceneText = `
+version: 1.0.0
+root:
+  - id: shop-ui-instance
+    type: Group2D
+    instance: res://prefabs/shop.pix3scene
+`;
+
+    const loader = createLoader({ 'res://prefabs/shop.pix3scene': prefabText });
+    const graph = await loader.parseScene(sceneText, { filePath: 'res://scenes/main.pix3scene' });
+
+    // User enables anchor + top on the live instance root (as the inspector does).
+    const instanceRoot = graph.rootNodes[0] as unknown as {
+      layoutEnabled: boolean;
+      verticalAlign: string;
+      horizontalAlign: string;
+    };
+    instanceRoot.layoutEnabled = true;
+    instanceRoot.verticalAlign = 'top';
+    instanceRoot.horizontalAlign = 'center';
+
+    const saver = new SceneSaver();
+    const savedText = saver.serializeScene(graph);
+    const savedDoc = parseYaml(savedText) as {
+      root: Array<{ properties?: Record<string, unknown> }>;
+    };
+    // The align override must be present in the serialized instance diff.
+    expect(savedDoc.root[0].properties?.layoutEnabled).toBe(true);
+    expect(savedDoc.root[0].properties?.verticalAlign).toBe('top');
+
+    const reloaded = await loader.parseScene(savedText, {
+      filePath: 'res://scenes/main.pix3scene',
+    });
+    const reloadedRoot = reloaded.rootNodes[0] as unknown as {
+      layoutEnabled: boolean;
+      verticalAlign: string;
+    };
+    expect(reloadedRoot.layoutEnabled).toBe(true);
+    expect(reloadedRoot.verticalAlign).toBe('top');
+  });
 });

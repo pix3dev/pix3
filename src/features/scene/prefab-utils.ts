@@ -58,3 +58,34 @@ export const findPrefabInstanceRoot = (node: NodeBase): NodeBase | null => {
 
   return null;
 };
+
+/**
+ * Properties of an instance ROOT that describe where the instance sits in the
+ * host scene rather than the prefab's authored content — Unity's "default
+ * overrides". These are stored on the host scene's `instance:` definition (name
+ * + the `properties:` diff), so moving/anchoring an instance is placement, not a
+ * content override, and the inspector must not flag them or offer a Revert.
+ *
+ * Includes 2D anchored-layout keys (layoutEnabled/horizontalAlign/verticalAlign)
+ * so pinning a panel to a window edge counts as placement; the anchored layout
+ * itself rewrites the root's position on resize. 3D roots never expose these
+ * names, so listing them is harmless there.
+ */
+export const INSTANCE_PLACEMENT_PROPERTY_NAMES: ReadonlySet<string> = new Set([
+  'name',
+  'position',
+  'rotation',
+  'scale',
+  'layoutEnabled',
+  'horizontalAlign',
+  'verticalAlign',
+]);
+
+/**
+ * True when `propertyName` is a placement property on an instance ROOT (see
+ * INSTANCE_PLACEMENT_PROPERTY_NAMES). Children and nested-instance roots are not
+ * placement: moving them genuinely overrides the enclosing prefab's content.
+ */
+export const isInstancePlacementProperty = (node: NodeBase, propertyName: string): boolean => {
+  return isPrefabInstanceRoot(node) && INSTANCE_PLACEMENT_PROPERTY_NAMES.has(propertyName);
+};

@@ -741,7 +741,11 @@ export class SceneLoader {
     const schema = getNodePropertySchema(node);
     const result: Record<string, unknown> = {};
     for (const prop of schema.properties) {
-      if (prop.ui?.hidden || prop.ui?.readOnly) {
+      // Skip only STATICALLY read-only props (identity/derived). A function
+      // `readOnly` marks a conditionally-editable real value (e.g. 2D anchor
+      // align gated on layoutEnabled) and must be captured for the prefab base
+      // snapshot so instance override diffs stay correct. See SceneSaver.
+      if (prop.ui?.hidden || prop.ui?.readOnly === true) {
         continue;
       }
       result[prop.name] = this.cloneValue(prop.getValue(node));

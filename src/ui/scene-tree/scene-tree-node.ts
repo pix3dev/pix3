@@ -198,6 +198,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
           data-node-id=${this.node.id}
           title=${this.getNodeTooltip(this.node)}
           @click=${(event: Event) => this.onSelectNode(event)}
+          @dblclick=${(event: MouseEvent) => this.onDoubleClick(event)}
           @contextmenu=${(event: MouseEvent) => {
             void this.onContextMenu(event);
           }}
@@ -233,6 +234,14 @@ export class SceneTreeNodeComponent extends ComponentBase {
                 : null}
               ${this.node.isPrefabRoot
                 ? html`<span class="tree-node__prefab-badge" title="Prefab instance root">🔗</span>`
+                : null}
+              ${this.node.isPrefabChild
+                ? html`<span
+                    class="tree-node__prefab-lock"
+                    title="Part of a prefab instance — open the prefab to edit its structure"
+                    aria-hidden="true"
+                    >${this.renderToggleIcon('lock')}</span
+                  >`
                 : null}
               ${this.node.scripts.length > 0
                 ? html`
@@ -316,10 +325,13 @@ export class SceneTreeNodeComponent extends ComponentBase {
   }
 
   private getNodeTooltip(node: SceneTreeNode): string {
-    if (node.instancePath) {
-      return `${node.name} · ${node.type} · ${node.instancePath}`;
+    const base = node.instancePath
+      ? `${node.name} · ${node.type} · ${node.instancePath}`
+      : `${node.name} · ${node.type}`;
+    if (node.isPrefabChild) {
+      return `${base} · part of prefab instance — open prefab to edit structure`;
     }
-    return `${node.name} · ${node.type}`;
+    return base;
   }
 
   private getToggleLabel(nodeName: string, isCollapsed: boolean): string {
@@ -509,6 +521,23 @@ export class SceneTreeNodeComponent extends ComponentBase {
     );
   }
 
+  private onDoubleClick(event: MouseEvent): void {
+    // Double-clicking a prefab instance node (root or child) opens its source
+    // prefab in a dedicated tab. Non-prefab nodes keep their default behavior.
+    if (!this.node.isPrefabNode) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.dispatchEvent(
+      new CustomEvent('node-open-prefab', {
+        detail: { nodeId: this.node.id },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   private onToggleNode(event: Event): void {
     event.stopPropagation();
     const nextCollapsedState = !this.isCollapsed;
@@ -588,6 +617,14 @@ export class SceneTreeNodeComponent extends ComponentBase {
   }
 
   private onDragStart(event: DragEvent): void {
+    // Prefab instance children are structurally locked — they cannot be moved out
+    // of or within their instance (the change would be lost on save). Refuse the
+    // drag outright so the user gets immediate feedback.
+    if (this.node.isPrefabChild) {
+      event.preventDefault();
+      return;
+    }
+
     event.stopPropagation();
     this.isDragging = true;
 
@@ -663,11 +700,32 @@ export class SceneTreeNodeComponent extends ComponentBase {
       if (event.dataTransfer) {
         event.dataTransfer.dropEffect = isValid ? (hasAssetResource ? 'copy' : 'move') : 'none';
       }
+    } else if (hasAssetResource) {
+      // Asset drags (from the asset browser) create a node at the drop site.
+      // Reject anything that would land inside a prefab instance subtree.
+      const isValid = !this.targetsPrefabInterior(nextPosition);
+      this.isValidDropTarget = isValid;
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = isValid ? 'copy' : 'none';
+      }
     }
 
     if (this.dragOverPosition !== nextPosition) {
       this.dragOverPosition = nextPosition;
     }
+  }
+
+  /**
+   * True when dropping at `position` relative to this node would place a new node
+   * inside a prefab instance subtree (dropping "inside" any instance node, or as
+   * a sibling of a prefab child). Instance roots accept before/after (sibling
+   * placement outside the instance).
+   */
+  private targetsPrefabInterior(position: 'top' | 'inside' | 'bottom' | null): boolean {
+    if (position === 'inside') {
+      return !!this.node.isPrefabNode;
+    }
+    return !!this.node.isPrefabChild;
   }
 
   private onDragLeave(event: DragEvent): void {
@@ -685,6 +743,9 @@ export class SceneTreeNodeComponent extends ComponentBase {
     const droppedResourcePath = this.getDroppedResourcePath(event.dataTransfer ?? null);
 
     const dropPosition = this.dragOverPosition;
+    // Capture validity BEFORE resetting it — the reset below must not defeat the
+    // invalid-target guard.
+    const wasValidDropTarget = this.isValidDropTarget;
     this.dragOverPosition = null;
     this.isValidDropTarget = true;
 
@@ -696,7 +757,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
       return;
     }
 
-    if (!this.isValidDropTarget) {
+    if (!wasValidDropTarget) {
       console.log('[SceneTreeNode] Drop prevented: invalid target');
       return;
     }

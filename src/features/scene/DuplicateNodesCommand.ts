@@ -10,7 +10,10 @@ import {
   DuplicateNodesOperation,
   type DuplicateNodesOperationParams,
 } from '@/features/scene/DuplicateNodesOperation';
-import { requireActiveScene } from '@/features/scene/scene-command-utils';
+import {
+  allResolvedNodesArePrefabChildren,
+  requireActiveScene,
+} from '@/features/scene/scene-command-utils';
 
 export class DuplicateNodesCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
@@ -46,6 +49,15 @@ export class DuplicateNodesCommand extends CommandBase<void, void> {
       return {
         canExecute: false,
         reason: 'At least one node must be selected to duplicate',
+        scope: 'selection',
+      };
+    }
+
+    if (allResolvedNodesArePrefabChildren(context, nodeIds)) {
+      return {
+        canExecute: false,
+        reason:
+          'Prefab instance children cannot be duplicated — open the prefab to edit its contents',
         scope: 'selection',
       };
     }

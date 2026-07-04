@@ -13,6 +13,7 @@ const READ_ONLY_ALLOWED_COMMANDS = new Set([
   'scene.load',
   'scene.reload',
   'scene.select-object',
+  'scene.open-prefab',
   'project.open-settings',
   'project.open-in-ide',
   'editor.open-settings',

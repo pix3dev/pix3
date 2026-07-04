@@ -10,7 +10,10 @@ import {
   GroupSelectedNodesOperation,
   type GroupSelectedNodesOperationParams,
 } from '@/features/scene/GroupSelectedNodesOperation';
-import { requireActiveScene } from '@/features/scene/scene-command-utils';
+import {
+  allResolvedNodesArePrefabChildren,
+  requireActiveScene,
+} from '@/features/scene/scene-command-utils';
 
 export class GroupSelectedNodesCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
@@ -46,6 +49,14 @@ export class GroupSelectedNodesCommand extends CommandBase<void, void> {
       return {
         canExecute: false,
         reason: 'At least one node must be selected to group',
+        scope: 'selection',
+      };
+    }
+
+    if (allResolvedNodesArePrefabChildren(context, nodeIds)) {
+      return {
+        canExecute: false,
+        reason: 'Prefab instance children cannot be grouped — open the prefab to edit its contents',
         scope: 'selection',
       };
     }

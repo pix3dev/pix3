@@ -630,7 +630,12 @@ export class SceneSaver {
     const values: Record<string, unknown> = {};
 
     for (const prop of schema.properties) {
-      if (prop.ui?.hidden || prop.ui?.readOnly) {
+      // Skip only STATICALLY read-only props (identity/derived, e.g. id/type).
+      // A function `readOnly` marks a conditionally-editable real value (e.g.
+      // horizontalAlign/verticalAlign gated on layoutEnabled); treating the
+      // function as truthy here previously dropped such values from prefab
+      // instance override diffs, silently losing anchor overrides on save.
+      if (prop.ui?.hidden || prop.ui?.readOnly === true) {
         continue;
       }
       values[prop.name] = this.cloneValue(prop.getValue(node));

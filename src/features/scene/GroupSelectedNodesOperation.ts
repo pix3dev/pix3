@@ -7,6 +7,7 @@ import type {
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { Group2D, Node2D, Node3D, NodeBase, SceneManager } from '@pix3/runtime';
 import { Quaternion, Vector3 } from 'three';
+import { isPrefabChildNode } from '@/features/scene/prefab-utils';
 
 export interface GroupSelectedNodesOperationParams {
   nodeIds: string[];
@@ -59,7 +60,10 @@ export class GroupSelectedNodesOperation implements Operation<OperationInvokeRes
     const requestedNodeIds = Array.from(new Set(this.params.nodeIds));
     const requestedNodes = requestedNodeIds
       .map(nodeId => sceneGraph.nodeMap.get(nodeId) ?? null)
-      .filter((node): node is NodeBase => node instanceof NodeBase);
+      .filter((node): node is NodeBase => node instanceof NodeBase)
+      // Grouping a prefab instance child would reparent it under a new container
+      // inside the instance — not representable in the override format.
+      .filter(node => !isPrefabChildNode(node));
 
     const topLevelNodes = this.filterTopLevelNodes(requestedNodes);
     if (topLevelNodes.length === 0) {

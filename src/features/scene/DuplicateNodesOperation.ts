@@ -7,6 +7,7 @@ import type {
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { NodeBase, SceneManager } from '@pix3/runtime';
 import { parse, stringify } from 'yaml';
+import { isPrefabChildNode } from '@/features/scene/prefab-utils';
 
 export interface DuplicateNodesOperationParams {
   nodeIds: string[];
@@ -81,7 +82,11 @@ export class DuplicateNodesOperation implements Operation<OperationInvokeResult>
     const requestedNodeIds = Array.from(new Set(this.params.nodeIds));
     const requestedNodes = requestedNodeIds
       .map(nodeId => sceneGraph.nodeMap.get(nodeId) ?? null)
-      .filter((node): node is NodeBase => node instanceof NodeBase);
+      .filter((node): node is NodeBase => node instanceof NodeBase)
+      // Prefab instance children cannot be duplicated in place (the clone would
+      // live inside the instance and be discarded on save). Instance roots are
+      // fine — they round-trip as a second `instance:` reference.
+      .filter(node => !isPrefabChildNode(node));
 
     const topLevelNodes = this.filterTopLevelNodes(requestedNodes);
     if (topLevelNodes.length === 0) {

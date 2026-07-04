@@ -10,6 +10,10 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { OperationService } from '@/services/OperationService';
+import {
+  PREFAB_COMPONENT_LOCK_REASON,
+  isPrefabInstanceNode,
+} from '@/features/scene/scene-command-utils';
 import { RemoveComponentOperation, type RemoveComponentParams } from './RemoveComponentOperation';
 
 export class RemoveComponentCommand extends CommandBase<object, void> {
@@ -33,6 +37,9 @@ export class RemoveComponentCommand extends CommandBase<object, void> {
     }
     if (!this.params.nodeId) {
       return { canExecute: false, reason: 'No target node specified', scope: 'selection' };
+    }
+    if (isPrefabInstanceNode(context, this.params.nodeId)) {
+      return { canExecute: false, reason: PREFAB_COMPONENT_LOCK_REASON, scope: 'selection' };
     }
     return { canExecute: true };
   }

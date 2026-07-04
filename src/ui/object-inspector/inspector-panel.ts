@@ -47,6 +47,9 @@ import { getNodeVisuals } from '@/ui/scene-tree/node-visuals.helper';
 import {
   findPrefabInstanceRoot,
   getPrefabMetadata,
+  isInstancePlacementProperty,
+  isPrefabChildNode,
+  isPrefabNode,
   type PrefabMetadata,
 } from '@/features/scene/prefab-utils';
 import { analyzeAudioBlob } from '@/services/audio-preview-utils';
@@ -2208,7 +2211,12 @@ ${textPreview?.content || 'Empty file'}</pre
     const nameState = this.propertyValues['name'];
     const groups = Array.from(this.primaryNode.groups).sort((a, b) => a.localeCompare(b));
     const nameProp = this.propertySchema?.properties.find(prop => prop.name === 'name');
-    const nameReadOnly = this.isPropertyReadOnly(nameProp?.ui?.readOnly, this.primaryNode);
+    // Renaming a prefab instance child breaks the effectiveLocalId keys that
+    // property overrides are stored under, so lock it. The instance root keeps an
+    // editable name (it is serialized on the `instance:` definition).
+    const nameReadOnly =
+      this.isPropertyReadOnly(nameProp?.ui?.readOnly, this.primaryNode) ||
+      isPrefabChildNode(this.primaryNode);
 
     return html`
       <div class="inspector-summary">
@@ -2485,13 +2493,23 @@ ${textPreview?.content || 'Empty file'}</pre
     if (!this.primaryNode) return '';
 
     const components = this.primaryNode.components || [];
+    // Components on a prefab instance node are not serialized as overrides, so
+    // adding/removing/toggling them here would be silently lost on save. Lock the
+    // structural actions on every node of an instance (root included).
+    const structureLocked = isPrefabNode(this.primaryNode);
+    const lockedTitle = 'Managed by the prefab — open the prefab to edit its components';
 
     return html`
       <div class="property-group-section scripts-section">
         <div class="group-header">
           <h4 class="group-title">Components</h4>
           <div class="group-actions">
-            <button class="btn-add-behavior" @click=${this.onAddBehavior} title="Add Component">
+            <button
+              class="btn-add-behavior"
+              @click=${this.onAddBehavior}
+              ?disabled=${structureLocked}
+              title=${structureLocked ? lockedTitle : 'Add Component'}
+            >
               ${this.iconService.getIcon('plus', 14)}
               <span>Add</span>
             </button>
@@ -2513,6 +2531,8 @@ ${textPreview?.content || 'Empty file'}</pre
                     <button
                       class="component-action-link"
                       type="button"
+                      ?disabled=${structureLocked}
+                      title=${structureLocked ? lockedTitle : ''}
                       @click=${() => this.onToggleComponent(component.id, !component.enabled)}
                     >
                       ${component.enabled ? 'Disable' : 'Enable'}
@@ -2520,6 +2540,8 @@ ${textPreview?.content || 'Empty file'}</pre
                     <button
                       class="component-action-link component-action-link--danger"
                       type="button"
+                      ?disabled=${structureLocked}
+                      title=${structureLocked ? lockedTitle : ''}
                       @click=${() => this.onRemoveComponent(component.id)}
                     >
                       Remove
@@ -2975,7 +2997,13 @@ ${textPreview?.content || 'Empty file'}</pre
     }
 
     const label = prop.ui?.label || prop.name;
-    const readOnly = this.isPropertyReadOnly(prop.ui?.readOnly, component);
+    // Component config on a prefab instance node is not serialized as an
+    // override, so edits would be silently lost on save. Render the editors
+    // read-only for every instance node (matching the disabled Add/Remove/Toggle
+    // actions); the value can be changed by opening the prefab itself.
+    const readOnly =
+      this.isPropertyReadOnly(prop.ui?.readOnly, component) ||
+      (this.primaryNode ? isPrefabNode(this.primaryNode) : false);
 
     if (prop.type === 'string' && prop.ui?.editor === 'audio-resource') {
       const audioPreview = this.getAudioPreview(state.value);
@@ -3951,6 +3979,12 @@ ${textPreview?.content || 'Empty file'}</pre
 
   private isPropertyOverriddenForPrimaryNode(prop: PropertyDefinition): boolean {
     if (!this.primaryNode) {
+      return false;
+    }
+    // Placement properties of an instance root (position/rotation/scale/name +
+    // 2D anchors) are where-it-sits-in-the-scene, not prefab-content overrides.
+    // Don't flag them or offer a Revert. See INSTANCE_PLACEMENT_PROPERTY_NAMES.
+    if (isInstancePlacementProperty(this.primaryNode, prop.name)) {
       return false;
     }
     const baseValue = this.getPrefabBaseValueForProperty(prop);

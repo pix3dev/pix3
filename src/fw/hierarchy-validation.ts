@@ -1,6 +1,7 @@
 import { Node2D, Node3D } from '@pix3/runtime';
 import type { NodeBase } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
+import { isPrefabChildNode, isPrefabNode } from '@/features/scene/prefab-utils';
 
 /**
  * Determines if a node is a 2D node (Node2D or its subclasses)
@@ -34,6 +35,11 @@ export function canDropNode(
   const draggedNode = sceneGraph.nodeMap.get(draggedNodeId);
   if (!draggedNode) return false;
 
+  // Prefab instance children are structurally locked: their layout is owned by
+  // the prefab file, and the override format only round-trips property diffs, so
+  // moving one would be silently lost on save. Block dragging it anywhere.
+  if (isPrefabChildNode(draggedNode)) return false;
+
   // For before/after positions, always allow (reordering siblings)
   if (position === 'before' || position === 'after') {
     if (targetNodeId) {
@@ -44,6 +50,11 @@ export function canDropNode(
 
         // Check if target is a descendant of dragged node (circular reference)
         if (isDescendantOf(targetNode, draggedNodeId)) return false;
+
+        // Dropping as a sibling of a prefab child would insert the node inside
+        // the instance subtree — not representable in the override format.
+        // (An instance ROOT is fine: its parent is outside the instance.)
+        if (isPrefabChildNode(targetNode)) return false;
       }
     }
     return true;
@@ -57,6 +68,10 @@ export function canDropNode(
 
   const targetNode = sceneGraph.nodeMap.get(targetNodeId);
   if (!targetNode) return false;
+
+  // Never drop inside a prefab instance (root or child) — its children are owned
+  // by the prefab and structural edits do not survive serialization.
+  if (isPrefabNode(targetNode)) return false;
 
   // Prevent dropping inside itself or its descendants
   if (targetNodeId === draggedNodeId || isDescendantOf(targetNode, draggedNodeId)) {

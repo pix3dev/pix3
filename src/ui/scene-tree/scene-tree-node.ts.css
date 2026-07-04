@@ -293,10 +293,32 @@ pix3-scene-tree-node {
   color: rgba(var(--pix3-accent-rgb), 0.78);
 }
 
+/* Children of a prefab instance are structurally locked; render the whole row
+   dimmed (~80% visibility) so they read as secondary/protected content. */
+.tree-node__content--prefab-child {
+  opacity: 0.8;
+}
+
 .tree-node__prefab-badge {
   font-size: 0.7rem;
   opacity: 0.85;
   line-height: 1;
+}
+
+.tree-node__prefab-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.7rem;
+  height: 0.7rem;
+  color: rgba(245, 247, 250, 0.4);
+  flex-shrink: 0;
+}
+
+.tree-node__prefab-lock svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .tree-node__buttons {

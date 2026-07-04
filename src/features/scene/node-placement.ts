@@ -2,6 +2,7 @@ import type { NodeBase } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Node3D } from '@pix3/runtime';
+import { isPrefabNode } from '@/features/scene/prefab-utils';
 
 export interface IndexedNodePlacement {
   parentNodeId?: string | null;
@@ -9,7 +10,21 @@ export interface IndexedNodePlacement {
 }
 
 const isCompatible2DContainer = (node: NodeBase | null): node is NodeBase => {
-  return Boolean(node && node instanceof Node2D && node.isContainer);
+  return Boolean(node && node instanceof Node2D && node.isContainer && !isPrefabNode(node));
+};
+
+/**
+ * Walk up from a candidate parent to the nearest ancestor that is NOT part of a
+ * prefab instance. New nodes must never be created inside an instance subtree
+ * (structural edits are not representable in the override format), so creation
+ * that targets an instance node is redirected to the closest editable ancestor.
+ */
+const escapePrefabAncestor = (node: NodeBase | null): NodeBase | null => {
+  let current: NodeBase | null = node;
+  while (current && isPrefabNode(current)) {
+    current = current.parentNode;
+  }
+  return current;
 };
 
 export const resolve2DParentForCreation = (
@@ -43,7 +58,8 @@ export const resolvePlacementParent = (
   }
 
   const parentNode = sceneGraph.nodeMap.get(parentNodeId);
-  return parentNode instanceof Node3D || parentNode instanceof Node2D ? parentNode : null;
+  const resolved = parentNode instanceof Node3D || parentNode instanceof Node2D ? parentNode : null;
+  return escapePrefabAncestor(resolved);
 };
 
 export const insertNodeAtIndex = (

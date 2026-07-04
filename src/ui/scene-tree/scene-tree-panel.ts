@@ -16,11 +16,14 @@ import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
 import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstanceCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
+import { OpenPrefabCommand } from '@/features/scene/OpenPrefabCommand';
+import { UnlinkPrefabInstanceCommand } from '@/features/scene/UnlinkPrefabInstanceCommand';
 import { SceneManager } from '@pix3/runtime';
 import { ServiceContainer } from '@/fw/di';
 import { classifySceneCreateAssetResource, deriveAssetNodeName } from '@/ui/shared/asset-drag-drop';
 import { DropdownPortal } from '../shared/dropdown-portal';
 import {
+  getPrefabMetadata,
   isPrefabChildNode,
   isPrefabInstanceRoot,
   isPrefabNode,
@@ -107,6 +110,12 @@ export class SceneTreePanel extends ComponentBase {
   private portal = new DropdownPortal({ minWidth: '12rem' });
   private lastHierarchyRef: NodeBase[] | null = null;
   private pendingScrollNodeId: string | null = null;
+  /**
+   * Scene id whose prefab instance roots have already been auto-collapsed. Reset
+   * on scene change so each newly loaded scene collapses its instances once, then
+   * respects the user's manual expand/collapse toggles.
+   */
+  private collapseInitializedSceneId: string | null = null;
   private disposeSceneSubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
   private disposeCollaborationSubscription?: () => void;
@@ -192,6 +201,7 @@ export class SceneTreePanel extends ComponentBase {
           @node-drag-end=${this.onNodeDragEnd.bind(this)}
           @node-context-menu=${this.onNodeContextMenu.bind(this)}
           @node-asset-drop=${this.onNodeAssetDrop.bind(this)}
+          @node-open-prefab=${this.onNodeOpenPrefab.bind(this)}
         >
           ${hasHierarchy
             ? html`<ul
@@ -256,36 +266,92 @@ export class SceneTreePanel extends ComponentBase {
       return null;
     }
 
+    const contextNode = this.resolveContextMenuNode();
+    const isInstanceRoot = contextNode ? isPrefabInstanceRoot(contextNode) : false;
+    const isChild = contextNode ? isPrefabChildNode(contextNode) : false;
+    const isPrefab = contextNode ? isPrefabNode(contextNode) : false;
+
     return html`
       <div class="scene-tree-context-menu" role="menu" @click=${(e: Event) => e.stopPropagation()}>
-        <button type="button" role="menuitem" @click=${() => this.onContextMenuAction('duplicate')}>
-          <span>Duplicate</span>
-          <span class="context-menu-shortcut"
-            >${this.getCommandShortcut('scene.duplicate-nodes')}</span
-          >
-        </button>
-        <button type="button" role="menuitem" @click=${() => this.onContextMenuAction('group')}>
-          <span>Group Selection</span>
-          <span class="context-menu-shortcut"
-            >${this.getCommandShortcut('scene.group-selected-nodes')}</span
-          >
-        </button>
-        <button type="button" role="menuitem" @click=${() => this.onContextMenuAction('delete')}>
-          <span>Delete</span>
-          <span class="context-menu-shortcut"
-            >${this.getCommandShortcut('scene.delete-object')}</span
-          >
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          @click=${() => this.onContextMenuAction('saveAsPrefab')}
-        >
-          <span>Save Branch as Prefab</span>
-          <span class="context-menu-shortcut"></span>
-        </button>
+        ${isPrefab
+          ? html`<button
+              type="button"
+              role="menuitem"
+              @click=${() => this.onContextMenuAction('openPrefab')}
+            >
+              <span>Open Prefab</span>
+              <span class="context-menu-shortcut"></span>
+            </button>`
+          : null}
+        ${isInstanceRoot
+          ? html`<button
+              type="button"
+              role="menuitem"
+              @click=${() => this.onContextMenuAction('unlinkPrefab')}
+            >
+              <span>Unlink Prefab Instance</span>
+              <span class="context-menu-shortcut"></span>
+            </button>`
+          : null}
+        ${isChild
+          ? null
+          : html`
+              <button
+                type="button"
+                role="menuitem"
+                @click=${() => this.onContextMenuAction('duplicate')}
+              >
+                <span>Duplicate</span>
+                <span class="context-menu-shortcut"
+                  >${this.getCommandShortcut('scene.duplicate-nodes')}</span
+                >
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                @click=${() => this.onContextMenuAction('group')}
+              >
+                <span>Group Selection</span>
+                <span class="context-menu-shortcut"
+                  >${this.getCommandShortcut('scene.group-selected-nodes')}</span
+                >
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                @click=${() => this.onContextMenuAction('delete')}
+              >
+                <span>Delete</span>
+                <span class="context-menu-shortcut"
+                  >${this.getCommandShortcut('scene.delete-object')}</span
+                >
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                @click=${() => this.onContextMenuAction('saveAsPrefab')}
+              >
+                <span>Save Branch as Prefab</span>
+                <span class="context-menu-shortcut"></span>
+              </button>
+            `}
       </div>
     `;
+  }
+
+  private resolveContextMenuNode(): NodeBase | null {
+    if (!this.contextMenu) {
+      return null;
+    }
+    const sceneId = appState.scenes.activeSceneId;
+    if (!sceneId) {
+      return null;
+    }
+    const container = ServiceContainer.getInstance();
+    const sceneManager = container.getService<SceneManager>(
+      container.getOrCreateToken(SceneManager)
+    );
+    return sceneManager.getSceneGraph(sceneId)?.nodeMap.get(this.contextMenu.nodeId) ?? null;
   }
 
   private getCommandShortcut(commandId: string): string {
@@ -329,6 +395,19 @@ export class SceneTreePanel extends ComponentBase {
 
     if (sceneChanged) {
       this.collapsedNodeIds = new Set();
+      this.collapseInitializedSceneId = null;
+    }
+
+    if (
+      this.activeSceneId &&
+      this.activeSceneId !== this.collapseInitializedSceneId &&
+      this.hierarchy.length > 0
+    ) {
+      // First time this scene's hierarchy is available: collapse prefab instance
+      // roots by default so many instances don't flood the tree. Deferred via the
+      // sentinel because activeSceneId changes before rootNodes arrive on load.
+      this.collapsedNodeIds = this.collectPrefabRootIds(this.hierarchy);
+      this.collapseInitializedSceneId = this.activeSceneId;
     } else if (this.collapsedNodeIds.size > 0 && needsRebuild) {
       const validIds = new Set<string>();
       this.collectNodeIds(this.hierarchy, validIds);
@@ -337,6 +416,22 @@ export class SceneTreePanel extends ComponentBase {
         this.collapsedNodeIds = pruned;
       }
     }
+  }
+
+  private collectPrefabRootIds(nodes: SceneTreeNode[]): Set<string> {
+    const target = new Set<string>();
+    const walk = (list: SceneTreeNode[]): void => {
+      for (const node of list) {
+        if (node.isPrefabRoot) {
+          target.add(node.id);
+        }
+        if (node.children.length > 0) {
+          walk(node.children);
+        }
+      }
+    };
+    walk(nodes);
+    return target;
   }
 
   private syncSelectionState(): void {
@@ -650,6 +745,18 @@ export class SceneTreePanel extends ComponentBase {
       }
     }
 
+    // Never create a node inside a prefab instance subtree — its structure is
+    // owned by the prefab file and additions are lost on save. (The dragover
+    // validator already fades these targets; this backstops other entry paths.)
+    const effectiveParent = parentNodeId ? sceneGraph.nodeMap.get(parentNodeId) : null;
+    if (effectiveParent && isPrefabNode(effectiveParent)) {
+      console.warn(
+        '[SceneTreePanel] Asset drop rejected: target is inside a prefab instance',
+        parentNodeId
+      );
+      return;
+    }
+
     const assetKind = classifySceneCreateAssetResource(resourcePath);
     if (!assetKind) {
       return;
@@ -721,15 +828,31 @@ export class SceneTreePanel extends ComponentBase {
   }
 
   private async onContextMenuAction(
-    action: 'duplicate' | 'group' | 'delete' | 'saveAsPrefab'
+    action: 'duplicate' | 'group' | 'delete' | 'saveAsPrefab' | 'openPrefab' | 'unlinkPrefab'
   ): Promise<void> {
+    // Resolve the context node before clearing the menu — the node id is needed
+    // for the prefab-specific actions.
+    const contextNode = this.resolveContextMenuNode();
     this.contextMenu = null;
 
-    const commandIdByAction: Record<'duplicate' | 'group' | 'delete', string> = {
-      duplicate: 'scene.duplicate-nodes',
-      group: 'scene.group-selected-nodes',
-      delete: 'scene.delete-object',
-    };
+    if (action === 'openPrefab') {
+      await this.openPrefabForNode(contextNode);
+      return;
+    }
+
+    if (action === 'unlinkPrefab') {
+      if (!contextNode) {
+        return;
+      }
+      try {
+        await this.commandDispatcher.execute(
+          new UnlinkPrefabInstanceCommand({ nodeId: contextNode.nodeId })
+        );
+      } catch (error) {
+        console.error('[SceneTreePanel] Failed to execute "Unlink Prefab Instance"', error);
+      }
+      return;
+    }
 
     if (action === 'saveAsPrefab') {
       try {
@@ -740,11 +863,50 @@ export class SceneTreePanel extends ComponentBase {
       return;
     }
 
+    const commandIdByAction: Record<'duplicate' | 'group' | 'delete', string> = {
+      duplicate: 'scene.duplicate-nodes',
+      group: 'scene.group-selected-nodes',
+      delete: 'scene.delete-object',
+    };
+
     const commandId = commandIdByAction[action];
     try {
       await this.commandDispatcher.executeById(commandId);
     } catch (error) {
       console.error(`[SceneTreePanel] Failed to execute context menu action "${action}"`, error);
+    }
+  }
+
+  private async onNodeOpenPrefab(event: CustomEvent<{ nodeId: string }>): Promise<void> {
+    const sceneId = appState.scenes.activeSceneId;
+    if (!sceneId) {
+      return;
+    }
+    const container = ServiceContainer.getInstance();
+    const sceneManager = container.getService<SceneManager>(
+      container.getOrCreateToken(SceneManager)
+    );
+    const node = sceneManager.getSceneGraph(sceneId)?.nodeMap.get(event.detail.nodeId) ?? null;
+    await this.openPrefabForNode(node);
+  }
+
+  private async openPrefabForNode(node: NodeBase | null): Promise<void> {
+    if (!node) {
+      return;
+    }
+    const marker = getPrefabMetadata(node);
+    // Prefer the node's own instancePath (set on instance roots). For a child use
+    // the marker's sourcePath — the innermost prefab that defines it. focusLocalId
+    // pre-selects the corresponding node in the opened prefab when it is a child.
+    const prefabPath = node.instancePath ?? marker?.sourcePath ?? null;
+    if (!prefabPath) {
+      return;
+    }
+    const focusLocalId = isPrefabChildNode(node) ? marker?.localId : undefined;
+    try {
+      await this.commandDispatcher.execute(new OpenPrefabCommand({ prefabPath, focusLocalId }));
+    } catch (error) {
+      console.error('[SceneTreePanel] Failed to open prefab', error);
     }
   }
 }
