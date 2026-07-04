@@ -141,10 +141,74 @@ async function runBiRefNet(req: BgRemovalRequest): Promise<Blob> {
   return result.toBlob('image/png');
 }
 
+// Fill enclosed transparent regions: a transparent pixel that can't be reached from the image
+// border (through other transparent pixels) is an interior hole — make it opaque. Leaves the outer
+// background and anti-aliased edges untouched, so it only recovers wrongly-removed object interiors.
+function fillAlphaHoles(data: Uint8ClampedArray, width: number, height: number): void {
+  const threshold = 128;
+  const total = width * height;
+  const outside = new Uint8Array(total);
+  const stack: number[] = [];
+  const isTransparent = (p: number): boolean => data[p * 4 + 3] < threshold;
+  const seed = (p: number): void => {
+    if (isTransparent(p) && !outside[p]) {
+      outside[p] = 1;
+      stack.push(p);
+    }
+  };
+  for (let x = 0; x < width; x++) {
+    seed(x);
+    seed((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    seed(y * width);
+    seed(y * width + (width - 1));
+  }
+  while (stack.length > 0) {
+    const p = stack.pop() as number;
+    const x = p % width;
+    const y = (p - x) / width;
+    if (x > 0) seed(p - 1);
+    if (x < width - 1) seed(p + 1);
+    if (y > 0) seed(p - width);
+    if (y < height - 1) seed(p + width);
+  }
+  for (let p = 0; p < total; p++) {
+    if (isTransparent(p) && !outside[p]) {
+      data[p * 4 + 3] = 255;
+    }
+  }
+}
+
+async function fillHolesInBlob(blob: Blob): Promise<Blob> {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') {
+    return blob;
+  }
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+  } catch {
+    return blob;
+  }
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const c2d = canvas.getContext('2d');
+  if (!c2d) {
+    bitmap.close();
+    return blob;
+  }
+  c2d.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const imageData = c2d.getImageData(0, 0, canvas.width, canvas.height);
+  fillAlphaHoles(imageData.data, canvas.width, canvas.height);
+  c2d.putImageData(imageData, 0, 0);
+  return canvas.convertToBlob({ type: 'image/png' });
+}
+
 ctx.onmessage = (event: MessageEvent<BgRemovalRequest>) => {
   const req = event.data;
   const run = req.engine === 'imgly' ? runImgly(req) : runBiRefNet(req);
   run
+    .then(async blob => (req.fillHoles ? fillHolesInBlob(blob) : blob))
     .then(blob => post({ id: req.id, type: 'done', blob }))
     .catch((error: unknown) => {
       post({

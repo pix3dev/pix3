@@ -18,6 +18,8 @@ const INSTALLED_KEY = (engine: BgRemovalEngine): string => `pix3.bgRemoval.insta
 export interface RemoveBackgroundOptions {
   engine?: BgRemovalEngine;
   quality?: BgRemovalQuality;
+  /** Fill enclosed transparent holes in the result (default true). */
+  fillHoles?: boolean;
   onProgress?: (progress: BgRemovalProgress) => void;
 }
 
@@ -62,6 +64,7 @@ export class BackgroundRemovalService {
       quality,
       blob: capped,
       installed: isInstalled(engine),
+      fillHoles: options?.fillHoles ?? true,
       ...(engine === 'imgly' && this.imglyPublicPath
         ? { imglyPublicPath: this.imglyPublicPath }
         : {}),

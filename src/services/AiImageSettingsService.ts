@@ -13,6 +13,8 @@ export interface AiImagePreferences {
   /** Local background-removal engine + BiRefNet quality tier. */
   bgRemovalEngine: BgRemovalEngine;
   bgRemovalQuality: BgRemovalQuality;
+  /** Fill enclosed transparent holes in the cutout (recovers wrongly-removed object interiors). */
+  bgFillHoles: boolean;
 }
 
 const STORAGE_KEY = 'pix3.aiImageSettings:v1';
@@ -138,6 +140,7 @@ export class AiImageSettingsService {
       defaultImageSize: '1K',
       bgRemovalEngine: 'imgly',
       bgRemovalQuality: 'balanced',
+      bgFillHoles: true,
     };
   }
 
@@ -177,6 +180,8 @@ export class AiImageSettingsService {
           parsed.bgRemovalQuality === 'balanced' || parsed.bgRemovalQuality === 'max'
             ? parsed.bgRemovalQuality
             : defaults.bgRemovalQuality,
+        bgFillHoles:
+          typeof parsed.bgFillHoles === 'boolean' ? parsed.bgFillHoles : defaults.bgFillHoles,
       };
     } catch {
       return defaults;

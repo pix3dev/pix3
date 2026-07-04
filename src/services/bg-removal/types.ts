@@ -19,6 +19,12 @@ export interface BgRemovalRequest {
   blob: Blob;
   /** True once this engine's model was fetched before (label "loading" vs "downloading"). */
   installed: boolean;
+  /**
+   * Fill enclosed transparent "holes" in the cutout — transparent pixels fully surrounded by the
+   * object become opaque again. Fixes lighter models (ISNet) making a framed object's interior
+   * see-through, while leaving the outer background and soft edges untouched.
+   */
+  fillHoles: boolean;
   /** Optional self-host base for imgly assets. */
   imglyPublicPath?: string;
   /** Optional self-host host for BiRefNet (transformers.js env.remoteHost). */

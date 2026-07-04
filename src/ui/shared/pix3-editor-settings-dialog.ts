@@ -59,6 +59,9 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private bgQuality: BgRemovalQuality = 'balanced';
 
+  @state()
+  private bgFillHoles = true;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.warnOnUnsavedUnload = appState.ui.warnOnUnsavedUnload;
@@ -70,6 +73,7 @@ export class EditorSettingsDialog extends ComponentBase {
     this.aiModelId = this.aiImageSettings.getSelectedModelId(this.aiProviderId) ?? '';
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
+    this.bgFillHoles = prefs.bgFillHoles;
     void this.refreshAiKeyStatus();
   }
 
@@ -273,6 +277,14 @@ export class EditorSettingsDialog extends ComponentBase {
                 </select>
               </label>`
             : null}
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.bgFillHoles}
+              @change=${this.onBgFillHolesChange}
+            />
+            <span>Fill interior holes (solid cutout)</span>
+          </label>
           <div class="hint">
             Runs on-device (no API key).
             ${this.bgEngine === 'imgly'
@@ -292,6 +304,11 @@ export class EditorSettingsDialog extends ComponentBase {
   private onBgQualityChange(e: Event): void {
     this.bgQuality = (e.target as HTMLSelectElement).value as BgRemovalQuality;
     this.aiImageSettings.updatePreferences({ bgRemovalQuality: this.bgQuality });
+  }
+
+  private onBgFillHolesChange(e: Event): void {
+    this.bgFillHoles = (e.target as HTMLInputElement).checked;
+    this.aiImageSettings.updatePreferences({ bgFillHoles: this.bgFillHoles });
   }
 
   private async refreshAiKeyStatus(): Promise<void> {

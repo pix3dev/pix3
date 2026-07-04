@@ -86,6 +86,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private bgBusy = false;
   @state() private bgEngine: BgRemovalEngine = 'imgly';
   @state() private bgQuality: BgRemovalQuality = 'balanced';
+  @state() private bgFillHoles = true;
   @state() private bgProgress: BgRemovalProgress | null = null;
   @state() private bgError: string | null = null;
   @state() private historyRecords: GenerationRecord[] = [];
@@ -211,6 +212,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       : (model?.capabilities.imageSizes[0] ?? '1K');
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
+    this.bgFillHoles = prefs.bgFillHoles;
     void this.refreshKeyStatus();
   }
 
@@ -915,6 +917,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       const output = await this.bgRemoval.removeBackground(sourceBlob, {
         engine: this.bgEngine,
         quality: this.bgQuality,
+        fillHoles: this.bgFillHoles,
         onProgress: progress => {
           this.bgProgress = progress;
         },
