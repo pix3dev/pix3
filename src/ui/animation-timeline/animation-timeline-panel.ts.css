@@ -336,6 +336,32 @@ pix3-animation-timeline-panel .atl-lane--audio {
   background-color: rgba(96, 165, 250, 0.04);
 }
 
+/* In-lane preview layer — value curves / color ramp / text chips, behind keys. */
+pix3-animation-timeline-panel .atl-lane-preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+pix3-animation-timeline-panel .atl-lane-text {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+pix3-animation-timeline-panel .atl-lane-text__chip {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-left: 9px;
+  font-size: 0.62rem;
+  color: var(--color-text-secondary, #9ca3af);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 pix3-animation-timeline-panel .atl-lane--empty {
   display: flex;
   align-items: center;
@@ -366,6 +392,22 @@ pix3-animation-timeline-panel .atl-key:hover {
   background: #f1f5f9;
 }
 
+/* Per-key glyph encodes the outgoing easing (After Effects idiom):
+   filled diamond = eased, hollow diamond = linear, square = step. */
+pix3-animation-timeline-panel .atl-key--linear {
+  background: transparent;
+  border-color: #cbd5e1;
+}
+
+pix3-animation-timeline-panel .atl-key--linear:hover {
+  background: rgba(203, 213, 225, 0.3);
+}
+
+pix3-animation-timeline-panel .atl-key--step {
+  transform: translate(-50%, -50%) rotate(0deg);
+  border-radius: 1px;
+}
+
 pix3-animation-timeline-panel .atl-key--selected {
   background: var(--pix3-accent-color, #ffcf33);
   box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.35);
@@ -379,6 +421,15 @@ pix3-animation-timeline-panel .atl-key--audio {
 
 pix3-animation-timeline-panel .atl-key--audio.atl-key--selected {
   background: var(--pix3-accent-color, #ffcf33);
+}
+
+/* Rubber-band (box) selection rectangle — fixed to the viewport. */
+.atl-marquee {
+  position: fixed;
+  z-index: 50;
+  border: 1px solid var(--pix3-accent-color, #ffcf33);
+  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
+  pointer-events: none;
 }
 
 /* -------------------------------- menus -------------------------------- */
@@ -504,4 +555,8 @@ pix3-animation-timeline-panel .atl-menu {
 
 .pix3-dropdown-portal .atl-menu-back {
   font-weight: 600;
+}
+
+.pix3-dropdown-portal .atl-menu .atl-menu-easing {
+  padding: 0.15rem 0.5rem 0.4rem;
 }

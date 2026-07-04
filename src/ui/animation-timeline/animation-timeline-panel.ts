@@ -14,9 +14,9 @@
  */
 
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
+import { svg } from 'lit';
 import { appState } from '@/state';
 import {
-  EASING_NAMES,
   findKeyframeClip,
   fromSchemaValue,
   getNodePropertySchema,
@@ -66,6 +66,7 @@ import {
   KEY_TIME_EPSILON,
 } from '@/features/animation-timeline/clip-edit-utils';
 import {
+  BASE_PX_PER_SECOND,
   clampZoom,
   formatTime,
   getRulerTicks,
@@ -74,14 +75,19 @@ import {
   timeToX,
   xToTime,
 } from './timeline-geometry';
+import { easingLabel } from './easing-curve';
+import { buildLanePreview, PREVIEW_PAD } from './timeline-preview';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { getDroppedAssetResourcePath, hasAssetDragData } from '@/ui/shared/asset-drag-drop';
+import { renderEasingGrid } from '@/ui/shared/pix3-easing-picker';
 import '@/ui/shared/pix3-panel';
 import '@/ui/shared/pix3-toolbar';
 import '@/ui/shared/pix3-toolbar-button';
 import './animation-timeline-panel.ts.css';
 
 const TRACK_LABEL_WIDTH = 260;
+/** Fixed lane content height used by the preview SVG coordinate space (px). */
+const LANE_PREVIEW_HEIGHT = 28;
 const SUPPORTED_TRACK_TYPES: Record<string, TrackValueType> = {
   number: 'number',
   boolean: 'boolean',
@@ -104,6 +110,33 @@ interface BoundPlayer {
 interface KeyRef {
   trackId: string;
   time: number;
+}
+
+interface ClipboardKey {
+  trackId: string;
+  kind: 'property' | 'audio';
+  time: number;
+  value?: KeyframeValue;
+  easing?: KeyframeEasing;
+  audioPath?: string;
+  volume?: number;
+}
+
+interface KeyClipboard {
+  minTime: number;
+  items: ClipboardKey[];
+}
+
+/** Rubber-band selection rectangle, in viewport (client) coordinates. */
+interface MarqueeState {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** Shift/Ctrl held at press — add to the prior selection. */
+  additive: boolean;
+  base: KeyRef[];
+  moved: boolean;
 }
 
 type OpenMenu =
@@ -178,9 +211,11 @@ export class AnimationTimelinePanel extends ComponentBase {
   @state() private hasSelection = false;
   @state() private hasScene = false;
   @state() private recording = false;
+  @state() private marquee: MarqueeState | null = null;
 
   private readonly portal = new DropdownPortal({ minWidth: '14rem' });
   private keysDrag: KeysDragState | null = null;
+  private keyClipboard: KeyClipboard | null = null;
   private scrubPointerId: number | null = null;
   private disposers: Array<() => void> = [];
   /** Last-known live value per property track, for autokey diffing. */
@@ -231,6 +266,8 @@ export class AnimationTimelinePanel extends ComponentBase {
     this.disposers = [];
     document.removeEventListener('pointerdown', this.onWindowPointerDown, { capture: true });
     window.removeEventListener('keydown', this.onWindowKeyDown);
+    window.removeEventListener('pointermove', this.onMarqueePointerMove);
+    window.removeEventListener('pointerup', this.onMarqueePointerUp);
     this.portal.close();
     this.preview.stopAndRestore();
     super.disconnectedCallback();
@@ -572,6 +609,46 @@ export class AnimationTimelinePanel extends ComponentBase {
     this.zoom = clampZoom(delta === 0 ? 1 : this.zoom * (delta > 0 ? 1.25 : 0.8));
   }
 
+  /** Fit the whole clip into the visible lane area. */
+  private onFitToView(): void {
+    const clip = this.activeClip;
+    if (!clip) {
+      return;
+    }
+    const scroll = this.querySelector('.atl-scroll') as HTMLElement | null;
+    const available = (scroll?.clientWidth ?? 0) - TRACK_LABEL_WIDTH - 48;
+    if (available <= 0) {
+      return;
+    }
+    this.zoom = clampZoom(available / (clip.duration * BASE_PX_PER_SECOND));
+    if (scroll) {
+      scroll.scrollLeft = 0;
+    }
+  }
+
+  /** Snap the playhead to the previous/next keyframe across all tracks (dir: -1 | 1). */
+  private onJumpToKeyframe(dir: -1 | 1): void {
+    const clip = this.activeClip;
+    if (!clip) {
+      return;
+    }
+    const times = new Set<number>([0, clip.duration]);
+    for (const track of clip.tracks) {
+      for (const key of track.keys as Array<{ time: number }>) {
+        times.add(key.time);
+      }
+    }
+    const sorted = [...times].sort((a, b) => a - b);
+    const current = this.playhead;
+    const target =
+      dir < 0
+        ? [...sorted].reverse().find(t => t < current - KEY_TIME_EPSILON)
+        : sorted.find(t => t > current + KEY_TIME_EPSILON);
+    if (target !== undefined) {
+      this.setPlayhead(target);
+    }
+  }
+
   private async onAddKeyAtPlayhead(): Promise<void> {
     const clip = this.activeClip;
     const clipName = this.activeClipName;
@@ -628,8 +705,35 @@ export class AnimationTimelinePanel extends ComponentBase {
     this.selectedKeys = [];
   }
 
-  private async onSelectionEasingChange(event: Event): Promise<void> {
-    const easing = (event.target as HTMLSelectElement).value as KeyframeEasing;
+  /**
+   * The easing shared by the current property-key selection, or null when the
+   * selection is empty or mixed (the picker then shows its placeholder).
+   */
+  private get selectionEasing(): KeyframeEasing | null {
+    const clip = this.activeClip;
+    if (!clip) {
+      return null;
+    }
+    let result: KeyframeEasing | null = null;
+    for (const ref of this.selectedKeys) {
+      const track = findTrack(clip, ref.trackId);
+      if (!track || track.kind !== 'property') {
+        continue;
+      }
+      const key = track.keys.find(k => Math.abs(k.time - ref.time) < KEY_TIME_EPSILON);
+      if (!key) {
+        continue;
+      }
+      if (result === null) {
+        result = key.easing;
+      } else if (result !== key.easing) {
+        return null;
+      }
+    }
+    return result;
+  }
+
+  private async applyEasingToSelection(easing: KeyframeEasing): Promise<void> {
     const clipName = this.activeClipName;
     if (!clipName || this.selectedKeys.length === 0) {
       return;
@@ -989,17 +1093,31 @@ export class AnimationTimelinePanel extends ComponentBase {
     }
   }
 
-  private async onLaneDoubleClick(event: MouseEvent, track: ClipTrack): Promise<void> {
+  private onLaneDoubleClick(event: MouseEvent, track: ClipTrack): void {
+    const lane = event.currentTarget as HTMLElement;
+    void this.insertKeyAtLane(track, event.clientX, lane);
+  }
+
+  /** Godot-style: right-click an empty spot on a property lane to insert a key. */
+  private onLaneContextMenu(event: MouseEvent, track: ClipTrack): void {
+    if (track.kind !== 'property') {
+      return;
+    }
+    event.preventDefault();
+    const lane = event.currentTarget as HTMLElement;
+    void this.insertKeyAtLane(track, event.clientX, lane);
+  }
+
+  private async insertKeyAtLane(
+    track: ClipTrack,
+    clientX: number,
+    lane: HTMLElement
+  ): Promise<void> {
     const clipName = this.activeClipName;
     if (!clipName || track.kind !== 'property') {
       return;
     }
-    const lane = event.currentTarget as HTMLElement;
-    const time = snapTime(
-      this.laneTimeFromClientX(event.clientX, lane),
-      this.snapStep,
-      this.snapEnabled
-    );
+    const time = snapTime(this.laneTimeFromClientX(clientX, lane), this.snapStep, this.snapEnabled);
     const value = this.captureTrackValue(track);
     if (value === null) {
       return;
@@ -1012,6 +1130,191 @@ export class AnimationTimelinePanel extends ComponentBase {
       }
     });
     this.selectedKeys = [{ trackId: track.id, time }];
+  }
+
+  // ---------------------------------------------------------------------
+  // Rubber-band (box) selection
+  // ---------------------------------------------------------------------
+
+  private onLanePointerDown(event: PointerEvent): void {
+    // Keys stop propagation on their own pointerdown, so reaching here means an
+    // empty spot on the lane — start a marquee (and scrub-select).
+    if (event.button !== 0) {
+      return;
+    }
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    this.marquee = {
+      x0: event.clientX,
+      y0: event.clientY,
+      x1: event.clientX,
+      y1: event.clientY,
+      additive,
+      base: additive ? [...this.selectedKeys] : [],
+      moved: false,
+    };
+    if (!additive) {
+      this.selectedKeys = [];
+    }
+    window.addEventListener('pointermove', this.onMarqueePointerMove);
+    window.addEventListener('pointerup', this.onMarqueePointerUp);
+  }
+
+  private readonly onMarqueePointerMove = (event: PointerEvent): void => {
+    const marquee = this.marquee;
+    if (!marquee) {
+      return;
+    }
+    this.marquee = { ...marquee, x1: event.clientX, y1: event.clientY, moved: true };
+    this.updateMarqueeSelection();
+  };
+
+  private readonly onMarqueePointerUp = (): void => {
+    window.removeEventListener('pointermove', this.onMarqueePointerMove);
+    window.removeEventListener('pointerup', this.onMarqueePointerUp);
+    this.marquee = null;
+  };
+
+  private updateMarqueeSelection(): void {
+    const marquee = this.marquee;
+    if (!marquee) {
+      return;
+    }
+    const left = Math.min(marquee.x0, marquee.x1);
+    const right = Math.max(marquee.x0, marquee.x1);
+    const top = Math.min(marquee.y0, marquee.y1);
+    const bottom = Math.max(marquee.y0, marquee.y1);
+    const hits: KeyRef[] = [];
+    this.querySelectorAll('.atl-key').forEach(element => {
+      const rect = element.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      if (cx < left || cx > right || cy < top || cy > bottom) {
+        return;
+      }
+      const el = element as HTMLElement;
+      const trackId = el.dataset.trackId;
+      const time = Number(el.dataset.keyTime);
+      if (trackId && Number.isFinite(time)) {
+        hits.push({ trackId, time });
+      }
+    });
+    const merged = [...marquee.base];
+    for (const hit of hits) {
+      if (!merged.some(ref => this.sameKey(ref, hit))) {
+        merged.push(hit);
+      }
+    }
+    this.selectedKeys = merged;
+  }
+
+  // ---------------------------------------------------------------------
+  // Keyframe clipboard (copy / cut / paste / duplicate)
+  // ---------------------------------------------------------------------
+
+  private collectSelectedKeyData(): KeyClipboard | null {
+    const clip = this.activeClip;
+    if (!clip || this.selectedKeys.length === 0) {
+      return null;
+    }
+    const items: ClipboardKey[] = [];
+    let minTime = Number.POSITIVE_INFINITY;
+    for (const ref of this.selectedKeys) {
+      const track = findTrack(clip, ref.trackId);
+      if (!track) {
+        continue;
+      }
+      if (track.kind === 'property') {
+        const key = track.keys.find(k => Math.abs(k.time - ref.time) < KEY_TIME_EPSILON);
+        if (!key) {
+          continue;
+        }
+        minTime = Math.min(minTime, key.time);
+        items.push({
+          trackId: track.id,
+          kind: 'property',
+          time: key.time,
+          value: structuredClone(key.value),
+          easing: key.easing,
+        });
+      } else {
+        const key = track.keys.find(k => Math.abs(k.time - ref.time) < KEY_TIME_EPSILON);
+        if (!key) {
+          continue;
+        }
+        minTime = Math.min(minTime, key.time);
+        items.push({
+          trackId: track.id,
+          kind: 'audio',
+          time: key.time,
+          audioPath: key.audioPath,
+          volume: key.volume,
+        });
+      }
+    }
+    return items.length > 0 ? { minTime, items } : null;
+  }
+
+  private async pasteKeyData(data: KeyClipboard, targetTime: number): Promise<void> {
+    const clipName = this.activeClipName;
+    if (!clipName) {
+      return;
+    }
+    const offset = targetTime - data.minTime;
+    const pasted: KeyRef[] = [];
+    await this.mutateClips('Paste keyframes', draft => {
+      const clip = findKeyframeClip(draft, clipName);
+      if (!clip) {
+        return;
+      }
+      for (const item of data.items) {
+        const track = findTrack(clip, item.trackId);
+        if (!track) {
+          continue;
+        }
+        const time = Math.max(0, item.time + offset);
+        if (track.kind === 'property' && item.kind === 'property' && item.value !== undefined) {
+          upsertKey(track, time, structuredClone(item.value), item.easing);
+          pasted.push({ trackId: track.id, time });
+        } else if (track.kind === 'audio' && item.kind === 'audio' && item.audioPath) {
+          upsertAudioKey(track, time, item.audioPath, item.volume ?? 1);
+          pasted.push({ trackId: track.id, time });
+        }
+      }
+    });
+    if (pasted.length > 0) {
+      this.selectedKeys = pasted;
+    }
+  }
+
+  private onCopyKeys(): void {
+    const data = this.collectSelectedKeyData();
+    if (data) {
+      this.keyClipboard = data;
+    }
+  }
+
+  private onCutKeys(): void {
+    const data = this.collectSelectedKeyData();
+    if (data) {
+      this.keyClipboard = data;
+      void this.onDeleteSelectedKeys();
+    }
+  }
+
+  private onPasteKeys(): void {
+    if (this.keyClipboard) {
+      void this.pasteKeyData(
+        this.keyClipboard,
+        snapTime(this.playhead, this.snapStep, this.snapEnabled)
+      );
+    }
+  }
+
+  private onDuplicateKeys(): void {
+    const data = this.collectSelectedKeyData();
+    if (data) {
+      void this.pasteKeyData(data, snapTime(this.playhead, this.snapStep, this.snapEnabled));
+    }
   }
 
   private onKeyContextMenu(event: MouseEvent, track: ClipTrack, keyTime: number): void {
@@ -1163,7 +1466,7 @@ export class AnimationTimelinePanel extends ComponentBase {
         setKeyEasing(track, ctx.time, easing);
       }
     });
-    this.openMenu = null;
+    // Keep the menu open so the value editor stays reachable after picking.
   }
 
   private async onContextSetValue(value: KeyframeValue): Promise<void> {
@@ -1261,10 +1564,43 @@ export class AnimationTimelinePanel extends ComponentBase {
       return;
     }
 
+    // Clipboard shortcuts — handle before the plain-key switch. Unhandled
+    // Ctrl/Cmd combos (undo/redo…) bubble to the global keybindings.
+    if (event.ctrlKey || event.metaKey) {
+      switch (event.key.toLowerCase()) {
+        case 'c':
+          event.preventDefault();
+          event.stopPropagation();
+          this.onCopyKeys();
+          break;
+        case 'x':
+          event.preventDefault();
+          event.stopPropagation();
+          this.onCutKeys();
+          break;
+        case 'v':
+          event.preventDefault();
+          event.stopPropagation();
+          this.onPasteKeys();
+          break;
+        case 'd':
+          event.preventDefault();
+          event.stopPropagation();
+          this.onDuplicateKeys();
+          break;
+      }
+      return;
+    }
+
     switch (event.key) {
       case ' ':
         event.preventDefault();
         this.togglePlayback();
+        break;
+      case 'k':
+      case 'K':
+        event.preventDefault();
+        void this.onAddKeyAtPlayhead();
         break;
       case 'Delete':
       case 'Backspace':
@@ -1274,6 +1610,11 @@ export class AnimationTimelinePanel extends ComponentBase {
       case 'ArrowLeft':
       case 'ArrowRight': {
         event.preventDefault();
+        // Alt+Arrow leaps the playhead between keyframes.
+        if (event.altKey) {
+          this.onJumpToKeyframe(event.key === 'ArrowLeft' ? -1 : 1);
+          break;
+        }
         const step = this.snapStep * (event.shiftKey ? 5 : 1);
         const delta = event.key === 'ArrowLeft' ? -step : step;
         if (this.selectedKeys.length > 0) {
@@ -1345,10 +1686,25 @@ export class AnimationTimelinePanel extends ComponentBase {
         ${this.bound ? html`<span slot="subtitle">${this.bound.nodeName}</span>` : null}
         ${this.renderToolbar()}
         <div class="atl-root" tabindex="0" @keydown=${this.onPanelKeyDown}>
-          ${this.renderBody()}${this.renderMenu()}
+          ${this.renderBody()}${this.renderMenu()}${this.renderMarquee()}
         </div>
       </pix3-panel>
     `;
+  }
+
+  private renderMarquee() {
+    const marquee = this.marquee;
+    if (!marquee || !marquee.moved) {
+      return null;
+    }
+    const left = Math.min(marquee.x0, marquee.x1);
+    const top = Math.min(marquee.y0, marquee.y1);
+    const width = Math.abs(marquee.x1 - marquee.x0);
+    const height = Math.abs(marquee.y1 - marquee.y0);
+    return html`<div
+      class="atl-marquee"
+      style="left: ${left}px; top: ${top}px; width: ${width}px; height: ${height}px;"
+    ></div>`;
   }
 
   private renderToolbar() {
@@ -1399,6 +1755,7 @@ export class AnimationTimelinePanel extends ComponentBase {
           icon="more-vertical"
           iconOnly
           aria-label="Clip actions"
+          tooltip="Clip actions — new, rename, duplicate, delete"
           ?disabled=${!this.bound}
           @click=${() => {
             this.openMenu =
@@ -1409,16 +1766,34 @@ export class AnimationTimelinePanel extends ComponentBase {
         ></pix3-toolbar-button>
         <span class="atl-toolbar-separator"></span>
         <pix3-toolbar-button
+          icon="key-prev"
+          iconOnly
+          aria-label="Previous keyframe"
+          tooltip="Previous keyframe (Alt+Left)"
+          ?disabled=${!hasClip}
+          @click=${() => this.onJumpToKeyframe(-1)}
+        ></pix3-toolbar-button>
+        <pix3-toolbar-button
           icon=${this.previewPlaying ? 'pause' : 'play'}
           iconOnly
           aria-label=${this.previewPlaying ? 'Pause preview' : 'Play preview'}
+          tooltip=${this.previewPlaying ? 'Pause (Space)' : 'Play from playhead (Space)'}
           ?disabled=${!hasClip}
           @click=${() => this.togglePlayback()}
         ></pix3-toolbar-button>
         <pix3-toolbar-button
-          icon="square"
+          icon="key-next"
+          iconOnly
+          aria-label="Next keyframe"
+          tooltip="Next keyframe (Alt+Right)"
+          ?disabled=${!hasClip}
+          @click=${() => this.onJumpToKeyframe(1)}
+        ></pix3-toolbar-button>
+        <pix3-toolbar-button
+          icon="stop"
           iconOnly
           aria-label="Stop preview and restore scene"
+          tooltip="Stop and reset to the authored pose"
           ?disabled=${!this.previewActive}
           @click=${() => this.stopPlayback()}
         ></pix3-toolbar-button>
@@ -1429,11 +1804,14 @@ export class AnimationTimelinePanel extends ComponentBase {
           aria-label=${this.recording
             ? 'Autokey on: moving the node records keyframes'
             : 'Autokey off: enable to record keyframes as you pose the node'}
+          tooltip=${this.recording
+            ? 'Auto-key ON — posing the node records keyframes'
+            : 'Auto-key — record keyframes as you pose the node'}
           ?toggled=${this.recording}
           ?disabled=${!hasClip}
           @click=${() => this.onToggleRecording()}
         ></pix3-toolbar-button>
-        <span class="atl-time-readout">${formatTime(this.playhead)}</span>
+        <span class="atl-time-readout" title="Playhead time">${formatTime(this.playhead)}</span>
         <span class="atl-toolbar-separator"></span>
         <label class="atl-field">
           <span>Length</span>
@@ -1445,6 +1823,7 @@ export class AnimationTimelinePanel extends ComponentBase {
             .value=${clip ? String(clip.duration) : ''}
             ?disabled=${!hasClip}
             aria-label="Clip duration in seconds"
+            title="Clip length in seconds"
             @change=${this.onDurationChange}
           />
         </label>
@@ -1452,6 +1831,7 @@ export class AnimationTimelinePanel extends ComponentBase {
           icon="repeat"
           iconOnly
           aria-label="Loop clip"
+          tooltip="Loop clip playback"
           ?toggled=${clip?.loop ?? false}
           ?disabled=${!hasClip}
           @click=${() => void this.onToggleLoop()}
@@ -1461,6 +1841,7 @@ export class AnimationTimelinePanel extends ComponentBase {
           icon="snap"
           iconOnly
           aria-label="Snap keys to grid"
+          tooltip="Snap keyframes & playhead to the step"
           ?toggled=${this.snapEnabled}
           @click=${() => {
             this.snapEnabled = !this.snapEnabled;
@@ -1469,6 +1850,7 @@ export class AnimationTimelinePanel extends ComponentBase {
         <select
           class="atl-select atl-select--snap"
           aria-label="Snap step in seconds"
+          title="Snap step (seconds)"
           ?disabled=${!this.snapEnabled}
           @change=${(e: Event) => {
             this.snapStep = Number((e.target as HTMLSelectElement).value);
@@ -1486,25 +1868,37 @@ export class AnimationTimelinePanel extends ComponentBase {
           icon="zoom-out"
           iconOnly
           aria-label="Zoom out"
+          tooltip="Zoom out"
           @click=${() => this.onZoom(-1)}
         ></pix3-toolbar-button>
         <pix3-toolbar-button
           icon="zoom-default"
           iconOnly
           aria-label="Reset zoom"
+          tooltip="Reset zoom to 100%"
           @click=${() => this.onZoom(0)}
+        ></pix3-toolbar-button>
+        <pix3-toolbar-button
+          icon="maximize-2"
+          iconOnly
+          aria-label="Fit clip to view"
+          tooltip="Fit clip to view"
+          ?disabled=${!hasClip}
+          @click=${() => this.onFitToView()}
         ></pix3-toolbar-button>
         <pix3-toolbar-button
           icon="zoom-in"
           iconOnly
           aria-label="Zoom in"
+          tooltip="Zoom in"
           @click=${() => this.onZoom(1)}
         ></pix3-toolbar-button>
         <span class="atl-toolbar-separator"></span>
         <pix3-toolbar-button
-          icon="plus-circle"
+          icon="key-add"
           iconOnly
           aria-label="Add keyframe at playhead"
+          tooltip="Add keyframe at playhead (K)"
           ?disabled=${!hasClip}
           @click=${() => void this.onAddKeyAtPlayhead()}
         ></pix3-toolbar-button>
@@ -1512,18 +1906,19 @@ export class AnimationTimelinePanel extends ComponentBase {
           icon="trash-2"
           iconOnly
           aria-label="Delete selected keyframes"
+          tooltip="Delete selected keyframes (Del)"
           ?disabled=${this.selectedKeys.length === 0}
           @click=${() => void this.onDeleteSelectedKeys()}
         ></pix3-toolbar-button>
-        <select
-          class="atl-select atl-select--easing"
-          aria-label="Easing for selected keyframes"
+        <pix3-easing-picker
+          class="atl-easing-picker"
+          .value=${this.selectionEasing}
           ?disabled=${!selectionHasPropertyKeys}
-          @change=${this.onSelectionEasingChange}
-        >
-          <option value="" selected disabled>Easing…</option>
-          ${EASING_NAMES.map(name => html`<option value=${name}>${name}</option>`)}
-        </select>
+          placeholder="Easing…"
+          tooltip="Easing of the segment to the next key"
+          @easing-change=${(e: CustomEvent<{ easing: KeyframeEasing }>) =>
+            void this.applyEasingToSelection(e.detail.easing)}
+        ></pix3-easing-picker>
       </pix3-toolbar>
     `;
   }
@@ -1634,7 +2029,7 @@ export class AnimationTimelinePanel extends ComponentBase {
             <span class="atl-duration-marker" style="left: ${durationX}px;" title="Clip end"></span>
             <span class="atl-playhead-handle" style="left: ${playheadX}px;"></span>
           </div>
-          ${clip.tracks.map(track => this.renderTrackRow(track, clip, laneWidth, host))}
+          ${clip.tracks.map(track => this.renderTrackRow(track, clip, laneWidth, endTime, host))}
           ${clip.tracks.length === 0
             ? html`
                 <div class="atl-track-label atl-track-label--empty">No tracks</div>
@@ -1653,6 +2048,7 @@ export class AnimationTimelinePanel extends ComponentBase {
     track: ClipTrack,
     clip: KeyframeClip,
     laneWidth: number,
+    endTime: number,
     host: NodeBase | null
   ) {
     const isAudio = track.kind === 'audio';
@@ -1696,10 +2092,13 @@ export class AnimationTimelinePanel extends ComponentBase {
       <div
         class="atl-lane ${isAudio ? 'atl-lane--audio' : ''}"
         style="width: ${laneWidth}px;"
-        @dblclick=${(e: MouseEvent) => void this.onLaneDoubleClick(e, track)}
+        @pointerdown=${(e: PointerEvent) => this.onLanePointerDown(e)}
+        @dblclick=${(e: MouseEvent) => this.onLaneDoubleClick(e, track)}
+        @contextmenu=${(e: MouseEvent) => this.onLaneContextMenu(e, track)}
         @dragover=${(e: DragEvent) => this.onLaneDragOver(e, track)}
         @drop=${(e: DragEvent) => void this.onLaneDrop(e, track)}
       >
+        ${this.renderLanePreview(track, laneWidth, endTime)}
         <span
           class="atl-lane-overflow"
           style="left: ${timeToX(clip.duration, this.zoom)}px;"
@@ -1709,18 +2108,93 @@ export class AnimationTimelinePanel extends ComponentBase {
     `;
   }
 
+  /**
+   * The in-lane preview drawn behind the keys: value curves (number / vector /
+   * boolean), a color ramp, or text chips (string / audio filename). Uses the
+   * same `timeToX` mapping as the keys so it lines up exactly.
+   */
+  private renderLanePreview(track: ClipTrack, laneWidth: number, endTime: number) {
+    const preview = buildLanePreview(track, this.zoom, LANE_PREVIEW_HEIGHT, endTime);
+    if (preview.kind === 'none') {
+      return null;
+    }
+    if (preview.kind === 'text') {
+      return html`<div class="atl-lane-text" style="width: ${laneWidth}px;">
+        ${preview.segments.map(
+          seg =>
+            html`<span
+              class="atl-lane-text__chip"
+              style="left: ${seg.x}px; max-width: ${Math.max(24, seg.width - 6)}px;"
+              >${seg.text}</span
+            >`
+        )}
+      </div>`;
+    }
+
+    const inner = LANE_PREVIEW_HEIGHT - 2 * PREVIEW_PAD;
+    return html`<svg
+      class="atl-lane-preview"
+      width=${laneWidth}
+      height=${LANE_PREVIEW_HEIGHT}
+      viewBox="0 0 ${laneWidth} ${LANE_PREVIEW_HEIGHT}"
+    >
+      ${preview.kind === 'color'
+        ? svg`
+            <defs>
+              ${preview.segments.map(
+                seg => svg`<linearGradient id=${seg.id} x1="0" y1="0" x2="1" y2="0">
+                  ${seg.stops.map(
+                    stop => svg`<stop offset=${stop.offset} stop-color=${stop.color}></stop>`
+                  )}
+                </linearGradient>`
+              )}
+            </defs>
+            ${preview.segments.map(
+              seg => svg`<rect
+                x=${seg.x0}
+                y=${PREVIEW_PAD}
+                width=${Math.max(0, seg.x1 - seg.x0)}
+                height=${inner}
+                rx="2"
+                fill=${`url(#${seg.id})`}
+              ></rect>`
+            )}`
+        : preview.paths.map(
+            path => svg`<polyline
+              points=${path.points}
+              fill="none"
+              stroke=${path.color}
+              stroke-width=${path.width}
+              stroke-linejoin="round"
+              stroke-linecap="round"
+              vector-effect="non-scaling-stroke"
+              opacity="0.85"
+            ></polyline>`
+          )}
+    </svg>`;
+  }
+
   private renderKey(track: ClipTrack, key: { time: number }) {
     const isAudio = track.kind === 'audio';
     const selected = this.isKeySelected({ trackId: track.id, time: key.time });
+    const easing = isAudio ? null : (key as PropertyTrack['keys'][number]).easing;
+    // Encode interpolation in the glyph (After Effects idiom): filled diamond =
+    // eased, hollow diamond = linear, square = step.
+    const easingClass =
+      easing === 'step' ? 'atl-key--step' : easing === 'linear' ? 'atl-key--linear' : '';
     const title = isAudio
       ? `${formatTime(key.time)} · ${(key as AudioTrack['keys'][number]).audioPath}`
-      : `${formatTime(key.time)} · ${(key as PropertyTrack['keys'][number]).easing}`;
+      : `${formatTime(key.time)} · ${easingLabel(easing as PropertyTrack['keys'][number]['easing'])}`;
 
     return html`
       <button
         type="button"
-        class="atl-key ${isAudio ? 'atl-key--audio' : ''} ${selected ? 'atl-key--selected' : ''}"
+        class="atl-key ${isAudio ? 'atl-key--audio' : ''} ${easingClass} ${selected
+          ? 'atl-key--selected'
+          : ''}"
         style="left: ${timeToX(key.time, this.zoom)}px;"
+        data-track-id=${track.id}
+        data-key-time=${key.time}
         title=${title}
         aria-label=${title}
         @pointerdown=${(e: PointerEvent) => this.onKeyPointerDown(e, track, key.time)}
@@ -1883,22 +2357,13 @@ export class AnimationTimelinePanel extends ComponentBase {
     return html`
       ${isProperty && propertyKey
         ? html`
-            <div class="atl-menu-heading">Easing</div>
-            <select
-              class="atl-select atl-menu-select"
-              aria-label="Keyframe easing"
-              @change=${(e: Event) =>
-                void this.onContextSetEasing(
-                  (e.target as HTMLSelectElement).value as KeyframeEasing
-                )}
-            >
-              ${EASING_NAMES.map(
-                name =>
-                  html`<option value=${name} ?selected=${name === propertyKey.easing}>
-                    ${name}
-                  </option>`
-              )}
-            </select>
+            <div class="atl-menu-heading">Easing (segment to next key)</div>
+            <div class="atl-menu-easing">
+              ${renderEasingGrid({
+                value: propertyKey.easing,
+                onSelect: easing => void this.onContextSetEasing(easing),
+              })}
+            </div>
             <div class="atl-menu-heading">Value</div>
             ${this.renderKeyValueEditor(ctx.track as PropertyTrack, propertyKey)}
             <div class="atl-menu-separator"></div>

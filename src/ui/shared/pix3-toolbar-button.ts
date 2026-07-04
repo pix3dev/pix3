@@ -16,6 +16,15 @@ export class Pix3ToolbarButton extends ComponentBase {
   @property({ attribute: 'aria-label' })
   label: string | null = null;
 
+  /**
+   * Hover tooltip text. Reflected to the native `title` attribute so the
+   * browser shows a tooltip on the custom-element host. Falls back to `label`
+   * when unset, so icon-only buttons get a tooltip for free without regressing
+   * the screen-reader `aria-label`.
+   */
+  @property({ type: String })
+  tooltip: string | null = null;
+
   @property({ type: Boolean, reflect: true })
   iconOnly = false;
 
@@ -30,6 +39,7 @@ export class Pix3ToolbarButton extends ComponentBase {
       this.tabIndex = -1;
     }
     this.updateAriaDisabled();
+    this.updateTitle();
     this.setupEventListeners();
   }
 
@@ -53,6 +63,19 @@ export class Pix3ToolbarButton extends ComponentBase {
       } else {
         this.removeAttribute('aria-label');
       }
+    }
+
+    if (changed.has('tooltip') || changed.has('label')) {
+      this.updateTitle();
+    }
+  }
+
+  private updateTitle(): void {
+    const title = this.tooltip ?? this.label;
+    if (title) {
+      this.setAttribute('title', title);
+    } else {
+      this.removeAttribute('title');
     }
   }
 

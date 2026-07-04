@@ -283,6 +283,58 @@ export class IconService {
 </svg>`
     );
 
+    // Stop (filled square) — animation timeline transport. Feather 'square' is
+    // outline-only and reads as an empty checkbox for a Stop button.
+    this.customIcons.set(
+      'stop',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>
+</svg>`
+    );
+
+    // Keyframe diamond (outline) — timeline keys, generic keyframe affordance.
+    this.customIcons.set(
+      'diamond',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 3L21 12L12 21L3 12L12 3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+</svg>`
+    );
+
+    // Keyframe diamond (filled) — selected/eased key affordance.
+    this.customIcons.set(
+      'diamond-filled',
+      `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 3L21 12L12 21L3 12L12 3Z" fill="currentColor"/>
+</svg>`
+    );
+
+    // Add keyframe — a diamond with a small plus, distinct from "Add Track" (+).
+    this.customIcons.set(
+      'key-add',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M11 3L17.5 9.5L11 16L4.5 9.5L11 3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M18 15.5V21.5M15 18.5H21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>`
+    );
+
+    // Jump to previous keyframe — chevron pointing at a keyframe diamond.
+    this.customIcons.set(
+      'key-prev',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M18 6L11 12L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6.5 8.5L10 12L6.5 15.5L3 12L6.5 8.5Z" fill="currentColor"/>
+</svg>`
+    );
+
+    // Jump to next keyframe — mirror of key-prev.
+    this.customIcons.set(
+      'key-next',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M6 6L13 12L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17.5 8.5L21 12L17.5 15.5L14 12L17.5 8.5Z" fill="currentColor"/>
+</svg>`
+    );
+
     for (const [name, svg] of Object.entries(ALIGNMENT_ICON_SVGS)) {
       this.customIcons.set(name, svg);
     }
