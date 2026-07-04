@@ -125,9 +125,18 @@ export function easingSparklinePath(
   return path;
 }
 
-/** The linear reference diagonal (guide line) for the same box. */
-export function linearGuidePath(width: number, height: number, pad = 4): string {
-  const domain = NORMAL_DOMAIN;
+/**
+ * The linear reference diagonal for the same box. Drawn against the SAME domain
+ * as the curve it sits behind, so it meets the curve at (t=0, v=0) and
+ * (t=1, v=1) — including the wider overshoot domain used by back / elastic.
+ */
+export function linearGuidePath(
+  easing: KeyframeEasing,
+  width: number,
+  height: number,
+  pad = 4
+): string {
+  const domain = easingDomain(easing);
   const y0 = easingValueToY(0, height, pad, domain);
   const y1 = easingValueToY(1, height, pad, domain);
   return `${pad.toFixed(2)},${y0.toFixed(2)} ${(width - pad).toFixed(2)},${y1.toFixed(2)}`;

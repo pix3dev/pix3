@@ -159,8 +159,10 @@ export class DropdownPortal {
     let top = isExactPosition ? triggerRect.top : triggerRect.bottom + 8; // 0.5rem gap
     let left = triggerRect.left;
 
-    // Get the portal's dimensions to check viewport bounds
-    const portal = this.portalElement.querySelector('[role="menu"]') as HTMLElement | null;
+    // Measure the actual moved element (not a [role="menu"] descendant) so
+    // viewport clamping works for any portal content — menus, dialogs, the
+    // easing-picker popover (role="dialog"), etc.
+    const portal = this.menuElement;
     if (portal && this.options.keepInViewport) {
       const portalRect = portal.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
@@ -190,9 +192,9 @@ export class DropdownPortal {
     this.portalElement.style.left = `${left}px`;
     this.portalElement.style.zIndex = '999999';
 
-    // Apply minimum width
+    // Apply minimum width to the moved element.
     if (this.options.minWidth) {
-      const menuDiv = this.portalElement.querySelector('[role="menu"]') as HTMLElement | null;
+      const menuDiv = this.menuElement;
       if (menuDiv) {
         menuDiv.style.minWidth = this.options.minWidth;
       }

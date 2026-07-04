@@ -70,12 +70,18 @@ export class Pix3ToolbarButton extends ComponentBase {
     }
   }
 
+  /** Whether the last `title` on the host was set by us (vs. an author's static title=). */
+  private titleManaged = false;
+
   private updateTitle(): void {
     const title = this.tooltip ?? this.label;
     if (title) {
       this.setAttribute('title', title);
-    } else {
+      this.titleManaged = true;
+    } else if (this.titleManaged) {
+      // Only clear a title WE set — never clobber an author-provided static title=.
       this.removeAttribute('title');
+      this.titleManaged = false;
     }
   }
 

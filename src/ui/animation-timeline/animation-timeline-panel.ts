@@ -268,6 +268,7 @@ export class AnimationTimelinePanel extends ComponentBase {
     window.removeEventListener('keydown', this.onWindowKeyDown);
     window.removeEventListener('pointermove', this.onMarqueePointerMove);
     window.removeEventListener('pointerup', this.onMarqueePointerUp);
+    window.removeEventListener('pointercancel', this.onMarqueePointerUp);
     this.portal.close();
     this.preview.stopAndRestore();
     super.disconnectedCallback();
@@ -655,7 +656,12 @@ export class AnimationTimelinePanel extends ComponentBase {
     if (!clip || !clipName) {
       return;
     }
-    const trackId = this.selectedKeys[0]?.trackId ?? this.firstPropertyTrackId(clip);
+    // Honor the first selected PROPERTY track (audio keys can be first in the
+    // selection via box-select); otherwise fall back to the first property track.
+    const selectedPropertyTrackId = this.selectedKeys
+      .map(ref => findTrack(clip, ref.trackId))
+      .find(track => track?.kind === 'property')?.id;
+    const trackId = selectedPropertyTrackId ?? this.firstPropertyTrackId(clip);
     if (!trackId) {
       return;
     }
@@ -1022,10 +1028,12 @@ export class AnimationTimelinePanel extends ComponentBase {
     }
     this.keysDrag = null;
     if (drag.moved) {
-      // Selection follows the moved keys.
+      // Selection follows the moved keys — clamp to the clip like moveKeys does,
+      // so an over-drag past the clip end doesn't desync (and drop) the selection.
+      const maxTime = this.activeClip?.duration ?? Number.POSITIVE_INFINITY;
       this.selectedKeys = drag.selection.map(ref => ({
         trackId: ref.trackId,
-        time: Math.max(0, ref.time + drag.lastDelta),
+        time: Math.min(Math.max(0, ref.time + drag.lastDelta), maxTime),
       }));
       return;
     }
@@ -1157,6 +1165,7 @@ export class AnimationTimelinePanel extends ComponentBase {
     }
     window.addEventListener('pointermove', this.onMarqueePointerMove);
     window.addEventListener('pointerup', this.onMarqueePointerUp);
+    window.addEventListener('pointercancel', this.onMarqueePointerUp);
   }
 
   private readonly onMarqueePointerMove = (event: PointerEvent): void => {
@@ -1164,15 +1173,27 @@ export class AnimationTimelinePanel extends ComponentBase {
     if (!marquee) {
       return;
     }
+    // Self-heal: a button-less move means we missed the pointerup (released
+    // outside the window, or a native drag started). End the marquee rather
+    // than silently rewriting the selection on plain hover.
+    if (event.buttons === 0) {
+      this.endMarquee();
+      return;
+    }
     this.marquee = { ...marquee, x1: event.clientX, y1: event.clientY, moved: true };
     this.updateMarqueeSelection();
   };
 
   private readonly onMarqueePointerUp = (): void => {
+    this.endMarquee();
+  };
+
+  private endMarquee(): void {
     window.removeEventListener('pointermove', this.onMarqueePointerMove);
     window.removeEventListener('pointerup', this.onMarqueePointerUp);
+    window.removeEventListener('pointercancel', this.onMarqueePointerUp);
     this.marquee = null;
-  };
+  }
 
   private updateMarqueeSelection(): void {
     const marquee = this.marquee;

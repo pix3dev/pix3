@@ -56,7 +56,7 @@ function renderEasingCard(
         height=${h}
         aria-hidden="true"
       >
-        <polyline class="pix3-easing-guide" points=${linearGuidePath(w, h, 5)} />
+        <polyline class="pix3-easing-guide" points=${linearGuidePath(easing, w, h, 5)} />
         <polyline
           class="pix3-easing-stroke"
           points=${easingSparklinePath(easing, w, h, { pad: 5 })}
