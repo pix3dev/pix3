@@ -338,6 +338,8 @@ export class CloudProjectService {
     appState.selection.hoveredNodeId = null;
     appState.project.assetBrowserExpandedPaths = [];
     appState.project.assetBrowserSelectedPath = null;
+    appState.project.assetBrowserViewMode = 'folders';
+    appState.project.assetBrowserGroupedExpandedKeys = [];
     appState.project.scriptsStatus = 'idle';
     appState.project.fileRefreshSignal = 0;
     appState.project.scriptRefreshSignal = 0;

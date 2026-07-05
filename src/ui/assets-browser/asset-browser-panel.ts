@@ -1,6 +1,7 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { ref } from 'lit/directives/ref.js';
-import { appState } from '@/state';
+import { subscribe } from 'valtio/vanilla';
+import { appState, type AssetBrowserViewMode } from '@/state';
 import { AssetFileActivationService, type AssetActivation, CommandDispatcher } from '@/services';
 import { AssetImportDialogService } from '@/services/AssetImportDialogService';
 import { DialogService } from '@/services/DialogService';
@@ -51,6 +52,11 @@ export class AssetBrowserPanel extends ComponentBase {
 
   @state()
   private selectedItemName: string | null = null;
+
+  @state()
+  private assetViewMode: AssetBrowserViewMode = 'folders';
+
+  private disposeViewModeSubscription?: () => void;
 
   private scriptFileCreatedHandler?: (e: Event) => void;
   private scriptFileRevealRequestHandler?: (e: Event) => void;
@@ -253,6 +259,12 @@ export class ${singletonName} extends Script {
     void this.commandDispatcher.executeById('project.open-in-ide');
   };
 
+  private onToggleViewMode = () => {
+    const next: AssetBrowserViewMode = this.assetViewMode === 'by-type' ? 'folders' : 'by-type';
+    this.assetViewMode = next;
+    void this.assetTreeRef?.setViewMode(next);
+  };
+
   private async showDeleteConfirmation(itemName: string): Promise<void> {
     try {
       const confirmed = await this.dialogService.showConfirmation({
@@ -300,6 +312,14 @@ export class ${singletonName} extends Script {
       appState.editorContext.focusedArea = 'assets';
     });
 
+    // Keep the view-mode toggle in sync with restored per-project state.
+    this.assetViewMode = appState.project.assetBrowserViewMode;
+    this.disposeViewModeSubscription = subscribe(appState.project, () => {
+      if (appState.project.assetBrowserViewMode !== this.assetViewMode) {
+        this.assetViewMode = appState.project.assetBrowserViewMode;
+      }
+    });
+
     this.scriptFileCreatedHandler = (e: Event) => {
       const customEvent = e as CustomEvent;
       const { filePath } = customEvent.detail;
@@ -329,6 +349,9 @@ export class ${singletonName} extends Script {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+
+    this.disposeViewModeSubscription?.();
+    this.disposeViewModeSubscription = undefined;
 
     if (this.scriptFileCreatedHandler) {
       window.removeEventListener(
@@ -433,6 +456,15 @@ export class ${singletonName} extends Script {
               }
             }}
           ></pix3-dropdown-button>
+          <pix3-toolbar-button
+            icon="layers"
+            label="Group by type"
+            title=${this.assetViewMode === 'by-type'
+              ? 'Show project folder structure'
+              : 'Group assets by type'}
+            ?toggled=${this.assetViewMode === 'by-type'}
+            @click=${this.onToggleViewMode}
+          ></pix3-toolbar-button>
           <pix3-toolbar-button
             icon="upload"
             label="Import"

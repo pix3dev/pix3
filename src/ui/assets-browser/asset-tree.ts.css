@@ -152,6 +152,24 @@ asset-tree {
   font: inherit;
 }
 
+/* Grouped "by type" view: virtual category rows */
+.node-row--category .node-name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.icon.category {
+  color: rgba(var(--pix3-accent-rgb), 0.8);
+}
+
+.node-count {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0 0.45em;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
 .empty {
   margin: 0;
   color: rgba(245, 247, 250, 0.6);

@@ -43,6 +43,53 @@ describe('AssetTree', () => {
     expect(tree.querySelector('.node-meta')?.textContent).not.toContain('directory');
   });
 
+  it('groups assets by type with category counts in by-type view', async () => {
+    const tree = document.createElement('pix3-asset-tree') as AssetTreeElement;
+    stubTreeServices(
+      tree,
+      {
+        '.': [
+          { name: 'scenes', path: 'scenes', kind: 'directory', size: 0 },
+          { name: 'textures', path: 'textures', kind: 'directory', size: 0 },
+        ],
+        scenes: [{ name: 'main.pix3scene', path: 'scenes/main.pix3scene', kind: 'file', size: 10 }],
+        textures: [{ name: 'ui', path: 'textures/ui', kind: 'directory', size: 0 }],
+        'textures/ui': [
+          { name: 'button.png', path: 'textures/ui/button.png', kind: 'file', size: 2048 },
+          { name: 'panel.png', path: 'textures/ui/panel.png', kind: 'file', size: 1024 },
+        ],
+      },
+      {
+        expandedPaths: [],
+        selectedPath: null,
+        viewMode: 'by-type',
+        groupedExpandedKeys: [],
+      }
+    );
+
+    document.body.appendChild(tree);
+    await vi.waitFor(() => {
+      expect(Array.from(tree.querySelectorAll('.node-row--category'))).toHaveLength(2);
+    });
+
+    const categoryNames = Array.from(tree.querySelectorAll('.node-row--category .node-name')).map(
+      el => el.textContent?.trim()
+    );
+    expect(categoryNames).toEqual(['Scenes', 'Images']);
+
+    const counts = Array.from(tree.querySelectorAll('.node-count')).map(el =>
+      el.textContent?.trim()
+    );
+    expect(counts).toEqual(['1', '2']);
+
+    // Categories start expanded on first use; the folder chain is compacted.
+    const allNames = Array.from(tree.querySelectorAll('.node-name')).map(el =>
+      el.textContent?.trim()
+    );
+    expect(allNames).toContain('textures/ui');
+    expect(allNames).toContain('scenes');
+  });
+
   it('formats byte values consistently', () => {
     const tree = new AssetTree();
     const formatFileSize = (
@@ -59,12 +106,18 @@ describe('AssetTree', () => {
 
 function stubTreeServices(
   tree: AssetTreeElement,
-  directories: Record<string, FileDescriptor[]>
+  directories: Record<string, FileDescriptor[]>,
+  persistedState: {
+    expandedPaths: string[];
+    selectedPath: string | null;
+    viewMode: 'folders' | 'by-type';
+    groupedExpandedKeys: string[];
+  } | null = null
 ): void {
   const projectService = {
     listDirectory: vi.fn(async (path = '.') => directories[path] ?? []),
     saveAssetBrowserState: vi.fn(),
-    loadAssetBrowserState: vi.fn(() => null),
+    loadAssetBrowserState: vi.fn(() => persistedState),
   };
 
   const templateService = {

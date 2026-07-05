@@ -137,6 +137,7 @@ export interface AnimationsState {
 
 export type ProjectStatus = 'idle' | 'selecting' | 'opening' | 'ready' | 'error';
 export type ProjectBackend = 'local' | 'cloud';
+export type AssetBrowserViewMode = 'folders' | 'by-type';
 export type HybridSyncStatus =
   | 'unlinked'
   | 'checking'
@@ -208,6 +209,10 @@ export interface ProjectState {
   assetBrowserExpandedPaths: string[];
   /** Asset browser selected path (persisted per project). */
   assetBrowserSelectedPath: string | null;
+  /** Asset browser view mode: raw folder structure or grouped by asset type (persisted per project). */
+  assetBrowserViewMode: AssetBrowserViewMode;
+  /** Asset browser expanded keys for the "group by type" view (persisted per project). */
+  assetBrowserGroupedExpandedKeys: string[];
   /** Current status of script compilation and loading. */
   scriptsStatus: ScriptLoadStatus;
   /** Signal counter incremented when project files change (triggers asset explorer refresh). */
@@ -464,6 +469,8 @@ export const createInitialAppState = (): AppState => ({
     lastOpenedScenePath: null,
     assetBrowserExpandedPaths: [],
     assetBrowserSelectedPath: null,
+    assetBrowserViewMode: 'folders',
+    assetBrowserGroupedExpandedKeys: [],
     scriptsStatus: 'idle',
     fileRefreshSignal: 0,
     scriptRefreshSignal: 0,

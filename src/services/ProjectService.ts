@@ -1,6 +1,10 @@
 import { injectable, ServiceContainer } from '@/fw/di';
-import { appState, createInitialHybridSyncState } from '@/state';
+import { appState, createInitialHybridSyncState, type AssetBrowserViewMode } from '@/state';
 import { createInitialProjectOpenProgressState } from '@/state';
+import {
+  groupedDirectoryExpansionKey,
+  splitGroupedDirectoryExpansionKey,
+} from '@/core/asset-categories';
 import { resolveFileSystemAPIService, type FileDescriptor } from './FileSystemAPIService';
 import { ProjectStorageService } from './ProjectStorageService';
 import { parse, stringify } from 'yaml';
@@ -20,6 +24,13 @@ import { CollaborationService } from './CollaborationService';
 const RECENTS_KEY = 'pix3.recentProjects:v1';
 const PROJECT_MANIFEST_PATH = 'pix3project.yaml';
 const ASSET_BROWSER_STORAGE_PREFIX = 'pix3.assetBrowser:v1:';
+
+export interface AssetBrowserPersistedState {
+  expandedPaths: string[];
+  selectedPath: string | null;
+  viewMode: AssetBrowserViewMode;
+  groupedExpandedKeys: string[];
+}
 
 export interface RecentProjectEntry {
   readonly id?: string;
@@ -86,18 +97,23 @@ export class ProjectService {
   }
 
   /**
-   * Saves asset browser state (expanded paths and selected path) to localStorage.
-   * Should be called whenever the asset browser state changes.
+   * Saves asset browser state to localStorage. Accepts a partial patch that is
+   * merged with the currently stored record, so callers updating one view mode's
+   * expansion state don't clobber the other's.
    */
-  saveAssetBrowserState(expandedPaths: string[], selectedPath: string | null): void {
+  saveAssetBrowserState(patch: Partial<AssetBrowserPersistedState>): void {
     const projectId = appState.project.id;
     if (!projectId) return;
 
     try {
       const key = `${ASSET_BROWSER_STORAGE_PREFIX}${projectId}`;
+      const current = this.loadAssetBrowserState();
       const state = {
-        expandedPaths,
-        selectedPath,
+        expandedPaths: patch.expandedPaths ?? current?.expandedPaths ?? [],
+        selectedPath:
+          patch.selectedPath !== undefined ? patch.selectedPath : (current?.selectedPath ?? null),
+        viewMode: patch.viewMode ?? current?.viewMode ?? 'folders',
+        groupedExpandedKeys: patch.groupedExpandedKeys ?? current?.groupedExpandedKeys ?? [],
         savedAt: Date.now(),
       };
       localStorage.setItem(key, JSON.stringify(state));
@@ -107,10 +123,10 @@ export class ProjectService {
   }
 
   /**
-   * Loads asset browser state (expanded paths and selected path) from localStorage.
-   * Returns null if no state is saved for the current project.
+   * Loads asset browser state from localStorage. Returns null if no state is
+   * saved for the current project; legacy records get defaults for new fields.
    */
-  loadAssetBrowserState(): { expandedPaths: string[]; selectedPath: string | null } | null {
+  loadAssetBrowserState(): AssetBrowserPersistedState | null {
     const projectId = appState.project.id;
     if (!projectId) return null;
 
@@ -125,6 +141,12 @@ export class ProjectService {
       return {
         expandedPaths: Array.isArray(parsed.expandedPaths) ? parsed.expandedPaths : [],
         selectedPath: typeof parsed.selectedPath === 'string' ? parsed.selectedPath : null,
+        viewMode: parsed.viewMode === 'by-type' ? 'by-type' : 'folders',
+        groupedExpandedKeys: Array.isArray(parsed.groupedExpandedKeys)
+          ? parsed.groupedExpandedKeys.filter(
+              (entry: unknown): entry is string => typeof entry === 'string'
+            )
+          : [],
       };
     } catch {
       return null;
@@ -906,10 +928,19 @@ Happy creating! 🎨
         movedKind
       ) ?? appState.project.assetBrowserSelectedPath;
 
-    this.saveAssetBrowserState(
-      appState.project.assetBrowserExpandedPaths,
-      appState.project.assetBrowserSelectedPath
-    );
+    appState.project.assetBrowserGroupedExpandedKeys =
+      appState.project.assetBrowserGroupedExpandedKeys.map(key => {
+        const parsed = splitGroupedDirectoryExpansionKey(key);
+        if (!parsed) return key;
+        const remapped = this.remapProjectPath(parsed.path, sourcePath, targetPath, movedKind);
+        return remapped ? groupedDirectoryExpansionKey(parsed.categoryId, remapped) : key;
+      });
+
+    this.saveAssetBrowserState({
+      expandedPaths: appState.project.assetBrowserExpandedPaths,
+      selectedPath: appState.project.assetBrowserSelectedPath,
+      groupedExpandedKeys: appState.project.assetBrowserGroupedExpandedKeys,
+    });
   }
 
   private updateCollaborationReferencesAfterMove(
@@ -1198,6 +1229,8 @@ Happy creating! 🎨
     appState.project.lastOpenedScenePath = null;
     appState.project.assetBrowserExpandedPaths = [];
     appState.project.assetBrowserSelectedPath = null;
+    appState.project.assetBrowserViewMode = 'folders';
+    appState.project.assetBrowserGroupedExpandedKeys = [];
     appState.project.scriptsStatus = 'idle';
     appState.project.fileRefreshSignal = 0;
     appState.project.scriptRefreshSignal = 0;

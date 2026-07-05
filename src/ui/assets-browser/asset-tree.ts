@@ -10,19 +10,17 @@ import { IconService } from '@/services/IconService';
 import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
 import { isDocumentActive } from '@/services/page-activity';
 import { hasGenerationDragData } from '@/ui/shared/asset-drag-drop';
-import { appState } from '@/state';
+import { appState, type AssetBrowserViewMode } from '@/state';
 import { subscribe } from 'valtio/vanilla';
+import { ASSET_CATEGORY_BY_ID, type AssetCategoryId } from '@/core/asset-categories';
+import {
+  buildGroupedTree,
+  collectGroupedExpandedKeys,
+  categoryIdFromPath,
+  isCategoryPath,
+  type AssetTreeNode as Node,
+} from './grouped-asset-tree';
 import './asset-tree.ts.css';
-
-type Node = {
-  name: string;
-  path: string;
-  kind: FileSystemHandleKind;
-  sizeBytes: number | null;
-  children?: Node[] | null; // null = not loaded yet, [] = loaded and empty
-  expanded?: boolean;
-  editing?: boolean;
-};
 
 @customElement('pix3-asset-tree')
 export class AssetTree extends ComponentBase {
@@ -49,20 +47,49 @@ export class AssetTree extends ComponentBase {
   @state()
   private selectedPath: string | null = null;
 
+  @state()
+  private viewMode: AssetBrowserViewMode = 'folders';
+
+  /** The mode `this.tree` was actually built for (lags `viewMode` during a switch). */
+  private treeViewMode: AssetBrowserViewMode = 'folders';
+
+  /** Disambiguates selection when the same real path appears under two categories. */
+  private selectedCategoryId: AssetCategoryId | null = null;
+
   /** Public getter for selected path (avoid accessing private internals) */
   public getSelectedPath(): string | null {
+    if (isCategoryPath(this.selectedPath)) {
+      return null;
+    }
     return this.selectedPath;
+  }
+
+  public getViewMode(): AssetBrowserViewMode {
+    return this.viewMode;
+  }
+
+  public async setViewMode(mode: AssetBrowserViewMode): Promise<void> {
+    if (mode === this.viewMode) {
+      return;
+    }
+    this.viewMode = mode;
+    appState.project.assetBrowserViewMode = mode;
+    if (mode === 'folders') {
+      this.selectedCategoryId = null;
+    }
+    await this.loadRoot();
+    this.saveState();
   }
 
   /**
    * Resolves the directory that new assets should be placed in, based on the
    * current selection: a selected folder is used directly, a selected file
    * resolves to its parent directory, and no selection falls back to the
-   * project root (`.`).
+   * project root (`.`). Virtual category rows also fall back to the root.
    */
   public getTargetDirectory(): string {
     const selected = this.selectedPath;
-    if (!selected) {
+    if (!selected || isCategoryPath(selected)) {
       return '.';
     }
     const found = this.findNodeByPath(selected);
@@ -113,20 +140,29 @@ export class AssetTree extends ComponentBase {
     await this.startCreateFolder();
   }
 
+  /** Recursively enumerates every project entry (files and directories). */
+  private async walkProjectEntries(): Promise<FileDescriptor[]> {
+    const collected: FileDescriptor[] = [];
+    const collect = async (path: string): Promise<void> => {
+      const entries = await this.listDirectory(path || '.');
+      for (const entry of entries) {
+        collected.push(entry);
+        if (entry.kind === 'directory') {
+          await collect(entry.path);
+        }
+      }
+    };
+    await collect(this.rootPath || '.');
+    return collected;
+  }
+
   private async buildRootSignature(): Promise<string> {
     try {
-      const paths: string[] = [];
-      const collect = async (path: string) => {
-        const entries = await this.listDirectory(path || '.');
-        for (const e of entries) {
-          paths.push(`${e.path}:${e.kind}`);
-          if (e.kind === 'directory') {
-            await collect(e.path);
-          }
-        }
-      };
-      await collect(this.rootPath || '.');
-      return paths.sort().join('|');
+      const entries = await this.walkProjectEntries();
+      return entries
+        .map(entry => `${entry.path}:${entry.kind}`)
+        .sort()
+        .join('|');
     } catch {
       return '';
     }
@@ -206,6 +242,10 @@ export class AssetTree extends ComponentBase {
    * Expands parent directories if needed and ensures the path is visible
    */
   public async selectPath(targetPath: string): Promise<boolean> {
+    if (this.viewMode === 'by-type') {
+      return await this.selectPathInGroupedTree(targetPath);
+    }
+
     const normalizedPath = targetPath.startsWith('.') ? targetPath.slice(1) : targetPath;
     const searchPath = normalizedPath.startsWith('/') ? normalizedPath.slice(1) : normalizedPath;
 
@@ -261,6 +301,80 @@ export class AssetTree extends ComponentBase {
 
     this.saveState();
     return true;
+  }
+
+  /**
+   * Reveal a real file/folder path inside the grouped view: expand its category and
+   * the directory chain leading to it. Paths compacted away (intermediate chain
+   * segments) are not present in the grouped tree and report a miss.
+   */
+  private async selectPathInGroupedTree(targetPath: string): Promise<boolean> {
+    const normalized = this.normalizePath(this.normalizeTreePath(targetPath));
+    if (!normalized || normalized === '.') {
+      return false;
+    }
+
+    const tryReveal = (): boolean => {
+      for (const category of this.tree) {
+        if (category.nodeType !== 'category' || !category.children) {
+          continue;
+        }
+        const trail = this.findGroupedTrail(category.children, normalized);
+        if (!trail) {
+          continue;
+        }
+        category.expanded = true;
+        for (const ancestor of trail.ancestors) {
+          ancestor.expanded = true;
+        }
+        this.selectedPath = trail.node.path;
+        this.selectedCategoryId = category.categoryId ?? null;
+        void this.assetsPreviewService.syncFromAssetSelection(trail.node.path, trail.node.kind);
+        this.tree = [...this.tree];
+        return true;
+      }
+      return false;
+    };
+
+    if (tryReveal()) {
+      this.saveState();
+      return true;
+    }
+
+    // Force refresh and try again (mirrors the folder-mode retry).
+    await this.loadRoot();
+    if (tryReveal()) {
+      this.saveState();
+      return true;
+    }
+
+    console.warn('[AssetTree] Path not found in grouped tree:', targetPath);
+    return false;
+  }
+
+  private findGroupedTrail(
+    nodes: Node[],
+    normalizedPath: string,
+    ancestors: Node[] = []
+  ): { node: Node; ancestors: Node[] } | null {
+    for (const node of nodes) {
+      const nodePath = this.normalizePath(node.path);
+      if (nodePath === normalizedPath) {
+        return { node, ancestors: [...ancestors] };
+      }
+      if (
+        node.kind === 'directory' &&
+        node.children &&
+        node.children.length > 0 &&
+        normalizedPath.startsWith(`${nodePath}/`)
+      ) {
+        const found = this.findGroupedTrail(node.children, normalizedPath, [...ancestors, node]);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
   }
 
   private splitPath(path: string): string[] {
@@ -404,23 +518,34 @@ export class AssetTree extends ComponentBase {
   }
 
   /**
-   * Saves current asset browser state (expanded paths and selected path) to appState and localStorage.
+   * Saves current asset browser state (view mode, expanded paths/keys and selected path)
+   * to appState and localStorage. Only the live tree's mode is re-collected; the other
+   * mode keeps its last-saved expansion state.
    */
   private saveState(): void {
-    // Collect expanded paths from the tree
-    const expandedPaths = new Set<string>();
-    this.collectExpandedPaths(this.tree, expandedPaths);
+    if (this.treeViewMode === 'folders') {
+      const expandedPaths = new Set<string>();
+      this.collectExpandedPaths(this.tree, expandedPaths);
+      appState.project.assetBrowserExpandedPaths = Array.from(expandedPaths);
+    } else {
+      const expandedKeys = new Set<string>();
+      collectGroupedExpandedKeys(this.tree, expandedKeys);
+      appState.project.assetBrowserGroupedExpandedKeys = Array.from(expandedKeys);
+    }
 
-    // Update appState
-    appState.project.assetBrowserExpandedPaths = Array.from(expandedPaths);
     appState.project.assetBrowserSelectedPath = this.selectedPath;
+    appState.project.assetBrowserViewMode = this.viewMode;
 
-    // Persist to localStorage
-    this.projectService.saveAssetBrowserState(Array.from(expandedPaths), this.selectedPath);
+    this.projectService.saveAssetBrowserState({
+      expandedPaths: appState.project.assetBrowserExpandedPaths,
+      selectedPath: this.selectedPath,
+      viewMode: this.viewMode,
+      groupedExpandedKeys: appState.project.assetBrowserGroupedExpandedKeys,
+    });
   }
 
   /**
-   * Restores asset browser state (expanded paths and selected path) from localStorage.
+   * Restores asset browser state (view mode, expanded paths and selected path) from localStorage.
    */
   private async restoreState(): Promise<void> {
     // First, load state from localStorage
@@ -430,13 +555,22 @@ export class AssetTree extends ComponentBase {
       // Update appState with loaded state
       appState.project.assetBrowserExpandedPaths = loadedState.expandedPaths;
       appState.project.assetBrowserSelectedPath = loadedState.selectedPath;
+      appState.project.assetBrowserViewMode = loadedState.viewMode;
+      appState.project.assetBrowserGroupedExpandedKeys = loadedState.groupedExpandedKeys;
+      this.viewMode = loadedState.viewMode;
     }
 
     await this.loadRoot();
 
     if (loadedState && loadedState.selectedPath) {
-      this.selectedPath = loadedState.selectedPath;
-      await this.selectPath(loadedState.selectedPath);
+      if (isCategoryPath(loadedState.selectedPath)) {
+        this.selectedPath = loadedState.selectedPath;
+        this.selectedCategoryId = categoryIdFromPath(loadedState.selectedPath);
+        this.requestUpdate();
+      } else {
+        this.selectedPath = loadedState.selectedPath;
+        await this.selectPath(loadedState.selectedPath);
+      }
     }
   }
 
@@ -473,15 +607,52 @@ export class AssetTree extends ComponentBase {
   }
 
   private async loadRoot(): Promise<void> {
+    if (this.viewMode === 'by-type') {
+      await this.loadGroupedRoot();
+      return;
+    }
+    await this.loadFolderRoot();
+  }
+
+  private async loadFolderRoot(): Promise<void> {
     await this.runSerializedTreeRefresh(async () => {
       const expandedPaths = new Set<string>(appState.project.assetBrowserExpandedPaths || []);
-      this.collectExpandedPaths(this.tree, expandedPaths);
+      if (this.treeViewMode === 'folders') {
+        this.collectExpandedPaths(this.tree, expandedPaths);
+      }
 
       const nextTree = await this.buildTreeFromExpandedPaths(this.rootPath || '.', expandedPaths);
       this.tree = nextTree;
+      this.treeViewMode = 'folders';
 
       if (this.selectedPath && !this.findNodeByPath(this.selectedPath)) {
         this.selectedPath = null;
+        this.selectedCategoryId = null;
+      }
+    });
+  }
+
+  private async loadGroupedRoot(): Promise<void> {
+    await this.runSerializedTreeRefresh(async () => {
+      const expandedKeys = new Set<string>(appState.project.assetBrowserGroupedExpandedKeys || []);
+      // Expand all categories only on first entry into the grouped view; while the
+      // grouped tree is live, an empty set means the user collapsed everything.
+      const defaultCategoryExpanded = expandedKeys.size === 0 && this.treeViewMode !== 'by-type';
+      if (this.treeViewMode === 'by-type') {
+        collectGroupedExpandedKeys(this.tree, expandedKeys);
+      }
+
+      const entries = await this.walkProjectEntries();
+      const files = entries.filter(entry => entry.kind === 'file');
+      this.tree = buildGroupedTree(files, {
+        expandedKeys,
+        defaultCategoryExpanded,
+      });
+      this.treeViewMode = 'by-type';
+
+      if (this.selectedPath && !this.findNodeByPath(this.selectedPath)) {
+        this.selectedPath = null;
+        this.selectedCategoryId = null;
       }
     });
   }
@@ -532,8 +703,11 @@ export class AssetTree extends ComponentBase {
     const isAlreadySelected = this.selectedPath === node.path;
 
     this.clearRenameTimer();
+    this.selectedCategoryId = node.categoryId ?? null;
 
-    const shouldStartRename = !options?.suppressRename && isSameNode && isAlreadySelected;
+    const isRenamable = node.nodeType !== 'category' && !this.isCompactedDirNode(node);
+    const shouldStartRename =
+      !options?.suppressRename && isSameNode && isAlreadySelected && isRenamable;
 
     if (shouldStartRename) {
       this._lastClickedPath = node.path;
@@ -609,7 +783,16 @@ export class AssetTree extends ComponentBase {
     );
   }
 
+  /** Compacted grouped-view dirs (chain labels like `assets/ui`) can't be renamed in place. */
+  private isCompactedDirNode(node: Node): boolean {
+    return node.nodeType === 'dir' && node.name.includes('/');
+  }
+
   private notifyAssetSelected(node: Node): void {
+    if (node.nodeType === 'category') {
+      // Virtual rows have no backing file; keep the preview and listeners untouched.
+      return;
+    }
     void this.assetsPreviewService.syncFromAssetSelection(node.path, node.kind);
     this.dispatchEvent(
       new CustomEvent('asset-selected', {
@@ -715,10 +898,21 @@ export class AssetTree extends ComponentBase {
     return `${mb.toFixed(2)} MB`;
   }
 
+  private isNodeSelected(node: Node): boolean {
+    if (this.selectedPath !== node.path) {
+      return false;
+    }
+    if (node.categoryId === undefined || this.selectedCategoryId === null) {
+      return true;
+    }
+    return this.selectedCategoryId === node.categoryId;
+  }
+
   private renderNode(node: Node, depth = 0): ReturnType<typeof html> {
-    const isSelected = this.selectedPath === node.path;
-    const isDragOver = this.dragOverPath === node.path && node.kind === 'directory';
-    const metaLabel = this.getNodeMetaLabel(node);
+    const isCategory = node.nodeType === 'category';
+    const isSelected = this.isNodeSelected(node);
+    const isDragOver = this.dragOverPath === node.path && node.kind === 'directory' && !isCategory;
+    const metaLabel = isCategory ? null : this.getNodeMetaLabel(node);
     return html`<div
       class="tree-node"
       data-path=${node.path}
@@ -728,7 +922,9 @@ export class AssetTree extends ComponentBase {
       )}
     >
       <div
-        class="node-row ${isSelected ? 'selected' : ''} ${isDragOver ? 'drag-over' : ''}"
+        class="node-row ${isSelected ? 'selected' : ''} ${isDragOver
+          ? 'drag-over'
+          : ''} ${isCategory ? 'node-row--category' : ''}"
         @click=${() => this.onSelect(node)}
         @dblclick=${(e: MouseEvent) => this.onNodeDoubleClick(e, node)}
         @keydown=${(e: KeyboardEvent) => this.onNodeKeyDown(e, node)}
@@ -737,7 +933,7 @@ export class AssetTree extends ComponentBase {
         @dragover=${(e: DragEvent) => this.onDragOver(e, node)}
         @dragleave=${(e: DragEvent) => this.onDragLeave(e, node)}
         @drop=${(e: DragEvent) => this.onDrop(e, node)}
-        draggable="true"
+        draggable=${isCategory ? 'false' : 'true'}
         tabindex="0"
       >
         ${node.kind === 'directory'
@@ -753,7 +949,11 @@ export class AssetTree extends ComponentBase {
               aria-label=${node.expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
             ></button>`
           : html`<span class="expander" aria-hidden="true"></span>`}
-        ${node.kind === 'directory' ? this.folderIcon(!!node.expanded) : this.fileIcon()}
+        ${isCategory
+          ? this.categoryIcon(node)
+          : node.kind === 'directory'
+            ? this.folderIcon(!!node.expanded)
+            : this.fileIcon()}
         ${node.editing
           ? html`<input
               class="node-edit"
@@ -763,7 +963,11 @@ export class AssetTree extends ComponentBase {
               @blur=${() => this.commitCreateFolder(node)}
             />`
           : html`<span class="node-name">${node.name}</span>`}
-        ${metaLabel ? html`<span class="node-meta">${metaLabel}</span>` : null}
+        ${isCategory && node.fileCount !== undefined
+          ? html`<span class="node-meta node-count">${node.fileCount}</span>`
+          : metaLabel
+            ? html`<span class="node-meta">${metaLabel}</span>`
+            : null}
       </div>
       ${node.expanded && node.children && node.children.length
         ? html`<div class="node-children" role="group">
@@ -774,8 +978,8 @@ export class AssetTree extends ComponentBase {
   }
 
   private onDragStart(e: DragEvent, node: Node): void {
-    // Prevent dragging while editing
-    if (node.editing) {
+    // Prevent dragging while editing; virtual category rows are not draggable
+    if (node.editing || node.nodeType === 'category') {
       e.preventDefault();
       return;
     }
@@ -804,6 +1008,11 @@ export class AssetTree extends ComponentBase {
   }
 
   private onDragOver(_e: DragEvent, node: Node): void {
+    // Virtual category rows are never drop targets (any payload kind).
+    if (node.nodeType === 'category') {
+      return;
+    }
+
     // Dragging an Asset Generator history entry — accept on directories only.
     if (hasGenerationDragData(_e.dataTransfer)) {
       if (node.kind !== 'directory') {
@@ -863,6 +1072,11 @@ export class AssetTree extends ComponentBase {
   }
 
   private onTreeDragOver(e: DragEvent): void {
+    // In the grouped view the tree background is the category list, not the project root.
+    if (this.viewMode === 'by-type') {
+      return;
+    }
+
     // Dragging an Asset Generator history entry — drop into the project root.
     if (hasGenerationDragData(e.dataTransfer)) {
       e.preventDefault();
@@ -919,6 +1133,11 @@ export class AssetTree extends ComponentBase {
   }
 
   private async onTreeDrop(e: DragEvent): Promise<void> {
+    // Grouped view: "move to project root" via background drop is disabled.
+    if (this.viewMode === 'by-type') {
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -970,6 +1189,11 @@ export class AssetTree extends ComponentBase {
   }
 
   private async onDrop(e: DragEvent, targetNode: Node): Promise<void> {
+    // Defensive: category rows never accept drops (dragover doesn't preventDefault).
+    if (targetNode.nodeType === 'category') {
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -1165,6 +1389,13 @@ export class AssetTree extends ComponentBase {
     </span>`;
   }
 
+  private categoryIcon(node: Node) {
+    const definition = node.categoryId ? ASSET_CATEGORY_BY_ID[node.categoryId] : null;
+    return html`<span class="icon category" role="img" aria-label=${node.name} title=${node.name}>
+      ${this.iconService.getIcon(definition?.icon ?? 'folder', 16)}
+    </span>`;
+  }
+
   protected render() {
     const isDragOverRoot = this.dragOverPath === '__TREE_ROOT__';
     return html`<div class="asset-tree-root">
@@ -1187,9 +1418,15 @@ export class AssetTree extends ComponentBase {
     if (this.isReadOnly) {
       return;
     }
+    if (isCategoryPath(path)) {
+      return;
+    }
     const nodeEntry = this.findNodeByPath(path);
     if (!nodeEntry || !nodeEntry.node) {
       console.warn('[AssetTree] Node not found for rename:', path);
+      return;
+    }
+    if (nodeEntry.node.nodeType === 'category' || this.isCompactedDirNode(nodeEntry.node)) {
       return;
     }
 
@@ -1224,18 +1461,30 @@ export class AssetTree extends ComponentBase {
   private _originalExtension: string = '';
   private _isNewScene: boolean = true;
 
+  /**
+   * Resolves the real directory node that create flows should nest under.
+   * Virtual category rows (grouped view) fall back to the project root.
+   */
+  private resolveCreateParent(): { parentPath: string; parentNode: Node | null } {
+    const selected =
+      this.selectedPath && !isCategoryPath(this.selectedPath)
+        ? this.findNodeByPath(this.selectedPath)
+        : null;
+    const node =
+      selected?.node && selected.node.nodeType !== 'category' && selected.node.kind === 'directory'
+        ? selected.node
+        : null;
+    return node
+      ? { parentPath: node.path, parentNode: node }
+      : { parentPath: '.', parentNode: null };
+  }
+
   private startCreateScene(): void {
     if (this.isReadOnly) {
       return;
     }
     // similar to startCreateFolder but for scene file
-    const selected = this.selectedPath ? this.findNodeByPath(this.selectedPath) : null;
-    const parentPath =
-      selected && selected.node && selected.node.kind === 'directory' ? selected.node.path : '.';
-
-    // ensure parent children loaded
-    const parentNode =
-      selected && selected.node && selected.node.kind === 'directory' ? selected.node : null;
+    const { parentPath, parentNode } = this.resolveCreateParent();
 
     const newName = 'New Scene';
     const newPath = this.joinPath(parentPath, `${newName}.pix3scene`);
@@ -1276,14 +1525,8 @@ export class AssetTree extends ComponentBase {
     if (this.isReadOnly) {
       return;
     }
-    // determine parent path
-    const selected = this.selectedPath ? this.findNodeByPath(this.selectedPath) : null;
-    const parentPath =
-      selected && selected.node && selected.node.kind === 'directory' ? selected.node.path : '.';
-
-    // ensure parent is expanded and children loaded
-    let parentNode =
-      selected && selected.node && selected.node.kind === 'directory' ? selected.node : null;
+    // determine parent path; ensure parent is expanded and children loaded
+    const { parentPath, parentNode } = this.resolveCreateParent();
     if (parentNode && parentNode.children === null) {
       await this.expandNode(parentNode);
     }
@@ -1547,6 +1790,10 @@ export class AssetTree extends ComponentBase {
 
   private async deleteEntry(path: string): Promise<void> {
     if (this.isReadOnly) {
+      return;
+    }
+    if (isCategoryPath(path)) {
+      console.warn('[AssetTree] Category rows cannot be deleted:', path);
       return;
     }
     try {

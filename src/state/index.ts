@@ -42,6 +42,7 @@ export type {
   AnimationLoadState,
   AnimationsState,
   AppState,
+  AssetBrowserViewMode,
   CameraState,
   CodeEditorContextState,
   CodeEditorSelectionState,
