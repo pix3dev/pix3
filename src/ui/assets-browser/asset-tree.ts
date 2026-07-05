@@ -7,7 +7,9 @@ import { ProjectService } from '@/services/ProjectService';
 import { TemplateService, DEFAULT_TEMPLATE_SCENE_ID } from '@/services/TemplateService';
 import { DialogService } from '@/services/DialogService';
 import { IconService } from '@/services/IconService';
+import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
 import { isDocumentActive } from '@/services/page-activity';
+import { hasGenerationDragData } from '@/ui/shared/asset-drag-drop';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import './asset-tree.ts.css';
@@ -34,6 +36,8 @@ export class AssetTree extends ComponentBase {
   private readonly iconService!: IconService;
   @inject(AssetsPreviewService)
   private readonly assetsPreviewService!: AssetsPreviewService;
+  @inject(GeneratedAssetDropService)
+  private readonly generatedAssetDropService!: GeneratedAssetDropService;
   // Parent will handle actions via 'asset-activate' event
 
   // root path to show, defaults to project root
@@ -800,6 +804,19 @@ export class AssetTree extends ComponentBase {
   }
 
   private onDragOver(_e: DragEvent, node: Node): void {
+    // Dragging an Asset Generator history entry — accept on directories only.
+    if (hasGenerationDragData(_e.dataTransfer)) {
+      if (node.kind !== 'directory') {
+        return;
+      }
+      _e.preventDefault();
+      if (_e.dataTransfer) {
+        _e.dataTransfer.dropEffect = 'copy';
+      }
+      this.dragOverPath = node.path;
+      return;
+    }
+
     // Check if this is an external drag (files from outside browser)
     if (_e.dataTransfer?.items && _e.dataTransfer.items.length > 0) {
       const hasFiles = Array.from(_e.dataTransfer.items).some(item => item.kind === 'file');
@@ -846,6 +863,18 @@ export class AssetTree extends ComponentBase {
   }
 
   private onTreeDragOver(e: DragEvent): void {
+    // Dragging an Asset Generator history entry — drop into the project root.
+    if (hasGenerationDragData(e.dataTransfer)) {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      if (!this.dragOverPath || this.dragOverPath === '__TREE_ROOT__') {
+        this.dragOverPath = '__TREE_ROOT__';
+      }
+      return;
+    }
+
     // Check if this is an external drag (files from outside browser)
     if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
       const hasFiles = Array.from(e.dataTransfer.items).some(item => item.kind === 'file');
@@ -895,6 +924,12 @@ export class AssetTree extends ComponentBase {
 
     this.dragOverPath = null;
 
+    // Dropping an Asset Generator history entry into the project root.
+    if (hasGenerationDragData(e.dataTransfer)) {
+      await this.generatedAssetDropService.handleDrop(e.dataTransfer, '.');
+      return;
+    }
+
     // Check if this is an external file drop
     if (this.isExternalDrag && e.dataTransfer?.items) {
       await this.handleExternalFileDrop(e.dataTransfer.items, '.');
@@ -939,6 +974,14 @@ export class AssetTree extends ComponentBase {
     e.stopPropagation();
 
     this.dragOverPath = null;
+
+    // Dropping an Asset Generator history entry — save into the target directory.
+    if (hasGenerationDragData(e.dataTransfer)) {
+      const targetDirectory =
+        targetNode.kind === 'directory' ? targetNode.path : this.getParentPath(targetNode.path);
+      await this.generatedAssetDropService.handleDrop(e.dataTransfer, targetDirectory);
+      return;
+    }
 
     // Check if this is an external file drop
     if (this.isExternalDrag && e.dataTransfer?.items) {

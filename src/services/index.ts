@@ -43,6 +43,13 @@ export {
   type AssetImportDialogParams,
   type AssetImportDialogResult,
 } from './AssetImportDialogService';
+export {
+  SaveGeneratedAssetDialogService,
+  type SaveGeneratedAssetDialogInstance,
+  type SaveGeneratedAssetDialogParams,
+  type SaveGeneratedAssetDialogResult,
+} from './SaveGeneratedAssetDialogService';
+export { GeneratedAssetDropService } from './GeneratedAssetDropService';
 export { CommandDispatcher, resolveCommandDispatcher } from './CommandDispatcher';
 export { LoggingService, type LogLevel, type LogEntry, type LogListener } from './LoggingService';
 export { CommandRegistry, type CommandMenuItem, type MenuSection } from './CommandRegistry';

@@ -10,6 +10,10 @@ export interface AiImagePreferences {
   modelByProvider: Record<string, string>;
   defaultAspectRatio: AspectRatio;
   defaultImageSize: string;
+  /** Provider-specific quality tier (e.g. OpenAI 'low' | 'medium' | 'high'); '' = provider default. */
+  defaultQuality: string;
+  /** Request a transparent alpha channel from providers that support it (e.g. OpenAI GPT Image). */
+  transparentBackground: boolean;
   /** Local background-removal engine + BiRefNet quality tier. */
   bgRemovalEngine: BgRemovalEngine;
   bgRemovalQuality: BgRemovalQuality;
@@ -138,6 +142,8 @@ export class AiImageSettingsService {
       modelByProvider: {},
       defaultAspectRatio: 'Auto',
       defaultImageSize: '1K',
+      defaultQuality: '',
+      transparentBackground: false,
       bgRemovalEngine: 'imgly',
       bgRemovalQuality: 'balanced',
       bgFillHoles: true,
@@ -172,6 +178,14 @@ export class AiImageSettingsService {
           typeof parsed.defaultImageSize === 'string'
             ? parsed.defaultImageSize
             : defaults.defaultImageSize,
+        defaultQuality:
+          typeof parsed.defaultQuality === 'string'
+            ? parsed.defaultQuality
+            : defaults.defaultQuality,
+        transparentBackground:
+          typeof parsed.transparentBackground === 'boolean'
+            ? parsed.transparentBackground
+            : defaults.transparentBackground,
         bgRemovalEngine:
           parsed.bgRemovalEngine === 'imgly' || parsed.bgRemovalEngine === 'birefnet'
             ? parsed.bgRemovalEngine

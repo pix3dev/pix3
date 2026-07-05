@@ -77,6 +77,16 @@ export default defineConfig(async ({ mode }) => {
           secure: false,
           ws: true,
         },
+        // OpenAI does not send CORS headers, so the browser cannot call api.openai.com directly
+        // (Gemini can). This same-origin dev proxy forwards GPT Image requests; the user's key
+        // rides along as the Authorization header. For production, host an equivalent proxy and set
+        // VITE_OPENAI_PROXY_URL. See OpenAIImageProvider.
+        '/openai-proxy': {
+          target: 'https://api.openai.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: path => path.replace(/^\/openai-proxy/, ''),
+        },
       },
     },
     esbuild: {

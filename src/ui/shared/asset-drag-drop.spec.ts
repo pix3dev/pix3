@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   ASSET_RESOURCE_MIME,
   ASSET_PATH_MIME,
+  GENERATION_DRAG_MIME,
   classifySceneCreateAssetResource,
   deriveAssetNodeName,
   getDroppedAssetResourcePath,
+  getGenerationDragData,
   hasAssetDragData,
+  hasGenerationDragData,
+  setGenerationDragData,
   toProjectResourcePath,
 } from './asset-drag-drop';
 
@@ -68,6 +72,47 @@ describe('asset-drag-drop', () => {
     };
 
     expect(hasAssetDragData(transfer as DataTransfer)).toBe(true);
+  });
+
+  it('round-trips a generation drag payload through the data transfer', () => {
+    const store = new Map<string, string>();
+    const transfer = {
+      types: [] as string[],
+      effectAllowed: 'none',
+      setData: (type: string, value: string) => {
+        store.set(type, value);
+        if (!transfer.types.includes(type)) {
+          transfer.types.push(type);
+        }
+      },
+      getData: (type: string) => store.get(type) ?? '',
+    };
+
+    setGenerationDragData(transfer as unknown as DataTransfer, {
+      id: 'gen-123',
+      suggestedName: 'hero.png',
+    });
+
+    expect(transfer.effectAllowed).toBe('copy');
+    expect(hasGenerationDragData(transfer as unknown as DataTransfer)).toBe(true);
+    expect(getGenerationDragData(transfer as unknown as DataTransfer)).toEqual({
+      id: 'gen-123',
+      suggestedName: 'hero.png',
+    });
+    // The plain-text mirror lets non-Pix3 drop targets receive a sensible name.
+    expect(transfer.getData('text/plain')).toBe('hero.png');
+  });
+
+  it('rejects generation payloads without an id and non-generation drags', () => {
+    const emptyTransfer = { types: [] as string[], getData: () => '' };
+    expect(hasGenerationDragData(emptyTransfer as unknown as DataTransfer)).toBe(false);
+    expect(getGenerationDragData(emptyTransfer as unknown as DataTransfer)).toBeNull();
+
+    const malformedTransfer = {
+      types: [GENERATION_DRAG_MIME],
+      getData: (type: string) => (type === GENERATION_DRAG_MIME ? '{"suggestedName":"x.png"}' : ''),
+    };
+    expect(getGenerationDragData(malformedTransfer as unknown as DataTransfer)).toBeNull();
   });
 
   it('classifies supported scene-create asset types and derives node names from file names', () => {

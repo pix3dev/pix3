@@ -12,9 +12,11 @@ import {
   ASSET_PATH_MIME,
   ASSET_RESOURCE_LIST_MIME,
   ASSET_RESOURCE_MIME,
+  hasGenerationDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
 import { EditorTabService } from '@/services/EditorTabService';
+import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import './assets-preview-panel.ts.css';
 import '../shared/pix3-panel';
@@ -33,6 +35,9 @@ export class AssetsPreviewPanel extends ComponentBase {
   @inject(EditorTabService)
   private readonly editorTabService!: EditorTabService;
 
+  @inject(GeneratedAssetDropService)
+  private readonly generatedAssetDropService!: GeneratedAssetDropService;
+
   @state()
   private snapshot: AssetsPreviewSnapshot = {
     selectedFolderPath: null,
@@ -46,6 +51,9 @@ export class AssetsPreviewPanel extends ComponentBase {
 
   @state()
   private contextMenu: { item: AssetPreviewItem; x: number; y: number } | null = null;
+
+  @state()
+  private isGenerationDropActive = false;
 
   private disposePreviewSubscription?: () => void;
   private selectedPaths = new Set<string>();
@@ -98,7 +106,17 @@ export class AssetsPreviewPanel extends ComponentBase {
         panel-description="Select a folder in Asset Browser to preview files as thumbnails."
       >
         <span slot="subtitle" class="folder-path">${this.snapshot.displayPath}</span>
-        <div class="preview-root">
+        <div
+          class="preview-root ${this.isGenerationDropActive ? 'is-generation-drop' : ''}"
+          @dragover=${this.onGenerationDragOver}
+          @dragleave=${this.onGenerationDragLeave}
+          @drop=${this.onGenerationDrop}
+        >
+          ${this.isGenerationDropActive
+            ? html`<div class="generation-drop-overlay">
+                Drop to save into ${this.snapshot.displayPath}
+              </div>`
+            : null}
           ${this.snapshot.isLoading
             ? html`<p class="preview-status">Loading folder preview...</p>`
             : this.snapshot.errorMessage
@@ -222,6 +240,36 @@ export class AssetsPreviewPanel extends ComponentBase {
     event.dataTransfer.setData(ASSET_PATH_LIST_MIME, JSON.stringify(plainPaths));
     event.dataTransfer.setData(ASSET_RESOURCE_LIST_MIME, JSON.stringify(resourcePaths));
     event.dataTransfer.setData('text/uri-list', resourcePath);
+  }
+
+  private onGenerationDragOver(event: DragEvent): void {
+    if (!hasGenerationDragData(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    this.isGenerationDropActive = true;
+  }
+
+  private onGenerationDragLeave(event: DragEvent): void {
+    const related = event.relatedTarget as Node | null;
+    if (related && this.contains(related)) {
+      return;
+    }
+    this.isGenerationDropActive = false;
+  }
+
+  private async onGenerationDrop(event: DragEvent): Promise<void> {
+    if (!hasGenerationDragData(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    this.isGenerationDropActive = false;
+    const targetDirectory = this.snapshot.selectedFolderPath ?? '.';
+    await this.generatedAssetDropService.handleDrop(event.dataTransfer, targetDirectory);
+    // The preview refreshes automatically once the write signals a directory change.
   }
 
   private updateSelectionFromClick(event: MouseEvent, item: AssetPreviewItem): void {

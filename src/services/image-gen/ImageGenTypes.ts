@@ -6,6 +6,14 @@
 /** 'Auto' lets the model choose (no aspectRatio sent); others map to Gemini imageConfig.aspectRatio. */
 export type AspectRatio = 'Auto' | '1:1' | '3:4' | '4:3' | '16:9' | '9:16';
 
+/**
+ * Requested output background. Providers that advertise
+ * {@link ImageModelCapabilities.supportsTransparency} can honour `'transparent'` and return a PNG
+ * with a real alpha channel (no local background-removal pass needed). `'auto'` lets the model
+ * decide; `'opaque'` forces a filled background.
+ */
+export type Background = 'auto' | 'transparent' | 'opaque';
+
 /** A reference/input image, base64-encoded WITHOUT the `data:` URI prefix. */
 export interface ReferenceImage {
   readonly mimeType: string;
@@ -25,6 +33,13 @@ export interface GenerateImageParams {
   readonly aspectRatio?: AspectRatio;
   /** Provider-specific size hint (e.g. '1K' | '2K' | '4K' for Gemini). */
   readonly imageSize?: string;
+  /** Provider-specific quality tier (e.g. 'low' | 'medium' | 'high' for OpenAI GPT Image). */
+  readonly quality?: string;
+  /**
+   * Desired output background. Only honoured by providers whose selected model advertises
+   * {@link ImageModelCapabilities.supportsTransparency}; ignored otherwise.
+   */
+  readonly background?: Background;
   readonly outputMimeType?: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Number of images to request. Providers may clamp to their `maxCount`. */
   readonly count?: number;
@@ -42,7 +57,14 @@ export interface ImageModelCapabilities {
   readonly maxReferenceImages: number;
   readonly aspectRatios: readonly AspectRatio[];
   readonly imageSizes: readonly string[];
+  /**
+   * Provider-specific quality tiers (e.g. `['low', 'medium', 'high']`). Empty/omitted means the
+   * model exposes no quality knob and the UI hides the control.
+   */
+  readonly qualities?: readonly string[];
   readonly maxCount: number;
+  /** True when the model can emit a transparent alpha channel directly (skips local bg-removal). */
+  readonly supportsTransparency: boolean;
   /** True when direct browser calls are blocked by CORS and a same-origin proxy is required. */
   readonly requiresProxy: boolean;
 }

@@ -3,6 +3,57 @@ export const ASSET_PATH_MIME = 'application/x-pix3-asset-path';
 export const ASSET_RESOURCE_LIST_MIME = 'application/x-pix3-asset-resource-list';
 export const ASSET_PATH_LIST_MIME = 'application/x-pix3-asset-path-list';
 
+/**
+ * Drag payload used when dragging an entry out of the Asset Generator's generation
+ * history. The blob itself lives in {@link GenerationHistoryService} (IndexedDB); the
+ * drag only carries the record id so a drop target can fetch it and offer to save it.
+ */
+export const GENERATION_DRAG_MIME = 'application/x-pix3-generation';
+
+export interface GenerationDragPayload {
+  /** GenerationHistoryService record id. */
+  id: string;
+  /** Suggested file name (with extension) to pre-fill the save dialog. */
+  suggestedName?: string;
+}
+
+export const setGenerationDragData = (
+  dataTransfer: DataTransfer,
+  payload: GenerationDragPayload
+): void => {
+  dataTransfer.setData(GENERATION_DRAG_MIME, JSON.stringify(payload));
+  if (payload.suggestedName) {
+    dataTransfer.setData('text/plain', payload.suggestedName);
+  }
+  dataTransfer.effectAllowed = 'copy';
+};
+
+export const hasGenerationDragData = (dataTransfer: DataTransfer | null): boolean => {
+  if (!dataTransfer) {
+    return false;
+  }
+  const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+  return types.includes(GENERATION_DRAG_MIME);
+};
+
+export const getGenerationDragData = (
+  dataTransfer: DataTransfer | null
+): GenerationDragPayload | null => {
+  if (!dataTransfer) {
+    return null;
+  }
+  const raw = dataTransfer.getData(GENERATION_DRAG_MIME);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as GenerationDragPayload;
+    return typeof parsed?.id === 'string' && parsed.id.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 export const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',

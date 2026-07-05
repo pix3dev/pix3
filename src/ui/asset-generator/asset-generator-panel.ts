@@ -1,4 +1,5 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
+import { createRef, ref } from 'lit/directives/ref.js';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { AiImageSettingsService } from '@/services/AiImageSettingsService';
@@ -21,11 +22,52 @@ import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import {
   getDroppedAssetResourcePath,
   hasAssetDragData,
+  setGenerationDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
 import './asset-generator-panel.ts.css';
 
 const EMPTY_RESOURCE_ID = 'asset-generator://new';
+
+/** Crop selection rectangle, in overlay (display) pixels relative to the crop overlay's box. */
+interface CropRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The painted image region inside the crop overlay (accounts for object-fit letterboxing). */
+interface CropContentRect {
+  ox: number;
+  oy: number;
+  pw: number;
+  ph: number;
+  scale: number;
+}
+
+interface CropDragState {
+  mode: 'draw' | 'move' | 'resize';
+  /** Combination of `n`/`s`/`e`/`w` for resize handles; empty otherwise. */
+  edges: string;
+  originX: number;
+  originY: number;
+  startRectX: number;
+  startRectY: number;
+  startRectW: number;
+  startRectH: number;
+}
+
+const CROP_HANDLES: ReadonlyArray<{ pos: string; edges: string }> = [
+  { pos: 'nw', edges: 'nw' },
+  { pos: 'n', edges: 'n' },
+  { pos: 'ne', edges: 'ne' },
+  { pos: 'e', edges: 'e' },
+  { pos: 'se', edges: 'se' },
+  { pos: 's', edges: 's' },
+  { pos: 'sw', edges: 'sw' },
+  { pos: 'w', edges: 'w' },
+];
 
 interface ReferenceItem {
   id: string;
@@ -35,7 +77,7 @@ interface ReferenceItem {
   label: string;
 }
 
-type CurrentSource = 'file' | 'generated' | 'bg-removed';
+type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped';
 
 interface CurrentImage {
   blob: Blob;
@@ -78,6 +120,8 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private modelId = '';
   @state() private aspectRatio: AspectRatio = 'Auto';
   @state() private imageSize = '1K';
+  @state() private quality = '';
+  @state() private transparentBackground = false;
   @state() private keyConfigured = false;
   @state() private references: ReferenceItem[] = [];
   @state() private current: CurrentImage | null = null;
@@ -99,6 +143,12 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private apiKeyInput = '';
   @state() private apiKeyBusy = false;
   @state() private apiKeyMessage: string | null = null;
+  @state() private cropMode = false;
+  @state() private cropRect: CropRect | null = null;
+
+  private readonly cropOverlayRef = createRef<HTMLDivElement>();
+  private readonly cropImageRef = createRef<HTMLImageElement>();
+  private cropDrag: CropDragState | null = null;
 
   private disposeTabsSubscription?: () => void;
   private disposeHistorySubscription?: () => void;
@@ -191,6 +241,10 @@ export class AssetGeneratorPanel extends ComponentBase {
     if (changed.has('tabId')) {
       this.syncFromTabState();
     }
+    if (changed.has('cropMode') && this.cropMode && !this.cropRect) {
+      // The crop overlay/image need a layout pass before we can size the initial selection.
+      requestAnimationFrame(() => this.initCropRect());
+    }
   }
 
   // -- tab / preferences sync ------------------------------------------------
@@ -222,6 +276,13 @@ export class AssetGeneratorPanel extends ComponentBase {
     this.imageSize = model?.capabilities.imageSizes.includes(prefs.defaultImageSize)
       ? prefs.defaultImageSize
       : (model?.capabilities.imageSizes[0] ?? '1K');
+    const qualities = model?.capabilities.qualities ?? [];
+    this.quality =
+      prefs.defaultQuality && qualities.includes(prefs.defaultQuality)
+        ? prefs.defaultQuality
+        : (qualities.find(q => q === 'medium') ?? qualities[0] ?? '');
+    this.transparentBackground =
+      Boolean(model?.capabilities.supportsTransparency) && prefs.transparentBackground;
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
     this.bgFillHoles = prefs.bgFillHoles;
@@ -296,9 +357,17 @@ export class AssetGeneratorPanel extends ComponentBase {
         </button>
         <div class="ag-toolbar-spacer"></div>
         <button
+          class="ag-toolbar-button ${this.cropMode ? 'is-active' : ''}"
+          title="Select a region and crop the image"
+          @click=${this.onToggleCrop}
+          ?disabled=${!this.current || this.bgBusy || this.generating}
+        >
+          ✂ Crop
+        </button>
+        <button
           class="ag-toolbar-button"
           @click=${this.onRemoveBackground}
-          ?disabled=${!this.current || this.bgBusy}
+          ?disabled=${!this.current || this.bgBusy || this.cropMode}
         >
           ${this.bgBusy ? 'Removing…' : 'Remove background'}
         </button>
@@ -313,7 +382,7 @@ export class AssetGeneratorPanel extends ComponentBase {
         <button
           class="ag-toolbar-button ag-save-button ${this.savePopoverOpen ? 'is-open' : ''}"
           title="Save options"
-          ?disabled=${!this.current}
+          ?disabled=${!this.current || this.cropMode}
           @click=${this.toggleSavePopover}
         >
           💾 Save ▾
@@ -505,16 +574,41 @@ export class AssetGeneratorPanel extends ComponentBase {
               )}
             </select>
           </label>
-          <label class="ag-field">
-            <span class="ag-field-label">Size</span>
-            <select @change=${this.onSizeChange}>
-              ${(caps?.imageSizes ?? ['1K']).map(
-                size =>
-                  html`<option value=${size} ?selected=${size === this.imageSize}>${size}</option>`
-              )}
-            </select>
-          </label>
+          ${caps && caps.imageSizes.length > 0
+            ? html`<label class="ag-field">
+                <span class="ag-field-label">Size</span>
+                <select @change=${this.onSizeChange}>
+                  ${caps.imageSizes.map(
+                    size =>
+                      html`<option value=${size} ?selected=${size === this.imageSize}>
+                        ${size}
+                      </option>`
+                  )}
+                </select>
+              </label>`
+            : null}
+          ${caps && caps.qualities && caps.qualities.length > 0
+            ? html`<label class="ag-field">
+                <span class="ag-field-label">Quality</span>
+                <select @change=${this.onQualityChange}>
+                  ${caps.qualities.map(
+                    q => html`<option value=${q} ?selected=${q === this.quality}>${q}</option>`
+                  )}
+                </select>
+              </label>`
+            : null}
         </div>
+
+        ${caps?.supportsTransparency
+          ? html`<label class="ag-toggle-field">
+              <input
+                type="checkbox"
+                .checked=${this.transparentBackground}
+                @change=${this.onTransparentChange}
+              />
+              <span>Transparent background (alpha) — no bg-removal needed</span>
+            </label>`
+          : null}
 
         <button class="ag-link-button" @click=${this.openFullSettings}>Open full settings…</button>
       </div>
@@ -555,6 +649,9 @@ export class AssetGeneratorPanel extends ComponentBase {
   }
 
   private renderStage() {
+    if (this.cropMode && this.current) {
+      return this.renderCropEditor(this.current);
+    }
     return html`
       <div class="ag-stage">
         ${this.current
@@ -569,6 +666,60 @@ export class AssetGeneratorPanel extends ComponentBase {
       </div>
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
+  }
+
+  private renderCropEditor(current: CurrentImage) {
+    const rect = this.cropRect;
+    const dims = rect ? this.describeCropDimensions(rect) : null;
+    return html`
+      <div class="ag-stage ag-stage--crop">
+        <img
+          class="ag-crop-image"
+          src=${current.objectUrl}
+          alt="Crop source"
+          draggable="false"
+          ${ref(this.cropImageRef)}
+          @load=${this.onCropImageLoad}
+        />
+        <div
+          class="ag-crop-overlay"
+          ${ref(this.cropOverlayRef)}
+          @pointerdown=${this.onCropOverlayPointerDown}
+          @pointermove=${this.onCropPointerMove}
+          @pointerup=${this.onCropPointerUp}
+          @pointercancel=${this.onCropPointerUp}
+        >
+          ${rect
+            ? html`<div
+                class="ag-crop-rect"
+                style="left:${rect.x}px; top:${rect.y}px; width:${rect.w}px; height:${rect.h}px"
+                @pointerdown=${(event: PointerEvent) => this.beginCropDrag(event, 'move', '')}
+              >
+                ${CROP_HANDLES.map(handle => this.renderCropHandle(handle))}
+              </div>`
+            : null}
+        </div>
+      </div>
+      <div class="ag-crop-toolbar">
+        <span class="ag-crop-dims">${dims ?? 'Drag on the image to select a region'}</span>
+        <div class="ag-prompt-spacer"></div>
+        <button class="ag-cancel-button" @click=${this.onCancelCrop}>Cancel</button>
+        <button
+          class="ag-generate-button ag-crop-apply"
+          ?disabled=${!this.canApplyCrop()}
+          @click=${this.onApplyCrop}
+        >
+          Apply crop
+        </button>
+      </div>
+    `;
+  }
+
+  private renderCropHandle(handle: { pos: string; edges: string }) {
+    return html`<span
+      class="ag-crop-handle ag-crop-handle--${handle.pos}"
+      @pointerdown=${(event: PointerEvent) => this.beginCropDrag(event, 'resize', handle.edges)}
+    ></span>`;
   }
 
   private renderBgProgress() {
@@ -593,6 +744,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       <footer class="ag-history">
         <div class="ag-history-head">
           <span class="ag-field-label">History (${this.historyRecords.length})</span>
+          <span class="ag-history-hint">Drag a thumbnail to the Asset Browser to save it.</span>
           <button class="ag-link-button" @click=${this.onClearHistory}>Clear</button>
         </div>
         <div class="ag-history-strip">
@@ -600,8 +752,13 @@ export class AssetGeneratorPanel extends ComponentBase {
             const url = this.historyUrls.get(record.id);
             return html`
               <div class="ag-history-card" title=${record.prompt}>
-                <button class="ag-history-thumb" @click=${() => this.useHistoryRecord(record)}>
-                  ${url ? html`<img src=${url} alt=${record.prompt} />` : null}
+                <button
+                  class="ag-history-thumb"
+                  draggable="true"
+                  @click=${() => this.useHistoryRecord(record)}
+                  @dragstart=${(event: DragEvent) => this.onHistoryDragStart(event, record)}
+                >
+                  ${url ? html`<img src=${url} alt=${record.prompt} draggable="false" />` : null}
                 </button>
                 <button
                   class="ag-history-delete"
@@ -722,6 +879,16 @@ export class AssetGeneratorPanel extends ComponentBase {
   private onSizeChange(event: Event): void {
     this.imageSize = (event.target as HTMLSelectElement).value;
     this.aiSettings.updatePreferences({ defaultImageSize: this.imageSize });
+  }
+
+  private onQualityChange(event: Event): void {
+    this.quality = (event.target as HTMLSelectElement).value;
+    this.aiSettings.updatePreferences({ defaultQuality: this.quality });
+  }
+
+  private onTransparentChange(event: Event): void {
+    this.transparentBackground = (event.target as HTMLInputElement).checked;
+    this.aiSettings.updatePreferences({ transparentBackground: this.transparentBackground });
   }
 
   private onSaveNameInput(event: Event): void {
@@ -883,6 +1050,9 @@ export class AssetGeneratorPanel extends ComponentBase {
           references,
           aspectRatio: caps.aspectRatios.includes(this.aspectRatio) ? this.aspectRatio : undefined,
           imageSize: caps.imageSizes.includes(this.imageSize) ? this.imageSize : undefined,
+          quality: caps.qualities?.includes(this.quality) ? this.quality : undefined,
+          background:
+            caps.supportsTransparency && this.transparentBackground ? 'transparent' : undefined,
           signal: this.abortController.signal,
         },
         { apiKey, modelId: this.modelId }
@@ -970,6 +1140,267 @@ export class AssetGeneratorPanel extends ComponentBase {
     } finally {
       this.bgBusy = false;
       this.bgProgress = null;
+    }
+  }
+
+  // -- crop ------------------------------------------------------------------
+
+  private onToggleCrop(): void {
+    if (!this.current) {
+      return;
+    }
+    this.cropMode = !this.cropMode;
+    this.cropRect = null;
+    this.cropDrag = null;
+  }
+
+  private onCancelCrop(): void {
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+  }
+
+  private onCropImageLoad(): void {
+    // The image may already be decoded (it is the current stage image); still wait a frame so
+    // the overlay has laid out before we measure it.
+    requestAnimationFrame(() => this.initCropRect());
+  }
+
+  private initCropRect(): void {
+    if (this.cropRect || !this.cropMode) {
+      return;
+    }
+    const content = this.getCropContentRect();
+    if (!content) {
+      return;
+    }
+    const insetX = content.pw * 0.15;
+    const insetY = content.ph * 0.15;
+    this.cropRect = {
+      x: content.ox + insetX,
+      y: content.oy + insetY,
+      w: content.pw - insetX * 2,
+      h: content.ph - insetY * 2,
+    };
+  }
+
+  /** Painted-image rectangle inside the crop overlay, accounting for object-fit letterboxing. */
+  private getCropContentRect(): CropContentRect | null {
+    const overlay = this.cropOverlayRef.value;
+    const image = this.cropImageRef.value;
+    if (!overlay || !image || !image.naturalWidth || !image.naturalHeight) {
+      return null;
+    }
+    const bounds = overlay.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      return null;
+    }
+    const scale = Math.min(bounds.width / image.naturalWidth, bounds.height / image.naturalHeight);
+    const pw = image.naturalWidth * scale;
+    const ph = image.naturalHeight * scale;
+    return {
+      ox: (bounds.width - pw) / 2,
+      oy: (bounds.height - ph) / 2,
+      pw,
+      ph,
+      scale,
+    };
+  }
+
+  private onCropOverlayPointerDown(event: PointerEvent): void {
+    if (event.button !== 0) {
+      return;
+    }
+    const overlay = this.cropOverlayRef.value;
+    const content = this.getCropContentRect();
+    if (!overlay || !content) {
+      return;
+    }
+    const bounds = overlay.getBoundingClientRect();
+    const x = clamp(event.clientX - bounds.left, content.ox, content.ox + content.pw);
+    const y = clamp(event.clientY - bounds.top, content.oy, content.oy + content.ph);
+    this.cropDrag = {
+      mode: 'draw',
+      edges: '',
+      originX: x,
+      originY: y,
+      startRectX: x,
+      startRectY: y,
+      startRectW: 0,
+      startRectH: 0,
+    };
+    this.cropRect = { x, y, w: 0, h: 0 };
+    overlay.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  private beginCropDrag(event: PointerEvent, mode: 'move' | 'resize', edges: string): void {
+    if (event.button !== 0 || !this.cropRect) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+    const overlay = this.cropOverlayRef.value;
+    if (!overlay) {
+      return;
+    }
+    const bounds = overlay.getBoundingClientRect();
+    this.cropDrag = {
+      mode,
+      edges,
+      originX: event.clientX - bounds.left,
+      originY: event.clientY - bounds.top,
+      startRectX: this.cropRect.x,
+      startRectY: this.cropRect.y,
+      startRectW: this.cropRect.w,
+      startRectH: this.cropRect.h,
+    };
+    overlay.setPointerCapture(event.pointerId);
+  }
+
+  private onCropPointerMove(event: PointerEvent): void {
+    const drag = this.cropDrag;
+    const overlay = this.cropOverlayRef.value;
+    const content = this.getCropContentRect();
+    if (!drag || !overlay || !content) {
+      return;
+    }
+    const bounds = overlay.getBoundingClientRect();
+    const minX = content.ox;
+    const minY = content.oy;
+    const maxX = content.ox + content.pw;
+    const maxY = content.oy + content.ph;
+    const px = clamp(event.clientX - bounds.left, minX, maxX);
+    const py = clamp(event.clientY - bounds.top, minY, maxY);
+
+    if (drag.mode === 'draw') {
+      this.cropRect = {
+        x: Math.min(px, drag.originX),
+        y: Math.min(py, drag.originY),
+        w: Math.abs(px - drag.originX),
+        h: Math.abs(py - drag.originY),
+      };
+      return;
+    }
+
+    if (drag.mode === 'move') {
+      const w = drag.startRectW;
+      const h = drag.startRectH;
+      const dx = event.clientX - bounds.left - drag.originX;
+      const dy = event.clientY - bounds.top - drag.originY;
+      this.cropRect = {
+        x: clamp(drag.startRectX + dx, minX, maxX - w),
+        y: clamp(drag.startRectY + dy, minY, maxY - h),
+        w,
+        h,
+      };
+      return;
+    }
+
+    let left = drag.startRectX;
+    let top = drag.startRectY;
+    let right = drag.startRectX + drag.startRectW;
+    let bottom = drag.startRectY + drag.startRectH;
+    if (drag.edges.includes('w')) {
+      left = clamp(px, minX, right - 1);
+    }
+    if (drag.edges.includes('e')) {
+      right = clamp(px, left + 1, maxX);
+    }
+    if (drag.edges.includes('n')) {
+      top = clamp(py, minY, bottom - 1);
+    }
+    if (drag.edges.includes('s')) {
+      bottom = clamp(py, top + 1, maxY);
+    }
+    this.cropRect = { x: left, y: top, w: right - left, h: bottom - top };
+  }
+
+  private onCropPointerUp(event: PointerEvent): void {
+    if (!this.cropDrag) {
+      return;
+    }
+    const overlay = this.cropOverlayRef.value;
+    if (overlay && overlay.hasPointerCapture(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
+    this.cropDrag = null;
+  }
+
+  private canApplyCrop(): boolean {
+    return Boolean(this.cropRect && this.cropRect.w >= 2 && this.cropRect.h >= 2);
+  }
+
+  private describeCropDimensions(rect: CropRect): string | null {
+    const content = this.getCropContentRect();
+    if (!content) {
+      return null;
+    }
+    const w = Math.max(1, Math.round(rect.w / content.scale));
+    const h = Math.max(1, Math.round(rect.h / content.scale));
+    return `${w} × ${h} px`;
+  }
+
+  private async onApplyCrop(): Promise<void> {
+    const image = this.cropImageRef.value;
+    const rect = this.cropRect;
+    const content = this.getCropContentRect();
+    if (!image || !rect || !content || !this.current) {
+      return;
+    }
+
+    const sx = clamp(Math.round((rect.x - content.ox) / content.scale), 0, image.naturalWidth - 1);
+    const sy = clamp(Math.round((rect.y - content.oy) / content.scale), 0, image.naturalHeight - 1);
+    const sw = clamp(Math.round(rect.w / content.scale), 1, image.naturalWidth - sx);
+    const sh = clamp(Math.round(rect.h / content.scale), 1, image.naturalHeight - sy);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    const blob = await new Promise<Blob | null>(resolve =>
+      canvas.toBlob(result => resolve(result), 'image/png')
+    );
+    if (!blob) {
+      return;
+    }
+
+    const objectUrl = this.trackUrl(URL.createObjectURL(blob));
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+    this.setCurrent({
+      blob,
+      mimeType: 'image/png',
+      objectUrl,
+      source: 'cropped',
+      width: sw,
+      height: sh,
+    });
+    this.saveName = setImageExt(
+      `${stripImageExt(normalizeRelativePath(this.saveName) || 'cropped')}-crop`,
+      'png'
+    );
+
+    try {
+      await this.history.add({
+        providerId: this.providerId,
+        modelId: this.modelId,
+        prompt: this.prompt.trim() ? `${this.prompt.trim()} (crop)` : 'Cropped image',
+        aspectRatio: this.aspectRatio,
+        imageSize: this.imageSize,
+        mimeType: 'image/png',
+        blob,
+        width: sw,
+        height: sh,
+      });
+    } catch (error) {
+      console.warn('[AssetGenerator] Failed to add crop to history', error);
     }
   }
 
@@ -1098,6 +1529,14 @@ export class AssetGeneratorPanel extends ComponentBase {
     this.saveName = deriveSaveName(record.prompt, this.boundImagePath, record.mimeType);
   }
 
+  private onHistoryDragStart(event: DragEvent, record: GenerationRecord): void {
+    if (!event.dataTransfer) {
+      return;
+    }
+    const suggestedName = ensureImageExt(slugify(record.prompt) || 'generated', record.mimeType);
+    setGenerationDragData(event.dataTransfer, { id: record.id, suggestedName });
+  }
+
   private async deleteHistoryRecord(id: string): Promise<void> {
     await this.history.delete(id);
     // reloadHistory runs via the history subscription.
@@ -1195,6 +1634,9 @@ const readImageSize = (objectUrl: string): Promise<{ width: number; height: numb
     image.onerror = () => resolve(null);
     image.src = objectUrl;
   });
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(Math.max(value, min), Math.max(min, max));
 
 const slugify = (text: string): string =>
   text

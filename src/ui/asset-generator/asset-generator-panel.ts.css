@@ -123,6 +123,12 @@ pix3-asset-generator-panel .ag-action-button:hover:not(:disabled) {
   color: #fff;
 }
 
+pix3-asset-generator-panel .ag-toolbar-button.is-active {
+  border-color: var(--pix3-accent-color, #ffcf33);
+  color: var(--pix3-accent-color, #ffcf33);
+  background: rgba(255, 207, 51, 0.12);
+}
+
 pix3-asset-generator-panel button:disabled {
   opacity: 0.4;
   cursor: default;
@@ -340,6 +346,19 @@ pix3-asset-generator-panel .ag-field-row {
 
 pix3-asset-generator-panel .ag-field-row .ag-field {
   flex: 1 1 0;
+}
+
+pix3-asset-generator-panel .ag-toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--pix3-text-muted, #999);
+  cursor: pointer;
+}
+
+pix3-asset-generator-panel .ag-toggle-field input {
+  flex: 0 0 auto;
 }
 
 /* References ------------------------------------------------------------ */
@@ -572,7 +591,25 @@ pix3-asset-generator-panel .ag-history-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
   margin-bottom: 0.4rem;
+}
+
+pix3-asset-generator-panel .ag-history-hint {
+  flex: 1 1 auto;
+  font-size: 0.72rem;
+  color: var(--pix3-text-muted, #777);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-asset-generator-panel .ag-history-thumb[draggable='true'] {
+  cursor: grab;
+}
+
+pix3-asset-generator-panel .ag-history-thumb[draggable='true']:active {
+  cursor: grabbing;
 }
 
 pix3-asset-generator-panel .ag-history-strip {
@@ -637,4 +674,109 @@ pix3-asset-generator-panel .ag-drop-overlay {
   font-weight: 600;
   pointer-events: none;
   z-index: 5;
+}
+
+/* Crop editor ----------------------------------------------------------- */
+pix3-asset-generator-panel .ag-stage--crop {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+pix3-asset-generator-panel .ag-crop-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+pix3-asset-generator-panel .ag-crop-overlay {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+pix3-asset-generator-panel .ag-crop-rect {
+  position: absolute;
+  border: 1px solid var(--pix3-accent-color, #ffcf33);
+  box-shadow: 0 0 0 100000px rgba(0, 0, 0, 0.55);
+  cursor: move;
+  box-sizing: border-box;
+}
+
+pix3-asset-generator-panel .ag-crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--pix3-accent-color, #ffcf33);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+pix3-asset-generator-panel .ag-crop-handle--nw {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--n {
+  top: -6px;
+  left: calc(50% - 6px);
+  cursor: ns-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--ne {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--e {
+  top: calc(50% - 6px);
+  right: -6px;
+  cursor: ew-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--se {
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--s {
+  bottom: -6px;
+  left: calc(50% - 6px);
+  cursor: ns-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--sw {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+pix3-asset-generator-panel .ag-crop-handle--w {
+  top: calc(50% - 6px);
+  left: -6px;
+  cursor: ew-resize;
+}
+
+pix3-asset-generator-panel .ag-crop-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--pix3-border, #333);
+  background: var(--pix3-bg-secondary, #262626);
+}
+
+pix3-asset-generator-panel .ag-crop-dims {
+  font-size: 0.8rem;
+  color: var(--pix3-text-secondary, #ccc);
+}
+
+pix3-asset-generator-panel .ag-crop-apply {
+  flex: 0 0 auto;
+  padding: 0.4rem 1rem;
 }

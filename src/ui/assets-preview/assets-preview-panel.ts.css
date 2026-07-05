@@ -18,8 +18,34 @@ pix3-assets-preview-panel .folder-path {
 }
 
 pix3-assets-preview-panel .preview-root {
+  position: relative;
   height: 100%;
   overflow: auto;
+}
+
+pix3-assets-preview-panel .preview-root.is-generation-drop {
+  outline: 2px dashed var(--pix3-accent-color, #ffcf33);
+  outline-offset: -4px;
+  background: rgba(255, 207, 51, 0.08);
+}
+
+pix3-assets-preview-panel .generation-drop-overlay {
+  position: sticky;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 2.4rem;
+  margin: 0.25rem;
+  border-radius: 6px;
+  padding: 0 1rem;
+  text-align: center;
+  background: rgba(255, 207, 51, 0.16);
+  color: var(--pix3-accent-color, #ffcf33);
+  font-weight: 600;
+  font-size: 0.8rem;
+  pointer-events: none;
 }
 
 pix3-assets-preview-panel .preview-status {
