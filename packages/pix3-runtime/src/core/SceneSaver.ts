@@ -359,6 +359,16 @@ export class SceneSaver {
       props.scrollbarInset = node.scrollbarInset;
       props.scrollbarColor = node.scrollbarColor;
       props.scrollbarTrackColor = node.scrollbarTrackColor;
+      if (node.scrollbarThumbTexture) {
+        props.scrollbarThumbTexture = { ...node.scrollbarThumbTexture };
+      } else {
+        delete props.scrollbarThumbTexture;
+      }
+      if (node.scrollbarTrackTexture) {
+        props.scrollbarTrackTexture = { ...node.scrollbarTrackTexture };
+      } else {
+        delete props.scrollbarTrackTexture;
+      }
     } else if (node instanceof Sprite2D) {
       if (node.texture) {
         props.texture = { ...node.texture };
@@ -436,6 +446,26 @@ export class SceneSaver {
       props.hoverColor = node.hoverColor;
       props.pressedColor = node.pressedColor;
       props.buttonAction = node.buttonAction;
+      if (node.textureNormal) {
+        props.textureNormal = { ...node.textureNormal };
+      } else {
+        delete props.textureNormal;
+      }
+      if (node.textureHover) {
+        props.textureHover = { ...node.textureHover };
+      } else {
+        delete props.textureHover;
+      }
+      if (node.texturePressed) {
+        props.texturePressed = { ...node.texturePressed };
+      } else {
+        delete props.texturePressed;
+      }
+      if (node.textureDisabled) {
+        props.textureDisabled = { ...node.textureDisabled };
+      } else {
+        delete props.textureDisabled;
+      }
     } else if (node instanceof Label2D) {
       this.serializeCommonUIControlProps(node, props);
     } else if (node instanceof Slider2D) {

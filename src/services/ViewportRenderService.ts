@@ -36,7 +36,6 @@ import { Particles3D } from '@pix3/runtime';
 import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
-import { assign2DRenderOrder } from '@pix3/runtime';
 import type { EditorPreviewContext, SceneGraph, ScriptComponent } from '@pix3/runtime';
 import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
@@ -88,6 +87,13 @@ const MIN_WORLD_BOUNDS_SIZE = 0.0001;
 const TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER = 1.25;
 const TWO_D_FIT_PADDING_MULTIPLIER = 1.15;
 const MARQUEE_PREVIEW_2D_COLOR = 0xffcf33;
+// While idle (no dirty flag, no animated previews) the render loop still
+// paints one frame this often as a safety net for mutations that bypass
+// requestRender() (async texture loads, background-tab agent screenshots).
+const IDLE_RENDER_INTERVAL_MS = 500;
+// Upper bound for the per-frame delta fed to preview tickers so the idle
+// heartbeat gap doesn't fast-forward mixers/particles in one jump.
+const MAX_PREVIEW_DELTA_S = 0.1;
 
 @injectable()
 export class ViewportRendererService {
@@ -178,6 +184,18 @@ export class ViewportRendererService {
   private panVelocity = { x: 0, y: 0 };
   private momentumAnimationId?: number;
 
+  // On-demand rendering: the rAF loop skips frames unless something marked
+  // the viewport dirty, an editor preview is animating, or the idle
+  // heartbeat (IDLE_RENDER_INTERVAL_MS) is due.
+  private renderRequested = true;
+  private isRenderingFrame = false;
+  private lastRenderedAt = 0;
+  private activeParticlePreviewCount = 0;
+  private activeComponentPreviewCount = 0;
+  private readonly invalidateOnControlsChange = () => {
+    this.renderRequested = true;
+  };
+
   constructor() {
     this.transformTool2d = new TransformTool2d();
   }
@@ -236,6 +254,43 @@ export class ViewportRendererService {
 
     // Attach InputService to the renderer canvas
     this.inputService.attach(this.renderer.domElement);
+
+    // Any interaction with the canvas invalidates the frame. This keeps every
+    // gesture path (2D transform drags, hover frames, marquee, wheel zoom)
+    // painting at event rate without each handler calling requestRender().
+    const invalidateOnInteraction = () => {
+      this.renderRequested = true;
+    };
+    const interactionEvents = [
+      'pointerdown',
+      'pointermove',
+      'pointerup',
+      'pointercancel',
+      'wheel',
+      'dragover',
+      'drop',
+    ] as const;
+    const interactionTarget = this.renderer.domElement;
+    for (const eventName of interactionEvents) {
+      interactionTarget.addEventListener(eventName, invalidateOnInteraction, {
+        capture: true,
+        passive: true,
+      });
+    }
+    this.disposers.push(() => {
+      for (const eventName of interactionEvents) {
+        interactionTarget.removeEventListener(eventName, invalidateOnInteraction, {
+          capture: true,
+        });
+      }
+    });
+
+    // All `new THREE.TextureLoader()` call sites share the default manager, so
+    // this repaints the viewport as soon as texture data arrives instead of
+    // leaving the new texture waiting for the idle heartbeat.
+    THREE.DefaultLoadingManager.onLoad = () => {
+      this.requestRender();
+    };
 
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.setClearColor(0x13161b, 1);
@@ -301,6 +356,7 @@ export class ViewportRendererService {
       this.orthographicControls.enableDamping = true;
       this.orthographicControls.dampingFactor = 0.2;
       this.orthographicControls.screenSpacePanning = true;
+      this.orthographicControls.addEventListener('change', this.invalidateOnControlsChange);
     }
 
     // Initialize TransformControls for object manipulation
@@ -353,6 +409,7 @@ export class ViewportRendererService {
       this.syncBaseViewportFrame();
       this.updateNodeIconVisibility();
       this.handleFocusPause();
+      this.requestRender();
     });
     this.disposers.push(unsubscribeUi);
 
@@ -483,6 +540,7 @@ export class ViewportRendererService {
 
         // Ensure the internal raycaster can intersect with the gizmo, which we place on LAYER_GIZMOS
         this.transformControls.getRaycaster().layers.enable(LAYER_GIZMOS);
+        this.transformControls.addEventListener('change', this.invalidateOnControlsChange);
 
         this.transformControls.addEventListener('dragging-changed', (event: { value: unknown }) => {
           if (event.value) {
@@ -665,6 +723,7 @@ export class ViewportRendererService {
     this.orbitControls.autoRotate = false;
     this.orbitControls.enableZoom = true;
     this.orbitControls.enablePan = true;
+    this.orbitControls.addEventListener('change', this.invalidateOnControlsChange);
   }
 
   private createTransformControls(): void {
@@ -685,6 +744,7 @@ export class ViewportRendererService {
     this.transformControls.setMode(existingMode === 'select' ? 'translate' : existingMode);
     this.transformControls.size = 0.6;
     this.transformControls.getRaycaster().layers.enable(LAYER_GIZMOS);
+    this.transformControls.addEventListener('change', this.invalidateOnControlsChange);
 
     this.transformControls.addEventListener('dragging-changed', (event: { value: unknown }) => {
       if (event.value) {
@@ -1230,7 +1290,12 @@ export class ViewportRendererService {
       this.previewAnimationActions.delete(nodeId);
     }
 
-    if (animationName === null) return;
+    if (animationName === null) {
+      // Repaint once so the model visibly returns to its bind pose now that
+      // the continuous preview loop is no longer running.
+      this.requestRender();
+      return;
+    }
 
     // Find the MeshInstance node and look for the clip by name
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
@@ -1254,18 +1319,127 @@ export class ViewportRendererService {
     const action = mixer.clipAction(clip);
     action.reset().play();
     this.previewAnimationActions.set(nodeId, action);
+    this.requestRender();
+  }
+
+  private get2DVisualRoot(nodeId: string): THREE.Group | undefined {
+    return (
+      this.group2DVisuals.get(nodeId) ??
+      this.sprite2DVisuals.get(nodeId) ??
+      this.animatedSprite2DVisuals.get(nodeId) ??
+      this.tiledSprite2DVisuals.get(nodeId) ??
+      this.uiControl2DVisuals.get(nodeId)
+    );
+  }
+
+  /**
+   * Editor-side counterpart of the runtime's `assign2DRenderOrder`: assigns
+   * contiguous `renderOrder` to the 2D proxy-visual meshes in scene-tree DFS
+   * order so viewport stacking matches the authored hierarchy. The runtime 2D
+   * nodes are never added to the editor scene — only these proxies are drawn —
+   * so without this pass three.js falls back to its transparent sort (view z,
+   * then object creation id), which reshuffles stacking whenever a visual is
+   * recreated (texture load, label change, tree edits).
+   *
+   * Editor adornments (anchor markers, Group2D outlines, selection/hover
+   * frames) sit under `THREE.Group`s with a non-zero `renderOrder`; three.js
+   * uses a group's `renderOrder` as `groupOrder`, which sorts before per-mesh
+   * `renderOrder`, so they keep floating above scene content and are skipped
+   * here. Within one visual, meshes keep their authored stacking (e.g. control
+   * skin below its label) because the rebase sorts by the previous values —
+   * the same idempotency argument as the runtime pass.
+   */
+  private assign2DVisualRenderOrder(rootNodes: readonly NodeBase[]): void {
+    const visualRoots = new Set<THREE.Object3D>([
+      ...this.group2DVisuals.values(),
+      ...this.sprite2DVisuals.values(),
+      ...this.animatedSprite2DVisuals.values(),
+      ...this.tiledSprite2DVisuals.values(),
+      ...this.uiControl2DVisuals.values(),
+    ]);
+    let next = 0;
+
+    const collectContentMeshes = (object: THREE.Object3D, content: THREE.Object3D[]): void => {
+      for (const child of object.children) {
+        if (visualRoots.has(child)) {
+          continue; // Another node's visual — it is ordered at its own tree position.
+        }
+        if ((child as THREE.Group).isGroup && child.renderOrder !== 0) {
+          continue; // Floating adornment — stays above content via groupOrder.
+        }
+        if ((child as THREE.Mesh).isMesh) {
+          content.push(child);
+        }
+        collectContentMeshes(child, content);
+      }
+    };
+
+    const assignVisual = (visualRoot: THREE.Group): void => {
+      const content: THREE.Object3D[] = [];
+      collectContentMeshes(visualRoot, content);
+      content
+        .map((mesh, index) => ({ mesh, index }))
+        .sort((a, b) => a.mesh.renderOrder - b.mesh.renderOrder || a.index - b.index)
+        .forEach(entry => {
+          entry.mesh.renderOrder = next++;
+        });
+    };
+
+    const visitNode = (node: NodeBase): void => {
+      if (node instanceof Node2D) {
+        const visualRoot = this.get2DVisualRoot(node.nodeId);
+        if (visualRoot) {
+          assignVisual(visualRoot);
+        }
+      }
+      for (const child of node.children) {
+        if (child instanceof NodeBase) {
+          visitNode(child);
+        }
+      }
+    };
+
+    for (const node of rootNodes) {
+      visitNode(node);
+    }
   }
 
   /**
    * Manually trigger a single frame render. Useful when the main loop
    * is paused but we still want to update the visual state (e.g. on resize).
    */
+  /**
+   * Mark the viewport dirty so the render loop paints a frame on the next
+   * animation frame. When the loop is not running (paused, window unfocused,
+   * or a hidden tab where rAF never fires), the frame is rendered
+   * synchronously instead so on-demand consumers (resize, collab updates,
+   * agent-driven edits in a background tab) still get a fresh canvas.
+   */
   requestRender(): void {
+    this.renderRequested = true;
+    if (this.animationId === undefined) {
+      this.renderFrame();
+    }
+  }
+
+  private renderFrame(): void {
+    if (this.isRenderingFrame) return;
+    this.isRenderingFrame = true;
+    this.renderRequested = false;
+    this.lastRenderedAt = performance.now();
+    try {
+      this.renderFrameBody();
+    } finally {
+      this.isRenderingFrame = false;
+    }
+  }
+
+  private renderFrameBody(): void {
     if (!this.renderer || !this.scene || !this.camera) return;
 
     // Advance animation mixers
     this.animationTimer.update();
-    const delta = this.animationTimer.getDelta();
+    const delta = Math.min(this.animationTimer.getDelta(), MAX_PREVIEW_DELTA_S);
     for (const mixer of this.animationMixers.values()) {
       mixer.update(delta);
     }
@@ -1295,9 +1469,11 @@ export class ViewportRendererService {
     // Render 2D layer with orthographic camera if enabled
     if (appState.ui.showLayer2D && this.orthographicCamera) {
       // Draw order for 2D scene content follows the scene-graph hierarchy.
+      // The editor draws proxy visuals rather than the runtime nodes, so the
+      // hierarchy-driven order must be assigned to the proxy meshes directly.
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
       if (sceneGraph) {
-        assign2DRenderOrder(sceneGraph.rootNodes);
+        this.assign2DVisualRenderOrder(sceneGraph.rootNodes);
       }
 
       const savedBackground = this.scene.background;
@@ -2081,6 +2257,7 @@ export class ViewportRendererService {
       if (this.orthographicControls && appState.ui.navigationMode === '2d') {
         this.orthographicControls.target.x += this.panVelocity.x;
         this.orthographicControls.target.y += this.panVelocity.y;
+        this.renderRequested = true;
       }
 
       // Decay velocity
@@ -2715,8 +2892,7 @@ export class ViewportRendererService {
           mesh.material.userData.baseOpacity = node instanceof Label2D ? 0 : 1;
           mesh.material.color.setHex(this.getUIControlDefaultColor(node));
 
-          const currentTexturePath =
-            (node as UIControl2D & { texturePath?: string | null }).texturePath ?? null;
+          const currentTexturePath = this.getUIControlSkinTextureUrl(node);
           const previousTexturePath = (visualRoot.userData.texturePath as string | null) ?? null;
           if (currentTexturePath !== previousTexturePath) {
             mesh.material.map = null;
@@ -3224,6 +3400,8 @@ export class ViewportRendererService {
     const sizeGroup = new THREE.Group();
     sizeGroup.scale.set(node.width, node.height, 1);
     sizeGroup.layers.set(LAYER_2D);
+    // groupOrder: keeps the outline above hierarchy-ordered 2D content meshes.
+    sizeGroup.renderOrder = 410;
 
     // Create four border lines as actual meshes with thickness.
     // Border mesh lives in normalized space (sizeGroup scales to node width/height),
@@ -3719,6 +3897,8 @@ export class ViewportRendererService {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 1,
+      depthTest: false,
+      depthWrite: false,
     });
     material.userData.baseOpacity = 1;
 
@@ -3770,6 +3950,8 @@ export class ViewportRendererService {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 1,
+      depthTest: false,
+      depthWrite: false,
     });
     material.userData.baseOpacity = 1;
     this.applyTextureToSprite2DMaterial(node, material);
@@ -4010,6 +4192,8 @@ export class ViewportRendererService {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 1,
+      depthTest: false,
+      depthWrite: false,
     });
     material.userData.baseOpacity = 1;
 
@@ -4486,19 +4670,27 @@ export class ViewportRendererService {
   }
 
   private tickParticlePreview(dt: number): void {
-    if (dt <= 0 || appState.ui.isPlaying) {
+    if (appState.ui.isPlaying) {
+      this.activeParticlePreviewCount = 0;
+      return;
+    }
+
+    if (dt <= 0) {
       return;
     }
 
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
+      this.activeParticlePreviewCount = 0;
       return;
     }
 
+    let active = 0;
     const visit = (nodes: NodeBase[]) => {
       for (const node of nodes) {
         if (node instanceof Particles3D && node.preview) {
           node.tick(dt);
+          active += 1;
         }
 
         if (node.children.length > 0) {
@@ -4508,15 +4700,22 @@ export class ViewportRendererService {
     };
 
     visit(sceneGraph.rootNodes);
+    this.activeParticlePreviewCount = active;
   }
 
   private tickComponentPreview(dt: number): void {
-    if (dt <= 0 || appState.ui.isPlaying) {
+    if (appState.ui.isPlaying) {
+      this.activeComponentPreviewCount = 0;
+      return;
+    }
+
+    if (dt <= 0) {
       return;
     }
 
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
+      this.activeComponentPreviewCount = 0;
       return;
     }
 
@@ -4527,10 +4726,14 @@ export class ViewportRendererService {
       },
     };
 
+    let active = 0;
     const visit = (nodes: NodeBase[]) => {
       for (const node of nodes) {
         if (node.components && Array.isArray(node.components)) {
           for (const component of node.components) {
+            if (component.enabled && typeof component.tickEditorPreview === 'function') {
+              active += 1;
+            }
             this.tickPreviewComponent(component, dt, previewContext);
           }
         }
@@ -4542,6 +4745,7 @@ export class ViewportRendererService {
     };
 
     visit(sceneGraph.rootNodes);
+    this.activeComponentPreviewCount = active;
   }
 
   private tickPreviewComponent(
@@ -4711,8 +4915,7 @@ export class ViewportRendererService {
     root.userData.nodeId = node.nodeId;
     root.userData.sizeGroup = sizeGroup;
     root.userData.controlMesh = mesh;
-    root.userData.texturePath =
-      (node as UIControl2D & { texturePath?: string | null }).texturePath ?? null;
+    root.userData.texturePath = this.getUIControlSkinTextureUrl(node);
     this.apply2DVisualOpacity(node, root);
 
     return root;
@@ -4770,8 +4973,20 @@ export class ViewportRendererService {
     return 0x96cbf6;
   }
 
+  /**
+   * The skin texture URL the editor proxy should display. Button2D exposes
+   * per-state sprites; the proxy shows the effective-normal one (its explicit
+   * normal sprite, else the legacy single skin). Other controls use texturePath.
+   */
+  private getUIControlSkinTextureUrl(node: UIControl2D): string | null {
+    if (node instanceof Button2D) {
+      return node.textureNormal?.url ?? node.texturePath ?? null;
+    }
+    return node.texturePath ?? null;
+  }
+
   private applyTextureTo2DMaterial(node: UIControl2D, material: THREE.MeshBasicMaterial): void {
-    const texturePath = (node as UIControl2D & { texturePath?: string | null }).texturePath;
+    const texturePath = this.getUIControlSkinTextureUrl(node);
     if (!texturePath) {
       return;
     }
@@ -6349,11 +6564,44 @@ export class ViewportRendererService {
       }
 
       this.animationId = requestAnimationFrame(render);
-      this.requestRender();
+      this.renderLoopTick();
     };
 
     this.isPaused = false;
+    this.renderRequested = true;
     render();
+  }
+
+  /**
+   * One iteration of the rAF loop. Skips all render work while the viewport
+   * is idle so a backgrounded/untouched editor doesn't burn CPU/GPU at 60fps;
+   * the idle heartbeat still paints an occasional frame as a safety net for
+   * changes that never called requestRender().
+   */
+  private renderLoopTick(): void {
+    if (
+      !this.renderRequested &&
+      !this.hasContinuousPreviewWork() &&
+      performance.now() - this.lastRenderedAt < IDLE_RENDER_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    this.renderFrame();
+  }
+
+  /**
+   * True while an editor-side preview is animating and therefore needs a
+   * fresh frame every tick (animation clip preview, particle preview, or a
+   * script component with an editor preview ticker). The particle/component
+   * counts are refreshed by their tickers on every rendered frame.
+   */
+  private hasContinuousPreviewWork(): boolean {
+    return (
+      this.previewAnimationActions.size > 0 ||
+      this.activeParticlePreviewCount > 0 ||
+      this.activeComponentPreviewCount > 0
+    );
   }
 
   private shouldPauseForWindowFocus(): boolean {

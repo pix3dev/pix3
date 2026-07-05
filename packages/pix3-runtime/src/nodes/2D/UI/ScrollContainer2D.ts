@@ -5,6 +5,7 @@ import {
     PlaneGeometry,
     type Material,
     type Object3D,
+    type Texture,
     Vector2,
     Vector3,
 } from 'three';
@@ -12,6 +13,8 @@ import {
 import { Group2D, type Group2DProps } from '../Group2D';
 import { Node2D } from '../../Node2D';
 import { OVERLAY_2D_FLAG } from '../../../core/render-order-2d';
+import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
 
 export interface ScrollContainer2DProps extends Group2DProps {
@@ -28,6 +31,8 @@ export interface ScrollContainer2DProps extends Group2DProps {
     scrollbarInset?: number;
     scrollbarColor?: string;
     scrollbarTrackColor?: string;
+    scrollbarThumbTexture?: TextureResourceRef | string | null;
+    scrollbarTrackTexture?: TextureResourceRef | string | null;
 }
 
 type PointerDragMode = 'content' | 'thumb' | null;
@@ -45,6 +50,8 @@ export class ScrollContainer2D extends Group2D {
     scrollbarInset: number;
     scrollbarColor: string;
     scrollbarTrackColor: string;
+    scrollbarThumbTexture: TextureResourceRef | null;
+    scrollbarTrackTexture: TextureResourceRef | null;
 
     private _scrollY: number;
     private readonly tmpWorldPos = new Vector3();
@@ -91,6 +98,8 @@ export class ScrollContainer2D extends Group2D {
         this.scrollbarInset = Math.max(0, props.scrollbarInset ?? 8);
         this.scrollbarColor = props.scrollbarColor ?? '#f5f7ff';
         this.scrollbarTrackColor = props.scrollbarTrackColor ?? '#ffffff';
+        this.scrollbarThumbTexture = coerceTextureResource(props.scrollbarThumbTexture ?? null);
+        this.scrollbarTrackTexture = coerceTextureResource(props.scrollbarTrackTexture ?? null);
         this._scrollY = Math.max(0, props.scrollY ?? 0);
 
         this.trackGeometry = new PlaneGeometry(this.scrollbarWidth, Math.max(1, this.height));
@@ -143,9 +152,59 @@ export class ScrollContainer2D extends Group2D {
             return;
         }
 
+        // Store only — the child offset is applied by tick(), i.e. exclusively
+        // inside the game loop. Assignments outside it (inspector edits, prefab
+        // instance overrides during load) must never mutate the authored child
+        // transforms: those writes leaked into saved scenes / prefab override
+        // diffs and compounded the offset on every load.
         this._scrollY = nextValue;
-        this.applyScrollOffset();
+        this.properties.scrollY = nextValue;
         this.syncScrollbarVisuals();
+    }
+
+    /** Assign the loaded thumb Texture (called by SceneLoader after loading). */
+    setScrollbarThumbTexture(texture: Texture | null): void {
+        if (texture) {
+            // sRGB + mipmaps disabled (see configure2DTexture for the why).
+            configure2DTexture(texture);
+        }
+        this.thumbMaterial.map = texture;
+        // The flat-color thumb rides at 0.92 base opacity; a texture wants to show
+        // its own alpha, so force full opacity while textured and restore on clear.
+        this.setOpacityMaterialBase(this.thumbMaterial, texture ? 1 : 0.92);
+        this.thumbMaterial.needsUpdate = true;
+    }
+
+    /** Assign the loaded track Texture (called by SceneLoader after loading). */
+    setScrollbarTrackTexture(texture: Texture | null): void {
+        if (texture) {
+            configure2DTexture(texture);
+        }
+        this.trackMaterial.map = texture;
+        // The flat-color track sits at 0.18 base opacity, which would render a
+        // texture nearly invisible; force full opacity while textured.
+        this.setOpacityMaterialBase(this.trackMaterial, texture ? 1 : 0.18);
+        this.trackMaterial.needsUpdate = true;
+    }
+
+    private setScrollbarThumbTextureRef(value: unknown): void {
+        const ref = coerceTextureResource(value);
+        const changed = this.scrollbarThumbTexture?.url !== ref?.url;
+        this.scrollbarThumbTexture = ref;
+        // The node has no asset loader; a new ref is loaded by SceneLoader on the
+        // next scene load / play. Only clearing can be reflected immediately.
+        if (changed && !ref) {
+            this.setScrollbarThumbTexture(null);
+        }
+    }
+
+    private setScrollbarTrackTextureRef(value: unknown): void {
+        const ref = coerceTextureResource(value);
+        const changed = this.scrollbarTrackTexture?.url !== ref?.url;
+        this.scrollbarTrackTexture = ref;
+        if (changed && !ref) {
+            this.setScrollbarTrackTexture(null);
+        }
     }
 
     hasActivePointerCapture(): boolean {
@@ -322,6 +381,26 @@ export class ScrollContainer2D extends Group2D {
                         target.trackMaterial.color.setStyle(target.scrollbarTrackColor);
                     },
                 },
+                {
+                    name: 'scrollbarThumbTexture',
+                    type: 'object',
+                    ui: { label: 'Thumb Sprite', group: 'Scrollbar', editor: 'texture-resource', resourceType: 'texture' },
+                    getValue: (node: unknown) =>
+                        (node as ScrollContainer2D).scrollbarThumbTexture ?? { type: 'texture', url: '' },
+                    setValue: (node: unknown, value: unknown) => {
+                        (node as ScrollContainer2D).setScrollbarThumbTextureRef(value);
+                    },
+                },
+                {
+                    name: 'scrollbarTrackTexture',
+                    type: 'object',
+                    ui: { label: 'Track Sprite', group: 'Scrollbar', editor: 'texture-resource', resourceType: 'texture' },
+                    getValue: (node: unknown) =>
+                        (node as ScrollContainer2D).scrollbarTrackTexture ?? { type: 'texture', url: '' },
+                    setValue: (node: unknown, value: unknown) => {
+                        (node as ScrollContainer2D).setScrollbarTrackTextureRef(value);
+                    },
+                },
             ],
             groups: {
                 ...baseSchema.groups,
@@ -414,15 +493,6 @@ export class ScrollContainer2D extends Group2D {
         this.lastPointerWorldY = this.pointerWorld.y;
         this.pointerWasDown = isPointerDown;
         this.scrollY = this._scrollY;
-    }
-
-    private resolveContentNode(): Node2D | null {
-        for (const child of this.children) {
-            if (child instanceof Node2D) {
-                return child;
-            }
-        }
-        return null;
     }
 
     private getScrollableChildren(): Node2D[] {

@@ -19,7 +19,7 @@ import { Sprite3D } from '../nodes/3D/Sprite3D';
 import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
 import { Particles3D } from '../nodes/3D/Particles3D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
-import { Button2D } from '../nodes/2D/UI/Button2D';
+import { Button2D, type Button2DSpriteState } from '../nodes/2D/UI/Button2D';
 import { Slider2D } from '../nodes/2D/UI/Slider2D';
 import { Bar2D } from '../nodes/2D/UI/Bar2D';
 import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
@@ -218,6 +218,8 @@ export interface ScrollContainer2DProperties extends Group2DProperties {
   scrollbarInset?: number;
   scrollbarColor?: string;
   scrollbarTrackColor?: string;
+  scrollbarThumbTexture?: TextureResourceRef | string | null;
+  scrollbarTrackTexture?: TextureResourceRef | string | null;
 }
 
 export interface ParseSceneOptions {
@@ -1132,7 +1134,10 @@ export class SceneLoader {
         const props = baseProps.properties as ScrollContainer2DProperties & Record<string, unknown>;
         const transform = this.asRecord(props.transform);
 
-        return new ScrollContainer2D({
+        const thumbTexture = coerceTextureResource(props.scrollbarThumbTexture ?? null);
+        const trackTexture = coerceTextureResource(props.scrollbarTrackTexture ?? null);
+
+        const container = new ScrollContainer2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1160,7 +1165,32 @@ export class SceneLoader {
           scrollbarInset: this.asNumber(props.scrollbarInset, undefined),
           scrollbarColor: this.asString(props.scrollbarColor),
           scrollbarTrackColor: this.asString(props.scrollbarTrackColor),
+          scrollbarThumbTexture: thumbTexture,
+          scrollbarTrackTexture: trackTexture,
         });
+
+        if (thumbTexture) {
+          try {
+            container.setScrollbarThumbTexture(await this.assetLoader.loadTexture(thumbTexture.url));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading scrollbar thumb texture for ScrollContainer2D "${container.nodeId}":`,
+              error
+            );
+          }
+        }
+        if (trackTexture) {
+          try {
+            container.setScrollbarTrackTexture(await this.assetLoader.loadTexture(trackTexture.url));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading scrollbar track texture for ScrollContainer2D "${container.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return container;
       }
       case 'Joystick2D': {
         const props = baseProps.properties as Record<string, unknown>;
@@ -1187,7 +1217,15 @@ export class SceneLoader {
       case 'Button2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Button2D({
+
+        const stateRefs: Array<[Button2DSpriteState, TextureResourceRef | null]> = [
+          ['normal', coerceTextureResource(props.textureNormal ?? null)],
+          ['hover', coerceTextureResource(props.textureHover ?? null)],
+          ['pressed', coerceTextureResource(props.texturePressed ?? null)],
+          ['disabled', coerceTextureResource(props.textureDisabled ?? null)],
+        ];
+
+        const button = new Button2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1210,7 +1248,27 @@ export class SceneLoader {
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureNormal: stateRefs[0][1],
+          textureHover: stateRefs[1][1],
+          texturePressed: stateRefs[2][1],
+          textureDisabled: stateRefs[3][1],
         });
+
+        for (const [state, ref] of stateRefs) {
+          if (!ref) {
+            continue;
+          }
+          try {
+            button.setStateTexture(state, await this.assetLoader.loadTexture(ref.url));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${state} texture for Button2D "${button.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return button;
       }
       case 'Label2D': {
         const props = baseProps.properties as Record<string, unknown>;

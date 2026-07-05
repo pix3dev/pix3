@@ -33,7 +33,7 @@ export interface UIControl2DProps extends Node2DProps {
  */
 export abstract class UIControl2D extends Node2D {
   // Control state
-  enabled: boolean;
+  private _enabled: boolean = true;
   label: string;
   labelFontFamily: string;
   labelFontSize: number;
@@ -61,7 +61,7 @@ export abstract class UIControl2D extends Node2D {
   constructor(props: UIControl2DProps, nodeType: string) {
     super(props, nodeType);
 
-    this.enabled = props.enabled ?? true;
+    this._enabled = props.enabled ?? true;
     this.label = props.label ?? '';
     this.labelFontFamily = props.labelFontFamily ?? 'Arial';
     this.labelFontSize = props.labelFontSize ?? 16;
@@ -76,6 +76,27 @@ export abstract class UIControl2D extends Node2D {
     if (this.label.trim().length > 0) {
       this.updateLabel();
     }
+  }
+
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
+  set enabled(value: boolean) {
+    const next = Boolean(value);
+    if (this._enabled === next) {
+      return;
+    }
+    this._enabled = next;
+    this.onEnabledChanged(next);
+  }
+
+  /**
+   * Called when the enabled state changes after construction.
+   * Subclasses override to update their visuals (e.g. a disabled skin).
+   */
+  protected onEnabledChanged(_enabled: boolean): void {
+    // Default: no visual change
   }
 
   protected registerSkinMaterial(material: MeshBasicMaterial): void {

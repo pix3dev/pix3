@@ -57,6 +57,7 @@ export class ModelAssetPreview extends ComponentBase {
   private currentAssetCleanup?: () => void;
   private frameHandle?: number;
   private loadVersion = 0;
+  private renderRequested = true;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -183,6 +184,9 @@ export class ModelAssetPreview extends ComponentBase {
       this.controls.enableZoom = true;
       this.controls.enablePan = true;
       this.controls.target.copy(new Vector3(0, 0, 0));
+      this.controls.addEventListener('change', () => {
+        this.renderRequested = true;
+      });
       this.controls.update();
 
       this.resizeObserver = new ResizeObserver(() => this.resizeRenderer());
@@ -235,6 +239,7 @@ export class ModelAssetPreview extends ComponentBase {
       this.currentAssetRoot = previewRoot;
       this.currentAssetCleanup = cleanup;
       this.previewState = 'ready';
+      this.renderRequested = true;
     } catch (error) {
       if (version !== this.loadVersion) {
         return;
@@ -259,6 +264,7 @@ export class ModelAssetPreview extends ComponentBase {
 
     this.currentAssetRoot = undefined;
     this.currentAssetCleanup = undefined;
+    this.renderRequested = true;
   }
 
   private resizeRenderer(): void {
@@ -273,6 +279,7 @@ export class ModelAssetPreview extends ComponentBase {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.renderRequested = true;
   }
 
   private startRenderLoop(): void {
@@ -285,6 +292,14 @@ export class ModelAssetPreview extends ComponentBase {
       if (!this.renderer || !this.scene || !this.camera) {
         return;
       }
+
+      // Render on demand only: OrbitControls fires 'change' while the user
+      // interacts (and while damping settles), which re-marks the frame
+      // dirty. An idle preview costs no CPU/GPU.
+      if (!this.renderRequested) {
+        return;
+      }
+      this.renderRequested = false;
 
       this.controls?.update();
       this.renderer.render(this.scene, this.camera);

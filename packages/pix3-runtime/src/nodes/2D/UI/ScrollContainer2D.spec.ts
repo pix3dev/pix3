@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Mesh, MeshBasicMaterial, Vector2 } from 'three';
+import { Mesh, MeshBasicMaterial, Texture, Vector2 } from 'three';
 
 import { Group2D } from '../Group2D';
 import { Button2D } from './Button2D';
@@ -13,12 +13,30 @@ import { SceneSaver } from '../../../core/SceneSaver';
 import type { SceneService } from '../../../core/SceneService';
 import { ScriptRegistry } from '../../../core/ScriptRegistry';
 
-function createLoader(): SceneLoader {
-    return new SceneLoader(
-        new AssetLoader(new ResourceManager('/'), new AudioService()),
-        new ScriptRegistry(),
-        new ResourceManager('/'),
-    );
+function createLoader(preloadTextures: string[] = []): SceneLoader {
+    const assetLoader = new AssetLoader(new ResourceManager('/'), new AudioService());
+    // Seed the texture cache so loadTexture() short-circuits before any network
+    // fetch — res:// URLs 404 under happy-dom and would leak unhandled rejections.
+    const cache = (assetLoader as unknown as { textureCache: Map<string, Texture> }).textureCache;
+    for (const url of preloadTextures) {
+        cache.set(url, new Texture());
+    }
+    return new SceneLoader(assetLoader, new ScriptRegistry(), new ResourceManager('/'));
+}
+
+function getScrollbarMaterials(container: ScrollContainer2D): {
+    thumb: MeshBasicMaterial;
+    track: MeshBasicMaterial;
+} {
+    const internals = container as unknown as {
+        thumbMaterial: MeshBasicMaterial;
+        trackMaterial: MeshBasicMaterial;
+    };
+    return { thumb: internals.thumbMaterial, track: internals.trackMaterial };
+}
+
+function baseOpacityOf(material: MeshBasicMaterial): number {
+    return material.userData.__pix3BaseOpacity as number;
 }
 
 function createScrollContainer(): { container: ScrollContainer2D; content: Group2D; button: Button2D; input: InputService } {
@@ -183,6 +201,86 @@ describe('ScrollContainer2D', () => {
         expect(buttonMaterial.clippingPlanes).toHaveLength(4);
     });
 
+    it('applies a thumb texture, forces full base opacity, and keeps the map through a sync', () => {
+        const { container } = createScrollContainer();
+        const { thumb } = getScrollbarMaterials(container);
+        const thumbTexture = new Texture();
+
+        container.setScrollbarThumbTexture(thumbTexture);
+        expect(thumb.map).toBe(thumbTexture);
+        expect(baseOpacityOf(thumb)).toBe(1);
+
+        // A tick runs syncScrollbarVisuals, which re-applies the tint color; the
+        // map must survive it.
+        container.tick(1 / 60);
+        expect(thumb.map).toBe(thumbTexture);
+    });
+
+    it('keeps the thumb texture map when the scrollbar geometry is rebuilt on width change', () => {
+        const { container } = createScrollContainer();
+        const { thumb } = getScrollbarMaterials(container);
+        const thumbTexture = new Texture();
+        container.setScrollbarThumbTexture(thumbTexture);
+
+        container.scrollbarWidth = 16;
+        container.tick(1 / 60); // triggers a geometry rebuild inside syncScrollbarVisuals
+
+        expect(thumb.map).toBe(thumbTexture);
+    });
+
+    it('applies a track texture and restores base opacities when cleared', () => {
+        const { container } = createScrollContainer();
+        const { thumb, track } = getScrollbarMaterials(container);
+        const trackTexture = new Texture();
+
+        container.setScrollbarTrackTexture(trackTexture);
+        expect(track.map).toBe(trackTexture);
+        expect(baseOpacityOf(track)).toBe(1);
+
+        container.setScrollbarTrackTexture(null);
+        expect(track.map).toBeNull();
+        expect(baseOpacityOf(track)).toBeCloseTo(0.18, 5);
+
+        container.setScrollbarThumbTexture(null);
+        expect(baseOpacityOf(thumb)).toBeCloseTo(0.92, 5);
+    });
+
+    it('serializes and restores scrollbar thumb and track texture refs', async () => {
+        const container = new ScrollContainer2D({
+            id: 'tex-scroll',
+            name: 'Tex Scroll',
+            width: 120,
+            height: 120,
+            scrollbarThumbTexture: { type: 'texture', url: 'res://ui/thumb.png' },
+            scrollbarTrackTexture: 'res://ui/track.png',
+        });
+        const content = new Group2D({ id: 'tex-content', name: 'Tex Content', width: 120, height: 320 });
+        container.adoptChild(content);
+
+        const saver = new SceneSaver();
+        const yaml = saver.serializeScene({
+            version: '1.0.0',
+            metadata: {},
+            rootNodes: [container],
+            nodeMap: new Map([
+                [container.nodeId, container],
+                [content.nodeId, content],
+            ]),
+        });
+
+        expect(yaml).toContain('res://ui/thumb.png');
+        expect(yaml).toContain('res://ui/track.png');
+
+        const graph = await createLoader([
+            'res://ui/thumb.png',
+            'res://ui/track.png',
+        ]).parseScene(yaml, { filePath: 'res://scenes/scroll.pix3scene' });
+        const loaded = graph.rootNodes[0] as ScrollContainer2D;
+
+        expect(loaded.scrollbarThumbTexture?.url).toBe('res://ui/thumb.png');
+        expect(loaded.scrollbarTrackTexture?.url).toBe('res://ui/track.png');
+    });
+
     it('serializes and parses the node with its scroll properties', async () => {
         const container = new ScrollContainer2D({
             id: 'scroll-container',
@@ -258,6 +356,24 @@ describe('ScrollContainer2D', () => {
         expect(container.scrollY).toBe(110);
         expect(topTool.position.y).toBeCloseTo(140, 5);
         expect(bottomTool.position.y).toBeCloseTo(-40, 5);
+    });
+
+    it('does not mutate authored child transforms when scrollY is assigned outside the game loop', () => {
+        const { container, topTool, bottomTool } = createDirectChildrenScrollContainer();
+
+        // Editor-style assignment (inspector edit, prefab instance override):
+        // children keep their authored positions until the game loop runs.
+        container.scrollY = 70;
+
+        expect(container.scrollY).toBe(70);
+        expect(container.properties.scrollY).toBe(70);
+        expect(topTool.position.y).toBe(30);
+        expect(bottomTool.position.y).toBe(-150);
+
+        container.tick(1 / 60);
+
+        expect(topTool.position.y).toBeCloseTo(100, 5);
+        expect(bottomTool.position.y).toBeCloseTo(-80, 5);
     });
 
     it('maps button hit testing through the logical camera size instead of raw input resolution', () => {

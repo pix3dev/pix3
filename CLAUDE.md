@@ -80,8 +80,12 @@ The mental model that spans many files:
 
 The 2D layer is a separate render pass with an orthographic camera, drawn over the 3D pass after a `clearDepth()`. Two things about it are easy to break:
 
-- **Draw order is hierarchy-driven, not depth-driven.** All 2D materials use `depthTest: false`, so `renderOrder` is the *only* thing that decides stacking. `assign2DRenderOrder(roots)` (`packages/pix3-runtime/src/core/render-order-2d.ts`) walks the 2D node tree and assigns `renderOrder` by DFS — a node later/deeper in the tree draws on top. It runs every frame before the 2D pass in **both** renderers: the runtime (`SceneRunner.reflowRoot2DNodes`) and the editor (`ViewportRenderService.requestRender`). So **node order in the scene tree = paint order** (Godot-like). Within a node, its own meshes are ordered by their *authored* `renderOrder` (e.g. Button2D skin 999 < label 1001) — never add-order, because `UIControl2D` adds its label in `super()` before subclasses add their skin. Meshes that must float above a node's *children* (e.g. a ScrollContainer scrollbar) set `userData[OVERLAY_2D_FLAG] = true`.
+- **Draw order is hierarchy-driven, not depth-driven.** All 2D materials use `depthTest: false`, so `renderOrder` is the *only* thing that decides stacking. `assign2DRenderOrder(roots)` (`packages/pix3-runtime/src/core/render-order-2d.ts`) walks the 2D node tree and assigns `renderOrder` by DFS — a node later/deeper in the tree draws on top. The runtime runs it every frame before the 2D pass (`SceneRunner.reflowRoot2DNodes`). The **editor viewport does NOT render the runtime nodes** — it draws separate proxy visuals — so it runs its own counterpart, `ViewportRenderService.assign2DVisualRenderOrder` (called from `requestRender`), which DFS-walks the scene tree and rebases the proxy meshes' `renderOrder`; editor adornments (anchor markers, Group2D outlines, selection/hover frames) float above content via `THREE.Group.renderOrder`, which three.js treats as `groupOrder` (sorts before per-mesh `renderOrder`). So **node order in the scene tree = paint order** (Godot-like) in both. Within a node, its own meshes are ordered by their *authored* `renderOrder` (e.g. Button2D skin 999 < label 1001) — never add-order, because `UIControl2D` adds its label in `super()` before subclasses add their skin. Meshes that must float above a node's *children* (e.g. a ScrollContainer scrollbar) set `userData[OVERLAY_2D_FLAG] = true`.
 - **2D textures must disable mipmaps.** Always run loaded/canvas textures for 2D nodes through `configure2DTexture()` (`packages/pix3-runtime/src/core/configure-2d-texture.ts`): sRGB + `generateMipmaps = false` + `LinearFilter`. On some ANGLE/D3D11 backends (Adreno / Windows on ARM) mipmapped NPOT 2D textures upload as transparent black and get cached that way, so sprites/labels render semi-transparent with opacity varying by zoom. The editor applies the same fix in `ViewportRenderService.configureSpriteTexture`. (3D textures keep mipmaps.)
+
+### Editor viewport renders on demand (non-obvious)
+
+The `ViewportRenderService` rAF loop does **not** paint every frame. A frame renders only when something marked the viewport dirty (`requestRender()`), an editor preview is animating (animation-clip / particle / component preview), or the 500 ms idle heartbeat is due — an idle editor costs near-zero CPU/GPU (important for agent-driven background-tab sessions). Dirty marking comes from: Valtio state subscriptions, canvas pointer/wheel/drag events, Orbit/Transform controls `change` events, and `THREE.DefaultLoadingManager.onLoad` for async textures. If you add code that mutates three.js objects outside those paths (timers, async callbacks, direct service calls), call `viewportRenderService.requestRender()` afterwards — otherwise the change won't appear until the next heartbeat (≤500 ms) and, worse, will look intermittently "laggy". `requestRender()` renders synchronously when the loop is stopped (paused / window unfocused / hidden tab), so background-tab edits still land on canvas.
 
 ## Conventions worth flagging
 
@@ -89,3 +93,17 @@ The 2D layer is a separate render pass with an orthographic camera, drawn over t
 - **Lit components** extend `ComponentBase` from `@/fw`, default to Light DOM, and split styles into a sibling `[component].ts.css` (imported directly for Light DOM, or `?raw` for Shadow DOM). Lit a11y/html ESLint rules are enforced.
 - **Theming** via CSS custom properties — accent is `--pix3-accent-color` (#ffcf33) / `--pix3-accent-rgb`; avoid hardcoded colors.
 - **Docs policy** (from AGENTS.md): maintain `README.md`, `AGENTS.md`, and `docs/pix3-specification.md`; don't spawn new feature-specific `.md` files.
+
+## Engine vs Game feature decision
+
+When asked to implement a game feature:
+1. Check `docs/nodes-and-systems.md` — if the capability already exists
+   in the editor/runtime, use it instead of custom game code.
+2. Ask: "Would Godot/Unity ship this as a built-in node/system?"
+   - Yes → engine-level: implement in pix3 runtime + editor
+     (schema, Create*Command, registry, YAML serialization, inspector),
+     then `yalc:publish` and update the game project.
+   - No (game-specific rules, content, balancing) → game-level script.
+3. For engine-level changes, state the plan and get confirmation first.
+4. Engine nodes must not reference game domain concepts (shop, coins, enemies).
+5. After adding an engine feature, update `docs/nodes-and-systems.md`.
