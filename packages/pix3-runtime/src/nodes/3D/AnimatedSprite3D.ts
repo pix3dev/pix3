@@ -262,7 +262,7 @@ export class AnimatedSprite3D extends Node3D {
     this.mesh.geometry = this.geometry;
   }
 
-  dispose(): void {
+  protected override disposeResources(): void {
     this.geometry.dispose();
     this.material.dispose();
   }

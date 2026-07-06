@@ -44,7 +44,7 @@ export class GeometryMesh extends Node3D {
     this._material = material;
   }
 
-  dispose(): void {
+  protected override disposeResources(): void {
     try {
       this._geometry?.dispose();
       // eslint-disable-next-line no-empty

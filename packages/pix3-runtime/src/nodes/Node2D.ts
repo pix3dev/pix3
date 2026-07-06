@@ -514,7 +514,7 @@ export class Node2D extends NodeBase {
       return;
     }
 
-    this.authoredLayoutSize.copy(new Vector2(currentSize.width, currentSize.height));
+    this.authoredLayoutSize.set(currentSize.width, currentSize.height);
     this.hasAuthoredLayoutSize = true;
   }
 

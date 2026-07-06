@@ -410,7 +410,7 @@ export class ScrollContainer2D extends Group2D {
         };
     }
 
-    dispose(): void {
+    protected override disposeResources(): void {
         this.clearClippingPlanes();
         this.trackGeometry.dispose();
         this.thumbGeometry.dispose();

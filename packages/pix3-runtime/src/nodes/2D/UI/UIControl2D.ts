@@ -78,6 +78,16 @@ export abstract class UIControl2D extends Node2D {
     }
   }
 
+  protected override disposeResources(): void {
+    // Generic pass frees geometry + per-instance skin materials on child meshes.
+    super.disposeResources();
+    // labelTexture is a canvas-backed texture owned by this node (material.dispose
+    // does not free it). Skin textures are intentionally left alone: they may come
+    // from the shared AssetLoader cache and are not safe to dispose here.
+    this.labelTexture?.dispose();
+    this.labelTexture = null;
+  }
+
   get enabled(): boolean {
     return this._enabled;
   }

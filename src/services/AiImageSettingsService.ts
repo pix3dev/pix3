@@ -14,6 +14,11 @@ export interface AiImagePreferences {
   defaultQuality: string;
   /** Request a transparent alpha channel from providers that support it (e.g. OpenAI GPT Image). */
   transparentBackground: boolean;
+  /**
+   * Default longest-edge cap (px) applied when saving into the project — game elements rarely need
+   * the full 1K/2K generation. `0` = keep the original size. Downscale-only (never upscales).
+   */
+  defaultSaveMaxSize: number;
   /** Local background-removal engine + BiRefNet quality tier. */
   bgRemovalEngine: BgRemovalEngine;
   bgRemovalQuality: BgRemovalQuality;
@@ -144,6 +149,7 @@ export class AiImageSettingsService {
       defaultImageSize: '1K',
       defaultQuality: '',
       transparentBackground: false,
+      defaultSaveMaxSize: 0,
       bgRemovalEngine: 'imgly',
       bgRemovalQuality: 'balanced',
       bgFillHoles: true,
@@ -186,6 +192,12 @@ export class AiImageSettingsService {
           typeof parsed.transparentBackground === 'boolean'
             ? parsed.transparentBackground
             : defaults.transparentBackground,
+        defaultSaveMaxSize:
+          typeof parsed.defaultSaveMaxSize === 'number' &&
+          Number.isFinite(parsed.defaultSaveMaxSize) &&
+          parsed.defaultSaveMaxSize >= 0
+            ? Math.round(parsed.defaultSaveMaxSize)
+            : defaults.defaultSaveMaxSize,
         bgRemovalEngine:
           parsed.bgRemovalEngine === 'imgly' || parsed.bgRemovalEngine === 'birefnet'
             ? parsed.bgRemovalEngine

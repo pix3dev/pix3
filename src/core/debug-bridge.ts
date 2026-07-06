@@ -19,6 +19,18 @@ import { ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
 import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { AssetGenService } from '@/services/AssetGenService';
+import type {
+  AssetGenBgOptions,
+  AssetGenCompressOptions,
+  AssetGenGenerateOptions,
+  AssetGenResizeOptions,
+  AssetGenSaveOptions,
+  AssetGenSaveResult,
+  AssetGenStatus,
+  AssetImageMeta,
+} from '@/services/AssetGenService';
+import type { CropRectPixels } from '@/services/image-gen/image-ops';
 import {
   SceneManager,
   NodeBase,
@@ -441,6 +453,61 @@ export interface Pix3DebugBridge {
   errors(): CapturedError[];
   clearErrors(): void;
 
+  /**
+   * Headless AI asset pipeline (through {@link AssetGenService}) — generate, transform, and save
+   * images programmatically using the user's saved (encrypted) API key. Every method returns
+   * JSON-safe metadata (an image `id` + dimensions/bytes), never a blob, so results round-trip
+   * through `evaluate_script`. Reuse an `id` across calls; fetch a `data:` URL for visual QC with
+   * `preview(id)`.
+   */
+  readonly assets: {
+    /** Provider/model/key/project status + selected model capabilities. */
+    status(providerId?: string): Promise<AssetGenStatus>;
+    /** Generate an image from a prompt (+ optional reference res:// paths). Returns a new handle. */
+    generate(options: AssetGenGenerateOptions): Promise<AssetImageMeta>;
+    /** Downscale/resize a handle (longest-edge `maxSize`, or explicit `width`/`height`). */
+    resize(id: string, options: AssetGenResizeOptions): Promise<AssetImageMeta>;
+    /** Crop a pixel rectangle `{x,y,width,height}` out of a handle. */
+    crop(
+      id: string,
+      rect: CropRectPixels,
+      format?: 'image/png' | 'image/jpeg' | 'image/webp'
+    ): Promise<AssetImageMeta>;
+    /** Re-encode a handle to a smaller format (default WebP q0.85), optionally downscaling too. */
+    compress(id: string, options?: AssetGenCompressOptions): Promise<AssetImageMeta>;
+    /** Remove the background of a handle (local Web Worker; transparent PNG out). */
+    removeBackground(id: string, options?: AssetGenBgOptions): Promise<AssetImageMeta>;
+    /** Load an existing project asset into a handle for editing. */
+    open(pathOrRef: string): Promise<AssetImageMeta>;
+    /** Metadata for one handle, or null. */
+    get(id: string): AssetImageMeta | null;
+    /** All live handles this session (newest first). */
+    list(): AssetImageMeta[];
+    /** `data:` URL preview of a handle, downscaled to `maxSize` (px, longest edge) for QC. */
+    preview(id: string, maxSize?: number): Promise<string>;
+    /** Save a handle into the project (creates dirs; optional resize/re-encode). */
+    save(id: string, name: string, options?: AssetGenSaveOptions): Promise<AssetGenSaveResult>;
+    /** Recent generations from the IndexedDB cache (metadata only). */
+    history(limit?: number): Promise<
+      Array<{
+        id: string;
+        prompt: string;
+        providerId: string;
+        modelId: string;
+        mimeType: string;
+        width?: number;
+        height?: number;
+        createdAt: number;
+      }>
+    >;
+    /** Pull a cached generation into a working handle. */
+    openHistory(recordId: string): Promise<AssetImageMeta>;
+    /** Drop a handle (frees its blob). */
+    discard(id: string): boolean;
+    /** Drop all handles. */
+    clear(): void;
+  };
+
   // --- game-specific surface (present only if the running game registered one) ---
   readonly game: {
     /** True if the running game registered a GameDebugProvider. */
@@ -462,7 +529,7 @@ export interface Pix3DebugBridge {
 
 function createBridge(): Pix3DebugBridge {
   return {
-    version: 1,
+    version: 2,
 
     help() {
       return {
@@ -484,6 +551,17 @@ function createBridge(): Pix3DebugBridge {
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',
         'game.snapshot() / game.inspect(q) / game.action(n)':
           'Game-specific debug surface (per-game).',
+        'assets.status()': 'AI asset pipeline: provider/model/key/project status + capabilities.',
+        'assets.generate({prompt,references,aspectRatio,imageSize,transparent})':
+          "Generate an image with the user's saved key. Returns a handle {id,width,height,bytes}.",
+        'assets.resize(id,{maxSize}) / crop(id,{x,y,width,height}) / compress(id,{format,quality})':
+          'Transform a handle; each returns a NEW handle id.',
+        'assets.removeBackground(id) / open(path) / openHistory(recordId)':
+          'Cut out background / load a project asset / pull a cached generation into a handle.',
+        'assets.preview(id,maxSize=256)': 'data: URL preview of a handle for visual QC.',
+        'assets.save(id,name,{maxSize,format,quality})':
+          'Write a handle into the project (creates dirs, optional downscale).',
+        'assets.list() / get(id) / history(limit) / discard(id) / clear()': 'Handle + cache mgmt.',
       };
     },
 
@@ -615,6 +693,54 @@ function createBridge(): Pix3DebugBridge {
 
     clearErrors() {
       errorBuffer.length = 0;
+    },
+
+    assets: {
+      status(providerId) {
+        return service<AssetGenService>(AssetGenService).status(providerId);
+      },
+      generate(options) {
+        return service<AssetGenService>(AssetGenService).generate(options);
+      },
+      resize(id, options) {
+        return service<AssetGenService>(AssetGenService).resize(id, options);
+      },
+      crop(id, rect, format) {
+        return service<AssetGenService>(AssetGenService).crop(id, rect, format);
+      },
+      compress(id, options) {
+        return service<AssetGenService>(AssetGenService).compress(id, options);
+      },
+      removeBackground(id, options) {
+        return service<AssetGenService>(AssetGenService).removeBackground(id, options);
+      },
+      open(pathOrRef) {
+        return service<AssetGenService>(AssetGenService).open(pathOrRef);
+      },
+      get(id) {
+        return service<AssetGenService>(AssetGenService).get(id);
+      },
+      list() {
+        return service<AssetGenService>(AssetGenService).list();
+      },
+      preview(id, maxSize) {
+        return service<AssetGenService>(AssetGenService).preview(id, maxSize);
+      },
+      save(id, name, options) {
+        return service<AssetGenService>(AssetGenService).save(id, name, options);
+      },
+      history(limit) {
+        return service<AssetGenService>(AssetGenService).history(limit);
+      },
+      openHistory(recordId) {
+        return service<AssetGenService>(AssetGenService).openHistory(recordId);
+      },
+      discard(id) {
+        return service<AssetGenService>(AssetGenService).discard(id);
+      },
+      clear() {
+        service<AssetGenService>(AssetGenService).clear();
+      },
     },
 
     game: {

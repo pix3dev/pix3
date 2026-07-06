@@ -33,6 +33,12 @@ export class SceneManager {
   }
 
   setActiveSceneGraph(sceneId: string, graph: SceneGraph): void {
+    // Replacing an existing graph (e.g. scene reload from disk) — free the old
+    // graph's GPU resources so geometries/materials/textures are not leaked.
+    const previous = this.sceneGraphs.get(sceneId);
+    if (previous && previous !== graph) {
+      this.disposeSceneGraph(previous);
+    }
     this.sceneGraphs.set(sceneId, graph);
     this.groupMaps.set(sceneId, this.buildGroupMap(graph));
     this.activeSceneId = sceneId;
@@ -76,6 +82,10 @@ export class SceneManager {
   }
 
   removeSceneGraph(sceneId: string): void {
+    const graph = this.sceneGraphs.get(sceneId);
+    if (graph) {
+      this.disposeSceneGraph(graph);
+    }
     this.sceneGraphs.delete(sceneId);
     this.groupMaps.delete(sceneId);
     if (this.activeSceneId === sceneId) {
@@ -150,9 +160,24 @@ export class SceneManager {
   }
 
   dispose(): void {
+    for (const graph of this.sceneGraphs.values()) {
+      this.disposeSceneGraph(graph);
+    }
     this.sceneGraphs.clear();
     this.groupMaps.clear();
     this.activeSceneId = null;
+  }
+
+  /**
+   * Free the GPU/runtime resources of every node in a scene graph. Call only
+   * when the graph is being discarded (reload/replace, tab close, teardown) —
+   * never for a graph whose nodes are still referenced (e.g. by undo history).
+   */
+  private disposeSceneGraph(graph: SceneGraph): void {
+    for (const root of graph.rootNodes) {
+      root.dispose();
+    }
+    graph.nodeMap.clear();
   }
 
   private ensureGroupMap(sceneId: string): Map<string, Set<NodeBase>> {

@@ -1,5 +1,6 @@
 import { inject } from '@/fw/di';
 import { ResourceManager } from '@/services/ResourceManager';
+import { OperationService } from '@/services/OperationService';
 import { SceneManager } from '@pix3/runtime';
 import { SceneValidationError } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
@@ -124,6 +125,17 @@ export class LoadSceneCommand extends CommandBase<LoadSceneCommandPayload, void>
       }
 
       this.sceneManager.setActiveSceneGraph(activeId, graph);
+
+      // Reloading into an already-open scene replaces its graph in place (the old
+      // nodes are disposed by setActiveSceneGraph). The active-scene id is
+      // unchanged, so OperationService's per-scene switch won't fire — clear this
+      // scene's undo history explicitly so entries don't reference detached nodes.
+      if (existing) {
+        const operationService = context.container.getService<OperationService>(
+          context.container.getOrCreateToken(OperationService)
+        );
+        operationService.clearHistory();
+      }
 
       state.scenes.hierarchies[activeId] = {
         version: graph.version ?? null,

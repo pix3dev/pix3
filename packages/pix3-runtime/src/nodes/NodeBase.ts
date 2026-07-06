@@ -1,4 +1,4 @@
-import { Object3D } from 'three';
+import { Object3D, type BufferGeometry, type Material } from 'three';
 import type { PropertySchema } from '../fw/property-schema';
 import type { ScriptComponent, Constructor } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
@@ -37,6 +37,7 @@ export class NodeBase extends Object3D {
   /** Groups associated with this node */
   readonly groups: Set<string> = new Set();
   private readonly _signals: Map<string, Set<SignalConnection>> = new Map();
+  private _disposed = false;
 
   /** Reference to InputSystem (injected by runtime) */
   _input?: import('../core/InputService').InputService;
@@ -426,6 +427,85 @@ export class NodeBase extends Object3D {
 
   isInGroup(group: string): boolean {
     return this.groups.has(group.trim());
+  }
+
+  /**
+   * Free all GPU/runtime resources owned by this node and its entire subtree.
+   *
+   * Recursively disposes NodeBase children, detaches script components (firing
+   * onDetach), clears signal connections, releases owned Three.js resources via
+   * {@link disposeResources}, then detaches from its parent. Idempotent — calling
+   * it twice is a no-op.
+   *
+   * Must be called by scene teardown paths (SceneRunner.stop for the runtime
+   * clone; SceneManager when an authored graph is replaced/removed) so that
+   * geometries/materials/canvas textures are not leaked. It must NOT be called
+   * for nodes that will be re-added later (e.g. DeleteObjectOperation keeps
+   * deleted nodes alive for undo).
+   */
+  dispose(): void {
+    if (this._disposed) {
+      return;
+    }
+    this._disposed = true;
+
+    // Dispose child subtrees first (they detach themselves from this node).
+    for (const child of [...this.children]) {
+      if (child instanceof NodeBase) {
+        child.dispose();
+      }
+    }
+
+    // Drop component references. The runtime component lifecycle (onDetach) is
+    // driven explicitly by the SceneRunner on stop(); dispose() only releases
+    // references and resources, so it must NOT fire onDetach here (that would
+    // double-fire in play mode and run onDetach for non-running editor nodes).
+    for (const component of this.components) {
+      component.node = null;
+    }
+    this.components.length = 0;
+
+    this.disconnectAll();
+    this.disposeResources();
+    this.removeFromParent();
+  }
+
+  /**
+   * Release Three.js resources owned by this node's own (non-NodeBase) visual
+   * meshes. The default implementation disposes the geometry and material(s) of
+   * every visual descendant — this is safe because a Three.js Material.dispose()
+   * does NOT dispose its textures, so shared AssetLoader-cached textures on
+   * `material.map` are left intact.
+   *
+   * Subclasses that own additional resources not reachable this way — canvas
+   * textures (labels), sliced spritesheet frame textures, particle buffers, or a
+   * shared module-level material that must be preserved — should override this
+   * (calling `super.disposeResources()` unless they fully manage their meshes).
+   */
+  protected disposeResources(): void {
+    // `children` is declared as NodeBase[] but at runtime also holds the plain
+    // Object3D visual meshes a node adds (e.g. `this.add(new Mesh(...))`).
+    const visualChildren: Object3D[] = this.children;
+    for (const child of visualChildren) {
+      if (child instanceof NodeBase) {
+        continue;
+      }
+      child.traverse(descendant => {
+        if (descendant instanceof NodeBase) {
+          return;
+        }
+        const geometry = (descendant as { geometry?: BufferGeometry }).geometry;
+        geometry?.dispose?.();
+        const material = (descendant as { material?: Material | Material[] }).material;
+        if (Array.isArray(material)) {
+          for (const entry of material) {
+            entry?.dispose?.();
+          }
+        } else {
+          material?.dispose?.();
+        }
+      });
+    }
   }
 
   /**

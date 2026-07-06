@@ -224,7 +224,7 @@ export class TiledSprite2D extends Node2D {
     this.rebuildGeometry();
   }
 
-  dispose(): void {
+  protected override disposeResources(): void {
     this.geometry.dispose();
     this.material.dispose();
   }

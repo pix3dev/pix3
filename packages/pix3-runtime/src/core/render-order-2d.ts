@@ -55,10 +55,11 @@ function collectGroups(node: Node2D): NodeMeshGroups {
  * back into place on the next pass.
  */
 function sortByAuthoredOrder(meshes: Object3D[]): Object3D[] {
-  return meshes
-    .map((mesh, index) => ({ mesh, index }))
-    .sort((a, b) => a.mesh.renderOrder - b.mesh.renderOrder || a.index - b.index)
-    .map(entry => entry.mesh);
+  // Sort the (throwaway) array in place. Array.prototype.sort is stable
+  // (ES2019+), so equal-`renderOrder` meshes keep their add-order without the
+  // explicit index tie-break — avoiding the decorate/sort/undecorate array
+  // allocations. This runs every frame in the runtime, so the churn matters.
+  return meshes.sort((a, b) => a.renderOrder - b.renderOrder);
 }
 
 function assignMeshSubtree(obj: Object3D, ctx: AssignContext): void {

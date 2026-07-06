@@ -95,7 +95,7 @@ export class ColorRect2D extends Node2D {
     this.mesh.geometry = this.geometry;
   }
 
-  dispose(): void {
+  protected override disposeResources(): void {
     this.geometry.dispose();
     this.material.dispose();
   }

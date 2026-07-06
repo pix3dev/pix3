@@ -2,7 +2,6 @@ import { ResourceManager } from '@/services/ResourceManager';
 import { SceneManager } from '@pix3/runtime';
 import { SceneValidationError } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';
-import { getAppStateSnapshot } from '@/state';
 import type {
   Operation,
   OperationContext,
@@ -109,25 +108,13 @@ export class ReloadSceneOperation implements Operation<OperationInvokeResult> {
       state.scenes.loadError = null;
       state.scenes.lastLoadedAt = Date.now();
 
-      const beforeSnapshot = context.snapshot;
-      const afterSnapshot = getAppStateSnapshot();
-
-      return {
-        didMutate: true,
-        commit: {
-          label: `Reload scene from file: ${filePath}`,
-          beforeSnapshot,
-          afterSnapshot,
-          undo: () => {
-            // For auto-reload, undo is not really applicable
-            // Just restore the previous state snapshot
-            Object.assign(state, beforeSnapshot);
-          },
-          redo: () => {
-            Object.assign(state, afterSnapshot);
-          },
-        },
-      };
+      // Reloading from disk replaces the in-memory graph wholesale (the previous
+      // graph and its nodes are disposed by SceneManager.setActiveSceneGraph).
+      // There is no coherent in-editor undo for an external file change, and the
+      // old snapshot-swap undo left state and scene graph out of sync. Return a
+      // non-committing mutation so this is never pushed to history;
+      // ReloadSceneCommand clears history after a successful reload.
+      return { didMutate: true };
     } catch (error) {
       let message = 'Failed to reload scene from file.';
       if (error instanceof SceneValidationError) {

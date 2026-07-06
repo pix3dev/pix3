@@ -17,6 +17,7 @@ import {
   type OperationMetadata,
 } from '../core/Operation';
 import { appState, type AppState, type AppStateSnapshot } from '@/state';
+import { subscribe } from 'valtio/vanilla';
 import { LoggingService } from './LoggingService';
 import { CollaborationService } from './CollaborationService';
 
@@ -79,21 +80,66 @@ const READ_ONLY_ALLOWED_OPERATIONS = new Set([
   'editor.update-settings',
 ]);
 
+const NO_SCENE_HISTORY_KEY = '__none__';
+
 @injectable()
 export class OperationService {
-  readonly history: HistoryManager;
   private readonly state: AppState;
   private readonly listeners = new Set<OperationEventListener>();
-  private readonly disposeHistorySubscription: () => void;
   private readonly logger: LoggingService;
 
+  // Per-scene undo/redo: each scene (tab) keeps its own history stack so undo
+  // never operates on another scene's (detached) nodes. `history` always resolves
+  // to the active scene's stack; buckets for closed scenes are pruned.
+  private readonly histories = new Map<string, HistoryManager>();
+  private historyCapacity: number | undefined;
+  private readonly seedHistory?: HistoryManager;
+  private subscribedHistory: HistoryManager | null = null;
+  private disposeHistorySubscription: () => void = () => {};
+  private readonly disposeSceneWatch: () => void;
+
   constructor(historyManager?: HistoryManager, state: AppState = appState) {
-    this.history = historyManager ?? new HistoryManager();
     this.state = state;
+    this.seedHistory = historyManager;
     this.logger = ServiceContainer.getInstance().getService<LoggingService>(
       ServiceContainer.getInstance().getOrCreateToken(LoggingService)
     );
-    this.disposeHistorySubscription = this.history.subscribe(snapshot => {
+    // Point the change-subscription at the initial active scene's history.
+    this.repointHistory();
+    // Follow the active scene: re-point history + drop stacks for closed scenes.
+    this.disposeSceneWatch = subscribe(this.state.scenes, () => {
+      this.repointHistory();
+      this.pruneClosedScenes();
+    });
+  }
+
+  /** Active scene's undo/redo stack (created on first access for that scene). */
+  get history(): HistoryManager {
+    const key = this.state.scenes.activeSceneId ?? NO_SCENE_HISTORY_KEY;
+    let manager = this.histories.get(key);
+    if (!manager) {
+      // Reuse the injected/seed manager for the very first bucket so tests and
+      // DI wiring that pass a specific HistoryManager keep working.
+      manager =
+        this.seedHistory && this.histories.size === 0
+          ? this.seedHistory
+          : new HistoryManager(
+              this.historyCapacity != null ? { capacity: this.historyCapacity } : undefined
+            );
+      this.histories.set(key, manager);
+    }
+    return manager;
+  }
+
+  /** Ensure the history:changed subscription tracks the active scene's stack. */
+  private repointHistory(): void {
+    const manager = this.history;
+    if (manager === this.subscribedHistory) {
+      return;
+    }
+    this.disposeHistorySubscription();
+    this.subscribedHistory = manager;
+    this.disposeHistorySubscription = manager.subscribe(snapshot => {
       this.emit({
         type: 'history:changed',
         snapshot,
@@ -102,8 +148,28 @@ export class OperationService {
     });
   }
 
+  /** Discard undo/redo stacks for scenes that are no longer open (frees the undo
+   *  closures, which retain node subtrees). Never drops the active scene. */
+  private pruneClosedScenes(): void {
+    const activeKey = this.state.scenes.activeSceneId ?? NO_SCENE_HISTORY_KEY;
+    for (const key of [...this.histories.keys()]) {
+      if (key === activeKey) {
+        continue;
+      }
+      if (key === NO_SCENE_HISTORY_KEY || !this.state.scenes.descriptors[key]) {
+        this.histories.get(key)?.clear();
+        this.histories.delete(key);
+      }
+    }
+  }
+
   dispose(): void {
-    this.disposeHistorySubscription?.();
+    this.disposeHistorySubscription();
+    this.disposeSceneWatch?.();
+    for (const manager of this.histories.values()) {
+      manager.clear();
+    }
+    this.histories.clear();
     this.listeners.clear();
   }
 
@@ -134,6 +200,7 @@ export class OperationService {
     options: OperationInvokeOptions = {}
   ): Promise<boolean> {
     this.ensureWritable(operation.metadata.id);
+    this.repointHistory();
     this.logger.debug('invokeAndPush: Starting operation', {
       operationId: operation.metadata.id,
       operationTitle: operation.metadata.title,
@@ -177,6 +244,7 @@ export class OperationService {
 
   async undo(): Promise<boolean> {
     this.ensureWritable('history.undo');
+    this.repointHistory();
     // Route through Y.UndoManager when collaboration is active
     const collabUndone = this.tryCollabUndo();
     if (collabUndone !== null) {
@@ -214,6 +282,7 @@ export class OperationService {
 
   async redo(): Promise<boolean> {
     this.ensureWritable('history.redo');
+    this.repointHistory();
     // Route through Y.UndoManager when collaboration is active
     const collabRedone = this.tryCollabRedo();
     if (collabRedone !== null) {
@@ -255,7 +324,10 @@ export class OperationService {
   }
 
   setHistoryCapacity(capacity: number): void {
-    this.history.setCapacity(capacity);
+    this.historyCapacity = Math.max(1, capacity);
+    for (const manager of this.histories.values()) {
+      manager.setCapacity(capacity);
+    }
   }
 
   /**

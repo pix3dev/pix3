@@ -65,6 +65,9 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private bgFillHoles = true;
 
+  @state()
+  private defaultSaveMaxSize = 0;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.activeTab = this.editorSettingsService.getInitialTab();
@@ -78,6 +81,7 @@ export class EditorSettingsDialog extends ComponentBase {
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
     this.bgFillHoles = prefs.bgFillHoles;
+    this.defaultSaveMaxSize = prefs.defaultSaveMaxSize;
     void this.refreshAiKeyStatus();
   }
 
@@ -293,6 +297,25 @@ export class EditorSettingsDialog extends ComponentBase {
 
         <div class="settings-field">
           <label class="select-row">
+            <span>Default save size (downscale)</span>
+            <select @change=${this.onDefaultSaveSizeChange}>
+              <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
+              <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
+              <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
+              <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
+              <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
+              <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
+            </select>
+          </label>
+          <div class="hint">
+            Downscales the longest edge when saving a generated image into the project (never
+            upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
+            the Asset Generator.
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label class="select-row">
             <span>Background removal engine</span>
             <select @change=${this.onBgEngineChange}>
               <option value="imgly" ?selected=${this.bgEngine === 'imgly'}>
@@ -348,6 +371,11 @@ export class EditorSettingsDialog extends ComponentBase {
   private onBgFillHolesChange(e: Event): void {
     this.bgFillHoles = (e.target as HTMLInputElement).checked;
     this.aiImageSettings.updatePreferences({ bgFillHoles: this.bgFillHoles });
+  }
+
+  private onDefaultSaveSizeChange(e: Event): void {
+    this.defaultSaveMaxSize = Number((e.target as HTMLSelectElement).value) || 0;
+    this.aiImageSettings.updatePreferences({ defaultSaveMaxSize: this.defaultSaveMaxSize });
   }
 
   private async refreshAiKeyStatus(): Promise<void> {

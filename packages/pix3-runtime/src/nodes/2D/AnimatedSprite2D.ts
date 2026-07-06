@@ -391,7 +391,7 @@ export class AnimatedSprite2D extends Node2D {
     this.mesh.geometry = this.geometry;
   }
 
-  dispose(): void {
+  protected override disposeResources(): void {
     this.geometry.dispose();
     if (this.spritesheetTexture) {
       this.spritesheetTexture.dispose();

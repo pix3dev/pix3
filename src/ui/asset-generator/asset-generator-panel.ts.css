@@ -579,6 +579,18 @@ pix3-asset-generator-panel .ag-save-name {
   box-sizing: border-box;
 }
 
+pix3-asset-generator-panel .ag-save-resize select,
+pix3-asset-generator-panel .ag-save-custom-size {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--pix3-bg-primary, #1e1e1e);
+  color: var(--pix3-text-primary, #fff);
+  border: 1px solid var(--pix3-border, #444);
+  border-radius: 4px;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
 /* History --------------------------------------------------------------- */
 pix3-asset-generator-panel .ag-history {
   flex: 0 0 auto;

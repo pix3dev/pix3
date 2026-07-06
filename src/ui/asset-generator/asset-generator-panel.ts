@@ -25,7 +25,11 @@ import {
   setGenerationDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
+import { resizeImageBlob, scaledDimensions } from '@/services/image-gen/image-ops';
 import './asset-generator-panel.ts.css';
+
+/** Longest-edge downscale presets offered in the save popover (px); 0 = keep original size. */
+const SAVE_SIZE_PRESETS: readonly number[] = [1024, 512, 256, 128, 64];
 
 const EMPTY_RESOURCE_ID = 'asset-generator://new';
 
@@ -137,6 +141,10 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private saveName = '';
   @state() private saveMessage: string | null = null;
   @state() private saveError: string | null = null;
+  /** Longest-edge downscale cap applied at save time (px); 0 = keep original size. */
+  @state() private saveMaxSize = 0;
+  /** True while the user is entering a custom (non-preset) save size. */
+  @state() private saveSizeCustom = false;
   @state() private isDragActive = false;
   @state() private savePopoverOpen = false;
   @state() private apiKeyPopoverOpen = false;
@@ -283,6 +291,9 @@ export class AssetGeneratorPanel extends ComponentBase {
         : (qualities.find(q => q === 'medium') ?? qualities[0] ?? '');
     this.transparentBackground =
       Boolean(model?.capabilities.supportsTransparency) && prefs.transparentBackground;
+    this.saveMaxSize = prefs.defaultSaveMaxSize;
+    this.saveSizeCustom =
+      prefs.defaultSaveMaxSize > 0 && !SAVE_SIZE_PRESETS.includes(prefs.defaultSaveMaxSize);
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
     this.bgFillHoles = prefs.bgFillHoles;
@@ -404,6 +415,7 @@ export class AssetGeneratorPanel extends ComponentBase {
           .value=${this.saveName}
           @input=${this.onSaveNameInput}
         />
+        ${this.renderSaveResize()}
         <div class="ag-save-actions">
           <button
             class="ag-action-button"
@@ -433,6 +445,53 @@ export class AssetGeneratorPanel extends ComponentBase {
         ${this.saveMessage ? html`<div class="ag-success">${this.saveMessage}</div>` : null}
         ${this.saveError ? html`<div class="ag-error">${this.saveError}</div>` : null}
         ${projectReady ? null : html`<div class="ag-hint">Open a project to save into it.</div>`}
+      </div>
+    `;
+  }
+
+  private renderSaveResize() {
+    const current = this.current;
+    const selectValue = this.saveSizeCustom
+      ? 'custom'
+      : this.saveMaxSize > 0
+        ? String(this.saveMaxSize)
+        : '0';
+    const target =
+      current?.width && current.height
+        ? scaledDimensions(current.width, current.height, this.saveMaxSize)
+        : null;
+    const sourceLabel =
+      current?.width && current.height ? `${current.width}×${current.height}` : '?';
+    const targetLabel = target ? `${target.width}×${target.height}` : '?';
+    return html`
+      <label class="ag-field ag-save-resize">
+        <span class="ag-field-label">Resize on save (longest edge)</span>
+        <select @change=${this.onSaveResizeChange}>
+          <option value="0" ?selected=${selectValue === '0'}>Original size</option>
+          ${SAVE_SIZE_PRESETS.map(
+            size =>
+              html`<option value=${String(size)} ?selected=${selectValue === String(size)}>
+                ≤ ${size} px
+              </option>`
+          )}
+          <option value="custom" ?selected=${selectValue === 'custom'}>Custom…</option>
+        </select>
+      </label>
+      ${this.saveSizeCustom
+        ? html`<input
+            class="ag-save-custom-size"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="Max px"
+            .value=${this.saveMaxSize > 0 ? String(this.saveMaxSize) : ''}
+            @input=${this.onSaveCustomSizeInput}
+          />`
+        : null}
+      <div class="ag-hint">
+        ${this.saveMaxSize > 0
+          ? html`Source ${sourceLabel} → saved at <strong>${targetLabel}</strong> px`
+          : html`Saved at full generated size (${sourceLabel} px)`}
       </div>
     `;
   }
@@ -895,6 +954,54 @@ export class AssetGeneratorPanel extends ComponentBase {
     this.saveName = (event.target as HTMLInputElement).value;
     this.saveMessage = null;
     this.saveError = null;
+  }
+
+  private onSaveResizeChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'custom') {
+      this.saveSizeCustom = true;
+      // Keep whatever custom value was there; seed a sensible default the first time.
+      if (this.saveMaxSize <= 0) {
+        this.saveMaxSize = 256;
+      }
+    } else {
+      this.saveSizeCustom = false;
+      this.saveMaxSize = Number(value) || 0;
+    }
+    this.aiSettings.updatePreferences({ defaultSaveMaxSize: this.saveMaxSize });
+  }
+
+  private onSaveCustomSizeInput(event: Event): void {
+    const parsed = Math.round(Number((event.target as HTMLInputElement).value));
+    this.saveMaxSize = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    this.aiSettings.updatePreferences({ defaultSaveMaxSize: this.saveMaxSize });
+  }
+
+  /**
+   * Resolve the bytes to write for the current image, applying the save-time downscale when one is
+   * set and the image is larger than the cap. Returns the original blob unchanged otherwise.
+   */
+  private async resolveSaveBlob(): Promise<{ blob: Blob; mimeType: string } | null> {
+    const current = this.current;
+    if (!current) {
+      return null;
+    }
+    const longest = Math.max(current.width ?? 0, current.height ?? 0);
+    // No cap, or the image already fits within it → write the exact generated bytes untouched.
+    if (this.saveMaxSize <= 0 || (longest > 0 && longest <= this.saveMaxSize)) {
+      return { blob: current.blob, mimeType: current.mimeType };
+    }
+    try {
+      // Preserve the source format so alpha (transparent PNGs / cut-outs) survives the resize.
+      const result = await resizeImageBlob(current.blob, {
+        maxSize: this.saveMaxSize,
+        mimeType: current.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+      });
+      return { blob: result.blob, mimeType: result.blob.type || current.mimeType };
+    } catch (error) {
+      console.warn('[AssetGenerator] Resize on save failed; writing original size', error);
+      return { blob: current.blob, mimeType: current.mimeType };
+    }
   }
 
   private openSettings(): void {
@@ -1410,10 +1517,11 @@ export class AssetGeneratorPanel extends ComponentBase {
     if (!this.current) {
       return null;
     }
-    const relativePath = ensureImageExt(
-      normalizeRelativePath(this.saveName),
-      this.current.mimeType
-    );
+    const output = await this.resolveSaveBlob();
+    if (!output) {
+      return null;
+    }
+    const relativePath = ensureImageExt(normalizeRelativePath(this.saveName), output.mimeType);
     if (!relativePath) {
       this.saveError = 'Enter a file name.';
       return null;
@@ -1422,14 +1530,23 @@ export class AssetGeneratorPanel extends ComponentBase {
     this.saveMessage = null;
     try {
       await this.ensureParentDirectory(relativePath);
-      const buffer = await this.current.blob.arrayBuffer();
+      const buffer = await output.blob.arrayBuffer();
       await this.storage.writeBinaryFile(relativePath, buffer);
-      this.saveMessage = `Saved to ${relativePath}`;
+      this.saveMessage = this.describeSaveResult(relativePath, output.blob);
       return relativePath;
     } catch (error) {
       this.saveError = `Save failed: ${describeError(error)}`;
       return null;
     }
+  }
+
+  /** Human-readable confirmation, noting the downscaled dimensions when a resize was applied. */
+  private describeSaveResult(path: string, blob: Blob): string {
+    if (this.saveMaxSize > 0 && this.current?.width && this.current.height) {
+      const target = scaledDimensions(this.current.width, this.current.height, this.saveMaxSize);
+      return `Saved to ${path} (${target.width}×${target.height}, ${formatBytes(blob.size)})`;
+    }
+    return `Saved to ${path}`;
   }
 
   private async onInsertSprite(): Promise<void> {
@@ -1457,32 +1574,45 @@ export class AssetGeneratorPanel extends ComponentBase {
     if (!this.current || !this.boundImagePath) {
       return;
     }
+    const output = await this.resolveSaveBlob();
+    if (!output) {
+      return;
+    }
     this.saveError = null;
     this.saveMessage = null;
     try {
-      const buffer = await this.current.blob.arrayBuffer();
+      const buffer = await output.blob.arrayBuffer();
       await this.storage.writeBinaryFile(this.boundImagePath, buffer);
-      this.saveMessage = `Overwrote ${this.boundImagePath}`;
+      this.saveMessage = this.describeSaveResult(this.boundImagePath, output.blob).replace(
+        'Saved to',
+        'Overwrote'
+      );
     } catch (error) {
       this.saveError = `Overwrite failed: ${describeError(error)}`;
     }
   }
 
-  private onDownload(): void {
+  private async onDownload(): Promise<void> {
     if (!this.current) {
       return;
     }
+    const output = await this.resolveSaveBlob();
+    if (!output) {
+      return;
+    }
+    const url = URL.createObjectURL(output.blob);
     const anchor = document.createElement('a');
-    anchor.href = this.current.objectUrl;
+    anchor.href = url;
     anchor.download = ensureImageExt(
       normalizeRelativePath(this.saveName) || 'generated',
-      this.current.mimeType
+      output.mimeType
     )
       .split('/')
       .pop()!;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    URL.revokeObjectURL(url);
   }
 
   // -- history ---------------------------------------------------------------
@@ -1637,6 +1767,16 @@ const readImageSize = (objectUrl: string): Promise<{ width: number; height: numb
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(Math.max(value, min), Math.max(min, max));
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 const slugify = (text: string): string =>
   text

@@ -7,6 +7,7 @@ import type {
 import { SceneManager } from '@pix3/runtime';
 import { getAppStateSnapshot } from '@/state';
 import { LoggingService } from '@/services/LoggingService';
+import { FileWatchService } from '@/services/FileWatchService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 
 export interface SaveSceneOperationParams {
@@ -56,6 +57,9 @@ export class SaveSceneOperation implements Operation<OperationInvokeResult> {
     const logger = context.container.getService<LoggingService>(
       context.container.getOrCreateToken(LoggingService)
     );
+    const fileWatchService = context.container.getService<FileWatchService>(
+      context.container.getOrCreateToken(FileWatchService)
+    );
 
     const sceneGraph = sceneManager.getSceneGraph(sceneId);
     if (!sceneGraph) {
@@ -79,7 +83,9 @@ export class SaveSceneOperation implements Operation<OperationInvokeResult> {
     descriptor.isDirty = false;
     descriptor.lastSavedAt = Date.now();
 
-    // Update modification time best-effort
+    // Update modification time best-effort and tell the file watcher about our own
+    // write, so it does not mistake this Save for an external change and trigger a
+    // self-reload (which would replace the graph and clear this scene's undo history).
     try {
       if (descriptor.fileHandle) {
         const file = await descriptor.fileHandle.getFile();
@@ -87,6 +93,7 @@ export class SaveSceneOperation implements Operation<OperationInvokeResult> {
       } else {
         descriptor.lastModifiedTime = await storage.getLastModified(filePath);
       }
+      fileWatchService.setLastKnownModifiedTime(filePath, descriptor.lastModifiedTime);
     } catch {
       // ignore
     }

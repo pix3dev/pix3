@@ -226,6 +226,14 @@ export class SceneRunner {
       // Remove nodes from the THREE scene (optional, as scene.clear() might be called next start)
       // But good for cleanup
       this.scene.clear();
+
+      // Dispose the runtime graph's GPU resources. This graph is an isolated clone
+      // built per startScene() (serialize + re-parse), so its nodes are NOT shared
+      // with the editor's authored graph — disposing here is safe and prevents a
+      // full-scene geometry/material/texture leak on every play/stop cycle.
+      for (const rootNode of this.runtimeGraph.rootNodes) {
+        rootNode.dispose();
+      }
       this.runtimeGraph = null;
     }
 

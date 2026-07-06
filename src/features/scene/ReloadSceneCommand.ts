@@ -53,7 +53,11 @@ export class ReloadSceneCommand extends CommandBase<void, void> {
     );
 
     const op = new ReloadSceneOperation(this.params);
-    await operationService.invokeAndPush(op);
+    // Use invoke (never pushes) — a reload is not undoable — then clear history:
+    // the in-memory graph was replaced and its nodes disposed, so any existing
+    // undo entries for this scene now reference detached/disposed nodes.
+    await operationService.invoke(op);
+    operationService.clearHistory();
 
     return { didMutate: true, payload: undefined };
   }

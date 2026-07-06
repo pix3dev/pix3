@@ -67,6 +67,7 @@ for the live list. Summary:
 | `components(id)` | Script components on a node (`className`, `scriptId`, `state`). |
 | `errors()` / `clearErrors()` | Captured `console.error` / `window.onerror` / unhandled-rejection ring buffer (last 200). |
 | `physicsDebug()` | Collider-wireframe overlay status: `{available, enabled, bodies, vertexCount, segments}` — or `null` when the game registered no source. Counts only; the raw buffers stay live for rendering. |
+| `assets.*` | **Headless AI asset pipeline** (bridge v2+): generate / resize / crop / compress / remove-background / save images programmatically using the user's saved key. Returns JSON-safe handle metadata, never blobs. See the [generate-sprites-in-editor](../generate-sprites-in-editor/SKILL.md) skill for the full playbook. |
 
 > **Showing colliders:** the running game publishes its collider line-segment
 > buffers via `registerPhysicsDebugSource` (DeepCore: `getColliderDebug()` →

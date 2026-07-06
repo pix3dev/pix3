@@ -115,6 +115,24 @@ export class InstancedMesh3D extends Node3D {
     this.add(this.mesh);
   }
 
+  protected override disposeResources(): void {
+    // Frees the instanceMatrix / instanceColor GPU buffers.
+    this.mesh.dispose();
+    // Only dispose owned geometry/material — the module-level DEFAULT_* singletons
+    // are shared across every InstancedMesh3D and must not be disposed. (Does not
+    // call super.disposeResources(), whose generic pass would hit those defaults.)
+    if (this.mesh.geometry !== DEFAULT_GEOMETRY) {
+      this.mesh.geometry.dispose();
+    }
+    const material = this.mesh.material;
+    const materials = Array.isArray(material) ? material : [material];
+    for (const entry of materials) {
+      if (entry && entry !== DEFAULT_MATERIAL) {
+        entry.dispose();
+      }
+    }
+  }
+
   get visibleInstanceCount(): number {
     return this.mesh.count;
   }
