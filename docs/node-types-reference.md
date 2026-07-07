@@ -349,7 +349,9 @@ A lightweight "virtual camera" (Cinemachine-lite). It does **not** render — it
 
 ### GeometryMesh
 
-A 3D mesh node with built-in geometry. Currently supports box geometry but can be extended.
+A 3D mesh node with a built-in primitive geometry and a PBR material. The shape
+is inspector-switchable and animatable via the `geometry`/`size` schema
+properties.
 
 **Type String:** `GeometryMesh`
 
@@ -357,23 +359,34 @@ A 3D mesh node with built-in geometry. Currently supports box geometry but can b
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `geometry` | string | "box" | Geometry type |
-| `size` | Vector3 | (1, 1, 1) | Dimensions (width, height, depth) |
+| `geometry` | enum | "box" | Primitive shape (see below) |
+| `size` | Vector3 | (1, 1, 1) | Interpreted per shape (see below) |
 | `material.color` | color | #4e8df5 | Surface color |
 | `material.roughness` | number | 0.35 | Surface roughness (0-1) |
 | `material.metalness` | number | 0.25 | Metallic appearance (0-1) |
 
-**Geometry Types:**
+**Geometry Types & `size` semantics:**
 
-| Type | Description |
-|------|-------------|
-| `box` | Rectangular box (default) |
+`size` is a single `[x, y, z]` vector reinterpreted per shape, so one editable
+field works for every primitive:
+
+| Type | `size` meaning |
+|------|----------------|
+| `box` | Full extents: width `x`, height `y`, depth `z` |
+| `sphere` | Diameter `x` (y, z ignored) |
+| `plane` | A horizontal floor `x` by `z` (lies in the XZ plane) |
+| `cylinder` | Diameter `x`, height `y` |
+| `cone` | Base diameter `x`, height `y` |
+| `torus` | Outer diameter `x`; tube thickness scales with `y` |
 
 **Usage Notes:**
-- Box is the only built-in geometry
-- Material uses PBR (Physically Based Rendering)
-- Roughness: 0 = glossy, 1 = matte
-- Metalness: 0 = non-metal, 1 = metal
+- Changing `geometry` or `size` in the inspector rebuilds the mesh live.
+- Material uses PBR (Physically Based Rendering).
+- Roughness: 0 = glossy, 1 = matte. Metalness: 0 = non-metal, 1 = metal.
+- Material color/roughness/metalness edits persist through save and play mode
+  (the live material is serialized, not a stale authored snapshot).
+- Node opacity does **not** currently fade a GeometryMesh (its material isn't
+  registered for opacity blending).
 
 ---
 

@@ -1,0 +1,143 @@
+# Demo 06 — 2D UI Layer
+# The 2D overlay pass: a Group2D design canvas (1920x1080, stretched to fit the
+# viewport) holding the built-in UI controls — Label, Button, Slider, Bar,
+# Checkbox — over a translucent panel, plus a Sprite2D. Positions are pixel
+# offsets from the parent's center; +y is up. Draw order follows tree order.
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: Group2D canvas with Label / Button / Slider / Bar / Checkbox / Sprite.
+root:
+  - id: ui-canvas
+    type: Group2D
+    name: UICanvas
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: panel
+        type: ColorRect2D
+        name: Panel
+        properties:
+          width: 720
+          height: 560
+          color: "#161b26"
+          opacity: 0.92
+          transform:
+            position: [0, -20]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: title
+        type: Label2D
+        name: Title
+        properties:
+          label: "Pix3 — 2D UI Showcase"
+          labelFontFamily: Arial
+          labelFontSize: 44
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, 300]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: logo
+        type: Sprite2D
+        name: Logo
+        properties:
+          texture:
+            type: texture
+            url: res://images/64x64.png
+          width: 96
+          height: 96
+          transform:
+            position: [0, 170]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: play-button
+        type: Button2D
+        name: Play Button
+        properties:
+          label: "PLAY"
+          labelFontSize: 28
+          labelColor: "#08110a"
+          width: 260
+          height: 72
+          backgroundColor: "#2fbf71"
+          hoverColor: "#40d081"
+          pressedColor: "#26a061"
+          buttonAction: ""
+          transform:
+            position: [0, 40]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: volume-slider
+        type: Slider2D
+        name: Volume
+        properties:
+          label: ""
+          width: 380
+          height: 28
+          handleSize: 26
+          trackBackgroundColor: "#2a2f3a"
+          trackFilledColor: "#ffcf33"
+          handleColor: "#ffffff"
+          minValue: 0
+          maxValue: 1
+          value: 0.6
+          axisName: ""
+          transform:
+            position: [0, -60]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: health-bar
+        type: Bar2D
+        name: Health
+        properties:
+          label: ""
+          width: 380
+          height: 26
+          backBackgroundColor: "#3a2020"
+          barColor: "#e23b3b"
+          minValue: 0
+          maxValue: 1
+          value: 0.75
+          showBorder: true
+          borderColor: "#000000"
+          borderWidth: 2
+          transform:
+            position: [0, -140]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: sound-checkbox
+        type: Checkbox2D
+        name: Sound
+        properties:
+          label: "Sound"
+          labelFontSize: 22
+          labelColor: "#e6ebf5"
+          size: 34
+          checked: true
+          uncheckedColor: "#2a2f3a"
+          checkedColor: "#2fbf71"
+          checkmarkColor: "#ffffff"
+          checkmarkAction: ""
+          transform:
+            position: [0, -220]
+            scale: [1, 1]
+            rotation: 0
+        children: []

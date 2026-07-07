@@ -515,20 +515,11 @@ export class SceneSaver {
       props.selectionColor = node.selectionColor;
       props.selectedAction = node.selectedAction;
     } else if (node instanceof GeometryMesh) {
-      const mesh = node as GeometryMesh & {
-        geometry?: unknown;
-        size?: unknown;
-        material?: unknown;
-      };
-      if (typeof mesh.geometry === 'string') props.geometry = mesh.geometry;
-      if (Array.isArray(mesh.size)) props.size = mesh.size as [number, number, number];
-      if (typeof mesh.material === 'object' && mesh.material !== null) {
-        props.material = mesh.material as {
-          color?: string;
-          roughness?: number;
-          metalness?: number;
-        };
-      }
+      // Read from the live material via serializeConfig (mirrors the light /
+      // camera branches). The previous cast-to-public-property approach always
+      // saw `undefined`, so inspector color/roughness/metalness edits were lost
+      // on save and in the play-mode clone.
+      Object.assign(props, node.serializeConfig());
     } else if (node instanceof InstancedMesh3D) {
       props.maxInstances = node.maxInstances;
       props.castShadow = node.mesh.castShadow;

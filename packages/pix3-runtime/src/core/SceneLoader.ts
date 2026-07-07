@@ -1431,6 +1431,15 @@ export class SceneLoader {
         const size = this.readVector3(propsRec.size, UNIT_VECTOR3);
         const material = this.asRecord(propsRec.material);
         const materialColor = this.asString(material?.color) ?? '#4e8df5';
+        const materialConfig: { color: string; roughness?: number; metalness?: number } = {
+          color: materialColor,
+        };
+        if (typeof material?.roughness === 'number') {
+          materialConfig.roughness = material.roughness;
+        }
+        if (typeof material?.metalness === 'number') {
+          materialConfig.metalness = material.metalness;
+        }
         return new GeometryMesh({
           ...baseProps,
           properties: parsed.restProps,
@@ -1440,7 +1449,7 @@ export class SceneLoader {
           scale: parsed.scale,
           geometry,
           size: [size.x, size.y, size.z],
-          material: { color: materialColor },
+          material: materialConfig,
         });
       }
       case 'InstancedMesh3D': {

@@ -1,0 +1,201 @@
+# Demo 02 — Cinematic Camera (Cinemachine-lite)
+# A Camera3D driven by a core:CameraBrain that blends between two
+# VirtualCamera3D rigs by priority. VCam Wide is an establishing shot that
+# looks at the hero; VCam CloseUp follows the hero with damping. An
+# AnimationPlayer raises the close-up's priority at t=3s, so the brain
+# eased-blends from the wide shot to the follow cam and back — a full camera
+# cut authored entirely from the timeline, no code.
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: VirtualCamera3D + CameraBrain priority blend and damped follow.
+root:
+  - id: stage-root
+    type: Node3D
+    name: Stage
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    components:
+      - id: cam-director
+        type: core:AnimationPlayer
+        enabled: true
+        config:
+          autoplay: cinematic
+          speed: 1
+          animations:
+            version: "1.0.0"
+            clips:
+              - name: cinematic
+                duration: 8
+                loop: true
+                tracks:
+                  - id: closeup-priority
+                    kind: property
+                    targetPath: VCam CloseUp
+                    property: priority
+                    valueType: number
+                    enabled: true
+                    keys:
+                      - { time: 0, value: 10, easing: linear }
+                      - { time: 2.5, value: 10, easing: linear }
+                      - { time: 3, value: 30, easing: linear }
+                      - { time: 6, value: 30, easing: linear }
+                      - { time: 6.5, value: 10, easing: linear }
+                      - { time: 8, value: 10, easing: linear }
+    children:
+      - id: render-camera
+        type: Camera3D
+        name: Render Camera
+        properties:
+          projection: perspective
+          fov: 50
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 8, 18]
+            rotationEuler: [-18, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: brain
+            type: core:CameraBrain
+            enabled: true
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 2.0
+          color: "#ffffff"
+          castShadow: true
+          shadowCameraSize: 30
+          shadowMapSize: 2048
+          transform:
+            position: [8, 14, 10]
+            rotationEuler: [-50, 30, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: sky-fill
+        type: HemisphereLightNode
+        name: Sky Fill
+        properties:
+          skyColor: "#cfe4ff"
+          groundColor: "#2a241c"
+          intensity: 0.6
+          transform:
+            position: [0, 6, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [60, 1, 60]
+          material:
+            type: standard
+            color: "#23262e"
+            roughness: 1.0
+            metalness: 0.0
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: hero-sphere
+        type: GeometryMesh
+        name: Hero
+        properties:
+          geometry: sphere
+          size: [1.5, 1.5, 1.5]
+          material:
+            type: standard
+            color: "#ffcf33"
+            roughness: 0.3
+            metalness: 0.5
+          transform:
+            position: [0, 0.75, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: hero-drift
+            type: core:Sine
+            enabled: true
+            config:
+              amplitude: 5
+              frequency: 0.25
+              axis: x
+        children: []
+      - id: pillar-a
+        type: GeometryMesh
+        name: Pillar A
+        properties:
+          geometry: cylinder
+          size: [1, 4, 1]
+          material:
+            type: standard
+            color: "#5b6472"
+            roughness: 0.8
+            metalness: 0.1
+          transform:
+            position: [-7, 2, -4]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: pillar-b
+        type: GeometryMesh
+        name: Pillar B
+        properties:
+          geometry: cylinder
+          size: [1, 4, 1]
+          material:
+            type: standard
+            color: "#5b6472"
+            roughness: 0.8
+            metalness: 0.1
+          transform:
+            position: [7, 2, -4]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: vcam-wide
+        type: VirtualCamera3D
+        name: VCam Wide
+        properties:
+          priority: 20
+          fov: 55
+          followTargetId: ""
+          lookAtTargetId: hero-sphere
+          lookAtWeight: 1
+          rotationDamping: 5
+          blendDuration: 1.5
+          blendEasing: cubicInOut
+          transform:
+            position: [0, 8, 18]
+            rotationEuler: [-18, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: vcam-closeup
+        type: VirtualCamera3D
+        name: VCam CloseUp
+        properties:
+          priority: 10
+          fov: 38
+          followTargetId: hero-sphere
+          followOffset: [0, 2, 6]
+          followDamping: 3
+          deadzone: [0.4, 0.2, 0.4]
+          lookAtTargetId: hero-sphere
+          lookAtWeight: 1
+          rotationDamping: 6
+          blendDuration: 1.5
+          blendEasing: cubicInOut
+          transform:
+            position: [0, 2.75, 6]
+            rotationEuler: [-8, 0, 0]
+            scale: [1, 1, 1]
+        children: []

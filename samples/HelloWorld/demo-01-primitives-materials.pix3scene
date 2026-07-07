@@ -1,0 +1,202 @@
+# Demo 01 — Primitives, Materials & Lights
+# The "hello cubes" of any engine: every GeometryMesh primitive shape, a range
+# of material colors / roughness / metalness, and the five light types casting
+# real shadows onto a ground plane. Good first scene to sanity-check rendering
+# and to verify the material-color fix (change a color, hit play — it sticks).
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: Primitive shapes, PBR material variety, and all five light types.
+root:
+  - id: env-root
+    type: Node3D
+    name: Environment
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    children:
+      - id: main-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 50
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 4, 13]
+            rotationEuler: [-14, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 2.2
+          color: "#fff4e0"
+          castShadow: true
+          shadowCameraSize: 24
+          shadowMapSize: 2048
+          transform:
+            position: [6, 12, 8]
+            rotationEuler: [-52, 32, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: sky-fill
+        type: HemisphereLightNode
+        name: Sky Fill
+        properties:
+          skyColor: "#bcd8ff"
+          groundColor: "#3a2c22"
+          intensity: 0.7
+          transform:
+            position: [0, 6, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ambient
+        type: AmbientLightNode
+        name: Ambient
+        properties:
+          color: "#20242c"
+          intensity: 0.4
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: accent-point
+        type: PointLightNode
+        name: Accent Point
+        properties:
+          color: "#ff6a00"
+          intensity: 30
+          distance: 22
+          decay: 2
+          castShadow: false
+          transform:
+            position: [-4, 3, 5]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: rim-spot
+        type: SpotLightNode
+        name: Rim Spot
+        properties:
+          color: "#66aaff"
+          intensity: 40
+          distance: 40
+          angle: 32
+          penumbra: 0.4
+          decay: 2
+          castShadow: false
+          transform:
+            position: [8, 9, -6]
+            rotationEuler: [-55, 55, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [34, 1, 24]
+          material:
+            type: standard
+            color: "#2a2f3a"
+            roughness: 0.95
+            metalness: 0.0
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: prim-box
+        type: GeometryMesh
+        name: Box
+        properties:
+          geometry: box
+          size: [1.6, 1.6, 1.6]
+          material:
+            type: standard
+            color: "#e23b3b"
+            roughness: 0.5
+            metalness: 0.1
+          transform:
+            position: [-6, 0.8, 0]
+            rotationEuler: [0, 20, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: prim-sphere
+        type: GeometryMesh
+        name: Sphere
+        properties:
+          geometry: sphere
+          size: [2, 2, 2]
+          material:
+            type: standard
+            color: "#3b82e2"
+            roughness: 0.2
+            metalness: 0.6
+          transform:
+            position: [-3, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: prim-cylinder
+        type: GeometryMesh
+        name: Cylinder
+        properties:
+          geometry: cylinder
+          size: [1.4, 2, 1.4]
+          material:
+            type: standard
+            color: "#2fbf71"
+            roughness: 0.4
+            metalness: 0.2
+          transform:
+            position: [0, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: prim-cone
+        type: GeometryMesh
+        name: Cone
+        properties:
+          geometry: cone
+          size: [1.6, 2, 1.6]
+          material:
+            type: standard
+            color: "#f0a500"
+            roughness: 0.6
+            metalness: 0.1
+          transform:
+            position: [3, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: prim-torus
+        type: GeometryMesh
+        name: Torus
+        properties:
+          geometry: torus
+          size: [2, 1, 2]
+          material:
+            type: standard
+            color: "#b14ae2"
+            roughness: 0.25
+            metalness: 0.75
+          transform:
+            position: [6, 1.1, 0]
+            rotationEuler: [-25, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: torus-rotate
+            type: core:Rotate
+            enabled: true
+            config:
+              rotationSpeed: 0.6
+        children: []

@@ -1,0 +1,179 @@
+# Demo 05 — Juice primitives
+# Enter play mode and TAP/CLICK the viewport: the JuiceImpact user script fires
+# a hitstop + camera shake + screen flash + punch-scale combo (Time.scale +
+# JuiceApi from a script). Ambient juice runs without input too: every object
+# pops in on start (core:PopIn), and the hero pulses on a beat driven by an
+# event track that emits "pulse" into its core:PunchScale.
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: PopIn / PunchScale / Shake / flash / hitstop — juice from behaviors and script.
+root:
+  - id: juice-root
+    type: Node3D
+    name: JuiceRoot
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    components:
+      - id: juice-impact
+        type: user:JuiceImpact
+        enabled: true
+    children:
+      - id: juice-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 52
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 3.5, 12]
+            rotationEuler: [-12, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 2.2
+          color: "#ffffff"
+          castShadow: true
+          shadowCameraSize: 22
+          shadowMapSize: 2048
+          transform:
+            position: [6, 12, 8]
+            rotationEuler: [-50, 30, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: sky-fill
+        type: HemisphereLightNode
+        name: Sky Fill
+        properties:
+          skyColor: "#cfe4ff"
+          groundColor: "#2a241c"
+          intensity: 0.7
+          transform:
+            position: [0, 6, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [34, 1, 22]
+          material:
+            type: standard
+            color: "#242a33"
+            roughness: 0.95
+            metalness: 0.0
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: juice-hero
+        type: GeometryMesh
+        name: Hero
+        properties:
+          geometry: box
+          size: [2, 2, 2]
+          material:
+            type: standard
+            color: "#ffcf33"
+            roughness: 0.35
+            metalness: 0.4
+          transform:
+            position: [0, 1, 0]
+            rotationEuler: [0, 20, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: hero-punch
+            type: core:PunchScale
+            enabled: true
+            config:
+              amount: 0.3
+              duration: 0.35
+              vibrato: 3
+              triggerEvent: pulse
+              playOnStart: false
+          - id: hero-beat
+            type: core:AnimationPlayer
+            enabled: true
+            config:
+              autoplay: beat
+              speed: 1
+              animations:
+                version: "1.0.0"
+                clips:
+                  - name: beat
+                    duration: 2.4
+                    loop: true
+                    tracks:
+                      - id: pulse-events
+                        kind: event
+                        name: Beat
+                        targetPath: ""
+                        enabled: true
+                        keys:
+                          - { time: 0, signal: pulse, args: "" }
+                          - { time: 1.2, signal: pulse, args: "" }
+        children: []
+      - id: pop-left
+        type: GeometryMesh
+        name: Pop Left
+        properties:
+          geometry: cone
+          size: [1.4, 2, 1.4]
+          material:
+            type: standard
+            color: "#e23b3b"
+            roughness: 0.5
+            metalness: 0.1
+          transform:
+            position: [-5, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: pop-left-popin
+            type: core:PopIn
+            enabled: true
+            config:
+              from: 0
+              duration: 0.5
+              easing: backOut
+              triggerEvent: ""
+              playOnStart: true
+        children: []
+      - id: pop-right
+        type: GeometryMesh
+        name: Pop Right
+        properties:
+          geometry: sphere
+          size: [1.8, 1.8, 1.8]
+          material:
+            type: standard
+            color: "#3b82e2"
+            roughness: 0.3
+            metalness: 0.5
+          transform:
+            position: [5, 0.9, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: pop-right-popin
+            type: core:PopIn
+            enabled: true
+            config:
+              from: 0
+              duration: 0.5
+              easing: backOut
+              triggerEvent: ""
+              playOnStart: true
+        children: []

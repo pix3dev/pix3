@@ -1,0 +1,157 @@
+# Demo 04 — Post-Processing Stack
+# A single PostProcess node configures the whole-frame effect stack: bloom on
+# the bright emissive-looking objects, a vignette, and subtle chromatic
+# aberration. An AnimationPlayer pulses bloomIntensity from 0.8 up to 3.0 and
+# back on a loop — the canonical "bloom flash" that is just three keys on one
+# animatable scalar. Toggle the effects in the inspector to A/B the look.
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: Bloom / vignette / chromatic aberration with an animated bloom flash.
+root:
+  - id: post-root
+    type: Node3D
+    name: PostRoot
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    components:
+      - id: flash-player
+        type: core:AnimationPlayer
+        enabled: true
+        config:
+          autoplay: bloomFlash
+          speed: 1
+          animations:
+            version: "1.0.0"
+            clips:
+              - name: bloomFlash
+                duration: 3
+                loop: true
+                tracks:
+                  - id: bloom-pulse
+                    kind: property
+                    targetPath: Post FX
+                    property: bloomIntensity
+                    valueType: number
+                    enabled: true
+                    keys:
+                      - { time: 0, value: 0.8, easing: quadIn }
+                      - { time: 1, value: 3.0, easing: expoOut }
+                      - { time: 2, value: 0.8, easing: linear }
+                      - { time: 3, value: 0.8, easing: linear }
+    children:
+      - id: post-fx
+        type: PostProcess
+        name: Post FX
+        properties:
+          affect2D: true
+          bloomEnabled: true
+          bloomIntensity: 0.8
+          bloomThreshold: 0.6
+          bloomSmoothing: 0.1
+          bloomRadius: 0.85
+          vignetteEnabled: true
+          vignetteOffset: 0.3
+          vignetteDarkness: 0.7
+          chromaticAberrationEnabled: true
+          chromaticAberrationOffset: 0.0025
+        children: []
+      - id: post-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 50
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 3, 11]
+            rotationEuler: [-12, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 2.6
+          color: "#ffffff"
+          castShadow: true
+          shadowCameraSize: 20
+          shadowMapSize: 2048
+          transform:
+            position: [5, 11, 7]
+            rotationEuler: [-52, 30, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: fill-point
+        type: PointLightNode
+        name: Fill Point
+        properties:
+          color: "#88aaff"
+          intensity: 25
+          distance: 25
+          decay: 2
+          castShadow: false
+          transform:
+            position: [-3, 4, 4]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [40, 1, 30]
+          material:
+            type: standard
+            color: "#14161c"
+            roughness: 0.9
+            metalness: 0.1
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: glow-sphere
+        type: GeometryMesh
+        name: Glow Sphere
+        properties:
+          geometry: sphere
+          size: [2.2, 2.2, 2.2]
+          material:
+            type: standard
+            color: "#ffffff"
+            roughness: 0.25
+            metalness: 0.0
+          transform:
+            position: [-2.5, 1.1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: glow-torus
+        type: GeometryMesh
+        name: Glow Torus
+        properties:
+          geometry: torus
+          size: [2.4, 1.1, 2.4]
+          material:
+            type: standard
+            color: "#ffcf33"
+            roughness: 0.3
+            metalness: 0.6
+          transform:
+            position: [3, 1.3, 0]
+            rotationEuler: [-30, 0, 0]
+            scale: [1, 1, 1]
+        components:
+          - id: torus-rotate
+            type: core:Rotate
+            enabled: true
+            config:
+              rotationSpeed: 0.8
+        children: []

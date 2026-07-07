@@ -1,0 +1,198 @@
+# Demo 03 — Animation Timeline (keyframe clips)
+# One core:AnimationPlayer drives a single looping "showcase" clip whose tracks
+# hit four different property types on four different children, each with a
+# different easing family:
+#   position  (vector3) — a bouncing ball        [bounceOut]
+#   rotation  (euler)   — a continuous spin       [linear]
+#   scale     (vector3) — an elastic pop-pulse    [backOut / elasticOut]
+#   color     (color)   — a hue crossfade         [sineInOut]
+# Open the Animation panel with the AnimRoot node selected to scrub the clip.
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: Keyframe tracks across position/rotation/scale/color with eased segments.
+root:
+  - id: anim-root
+    type: Node3D
+    name: AnimRoot
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    components:
+      - id: anim-player
+        type: core:AnimationPlayer
+        enabled: true
+        config:
+          autoplay: showcase
+          speed: 1
+          animations:
+            version: "1.0.0"
+            clips:
+              - name: showcase
+                duration: 3
+                loop: true
+                tracks:
+                  - id: track-bounce
+                    kind: property
+                    targetPath: Bouncer
+                    property: position
+                    valueType: vector3
+                    enabled: true
+                    keys:
+                      - { time: 0, value: [-6, 4.5, 0], easing: bounceOut }
+                      - { time: 1.5, value: [-6, 0.9, 0], easing: sineInOut }
+                      - { time: 3, value: [-6, 4.5, 0], easing: linear }
+                  - id: track-spin
+                    kind: property
+                    targetPath: Spinner
+                    property: rotation
+                    valueType: euler
+                    enabled: true
+                    keys:
+                      - { time: 0, value: [0, 0, 0], easing: linear }
+                      - { time: 3, value: [0, 360, 0], easing: linear }
+                  - id: track-pulse
+                    kind: property
+                    targetPath: Pulser
+                    property: scale
+                    valueType: vector3
+                    enabled: true
+                    keys:
+                      - { time: 0, value: [1, 1, 1], easing: backOut }
+                      - { time: 0.18, value: [1.4, 1.4, 1.4], easing: elasticOut }
+                      - { time: 1.1, value: [1, 1, 1], easing: linear }
+                      - { time: 3, value: [1, 1, 1], easing: linear }
+                  - id: track-color
+                    kind: property
+                    targetPath: Colorizer
+                    property: color
+                    valueType: color
+                    enabled: true
+                    keys:
+                      - { time: 0, value: "#e23b3b", easing: sineInOut }
+                      - { time: 1, value: "#2fbf71", easing: sineInOut }
+                      - { time: 2, value: "#3b82e2", easing: sineInOut }
+                      - { time: 3, value: "#e23b3b", easing: linear }
+    children:
+      - id: anim-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 55
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 3, 14]
+            rotationEuler: [-9, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 2.0
+          color: "#ffffff"
+          castShadow: true
+          shadowCameraSize: 24
+          shadowMapSize: 2048
+          transform:
+            position: [6, 12, 8]
+            rotationEuler: [-50, 30, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: sky-fill
+        type: HemisphereLightNode
+        name: Sky Fill
+        properties:
+          skyColor: "#cfe4ff"
+          groundColor: "#2a241c"
+          intensity: 0.7
+          transform:
+            position: [0, 6, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [34, 1, 20]
+          material:
+            type: standard
+            color: "#262b34"
+            roughness: 0.95
+            metalness: 0.0
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: bouncer
+        type: GeometryMesh
+        name: Bouncer
+        properties:
+          geometry: sphere
+          size: [1.8, 1.8, 1.8]
+          material:
+            type: standard
+            color: "#ffcf33"
+            roughness: 0.3
+            metalness: 0.4
+          transform:
+            position: [-6, 0.9, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: spinner
+        type: GeometryMesh
+        name: Spinner
+        properties:
+          geometry: box
+          size: [1.6, 1.6, 1.6]
+          material:
+            type: standard
+            color: "#4ad0e2"
+            roughness: 0.4
+            metalness: 0.3
+          transform:
+            position: [-2, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: pulser
+        type: GeometryMesh
+        name: Pulser
+        properties:
+          geometry: cylinder
+          size: [1.4, 2, 1.4]
+          material:
+            type: standard
+            color: "#2fbf71"
+            roughness: 0.5
+            metalness: 0.2
+          transform:
+            position: [2, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: colorizer
+        type: GeometryMesh
+        name: Colorizer
+        properties:
+          geometry: box
+          size: [1.8, 1.8, 1.8]
+          material:
+            type: standard
+            color: "#e23b3b"
+            roughness: 0.5
+            metalness: 0.1
+          transform:
+            position: [6, 0.9, 0]
+            rotationEuler: [0, 20, 0]
+            scale: [1, 1, 1]
+        children: []
