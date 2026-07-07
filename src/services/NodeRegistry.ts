@@ -7,6 +7,7 @@ import { CreateSpotLightCommand } from '@/features/scene/CreateSpotLightCommand'
 import { CreateAmbientLightCommand } from '@/features/scene/CreateAmbientLightCommand';
 import { CreateHemisphereLightCommand } from '@/features/scene/CreateHemisphereLightCommand';
 import { CreateCamera3DCommand } from '@/features/scene/CreateCamera3DCommand';
+import { CreateVirtualCamera3DCommand } from '@/features/scene/CreateVirtualCamera3DCommand';
 import { CreateMeshInstanceCommand } from '@/features/scene/CreateMeshInstanceCommand';
 import { CreateSprite3DCommand } from '@/features/scene/CreateSprite3DCommand';
 import { CreateJoystick2DCommand } from '@/features/scene/CreateJoystick2DCommand';
@@ -317,6 +318,18 @@ export class NodeRegistry {
       icon: 'camera',
       keywords: ['create', 'camera', '3d', 'viewport', 'perspective'],
       order: 3,
+    });
+
+    this.registerNodeType({
+      id: 'virtualcamera3d',
+      displayName: 'Virtual Camera',
+      description: 'Cinemachine-lite virtual camera (priority, follow, look-at, blend)',
+      category: '3D',
+      commandClass: CreateVirtualCamera3DCommand,
+      color: '#fe9ebeff',
+      icon: 'camera',
+      keywords: ['create', 'virtual', 'camera', 'vcam', 'cinemachine', '3d', 'follow', 'blend'],
+      order: 3.1,
     });
 
     this.registerNodeType({

@@ -33,6 +33,8 @@ import { GeometryMesh } from '../nodes/3D/GeometryMesh';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 
 import { Camera3D } from '../nodes/3D/Camera3D';
+import { VirtualCamera3D, VIRTUAL_CAMERA_DEFAULTS } from '../nodes/3D/VirtualCamera3D';
+import { isKeyframeEasing } from '../animation/easing';
 
 import { Node2D, type Node2DLayoutConfig } from '../nodes/Node2D';
 import { AssetLoader } from './AssetLoader';
@@ -1561,6 +1563,42 @@ export class SceneLoader {
           near: props.near ?? 0.1,
           far: props.far ?? 1000,
           orthographicSize: props.orthographicSize ?? 5,
+        });
+      }
+      case 'VirtualCamera3D': {
+        const parsed = this.parseNode3DTransforms(baseProps.properties as Record<string, unknown>);
+        const props = baseProps.properties as Record<string, unknown>;
+        return new VirtualCamera3D({
+          ...baseProps,
+          properties: parsed.restProps,
+          position: parsed.position,
+          rotation: parsed.rotation,
+          rotationOrder: parsed.rotationOrder,
+          scale: parsed.scale,
+          priority: this.asNumber(props.priority, VIRTUAL_CAMERA_DEFAULTS.priority),
+          fov: this.asNumber(props.fov, VIRTUAL_CAMERA_DEFAULTS.fov),
+          orthographicSize: this.asNumber(
+            props.orthographicSize,
+            VIRTUAL_CAMERA_DEFAULTS.orthographicSize
+          ),
+          followTargetId: this.asString(props.followTargetId) ?? '',
+          followDamping: this.asNumber(props.followDamping, VIRTUAL_CAMERA_DEFAULTS.followDamping),
+          followOffset: this.readVector3(props.followOffset, ZERO_VECTOR3),
+          deadzone: this.readVector3(props.deadzone, ZERO_VECTOR3),
+          lookAtTargetId: this.asString(props.lookAtTargetId) ?? '',
+          lookAtWeight: this.asNumber(props.lookAtWeight, VIRTUAL_CAMERA_DEFAULTS.lookAtWeight),
+          rotationDamping: this.asNumber(
+            props.rotationDamping,
+            VIRTUAL_CAMERA_DEFAULTS.rotationDamping
+          ),
+          confinerEnabled:
+            typeof props.confinerEnabled === 'boolean' ? props.confinerEnabled : false,
+          confinerCenter: this.readVector3(props.confinerCenter, ZERO_VECTOR3),
+          confinerSize: this.readVector3(props.confinerSize, new Vector3(10, 10, 10)),
+          blendDuration: this.asNumber(props.blendDuration, VIRTUAL_CAMERA_DEFAULTS.blendDuration),
+          blendEasing: isKeyframeEasing(props.blendEasing)
+            ? props.blendEasing
+            : VIRTUAL_CAMERA_DEFAULTS.blendEasing,
         });
       }
       case 'MeshInstance': {

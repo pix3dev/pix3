@@ -17,6 +17,7 @@ import { PlaySoundBehavior } from './PlaySoundBehavior';
 import { ShakeBehavior } from './ShakeBehavior';
 import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
+import { CameraBrainBehavior } from './CameraBrainBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
 
 /**
@@ -130,6 +131,15 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Juice',
     componentClass: PopInBehavior,
     keywords: ['pop', 'spawn', 'scale', 'juice', 'appear', 'intro'],
+  });
+
+  registry.registerComponent({
+    id: 'core:CameraBrain',
+    displayName: 'Camera Brain',
+    description: 'Blends the render camera between virtual cameras by priority (Cinemachine-lite)',
+    category: 'Camera',
+    componentClass: CameraBrainBehavior,
+    keywords: ['camera', 'brain', 'cinemachine', 'virtual', 'blend', 'priority', 'follow'],
   });
 
   console.log('[ScriptRegistry] Registered built-in script components');

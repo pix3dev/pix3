@@ -24,6 +24,7 @@ import { AmbientLightNode } from '../nodes/3D/AmbientLightNode';
 import { HemisphereLightNode } from '../nodes/3D/HemisphereLightNode';
 import { GeometryMesh } from '../nodes/3D/GeometryMesh';
 import { Camera3D } from '../nodes/3D/Camera3D';
+import { VirtualCamera3D } from '../nodes/3D/VirtualCamera3D';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 import { MeshInstance } from '../nodes/3D/MeshInstance';
 import { Sprite3D } from '../nodes/3D/Sprite3D';
@@ -577,6 +578,8 @@ export class SceneSaver {
         props.near = node.near;
         props.far = node.far;
       }
+    } else if (node instanceof VirtualCamera3D) {
+      Object.assign(props, node.serializeConfig());
     } else if (node instanceof MeshInstance) {
       const inst = node as MeshInstance;
       if (inst.src) {

@@ -313,6 +313,40 @@ A camera node that defines the viewpoint for rendering. The scene can have multi
 
 ---
 
+### VirtualCamera3D
+
+A lightweight "virtual camera" (Cinemachine-lite). It does **not** render — it only describes a desired framing. Attach a **Camera Brain** (`core:CameraBrain`) component to a real `Camera3D`; each frame the brain picks the highest-priority visible virtual camera and blends the render camera toward it. Because every knob is a schema property, the keyframe timeline can animate `priority`, `fov`, `position`, etc. — switching cameras is "raise this one's priority above that one" — with no animation code.
+
+**Type String:** `VirtualCamera3D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `priority` | number | 10 | Highest-priority live virtual camera wins (animatable) |
+| `fov` | number | 60 | Field of view applied to a perspective render camera |
+| `orthographicSize` | number | 5 | Size applied to an orthographic render camera |
+| `followTargetId` | node | — | Node whose position this camera follows (empty = authored position) |
+| `followOffset` | vector3 | 0,0,0 | World-space offset from the follow target |
+| `followDamping` | number | 8 | Higher = snappier follow (0 = instant) |
+| `deadzone` | vector3 | 0,0,0 | World half-extents the target may move within before the camera follows |
+| `lookAtTargetId` | node | — | Node this camera orients toward (empty = authored rotation) |
+| `lookAtWeight` | number | 1 | 0 = keep authored rotation, 1 = fully track the target |
+| `rotationDamping` | number | 8 | Higher = snappier aim (0 = instant) |
+| `confinerEnabled` | boolean | false | Clamp the camera position inside an axis-aligned box |
+| `confinerCenter` | vector3 | 0,0,0 | Confiner box center |
+| `confinerSize` | vector3 | 10,10,10 | Confiner box size |
+| `blendDuration` | number | 1 | Seconds to blend the render camera toward this one when it becomes active |
+| `blendEasing` | enum | cubicInOut | Easing curve used for the blend |
+
+**Usage Notes:**
+- Requires a `Camera3D` carrying the `core:CameraBrain` component — that camera is the only one that renders.
+- Standby cameras are still solved every frame, so a camera is already framed when it is cut to.
+- With no follow target, position is left to authored / keyframed values (dolly by keyframes). Same for rotation with no look-at target.
+- Setting a Camera Brain's **Blend On Switch** off makes cuts instantaneous.
+
+---
+
 ### GeometryMesh
 
 A 3D mesh node with built-in geometry. Currently supports box geometry but can be extended.
@@ -451,6 +485,7 @@ A light source that emits a cone of light in a specific direction. Like a flashl
 3. Use **MeshInstance** for imported 3D models
 4. Add **DirectionalLightNode** for overall lighting
 5. Add **PointLightNode** or **SpotLightNode** for localized lighting
+6. For cinematics / dynamic framing, add **VirtualCamera3D** nodes and a **Camera Brain** (`core:CameraBrain`) on the Camera3D to blend between them by priority
 
 ---
 
@@ -464,6 +499,7 @@ A light source that emits a cone of light in a specific direction. Like a flashl
 | Layout2D | width, height, resolutionPreset |
 | Sprite2D | texturePath, width, height, color |
 | Camera3D | projection, fov, near, far |
+| VirtualCamera3D | priority, followTargetId, lookAtTargetId, blendDuration, fov |
 | GeometryMesh | geometry, size, material |
 | MeshInstance | src |
 | DirectionalLightNode | color, intensity, castShadow |

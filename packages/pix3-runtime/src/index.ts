@@ -48,6 +48,7 @@ export * from './nodes/2D/UI/InventorySlot2D';
 
 // 3D Nodes
 export * from './nodes/3D/Camera3D';
+export * from './nodes/3D/VirtualCamera3D';
 export * from './nodes/3D/DirectionalLightNode';
 export * from './nodes/3D/GeometryMesh';
 export * from './nodes/3D/InstancedMesh3D';
@@ -72,6 +73,7 @@ export * from './behaviors/PlaySoundBehavior';
 export * from './behaviors/ShakeBehavior';
 export * from './behaviors/PunchScaleBehavior';
 export * from './behaviors/PopInBehavior';
+export * from './behaviors/CameraBrainBehavior';
 
 // Keyframe animation
 export * from './animation/easing';

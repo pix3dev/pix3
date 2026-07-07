@@ -30,6 +30,7 @@ import { DirectionalLightNode } from '@pix3/runtime';
 import { PointLightNode } from '@pix3/runtime';
 import { SpotLightNode } from '@pix3/runtime';
 import { Camera3D } from '@pix3/runtime';
+import { VirtualCamera3D } from '@pix3/runtime';
 import { MeshInstance } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
@@ -1192,11 +1193,19 @@ export class ViewportRendererService {
   }
 
   private shouldSkipSelectionBounds(node: Node3D): boolean {
-    return node instanceof Camera3D || this.isExplicitLightNode(node);
+    return (
+      node instanceof Camera3D ||
+      node instanceof VirtualCamera3D ||
+      this.isExplicitLightNode(node)
+    );
   }
 
   private shouldKeepSelectedNodeIcon(node: Node3D): boolean {
-    return node instanceof Camera3D || this.isExplicitLightNode(node);
+    return (
+      node instanceof Camera3D ||
+      node instanceof VirtualCamera3D ||
+      this.isExplicitLightNode(node)
+    );
   }
 
   resize(width: number, height: number): void {
@@ -3528,7 +3537,7 @@ export class ViewportRendererService {
         return;
       }
 
-      const isCamera = node instanceof Camera3D;
+      const isCamera = node instanceof Camera3D || node instanceof VirtualCamera3D;
       const isLight =
         node instanceof DirectionalLightNode ||
         node instanceof PointLightNode ||

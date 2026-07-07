@@ -68,12 +68,13 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 
 **Общий критерий готовности P0:** дизайнер собирает 3-секундный intro-синематик (наезд камеры, bloom-вспышка, slow-mo, звук, событие в геймплей) в таймлайне **без кода** — и экспортирует результат, проходящий валидацию хотя бы в 3 ad-сетях.
 
-### P0.1 Виртуальные камеры (Cinemachine-lite) — 🎬🧃 — L
+### P0.1 Виртуальные камеры (Cinemachine-lite) — 🎬🧃 — L — ✅ 3D-часть сделана (Camera2D отложена)
 
 - **Есть:** [Camera3D](../packages/pix3-runtime/src/nodes/3D/Camera3D.ts); [FollowBehavior](../packages/pix3-runtime/src/behaviors/FollowBehavior.ts) уже реализует smoothing/per-axis follow — переиспользовать математику.
 - **Делать:** нода `VirtualCamera3D` (priority, follow target + deadzone, lookAt + вес, confiner-box, FOV/orthoSize) + `CameraBrain` на активной камере (выбор по приоритету, бленд с easing при переключении). Всё — property-schema ⇒ таймлайн анимирует position/FOV/приоритеты **без строчки анимационного кода**.
-- **Camera2D** для 2D-слоя (offset/zoom/limits/shake) — отдельный пункт, M: сейчас 2D-пасс вообще без камеры (фиксированная орто-проекция).
-- Критерий: переключение двух vcam с блендом + follow за движущейся нодой собирается из инспектора.
+- ✅ **Сделано:** [VirtualCamera3D](../packages/pix3-runtime/src/nodes/3D/VirtualCamera3D.ts) (Node3D, не рендерит — описывает кадрирование; follow с per-axis deadzone + damping `1-e^(-k·dt)`, weighted look-at slerp, confiner-box, fov/orthoSize; вся конфигурация через property-schema ⇒ анимируется треками) + [CameraBrainBehavior](../packages/pix3-runtime/src/behaviors/CameraBrainBehavior.ts) `core:CameraBrain` на `Camera3D` (solve всех vcam каждый кадр включая standby, выбор по приоритету среди видимых, снапшот текущей позы на переключении, eased-бленд через `applyEasing` к живой цели, world→local запись в host-камеру). Проводка: SceneLoader/SceneSaver (`serializeConfig`), index, register-behaviors (`core:CameraBrain`), NodeRegistry + Create*Command/Operation, гизмо-иконка в ViewportRenderService. +14 тестов (solve-математика, выбор/бленд брейна, save/load round-trip).
+- **Camera2D** для 2D-слоя (offset/zoom/limits/shake) — отдельный пункт, M: сейчас 2D-пасс вообще без камеры (фиксированная орто-проекция). **Отложена** (осознанно, следующим шагом).
+- Критерий: переключение двух vcam с блендом + follow за движущейся нодой собирается из инспектора. ✅ (покрыто юнит-тестами; рекомендуется e2e-проверка в редакторе через `debug-running-game`)
 
 ### P0.2 Post-processing stack — 🧃🎬 — M
 
@@ -111,7 +112,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → **P0.1** ← следующий → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → ~~P0.1 (vcam-3D)~~ ✅ (Camera2D-подпункт отложен) → **P0.2** ← следующий → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
 
 ---
 
