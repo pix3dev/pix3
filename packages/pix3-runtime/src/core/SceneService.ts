@@ -1,11 +1,23 @@
 import { Camera3D } from '../nodes/3D/Camera3D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
+import { GameTime } from './GameTime';
+import { JuiceApi } from './JuiceApi';
 import type { AudioService } from './AudioService';
 import type { AssetLoader } from './AssetLoader';
 import type { ECSService } from './ECSService';
 import type { ResourceManager } from './ResourceManager';
 import type { SceneRaycastHit } from './raycast';
+
+/** Options for {@link SceneService.flash}. */
+export interface FlashOptions {
+  /** CSS color of the flash overlay (default `#ffffff`). */
+  color?: string;
+  /** Peak opacity 0..1 the overlay snaps to before fading (default `1`). */
+  intensity?: number;
+  /** Fade-out duration in seconds (default `0.2`). */
+  durationSec?: number;
+}
 
 export type ViewportOrientation = 'portrait' | 'landscape';
 
@@ -39,6 +51,7 @@ export interface SceneServiceDelegate {
   getAssetLoader(): AssetLoader;
   getResourceManager(): ResourceManager;
   getECSService(): ECSService | null;
+  getGameTime(): GameTime;
   raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null;
   reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void;
 }
@@ -71,6 +84,11 @@ export class SceneService {
   private delegate: SceneServiceDelegate | null = null;
   private fadeOverlay: HTMLDivElement | null = null;
   private fadeAnimationId: number | null = null;
+  private flashOverlay: HTMLDivElement | null = null;
+  private flashAnimationId: number | null = null;
+  private juiceApi: JuiceApi | null = null;
+  /** Inert fallback used when no scene is running (editor previews, etc.). */
+  private fallbackGameTime: GameTime | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private viewportWidth = 0;
   private viewportHeight = 0;
@@ -95,11 +113,44 @@ export class SceneService {
    */
   dispose(): void {
     this.cancelFade();
+    this.cancelFlash();
     this.fadeOverlay?.remove();
     this.fadeOverlay = null;
+    this.flashOverlay?.remove();
+    this.flashOverlay = null;
     this.canvas = null;
     this.delegate = null;
     this.viewportListeners.clear();
+  }
+
+  // ── Time scale & juice ────────────────────────────────────────────────────
+
+  /**
+   * Global time-scale controller for hitstop / slow-motion (P0.3). Scales the
+   * per-frame delta fed to all gameplay. Example: `this.scene.time.hitstop(80)`.
+   * Falls back to an inert controller when no scene is running.
+   */
+  get time(): GameTime {
+    const fromDelegate = this.delegate?.getGameTime();
+    if (fromDelegate) {
+      return fromDelegate;
+    }
+    if (!this.fallbackGameTime) {
+      this.fallbackGameTime = new GameTime();
+    }
+    return this.fallbackGameTime;
+  }
+
+  /**
+   * Fire-and-forget juice primitives — `shake` / `punchScale` / `popIn` /
+   * `flash`. Same effects as the `core:*` behavior presets. Example:
+   * `this.scene.juice.shake('camera', { amplitude: 12 })`.
+   */
+  get juice(): JuiceApi {
+    if (!this.juiceApi) {
+      this.juiceApi = new JuiceApi(this);
+    }
+    return this.juiceApi;
   }
 
   // ── Camera control ──────────────────────────────────────────────────────────
@@ -350,7 +401,94 @@ export class SceneService {
     this.fadeOverlay.style.opacity = String(Math.max(0, Math.min(1, opacity)));
   }
 
+  // ── Impact flash ──────────────────────────────────────────────────────────
+
+  /**
+   * Full-screen impact flash: snap a colored overlay to `intensity`, then fade
+   * it to transparent over `durationSec`. Uses a dedicated overlay independent
+   * of the fade-to-black one, so a flash never cancels a camera-transition
+   * fade. Runs on real (wall-clock) time, so it still plays while the game is
+   * frozen by a hitstop — exactly what an impact needs.
+   */
+  flash(options: FlashOptions = {}): void {
+    const color =
+      typeof options.color === 'string' && options.color.trim() ? options.color.trim() : '#ffffff';
+    const intensity = Math.max(0, Math.min(1, options.intensity ?? 1));
+    const durationSec = Math.max(0, options.durationSec ?? 0.2);
+
+    this.ensureFlashOverlay();
+    const overlay = this.flashOverlay;
+    if (!overlay) {
+      return;
+    }
+
+    this.cancelFlash();
+    overlay.style.background = color;
+
+    if (intensity <= 0) {
+      overlay.style.opacity = '0';
+      return;
+    }
+
+    overlay.style.opacity = String(intensity);
+
+    const durationMs = durationSec * 1000;
+    if (durationMs === 0) {
+      overlay.style.opacity = '0';
+      return;
+    }
+
+    const startTime = performance.now();
+    const step = (now: number): void => {
+      const t = Math.min((now - startTime) / durationMs, 1);
+      overlay.style.opacity = String(intensity * (1 - t));
+      if (t < 1) {
+        this.flashAnimationId = requestAnimationFrame(step);
+      } else {
+        this.flashAnimationId = null;
+      }
+    };
+    this.flashAnimationId = requestAnimationFrame(step);
+  }
+
   // ── Internals ───────────────────────────────────────────────────────────────
+
+  private ensureFlashOverlay(): void {
+    if (this.flashOverlay) {
+      return;
+    }
+
+    const parent = this.canvas?.parentElement;
+    if (!parent) {
+      console.warn('[SceneService] Cannot create flash overlay: canvas has no parent element.');
+      return;
+    }
+
+    const parentStyle = getComputedStyle(parent);
+    if (parentStyle.position === 'static') {
+      parent.style.position = 'relative';
+    }
+
+    this.flashOverlay = document.createElement('div');
+    this.flashOverlay.style.cssText = [
+      'position: absolute',
+      'inset: 0',
+      'background: #ffffff',
+      'opacity: 0',
+      'pointer-events: none',
+      // Above the fade-to-black overlay (9999) so an impact flash reads on top.
+      'z-index: 10000',
+    ].join('; ');
+
+    parent.appendChild(this.flashOverlay);
+  }
+
+  private cancelFlash(): void {
+    if (this.flashAnimationId !== null) {
+      cancelAnimationFrame(this.flashAnimationId);
+      this.flashAnimationId = null;
+    }
+  }
 
   private ensureFadeOverlay(): void {
     if (this.fadeOverlay) return;

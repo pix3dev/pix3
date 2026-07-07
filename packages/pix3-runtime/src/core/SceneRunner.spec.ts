@@ -66,6 +66,18 @@ class LifecycleScript extends Script {
   }
 }
 
+class DtRecordingScript extends Script {
+  readonly received: number[] = [];
+
+  constructor() {
+    super('dt-recording-script', 'DtRecordingScript');
+  }
+
+  override onUpdate(dt: number): void {
+    this.received.push(dt);
+  }
+}
+
 describe('SceneRunner camera projection updates', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -316,6 +328,58 @@ describe('SceneRunner camera projection updates', () => {
 
     expect(runner.applyLivePropertyUpdate('live-node', 'name', 'Renamed')).toBe(false);
     expect(node.name).toBe('Original');
+  });
+
+  it('scales the gameplay delta by the global Time.scale (slow-mo and hitstop)', () => {
+    const audioService = {
+      stopAll: vi.fn(),
+      getActivePlaybackSnapshot: vi.fn(() => []),
+    } as unknown as AudioService;
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      audioService,
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const cameraNode = new Camera3D({
+      id: 'runtime-timescale',
+      name: 'Camera',
+      projection: 'perspective',
+    });
+    const recorder = new DtRecordingScript();
+    cameraNode.addComponent(recorder);
+
+    const internals = runner as unknown as {
+      activeCamera: Camera3D;
+      runtimeGraph: SceneGraph;
+      sceneService: import('./SceneService').SceneService;
+      isRunning: boolean;
+      tick: () => void;
+      clock: { getDelta: () => number };
+      gameTime: import('./GameTime').GameTime;
+    };
+
+    cameraNode.scene = internals.sceneService;
+    internals.activeCamera = cameraNode;
+    internals.runtimeGraph = createGraph(cameraNode);
+    internals.isRunning = true;
+
+    vi.spyOn(internals.clock, 'getDelta').mockReturnValue(1 / 60);
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+
+    // Frame 1: normal speed.
+    internals.tick();
+    // Frame 2: half speed.
+    internals.gameTime.setScale(0.5);
+    internals.tick();
+    // Frame 3: frozen by a hitstop.
+    internals.gameTime.hitstop(1000);
+    internals.tick();
+
+    expect(recorder.received).toHaveLength(3);
+    expect(recorder.received[0]).toBeCloseTo(1 / 60, 6);
+    expect(recorder.received[1]).toBeCloseTo(1 / 120, 6);
+    expect(recorder.received[2]).toBe(0);
   });
 
   it('detaches runtime scripts and resets started state when stopping', () => {

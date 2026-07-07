@@ -3,6 +3,7 @@ import { AssetLoader } from './AssetLoader';
 import { AudioService } from './AudioService';
 import { ECSService } from './ECSService';
 import { ResourceManager } from './ResourceManager';
+import { GameTime } from './GameTime';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
 
 describe('SceneService viewport API', () => {
@@ -101,6 +102,7 @@ describe('SceneService viewport API', () => {
       getAssetLoader: () => assetLoader,
       getResourceManager: () => resources,
       getECSService: () => null,
+      getGameTime: () => new GameTime(),
       raycastViewport: () => null,
       reportFrameProfilerActivities: () => undefined,
     });
@@ -131,6 +133,7 @@ describe('SceneService viewport API', () => {
       getAssetLoader: () => new AssetLoader(new ResourceManager('/'), new AudioService()),
       getResourceManager: () => new ResourceManager('/'),
       getECSService: () => ecsService,
+      getGameTime: () => new GameTime(),
       raycastViewport: () => hit as never,
       reportFrameProfilerActivities: () => undefined,
     });
@@ -157,6 +160,7 @@ describe('SceneService viewport API', () => {
       getAssetLoader: () => new AssetLoader(new ResourceManager('/'), new AudioService()),
       getResourceManager: () => new ResourceManager('/'),
       getECSService: () => null,
+      getGameTime: () => new GameTime(),
       raycastViewport: () => null,
       reportFrameProfilerActivities,
     });

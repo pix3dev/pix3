@@ -36,6 +36,7 @@ import {
 } from './game-debug';
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
+import { GameTime } from './GameTime';
 
 export interface SceneRunnerFrameSample {
   readonly dt: number;
@@ -61,6 +62,8 @@ export class SceneRunner {
   private readonly audioService: AudioService;
   private readonly resourceManager: ResourceManager;
   private readonly clock: Clock;
+  /** Global time-scale controller (hitstop / slow-mo); scales gameplay dt. */
+  private readonly gameTime = new GameTime();
   private readonly raycaster = new Raycaster();
   private readonly raycastPointer = new Vector2();
   private animationFrameId: number | null = null;
@@ -188,6 +191,7 @@ export class SceneRunner {
     this.fixedTimeAccumulator = 0;
     this.elapsedTime = 0;
     this.frameNumber = 0;
+    this.gameTime.reset();
 
     this.ecsService.beginScene(this.sceneService, this.inputService);
 
@@ -222,6 +226,7 @@ export class SceneRunner {
     this.elapsedTime = 0;
     this.frameNumber = 0;
     this.isPaused = false;
+    this.gameTime.reset();
     this.currentFrameProfilerActivities = [];
 
     // Clear the runtime scene to release resources
@@ -273,7 +278,13 @@ export class SceneRunner {
   private tick = (): void => {
     if (!this.isRunning || this.isPaused) return;
 
-    const dt = this.clock.getDelta();
+    const rawDt = this.clock.getDelta();
+    // Advance the time-scale controller on the REAL delta (so hitstop / slow-mo
+    // can expire even while the game is frozen), then scale gameplay dt by it.
+    // Gameplay (ECS, node ticks, scripts, keyframe clips, fixed-step physics)
+    // all run off `dt`; render() below is unscaled so a frozen frame still paints.
+    this.gameTime.advance(rawDt);
+    const dt = rawDt * this.gameTime.scale;
     const logicStart = performance.now();
     this.currentFrameProfilerActivities = [];
 
@@ -300,7 +311,9 @@ export class SceneRunner {
     this.render();
     const renderMs = performance.now() - renderStart;
     this.notifyFrameListeners({
-      dt,
+      // Report the real (unscaled) delta so FPS stays accurate during slow-mo /
+      // hitstop; `elapsedTime` accumulates scaled game time.
+      dt: rawDt,
       elapsedTime: this.elapsedTime,
       frameNumber: this.frameNumber,
       logicMs,
@@ -588,6 +601,9 @@ export class SceneRunner {
       },
       getECSService(): ECSService | null {
         return runner.runtimeGraph ? runner.ecsService : null;
+      },
+      getGameTime(): GameTime {
+        return runner.gameTime;
       },
       raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null {
         return runner.raycastViewport(normalizedX, normalizedY);

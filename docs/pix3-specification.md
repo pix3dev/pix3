@@ -391,6 +391,51 @@ export class TestRotate extends Script {
 }
 ```
 
+### 6.12 Juice & time-scale primitives (P0.3)
+
+The runtime ships a small "juice" toolkit for the punchy, emotional feedback that
+sells mini-games and playable ads. It is exposed two ways with identical results:
+as a **script API** on `SceneService` (`this.scene.time` / `this.scene.juice`) and
+as **`core:` behavior presets** a designer can attach in the inspector.
+
+**Global time scale.** `SceneRunner` multiplies the per-frame delta fed to all
+gameplay (ECS, node ticks, scripts/behaviors, keyframe clips, fixed-step physics)
+by a single `GameTime.scale`. The `render()` pass is unscaled, so a frozen frame
+still paints. Timers advance on the real delta, so they expire even while frozen.
+
+- `scene.time.hitstop(ms)` — freeze (scale → 0) for `ms` of real time; overlapping
+  calls take the longest pending freeze.
+- `scene.time.slowMotion(scale, { durationMs?, blendMs? })` — ease into a slow-mo
+  scale, optionally hold then blend back to 1.
+- `scene.time.setScale(x)` / `reset()` / `scale` / `isFrozen`.
+
+Frame samples report the **real** (unscaled) delta so FPS stays accurate; scaled
+game time accumulates separately.
+
+**Juice effects** (`scene.juice`, and the matching presets):
+
+- `shake(target, { amplitude, frequency, duration, decay })` — smooth-noise
+  positional shake, **additive** over other motion (removes/re-applies its offset
+  each frame, so it composes with a follow and restores cleanly). `target` is a
+  node, a node query, or `'camera'` for the active 3D camera. Preset: `core:Shake`.
+- `punchScale(target, { amount, duration, vibrato })` — squash-and-stretch scale
+  punch that settles back to the resting scale. Preset: `core:PunchScale`.
+- `popIn(target, { from, duration, easing })` — spawn pop from `from`× up to the
+  authored scale with an overshoot easing. Preset: `core:PopIn` (plays on start).
+- `flash({ color, intensity, durationSec })` — full-screen impact flash overlay,
+  independent of the fade-to-black overlay and run on real time (plays during a
+  hitstop).
+
+Each transform effect is one reused component per node (no per-call allocation)
+and, being ticked through `node.tick`, automatically respects `Time.scale`. The
+canonical "juicy hit" is three calls:
+
+```typescript
+this.scene.time.hitstop(80);
+this.scene.juice.shake('camera', { amplitude: 12 });
+this.scene.juice.flash();
+```
+
 ## 6.5 Layout2D Node
 
 ### 6.5.1 Overview

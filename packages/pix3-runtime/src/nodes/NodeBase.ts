@@ -1,6 +1,6 @@
 import { Object3D, type BufferGeometry, type Material } from 'three';
 import type { PropertySchema } from '../fw/property-schema';
-import type { ScriptComponent, Constructor } from '../core/ScriptComponent';
+import type { ScriptComponent } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
 
 export interface NodeMetadata {
@@ -244,6 +244,9 @@ export class NodeBase extends Object3D {
     if (this._input) {
       component.input = this._input;
     }
+    if (this._scene) {
+      component.scene = this._scene;
+    }
     this.components.push(component);
 
     // Call onAttach if defined
@@ -265,7 +268,7 @@ export class NodeBase extends Object3D {
    * @param type - The constructor/class of the component type to find
    * @returns The first component of the specified type, or null if not found
    */
-  getComponent<T extends ScriptComponent>(type: Constructor<T>): T | null {
+  getComponent<T extends ScriptComponent>(type: new (...args: never[]) => T): T | null {
     const component = this.components.find(c => c instanceof type);
     return component ? (component as T) : null;
   }

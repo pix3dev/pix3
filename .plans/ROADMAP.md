@@ -57,7 +57,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 | Экспорт playable | ⚠️ single-file + size report; **нет сетевых адаптеров/минификации/компрессии** | [PlayableHtmlBuildService.ts](../src/services/PlayableHtmlBuildService.ts) |
 | Debug-мост для агентов | ⚠️ богатый v2; гапы см. гипотезу 3 | [debug-bridge.ts](../src/core/debug-bridge.ts) |
 | Пост-процессинг | ❌ отсутствует полностью (EffectComposer не используется) | — |
-| Глобальный timeScale | ❌ отсутствует (нужен для hitstop/slow-mo) | — |
+| Глобальный timeScale + juice | ✅ GameTime (hitstop/slow-mo) + shake/punchScale/popIn/flash (P0.3) | [GameTime.ts](../packages/pix3-runtime/src/core/GameTime.ts), [JuiceApi.ts](../packages/pix3-runtime/src/core/JuiceApi.ts), [behaviors/](../packages/pix3-runtime/src/behaviors/) |
 | Камера как система (vcams/blend/shake, Camera2D) | ❌ только Camera3D + FollowBehavior | — |
 
 Плюс: operations-first гейтвей (undo/redo даром для любой фичи), сигналы/группы, автолоады, collab-сервер, PWA. Второй стратегический актив после таймлайна — **CommandDispatcher/OperationService**: любая новая команда автоматически доступна агенту через мост.
@@ -82,12 +82,13 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - ⚠️ Бюджет размера: подключать в экспорт условно (эффект не используется → код не инлайнится).
 - Критерий: bloom-вспышка по таймлайну работает и в редакторе, и в экспортированном playable.
 
-### P0.3 Библиотека juice-примитивов — 🧃 — M
+### P0.3 Библиотека juice-примитивов — 🧃 — M — ✅ сделано
 
-- **Глобальный `Time.scale`** в SceneRunner (сейчас нет) → `hitstop(ms)`, slow-mo.
-- `shake(node|camera, {amplitude, frequency, decay})` на Perlin; `flash()`, `punchScale()` (squash&stretch), `popIn()` — поверх существующего easing/tween.
-- Оформить и как API для скриптов, и как behaviors/пресеты (двойное назначение: дизайнер и агент).
-- Критерий: «удар»: hitstop 80 мс + shake камеры + flash — три вызова или три пресета.
+- ✅ **Глобальный `Time.scale`** через [GameTime](../packages/pix3-runtime/src/core/GameTime.ts): `hitstop(ms)` (freeze, стекается по максимуму), `slowMotion(scale,{durationMs,blendMs})` (ease-in + hold + ease-out), `setScale`/`reset`/`scale`/`isFrozen`. [SceneRunner.tick](../packages/pix3-runtime/src/core/SceneRunner.ts) масштабирует gameplay-dt (`dt = rawDt * gameTime.scale`); `render()` не масштабируется (замороженный кадр рисуется); таймеры идут по реальному dt (истекают сквозь заморозку); FPS-сэмпл репортит реальный dt.
+- ✅ Юс-эффекты и как **script API** (`scene.time` / `scene.juice`), и как **`core:` behaviors/пресеты** (двойное назначение): `shake` на гладком шуме — **аддитивный** (убирает/переприменяет офсет каждый кадр, композится с Follow, чисто восстанавливается), `punchScale` (squash&stretch), `popIn` (spawn-pop с overshoot), плюс full-screen `flash()` (отдельный оверлей, реальное время → играет сквозь hitstop). Пресеты: [core:Shake](../packages/pix3-runtime/src/behaviors/ShakeBehavior.ts) / [core:PunchScale](../packages/pix3-runtime/src/behaviors/PunchScaleBehavior.ts) / [core:PopIn](../packages/pix3-runtime/src/behaviors/PopInBehavior.ts). API — [JuiceApi](../packages/pix3-runtime/src/core/JuiceApi.ts) (переиспользует один компонент на ноду; `target` = нода / query / `'camera'`).
+- ✅ Каждый transform-эффект тикается через `node.tick` ⇒ автоматически уважает `Time.scale`. +20 тестов (GameTime, dt-scaling в SceneRunner, эффекты, impact-combo). Побочно: `NodeBase.addComponent` теперь инжектит `scene` (не только `input`); `getComponent` сигнатура починена под strict.
+- **Не сделано (осознанно, отложено):** per-node tint-flash (сейчас flash экранный); Perlin заменён на сумму синусов (детерминизм без Math.random); shake на выделенном camera-pivot (сейчас офсет node.position — минимальная связка с Follow-сглаживанием, задокументирована).
+- Критерий: «удар»: hitstop 80 мс + shake камеры + flash — три вызова. ✅ (impact-combo тест в [JuiceApi.spec.ts](../packages/pix3-runtime/src/core/JuiceApi.spec.ts))
 
 ### P0.4 Event-трек в таймлайне — 🎬🤖 — S — ✅ сделано
 
@@ -110,7 +111,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → **P0.3** ← следующий → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → **P0.1** ← следующий → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
 
 ---
 

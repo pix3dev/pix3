@@ -14,6 +14,9 @@ import { FollowBehavior } from './FollowBehavior';
 import { FadeBehavior } from './FadeBehavior';
 import { RadialProgressBehavior } from './RadialProgressBehavior';
 import { PlaySoundBehavior } from './PlaySoundBehavior';
+import { ShakeBehavior } from './ShakeBehavior';
+import { PunchScaleBehavior } from './PunchScaleBehavior';
+import { PopInBehavior } from './PopInBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
 
 /**
@@ -100,6 +103,33 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Audio',
     componentClass: PlaySoundBehavior,
     keywords: ['audio', 'sound', 'sfx', 'trigger', 'event'],
+  });
+
+  registry.registerComponent({
+    id: 'core:Shake',
+    displayName: 'Shake',
+    description: 'Smooth positional shake, additive over other motion (juice)',
+    category: 'Juice',
+    componentClass: ShakeBehavior,
+    keywords: ['shake', 'juice', 'camera', 'impact', 'screenshake'],
+  });
+
+  registry.registerComponent({
+    id: 'core:PunchScale',
+    displayName: 'Punch Scale',
+    description: 'Squash-and-stretch scale punch on a signal or on start (juice)',
+    category: 'Juice',
+    componentClass: PunchScaleBehavior,
+    keywords: ['punch', 'scale', 'squash', 'stretch', 'juice', 'pop'],
+  });
+
+  registry.registerComponent({
+    id: 'core:PopIn',
+    displayName: 'Pop In',
+    description: 'Scales a node up from zero with an overshoot on spawn (juice)',
+    category: 'Juice',
+    componentClass: PopInBehavior,
+    keywords: ['pop', 'spawn', 'scale', 'juice', 'appear', 'intro'],
   });
 
   console.log('[ScriptRegistry] Registered built-in script components');

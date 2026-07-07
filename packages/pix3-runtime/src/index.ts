@@ -16,6 +16,8 @@ export * from './core/TextureResource';
 export * from './core/AnimationResource';
 export * from './core/ecs';
 export * from './core/ECSService';
+export * from './core/GameTime';
+export * from './core/JuiceApi';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
@@ -67,6 +69,9 @@ export * from './behaviors/RadialProgressBehavior';
 export * from './behaviors/PinToNodeBehavior';
 export * from './behaviors/FadeBehavior';
 export * from './behaviors/PlaySoundBehavior';
+export * from './behaviors/ShakeBehavior';
+export * from './behaviors/PunchScaleBehavior';
+export * from './behaviors/PopInBehavior';
 
 // Keyframe animation
 export * from './animation/easing';
