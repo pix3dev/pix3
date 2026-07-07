@@ -458,7 +458,6 @@ export class SceneRunner {
         this.postFx = new PostProcessingPipeline(this.renderer.getWebGLRenderer());
       }
       this.postFx.ensureLoading();
-      this.postFx.setSize(cssWidth, cssHeight);
     } else if (this.postFx) {
       // No active PostProcess node anymore — free the composer's render targets.
       this.postFx.dispose();

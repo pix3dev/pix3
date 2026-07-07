@@ -60,6 +60,7 @@ export class PostProcessingPipeline {
   private lastOrthoCamera: Camera | null = null;
   private width = 0;
   private height = 0;
+  private readonly sizeScratch = new Vector2();
 
   constructor(renderer: WebGLRenderer) {
     this.renderer = renderer;
@@ -81,14 +82,25 @@ export class PostProcessingPipeline {
     return this.pp !== null;
   }
 
-  setSize(width: number, height: number): void {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
+  /**
+   * Match the composer's render targets to the renderer's current size. The
+   * renderer is the single source of truth — sizing from a caller-supplied
+   * value risks a mismatch (composer RT smaller than the drawing buffer), which
+   * makes the post-processed image cover only part of the canvas. `getSize`
+   * returns CSS pixels; `EffectComposer.setSize` re-applies the pixel ratio for
+   * the render targets, matching the drawing buffer exactly. Guarded so it only
+   * reallocates targets when the size actually changes.
+   */
+  private syncSizeFromRenderer(): void {
+    const size = this.renderer.getSize(this.sizeScratch);
+    const w = Math.max(1, Math.round(size.width));
+    const h = Math.max(1, Math.round(size.height));
     if (w === this.width && h === this.height) {
-      return; // resizing render targets every frame would be very expensive
+      return;
     }
     this.width = w;
     this.height = h;
+    // `false` = don't touch the canvas CSS; the app owns the renderer's size.
     this.composer?.setSize(w, h, false);
   }
 
@@ -108,7 +120,18 @@ export class PostProcessingPipeline {
       return;
     }
 
+    this.syncSizeFromRenderer();
     this.sync(pp, scene, camera3D, orthoCamera, config);
+
+    // The composer must own the full drawing buffer. A host renderer may have
+    // left a partial viewport or an enabled scissor (e.g. the editor viewport's
+    // camera-preview inset, or a viewport tracked at a different size than the
+    // drawing buffer) — without this reset the whole post-processed frame would
+    // render into a sub-rectangle, dropping most of the image.
+    const size = this.renderer.getSize(this.sizeScratch);
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, size.width, size.height);
+
     // No deltaTime — the composer's internal timer supplies it (unused by the
     // current bloom/vignette/CA effects, which are time-independent).
     this.composer?.render();

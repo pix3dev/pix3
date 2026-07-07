@@ -1,0 +1,100 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Auto Template
+  created: 2025-09-27
+  description: Starter scene with box, light, camera and logo sprite
+root:
+  - id: environment-root
+    type: Node3D
+    name: Environment Root
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    children:
+      - id: main-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 60
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 2, 6]
+            rotationEuler: [-10, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 1.2
+          color: "#ffffff"
+          transform:
+            position: [5, 8, 3]
+            rotationEuler: [-45, 35, 0]
+            scale: [1, 1, 1]
+          castShadow: true
+          shadowCameraSize: 20
+          shadowMapSize: 2048
+        children: []
+      - id: demo-box
+        type: GeometryMesh
+        name: Demo Box
+        properties:
+          geometry: box
+          size: [1, 1, 1]
+          material:
+            type: standard
+            color: "#ff00ff"
+          transform:
+            position: [0, 0.5, 0]
+            rotationEuler: [0, 45, 0]
+            scale: [1, 1, 1]
+        children: []
+  - id: ui-root
+    type: Group2D
+    name: UI Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: ui-group
+        type: Group2D
+        name: UI Group
+        properties:
+          width: 256
+          height: 256
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: logo-sprite
+            type: Sprite2D
+            name: Logo Sprite
+            properties:
+              texture:
+                type: texture
+                url: templ://pix3-logo.png
+              width: 64
+              height: 64
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []

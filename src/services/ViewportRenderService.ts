@@ -1514,7 +1514,6 @@ export class ViewportRendererService {
         this.postFx = new PostProcessingPipeline(this.renderer);
       }
       this.postFx.ensureLoading();
-      this.postFx.setSize(this.viewportSize.width, this.viewportSize.height);
     } else if (this.postFx) {
       this.postFx.dispose();
       this.postFx = null;
@@ -1537,8 +1536,14 @@ export class ViewportRendererService {
       this.camera.layers.mask = savedMask;
       this.camera.layers.disableAll();
       this.camera.layers.enable(LAYER_GIZMOS);
+      // Null the scene background first: three's WebGLBackground force-clears the
+      // framebuffer when scene.background is a Color, even with autoClear=false —
+      // which would wipe the composited frame the composer just drew.
+      const savedGizmoBg = this.scene.background;
+      this.scene.background = null;
       this.renderer.autoClear = false;
       this.renderer.render(this.scene, this.camera);
+      this.scene.background = savedGizmoBg;
       this.camera.layers.mask = savedMask;
     } else if (appState.ui.showLayer3D) {
       this.renderer.autoClear = true;
