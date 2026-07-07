@@ -56,7 +56,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 | Инпут | ⚠️ pointer/key события, virtual axes/buttons; **нет жестов** | [InputService.ts](../packages/pix3-runtime/src/core/InputService.ts) |
 | Экспорт playable | ⚠️ single-file + size report; **нет сетевых адаптеров/минификации/компрессии** | [PlayableHtmlBuildService.ts](../src/services/PlayableHtmlBuildService.ts) |
 | Debug-мост для агентов | ⚠️ богатый v2; гапы см. гипотезу 3 | [debug-bridge.ts](../src/core/debug-bridge.ts) |
-| Пост-процессинг | ❌ отсутствует полностью (EffectComposer не используется) | — |
+| Пост-процессинг | ✅ pmndrs/postprocessing (lazy), Bloom/Vignette/ChromaticAberration; LUT — scaffold (P0.2) | [PostProcessingPipeline.ts](../packages/pix3-runtime/src/core/PostProcessingPipeline.ts), [PostProcess.ts](../packages/pix3-runtime/src/nodes/PostProcess.ts) |
 | Глобальный timeScale + juice | ✅ GameTime (hitstop/slow-mo) + shake/punchScale/popIn/flash (P0.3) | [GameTime.ts](../packages/pix3-runtime/src/core/GameTime.ts), [JuiceApi.ts](../packages/pix3-runtime/src/core/JuiceApi.ts), [behaviors/](../packages/pix3-runtime/src/behaviors/) |
 | Камера как система (vcams/blend/shake, Camera2D) | ❌ только Camera3D + FollowBehavior | — |
 
@@ -76,12 +76,15 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - **Camera2D** для 2D-слоя (offset/zoom/limits/shake) — отдельный пункт, M: сейчас 2D-пасс вообще без камеры (фиксированная орто-проекция). **Отложена** (осознанно, следующим шагом).
 - Критерий: переключение двух vcam с блендом + follow за движущейся нодой собирается из инспектора. ✅ (покрыто юнит-тестами; рекомендуется e2e-проверка в редакторе через `debug-running-game`)
 
-### P0.2 Post-processing stack — 🧃🎬 — M
+### P0.2 Post-processing stack — 🧃🎬 — M — ✅ Bloom/Vignette/CA сделано (LUT — scaffold)
 
-- Интеграция `pmndrs/postprocessing` в [RuntimeRenderer](../packages/pix3-runtime/src/core/RuntimeRenderer.ts) и editor-вьюпорт (ViewportRenderService, с учётом on-demand рендера и 2D-пасса поверх).
-- Нода/секция scene settings `PostProcess` со схемой: **Bloom, Vignette, Chromatic Aberration, LUT** — интенсивности анимируются property-треками (bloom-вспышка = 3 ключа).
-- ⚠️ Бюджет размера: подключать в экспорт условно (эффект не используется → код не инлайнится).
-- Критерий: bloom-вспышка по таймлайну работает и в редакторе, и в экспортированном playable.
+- ✅ **Интеграция `pmndrs/postprocessing`** через отдельный [PostProcessingPipeline](../packages/pix3-runtime/src/core/PostProcessingPipeline.ts): владеет `EffectComposer`, **lazy dynamic-import** модуля (code-split — без ноды не качается), 3-band пайплайн (3D RenderPass → depth ClearPass → 2D-content RenderPass → merged EffectPass). Rebuild пассов только при смене структуры; scalar-униформы (intensity/offset/darkness) пишутся каждый кадр ⇒ property-трек анимирует `bloomIntensity` бесплатно (bloom-вспышка = 3 ключа). RT сайзятся от `renderer.getSize()`; viewport/scissor сбрасываются перед композингом (композер владеет полным буфером). Поддержка **чисто-2D сцен** (нет Camera3D — playable ads): 2D-слой становится clearing base band.
+- ✅ **Runtime/play** ([SceneRunner](../packages/pix3-runtime/src/core/SceneRunner.ts)): ветка composer + fallback на старый двухпроходный путь без активной ноды (ноль оверхеда); dispose в `stop()`. **whole-frame** пост по умолчанию (`affect2D`), 2D-контент идёт сквозь эффекты. **Editor** ([ViewportRenderService](../src/services/ViewportRenderService.ts)): постит только **3D-банд** (gizmos замаскированы и рисуются чисто поверх; 2D-контент+адорнменты — чисто поверх), on-demand-aware.
+- ✅ **Нода `PostProcess`** ([nodes/PostProcess.ts](../packages/pix3-runtime/src/nodes/PostProcess.ts)) — Godot-`WorldEnvironment`-стиль (NodeBase, не рендерит), плоские анимируемые свойства: **Bloom** (intensity/threshold/smoothing/radius), **Vignette** (offset/darkness), **Chromatic Aberration** (offset), `affect2D`. Проводка: index, SceneLoader/Saver round-trip, NodeRegistry, `CreatePostProcess{Command,Operation}`; инспектор рисуется из схемы. +8 юнит-тестов (config/isActive/round-trip; рендер не тестируется в happy-dom).
+- ✅ **Бюджет размера**: `postprocessing` подключается динамическим импортом ⇒ проект без пост-эффектов не инлайнит его в экспортированный playable.
+- **Грабли (стоило часов, 2026-07-08):** three `WebGLBackground` **force-clear'ит фреймбуфер даже при `autoClear=false`**, если `scene.background` — `Color`. Любой `renderer.render(scene,cam)` после композера, не занулив `scene.background`, стирает кадр в цвет фона. Симптом: в редакторе 3D-сцена исчезала при включении поста (gizmo-пасс стирал композит). Фикс: занулять `scene.background` вокруг пост-композер рендеров.
+- **Не сделано (отложено):** **LUT**-эффект (схема есть; эффект ждёт async-загрузку .cube/.3dl lookup-текстуры через AssetLoader); [CanvasLayer2D](../packages/pix3-runtime/src/nodes/2D/) (чистый overlay-band для UI поверх размытой сцены — выстрелит вместе с blur/DOF); editor full-2D-post (вынести 2D-адорнменты на выделенный чистый слой, чтобы 2D тоже постился в превью).
+- Критерий: bloom-вспышка по таймлайну работает и в редакторе, и в экспортированном playable. ✅ проверено live через `debug-running-game` (whole-frame bloom в play-mode + 3D-превью в редакторе; A/B: draw calls 50→33 при выключении, стабильные 60 FPS). LUT-часть — после async-загрузки текстур.
 
 ### P0.3 Библиотека juice-примитивов — 🧃 — M — ✅ сделано
 
@@ -112,7 +115,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → ~~P0.1 (vcam-3D)~~ ✅ (Camera2D-подпункт отложен) → **P0.2** ← следующий → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → ~~P0.1 (vcam-3D)~~ ✅ (Camera2D-подпункт отложен) → ~~P0.2 (post-fx)~~ ✅ Bloom/Vignette/CA (LUT/CanvasLayer2D/editor-2D — отложены) → **P0.6** ← следующий (ad-network адаптеры экспорта).
 
 ---
 
