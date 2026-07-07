@@ -15,6 +15,7 @@ import { timeToX } from './timeline-geometry';
 import type {
   AudioTrack,
   ClipTrack,
+  EventTrack,
   KeyframeValue,
   PropertyTrack,
   TrackValueType,
@@ -264,6 +265,21 @@ export function buildLanePreview(
       kind: 'text',
       segments: buildText(
         audio.keys.map(key => ({ time: key.time, label: basename(key.audioPath) })),
+        zoom,
+        endTime
+      ),
+    };
+  }
+
+  if (track.kind === 'event') {
+    const event = track as EventTrack;
+    return {
+      kind: 'text',
+      segments: buildText(
+        event.keys.map(key => ({
+          time: key.time,
+          label: key.args.trim().length > 0 ? `${key.signal}(${key.args.trim()})` : key.signal,
+        })),
         zoom,
         endTime
       ),

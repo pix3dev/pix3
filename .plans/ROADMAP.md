@@ -89,16 +89,19 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Оформить и как API для скриптов, и как behaviors/пресеты (двойное назначение: дизайнер и агент).
 - Критерий: «удар»: hitstop 80 мс + shake камеры + flash — три вызова или три пресета.
 
-### P0.4 Event-трек в таймлайне — 🎬🤖 — S
+### P0.4 Event-трек в таймлайне — 🎬🤖 — S — ✅ сделано
 
-- Новый `kind: 'event'` по образцу `AudioTrack` ([keyframe-types.ts](../packages/pix3-runtime/src/animation/keyframe-types.ts)): в момент t → `emit(signal, args)` на host/target-ноде или `callGroup(...)`. Расширить [clip-evaluator.ts](../packages/pix3-runtime/src/animation/clip-evaluator.ts) + строка в панели таймлайна.
+- ✅ Новый `kind: 'event'` по образцу `AudioTrack` ([keyframe-types.ts](../packages/pix3-runtime/src/animation/keyframe-types.ts)): в момент t → `emit(signal, ...args)` на host/target-ноде. `EventTrack { name, targetPath, keys: [{ time, signal, args }] }`; `args` — сырая строка, парсится `parseEventArgs()` (пусто → нет аргов, JSON-массив → spread, иной JSON → один арг, нераспарсенное → строка).
+- ✅ Расширены [clip-evaluator.ts](../packages/pix3-runtime/src/animation/clip-evaluator.ts) (`collectEventKeysInRange`, `fireEventKey`, `eventEntries` в `ClipBinding`), плеер ([AnimationPlayerBehavior.ts](../packages/pix3-runtime/src/animation/AnimationPlayerBehavior.ts), `fireTimeWindow` = audio+events с единым окном), редактор ([clip-edit-utils.ts](../src/features/animation-timeline/clip-edit-utils.ts), панель, preview-сервис, lane-preview). +14 тестов.
+- **Не сделано в v1** (осознанно): UI для редактирования `targetPath` (в данных есть, кнопка создаёт host-scoped); `callGroup(...)` из event-трека (`SceneService` не отдаёт его в рантайм — отдельная задача по проводке).
 - Это клей кат-сцены: камера+VFX+звук+геймплей синхронизируются одним клипом. Сигнальный движок уже готов принимать.
 
-### P0.5 Hot reload свойств в play mode — 🧃🤖 — M
+### P0.5 Hot reload свойств в play mode — 🧃🤖 — M — ✅ сделано
 
-- Форвардинг `UpdateObjectPropertyOperation` в рантайм-клон по `nodeId` при `isPlaying` (маппинг authored→clone в SceneRunner). Структурные изменения (add/remove node) — вне скоупа, отдельно в P1/P2.
-- Мгновенно ускоряет тюнинг всего P0 (интенсивность shake, кривые, тайминги) и оживляет `__PIX3_DEBUG__.setProperty` во время игры.
-- Критерий: изменение свойства в инспекторе видно в запущенной игре ≤1 кадра, без рестарта.
+- ✅ Форвардинг `UpdateObjectPropertyOperation` в рантайм-клон по `nodeId` при `isPlaying`. Маппинг authored→clone бесплатный: клон — это serialize→parse копия, `nodeId` совпадает 1:1, применение через тот же `getNodePropertySchema().setValue`, что и загрузчик. Структурные изменения (add/remove node) — вне скоупа, отдельно в P1/P2.
+- ✅ Развязка через globalThis-sink в [game-debug.ts](../packages/pix3-runtime/src/core/game-debug.ts) (`registerRuntimeLivePropertySink`/`getRuntimeLivePropertySink`, по образцу `registerRuntimeSceneRoot`). [SceneRunner](../packages/pix3-runtime/src/core/SceneRunner.ts) регистрирует `applyLivePropertyUpdate` в `startScene`, чистит в `stop`; для 2D повторяет authored-rect capture / anchored-reflow, чтобы лейаут не откатывал правку. [Операция](../src/features/properties/UpdateObjectPropertyOperation.ts) форвардит в perform/undo/redo (в т.ч. opacity-ветка).
+- ✅ `__PIX3_DEBUG__.setProperty` оживает во время игры автоматически (тот же путь command→operation). +5 тестов (SceneRunner + Operation).
+- Критерий: изменение свойства в инспекторе видно в запущенной игре ≤1 кадра, без рестарта. ✅
 
 ### P0.6 Ad-network адаптеры экспорта — 💰 — M
 
@@ -107,7 +110,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** P0.4 (S, быстрый клей) → P0.5 (множитель для всего дальнейшего тюнинга) → P0.3 → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → **P0.3** ← следующий → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
 
 ---
 

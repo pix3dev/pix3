@@ -77,6 +77,40 @@ describe('normalizeKeyframeAnimationSet', () => {
     }
   });
 
+  it('normalizes event tracks and drops keys without a signal', () => {
+    const set = normalizeKeyframeAnimationSet({
+      clips: [
+        {
+          name: 'cue',
+          tracks: [
+            {
+              kind: 'event',
+              targetPath: '.',
+              keys: [
+                { time: 1, signal: 'flash', args: '["white"]' },
+                { time: 0, signal: '  ' },
+                { time: 0.5, signal: 'boom' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(set.clips[0].tracks).toHaveLength(1);
+    const event = set.clips[0].tracks[0];
+    expect(event.kind).toBe('event');
+    if (event.kind === 'event') {
+      expect(event.name).toBe('Events');
+      expect(event.targetPath).toBe('');
+      // Empty-signal key dropped, remaining sorted by time.
+      expect(event.keys.map(k => k.signal)).toEqual(['boom', 'flash']);
+      expect(event.keys[1].args).toBe('["white"]');
+      // A missing args field normalizes to an empty string.
+      expect(event.keys[0].args).toBe('');
+    }
+  });
+
   it('makes duplicate clip names and track ids unique', () => {
     const set = normalizeKeyframeAnimationSet({
       clips: [

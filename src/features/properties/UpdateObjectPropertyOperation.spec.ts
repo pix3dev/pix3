@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createInitialAppState } from '@/state/AppState';
-import { NodeBase, SceneManager, Sprite2D } from '@pix3/runtime';
+import { NodeBase, SceneManager, Sprite2D, registerRuntimeLivePropertySink } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { UpdateObjectPropertyOperation } from './UpdateObjectPropertyOperation';
 
@@ -116,6 +116,52 @@ describe('UpdateObjectPropertyOperation', () => {
     expect(sprite.opacity).toBe(0.35);
     expect(viewportRendererMock.updateNodeTransform).toHaveBeenCalledWith(sprite);
     expect(viewportRendererMock.updateSelection).not.toHaveBeenCalled();
+  });
+
+  it('forwards perform/undo/redo edits to the running clone via the runtime sink', async () => {
+    const calls: Array<{ nodeId: string; propertyPath: string; value: unknown }> = [];
+    registerRuntimeLivePropertySink((nodeId, propertyPath, value) => {
+      calls.push({ nodeId, propertyPath, value });
+      return true;
+    });
+
+    try {
+      const node = new NodeBase({ id: 'node-1', type: 'Node3D', name: 'Node 1' });
+      const { context } = createOperationContext(node);
+      const operation = new UpdateObjectPropertyOperation({
+        nodeId: 'node-1',
+        propertyPath: 'name',
+        value: 'Renamed',
+      });
+
+      const result = await operation.perform(context);
+      expect(result.didMutate).toBe(true);
+      expect(calls[0]).toEqual({ nodeId: 'node-1', propertyPath: 'name', value: 'Renamed' });
+
+      await result.commit?.undo();
+      expect(calls[1]).toEqual({ nodeId: 'node-1', propertyPath: 'name', value: 'Node 1' });
+
+      await result.commit?.redo();
+      expect(calls[2]).toEqual({ nodeId: 'node-1', propertyPath: 'name', value: 'Renamed' });
+    } finally {
+      registerRuntimeLivePropertySink(null);
+    }
+  });
+
+  it('applies cleanly with no runtime sink registered (edit mode)', async () => {
+    registerRuntimeLivePropertySink(null);
+    const node = new NodeBase({ id: 'node-1', type: 'Node3D', name: 'Node 1' });
+    const { context } = createOperationContext(node);
+    const operation = new UpdateObjectPropertyOperation({
+      nodeId: 'node-1',
+      propertyPath: 'name',
+      value: 'Renamed',
+    });
+
+    const result = await operation.perform(context);
+
+    expect(result.didMutate).toBe(true);
+    expect(node.name).toBe('Renamed');
   });
 
   it('keeps explicit initial visibility unchanged', async () => {

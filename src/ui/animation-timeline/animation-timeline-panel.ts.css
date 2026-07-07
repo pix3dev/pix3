@@ -65,7 +65,9 @@ pix3-animation-timeline-panel .atl-field {
 }
 
 /* Autokey record toggle — red + filled dot while armed. */
-pix3-animation-timeline-panel pix3-toolbar[variant='panel'] pix3-toolbar-button.atl-record[toggled] {
+pix3-animation-timeline-panel
+  pix3-toolbar[variant='panel']
+  pix3-toolbar-button.atl-record[toggled] {
   background: #ef4444;
   color: #fff;
 }
@@ -327,13 +329,17 @@ pix3-animation-timeline-panel .atl-track-remove:hover {
 pix3-animation-timeline-panel .atl-lane {
   position: relative;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background:
-    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 8px 0 / 120px 100%;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 8px 0 /
+    120px 100%;
   overflow: hidden;
 }
 
 pix3-animation-timeline-panel .atl-lane--audio {
   background-color: rgba(96, 165, 250, 0.04);
+}
+
+pix3-animation-timeline-panel .atl-lane--event {
+  background-color: rgba(245, 158, 11, 0.05);
 }
 
 /* In-lane preview layer — value curves / color ramp / text chips, behind keys. */
@@ -420,6 +426,21 @@ pix3-animation-timeline-panel .atl-key--audio {
 }
 
 pix3-animation-timeline-panel .atl-key--audio.atl-key--selected {
+  background: var(--pix3-accent-color, #ffcf33);
+}
+
+/* Event keys: upright amber square, distinct from property diamonds and audio dots. */
+pix3-animation-timeline-panel .atl-key--event {
+  transform: translate(-50%, -50%) rotate(0deg);
+  border-radius: 2px;
+  background: #f59e0b;
+}
+
+pix3-animation-timeline-panel .atl-key--event:hover {
+  background: #fbbf24;
+}
+
+pix3-animation-timeline-panel .atl-key--event.atl-key--selected {
   background: var(--pix3-accent-color, #ffcf33);
 }
 

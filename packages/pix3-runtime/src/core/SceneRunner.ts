@@ -29,8 +29,13 @@ import { assign2DRenderOrder } from './render-order-2d';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
 import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
-import { registerRuntimeSceneRoot, isPhysicsDebugEnabled } from './game-debug';
+import {
+  registerRuntimeSceneRoot,
+  registerRuntimeLivePropertySink,
+  isPhysicsDebugEnabled,
+} from './game-debug';
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
+import { getNodePropertySchema } from '../fw/property-schema-utils';
 
 export interface SceneRunnerFrameSample {
   readonly dt: number;
@@ -156,6 +161,13 @@ export class SceneRunner {
     // graph — the only place spawned objects (droppables, clusters) live.
     registerRuntimeSceneRoot(this.scene);
 
+    // Let inspector/debug property edits hot-reload into this running clone
+    // (P0.5). The sink is cleared in stop() so edits fall back to no-op in
+    // edit mode.
+    registerRuntimeLivePropertySink((nodeId, propertyPath, value) =>
+      this.applyLivePropertyUpdate(nodeId, propertyPath, value)
+    );
+
     this.applyInitialVisibility(this.runtimeGraph.rootNodes);
 
     // Attach InputService to renderer
@@ -193,6 +205,7 @@ export class SceneRunner {
   stop(): void {
     this.isRunning = false;
     registerRuntimeSceneRoot(null);
+    registerRuntimeLivePropertySink(null);
     if (this.physicsDebugOverlay) {
       this.physicsDebugOverlay.dispose();
       this.physicsDebugOverlay = null;
@@ -466,6 +479,81 @@ export class SceneRunner {
       if (found) return found;
     }
     return null;
+  }
+
+  /**
+   * Hot-reload a single property edit onto the *running clone* (P0.5). The clone
+   * is an isolated serialize→parse copy of the authored graph, so `nodeId`s match
+   * one-to-one; we apply the edit through the same property-schema `setValue`
+   * mechanism the loader uses, then mirror the 2D authored-rect capture / anchored
+   * reflow that the editor's `UpdateObjectPropertyOperation` performs, so anchored
+   * layout does not revert the change on the next frame. Returns `true` when the
+   * property was found and applied. The next render (every frame) shows the change.
+   */
+  applyLivePropertyUpdate(nodeId: string, propertyPath: string, value: unknown): boolean {
+    if (!this.isRunning || !this.runtimeGraph) {
+      return false;
+    }
+
+    const node = this.findNodeById(nodeId);
+    if (!node) {
+      return false;
+    }
+
+    const schema = getNodePropertySchema(node);
+    const propDef = schema.properties.find(p => p.name === propertyPath);
+    if (!propDef) {
+      // Defensive fallback for runtime/editor schema drift, mirroring the
+      // authored operation's opacity special-case.
+      if (propertyPath === 'opacity' && node instanceof Node2D) {
+        const next = Number(value);
+        if (!Number.isFinite(next)) {
+          return false;
+        }
+        node.opacity = Math.max(0, Math.min(1, next));
+        return true;
+      }
+      return false;
+    }
+
+    propDef.setValue(node, value);
+    this.afterLivePropertyApplied(node, propertyPath);
+    return true;
+  }
+
+  /**
+   * Mirrors {@link UpdateObjectPropertyOperation}'s `afterNodePropertyApplied`
+   * for the running clone: re-capture the authored layout rect for
+   * position/size edits and reflow anchored children of resized containers so
+   * the per-frame anchored layout keeps the edited value instead of reverting.
+   */
+  private afterLivePropertyApplied(node: NodeBase, propertyPath: string): void {
+    if (!(node instanceof Node2D)) {
+      return;
+    }
+
+    if (['position', 'width', 'height', 'size', 'radius'].includes(propertyPath)) {
+      node.captureAuthoredLayoutRectFromCurrent();
+    }
+
+    if (
+      ['width', 'height', 'size', 'radius', 'resolutionPreset'].includes(propertyPath) &&
+      node.isContainer
+    ) {
+      node.reflowAnchoredChildren();
+      this.captureAnchoredDescendantRects(node);
+    }
+  }
+
+  private captureAnchoredDescendantRects(parent: NodeBase): void {
+    for (const child of parent.children) {
+      if (child instanceof Node2D) {
+        child.captureAuthoredLayoutRectFromCurrent();
+      }
+      if (child instanceof NodeBase) {
+        this.captureAnchoredDescendantRects(child);
+      }
+    }
   }
 
   private bindSceneServiceDelegate(): void {

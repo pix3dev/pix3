@@ -70,7 +70,34 @@ export interface AudioTrack {
   keys: AudioKeyframe[];
 }
 
-export type ClipTrack = PropertyTrack | AudioTrack;
+export interface EventKeyframe {
+  time: number;
+  /** Signal name emitted on the target node when the playhead crosses this key. */
+  signal: string;
+  /**
+   * Raw argument string, parsed at fire time (see `parseEventArgs`):
+   * empty → no args, JSON array → spread, JSON scalar → single arg,
+   * unparseable → the raw string as a single arg.
+   */
+  args: string;
+}
+
+export interface EventTrack {
+  id: string;
+  kind: 'event';
+  /** Display label. */
+  name: string;
+  /**
+   * Relative name path from the host node ('' or '.' = the host itself,
+   * otherwise 'Child/GrandChild' with NodeBase.findByPath semantics). The
+   * signal is emitted on the resolved node.
+   */
+  targetPath: string;
+  enabled: boolean;
+  keys: EventKeyframe[];
+}
+
+export type ClipTrack = PropertyTrack | AudioTrack | EventTrack;
 
 export interface KeyframeClip {
   /** Unique within the animation set. */
@@ -180,6 +207,15 @@ function normalizeAudioKeyframe(raw: unknown): AudioKeyframe {
   };
 }
 
+function normalizeEventKeyframe(raw: unknown): EventKeyframe {
+  const candidate = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  return {
+    time: Math.max(0, toFiniteNumber(candidate.time, 0)),
+    signal: toTrimmedString(candidate.signal, ''),
+    args: typeof candidate.args === 'string' ? candidate.args : '',
+  };
+}
+
 function normalizeTrack(raw: unknown, usedIds: Set<string>): ClipTrack | null {
   const candidate = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
 
@@ -199,6 +235,21 @@ function normalizeTrack(raw: unknown, usedIds: Set<string>): ClipTrack | null {
       id,
       kind: 'audio',
       name: toTrimmedString(candidate.name, 'Audio'),
+      enabled,
+      keys,
+    };
+  }
+
+  if (candidate.kind === 'event') {
+    const keys = rawKeys.map(normalizeEventKeyframe).filter(key => key.signal.length > 0);
+    keys.sort((a, b) => a.time - b.time);
+    const targetPathRaw =
+      typeof candidate.targetPath === 'string' ? candidate.targetPath.trim() : '';
+    return {
+      id,
+      kind: 'event',
+      name: toTrimmedString(candidate.name, 'Events'),
+      targetPath: targetPathRaw === '.' ? '' : targetPathRaw,
       enabled,
       keys,
     };

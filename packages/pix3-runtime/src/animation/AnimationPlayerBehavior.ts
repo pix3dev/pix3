@@ -15,7 +15,9 @@ import type { PropertySchema } from '../fw/property-schema';
 import {
   applyClipAtTime,
   collectAudioKeysInRange,
+  collectEventKeysInRange,
   createClipBindings,
+  fireEventKey,
   type ClipBinding,
 } from './clip-evaluator';
 import {
@@ -140,13 +142,13 @@ export class AnimationPlayerBehavior extends Script {
 
     if (next >= clip.duration) {
       if (clip.loop && clip.duration > 0) {
-        this.fireAudioKeys(binding, prev, clip.duration, includeStart);
+        this.fireTimeWindow(binding, prev, clip.duration, includeStart);
         next = next % clip.duration;
         this.time = next;
         applyClipAtTime(binding, next);
-        this.fireAudioKeys(binding, 0, next, true);
+        this.fireTimeWindow(binding, 0, next, true);
       } else {
-        this.fireAudioKeys(binding, prev, clip.duration, includeStart);
+        this.fireTimeWindow(binding, prev, clip.duration, includeStart);
         this.time = clip.duration;
         applyClipAtTime(binding, clip.duration);
         this.playing = false;
@@ -157,7 +159,7 @@ export class AnimationPlayerBehavior extends Script {
 
     this.time = next;
     applyClipAtTime(binding, next);
-    this.fireAudioKeys(binding, prev, next, includeStart);
+    this.fireTimeWindow(binding, prev, next, includeStart);
   }
 
   override onDetach(): void {
@@ -267,7 +269,7 @@ export class AnimationPlayerBehavior extends Script {
     if (!this.binding || this.binding.clip !== clip) {
       const host = this.node;
       if (!host) {
-        return { clip, entries: [], audioTracks: [], missingTargets: [] };
+        return { clip, entries: [], audioTracks: [], eventEntries: [], missingTargets: [] };
       }
       this.binding = createClipBindings(host, clip);
       if (this.binding.missingTargets.length > 0 && !this.missingTargetsWarned) {
@@ -281,15 +283,17 @@ export class AnimationPlayerBehavior extends Script {
     return this.binding;
   }
 
-  private fireAudioKeys(
+  /**
+   * Fire all time-window keys (audio + events) crossed while advancing from
+   * `from` to `to`. Audio and events share identical windowing so that keys on
+   * either kind of track fire exactly once per crossing, including loop wraps.
+   */
+  private fireTimeWindow(
     binding: ClipBinding,
     from: number,
     to: number,
     includeStart: boolean
   ): void {
-    if (binding.audioTracks.length === 0) {
-      return;
-    }
     for (const track of binding.audioTracks) {
       const keys = collectAudioKeysInRange(track, from, to, {
         wrapDuration: binding.clip.duration,
@@ -297,6 +301,16 @@ export class AnimationPlayerBehavior extends Script {
       });
       for (const key of keys) {
         void this.playAudioKey(key);
+      }
+    }
+
+    for (const entry of binding.eventEntries) {
+      const keys = collectEventKeysInRange(entry.track, from, to, {
+        wrapDuration: binding.clip.duration,
+        includeStart,
+      });
+      for (const key of keys) {
+        fireEventKey(entry.node, key);
       }
     }
   }

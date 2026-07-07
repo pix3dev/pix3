@@ -252,6 +252,72 @@ describe('SceneRunner camera projection updates', () => {
     expect(samples[1]?.activeAudioPlaybacks).toBeUndefined();
   });
 
+  it('hot-reloads a property edit onto the running clone by nodeId', () => {
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const node = new NodeBase({ id: 'live-node', name: 'Original' });
+
+    (runner as unknown as { runtimeGraph: SceneGraph; isRunning: boolean }).runtimeGraph = {
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [node],
+      nodeMap: new Map([[node.nodeId, node]]),
+    };
+    (runner as unknown as { isRunning: boolean }).isRunning = true;
+
+    const applied = runner.applyLivePropertyUpdate('live-node', 'name', 'Renamed');
+
+    expect(applied).toBe(true);
+    expect(node.name).toBe('Renamed');
+  });
+
+  it('returns false for an unknown node id or an unknown property', () => {
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const node = new NodeBase({ id: 'live-node', name: 'Original' });
+
+    (runner as unknown as { runtimeGraph: SceneGraph; isRunning: boolean }).runtimeGraph = {
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [node],
+      nodeMap: new Map([[node.nodeId, node]]),
+    };
+    (runner as unknown as { isRunning: boolean }).isRunning = true;
+
+    expect(runner.applyLivePropertyUpdate('missing', 'name', 'x')).toBe(false);
+    expect(runner.applyLivePropertyUpdate('live-node', 'notARealProp', 'x')).toBe(false);
+    expect(node.name).toBe('Original');
+  });
+
+  it('does not apply live property updates when the runner is not running', () => {
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const node = new NodeBase({ id: 'live-node', name: 'Original' });
+
+    (runner as unknown as { runtimeGraph: SceneGraph }).runtimeGraph = {
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [node],
+      nodeMap: new Map([[node.nodeId, node]]),
+    };
+    // isRunning stays false.
+
+    expect(runner.applyLivePropertyUpdate('live-node', 'name', 'Renamed')).toBe(false);
+    expect(node.name).toBe('Original');
+  });
+
   it('detaches runtime scripts and resets started state when stopping', () => {
     const audioService = {
       stopAll: vi.fn(),

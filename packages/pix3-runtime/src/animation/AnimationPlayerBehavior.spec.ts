@@ -173,6 +173,71 @@ describe('AnimationPlayerBehavior', () => {
     expect(play).toHaveBeenCalledTimes(2);
   });
 
+  it('fires event keys exactly once when the playhead crosses them', () => {
+    const withEvents = {
+      clips: [
+        {
+          name: 'cue',
+          duration: 1,
+          loop: false,
+          tracks: [
+            {
+              kind: 'event',
+              name: 'Events',
+              targetPath: '',
+              keys: [
+                { time: 0, signal: 'intro_started', args: '' },
+                { time: 0.5, signal: 'flash', args: '["white", 3]' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const { host } = createPlayer(withEvents, { autoplay: 'cue' });
+    const started = vi.fn();
+    const flash = vi.fn();
+    host.connect('intro_started', host, started);
+    host.connect('flash', host, flash);
+
+    host.tick(0.4); // fires the t=0 key (includeStart on first frame)
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(flash).not.toHaveBeenCalled();
+
+    host.tick(0.2); // crosses t=0.5
+    expect(flash).toHaveBeenCalledTimes(1);
+    expect(flash).toHaveBeenCalledWith('white', 3);
+
+    host.tick(0.2); // no keys in (0.6, 0.8]
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(flash).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits event keys to a descendant target node', () => {
+    const withEvents = {
+      clips: [
+        {
+          name: 'cue',
+          duration: 1,
+          tracks: [
+            {
+              kind: 'event',
+              name: 'Child events',
+              targetPath: 'Icon',
+              keys: [{ time: 0.5, signal: 'hit', args: '' }],
+            },
+          ],
+        },
+      ],
+    };
+    const { host, child } = createPlayer(withEvents, { autoplay: 'cue' });
+    const hit = vi.fn();
+    child.connect('hit', child, hit);
+
+    host.tick(0.6);
+    expect(hit).toHaveBeenCalledTimes(1);
+  });
+
   it('preloads audio buffers on start', async () => {
     const withAudio = {
       clips: [
