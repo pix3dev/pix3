@@ -10,6 +10,7 @@ export * from './core/SceneSaver';
 export * from './core/SceneManager';
 export * from './core/SceneRunner';
 export * from './core/RuntimeRenderer';
+export * from './core/PostProcessingPipeline';
 export * from './core/InputService';
 export * from './core/SceneService';
 export * from './core/TextureResource';
@@ -29,6 +30,7 @@ export * from './nodes/NodeBase';
 export * from './nodes/Node2D';
 export * from './nodes/Node3D';
 export * from './nodes/AudioPlayer';
+export * from './nodes/PostProcess';
 
 // 2D Nodes
 export * from './nodes/2D/Sprite2D';

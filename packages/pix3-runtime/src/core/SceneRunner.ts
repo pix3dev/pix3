@@ -24,6 +24,8 @@ import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
 import { Particles3D } from '../nodes/3D/Particles3D';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 import { AudioPlayer } from '../nodes/AudioPlayer';
+import { PostProcess } from '../nodes/PostProcess';
+import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { LAYER_3D, LAYER_2D } from '../constants';
 import { assign2DRenderOrder } from './render-order-2d';
 import { ECSService } from './ECSService';
@@ -83,6 +85,9 @@ export class SceneRunner {
   private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
   /** Lazily created collider wireframe overlay (only while physics debug is on). */
   private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
+  /** Lazily created post-processing composer (only while a PostProcess node is
+   * active). Null when no effects are enabled — then the plain two-pass path runs. */
+  private postFx: PostProcessingPipeline | null = null;
 
   constructor(
     sceneManager: SceneManager,
@@ -213,6 +218,10 @@ export class SceneRunner {
     if (this.physicsDebugOverlay) {
       this.physicsDebugOverlay.dispose();
       this.physicsDebugOverlay = null;
+    }
+    if (this.postFx) {
+      this.postFx.dispose();
+      this.postFx = null;
     }
     this.clock.stop();
     if (this.animationFrameId !== null) {
@@ -431,42 +440,122 @@ export class SceneRunner {
     }
 
     // 2. Render Passes
+    //
+    // Two paths share the same layer-separated scene: a plain two-pass path
+    // (3D then 2D overlay) and a post-processing path that routes bands through
+    // an EffectComposer. The composer path only engages when an active
+    // PostProcess node exists AND its module has finished loading; until then
+    // we fall back to the plain path so the first frames never stall.
+    const postNode = this.findActivePostProcessNode();
+    const postConfig = postNode ? postNode.getConfig() : null;
+    // The composer needs at least one band: a 3D camera, or 2D content routed
+    // through post (`affect2D`). Pure-2D scenes (playable ads) have no Camera3D
+    // but still post the 2D layer as the composer's base band.
+    const canPostProcess = !!postConfig && (!!this.activeCamera || postConfig.affect2D);
 
-    // Pass 1: 3D
-    if (this.activeCamera) {
-      this.updateBillboardSprites(this.runtimeGraph?.rootNodes ?? [], this.activeCamera.camera);
-      this.renderer.setAutoClear(true);
-      this.renderer.render(this.scene, this.activeCamera.camera);
-    } else {
-      this.renderer.setAutoClear(true);
-      this.renderer.clear();
-    }
-
-    // Pass 1.5: Physics collider debug overlay (world-space wireframes drawn on
-    // top of the 3D pass). Pull-based: the running game publishes its collider
-    // geometry via registerPhysicsDebugSource; this only renders when the editor
-    // has toggled it on. Drawn before the 2D overlay so UI stays on top.
-    if (this.activeCamera && isPhysicsDebugEnabled()) {
-      if (!this.physicsDebugOverlay) {
-        this.physicsDebugOverlay = new PhysicsDebugOverlay();
+    if (canPostProcess) {
+      if (!this.postFx) {
+        this.postFx = new PostProcessingPipeline(this.renderer.getWebGLRenderer());
       }
-      this.renderer.setAutoClear(false);
-      this.physicsDebugOverlay.render(this.renderer, this.activeCamera.camera);
+      this.postFx.ensureLoading();
+      this.postFx.setSize(cssWidth, cssHeight);
+    } else if (this.postFx) {
+      // No active PostProcess node anymore — free the composer's render targets.
+      this.postFx.dispose();
+      this.postFx = null;
     }
 
-    // Pass 2: 2D Overlay
-    // We need to clear depth but keep color
+    const usingComposer = canPostProcess && !!this.postFx && this.postFx.isReady();
+
+    if (usingComposer && postConfig && this.postFx) {
+      const camera3D = this.activeCamera?.camera ?? null;
+      if (camera3D) {
+        this.updateBillboardSprites(this.runtimeGraph?.rootNodes ?? [], camera3D);
+      }
+
+      // Composer renders the 3D band (if any) and — when affect2D or there is no
+      // 3D camera — the 2D content band, applies the effect stack, outputs to canvas.
+      this.postFx.render(this.scene, camera3D, this.orthographicCamera, postConfig);
+
+      // Physics debug overlay draws after post (debug-only; needs a 3D camera).
+      if (camera3D && isPhysicsDebugEnabled()) {
+        if (!this.physicsDebugOverlay) {
+          this.physicsDebugOverlay = new PhysicsDebugOverlay();
+        }
+        this.renderer.setAutoClear(false);
+        this.physicsDebugOverlay.render(this.renderer, camera3D);
+      }
+
+      // When a 3D scene opts 2D out of post, the 2D layer was NOT rendered inside
+      // the composer — draw it clean on top. (With no 3D camera, 2D is already the
+      // composer's base band, so nothing to add here.)
+      if (!postConfig.affect2D && camera3D) {
+        this.renderScene2D();
+      }
+    } else {
+      // ── Plain two-pass path ────────────────────────────────────────────────
+
+      // Pass 1: 3D
+      if (this.activeCamera) {
+        this.updateBillboardSprites(this.runtimeGraph?.rootNodes ?? [], this.activeCamera.camera);
+        this.renderer.setAutoClear(true);
+        this.renderer.render(this.scene, this.activeCamera.camera);
+      } else {
+        this.renderer.setAutoClear(true);
+        this.renderer.clear();
+      }
+
+      // Pass 1.5: Physics collider debug overlay (world-space wireframes drawn on
+      // top of the 3D pass). Pull-based: the running game publishes its collider
+      // geometry via registerPhysicsDebugSource; this only renders when the editor
+      // has toggled it on. Drawn before the 2D overlay so UI stays on top.
+      if (this.activeCamera && isPhysicsDebugEnabled()) {
+        if (!this.physicsDebugOverlay) {
+          this.physicsDebugOverlay = new PhysicsDebugOverlay();
+        }
+        this.renderer.setAutoClear(false);
+        this.physicsDebugOverlay.render(this.renderer, this.activeCamera.camera);
+      }
+
+      // Pass 2: 2D Overlay
+      this.renderScene2D();
+    }
+  }
+
+  /** Draw the 2D content band over the current color buffer (clear depth, keep
+   * color, don't repaint the scene background). Shared by both render paths. */
+  private renderScene2D(): void {
     this.renderer.setAutoClear(false);
     this.renderer.clearDepth();
 
-    // Save background to prevent clearing it
     const savedBg = this.scene.background;
     this.scene.background = null;
 
     this.renderer.render(this.scene, this.orthographicCamera);
 
-    // Restore
     this.scene.background = savedBg;
+  }
+
+  /** First active PostProcess node in the running graph, or null. */
+  private findActivePostProcessNode(): PostProcess | null {
+    const graph = this.runtimeGraph;
+    if (!graph) {
+      return null;
+    }
+    const stack: NodeBase[] = [...graph.rootNodes];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node instanceof PostProcess && node.isActive()) {
+        return node;
+      }
+      for (const child of node.children) {
+        stack.push(child);
+      }
+    }
+    return null;
   }
 
   private findActiveCamera(nodes: NodeBase[]): Camera3D | null {

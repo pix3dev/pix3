@@ -23,6 +23,7 @@ import { CreateTiledSprite2DCommand } from '@/features/scene/CreateTiledSprite2D
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateAnimatedSprite3DCommand } from '@/features/scene/CreateAnimatedSprite3DCommand';
 import { CreateParticles3DCommand } from '@/features/scene/CreateParticles3DCommand';
+import { CreatePostProcessCommand } from '@/features/scene/CreatePostProcessCommand';
 import { CreateNode3DCommand } from '@/features/scene/CreateNode3DCommand';
 import { CreateAudioPlayerCommand } from '@/features/scene/CreateAudioPlayerCommand';
 import type { Command } from '@/core/command';
@@ -378,6 +379,32 @@ export class NodeRegistry {
       icon: 'sparkles',
       keywords: ['create', 'particles', '3d', 'vfx', 'emitter', 'effect', 'smoke', 'fire'],
       order: 5.2,
+    });
+
+    this.registerNodeType({
+      id: 'postprocess',
+      displayName: 'Post Process',
+      description: 'Screen post-processing stack: bloom, vignette, chromatic aberration, LUT',
+      category: '3D',
+      commandClass: CreatePostProcessCommand,
+      color: '#fe9ebeff',
+      icon: 'sparkles',
+      keywords: [
+        'create',
+        'post',
+        'processing',
+        'postfx',
+        'bloom',
+        'vignette',
+        'chromatic',
+        'aberration',
+        'lut',
+        'color',
+        'grading',
+        'effect',
+        'environment',
+      ],
+      order: 5.3,
     });
 
     // Audio Node Types

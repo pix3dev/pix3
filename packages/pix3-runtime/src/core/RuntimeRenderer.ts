@@ -48,6 +48,12 @@ export class RuntimeRenderer {
     return this.canvas;
   }
 
+  /** The underlying three.js renderer — needed to build a post-processing
+   * `EffectComposer` (see {@link ./PostProcessingPipeline}). */
+  getWebGLRenderer(): WebGLRenderer {
+    return this.renderer;
+  }
+
   attachToDocument(containerId: string = 'app'): void {
     const container = document.getElementById(containerId);
     if (!(container instanceof HTMLElement)) {

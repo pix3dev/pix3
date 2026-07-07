@@ -31,6 +31,7 @@ import { PointLightNode } from '@pix3/runtime';
 import { SpotLightNode } from '@pix3/runtime';
 import { Camera3D } from '@pix3/runtime';
 import { VirtualCamera3D } from '@pix3/runtime';
+import { PostProcess, PostProcessingPipeline } from '@pix3/runtime';
 import { MeshInstance } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
@@ -134,6 +135,10 @@ export class ViewportRendererService {
   private selectionGizmos = new Map<string, THREE.Object3D>();
   private targetGizmos = new Map<string, THREE.Object3D>();
   private previewCamera: THREE.Camera | null = null;
+  /** Lazily created post-processing composer (only while a PostProcess node is
+   * active). Editor previews the 3D band through it; 2D content and adornments
+   * are drawn clean on top. Null when no effects are enabled. */
+  private postFx: PostProcessingPipeline | null = null;
   private group2DVisuals = new Map<string, THREE.Group>();
   private animatedSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite2DVisuals = new Map<string, THREE.Group>();
@@ -1414,6 +1419,34 @@ export class ViewportRendererService {
   }
 
   /**
+   * First active PostProcess node in the active scene graph, or null. Editors
+   * the same node instance the inspector mutates, so property/keyframe edits are
+   * reflected on the next requested frame.
+   */
+  private findActivePostProcessNode(): PostProcess | null {
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) {
+      return null;
+    }
+    const stack: NodeBase[] = [...sceneGraph.rootNodes];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node instanceof PostProcess && node.isActive()) {
+        return node;
+      }
+      for (const child of node.children) {
+        if (child instanceof NodeBase) {
+          stack.push(child);
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Manually trigger a single frame render. Useful when the main loop
    * is paused but we still want to update the visual state (e.g. on resize).
    */
@@ -1466,8 +1499,48 @@ export class ViewportRendererService {
 
     this.syncSprite3DBillboarding(this.camera);
 
-    // Render main scene with perspective camera (3D layer and gizmos)
-    if (appState.ui.showLayer3D) {
+    // Render main scene with perspective camera (3D layer and gizmos).
+    //
+    // When an active PostProcess node exists, the 3D band is routed through an
+    // EffectComposer. Editor scope (Phase 1): only the 3D band is post-processed
+    // — gizmos and the 2D overlay draw clean on top, so bright selection frames
+    // never bloom. (Full editor 2D post is a follow-up that moves 2D adornments
+    // to their own clean layer.)
+    const postNode = this.findActivePostProcessNode();
+    const canPost = appState.ui.showLayer3D && !!postNode;
+
+    if (canPost) {
+      if (!this.postFx) {
+        this.postFx = new PostProcessingPipeline(this.renderer);
+      }
+      this.postFx.ensureLoading();
+      this.postFx.setSize(this.viewportSize.width, this.viewportSize.height);
+    } else if (this.postFx) {
+      this.postFx.dispose();
+      this.postFx = null;
+    }
+
+    if (canPost && this.postFx && this.postFx.isReady() && postNode && this.orthographicCamera) {
+      // Post the 3D band only: mask gizmos out of the composer's render, then
+      // draw them clean afterward. affect2D is forced off here — the editor's 2D
+      // overlay (below) always draws clean.
+      const savedMask = this.camera.layers.mask;
+      this.camera.layers.disableAll();
+      this.camera.layers.enable(LAYER_3D);
+
+      this.postFx.render(this.scene, this.camera, this.orthographicCamera, {
+        ...postNode.getConfig(),
+        affect2D: false,
+      });
+
+      // Restore, then draw gizmos (LAYER_GIZMOS only) over the post-processed frame.
+      this.camera.layers.mask = savedMask;
+      this.camera.layers.disableAll();
+      this.camera.layers.enable(LAYER_GIZMOS);
+      this.renderer.autoClear = false;
+      this.renderer.render(this.scene, this.camera);
+      this.camera.layers.mask = savedMask;
+    } else if (appState.ui.showLayer3D) {
       this.renderer.autoClear = true;
       this.renderer.render(this.scene, this.camera);
     } else {
@@ -6794,6 +6867,10 @@ export class ViewportRendererService {
 
     // Dispose transform controls
     this.transformControls?.dispose();
+
+    // Dispose post-processing composer (render targets)
+    this.postFx?.dispose();
+    this.postFx = null;
 
     // Dispose Three.js resources
     this.selectionBoxes.forEach(box => {

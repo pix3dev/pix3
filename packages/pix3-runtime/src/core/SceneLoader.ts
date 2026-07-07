@@ -34,6 +34,7 @@ import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 
 import { Camera3D } from '../nodes/3D/Camera3D';
 import { VirtualCamera3D, VIRTUAL_CAMERA_DEFAULTS } from '../nodes/3D/VirtualCamera3D';
+import { PostProcess } from '../nodes/PostProcess';
 import { isKeyframeEasing } from '../animation/easing';
 
 import { Node2D, type Node2DLayoutConfig } from '../nodes/Node2D';
@@ -1083,6 +1084,12 @@ export class SceneLoader {
           loop: typeof props.loop === 'boolean' ? props.loop : undefined,
           volume: this.asNumber(props.volume, undefined),
         });
+      }
+      case 'PostProcess': {
+        // Flat scalar config lives directly in `properties`; the node's
+        // constructor reads it from there (see PostProcess), so no per-field
+        // parsing is needed here.
+        return new PostProcess({ ...baseProps });
       }
       case 'Group':
         return new NodeBase({ ...baseProps, type: 'Group' });

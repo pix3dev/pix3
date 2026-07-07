@@ -31,6 +31,7 @@
     "golden-layout": "^2.6.0",
     "lit": "^3.3.1",
     "monaco-editor": "^0.55.1",
+    "postprocessing": "^6.39.2",
     "reflect-metadata": "^0.2.2",
     "three": "^0.183.2",
     "valtio": "^2.1.8",
