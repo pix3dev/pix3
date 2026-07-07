@@ -25,6 +25,7 @@ import {
   SceneManager,
   type AudioTrack,
   type ClipTrack,
+  type EventTrack,
   type KeyframeAnimationSet,
   type KeyframeClip,
   type KeyframeEasing,
@@ -48,6 +49,7 @@ import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timel
 import {
   addAudioTrack,
   addClip,
+  addEventTrack,
   addPropertyTrack,
   deleteClip,
   deleteKeys,
@@ -62,6 +64,7 @@ import {
   setKeyValue,
   setTrackEnabled,
   upsertAudioKey,
+  upsertEventKey,
   upsertKey,
   KEY_TIME_EPSILON,
 } from '@/features/animation-timeline/clip-edit-utils';
@@ -114,12 +117,14 @@ interface KeyRef {
 
 interface ClipboardKey {
   trackId: string;
-  kind: 'property' | 'audio';
+  kind: 'property' | 'audio' | 'event';
   time: number;
   value?: KeyframeValue;
   easing?: KeyframeEasing;
   audioPath?: string;
   volume?: number;
+  signal?: string;
+  args?: string;
 }
 
 interface KeyClipboard {
@@ -1106,9 +1111,9 @@ export class AnimationTimelinePanel extends ComponentBase {
     void this.insertKeyAtLane(track, event.clientX, lane);
   }
 
-  /** Godot-style: right-click an empty spot on a property lane to insert a key. */
+  /** Godot-style: right-click an empty spot on a property/event lane to insert a key. */
   private onLaneContextMenu(event: MouseEvent, track: ClipTrack): void {
-    if (track.kind !== 'property') {
+    if (track.kind !== 'property' && track.kind !== 'event') {
       return;
     }
     event.preventDefault();
@@ -1122,10 +1127,26 @@ export class AnimationTimelinePanel extends ComponentBase {
     lane: HTMLElement
   ): Promise<void> {
     const clipName = this.activeClipName;
-    if (!clipName || track.kind !== 'property') {
+    if (!clipName) {
       return;
     }
     const time = snapTime(this.laneTimeFromClientX(clientX, lane), this.snapStep, this.snapEnabled);
+
+    if (track.kind === 'event') {
+      await this.mutateClips('Add event keyframe', draft => {
+        const clip = findKeyframeClip(draft, clipName);
+        const draftTrack = clip ? findTrack(clip, track.id) : null;
+        if (draftTrack && draftTrack.kind === 'event') {
+          upsertEventKey(draftTrack, time, 'event');
+        }
+      });
+      this.selectedKeys = [{ trackId: track.id, time }];
+      return;
+    }
+
+    if (track.kind !== 'property') {
+      return;
+    }
     const value = this.captureTrackValue(track);
     if (value === null) {
       return;
@@ -1257,6 +1278,19 @@ export class AnimationTimelinePanel extends ComponentBase {
           value: structuredClone(key.value),
           easing: key.easing,
         });
+      } else if (track.kind === 'event') {
+        const key = track.keys.find(k => Math.abs(k.time - ref.time) < KEY_TIME_EPSILON);
+        if (!key) {
+          continue;
+        }
+        minTime = Math.min(minTime, key.time);
+        items.push({
+          trackId: track.id,
+          kind: 'event',
+          time: key.time,
+          signal: key.signal,
+          args: key.args,
+        });
       } else {
         const key = track.keys.find(k => Math.abs(k.time - ref.time) < KEY_TIME_EPSILON);
         if (!key) {
@@ -1298,6 +1332,9 @@ export class AnimationTimelinePanel extends ComponentBase {
           pasted.push({ trackId: track.id, time });
         } else if (track.kind === 'audio' && item.kind === 'audio' && item.audioPath) {
           upsertAudioKey(track, time, item.audioPath, item.volume ?? 1);
+          pasted.push({ trackId: track.id, time });
+        } else if (track.kind === 'event' && item.kind === 'event' && item.signal) {
+          upsertEventKey(track, time, item.signal, item.args ?? '');
           pasted.push({ trackId: track.id, time });
         }
       }
@@ -1457,6 +1494,20 @@ export class AnimationTimelinePanel extends ComponentBase {
     this.openMenu = null;
   }
 
+  private async onAddEventTrack(): Promise<void> {
+    const clipName = this.activeClipName;
+    if (!clipName) {
+      return;
+    }
+    await this.mutateClips('Add event track', draft => {
+      const clip = findKeyframeClip(draft, clipName);
+      if (clip) {
+        addEventTrack(clip);
+      }
+    });
+    this.openMenu = null;
+  }
+
   // ---------------------------------------------------------------------
   // Key context menu actions
   // ---------------------------------------------------------------------
@@ -1526,6 +1577,27 @@ export class AnimationTimelinePanel extends ComponentBase {
     });
   }
 
+  private async onContextSetEvent(patch: { signal?: string; args?: string }): Promise<void> {
+    const ctx = this.contextKey();
+    const clipName = this.activeClipName;
+    if (!ctx || !clipName || ctx.track.kind !== 'event') {
+      return;
+    }
+    const existing = ctx.track.keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON);
+    if (!existing) {
+      return;
+    }
+    const signal = patch.signal ?? existing.signal;
+    const args = patch.args ?? existing.args;
+    await this.mutateClips('Edit event keyframe', draft => {
+      const clip = findKeyframeClip(draft, clipName);
+      const track = clip ? findTrack(clip, ctx.track.id) : null;
+      if (track && track.kind === 'event') {
+        upsertEventKey(track, ctx.time, signal, args);
+      }
+    });
+  }
+
   private async onContextDuplicateAtPlayhead(): Promise<void> {
     const ctx = this.contextKey();
     const clipName = this.activeClipName;
@@ -1543,6 +1615,11 @@ export class AnimationTimelinePanel extends ComponentBase {
         const key = track.keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON);
         if (key) {
           upsertKey(track, time, structuredClone(key.value), key.easing);
+        }
+      } else if (track.kind === 'event') {
+        const key = track.keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON);
+        if (key) {
+          upsertEventKey(track, time, key.signal, key.args);
         }
       } else {
         const key = track.keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON);
@@ -2073,12 +2150,15 @@ export class AnimationTimelinePanel extends ComponentBase {
     host: NodeBase | null
   ) {
     const isAudio = track.kind === 'audio';
+    const isEvent = track.kind === 'event';
     const label = isAudio
       ? (track as AudioTrack).name
-      : `${(track as PropertyTrack).targetPath || '(self)'} · ${(track as PropertyTrack).property}`;
+      : isEvent
+        ? (track as EventTrack).name
+        : `${(track as PropertyTrack).targetPath || '(self)'} · ${(track as PropertyTrack).property}`;
     const missingTarget =
-      !isAudio && host
-        ? resolveTrackTarget(host, (track as PropertyTrack).targetPath) === null
+      host && (track.kind === 'property' || track.kind === 'event')
+        ? resolveTrackTarget(host, track.targetPath) === null
         : false;
 
     return html`
@@ -2093,7 +2173,9 @@ export class AnimationTimelinePanel extends ComponentBase {
         />
         ${isAudio
           ? html`<span class="atl-track-icon">${this.iconService.getIcon('volume-2', 14)}</span>`
-          : null}
+          : isEvent
+            ? html`<span class="atl-track-icon">${this.iconService.getIcon('zap', 14)}</span>`
+            : null}
         <span class="atl-track-name" title=${label}>${label}</span>
         ${missingTarget
           ? html`<span class="atl-track-warning" title="Target node not found">
@@ -2111,7 +2193,7 @@ export class AnimationTimelinePanel extends ComponentBase {
         </button>
       </div>
       <div
-        class="atl-lane ${isAudio ? 'atl-lane--audio' : ''}"
+        class="atl-lane ${isAudio ? 'atl-lane--audio' : ''} ${isEvent ? 'atl-lane--event' : ''}"
         style="width: ${laneWidth}px;"
         @pointerdown=${(e: PointerEvent) => this.onLanePointerDown(e)}
         @dblclick=${(e: MouseEvent) => this.onLaneDoubleClick(e, track)}
@@ -2197,22 +2279,25 @@ export class AnimationTimelinePanel extends ComponentBase {
 
   private renderKey(track: ClipTrack, key: { time: number }) {
     const isAudio = track.kind === 'audio';
+    const isEvent = track.kind === 'event';
     const selected = this.isKeySelected({ trackId: track.id, time: key.time });
-    const easing = isAudio ? null : (key as PropertyTrack['keys'][number]).easing;
+    const easing = isAudio || isEvent ? null : (key as PropertyTrack['keys'][number]).easing;
     // Encode interpolation in the glyph (After Effects idiom): filled diamond =
     // eased, hollow diamond = linear, square = step.
     const easingClass =
       easing === 'step' ? 'atl-key--step' : easing === 'linear' ? 'atl-key--linear' : '';
     const title = isAudio
       ? `${formatTime(key.time)} · ${(key as AudioTrack['keys'][number]).audioPath}`
-      : `${formatTime(key.time)} · ${easingLabel(easing as PropertyTrack['keys'][number]['easing'])}`;
+      : isEvent
+        ? `${formatTime(key.time)} · ${(key as EventTrack['keys'][number]).signal}`
+        : `${formatTime(key.time)} · ${easingLabel(easing as PropertyTrack['keys'][number]['easing'])}`;
 
     return html`
       <button
         type="button"
-        class="atl-key ${isAudio ? 'atl-key--audio' : ''} ${easingClass} ${selected
-          ? 'atl-key--selected'
-          : ''}"
+        class="atl-key ${isAudio ? 'atl-key--audio' : ''} ${isEvent
+          ? 'atl-key--event'
+          : ''} ${easingClass} ${selected ? 'atl-key--selected' : ''}"
         style="left: ${timeToX(key.time, this.zoom)}px;"
         data-track-id=${track.id}
         data-key-time=${key.time}
@@ -2300,6 +2385,9 @@ export class AnimationTimelinePanel extends ComponentBase {
         <button type="button" role="menuitem" @click=${() => void this.onAddAudioTrack()}>
           ${this.iconService.getIcon('volume-2', 14)} Audio Track
         </button>
+        <button type="button" role="menuitem" @click=${() => void this.onAddEventTrack()}>
+          ${this.iconService.getIcon('zap', 14)} Event Track
+        </button>
         <div class="atl-menu-separator"></div>
         <div class="atl-menu-heading">Animate node property…</div>
         ${entries.map(
@@ -2368,12 +2456,17 @@ export class AnimationTimelinePanel extends ComponentBase {
       return null;
     }
     const isProperty = ctx.track.kind === 'property';
+    const isEvent = ctx.track.kind === 'event';
     const propertyKey = isProperty
       ? (ctx.track as PropertyTrack).keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON)
       : undefined;
-    const audioKey = !isProperty
-      ? (ctx.track as AudioTrack).keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON)
+    const eventKey = isEvent
+      ? (ctx.track as EventTrack).keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON)
       : undefined;
+    const audioKey =
+      !isProperty && !isEvent
+        ? (ctx.track as AudioTrack).keys.find(k => Math.abs(k.time - ctx.time) < KEY_TIME_EPSILON)
+        : undefined;
 
     return html`
       ${isProperty && propertyKey
@@ -2405,6 +2498,31 @@ export class AnimationTimelinePanel extends ComponentBase {
                 void this.onContextSetAudio({
                   volume: Number((e.target as HTMLInputElement).value),
                 })}
+            />
+            <div class="atl-menu-separator"></div>
+          `
+        : null}
+      ${eventKey
+        ? html`
+            <div class="atl-menu-heading">Signal</div>
+            <input
+              class="atl-input atl-menu-input"
+              type="text"
+              placeholder="signal name"
+              .value=${eventKey.signal}
+              aria-label="Event signal name"
+              @change=${(e: Event) =>
+                void this.onContextSetEvent({ signal: (e.target as HTMLInputElement).value })}
+            />
+            <div class="atl-menu-heading">Args (JSON)</div>
+            <input
+              class="atl-input atl-menu-input"
+              type="text"
+              placeholder='e.g. 42 or ["a", 1]'
+              .value=${eventKey.args}
+              aria-label="Event arguments"
+              @change=${(e: Event) =>
+                void this.onContextSetEvent({ args: (e.target as HTMLInputElement).value })}
             />
             <div class="atl-menu-separator"></div>
           `

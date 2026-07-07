@@ -336,6 +336,10 @@ pix3-animation-timeline-panel .atl-lane--audio {
   background-color: rgba(96, 165, 250, 0.04);
 }
 
+pix3-animation-timeline-panel .atl-lane--event {
+  background-color: rgba(245, 158, 11, 0.05);
+}
+
 /* In-lane preview layer — value curves / color ramp / text chips, behind keys. */
 pix3-animation-timeline-panel .atl-lane-preview {
   position: absolute;
@@ -420,6 +424,21 @@ pix3-animation-timeline-panel .atl-key--audio {
 }
 
 pix3-animation-timeline-panel .atl-key--audio.atl-key--selected {
+  background: var(--pix3-accent-color, #ffcf33);
+}
+
+/* Event keys: upright amber square, distinct from property diamonds and audio dots. */
+pix3-animation-timeline-panel .atl-key--event {
+  transform: translate(-50%, -50%) rotate(0deg);
+  border-radius: 2px;
+  background: #f59e0b;
+}
+
+pix3-animation-timeline-panel .atl-key--event:hover {
+  background: #fbbf24;
+}
+
+pix3-animation-timeline-panel .atl-key--event.atl-key--selected {
   background: var(--pix3-accent-color, #ffcf33);
 }
 

@@ -14,6 +14,7 @@ import {
   MIN_CLIP_DURATION,
   type AudioTrack,
   type ClipTrack,
+  type EventTrack,
   type KeyframeAnimationSet,
   type KeyframeClip,
   type KeyframeEasing,
@@ -146,6 +147,19 @@ export function addAudioTrack(clip: KeyframeClip, name = 'Audio'): AudioTrack {
   return track;
 }
 
+export function addEventTrack(clip: KeyframeClip, name = 'Events'): EventTrack {
+  const track: EventTrack = {
+    id: generateTrackId(),
+    kind: 'event',
+    name,
+    targetPath: '',
+    enabled: true,
+    keys: [],
+  };
+  clip.tracks.push(track);
+  return track;
+}
+
 export function removeTrack(clip: KeyframeClip, trackId: string): boolean {
   const index = clip.tracks.findIndex(track => track.id === trackId);
   if (index < 0) {
@@ -197,6 +211,19 @@ export function upsertAudioKey(
     return;
   }
   track.keys.push({ time: clamped, audioPath, volume });
+  sortKeysInPlace(track);
+}
+
+/** Insert or replace (within epsilon) an event key. Keeps keys sorted. */
+export function upsertEventKey(track: EventTrack, time: number, signal: string, args = ''): void {
+  const clamped = Math.max(0, time);
+  const existing = track.keys.find(key => sameTime(key.time, clamped));
+  if (existing) {
+    existing.signal = signal;
+    existing.args = args;
+    return;
+  }
+  track.keys.push({ time: clamped, signal, args });
   sortKeysInPlace(track);
 }
 

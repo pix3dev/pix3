@@ -24,7 +24,9 @@ import { inject, injectable } from '@/fw/di';
 import {
   applyClipAtTime,
   collectAudioKeysInRange,
+  collectEventKeysInRange,
   createClipBindings,
+  fireEventKey,
   findKeyframeClip,
   normalizeKeyframeAnimationSet,
   AssetLoader,
@@ -185,7 +187,7 @@ export class AnimationTimelinePreviewService {
     }
     this.playing = true;
     this.lastFrameTs = null;
-    this.fireAudio(session.time, session.time, true);
+    this.fireTimeWindow(session.time, session.time, true);
     this.rafHandle = requestAnimationFrame(this.onAnimationFrame);
     this.emit();
   }
@@ -367,11 +369,11 @@ export class AnimationTimelinePreviewService {
     if (next >= clip.duration) {
       if (clip.loop && clip.duration > 0) {
         next = next % clip.duration;
-        this.fireAudio(prev, clip.duration, false);
-        this.fireAudio(0, next, true);
+        this.fireTimeWindow(prev, clip.duration, false);
+        this.fireTimeWindow(0, next, true);
       } else {
         next = clip.duration;
-        this.fireAudio(prev, next, false);
+        this.fireTimeWindow(prev, next, false);
         session.time = next;
         this.applyAtCurrentTime();
         this.playing = false;
@@ -380,7 +382,7 @@ export class AnimationTimelinePreviewService {
         return;
       }
     } else {
-      this.fireAudio(prev, next, false);
+      this.fireTimeWindow(prev, next, false);
     }
 
     session.time = next;
@@ -395,7 +397,13 @@ export class AnimationTimelinePreviewService {
     return Number.isFinite(num) && num >= 0 ? num : 1;
   }
 
-  private fireAudio(from: number, to: number, includeStart: boolean): void {
+  /**
+   * Fire time-window keys (audio + events) crossed while scrubbing/playing the
+   * preview from `from` to `to`. Event signals are emitted on the resolved
+   * nodes; during design-time preview no game scripts are connected, so this is
+   * typically a no-op, but it keeps preview timing WYSIWYG with play mode.
+   */
+  private fireTimeWindow(from: number, to: number, includeStart: boolean): void {
     const session = this.session;
     if (!session) {
       return;
@@ -407,6 +415,22 @@ export class AnimationTimelinePreviewService {
       });
       for (const key of keys) {
         void this.playAudio(key.audioPath, key.volume);
+      }
+    }
+    for (const entry of session.binding.eventEntries) {
+      const keys = collectEventKeysInRange(entry.track, from, to, {
+        wrapDuration: session.binding.clip.duration,
+        includeStart,
+      });
+      for (const key of keys) {
+        try {
+          fireEventKey(entry.node, key);
+        } catch (error) {
+          console.warn('[AnimationTimelinePreview] Event listener failed', {
+            signal: key.signal,
+            error,
+          });
+        }
       }
     }
   }

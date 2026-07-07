@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { AudioTrack, PropertyKeyframe, PropertyTrack, TrackValueType } from '@pix3/runtime';
+import type {
+  AudioTrack,
+  EventTrack,
+  PropertyKeyframe,
+  PropertyTrack,
+  TrackValueType,
+} from '@pix3/runtime';
 import { buildLanePreview } from './timeline-preview';
 
 function propertyTrack(
@@ -123,6 +129,25 @@ describe('buildLanePreview', () => {
     expect(preview.kind).toBe('text');
     if (preview.kind === 'text') {
       expect(preview.segments.map(s => s.text)).toEqual(['jump.wav', 'loop.ogg']);
+    }
+  });
+
+  it('shows the signal name (with args) for event track keys', () => {
+    const track: EventTrack = {
+      id: 'event-1',
+      kind: 'event',
+      name: 'Events',
+      targetPath: '',
+      enabled: true,
+      keys: [
+        { time: 0, signal: 'intro_started', args: '' },
+        { time: 0.5, signal: 'flash', args: '["white"]' },
+      ],
+    };
+    const preview = buildLanePreview(track, 1, 28, 1);
+    expect(preview.kind).toBe('text');
+    if (preview.kind === 'text') {
+      expect(preview.segments.map(s => s.text)).toEqual(['intro_started', 'flash(["white"])']);
     }
   });
 });

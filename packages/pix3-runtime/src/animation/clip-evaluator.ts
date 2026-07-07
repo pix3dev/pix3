@@ -15,6 +15,8 @@ import { applyEasing } from './easing';
 import type {
   AudioKeyframe,
   AudioTrack,
+  EventKeyframe,
+  EventTrack,
   KeyframeClip,
   KeyframeValue,
   PropertyTrack,
@@ -128,7 +130,7 @@ export function sampleTrack(track: PropertyTrack, time: number): KeyframeValue |
   return interpolateValue(track.valueType, a.value, b.value, applyEasing(a.easing, t));
 }
 
-export interface AudioKeyRangeOptions {
+export interface TimedKeyRangeOptions {
   /**
    * Loop wrap support: when `to < from`, keys are collected from
    * `(from, wrapDuration]` and `[0, to]` (the `[0, ...]` part is inclusive
@@ -139,18 +141,22 @@ export interface AudioKeyRangeOptions {
   includeStart?: boolean;
 }
 
+/** Back-compat alias for the shared time-window options. */
+export type AudioKeyRangeOptions = TimedKeyRangeOptions;
+
 /**
- * Collect audio keys crossed while advancing from `from` to `to`.
+ * Collect time-window keys crossed while advancing from `from` to `to`.
  * The shared boundary rule is `from < time <= to`; both the runtime player
- * and the editor preview use this function so keys fire exactly once.
+ * and the editor preview use this so keys fire exactly once. Used by audio
+ * and event tracks alike (any track whose keys carry a `time`).
  */
-export function collectAudioKeysInRange(
-  track: AudioTrack,
+export function collectTimedKeysInRange<T extends { time: number }>(
+  keys: readonly T[],
   from: number,
   to: number,
-  options: AudioKeyRangeOptions = {}
-): AudioKeyframe[] {
-  if (!track.enabled || track.keys.length === 0) {
+  options: TimedKeyRangeOptions = {}
+): T[] {
+  if (keys.length === 0) {
     return [];
   }
 
@@ -160,12 +166,73 @@ export function collectAudioKeysInRange(
 
   if (options.wrapDuration !== undefined && to < from) {
     const duration = options.wrapDuration;
-    return track.keys.filter(
+    return keys.filter(
       key => inRange(key.time, from, duration, includeStart) || inRange(key.time, 0, to, true)
     );
   }
 
-  return track.keys.filter(key => inRange(key.time, from, to, includeStart));
+  return keys.filter(key => inRange(key.time, from, to, includeStart));
+}
+
+/**
+ * Collect audio keys crossed while advancing from `from` to `to`.
+ * Disabled tracks yield nothing. See `collectTimedKeysInRange`.
+ */
+export function collectAudioKeysInRange(
+  track: AudioTrack,
+  from: number,
+  to: number,
+  options: TimedKeyRangeOptions = {}
+): AudioKeyframe[] {
+  if (!track.enabled) {
+    return [];
+  }
+  return collectTimedKeysInRange(track.keys, from, to, options);
+}
+
+/**
+ * Collect event keys crossed while advancing from `from` to `to`.
+ * Disabled tracks yield nothing. See `collectTimedKeysInRange`.
+ */
+export function collectEventKeysInRange(
+  track: EventTrack,
+  from: number,
+  to: number,
+  options: TimedKeyRangeOptions = {}
+): EventKeyframe[] {
+  if (!track.enabled) {
+    return [];
+  }
+  return collectTimedKeysInRange(track.keys, from, to, options);
+}
+
+/**
+ * Parse an event key's raw `args` string into a positional argument list for
+ * `NodeBase.emit(signal, ...args)`:
+ * - empty / whitespace → no args
+ * - a JSON array → its elements, spread
+ * - any other valid JSON (number, string, boolean, object, null) → one arg
+ * - unparseable text → the trimmed raw string as one arg (author convenience)
+ */
+export function parseEventArgs(raw: string): unknown[] {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [trimmed];
+  }
+}
+
+/** Emit an event key's signal on the given node with its parsed args. */
+export function fireEventKey(node: NodeBase, key: EventKeyframe): void {
+  if (key.signal.length === 0) {
+    return;
+  }
+  node.emit(key.signal, ...parseEventArgs(key.args));
 }
 
 /** Convert a stored keyframe value into the shape expected by PropertyDefinition.setValue. */
@@ -234,10 +301,16 @@ export interface PropertyBindingEntry {
   propDef: PropertyDefinition;
 }
 
+export interface EventBindingEntry {
+  track: EventTrack;
+  node: NodeBase;
+}
+
 export interface ClipBinding {
   clip: KeyframeClip;
   entries: PropertyBindingEntry[];
   audioTracks: AudioTrack[];
+  eventEntries: EventBindingEntry[];
   /** targetPath/property pairs that could not be resolved (missing node or property). */
   missingTargets: string[];
 }
@@ -250,11 +323,22 @@ export interface ClipBinding {
 export function createClipBindings(host: NodeBase, clip: KeyframeClip): ClipBinding {
   const entries: PropertyBindingEntry[] = [];
   const audioTracks: AudioTrack[] = [];
+  const eventEntries: EventBindingEntry[] = [];
   const missingTargets: string[] = [];
 
   for (const track of clip.tracks) {
     if (track.kind === 'audio') {
       audioTracks.push(track);
+      continue;
+    }
+
+    if (track.kind === 'event') {
+      const node = resolveTrackTarget(host, track.targetPath);
+      if (!node) {
+        missingTargets.push(`${track.targetPath || '.'} → ${track.name} (node not found)`);
+        continue;
+      }
+      eventEntries.push({ track, node });
       continue;
     }
 
@@ -273,7 +357,7 @@ export function createClipBindings(host: NodeBase, clip: KeyframeClip): ClipBind
     entries.push({ track, node, propDef });
   }
 
-  return { clip, entries, audioTracks, missingTargets };
+  return { clip, entries, audioTracks, eventEntries, missingTargets };
 }
 
 /**

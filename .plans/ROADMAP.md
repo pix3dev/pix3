@@ -89,9 +89,11 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Оформить и как API для скриптов, и как behaviors/пресеты (двойное назначение: дизайнер и агент).
 - Критерий: «удар»: hitstop 80 мс + shake камеры + flash — три вызова или три пресета.
 
-### P0.4 Event-трек в таймлайне — 🎬🤖 — S
+### P0.4 Event-трек в таймлайне — 🎬🤖 — S — ✅ сделано
 
-- Новый `kind: 'event'` по образцу `AudioTrack` ([keyframe-types.ts](../packages/pix3-runtime/src/animation/keyframe-types.ts)): в момент t → `emit(signal, args)` на host/target-ноде или `callGroup(...)`. Расширить [clip-evaluator.ts](../packages/pix3-runtime/src/animation/clip-evaluator.ts) + строка в панели таймлайна.
+- ✅ Новый `kind: 'event'` по образцу `AudioTrack` ([keyframe-types.ts](../packages/pix3-runtime/src/animation/keyframe-types.ts)): в момент t → `emit(signal, ...args)` на host/target-ноде. `EventTrack { name, targetPath, keys: [{ time, signal, args }] }`; `args` — сырая строка, парсится `parseEventArgs()` (пусто → нет аргов, JSON-массив → spread, иной JSON → один арг, нераспарсенное → строка).
+- ✅ Расширены [clip-evaluator.ts](../packages/pix3-runtime/src/animation/clip-evaluator.ts) (`collectEventKeysInRange`, `fireEventKey`, `eventEntries` в `ClipBinding`), плеер ([AnimationPlayerBehavior.ts](../packages/pix3-runtime/src/animation/AnimationPlayerBehavior.ts), `fireTimeWindow` = audio+events с единым окном), редактор ([clip-edit-utils.ts](../src/features/animation-timeline/clip-edit-utils.ts), панель, preview-сервис, lane-preview). +14 тестов.
+- **Не сделано в v1** (осознанно): UI для редактирования `targetPath` (в данных есть, кнопка создаёт host-scoped); `callGroup(...)` из event-трека (`SceneService` не отдаёт его в рантайм — отдельная задача по проводке).
 - Это клей кат-сцены: камера+VFX+звук+геймплей синхронизируются одним клипом. Сигнальный движок уже готов принимать.
 
 ### P0.5 Hot reload свойств в play mode — 🧃🤖 — M
@@ -107,7 +109,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** P0.4 (S, быстрый клей) → P0.5 (множитель для всего дальнейшего тюнинга) → P0.3 → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → **P0.5 (множитель для всего дальнейшего тюнинга)** ← следующий → P0.3 → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
 
 ---
 

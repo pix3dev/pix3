@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeKeyframeAnimationSet, type AudioTrack, type PropertyTrack } from '@pix3/runtime';
+import {
+  normalizeKeyframeAnimationSet,
+  type AudioTrack,
+  type EventTrack,
+  type PropertyTrack,
+} from '@pix3/runtime';
 import {
   addAudioTrack,
   addClip,
+  addEventTrack,
   addPropertyTrack,
   deleteClip,
   deleteKeys,
@@ -13,6 +19,7 @@ import {
   setKeyEasing,
   setTrackEnabled,
   upsertAudioKey,
+  upsertEventKey,
   upsertKey,
 } from './clip-edit-utils';
 
@@ -92,6 +99,18 @@ describe('tracks', () => {
     expect(removeTrack(clip, audio.id)).toBe(true);
     expect(removeTrack(clip, audio.id)).toBe(false);
   });
+
+  it('adds host-targeted event tracks with a default name', () => {
+    const set = emptySet();
+    const clip = addClip(set);
+    const event = addEventTrack(clip);
+
+    expect(event.kind).toBe('event');
+    expect(event.name).toBe('Events');
+    expect(event.targetPath).toBe('');
+    expect(event.enabled).toBe(true);
+    expect(event.keys).toEqual([]);
+  });
 });
 
 describe('keys', () => {
@@ -132,6 +151,20 @@ describe('keys', () => {
     expect(audio.keys).toHaveLength(1);
     expect(audio.keys[0].audioPath).toBe('res://b.mp3');
     expect(audio.keys[0].volume).toBe(1);
+  });
+
+  it('upsertEventKey inserts, sorts, and replaces within epsilon', () => {
+    const set = emptySet();
+    const clip = addClip(set);
+    const event = addEventTrack(clip) as EventTrack;
+
+    upsertEventKey(event, 1, 'late');
+    upsertEventKey(event, 0.5, 'flash', '["white"]');
+    expect(event.keys.map(k => k.signal)).toEqual(['flash', 'late']);
+
+    upsertEventKey(event, 0.5 + 1e-6, 'flash', '["red", 2]');
+    expect(event.keys).toHaveLength(2);
+    expect(event.keys[0].args).toBe('["red", 2]');
   });
 
   it('moveKeys shifts selected keys, clamps, and swallows collisions', () => {

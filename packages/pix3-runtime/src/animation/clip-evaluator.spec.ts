@@ -3,9 +3,12 @@ import { Node2D } from '../nodes/Node2D';
 import {
   applyClipAtTime,
   collectAudioKeysInRange,
+  collectEventKeysInRange,
   createClipBindings,
+  fireEventKey,
   fromSchemaValue,
   interpolateValue,
+  parseEventArgs,
   resolveTrackTarget,
   sampleTrack,
   toSchemaValue,
@@ -13,6 +16,7 @@ import {
 import {
   normalizeKeyframeAnimationSet,
   type AudioTrack,
+  type EventTrack,
   type KeyframeClip,
   type PropertyTrack,
 } from './keyframe-types';
@@ -32,6 +36,18 @@ function propertyTrack(overrides: Partial<PropertyTrack>): PropertyTrack {
 
 function audioTrack(keys: AudioTrack['keys']): AudioTrack {
   return { id: 'audio', kind: 'audio', name: 'Audio', enabled: true, keys };
+}
+
+function eventTrack(keys: EventTrack['keys'], overrides: Partial<EventTrack> = {}): EventTrack {
+  return {
+    id: 'event',
+    kind: 'event',
+    name: 'Events',
+    targetPath: '',
+    enabled: true,
+    keys,
+    ...overrides,
+  };
 }
 
 describe('sampleTrack', () => {
@@ -128,6 +144,77 @@ describe('collectAudioKeysInRange', () => {
   });
 });
 
+describe('collectEventKeysInRange', () => {
+  const track = eventTrack([
+    { time: 0, signal: 'a', args: '' },
+    { time: 0.5, signal: 'b', args: '' },
+    { time: 1, signal: 'c', args: '' },
+  ]);
+
+  it('uses the (from, to] boundary rule so keys fire exactly once', () => {
+    expect(collectEventKeysInRange(track, 0, 0.5).map(k => k.signal)).toEqual(['b']);
+  });
+
+  it('includes a key at exactly from with includeStart', () => {
+    expect(collectEventKeysInRange(track, 0, 0.5, { includeStart: true }).map(k => k.signal)).toEqual(
+      ['a', 'b']
+    );
+  });
+
+  it('collects across a loop wrap', () => {
+    expect(collectEventKeysInRange(track, 0.75, 0.25, { wrapDuration: 1 }).map(k => k.signal)).toEqual(
+      ['a', 'c']
+    );
+  });
+
+  it('skips disabled tracks', () => {
+    expect(collectEventKeysInRange({ ...track, enabled: false }, 0, 1)).toEqual([]);
+  });
+});
+
+describe('parseEventArgs', () => {
+  it('returns no args for empty / whitespace', () => {
+    expect(parseEventArgs('')).toEqual([]);
+    expect(parseEventArgs('   ')).toEqual([]);
+  });
+
+  it('spreads a JSON array into positional args', () => {
+    expect(parseEventArgs('["a", 1, true]')).toEqual(['a', 1, true]);
+  });
+
+  it('wraps a JSON scalar / object as a single arg', () => {
+    expect(parseEventArgs('42')).toEqual([42]);
+    expect(parseEventArgs('"hi"')).toEqual(['hi']);
+    expect(parseEventArgs('{"x":1}')).toEqual([{ x: 1 }]);
+  });
+
+  it('passes unparseable text through as a single trimmed string', () => {
+    expect(parseEventArgs('  play_intro  ')).toEqual(['play_intro']);
+  });
+});
+
+describe('fireEventKey', () => {
+  it('emits the signal on the node with parsed args', () => {
+    const node = new Node2D({ id: 'n', name: 'N' });
+    const received: unknown[][] = [];
+    const listener = { onSignal: (...args: unknown[]) => received.push(args) };
+    node.connect('boom', listener, listener.onSignal);
+
+    fireEventKey(node, { time: 0, signal: 'boom', args: '[1, "x"]' });
+    expect(received).toEqual([[1, 'x']]);
+  });
+
+  it('is a no-op for an empty signal name', () => {
+    const node = new Node2D({ id: 'n', name: 'N' });
+    let calls = 0;
+    node.connect('', node, () => {
+      calls += 1;
+    });
+    fireEventKey(node, { time: 0, signal: '', args: '' });
+    expect(calls).toBe(0);
+  });
+});
+
 describe('schema value conversion', () => {
   it('converts storage arrays to schema objects and back', () => {
     expect(toSchemaValue('vector2', [1, 2])).toEqual({ x: 1, y: 2 });
@@ -219,6 +306,36 @@ describe('createClipBindings / applyClipAtTime', () => {
     expect(host.position.x).toBeCloseTo(50, 6);
     expect(host.position.y).toBeCloseTo(25, 6);
     expect(child.opacity).toBeCloseTo(0.5, 6);
+  });
+
+  it('resolves event tracks into eventEntries and records missing targets', () => {
+    const { host, child } = buildScene();
+    const clip = buildClip([
+      {
+        kind: 'event',
+        name: 'Events',
+        targetPath: '',
+        keys: [{ time: 0, signal: 'started' }],
+      },
+      {
+        kind: 'event',
+        name: 'Child events',
+        targetPath: 'Icon',
+        keys: [{ time: 1, signal: 'hit' }],
+      },
+      {
+        kind: 'event',
+        name: 'Broken',
+        targetPath: 'Missing',
+        keys: [{ time: 0, signal: 'nope' }],
+      },
+    ]);
+
+    const binding = createClipBindings(host, clip);
+    expect(binding.eventEntries).toHaveLength(2);
+    expect(binding.eventEntries[0].node).toBe(host);
+    expect(binding.eventEntries[1].node).toBe(child);
+    expect(binding.missingTargets).toHaveLength(1);
   });
 
   it('pins the degrees contract: rotation keys are degrees, node stores radians', () => {
