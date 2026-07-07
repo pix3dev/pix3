@@ -96,11 +96,12 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - **Не сделано в v1** (осознанно): UI для редактирования `targetPath` (в данных есть, кнопка создаёт host-scoped); `callGroup(...)` из event-трека (`SceneService` не отдаёт его в рантайм — отдельная задача по проводке).
 - Это клей кат-сцены: камера+VFX+звук+геймплей синхронизируются одним клипом. Сигнальный движок уже готов принимать.
 
-### P0.5 Hot reload свойств в play mode — 🧃🤖 — M
+### P0.5 Hot reload свойств в play mode — 🧃🤖 — M — ✅ сделано
 
-- Форвардинг `UpdateObjectPropertyOperation` в рантайм-клон по `nodeId` при `isPlaying` (маппинг authored→clone в SceneRunner). Структурные изменения (add/remove node) — вне скоупа, отдельно в P1/P2.
-- Мгновенно ускоряет тюнинг всего P0 (интенсивность shake, кривые, тайминги) и оживляет `__PIX3_DEBUG__.setProperty` во время игры.
-- Критерий: изменение свойства в инспекторе видно в запущенной игре ≤1 кадра, без рестарта.
+- ✅ Форвардинг `UpdateObjectPropertyOperation` в рантайм-клон по `nodeId` при `isPlaying`. Маппинг authored→clone бесплатный: клон — это serialize→parse копия, `nodeId` совпадает 1:1, применение через тот же `getNodePropertySchema().setValue`, что и загрузчик. Структурные изменения (add/remove node) — вне скоупа, отдельно в P1/P2.
+- ✅ Развязка через globalThis-sink в [game-debug.ts](../packages/pix3-runtime/src/core/game-debug.ts) (`registerRuntimeLivePropertySink`/`getRuntimeLivePropertySink`, по образцу `registerRuntimeSceneRoot`). [SceneRunner](../packages/pix3-runtime/src/core/SceneRunner.ts) регистрирует `applyLivePropertyUpdate` в `startScene`, чистит в `stop`; для 2D повторяет authored-rect capture / anchored-reflow, чтобы лейаут не откатывал правку. [Операция](../src/features/properties/UpdateObjectPropertyOperation.ts) форвардит в perform/undo/redo (в т.ч. opacity-ветка).
+- ✅ `__PIX3_DEBUG__.setProperty` оживает во время игры автоматически (тот же путь command→operation). +5 тестов (SceneRunner + Operation).
+- Критерий: изменение свойства в инспекторе видно в запущенной игре ≤1 кадра, без рестарта. ✅
 
 ### P0.6 Ad-network адаптеры экспорта — 💰 — M
 
@@ -109,7 +110,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 - Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
-**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → **P0.5 (множитель для всего дальнейшего тюнинга)** ← следующий → P0.3 → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
+**Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → **P0.3** ← следующий → P0.1 → P0.2 → P0.6 (можно параллельно с камерой/пост-фх силами «второй руки» или агента).
 
 ---
 

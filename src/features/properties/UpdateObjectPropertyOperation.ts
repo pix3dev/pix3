@@ -11,6 +11,7 @@ import { Sprite3D } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { getNodePropertySchema } from '@pix3/runtime';
+import { getRuntimeLivePropertySink } from '@pix3/runtime';
 import type { PropertyDefinition } from '@/fw';
 import type { ServiceContainer } from '@/fw/di';
 
@@ -78,6 +79,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
         }
 
         this.updateViewport(container, propertyPath, node);
+        this.forwardToRuntime(nextValue);
 
         return {
           didMutate: true,
@@ -92,6 +94,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
                 if (descriptor) descriptor.isDirty = true;
               }
               this.updateViewport(container, propertyPath, node);
+              this.forwardToRuntime(previousValue);
             },
             redo: async () => {
               node.opacity = nextValue;
@@ -101,6 +104,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
                 if (descriptor) descriptor.isDirty = true;
               }
               this.updateViewport(container, propertyPath, node);
+              this.forwardToRuntime(nextValue);
             },
           },
         };
@@ -138,6 +142,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       // Set the property value using the schema's setValue method
       propDef.setValue(node, value);
       this.afterNodePropertyApplied(node, propertyPath);
+      this.forwardToRuntime(value);
     }
 
     const activeSceneId = state.scenes.activeSceneId;
@@ -165,6 +170,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
             if (descriptor) descriptor.isDirty = true;
           }
           this.updateViewport(container, propertyPath, node);
+          this.forwardToRuntime(previousValue);
         },
         redo: async () => {
           this.applyVisibilityPreservation(node, visibilityPreservation);
@@ -176,9 +182,22 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
             if (descriptor) descriptor.isDirty = true;
           }
           this.updateViewport(container, propertyPath, node);
+          this.forwardToRuntime(value);
         },
       },
     };
+  }
+
+  /**
+   * Hot-reload this edit into the running scene (P0.5). During play the game
+   * runs on an isolated clone in `SceneRunner`; the authored-graph mutation
+   * above is invisible there. The runner registers a sink (by `nodeId`) while
+   * playing, so this forwards the same edit onto the live clone within one
+   * frame. In edit mode the sink is null and this is a no-op. This is also the
+   * path that makes `window.__PIX3_DEBUG__.setProperty(...)` land live in-game.
+   */
+  private forwardToRuntime(value: unknown): void {
+    getRuntimeLivePropertySink()?.(this.params.nodeId, this.params.propertyPath, value);
   }
 
   private updateViewport(container: ServiceContainer, propertyPath: string, node: NodeBase) {

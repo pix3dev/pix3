@@ -443,7 +443,11 @@ export interface Pix3DebugBridge {
   };
 
   // --- mutate (through the gateway) ---
-  /** Edit a node property via UpdateObjectPropertyCommand (lands in undo). */
+  /**
+   * Edit a node property via UpdateObjectPropertyCommand (lands in undo). While
+   * a scene is playing, the edit also hot-reloads onto the running clone by
+   * `nodeId` within one frame — handy for live-tuning without a restart.
+   */
   setProperty(args: { nodeId: string; propertyPath: string; value: unknown }): Promise<boolean>;
   /** Run any registered command by id (e.g. 'history.undo'). */
   command(commandId: string): Promise<boolean>;
@@ -544,7 +548,8 @@ function createBridge(): Pix3DebugBridge {
         'physicsDebug()':
           'Summary of collider wireframe buffers exposed by the running game (counts only).',
         'play.status() / play.start() / play.stop() / play.restart()': 'Play-mode control.',
-        'setProperty({nodeId,propertyPath,value})': 'Edit a property (undoable).',
+        'setProperty({nodeId,propertyPath,value})':
+          'Edit a property (undoable); hot-reloads onto the running scene while playing.',
         'command(id)': "Run a command by id, e.g. 'edit.undo'.",
         'components(id)': 'Script components attached to a node.',
         'errors() / clearErrors()': 'Captured console/runtime errors (ring buffer).',

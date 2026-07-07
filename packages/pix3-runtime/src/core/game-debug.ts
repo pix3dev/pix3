@@ -95,6 +95,43 @@ export function getRuntimeSceneRoot(): object | null {
 }
 
 /**
+ * Applies an inspector/debug property edit to the *running clone* by node id.
+ * Returns `true` when the property was found and applied on a live node.
+ *
+ * `SceneRunner` runs the game on an isolated clone (see {@link getRuntimeSceneRoot}),
+ * so property edits made through the editor's mutation gateway only touch the
+ * authored graph. To make edits hot-reload into the running scene without a
+ * restart, `SceneRunner` registers a sink here on scene start (and clears it on
+ * stop); the editor's `UpdateObjectPropertyOperation` and the debug bridge push
+ * edits through it while playing. Stored on `globalThis` so it bridges runtime
+ * module copies, matching the other globals in this module.
+ */
+export type RuntimeLivePropertySink = (
+  nodeId: string,
+  propertyPath: string,
+  value: unknown
+) => boolean;
+
+export const RUNTIME_PROPERTY_SINK_GLOBAL_KEY = '__PIX3_RUNTIME_PROPERTY_SINK__';
+
+type RuntimePropertySinkGlobal = Record<string, RuntimeLivePropertySink | null | undefined>;
+
+/**
+ * Register (or clear, with `null`) the live property sink. Called by
+ * `SceneRunner` on scene start/stop.
+ */
+export function registerRuntimeLivePropertySink(sink: RuntimeLivePropertySink | null): void {
+  const store = globalThis as unknown as RuntimePropertySinkGlobal;
+  store[RUNTIME_PROPERTY_SINK_GLOBAL_KEY] = sink ?? undefined;
+}
+
+/** The registered live property sink, if a scene is running, else null. */
+export function getRuntimeLivePropertySink(): RuntimeLivePropertySink | null {
+  const store = globalThis as unknown as RuntimePropertySinkGlobal;
+  return store[RUNTIME_PROPERTY_SINK_GLOBAL_KEY] ?? null;
+}
+
+/**
  * Collider/line-segment buffers for visualising physics colliders. Mirrors the
  * shape returned by Rapier's `World.debugRender()`: a flat list of line-segment
  * endpoints (`vertices`, 3 floats per point, 2 points per segment) and optional
