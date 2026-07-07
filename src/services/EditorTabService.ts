@@ -254,7 +254,13 @@ export class EditorTabService {
       );
       return;
     }
-    await this.openResourceTab('asset-generator', 'asset-generator://new', {}, true, 'Asset Generator');
+    await this.openResourceTab(
+      'asset-generator',
+      'asset-generator://new',
+      {},
+      true,
+      'Asset Generator'
+    );
   }
 
   remapSceneTabs(remapResourcePath: (resourcePath: string) => string | null): void {
