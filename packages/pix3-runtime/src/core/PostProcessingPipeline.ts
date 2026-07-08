@@ -7,9 +7,11 @@ import type {
   RenderPass,
   EffectPass,
   ClearPass,
+  NormalPass,
   BloomEffect,
   VignetteEffect,
   ChromaticAberrationEffect,
+  SSAOEffect,
 } from 'postprocessing';
 import type { PostProcessConfig } from '../nodes/PostProcess';
 
@@ -46,6 +48,8 @@ export class PostProcessingPipeline {
 
   private composer: EffectComposer | null = null;
   private render3DPass: RenderPass | null = null;
+  private normalPass: NormalPass | null = null;
+  private ssaoPass: EffectPass | null = null;
   private clearDepthPass: ClearPass | null = null;
   private render2DPass: RenderPass | null = null;
   private effectPass: EffectPass | null = null;
@@ -53,6 +57,7 @@ export class PostProcessingPipeline {
   private bloom: BloomEffect | null = null;
   private vignette: VignetteEffect | null = null;
   private chromaticAberration: ChromaticAberrationEffect | null = null;
+  private ssao: SSAOEffect | null = null;
   private readonly caOffset = new Vector2();
 
   private structuralSignature = '';
@@ -168,6 +173,8 @@ export class PostProcessingPipeline {
       b.enabled ? `bloom:${b.threshold}:${b.smoothing}:${b.radius}` : 'bloom-',
       config.vignette.enabled ? 'vig' : 'vig-',
       config.chromaticAberration.enabled ? 'ca' : 'ca-',
+      // SSAO needs the 3D band; intensity/radius are live uniforms (not structural).
+      config.ssao.enabled && camera3D ? 'ssao' : 'ssao-',
       lutActive ? `lut:${config.lut.src}` : 'lut-',
     ].join('|');
   }
@@ -195,6 +202,31 @@ export class PostProcessingPipeline {
       composer.addPass(this.render3DPass);
     } else {
       this.render3DPass = null;
+    }
+
+    // Screen-space AO on the 3D band only (before the 2D composite, so UI isn't
+    // occluded). Needs a NormalPass for view-space normals; the EffectPass pulls
+    // the shared depth texture the RenderPass wrote. MULTIPLY blends AO into the
+    // 3D color. Realtime alternative to baked AO — see the AO-mode cascade.
+    if (config.ssao.enabled && camera3D) {
+      this.normalPass = new pp.NormalPass(scene, camera3D);
+      composer.addPass(this.normalPass);
+      this.ssao = new pp.SSAOEffect(camera3D, this.normalPass.texture, {
+        blendFunction: pp.BlendFunction.MULTIPLY,
+        samples: 16,
+        rings: 5,
+        luminanceInfluence: 0.6,
+        radius: config.ssao.radius,
+        intensity: config.ssao.intensity,
+        fade: 0.02,
+        bias: 0.03,
+      });
+      this.ssaoPass = new pp.EffectPass(camera3D, this.ssao);
+      composer.addPass(this.ssaoPass);
+    } else {
+      this.normalPass = null;
+      this.ssaoPass = null;
+      this.ssao = null;
     }
 
     // Band 2: the 2D content layer (ortho camera, LAYER_2D). Composited on top
@@ -273,6 +305,10 @@ export class PostProcessingPipeline {
       this.caOffset.set(config.chromaticAberration.offset, config.chromaticAberration.offset);
       this.chromaticAberration.offset = this.caOffset;
     }
+    if (this.ssao) {
+      this.ssao.intensity = config.ssao.intensity;
+      this.ssao.radius = config.ssao.radius;
+    }
   }
 
   private disposeEffects(): void {
@@ -282,10 +318,16 @@ export class PostProcessingPipeline {
     this.bloom?.dispose();
     this.vignette?.dispose();
     this.chromaticAberration?.dispose();
+    this.ssaoPass?.dispose();
+    this.ssao?.dispose();
+    this.normalPass?.dispose();
     this.effectPass = null;
     this.bloom = null;
     this.vignette = null;
     this.chromaticAberration = null;
+    this.ssaoPass = null;
+    this.ssao = null;
+    this.normalPass = null;
   }
 
   dispose(): void {

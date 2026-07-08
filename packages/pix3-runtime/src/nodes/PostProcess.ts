@@ -18,6 +18,9 @@ export const POST_PROCESS_DEFAULTS = {
   vignetteDarkness: 0.5,
   chromaticAberrationEnabled: false,
   chromaticAberrationOffset: 0.002,
+  ssaoEnabled: false,
+  ssaoIntensity: 1.2,
+  ssaoRadius: 0.25,
   lutEnabled: false,
   lutSrc: '',
   lutIntensity: 1,
@@ -35,6 +38,9 @@ export interface PostProcessProps extends Omit<NodeBaseProps, 'type'> {
   vignetteDarkness?: number;
   chromaticAberrationEnabled?: boolean;
   chromaticAberrationOffset?: number;
+  ssaoEnabled?: boolean;
+  ssaoIntensity?: number;
+  ssaoRadius?: number;
   lutEnabled?: boolean;
   lutSrc?: string;
   lutIntensity?: number;
@@ -52,6 +58,8 @@ export interface PostProcessConfig {
   };
   vignette: { enabled: boolean; offset: number; darkness: number };
   chromaticAberration: { enabled: boolean; offset: number };
+  /** Screen-space AO on the 3D band (realtime alternative to baked AO). */
+  ssao: { enabled: boolean; intensity: number; radius: number };
   lut: { enabled: boolean; src: string; intensity: number };
 }
 
@@ -79,6 +87,9 @@ export class PostProcess extends NodeBase {
   private vignetteDarknessValue: number;
   private chromaticAberrationEnabledValue: boolean;
   private chromaticAberrationOffsetValue: number;
+  private ssaoEnabledValue: boolean;
+  private ssaoIntensityValue: number;
+  private ssaoRadiusValue: number;
   private lutEnabledValue: boolean;
   private lutSrcValue: string;
   private lutIntensityValue: number;
@@ -112,6 +123,9 @@ export class PostProcess extends NodeBase {
       d.chromaticAberrationOffset,
       0
     );
+    this.ssaoEnabledValue = asBool(props.ssaoEnabled ?? p.ssaoEnabled, d.ssaoEnabled);
+    this.ssaoIntensityValue = asNum(props.ssaoIntensity ?? p.ssaoIntensity, d.ssaoIntensity, 0);
+    this.ssaoRadiusValue = asNum(props.ssaoRadius ?? p.ssaoRadius, d.ssaoRadius, 0);
     this.lutEnabledValue = asBool(props.lutEnabled ?? p.lutEnabled, d.lutEnabled);
     this.lutSrcValue = asStr(props.lutSrc ?? p.lutSrc, d.lutSrc);
     this.lutIntensityValue = asNum(props.lutIntensity ?? p.lutIntensity, d.lutIntensity, 0);
@@ -200,6 +214,27 @@ export class PostProcess extends NodeBase {
     this.chromaticAberrationOffsetValue = clampMin(value, 0, this.chromaticAberrationOffsetValue);
   }
 
+  get ssaoEnabled(): boolean {
+    return this.ssaoEnabledValue;
+  }
+  set ssaoEnabled(value: boolean) {
+    this.ssaoEnabledValue = Boolean(value);
+  }
+
+  get ssaoIntensity(): number {
+    return this.ssaoIntensityValue;
+  }
+  set ssaoIntensity(value: number) {
+    this.ssaoIntensityValue = clampMin(value, 0, this.ssaoIntensityValue);
+  }
+
+  get ssaoRadius(): number {
+    return this.ssaoRadiusValue;
+  }
+  set ssaoRadius(value: number) {
+    this.ssaoRadiusValue = clampMin(value, 0, this.ssaoRadiusValue);
+  }
+
   get lutEnabled(): boolean {
     return this.lutEnabledValue;
   }
@@ -228,6 +263,7 @@ export class PostProcess extends NodeBase {
       this.bloomEnabledValue ||
       this.vignetteEnabledValue ||
       this.chromaticAberrationEnabledValue ||
+      this.ssaoEnabledValue ||
       (this.lutEnabledValue && this.lutSrcValue.length > 0)
     );
   }
@@ -251,6 +287,11 @@ export class PostProcess extends NodeBase {
       chromaticAberration: {
         enabled: this.chromaticAberrationEnabledValue,
         offset: this.chromaticAberrationOffsetValue,
+      },
+      ssao: {
+        enabled: this.ssaoEnabledValue,
+        intensity: this.ssaoIntensityValue,
+        radius: this.ssaoRadiusValue,
       },
       lut: {
         enabled: this.lutEnabledValue,
@@ -277,6 +318,9 @@ export class PostProcess extends NodeBase {
       vignetteDarkness: this.vignetteDarknessValue,
       chromaticAberrationEnabled: this.chromaticAberrationEnabledValue,
       chromaticAberrationOffset: this.chromaticAberrationOffsetValue,
+      ssaoEnabled: this.ssaoEnabledValue,
+      ssaoIntensity: this.ssaoIntensityValue,
+      ssaoRadius: this.ssaoRadiusValue,
       lutEnabled: this.lutEnabledValue,
       lutSrc: this.lutSrcValue,
       lutIntensity: this.lutIntensityValue,
@@ -438,6 +482,51 @@ export class PostProcess extends NodeBase {
             (node as PostProcess).chromaticAberrationOffset = Number(value);
           },
         }),
+        // ── Screen-Space AO (realtime) ────────────────────────────────────────
+        defineProperty('ssaoEnabled', 'boolean', {
+          ui: {
+            label: 'Enabled',
+            description: 'Realtime screen-space ambient occlusion on the 3D band (desktop-grade)',
+            group: 'Ambient Occlusion (SSAO)',
+          },
+          getValue: node => (node as PostProcess).ssaoEnabled,
+          setValue: (node, value) => {
+            (node as PostProcess).ssaoEnabled = Boolean(value);
+          },
+        }),
+        defineProperty('ssaoIntensity', 'number', {
+          ui: {
+            label: 'Intensity',
+            group: 'Ambient Occlusion (SSAO)',
+            min: 0,
+            max: 4,
+            step: 0.05,
+            precision: 2,
+            slider: true,
+            readOnly: t => !(t as PostProcess).ssaoEnabled,
+          },
+          getValue: node => (node as PostProcess).ssaoIntensity,
+          setValue: (node, value) => {
+            (node as PostProcess).ssaoIntensity = Number(value);
+          },
+        }),
+        defineProperty('ssaoRadius', 'number', {
+          ui: {
+            label: 'Radius',
+            description: 'World-space sampling radius (larger = broader, softer occlusion)',
+            group: 'Ambient Occlusion (SSAO)',
+            min: 0,
+            max: 2,
+            step: 0.01,
+            precision: 2,
+            slider: true,
+            readOnly: t => !(t as PostProcess).ssaoEnabled,
+          },
+          getValue: node => (node as PostProcess).ssaoRadius,
+          setValue: (node, value) => {
+            (node as PostProcess).ssaoRadius = Number(value);
+          },
+        }),
         // ── LUT (color grading) ───────────────────────────────────────────────
         defineProperty('lutEnabled', 'boolean', {
           ui: {
@@ -484,6 +573,7 @@ export class PostProcess extends NodeBase {
         Bloom: { label: 'Bloom', expanded: true },
         Vignette: { label: 'Vignette', expanded: false },
         'Chromatic Aberration': { label: 'Chromatic Aberration', expanded: false },
+        'Ambient Occlusion (SSAO)': { label: 'Ambient Occlusion (SSAO)', expanded: false },
         'Color Grading': { label: 'Color Grading', expanded: false },
       },
     } as PropertySchema;

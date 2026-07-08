@@ -13,6 +13,18 @@ root:
         rotationEuler: [0, 0, 0]
         scale: [1, 1, 1]
     children:
+      - id: ao-post
+        type: PostProcess
+        name: Post FX
+        properties:
+          affect2D: false
+          bloomEnabled: false
+          vignetteEnabled: false
+          chromaticAberrationEnabled: false
+          ssaoEnabled: true
+          ssaoIntensity: 1.6
+          ssaoRadius: 0.3
+        children: []
       - id: ao-camera
         type: Camera3D
         name: Main Camera
