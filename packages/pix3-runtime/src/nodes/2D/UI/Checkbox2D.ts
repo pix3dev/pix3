@@ -62,6 +62,31 @@ export class Checkbox2D extends UIControl2D {
         if (this.checked) {
             this.createCheckmark();
         }
+
+        // A checkbox reads as "[box] Label", so default the label to left-aligned
+        // and lay it out beside the box (see updateLabel override). The base
+        // constructor already rendered it centered-on-control while `size` was
+        // still undefined, so re-run now that our props are set.
+        if (props.labelAlign === undefined) {
+            this.labelAlign = 'left';
+        }
+        if (this.label.trim().length > 0) {
+            this.updateLabel();
+        }
+    }
+
+    /** Horizontal gap between the box's right edge and the label plane. */
+    private static readonly LABEL_GAP = 6;
+
+    protected override updateLabel(): void {
+        super.updateLabel();
+        if (!this.labelMesh) return;
+        // Position the label to the right of the box, vertically centered —
+        // instead of the base class's centered-on-control placement, which would
+        // draw the text on top of the box.
+        this.labelMesh.position.x =
+            this.size / 2 + this.labelMesh.scale.x / 2 + Checkbox2D.LABEL_GAP;
+        this.labelMesh.position.y = 0;
     }
 
     private createCheckmark(): void {
@@ -83,9 +108,15 @@ export class Checkbox2D extends UIControl2D {
 
     override isPointInBounds(worldPoint: Vector2): boolean {
         this.getWorldPosition(this.tmpWorldPos);
-        const dx = Math.abs(worldPoint.x - this.tmpWorldPos.x);
-        const dy = Math.abs(worldPoint.y - this.tmpWorldPos.y);
-        return dx <= this.size / 2 && dy <= this.size / 2;
+        const localX = worldPoint.x - this.tmpWorldPos.x;
+        const localY = worldPoint.y - this.tmpWorldPos.y;
+        // Hit area spans the box plus the label to its right, so clicking the
+        // text toggles the checkbox too.
+        let maxX = this.size / 2;
+        if (this.labelMesh) {
+            maxX = Math.max(maxX, this.labelMesh.position.x + this.labelMesh.scale.x / 2);
+        }
+        return localX >= -this.size / 2 && localX <= maxX && Math.abs(localY) <= this.size / 2;
     }
 
     override tick(dt: number): void {

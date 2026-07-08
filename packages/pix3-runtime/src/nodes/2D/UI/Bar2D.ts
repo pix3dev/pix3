@@ -96,8 +96,11 @@ export class Bar2D extends UIControl2D {
     }
 
     private createBorder(): void {
-        // Create border outline using lines or a frame effect
-        this.borderGeometry = new PlaneGeometry(this.width, this.height);
+        // The border is a solid quad drawn BEHIND the background, expanded by
+        // borderWidth on every side, so its outer edge peeks out as a frame while
+        // the background/bar cover the interior. Drawing it on top (as before)
+        // would paint a solid rect over the whole bar and hide the fill entirely.
+        this.borderGeometry = this.buildBorderGeometry();
         this.borderMaterial = new MeshBasicMaterial({
             color: this.borderColor,
             transparent: true,
@@ -107,9 +110,23 @@ export class Bar2D extends UIControl2D {
         });
         this.registerOpacityMaterial(this.borderMaterial, 1);
         this.borderMesh = new Mesh(this.borderGeometry, this.borderMaterial);
-        this.borderMesh.renderOrder = 1001;
-        this.borderMesh.position.z = 0.2;
+        this.borderMesh.renderOrder = 998;
+        this.borderMesh.position.z = -0.1;
         this.add(this.borderMesh);
+    }
+
+    private buildBorderGeometry(): PlaneGeometry {
+        return new PlaneGeometry(
+            this.width + this.borderWidth * 2,
+            this.height + this.borderWidth * 2,
+        );
+    }
+
+    private rebuildBorderGeometry(): void {
+        if (!this.borderMesh) return;
+        this.borderGeometry?.dispose();
+        this.borderGeometry = this.buildBorderGeometry();
+        this.borderMesh.geometry = this.borderGeometry;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -161,11 +178,7 @@ export class Bar2D extends UIControl2D {
                         bar.backgroundGeometry.dispose();
                         bar.backgroundGeometry = new PlaneGeometry(bar.width, bar.height);
                         bar.backgroundMesh.geometry = bar.backgroundGeometry;
-                        if (bar.borderGeometry) {
-                            bar.borderGeometry.dispose();
-                            bar.borderGeometry = new PlaneGeometry(bar.width, bar.height);
-                            if (bar.borderMesh) bar.borderMesh.geometry = bar.borderGeometry;
-                        }
+                        bar.rebuildBorderGeometry();
                         bar.updateBarVisuals();
                     },
                 },
@@ -180,11 +193,7 @@ export class Bar2D extends UIControl2D {
                         bar.backgroundGeometry.dispose();
                         bar.backgroundGeometry = new PlaneGeometry(bar.width, bar.height);
                         bar.backgroundMesh.geometry = bar.backgroundGeometry;
-                        if (bar.borderGeometry) {
-                            bar.borderGeometry.dispose();
-                            bar.borderGeometry = new PlaneGeometry(bar.width, bar.height);
-                            if (bar.borderMesh) bar.borderMesh.geometry = bar.borderGeometry;
-                        }
+                        bar.rebuildBorderGeometry();
                         bar.updateBarVisuals();
                     },
                 },

@@ -160,10 +160,12 @@ export class Slider2D extends UIControl2D {
         const normalized = (this.value - this.minValue) / (this.maxValue - this.minValue);
         const filledWidth = this.width * normalized;
 
-        // Update filled track
+        // Update filled track. PlaneGeometry is centered on the origin, so offset
+        // the mesh to anchor the fill to the track's left edge (grows rightward).
         this.filledTrackGeometry.dispose();
         this.filledTrackGeometry = new PlaneGeometry(filledWidth, this.height);
         this.filledTrackMesh.geometry = this.filledTrackGeometry;
+        this.filledTrackMesh.position.x = -this.width / 2 + filledWidth / 2;
 
         // Update handle position
         const handleX = -this.width / 2 + filledWidth;

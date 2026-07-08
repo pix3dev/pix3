@@ -5242,6 +5242,11 @@ export class ViewportRendererService {
     mesh.userData.isUIControlLabel = true;
     mesh.renderOrder = 1002;
     mesh.position.z = 0.5;
+    // A checkbox reads as "[box] Label": lay the label out to the right of the
+    // box rather than centered on it (matches the runtime Checkbox2D layout).
+    if (node instanceof Checkbox2D) {
+      mesh.position.x = node.size / 2 + logicalWidth / 2 + 6;
+    }
     mesh.layers.set(LAYER_2D);
     return mesh;
   }
