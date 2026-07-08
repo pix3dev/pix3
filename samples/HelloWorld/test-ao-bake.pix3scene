@@ -23,7 +23,7 @@ root:
           chromaticAberrationEnabled: false
           aoMode: adaptive
           ssaoIntensity: 3
-          ssaoRadius: 0.3
+          ssaoRadius: 0.1
           bloomIntensity: 1
           bloomThreshold: 0.9
           bloomSmoothing: 0.025
@@ -62,7 +62,7 @@ root:
         type: HemisphereLightNode
         name: Sky Fill
         properties:
-          skyColor: "#3773ff"
+          skyColor: "#0a2cff"
           groundColor: "#000000"
           intensity: 0.9
           transform:
@@ -75,7 +75,7 @@ root:
         name: Key Light
         properties:
           intensity: 1
-          color: "#ff9a3a"
+          color: "#ff520b"
           castShadow: true
           shadowCameraSize: 20
           shadowMapSize: 2048
