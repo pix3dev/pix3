@@ -6,6 +6,18 @@ import { defineProperty } from '../fw/property-schema';
  * Default configuration for a freshly created {@link PostProcess} node. Bloom is
  * on by default so a newly-added node has a visible effect; the rest are opt-in.
  */
+/**
+ * Ambient-occlusion mode for the scene (the "scene" tier of the AO cascade).
+ * `baked` uses per-mesh baked aoMaps (cheap, mobile); `realtime` uses SSAO
+ * (desktop-grade, no bake); `adaptive` picks realtime on capable devices and
+ * baked otherwise; `off` disables AO. When realtime wins, baked maps are
+ * suppressed at render time so the two don't stack.
+ */
+export const AO_MODES = ['off', 'baked', 'realtime', 'adaptive'] as const;
+export type AOMode = (typeof AO_MODES)[number];
+/** Resolved AO mode (after `adaptive` is decided) — what the renderer acts on. */
+export type ResolvedAOMode = 'off' | 'baked' | 'realtime';
+
 export const POST_PROCESS_DEFAULTS = {
   affect2D: true,
   bloomEnabled: true,
@@ -18,8 +30,8 @@ export const POST_PROCESS_DEFAULTS = {
   vignetteDarkness: 0.5,
   chromaticAberrationEnabled: false,
   chromaticAberrationOffset: 0.002,
-  ssaoEnabled: false,
-  ssaoIntensity: 1.2,
+  aoMode: 'baked' as AOMode,
+  ssaoIntensity: 2.5,
   ssaoRadius: 0.25,
   lutEnabled: false,
   lutSrc: '',
@@ -38,7 +50,7 @@ export interface PostProcessProps extends Omit<NodeBaseProps, 'type'> {
   vignetteDarkness?: number;
   chromaticAberrationEnabled?: boolean;
   chromaticAberrationOffset?: number;
-  ssaoEnabled?: boolean;
+  aoMode?: string;
   ssaoIntensity?: number;
   ssaoRadius?: number;
   lutEnabled?: boolean;
@@ -87,7 +99,7 @@ export class PostProcess extends NodeBase {
   private vignetteDarknessValue: number;
   private chromaticAberrationEnabledValue: boolean;
   private chromaticAberrationOffsetValue: number;
-  private ssaoEnabledValue: boolean;
+  private aoModeValue: AOMode;
   private ssaoIntensityValue: number;
   private ssaoRadiusValue: number;
   private lutEnabledValue: boolean;
@@ -123,7 +135,7 @@ export class PostProcess extends NodeBase {
       d.chromaticAberrationOffset,
       0
     );
-    this.ssaoEnabledValue = asBool(props.ssaoEnabled ?? p.ssaoEnabled, d.ssaoEnabled);
+    this.aoModeValue = normalizeAOMode(props.aoMode ?? p.aoMode ?? d.aoMode);
     this.ssaoIntensityValue = asNum(props.ssaoIntensity ?? p.ssaoIntensity, d.ssaoIntensity, 0);
     this.ssaoRadiusValue = asNum(props.ssaoRadius ?? p.ssaoRadius, d.ssaoRadius, 0);
     this.lutEnabledValue = asBool(props.lutEnabled ?? p.lutEnabled, d.lutEnabled);
@@ -214,11 +226,19 @@ export class PostProcess extends NodeBase {
     this.chromaticAberrationOffsetValue = clampMin(value, 0, this.chromaticAberrationOffsetValue);
   }
 
-  get ssaoEnabled(): boolean {
-    return this.ssaoEnabledValue;
+  get aoMode(): AOMode {
+    return this.aoModeValue;
   }
-  set ssaoEnabled(value: boolean) {
-    this.ssaoEnabledValue = Boolean(value);
+  set aoMode(value: string) {
+    this.aoModeValue = normalizeAOMode(value);
+  }
+
+  /** Resolve `adaptive` to a concrete mode via a device-capability heuristic. */
+  getResolvedAOMode(): ResolvedAOMode {
+    if (this.aoModeValue === 'adaptive') {
+      return isHighEndDevice() ? 'realtime' : 'baked';
+    }
+    return this.aoModeValue;
   }
 
   get ssaoIntensity(): number {
@@ -263,7 +283,7 @@ export class PostProcess extends NodeBase {
       this.bloomEnabledValue ||
       this.vignetteEnabledValue ||
       this.chromaticAberrationEnabledValue ||
-      this.ssaoEnabledValue ||
+      this.getResolvedAOMode() === 'realtime' ||
       (this.lutEnabledValue && this.lutSrcValue.length > 0)
     );
   }
@@ -289,7 +309,7 @@ export class PostProcess extends NodeBase {
         offset: this.chromaticAberrationOffsetValue,
       },
       ssao: {
-        enabled: this.ssaoEnabledValue,
+        enabled: this.getResolvedAOMode() === 'realtime',
         intensity: this.ssaoIntensityValue,
         radius: this.ssaoRadiusValue,
       },
@@ -318,7 +338,7 @@ export class PostProcess extends NodeBase {
       vignetteDarkness: this.vignetteDarknessValue,
       chromaticAberrationEnabled: this.chromaticAberrationEnabledValue,
       chromaticAberrationOffset: this.chromaticAberrationOffsetValue,
-      ssaoEnabled: this.ssaoEnabledValue,
+      aoMode: this.aoModeValue,
       ssaoIntensity: this.ssaoIntensityValue,
       ssaoRadius: this.ssaoRadiusValue,
       lutEnabled: this.lutEnabledValue,
@@ -482,28 +502,30 @@ export class PostProcess extends NodeBase {
             (node as PostProcess).chromaticAberrationOffset = Number(value);
           },
         }),
-        // ── Screen-Space AO (realtime) ────────────────────────────────────────
-        defineProperty('ssaoEnabled', 'boolean', {
+        // ── Ambient Occlusion (cascade: scene tier) ───────────────────────────
+        defineProperty('aoMode', 'enum', {
           ui: {
-            label: 'Enabled',
-            description: 'Realtime screen-space ambient occlusion on the 3D band (desktop-grade)',
-            group: 'Ambient Occlusion (SSAO)',
+            label: 'Mode',
+            description:
+              'Off · Baked (per-mesh maps, cheap) · Realtime (SSAO, desktop) · Adaptive (by device)',
+            group: 'Ambient Occlusion',
+            options: [...AO_MODES],
           },
-          getValue: node => (node as PostProcess).ssaoEnabled,
+          getValue: node => (node as PostProcess).aoMode,
           setValue: (node, value) => {
-            (node as PostProcess).ssaoEnabled = Boolean(value);
+            (node as PostProcess).aoMode = String(value);
           },
         }),
         defineProperty('ssaoIntensity', 'number', {
           ui: {
-            label: 'Intensity',
-            group: 'Ambient Occlusion (SSAO)',
+            label: 'SSAO Intensity',
+            group: 'Ambient Occlusion',
             min: 0,
             max: 4,
             step: 0.05,
             precision: 2,
             slider: true,
-            readOnly: t => !(t as PostProcess).ssaoEnabled,
+            readOnly: t => !aoModeUsesSSAO((t as PostProcess).aoMode),
           },
           getValue: node => (node as PostProcess).ssaoIntensity,
           setValue: (node, value) => {
@@ -512,15 +534,15 @@ export class PostProcess extends NodeBase {
         }),
         defineProperty('ssaoRadius', 'number', {
           ui: {
-            label: 'Radius',
-            description: 'World-space sampling radius (larger = broader, softer occlusion)',
-            group: 'Ambient Occlusion (SSAO)',
+            label: 'SSAO Radius',
+            description: 'Sampling radius (larger = broader, softer occlusion)',
+            group: 'Ambient Occlusion',
             min: 0,
             max: 2,
             step: 0.01,
             precision: 2,
             slider: true,
-            readOnly: t => !(t as PostProcess).ssaoEnabled,
+            readOnly: t => !aoModeUsesSSAO((t as PostProcess).aoMode),
           },
           getValue: node => (node as PostProcess).ssaoRadius,
           setValue: (node, value) => {
@@ -573,11 +595,49 @@ export class PostProcess extends NodeBase {
         Bloom: { label: 'Bloom', expanded: true },
         Vignette: { label: 'Vignette', expanded: false },
         'Chromatic Aberration': { label: 'Chromatic Aberration', expanded: false },
-        'Ambient Occlusion (SSAO)': { label: 'Ambient Occlusion (SSAO)', expanded: false },
+        'Ambient Occlusion': { label: 'Ambient Occlusion', expanded: true },
         'Color Grading': { label: 'Color Grading', expanded: false },
       },
     } as PropertySchema;
   }
+}
+
+function normalizeAOMode(value: unknown): AOMode {
+  const mode = typeof value === 'string' ? value.toLowerCase() : '';
+  return (AO_MODES as readonly string[]).includes(mode) ? (mode as AOMode) : 'baked';
+}
+
+/** True for modes whose SSAO params (intensity/radius) are relevant. */
+export function aoModeUsesSSAO(mode: AOMode): boolean {
+  return mode === 'realtime' || mode === 'adaptive';
+}
+
+/**
+ * Cheap device-capability heuristic for `adaptive` AO: realtime SSAO on
+ * desktop-class devices (fine pointer + enough CPU threads), baked otherwise.
+ * Conservative on anything that looks like a phone/tablet to protect the
+ * per-frame budget of mobile playables.
+ */
+export function isHighEndDevice(): boolean {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+  const nav = navigator as Navigator & {
+    deviceMemory?: number;
+    userAgentData?: { mobile?: boolean };
+  };
+  // Exclude phones/tablets (the pointer-media heuristic is unreliable — many
+  // desktops report `pointer: coarse`), then gate on CPU threads + memory.
+  const mobile =
+    typeof nav.userAgentData?.mobile === 'boolean'
+      ? nav.userAgentData.mobile
+      : /Mobi|Android|iPhone|iPad|iPod/i.test(nav.userAgent ?? '');
+  if (mobile) {
+    return false;
+  }
+  const cores = typeof nav.hardwareConcurrency === 'number' ? nav.hardwareConcurrency : 4;
+  const memory = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : 8;
+  return cores >= 6 && memory >= 4;
 }
 
 function asBool(value: unknown, fallback: boolean): boolean {

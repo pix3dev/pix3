@@ -25,6 +25,7 @@ import { Particles3D } from '../nodes/3D/Particles3D';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 import { AudioPlayer } from '../nodes/AudioPlayer';
 import { PostProcess } from '../nodes/PostProcess';
+import { GeometryMesh } from '../nodes/3D/GeometryMesh';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { LAYER_3D, LAYER_2D } from '../constants';
 import { assign2DRenderOrder } from './render-order-2d';
@@ -446,6 +447,11 @@ export class SceneRunner {
     // an EffectComposer. The composer path only engages when an active
     // PostProcess node exists AND its module has finished loading; until then
     // we fall back to the plain path so the first frames never stall.
+    // AO-mode cascade (scene tier): suppress baked aoMaps when the scene's
+    // PostProcess node resolves to a non-baked mode (realtime SSAO / off), so
+    // baked + SSAO never stack. Walks only when the decision flips.
+    this.applyAOModeSuppression();
+
     const postNode = this.findActivePostProcessNode();
     const postConfig = postNode ? postNode.getConfig() : null;
     // The composer needs at least one band: a 3D camera, or 2D content routed
@@ -533,6 +539,47 @@ export class SceneRunner {
     this.renderer.render(this.scene, this.orthographicCamera);
 
     this.scene.background = savedBg;
+  }
+
+  /** Last-applied baked-AO suppression state (avoids re-walking every frame). */
+  private lastAOSuppress: boolean | null = null;
+
+  /**
+   * AO-mode cascade: resolve the scene's AO mode from its PostProcess node and
+   * suppress (or restore) baked aoMaps on all GeometryMesh nodes. Non-baked
+   * modes (realtime SSAO / off) suppress baked so it doesn't stack with SSAO.
+   * Only re-walks the graph when the decision changes.
+   */
+  private applyAOModeSuppression(): void {
+    const graph = this.runtimeGraph;
+    if (!graph) {
+      return;
+    }
+    let post: PostProcess | null = null;
+    const meshes: GeometryMesh[] = [];
+    const stack: NodeBase[] = [...graph.rootNodes];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node instanceof PostProcess && !post) {
+        post = node;
+      } else if (node instanceof GeometryMesh) {
+        meshes.push(node);
+      }
+      for (const child of node.children) {
+        stack.push(child);
+      }
+    }
+    const suppress = post ? post.getResolvedAOMode() !== 'baked' : false;
+    if (suppress === this.lastAOSuppress) {
+      return;
+    }
+    this.lastAOSuppress = suppress;
+    for (const mesh of meshes) {
+      mesh.setAOSuppressed(suppress);
+    }
   }
 
   /** First active PostProcess node in the running graph, or null. */

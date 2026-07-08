@@ -45,6 +45,14 @@ export class GeometryMesh extends Node3D {
   /** res:// path of the baked AO map, kept for serialization (the runtime
    * Texture is loaded async by the loader / assigned by the AO baker). */
   private _aoMapSrc: string;
+  /** Authored AO-map strength. Kept separate from the live
+   * `material.aoMapIntensity` so runtime suppression (when realtime SSAO wins
+   * the AO-mode cascade) can zero the effect without losing the authored value
+   * on save. */
+  private _aoMapIntensity = 1;
+  /** When true, the baked AO map is suppressed at render time (SSAO is driving
+   * AO instead). Runtime-only — never serialized. */
+  private _aoSuppressed = false;
 
   constructor(props: GeometryMeshProps) {
     super(props, 'GeometryMesh');
@@ -62,8 +70,9 @@ export class GeometryMesh extends Node3D {
     const metalness = typeof mat.metalness === 'number' ? mat.metalness : 0.25;
 
     const material = new MeshStandardMaterial({ color, roughness, metalness });
-    material.aoMapIntensity =
+    this._aoMapIntensity =
       typeof mat.aoMapIntensity === 'number' ? clamp01Number(mat.aoMapIntensity) : 1;
+    material.aoMapIntensity = this._aoMapIntensity;
 
     const mesh = new Mesh(geometry, material);
     mesh.castShadow = true;
@@ -177,14 +186,28 @@ export class GeometryMesh extends Node3D {
     mat.needsUpdate = true;
   }
 
-  /** Local strength of the AO map (0..1). */
+  /** Authored strength of the AO map (0..1). Unaffected by runtime suppression. */
   get aoMapIntensity(): number {
-    return this._stdMaterial?.aoMapIntensity ?? 1;
+    return this._aoMapIntensity;
   }
   set aoMapIntensity(value: number) {
+    this._aoMapIntensity = clamp01Number(value);
+    const mat = this._stdMaterial;
+    if (mat && !this._aoSuppressed) {
+      mat.aoMapIntensity = this._aoMapIntensity;
+    }
+  }
+
+  /**
+   * Runtime-only: suppress (or restore) the baked AO map's contribution without
+   * touching the authored intensity. Used by the AO-mode cascade so a scene set
+   * to realtime SSAO doesn't double up with its baked maps.
+   */
+  setAOSuppressed(suppressed: boolean): void {
+    this._aoSuppressed = suppressed;
     const mat = this._stdMaterial;
     if (mat) {
-      mat.aoMapIntensity = clamp01Number(value);
+      mat.aoMapIntensity = suppressed ? 0 : this._aoMapIntensity;
     }
   }
 
@@ -279,7 +302,7 @@ export class GeometryMesh extends Node3D {
     }
     if (this._aoMapSrc) {
       material.aoMap = this._aoMapSrc;
-      material.aoMapIntensity = mat?.aoMapIntensity ?? 1;
+      material.aoMapIntensity = this._aoMapIntensity;
     }
     return {
       geometry: this._geometryKind,

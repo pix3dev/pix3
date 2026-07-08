@@ -8,6 +8,7 @@ import type {
   EffectPass,
   ClearPass,
   NormalPass,
+  DepthDownsamplingPass,
   BloomEffect,
   VignetteEffect,
   ChromaticAberrationEffect,
@@ -49,6 +50,7 @@ export class PostProcessingPipeline {
   private composer: EffectComposer | null = null;
   private render3DPass: RenderPass | null = null;
   private normalPass: NormalPass | null = null;
+  private depthDownsampling: DepthDownsamplingPass | null = null;
   private ssaoPass: EffectPass | null = null;
   private clearDepthPass: ClearPass | null = null;
   private render2DPass: RenderPass | null = null;
@@ -209,12 +211,31 @@ export class PostProcessingPipeline {
     // the shared depth texture the RenderPass wrote. MULTIPLY blends AO into the
     // 3D color. Realtime alternative to baked AO — see the AO-mode cascade.
     if (config.ssao.enabled && camera3D) {
+      // Canonical postprocessing SSAO wiring: a NormalPass for view-space
+      // normals + a DepthDownsamplingPass that packs normal+depth into one
+      // buffer the effect samples (`normalDepthBuffer`). Without the packed
+      // depth buffer the effect gets no usable depth and outputs ~no occlusion.
       this.normalPass = new pp.NormalPass(scene, camera3D);
+      this.depthDownsampling = new pp.DepthDownsamplingPass({
+        normalBuffer: this.normalPass.texture,
+        resolutionScale: 1,
+      });
       composer.addPass(this.normalPass);
+      composer.addPass(this.depthDownsampling);
       this.ssao = new pp.SSAOEffect(camera3D, this.normalPass.texture, {
         blendFunction: pp.BlendFunction.MULTIPLY,
-        samples: 16,
-        rings: 5,
+        distanceScaling: true,
+        depthAwareUpsampling: true,
+        normalDepthBuffer: this.depthDownsampling.texture,
+        samples: 30,
+        rings: 11,
+        // World-space fade thresholds tuned for typical scene scales (units of
+        // metres). Proximity controls contact occlusion; distance keeps far
+        // geometry from bleeding AO.
+        worldDistanceThreshold: 40,
+        worldDistanceFalloff: 8,
+        worldProximityThreshold: 4,
+        worldProximityFalloff: 2,
         luminanceInfluence: 0.6,
         radius: config.ssao.radius,
         intensity: config.ssao.intensity,
@@ -225,6 +246,7 @@ export class PostProcessingPipeline {
       composer.addPass(this.ssaoPass);
     } else {
       this.normalPass = null;
+      this.depthDownsampling = null;
       this.ssaoPass = null;
       this.ssao = null;
     }
@@ -320,6 +342,7 @@ export class PostProcessingPipeline {
     this.chromaticAberration?.dispose();
     this.ssaoPass?.dispose();
     this.ssao?.dispose();
+    this.depthDownsampling?.dispose();
     this.normalPass?.dispose();
     this.effectPass = null;
     this.bloom = null;
@@ -327,6 +350,7 @@ export class PostProcessingPipeline {
     this.chromaticAberration = null;
     this.ssaoPass = null;
     this.ssao = null;
+    this.depthDownsampling = null;
     this.normalPass = null;
   }
 

@@ -32,6 +32,7 @@ import { SpotLightNode } from '@pix3/runtime';
 import { Camera3D } from '@pix3/runtime';
 import { VirtualCamera3D } from '@pix3/runtime';
 import { PostProcess, PostProcessingPipeline } from '@pix3/runtime';
+import { GeometryMesh } from '@pix3/runtime';
 import { MeshInstance } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
@@ -1446,6 +1447,49 @@ export class ViewportRendererService {
     return null;
   }
 
+  /** Last-applied baked-AO suppression state (avoids re-walking every frame). */
+  private lastAOSuppress: boolean | null = null;
+
+  /**
+   * Resolve the scene's AO mode (from its PostProcess node) and suppress or
+   * restore baked aoMaps on all GeometryMesh nodes accordingly. Non-baked modes
+   * (realtime SSAO, off) suppress baked so it doesn't double with SSAO. Walks
+   * only when the decision changes.
+   */
+  private applyAOModeSuppression(): void {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) {
+      return;
+    }
+    let post: PostProcess | null = null;
+    const meshes: GeometryMesh[] = [];
+    const stack: NodeBase[] = [...graph.rootNodes];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (node instanceof PostProcess && !post) {
+        post = node;
+      } else if (node instanceof GeometryMesh) {
+        meshes.push(node);
+      }
+      for (const child of node.children) {
+        if (child instanceof NodeBase) {
+          stack.push(child);
+        }
+      }
+    }
+    const suppress = post ? post.getResolvedAOMode() !== 'baked' : false;
+    if (suppress === this.lastAOSuppress) {
+      return;
+    }
+    this.lastAOSuppress = suppress;
+    for (const mesh of meshes) {
+      mesh.setAOSuppressed(suppress);
+    }
+  }
+
   /**
    * Manually trigger a single frame render. Useful when the main loop
    * is paused but we still want to update the visual state (e.g. on resize).
@@ -1506,6 +1550,11 @@ export class ViewportRendererService {
     // — gizmos and the 2D overlay draw clean on top, so bright selection frames
     // never bloom. (Full editor 2D post is a follow-up that moves 2D adornments
     // to their own clean layer.)
+    // AO-mode cascade (scene tier): when the PostProcess node resolves to a
+    // non-baked mode (realtime SSAO / off), suppress baked aoMaps so they don't
+    // stack with SSAO. Cheap: only re-walks when the decision flips.
+    this.applyAOModeSuppression();
+
     const postNode = this.findActivePostProcessNode();
     const canPost = appState.ui.showLayer3D && !!postNode;
 
