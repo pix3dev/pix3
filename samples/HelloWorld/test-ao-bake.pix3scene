@@ -1,0 +1,155 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-08
+  description: Dedicated scene for developing/verifying the ambient-occlusion baker.
+root:
+  - id: ao-root
+    type: Node3D
+    name: AO Test
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    children:
+      - id: ao-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 50
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 7, 14]
+            rotationEuler: [-22, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-ambient
+        type: AmbientLightNode
+        name: Ambient
+        properties:
+          color: "#ffffff"
+          intensity: 0.6
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-hemi
+        type: HemisphereLightNode
+        name: Sky Fill
+        properties:
+          skyColor: "#80b3ff"
+          groundColor: "#010101"
+          intensity: 0.9
+          transform:
+            position: [0, 8, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-key
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 1
+          color: "#ffcc83"
+          castShadow: true
+          shadowCameraSize: 20
+          shadowMapSize: 2048
+          transform:
+            position: [6, 12, 8]
+            rotationEuler: [-52, 32, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: plane
+          size: [26, 1, 26]
+          material:
+            type: standard
+            color: "#ffffff"
+            roughness: 1
+            metalness: 0
+            aoMap: res://lightmaps/test-ao-bake/ao-ground.png
+            aoMapIntensity: 1
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-box
+        type: GeometryMesh
+        name: Box
+        properties:
+          geometry: box
+          size: [2, 2, 2]
+          material:
+            type: standard
+            color: "#b7bcc4"
+            roughness: 0.9
+            metalness: 0
+            aoMap: res://lightmaps/test-ao-bake/ao-box.png
+            aoMapIntensity: 1
+          transform:
+            position: [-3, 1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-crate
+        type: GeometryMesh
+        name: Crate
+        properties:
+          geometry: box
+          size: [1, 1, 1]
+          material:
+            type: standard
+            color: "#b7bcc4"
+            roughness: 0.9
+            metalness: 0
+            aoMap: res://lightmaps/test-ao-bake/ao-crate.png
+            aoMapIntensity: 1
+          transform:
+            position: [-1.6, 0.5, 0.2]
+            rotationEuler: [0, 18, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-ball
+        type: GeometryMesh
+        name: Ball
+        properties:
+          geometry: sphere
+          size: [2.4, 2.4, 2.4]
+          material:
+            type: standard
+            color: "#b7bcc4"
+            roughness: 0.85
+            metalness: 0
+            aoMap: res://lightmaps/test-ao-bake/ao-ball.png
+            aoMapIntensity: 1
+          transform:
+            position: [0.6, 1.2, 2.75080101443471]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ao-pillar
+        type: GeometryMesh
+        name: Pillar
+        properties:
+          geometry: cylinder
+          size: [1.6, 3, 1.6]
+          material:
+            type: standard
+            color: "#ffffff"
+            roughness: 0.9
+            metalness: 0
+            aoMap: res://lightmaps/test-ao-bake/ao-pillar.png
+            aoMapIntensity: 1
+          transform:
+            position: [4, 1.5, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []

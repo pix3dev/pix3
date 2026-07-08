@@ -1431,7 +1431,13 @@ export class SceneLoader {
         const size = this.readVector3(propsRec.size, UNIT_VECTOR3);
         const material = this.asRecord(propsRec.material);
         const materialColor = this.asString(material?.color) ?? '#4e8df5';
-        const materialConfig: { color: string; roughness?: number; metalness?: number } = {
+        const materialConfig: {
+          color: string;
+          roughness?: number;
+          metalness?: number;
+          aoMap?: string;
+          aoMapIntensity?: number;
+        } = {
           color: materialColor,
         };
         if (typeof material?.roughness === 'number') {
@@ -1440,7 +1446,14 @@ export class SceneLoader {
         if (typeof material?.metalness === 'number') {
           materialConfig.metalness = material.metalness;
         }
-        return new GeometryMesh({
+        const aoMapSrc = this.asString(material?.aoMap);
+        if (aoMapSrc) {
+          materialConfig.aoMap = aoMapSrc;
+        }
+        if (typeof material?.aoMapIntensity === 'number') {
+          materialConfig.aoMapIntensity = material.aoMapIntensity;
+        }
+        const geometryMesh = new GeometryMesh({
           ...baseProps,
           properties: parsed.restProps,
           position: parsed.position,
@@ -1451,6 +1464,18 @@ export class SceneLoader {
           size: [size.x, size.y, size.z],
           material: materialConfig,
         });
+        if (aoMapSrc) {
+          try {
+            const aoTexture = await this.assetLoader.loadTexture(aoMapSrc);
+            geometryMesh.setAOMap(aoTexture);
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading AO map for GeometryMesh "${geometryMesh.nodeId}":`,
+              error
+            );
+          }
+        }
+        return geometryMesh;
       }
       case 'InstancedMesh3D': {
         const parsed = this.parseNode3DTransforms(baseProps.properties as Record<string, unknown>);

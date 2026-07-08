@@ -64,6 +64,8 @@ import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenAssetGeneratorCommand } from '@/features/editor/OpenAssetGeneratorCommand';
+import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
+import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
@@ -337,6 +339,8 @@ export class Pix3EditorShell extends ComponentBase {
     const closeProjectCommand = new CloseProjectCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openAssetGeneratorCommand = new OpenAssetGeneratorCommand();
+    const bakeAOCommand = new BakeAmbientOcclusionCommand();
+    const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
 
@@ -378,6 +382,8 @@ export class Pix3EditorShell extends ComponentBase {
       openGamePopoutWindowCommand,
       editorSettingsCommand,
       openAssetGeneratorCommand,
+      bakeAOCommand,
+      clearAOCommand,
       focusAnimationTimelineCommand,
       addAnimationPlayerCommand,
       newProjectCommand,

@@ -9,7 +9,9 @@ import {
   MeshStandardMaterial,
   Color,
   BufferGeometry,
+  Float32BufferAttribute,
   Material,
+  type Texture,
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
@@ -22,7 +24,15 @@ export type GeometryKind = (typeof GEOMETRY_KINDS)[number];
 export interface GeometryMeshProps extends Omit<Node3DProps, 'type'> {
   geometry?: string;
   size?: [number, number, number];
-  material?: { color?: string; roughness?: number; metalness?: number };
+  material?: {
+    color?: string;
+    roughness?: number;
+    metalness?: number;
+    /** res:// path of a baked ambient-occlusion map (see the AO baker). */
+    aoMap?: string;
+    /** 0..1 strength of the AO map (default 1). */
+    aoMapIntensity?: number;
+  };
 }
 
 export class GeometryMesh extends Node3D {
@@ -32,6 +42,9 @@ export class GeometryMesh extends Node3D {
    * (the three.js BufferGeometry doesn't carry the authored primitive name). */
   private _geometryKind: GeometryKind;
   private _size: [number, number, number];
+  /** res:// path of the baked AO map, kept for serialization (the runtime
+   * Texture is loaded async by the loader / assigned by the AO baker). */
+  private _aoMapSrc: string;
 
   constructor(props: GeometryMeshProps) {
     super(props, 'GeometryMesh');
@@ -49,6 +62,8 @@ export class GeometryMesh extends Node3D {
     const metalness = typeof mat.metalness === 'number' ? mat.metalness : 0.25;
 
     const material = new MeshStandardMaterial({ color, roughness, metalness });
+    material.aoMapIntensity =
+      typeof mat.aoMapIntensity === 'number' ? clamp01Number(mat.aoMapIntensity) : 1;
 
     const mesh = new Mesh(geometry, material);
     mesh.castShadow = true;
@@ -58,6 +73,7 @@ export class GeometryMesh extends Node3D {
 
     this._geometry = geometry;
     this._material = material;
+    this._aoMapSrc = typeof mat.aoMap === 'string' ? mat.aoMap : '';
   }
 
   protected override disposeResources(): void {
@@ -117,10 +133,109 @@ export class GeometryMesh extends Node3D {
       mesh.geometry = next;
     }
     this._geometry = next;
+    // The lightmap UV set lives on the geometry, so a rebuilt shape needs it
+    // regenerated when an AO map is in use.
+    if (this._stdMaterial?.aoMap) {
+      GeometryMesh.applyLightmapUV(this._geometryKind, next);
+    }
     try {
       old?.dispose();
       // eslint-disable-next-line no-empty
     } catch {}
+  }
+
+  /**
+   * Ensure the dedicated lightmap UV set (`uv1`) exists on the current geometry.
+   * The AO baker calls this before baking — the UV must exist before the texture
+   * does. Idempotent.
+   */
+  ensureLightmapUV(): void {
+    GeometryMesh.applyLightmapUV(this._geometryKind, this._geometry);
+  }
+
+  /** The child render mesh (exposed for the AO baker to read geometry/matrix). */
+  get renderMesh(): Mesh | undefined {
+    return this._mesh;
+  }
+
+  /**
+   * Assign (or clear) the baked ambient-occlusion map. The AO map samples the
+   * dedicated lightmap UV set (channel 1 / `uv1`), which is generated lazily so
+   * a mesh with no AO pays no extra attribute cost.
+   */
+  setAOMap(texture: Texture | null): void {
+    const mat = this._stdMaterial;
+    if (!mat) {
+      return;
+    }
+    if (texture) {
+      texture.channel = 1;
+      texture.flipY = false;
+      GeometryMesh.applyLightmapUV(this._geometryKind, this._geometry);
+    }
+    mat.aoMap = texture;
+    mat.needsUpdate = true;
+  }
+
+  /** Local strength of the AO map (0..1). */
+  get aoMapIntensity(): number {
+    return this._stdMaterial?.aoMapIntensity ?? 1;
+  }
+  set aoMapIntensity(value: number) {
+    const mat = this._stdMaterial;
+    if (mat) {
+      mat.aoMapIntensity = clamp01Number(value);
+    }
+  }
+
+  /** res:// path of the baked AO map, or '' when none. Set by the AO baker. */
+  get aoMapSrc(): string {
+    return this._aoMapSrc;
+  }
+  set aoMapSrc(value: string) {
+    this._aoMapSrc = typeof value === 'string' ? value : '';
+  }
+
+  /**
+   * Generate a deterministic, non-overlapping lightmap UV set (`uv1`) for a
+   * primitive. A box needs a real 6-face atlas (its base `uv` overlaps faces);
+   * the other primitives already have a unique [0,1] layout, so their base `uv`
+   * is copied. Idempotent and cheap.
+   */
+  private static applyLightmapUV(kind: GeometryKind, geometry?: BufferGeometry): void {
+    if (!geometry) {
+      return;
+    }
+    const uv = geometry.getAttribute('uv');
+    if (!uv) {
+      return;
+    }
+
+    if (kind === 'box') {
+      // BoxGeometry: 24 verts, 4 per face, faces in constructor order; each
+      // face's base uv spans [0,1]. Pack the 6 faces into a 3x2 atlas with a
+      // small inset so filtering doesn't bleed between cells.
+      const cols = 3;
+      const rows = 2;
+      const cw = 1 / cols;
+      const ch = 1 / rows;
+      const inset = 0.04;
+      const out = new Float32Array(uv.count * 2);
+      for (let i = 0; i < uv.count; i += 1) {
+        const face = Math.floor(i / 4) % 6;
+        const col = face % cols;
+        const row = Math.floor(face / cols);
+        const u = uv.getX(i);
+        const v = uv.getY(i);
+        out[i * 2] = (col + inset + u * (1 - 2 * inset)) * cw;
+        out[i * 2 + 1] = (row + inset + v * (1 - 2 * inset)) * ch;
+      }
+      geometry.setAttribute('uv1', new Float32BufferAttribute(out, 2));
+      return;
+    }
+
+    // Other primitives: reuse the base UV as the lightmap UV.
+    geometry.setAttribute('uv1', new Float32BufferAttribute(uv.array.slice(0), uv.itemSize));
   }
 
   get geometryKind(): GeometryKind {
@@ -161,6 +276,10 @@ export class GeometryMesh extends Node3D {
       material.color = '#' + mat.color.clone().convertLinearToSRGB().getHexString();
       material.roughness = mat.roughness;
       material.metalness = mat.metalness;
+    }
+    if (this._aoMapSrc) {
+      material.aoMap = this._aoMapSrc;
+      material.aoMapIntensity = mat?.aoMapIntensity ?? 1;
     }
     return {
       geometry: this._geometryKind,
@@ -235,6 +354,23 @@ export class GeometryMesh extends Node3D {
             if (mat) mat.metalness = Number(v);
           },
         }),
+        defineProperty('aoMapIntensity', 'number', {
+          ui: {
+            label: 'AO Intensity',
+            description: 'Strength of the baked ambient-occlusion map (0 = off)',
+            group: 'Material',
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2,
+            slider: true,
+            readOnly: t => !(t as GeometryMesh)._stdMaterial?.aoMap,
+          },
+          getValue: (n: unknown) => (n as GeometryMesh).aoMapIntensity,
+          setValue: (n: unknown, v: unknown) => {
+            (n as GeometryMesh).aoMapIntensity = Number(v);
+          },
+        }),
       ],
       groups: {
         Geometry: { label: 'Geometry', expanded: true },
@@ -249,4 +385,12 @@ export class GeometryMesh extends Node3D {
 function normalizeGeometryKind(value: unknown): GeometryKind {
   const kind = typeof value === 'string' ? value.toLowerCase() : '';
   return (GEOMETRY_KINDS as readonly string[]).includes(kind) ? (kind as GeometryKind) : 'box';
+}
+
+function clamp01Number(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return 1;
+  }
+  return n < 0 ? 0 : n > 1 ? 1 : n;
 }
