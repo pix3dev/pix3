@@ -55,6 +55,9 @@ export class EditorTabService {
   private readonly animationLoadInFlight = new Map<string, Promise<void>>();
   private previousActiveTabIdBeforeGame: string | null = null; // Track tab active before game tab
   private isRestoringProjectSession = false;
+  // While true, focus events emitted by Golden Layout are ignored. Set during programmatic tab
+  // removal so GL's automatic neighbour-selection can't hijack the active tab we intend to restore.
+  private suppressLayoutFocusSync = false;
 
   initialize(): void {
     if (this.disposeSceneSubscription) return;
@@ -460,6 +463,10 @@ export class EditorTabService {
       console.log('[EditorTabService] Ignoring layout focus during session restore:', tabId);
       return;
     }
+    if (this.suppressLayoutFocusSync) {
+      console.log('[EditorTabService] Ignoring layout focus during tab removal:', tabId);
+      return;
+    }
     await this.activateTab(tabId);
   }
 
@@ -699,7 +706,9 @@ export class EditorTabService {
       );
     }
 
-    if (appState.tabs.activeTabId === tab.id) {
+    const wasActive = appState.tabs.activeTabId === tab.id;
+
+    if (wasActive) {
       this.captureActiveContextState();
     }
 
@@ -707,7 +716,19 @@ export class EditorTabService {
 
     appState.tabs.tabs = appState.tabs.tabs.filter(t => t.id !== tab.id);
 
-    if (appState.tabs.activeTabId === tab.id) {
+    // Remove the Golden Layout component before restoring the next active tab. Closing a GL
+    // component makes Golden Layout auto-activate a neighbouring tab and synchronously emit a focus
+    // event; suppressing our focus-sync during removal prevents that event from hijacking the active
+    // tab. Otherwise stopping the game would land on an arbitrary neighbouring scene tab instead of
+    // the one that was playing.
+    this.suppressLayoutFocusSync = true;
+    try {
+      this.layoutManager.removeEditorTab(tab.id);
+    } finally {
+      this.suppressLayoutFocusSync = false;
+    }
+
+    if (wasActive) {
       let next: EditorTab | undefined;
       if (tab.type === 'game' && this.previousActiveTabIdBeforeGame) {
         next = appState.tabs.tabs.find(t => t.id === this.previousActiveTabIdBeforeGame);
@@ -720,7 +741,7 @@ export class EditorTabService {
       }
 
       if (!next) {
-        next = appState.tabs.tabs[appState.tabs.tabs.length - 1] ?? null;
+        next = appState.tabs.tabs[appState.tabs.tabs.length - 1] ?? undefined;
         console.log('[EditorTabService] Active tab was closed, finding next tab:', {
           closedTabId: tab.id,
           nextTab: next ? { id: next.id, type: next.type } : null,
@@ -730,11 +751,11 @@ export class EditorTabService {
 
       appState.tabs.activeTabId = null;
       if (next) {
-        await this.activateTab(next.id);
+        // focusTab (not activateTab) so Golden Layout visually switches to the restored tab too,
+        // keeping GL and appState in agreement after GL auto-selected a neighbour during removal.
+        await this.focusTab(next.id);
       }
     }
-
-    this.layoutManager.removeEditorTab(tab.id);
   }
 
   private syncResourceTabsFromDescriptors(): void {
