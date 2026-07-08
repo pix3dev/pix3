@@ -13,10 +13,36 @@ import { defineProperty } from '../fw/property-schema';
  * baked otherwise; `off` disables AO. When realtime wins, baked maps are
  * suppressed at render time so the two don't stack.
  */
-export const AO_MODES = ['off', 'baked', 'realtime', 'adaptive'] as const;
+export const AO_MODES = ['inherit', 'off', 'baked', 'realtime', 'adaptive'] as const;
 export type AOMode = (typeof AO_MODES)[number];
-/** Resolved AO mode (after `adaptive` is decided) — what the renderer acts on. */
+/** Modes a project-level default may take (everything except `inherit`). */
+export const PROJECT_AO_MODES = ['off', 'baked', 'realtime', 'adaptive'] as const;
+/** Resolved AO mode (after `inherit`/`adaptive` are decided) — what the renderer acts on. */
 export type ResolvedAOMode = 'off' | 'baked' | 'realtime';
+
+/**
+ * Project-tier AO default (the top of the cascade). A scene's PostProcess node
+ * set to `inherit` resolves to this. Stored on `globalThis` (like the runtime's
+ * other config sinks) so the editor can push it from the project manifest
+ * without threading it through every render call. Defaults to `baked`.
+ */
+const PROJECT_AO_MODE_KEY = '__PIX3_PROJECT_AO_MODE__';
+
+export function setProjectAODefault(mode: string): void {
+  (globalThis as Record<string, unknown>)[PROJECT_AO_MODE_KEY] = normalizeProjectAODefault(mode);
+}
+
+export function getProjectAODefault(): Exclude<AOMode, 'inherit'> {
+  const raw = (globalThis as Record<string, unknown>)[PROJECT_AO_MODE_KEY];
+  return normalizeProjectAODefault(raw);
+}
+
+function normalizeProjectAODefault(value: unknown): Exclude<AOMode, 'inherit'> {
+  const mode = typeof value === 'string' ? value.toLowerCase() : '';
+  return (PROJECT_AO_MODES as readonly string[]).includes(mode)
+    ? (mode as Exclude<AOMode, 'inherit'>)
+    : 'baked';
+}
 
 export const POST_PROCESS_DEFAULTS = {
   affect2D: true,
@@ -30,7 +56,7 @@ export const POST_PROCESS_DEFAULTS = {
   vignetteDarkness: 0.5,
   chromaticAberrationEnabled: false,
   chromaticAberrationOffset: 0.002,
-  aoMode: 'baked' as AOMode,
+  aoMode: 'inherit' as AOMode,
   ssaoIntensity: 2.5,
   ssaoRadius: 0.25,
   lutEnabled: false,
@@ -233,12 +259,18 @@ export class PostProcess extends NodeBase {
     this.aoModeValue = normalizeAOMode(value);
   }
 
-  /** Resolve `adaptive` to a concrete mode via a device-capability heuristic. */
+  /**
+   * Resolve the node's AO mode to a concrete one the renderer acts on:
+   * `inherit` → the project default (top of the cascade), then `adaptive` →
+   * realtime/baked by device capability.
+   */
   getResolvedAOMode(): ResolvedAOMode {
-    if (this.aoModeValue === 'adaptive') {
+    const mode: Exclude<AOMode, 'inherit'> =
+      this.aoModeValue === 'inherit' ? getProjectAODefault() : this.aoModeValue;
+    if (mode === 'adaptive') {
       return isHighEndDevice() ? 'realtime' : 'baked';
     }
-    return this.aoModeValue;
+    return mode;
   }
 
   get ssaoIntensity(): number {

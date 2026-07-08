@@ -19,6 +19,7 @@ interface ProjectManifestSnapshotLike {
     width: number;
     height: number;
   };
+  ambientOcclusion: ProjectManifest['ambientOcclusion'];
   autoloads: ReadonlyArray<{
     scriptPath: string;
     singleton: string;
@@ -34,6 +35,7 @@ const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =
     width: manifest.viewportBaseSize.width,
     height: manifest.viewportBaseSize.height,
   },
+  ambientOcclusion: manifest.ambientOcclusion,
   metadata: manifest.metadata ? { ...manifest.metadata } : {},
   autoloads: manifest.autoloads.map(entry => ({ ...entry })),
 });

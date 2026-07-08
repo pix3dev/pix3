@@ -16,7 +16,7 @@ import {
   normalizeProjectManifest,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
-import { SceneManager, type SceneGraph } from '@pix3/runtime';
+import { SceneManager, setProjectAODefault, type SceneGraph } from '@pix3/runtime';
 import type * as Y from 'yjs';
 import { EditorTabService } from './EditorTabService';
 import { CollaborationService } from './CollaborationService';
@@ -664,9 +664,13 @@ Happy creating! 🎨
       const yaml = await this.storage.readTextFile(PROJECT_MANIFEST_PATH);
       const parsed = parse(yaml);
       const manifest = normalizeProjectManifest(parsed);
+      // Push the project-tier AO default so scenes set to `inherit` resolve it.
+      setProjectAODefault(manifest.ambientOcclusion);
       return manifest;
     } catch {
-      return createDefaultProjectManifest();
+      const fallback = createDefaultProjectManifest();
+      setProjectAODefault(fallback.ambientOcclusion);
+      return fallback;
     }
   }
 
@@ -679,6 +683,7 @@ Happy creating! 🎨
         width: normalized.viewportBaseSize.width,
         height: normalized.viewportBaseSize.height,
       },
+      ambientOcclusion: normalized.ambientOcclusion,
       metadata: normalized.metadata ?? {},
       autoloads: normalized.autoloads.map(entry => ({
         scriptPath: entry.scriptPath,

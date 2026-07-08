@@ -3,6 +3,7 @@ import { appState } from '@/state';
 import { ProjectSettingsService } from '@/services/ProjectSettingsService';
 import { OperationService } from '@/services/OperationService';
 import { UpdateProjectSettingsOperation } from '@/features/project/UpdateProjectSettingsOperation';
+import { PROJECT_AO_MODES, type ProjectAODefault } from '@/core/ProjectManifest';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { AddAutoloadCommand } from '@/features/project/AddAutoloadCommand';
 import { RemoveAutoloadCommand } from '@/features/project/RemoveAutoloadCommand';
@@ -37,6 +38,9 @@ export class ProjectSettingsDialog extends ComponentBase {
 
   @state()
   private viewportBaseHeight: string = '1080';
+
+  @state()
+  private ambientOcclusion: ProjectAODefault = 'baked';
 
   private defaultExportScenePathDirty = false;
   private viewportBaseWidthDirty = false;
@@ -186,6 +190,27 @@ export class ProjectSettingsDialog extends ComponentBase {
                       and camera scaling.
                     </div>
                   </div>
+
+                  <div class="settings-field">
+                    <label for="ambientOcclusion">Ambient Occlusion (default)</label>
+                    <select
+                      id="ambientOcclusion"
+                      .value=${this.ambientOcclusion}
+                      @change=${(e: Event) => {
+                        this.ambientOcclusion = (e.target as HTMLSelectElement)
+                          .value as ProjectAODefault;
+                      }}
+                    >
+                      ${PROJECT_AO_MODES.map(
+                        mode => html`<option value=${mode}>${mode}</option>`
+                      )}
+                    </select>
+                    <div class="hint">
+                      Default AO strategy scenes inherit when their PostProcess node is set to
+                      “inherit”. Baked = cheap per-mesh maps (mobile); Realtime = SSAO (desktop);
+                      Adaptive = pick by device.
+                    </div>
+                  </div>
                 </div>
               `
             : html`
@@ -309,6 +334,7 @@ export class ProjectSettingsDialog extends ComponentBase {
       viewportBaseHeight: Number.isFinite(parsedViewportBaseHeight)
         ? Math.max(64, Math.round(parsedViewportBaseHeight))
         : 1080,
+      ambientOcclusion: this.ambientOcclusion,
     });
 
     await this.operationService.invokeAndPush(operation);
@@ -335,6 +361,8 @@ export class ProjectSettingsDialog extends ComponentBase {
     if (!this.viewportBaseHeightDirty) {
       this.viewportBaseHeight = String(manifest.viewportBaseSize.height);
     }
+
+    this.ambientOcclusion = manifest.ambientOcclusion;
   }
 
   private async onAddAutoload(): Promise<void> {

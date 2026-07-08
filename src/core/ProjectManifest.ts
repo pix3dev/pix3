@@ -4,6 +4,10 @@ export interface AutoloadConfig {
   enabled: boolean;
 }
 
+/** Project-level ambient-occlusion default (top of the AO cascade). */
+export const PROJECT_AO_MODES = ['off', 'baked', 'realtime', 'adaptive'] as const;
+export type ProjectAODefault = (typeof PROJECT_AO_MODES)[number];
+
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
@@ -12,10 +16,13 @@ export interface ProjectManifest {
     width: number;
     height: number;
   };
+  /** Default AO mode scenes inherit when their PostProcess is set to `inherit`. */
+  ambientOcclusion: ProjectAODefault;
   metadata?: Record<string, unknown>;
 }
 
 export const DEFAULT_PROJECT_MANIFEST_VERSION = '1.0.0';
+export const DEFAULT_AMBIENT_OCCLUSION: ProjectAODefault = 'baked';
 export const DEFAULT_VIEWPORT_BASE_WIDTH = 1920;
 export const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
 const MIN_VIEWPORT_BASE_SIZE = 64;
@@ -38,6 +45,13 @@ const normalizeViewportBaseSize = (
   };
 };
 
+const normalizeAmbientOcclusion = (input: unknown): ProjectAODefault => {
+  const mode = typeof input === 'string' ? input.toLowerCase() : '';
+  return (PROJECT_AO_MODES as readonly string[]).includes(mode)
+    ? (mode as ProjectAODefault)
+    : DEFAULT_AMBIENT_OCCLUSION;
+};
+
 const normalizeDefaultExportScenePath = (input: unknown): string | undefined => {
   if (typeof input !== 'string') {
     return undefined;
@@ -58,6 +72,7 @@ export const createDefaultProjectManifest = (): ProjectManifest => ({
     width: DEFAULT_VIEWPORT_BASE_WIDTH,
     height: DEFAULT_VIEWPORT_BASE_HEIGHT,
   },
+  ambientOcclusion: DEFAULT_AMBIENT_OCCLUSION,
   metadata: {},
 });
 
@@ -97,6 +112,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     autoloads,
     defaultExportScenePath: normalizeDefaultExportScenePath(record.defaultExportScenePath),
     viewportBaseSize: normalizeViewportBaseSize(record.viewportBaseSize),
+    ambientOcclusion: normalizeAmbientOcclusion(record.ambientOcclusion),
     metadata:
       record.metadata && typeof record.metadata === 'object'
         ? (record.metadata as Record<string, unknown>)

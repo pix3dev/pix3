@@ -4,11 +4,12 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { Node2D, SceneManager } from '@pix3/runtime';
+import { Node2D, SceneManager, setProjectAODefault } from '@pix3/runtime';
 import {
   createDefaultProjectManifest,
   normalizeProjectManifest,
   type ProjectManifest,
+  type ProjectAODefault,
 } from '@/core/ProjectManifest';
 import { ProjectService } from '@/services/ProjectService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
@@ -19,6 +20,7 @@ export interface UpdateProjectSettingsParams {
   defaultExportScenePath?: string | null;
   viewportBaseWidth?: number;
   viewportBaseHeight?: number;
+  ambientOcclusion?: ProjectAODefault;
 }
 
 interface ProjectManifestSnapshotLike {
@@ -28,6 +30,7 @@ interface ProjectManifestSnapshotLike {
     width: number;
     height: number;
   };
+  ambientOcclusion: ProjectAODefault;
   autoloads: ReadonlyArray<{
     scriptPath: string;
     singleton: string;
@@ -43,6 +46,7 @@ const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =
     width: manifest.viewportBaseSize.width,
     height: manifest.viewportBaseSize.height,
   },
+  ambientOcclusion: manifest.ambientOcclusion,
   autoloads: manifest.autoloads.map(entry => ({ ...entry })),
   metadata: manifest.metadata ? { ...manifest.metadata } : {},
 });
@@ -107,6 +111,10 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       this.params.defaultExportScenePath !== undefined
         ? this.params.defaultExportScenePath
         : prevManifest.defaultExportScenePath;
+    const nextAmbientOcclusion =
+      this.params.ambientOcclusion !== undefined
+        ? this.params.ambientOcclusion
+        : prevManifest.ambientOcclusion;
     const nextManifest = normalizeProjectManifest({
       ...prevManifest,
       defaultExportScenePath: nextDefaultExportScenePath,
@@ -114,6 +122,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
         width: nextViewportBaseWidth,
         height: nextViewportBaseHeight,
       },
+      ambientOcclusion: nextAmbientOcclusion,
     });
 
     if (
@@ -121,7 +130,8 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       prevPath === newPath &&
       prevManifest.defaultExportScenePath === nextManifest.defaultExportScenePath &&
       prevManifest.viewportBaseSize.width === nextManifest.viewportBaseSize.width &&
-      prevManifest.viewportBaseSize.height === nextManifest.viewportBaseSize.height
+      prevManifest.viewportBaseSize.height === nextManifest.viewportBaseSize.height &&
+      prevManifest.ambientOcclusion === nextManifest.ambientOcclusion
     ) {
       return { didMutate: false };
     }
@@ -131,6 +141,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       state.project.projectName = newName;
       state.project.localAbsolutePath = newPath;
       state.project.manifest = nextManifest;
+      setProjectAODefault(nextManifest.ambientOcclusion);
       this.rebakeRootAnchors(context, prevManifest.viewportBaseSize, nextManifest.viewportBaseSize);
     } catch {
       return { didMutate: false };
@@ -158,6 +169,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
           state.project.projectName = prevName;
           state.project.localAbsolutePath = prevPath;
           state.project.manifest = prevManifest;
+          setProjectAODefault(prevManifest.ambientOcclusion);
           this.rebakeRootAnchors(
             context,
             nextManifest.viewportBaseSize,
@@ -180,6 +192,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
           state.project.projectName = newName;
           state.project.localAbsolutePath = newPath;
           state.project.manifest = nextManifest;
+          setProjectAODefault(nextManifest.ambientOcclusion);
           this.rebakeRootAnchors(
             context,
             prevManifest.viewportBaseSize,
