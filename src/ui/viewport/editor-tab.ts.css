@@ -103,12 +103,18 @@
 .top-toolbar .toolbar-button--layer,
 .top-toolbar .toolbar-button--mode {
   min-width: 2.25rem;
-  padding: 0 0.45rem;
+  padding: 0 0.35rem;
 }
 
 .top-toolbar .toolbar-button--camera-projection .toolbar-icon {
   width: 1.35rem;
   height: 1.35rem;
+}
+
+/* Combined "2D"/"3D" label + eye badge glyph needs more room than a plain icon. */
+.top-toolbar .toolbar-button--layer .toolbar-icon {
+  width: 1.6rem;
+  height: 1.6rem;
 }
 
 .top-toolbar .toolbar-button:hover {

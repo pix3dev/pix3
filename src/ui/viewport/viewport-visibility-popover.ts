@@ -14,12 +14,6 @@ export class ViewportVisibilityPopover extends ComponentBase {
   @property({ type: Boolean })
   showLighting = false;
 
-  @property({ type: Boolean })
-  showLayer2D = false;
-
-  @property({ type: Boolean })
-  showLayer3D = false;
-
   @state()
   private isOpen = false;
 
@@ -126,18 +120,6 @@ export class ViewportVisibilityPopover extends ComponentBase {
             this.showLighting,
             'toggle-lighting',
             'Light the scene only when it has no explicit light sources'
-          )}
-          ${this.renderToggleRow(
-            '2D Layer',
-            this.showLayer2D,
-            'toggle-layer-2d',
-            'Show or hide the 2D layer'
-          )}
-          ${this.renderToggleRow(
-            '3D Layer',
-            this.showLayer3D,
-            'toggle-layer-3d',
-            'Show or hide the 3D layer'
           )}
         </div>
       </div>

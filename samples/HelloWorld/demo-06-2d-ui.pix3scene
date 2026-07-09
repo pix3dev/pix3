@@ -8,23 +8,33 @@ root:
     type: Camera3D
     name: Camera3D
     properties:
-      transform:
-        position: [0, 4.831264679918454, 5.934019539127118]
-        rotationEuler: [-26.292479767082277, 0, -0]
-        scale: [1, 1, 1]
       projection: perspective
       fov: 60
       near: 0.1
       far: 1000
+      transform:
+        position: [0, 4.831264679918454, 5.934019539127118]
+        rotationEuler: [-26.292479767082277, 0, -0]
+        scale: [1, 1, 1]
+    children: []
+  - id: pointlight-1783604287989-o441g5w
+    type: PointLightNode
+    name: Point Light
+    properties:
+      transform:
+        position: [0, 3.403371815215616, 0]
+        rotationEuler: [-0, 0, -0]
+        scale: [1, 1, 1]
+      color: "#ffffff"
+      intensity: 4.1
+      distance: 0
+      decay: 2
+      castShadow: true
     children: []
   - id: box-1783602419155-wlxye8t
     type: GeometryMesh
     name: Box
     properties:
-      transform:
-        position: [0, 0, 0]
-        rotationEuler: [-0, 0, -0]
-        scale: [5.74, 1, 9.703891678172575]
       geometry: box
       size: [1, 1, 1]
       material:
@@ -32,6 +42,10 @@ root:
         color: "#4e8df5"
         roughness: 0.35
         metalness: 0.25
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [-0, 0, -0]
+        scale: [5.74, 1, 9.703891678172575]
     children: []
   - id: ui-canvas
     type: Group2D
@@ -160,9 +174,9 @@ root:
           checkedColor: "#2fbf71"
           checkmarkColor: "#ffffff"
           checkmarkAction: ""
+          labelAlign: left
           transform:
             position: [0, -220]
             scale: [1, 1]
             rotation: 0
-          labelAlign: left
         children: []

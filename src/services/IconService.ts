@@ -215,6 +215,40 @@ export class IconService {
 </svg>`
     );
 
+    // 2D layer toggle — "2D" label with an eye badge overlapping the lower-right
+    // corner (viewport toolbar layer visibility). The eye sits in a masked-out
+    // gap so it reads cleanly over the text on any button background.
+    this.customIcons.set(
+      'layer-2d',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="pix3-eye-mask-2d" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+      <rect x="0" y="0" width="24" height="24" fill="white"/>
+      <ellipse cx="17.5" cy="17.5" rx="5" ry="3.8" fill="black"/>
+    </mask>
+  </defs>
+  <text x="1.25" y="14.5" font-family="system-ui, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="currentColor" mask="url(#pix3-eye-mask-2d)">2D</text>
+  <path d="M13.5 17.5Q17.5 13 21.5 17.5Q17.5 22 13.5 17.5Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+  <circle cx="17.5" cy="17.5" r="1.1" fill="currentColor"/>
+</svg>`
+    );
+
+    // 3D layer toggle — "3D" label with the same eye badge.
+    this.customIcons.set(
+      'layer-3d',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="pix3-eye-mask-3d" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+      <rect x="0" y="0" width="24" height="24" fill="white"/>
+      <ellipse cx="17.5" cy="17.5" rx="5" ry="3.8" fill="black"/>
+    </mask>
+  </defs>
+  <text x="1.25" y="14.5" font-family="system-ui, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="currentColor" mask="url(#pix3-eye-mask-3d)">3D</text>
+  <path d="M13.5 17.5Q17.5 13 21.5 17.5Q17.5 22 13.5 17.5Z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+  <circle cx="17.5" cy="17.5" r="1.1" fill="currentColor"/>
+</svg>`
+    );
+
     // Gamepad icon for Joystick2D nodes
     this.customIcons.set(
       'gamepad',

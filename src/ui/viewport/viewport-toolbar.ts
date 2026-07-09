@@ -229,6 +229,33 @@ export function renderViewportToolbar(
 
       <div class="toolbar-spacer"></div>
 
+      <div class="toolbar-group" role="group" aria-label="Layer visibility">
+        ${renderToolbarButton(
+          {
+            ariaLabel: 'Toggle 2D layer visibility',
+            title: `2D Layer: ${state.showLayer2D ? 'Visible' : 'Hidden'} (2)`,
+            iconName: 'layer-2d',
+            isPressed: state.showLayer2D,
+            isActive: state.showLayer2D,
+            onClick: handlers.onToggleLayer2D,
+            extraClass: 'toolbar-button--layer',
+          },
+          iconService
+        )}
+        ${renderToolbarButton(
+          {
+            ariaLabel: 'Toggle 3D layer visibility',
+            title: `3D Layer: ${state.showLayer3D ? 'Visible' : 'Hidden'} (3)`,
+            iconName: 'layer-3d',
+            isPressed: state.showLayer3D,
+            isActive: state.showLayer3D,
+            onClick: handlers.onToggleLayer3D,
+            extraClass: 'toolbar-button--layer',
+          },
+          iconService
+        )}
+      </div>
+
       <div class="toolbar-group" role="toolbar" aria-label="Viewport visibility settings">
         ${renderToolbarButton(
           {
@@ -266,12 +293,8 @@ export function renderViewportToolbar(
         <pix3-viewport-visibility-popover
           .showGrid=${state.showGrid}
           .showLighting=${state.showLighting}
-          .showLayer2D=${state.showLayer2D}
-          .showLayer3D=${state.showLayer3D}
           @toggle-grid=${() => handlers.onToggleGrid()}
           @toggle-lighting=${() => handlers.onToggleLighting()}
-          @toggle-layer-2d=${() => handlers.onToggleLayer2D()}
-          @toggle-layer-3d=${() => handlers.onToggleLayer3D()}
         ></pix3-viewport-visibility-popover>
       </div>
     </div>
