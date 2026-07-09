@@ -300,6 +300,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       'textureHover',
       'texturePressed',
       'textureDisabled',
+      'color',
       'backgroundColor',
       'hoverColor',
       'pressedColor',

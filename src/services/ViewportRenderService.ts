@@ -18,6 +18,7 @@ import { Group2D } from '@pix3/runtime';
 import { findAnimationClip } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
+import { ColorRect2D } from '@pix3/runtime';
 import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
@@ -143,6 +144,7 @@ export class ViewportRendererService {
   private group2DVisuals = new Map<string, THREE.Group>();
   private animatedSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite2DVisuals = new Map<string, THREE.Group>();
+  private colorRect2DVisuals = new Map<string, THREE.Group>();
   private tiledSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite3DTexturePaths = new Map<string, string | null>();
   private particles3DTexturePaths = new Map<string, string | null>();
@@ -1341,6 +1343,7 @@ export class ViewportRendererService {
     return (
       this.group2DVisuals.get(nodeId) ??
       this.sprite2DVisuals.get(nodeId) ??
+      this.colorRect2DVisuals.get(nodeId) ??
       this.animatedSprite2DVisuals.get(nodeId) ??
       this.tiledSprite2DVisuals.get(nodeId) ??
       this.uiControl2DVisuals.get(nodeId)
@@ -1368,6 +1371,7 @@ export class ViewportRendererService {
     const visualRoots = new Set<THREE.Object3D>([
       ...this.group2DVisuals.values(),
       ...this.sprite2DVisuals.values(),
+      ...this.colorRect2DVisuals.values(),
       ...this.animatedSprite2DVisuals.values(),
       ...this.tiledSprite2DVisuals.values(),
       ...this.uiControl2DVisuals.values(),
@@ -2092,6 +2096,17 @@ export class ViewportRendererService {
             }
             this.apply2DVisualOpacity(node, visualRoot);
           }
+        } else if (node instanceof ColorRect2D) {
+          const visualRoot = this.colorRect2DVisuals.get(node.nodeId);
+          if (visualRoot) {
+            this.apply2DVisualTransform(node, visualRoot);
+            const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
+            if (sizeGroup) {
+              sizeGroup.scale.set(node.width, node.height, 1);
+            }
+            this.applyColorRect2DColor(node, visualRoot);
+            this.apply2DVisualOpacity(node, visualRoot);
+          }
         } else if (node instanceof UIControl2D) {
           const visualRoot = this.uiControl2DVisuals.get(node.nodeId);
           if (visualRoot) {
@@ -2735,6 +2750,7 @@ export class ViewportRendererService {
     const candidates: THREE.Object3D[] = [
       ...this.animatedSprite2DVisuals.values(),
       ...this.sprite2DVisuals.values(),
+      ...this.colorRect2DVisuals.values(),
       ...this.tiledSprite2DVisuals.values(),
       ...this.uiControl2DVisuals.values(),
     ];
@@ -2887,6 +2903,7 @@ export class ViewportRendererService {
       !(
         node instanceof AnimatedSprite2D ||
         node instanceof Sprite2D ||
+        node instanceof ColorRect2D ||
         node instanceof TiledSprite2D ||
         node instanceof UIControl2D
       )
@@ -3012,6 +3029,18 @@ export class ViewportRendererService {
 
         this.apply2DVisualOpacity(node, visualRoot);
       }
+    } else if (node instanceof ColorRect2D) {
+      const visualRoot = this.colorRect2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        this.apply2DVisualTransform(node, visualRoot);
+        const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
+        if (sizeGroup) {
+          sizeGroup.scale.set(node.width, node.height, 1);
+        }
+        visualRoot.visible = node.visible;
+        this.applyColorRect2DColor(node, visualRoot);
+        this.apply2DVisualOpacity(node, visualRoot);
+      }
     } else if (node instanceof UIControl2D) {
       const visualRoot = this.uiControl2DVisuals.get(node.nodeId);
       if (visualRoot) {
@@ -3066,6 +3095,11 @@ export class ViewportRendererService {
       }
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.sprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        visualRoot.visible = node.visible;
+      }
+    } else if (node instanceof ColorRect2D) {
+      const visualRoot = this.colorRect2DVisuals.get(node.nodeId);
       if (visualRoot) {
         visualRoot.visible = node.visible;
       }
@@ -3375,6 +3409,14 @@ export class ViewportRendererService {
       }
       this.sprite2DVisuals.clear();
 
+      for (const visual of this.colorRect2DVisuals.values()) {
+        if (visual.parent) {
+          visual.parent.remove(visual);
+        }
+        this.disposeObject3D(visual);
+      }
+      this.colorRect2DVisuals.clear();
+
       for (const visual of this.tiledSprite2DVisuals.values()) {
         if (visual.parent) {
           visual.parent.remove(visual);
@@ -3492,6 +3534,13 @@ export class ViewportRendererService {
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.createSprite2DVisual(node);
       this.sprite2DVisuals.set(node.nodeId, visualRoot);
+
+      const parent = parent2DVisualRoot ?? this.scene;
+      parent.add(visualRoot);
+      current2DVisualRoot = visualRoot;
+    } else if (node instanceof ColorRect2D) {
+      const visualRoot = this.createColorRect2DVisual(node);
+      this.colorRect2DVisuals.set(node.nodeId, visualRoot);
 
       const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
@@ -4128,6 +4177,69 @@ export class ViewportRendererService {
     this.apply2DVisualOpacity(node, root);
 
     return root;
+  }
+
+  /**
+   * Create a solid-fill proxy visual for a ColorRect2D node. Mirrors the
+   * Sprite2D proxy structure (root transform group → size group → normalized
+   * quad) but paints the node's authored color instead of a texture and is
+   * always center-origin (no anchor pivot / marker). Without this, ColorRect2D
+   * had no editor proxy at all, so the rectangle was invisible in the viewport
+   * and could not be picked or framed for selection.
+   */
+  private createColorRect2DVisual(node: ColorRect2D): THREE.Group {
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    geometry.computeBoundingBox();
+
+    const material = new THREE.MeshBasicMaterial({
+      color: node.color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+      depthWrite: false,
+    });
+    material.userData.baseOpacity = 1;
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(0, 0, 0);
+    mesh.layers.set(LAYER_2D);
+    mesh.userData.isColorRect2DVisual = true;
+    mesh.userData.nodeId = node.nodeId;
+
+    const root = new THREE.Group();
+    root.position.copy(node.position);
+    root.rotation.copy(node.rotation);
+    root.scale.set(node.scale.x, node.scale.y, 1);
+    root.visible = node.visible;
+    root.layers.set(LAYER_2D);
+
+    const sizeGroup = new THREE.Group();
+    sizeGroup.scale.set(node.width, node.height, 1);
+    sizeGroup.layers.set(LAYER_2D);
+    sizeGroup.add(mesh);
+    root.add(sizeGroup);
+
+    root.userData.isColorRect2DVisualRoot = true;
+    root.userData.nodeId = node.nodeId;
+    root.userData.sizeGroup = sizeGroup;
+    root.userData.colorRectMesh = mesh;
+    this.apply2DVisualOpacity(node, root);
+
+    return root;
+  }
+
+  /**
+   * Sync the ColorRect2D proxy mesh color from the node's authored `color`.
+   * `Color.set` applies the same sRGB → linear conversion the runtime uses, so
+   * the editor swatch matches play mode.
+   */
+  private applyColorRect2DColor(node: ColorRect2D, visualRoot: THREE.Group): void {
+    const mesh = visualRoot.userData.colorRectMesh as THREE.Mesh | undefined;
+    if (mesh && mesh.material instanceof THREE.MeshBasicMaterial) {
+      mesh.material.color.set(node.color);
+      mesh.material.needsUpdate = true;
+    }
   }
 
   private createSprite2DAnchorMarker(_node: Sprite2D, width: number, height: number): THREE.Group {
@@ -5430,6 +5542,9 @@ export class ViewportRendererService {
       if (node instanceof Group2D) {
         halfWidth = node.width / 2;
         halfHeight = node.height / 2;
+      } else if (node instanceof ColorRect2D) {
+        halfWidth = node.width / 2;
+        halfHeight = node.height / 2;
       } else if (node instanceof UIControl2D) {
         const { width, height } = this.getUIControlDimensions(node);
         halfWidth = width / 2;
@@ -6686,6 +6801,9 @@ export class ViewportRendererService {
     if (node instanceof Sprite2D) {
       return this.sprite2DVisuals.get(node.nodeId);
     }
+    if (node instanceof ColorRect2D) {
+      return this.colorRect2DVisuals.get(node.nodeId);
+    }
     if (node instanceof UIControl2D) {
       return this.uiControl2DVisuals.get(node.nodeId);
     }
@@ -6955,6 +7073,11 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.sprite2DVisuals.clear();
+
+    for (const visual of this.colorRect2DVisuals.values()) {
+      this.disposeObject3D(visual);
+    }
+    this.colorRect2DVisuals.clear();
 
     for (const visual of this.tiledSprite2DVisuals.values()) {
       this.disposeObject3D(visual);

@@ -8,6 +8,7 @@ import { Group2D } from '../nodes/2D/Group2D';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
+import { ColorRect2D } from '../nodes/2D/ColorRect2D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
 import { UIControl2D } from '../nodes/2D/UI/UIControl2D';
 import { Button2D } from '../nodes/2D/UI/Button2D';
@@ -347,7 +348,16 @@ export class SceneSaver {
     }
 
     // Serialize specific node type properties
-    if (node instanceof ScrollContainer2D) {
+    if (node instanceof ColorRect2D) {
+      // ColorRect2D exposes width/height/color as instance fields; its property
+      // setters (Inspector edits) mutate those fields and the material directly
+      // and never touch node.properties, so we must read the live fields here.
+      // Without this branch, serialize→re-parse (used when entering play mode)
+      // would emit the stale load-time color/size from the properties bag.
+      props.width = node.width;
+      props.height = node.height;
+      props.color = node.color;
+    } else if (node instanceof ScrollContainer2D) {
       props.scrollY = node.scrollY;
       props.dragScrollEnabled = node.dragScrollEnabled;
       props.wheelScrollEnabled = node.wheelScrollEnabled;
