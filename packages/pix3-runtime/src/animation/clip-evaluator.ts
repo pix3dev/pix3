@@ -10,6 +10,7 @@
 
 import type { NodeBase } from '../nodes/NodeBase';
 import type { PropertyDefinition } from '../fw/property-schema';
+import { parseEventArgs } from '../core/parse-event-args';
 import { getNodePropertySchema, getPropertyDefinition } from '../fw/property-schema-utils';
 import { applyEasing } from './easing';
 import type {
@@ -206,26 +207,10 @@ export function collectEventKeysInRange(
   return collectTimedKeysInRange(track.keys, from, to, options);
 }
 
-/**
- * Parse an event key's raw `args` string into a positional argument list for
- * `NodeBase.emit(signal, ...args)`:
- * - empty / whitespace → no args
- * - a JSON array → its elements, spread
- * - any other valid JSON (number, string, boolean, object, null) → one arg
- * - unparseable text → the trimmed raw string as one arg (author convenience)
- */
-export function parseEventArgs(raw: string): unknown[] {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    return [trimmed];
-  }
-}
+// Re-exported (imported above) so existing importers keep working while the
+// flipbook nodes can depend on `core/parse-event-args` without pulling in the
+// keyframe evaluator.
+export { parseEventArgs };
 
 /** Emit an event key's signal on the given node with its parsed args. */
 export function fireEventKey(node: NodeBase, key: EventKeyframe): void {
