@@ -29,6 +29,11 @@ export class SpotLightNode extends Node3D {
 
     this.light = new SpotLight(color, intensity, distance, angle, penumbra, decay);
     this.light.castShadow = props.castShadow ?? true;
+    // three.js lights default position to Object3D.DEFAULT_UP (0,1,0); reset so the
+    // light (and its SpotLightHelper cone apex) sits exactly at the node origin —
+    // matching the icon/gizmo — instead of 1 unit above it. (DirectionalLight does
+    // the same.)
+    this.light.position.set(0, 0, 0);
     this.add(this.light);
     this.add(this.light.target);
 

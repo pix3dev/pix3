@@ -4,6 +4,15 @@ import { Vector3 } from 'three';
 import { SpotLightNode } from './SpotLightNode';
 
 describe('SpotLightNode aim target', () => {
+  it('keeps the light at the node origin (not the three.js DEFAULT_UP offset)', () => {
+    // new SpotLight() defaults position to (0,1,0); the node must reset it so the
+    // light / SpotLightHelper cone apex coincide with the node icon & gizmo.
+    const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
+    expect(spot.light.position.x).toBeCloseTo(0);
+    expect(spot.light.position.y).toBeCloseTo(0);
+    expect(spot.light.position.z).toBeCloseTo(0);
+  });
+
   it('defaults the target to local -Z (aims per transform, not the three.js origin default)', () => {
     const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
     const target = spot.getTargetPosition();
