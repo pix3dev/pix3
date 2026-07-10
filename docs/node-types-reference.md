@@ -531,6 +531,58 @@ A light source that emits a cone of light in a specific direction. Like a flashl
 
 ---
 
+### Particles3D
+
+A CPU-simulated particle emitter rendered as a single `InstancedMesh`. Supports
+billboarded planes, spheres or cubes, per-particle color/alpha/size ramps, an
+emitter shape (point/sphere/box), optional ribbon **trails**, and **sub-emitters**
+that burst a second emitter on particle death.
+
+**Type String:** `Particles3D`
+
+**Key Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `emissionRate` | number | 24 | Particles spawned per second |
+| `maxParticles` | number | 512 | Simulation pool size (also the instance cap) |
+| `lifetime` | number | 2 | Base particle lifetime (s), jittered ±15% |
+| `speed` / `speedSpread` | number | 2 / 0.5 | Initial speed and its random spread |
+| `gravity` | vector3 | (0,0,0) | Constant acceleration (sim-space vector) |
+| `startColor`/`endColor` | color | white/amber | Color ramp over life |
+| `startAlpha`/`endAlpha` | number | 1 / 0 | Alpha ramp over life |
+| `simulationSpace` | enum | `local` | `local` = particles follow the emitter; `world` = particles are emitted into world space and stay put |
+| `trailEnabled` | boolean | false | Draw a camera-facing ribbon behind each particle |
+| `trailLifetime` | number | 0.3 | How long (s) a trail sample survives |
+| `trailWidth` | number | 0.05 | Ribbon width at the head |
+| `trailSegments` | number | 16 | Ribbon resolution (clamped 2–64) |
+| `trailFade` | number | 1 | Alpha falloff along the ribbon (0 = solid, 1 = fade to transparent) |
+| `subEmitterId` | node | — | Another `Particles3D` fired as a burst at each particle death |
+| `subEmitterBurstCount` | number | 8 | Particles spawned per death (0–128) |
+| `subEmitterInheritVelocity` | number | 0 | Fraction of the dead particle's velocity passed to the burst (0–1) |
+
+**Simulation space (behavior change):** `simulationSpace` was persisted since it
+shipped but was previously **ignored** — every emitter simulated in `local` space
+regardless of the value. It now works: in `world` mode already-spawned particles
+keep their world position when the emitter moves (trails, exhaust, muzzle smoke),
+implemented by neutralizing the emitter's ancestor transform each frame
+(`renderRoot.matrix = matrixWorld⁻¹`). Any externally-authored scene that set
+`simulationSpace: world` will change from the old (buggy) local-follow to true
+world-space; there is no migration — the field finally does what its label says.
+
+**Usage Notes:**
+- Trails are best with `simulationSpace: world`; in `local` mode on a moving
+  emitter the whole ribbon rides with the node.
+- Trails allocate `maxParticles × trailSegments` samples — keep `maxParticles`
+  moderate when trails are enabled (buffers exist only while `trailEnabled`).
+- The sub-emitter target is a normal `Particles3D`, typically authored with
+  `emissionRate: 0` so it only fires from bursts. Bursts are deferred to after the
+  simulation loop, so self-reference and any tick order are safe (≤1 frame latency).
+- Trail material is additive and untextured in v1.
+- All new fields are flat scalars, so they are keyframe-animatable from the timeline.
+
+---
+
 ## Choosing the Right Node
 
 ### For 2D Projects:

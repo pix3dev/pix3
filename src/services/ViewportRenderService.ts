@@ -4909,12 +4909,14 @@ export class ViewportRendererService {
     }
 
     const cameraQuaternion = camera.getWorldQuaternion(new THREE.Quaternion());
+    const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
     const visit = (nodes: NodeBase[]) => {
       for (const node of nodes) {
         if (node instanceof Sprite3D) {
           node.applyBillboard(cameraQuaternion);
         } else if (node instanceof Particles3D) {
-          node.applyBillboard(cameraQuaternion);
+          // Camera position drives trail ribbons; world-space compensation latches here too.
+          node.syncRenderState(cameraQuaternion, cameraPosition);
         }
         if (node.children.length > 0) {
           visit(node.children);

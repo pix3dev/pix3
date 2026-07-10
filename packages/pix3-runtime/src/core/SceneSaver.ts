@@ -635,6 +635,14 @@ export class SceneSaver {
       props.prewarm = node.prewarm;
       props.preview = node.preview;
       props.simulationSpace = node.simulationSpace;
+      props.trailEnabled = node.trailEnabled;
+      props.trailLifetime = node.trailLifetime;
+      props.trailWidth = node.trailWidth;
+      props.trailSegments = node.trailSegments;
+      props.trailFade = node.trailFade;
+      props.subEmitterId = node.subEmitterId;
+      props.subEmitterBurstCount = node.subEmitterBurstCount;
+      props.subEmitterInheritVelocity = node.subEmitterInheritVelocity;
     }
 
     return props;

@@ -195,6 +195,14 @@ export interface Particles3DProperties {
   prewarm?: boolean;
   preview?: boolean;
   simulationSpace?: 'local' | 'world';
+  trailEnabled?: boolean;
+  trailLifetime?: number;
+  trailWidth?: number;
+  trailSegments?: number;
+  trailFade?: number;
+  subEmitterId?: string;
+  subEmitterBurstCount?: number;
+  subEmitterInheritVelocity?: number;
 }
 
 export interface Node2DProperties {
@@ -1874,6 +1882,14 @@ export class SceneLoader {
           prewarm: typeof props.prewarm === 'boolean' ? props.prewarm : false,
           preview: typeof props.preview === 'boolean' ? props.preview : false,
           simulationSpace: props.simulationSpace === 'world' ? 'world' : 'local',
+          trailEnabled: typeof props.trailEnabled === 'boolean' ? props.trailEnabled : false,
+          trailLifetime: this.asNumber(props.trailLifetime, 0.3),
+          trailWidth: this.asNumber(props.trailWidth, 0.05),
+          trailSegments: this.asNumber(props.trailSegments, 16),
+          trailFade: this.asNumber(props.trailFade, 1),
+          subEmitterId: this.asString(props.subEmitterId) ?? '',
+          subEmitterBurstCount: this.asNumber(props.subEmitterBurstCount, 8),
+          subEmitterInheritVelocity: this.asNumber(props.subEmitterInheritVelocity, 0),
         });
 
         if (particles.texturePath) {

@@ -7,6 +7,7 @@ import {
   Quaternion,
   Raycaster,
   Vector2,
+  Vector3,
   type Object3D,
 } from 'three';
 import { SceneManager } from './SceneManager';
@@ -1038,12 +1039,13 @@ export class SceneRunner {
 
   private updateBillboardSprites(nodes: NodeBase[], camera: Camera): void {
     const cameraQuaternion = camera.getWorldQuaternion(new Quaternion());
+    const cameraPosition = camera.getWorldPosition(new Vector3());
     for (const node of nodes) {
-      if (
-        node instanceof Sprite3D ||
-        node instanceof AnimatedSprite3D ||
-        node instanceof Particles3D
-      ) {
+      if (node instanceof Particles3D) {
+        // Particles3D also needs the camera position (trails) and latches
+        // world-space compensation each rendered frame.
+        node.syncRenderState(cameraQuaternion, cameraPosition);
+      } else if (node instanceof Sprite3D || node instanceof AnimatedSprite3D) {
         node.applyBillboard(cameraQuaternion);
       }
       if (node.children.length > 0) {
