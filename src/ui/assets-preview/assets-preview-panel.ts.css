@@ -130,6 +130,30 @@ pix3-assets-preview-panel .icon {
   color: rgba(245, 247, 250, 0.72);
 }
 
+pix3-assets-preview-panel .audio-play-btn {
+  position: absolute;
+  bottom: 0.3rem;
+  right: 0.3rem;
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease;
+}
+
+pix3-assets-preview-panel .audio-play-btn:hover,
+pix3-assets-preview-panel .audio-play-btn.is-playing {
+  background: rgba(var(--pix3-accent-rgb), 0.92);
+  color: #08110a;
+  transform: scale(1.06);
+}
+
 pix3-assets-preview-panel .thumb-spinner {
   position: absolute;
   width: 1.15rem;

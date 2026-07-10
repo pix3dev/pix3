@@ -55,9 +55,16 @@ export class AssetsPreviewPanel extends ComponentBase {
   @state()
   private isGenerationDropActive = false;
 
+  /** Path of the audio asset currently previewing (null = none). */
+  @state()
+  private playingAudioPath: string | null = null;
+
   private disposePreviewSubscription?: () => void;
   private selectedPaths = new Set<string>();
   private lastSelectedPath: string | null = null;
+  /** Shared element for asset-browser audio preview; reused across items. */
+  private audioPreviewEl: HTMLAudioElement | null = null;
+  private lastPreviewFolderPath: string | null = null;
   private readonly contextMenuPortal = new DropdownPortal({ minWidth: '13rem' });
   private readonly onGlobalPointerDown = (event: PointerEvent): void => {
     if (this.contextMenu && !this.contextMenuPortal.contains(event.target as Node)) {
@@ -73,6 +80,17 @@ export class AssetsPreviewPanel extends ComponentBase {
   connectedCallback(): void {
     super.connectedCallback();
     this.disposePreviewSubscription = this.assetsPreviewService.subscribe(snapshot => {
+      // Stop preview when the folder changes (its blob URLs get revoked) or the
+      // playing item disappears from the listing.
+      if (snapshot.selectedFolderPath !== this.lastPreviewFolderPath) {
+        this.lastPreviewFolderPath = snapshot.selectedFolderPath;
+        this.stopAudioPreview();
+      } else if (
+        this.playingAudioPath &&
+        !snapshot.items.some(entry => entry.path === this.playingAudioPath)
+      ) {
+        this.stopAudioPreview();
+      }
       this.snapshot = snapshot;
       this.requestUpdate();
     });
@@ -86,6 +104,8 @@ export class AssetsPreviewPanel extends ComponentBase {
     window.removeEventListener('pointerdown', this.onGlobalPointerDown, true);
     window.removeEventListener('keydown', this.onGlobalKeyDown);
     this.contextMenuPortal.close();
+    this.stopAudioPreview();
+    this.audioPreviewEl = null;
     super.disconnectedCallback();
   }
 
@@ -181,8 +201,8 @@ export class AssetsPreviewPanel extends ComponentBase {
         title=${this.buildTooltip(item)}
         draggable=${item.kind === 'file' ? 'true' : 'false'}
         @click=${(event: MouseEvent) => this.onItemSelected(event, item)}
-        @dblclick=${() => {
-          void this.onItemDoubleClick(item);
+        @dblclick=${(event: MouseEvent) => {
+          void this.onItemDoubleClick(event, item);
         }}
         @contextmenu=${(event: MouseEvent) => this.onItemContextMenu(event, item)}
         @dragstart=${(event: DragEvent) => this.onItemDragStart(event, item)}
@@ -198,6 +218,17 @@ export class AssetsPreviewPanel extends ComponentBase {
                     ? html`<span class="thumb-spinner" aria-hidden="true"></span>`
                     : null}
                 `}
+          ${item.previewType === 'audio' && item.kind === 'file' && item.previewUrl
+            ? html`<span
+                class="audio-play-btn ${this.playingAudioPath === item.path ? 'is-playing' : ''}"
+                aria-hidden="true"
+                title=${this.playingAudioPath === item.path ? 'Stop preview' : 'Play preview'}
+                >${this.iconService.getIcon(
+                  this.playingAudioPath === item.path ? 'stop' : 'play',
+                  18
+                )}</span
+              >`
+            : null}
         </span>
         <span class="name">${item.name}</span>
         ${item.kind === 'file' && item.sizeBytes !== null
@@ -208,10 +239,52 @@ export class AssetsPreviewPanel extends ComponentBase {
   }
 
   private onItemSelected(event: MouseEvent, item: AssetPreviewItem): void {
+    // Click on the audio play/stop affordance toggles preview (detected on the
+    // parent item button so we avoid a nested interactive element).
+    if (
+      item.previewType === 'audio' &&
+      (event.target as HTMLElement | null)?.closest('.audio-play-btn')
+    ) {
+      this.toggleAudioPreview(item);
+      return;
+    }
     this.updateSelectionFromClick(event, item);
     this.assetsPreviewService.selectItem(item.path);
     if (item.previewType === 'model') {
       this.assetsPreviewService.requestThumbnail(item.path);
+    }
+  }
+
+  private toggleAudioPreview(item: AssetPreviewItem): void {
+    if (this.playingAudioPath === item.path) {
+      this.stopAudioPreview();
+      return;
+    }
+    if (!item.previewUrl) {
+      return;
+    }
+    if (!this.audioPreviewEl) {
+      this.audioPreviewEl = new Audio();
+      this.audioPreviewEl.addEventListener('ended', () => {
+        this.playingAudioPath = null;
+      });
+    }
+    this.audioPreviewEl.src = item.previewUrl;
+    this.audioPreviewEl.currentTime = 0;
+    void this.audioPreviewEl.play().catch(() => {
+      this.playingAudioPath = null;
+    });
+    this.playingAudioPath = item.path;
+  }
+
+  private stopAudioPreview(): void {
+    if (this.audioPreviewEl) {
+      this.audioPreviewEl.pause();
+      this.audioPreviewEl.removeAttribute('src');
+      this.audioPreviewEl.load();
+    }
+    if (this.playingAudioPath !== null) {
+      this.playingAudioPath = null;
     }
   }
 
@@ -308,7 +381,14 @@ export class AssetsPreviewPanel extends ComponentBase {
     this.requestUpdate();
   }
 
-  private async onItemDoubleClick(item: AssetPreviewItem): Promise<void> {
+  private async onItemDoubleClick(event: MouseEvent, item: AssetPreviewItem): Promise<void> {
+    // The audio play/stop affordance handles its own clicks; don't also activate.
+    if (
+      item.previewType === 'audio' &&
+      (event.target as HTMLElement | null)?.closest('.audio-play-btn')
+    ) {
+      return;
+    }
     if (item.kind === 'directory') {
       window.dispatchEvent(
         new CustomEvent('assets-preview:reveal-path', {
