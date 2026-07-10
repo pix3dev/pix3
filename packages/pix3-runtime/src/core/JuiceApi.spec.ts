@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { Vector2 } from 'three';
 import { SceneService, type SceneServiceDelegate } from './SceneService';
 import { GameTime } from './GameTime';
 import { Camera3D } from '../nodes/3D/Camera3D';
+import { Camera2D } from '../nodes/2D/Camera2D';
 import { ShakeBehavior } from '../behaviors/ShakeBehavior';
 import type { AudioService } from './AudioService';
 import type { AssetLoader } from './AssetLoader';
@@ -21,6 +23,7 @@ function makeHarness(): Harness {
 
   const delegate: SceneServiceDelegate = {
     getActiveCameraNode: () => camera,
+    getActiveCamera2DNode: () => null,
     getUICamera: () => null,
     getLogicalCameraSize: () => ({ width: 1920, height: 1080 }),
     setActiveCameraNode: () => undefined,
@@ -85,5 +88,75 @@ describe('JuiceApi / impact combo (P0.3 acceptance)', () => {
 
     expect(service.juice.shake('does-not-exist')).toBeNull();
     expect(service.juice.punchScale('nope')).toBeNull();
+  });
+});
+
+describe('JuiceApi / 2D camera shake targets', () => {
+  function makeService(opts: {
+    active3D: Camera3D | null;
+    active2D: Camera2D | null;
+  }): SceneService {
+    const gameTime = new GameTime();
+    const service = new SceneService();
+    const delegate: SceneServiceDelegate = {
+      getActiveCameraNode: () => opts.active3D,
+      getActiveCamera2DNode: () => opts.active2D,
+      getUICamera: () => null,
+      getLogicalCameraSize: () => ({ width: 1920, height: 1080 }),
+      setActiveCameraNode: () => undefined,
+      findNodeById: () => null,
+      getRootNodes: () => [],
+      getAudioService: () => null as unknown as AudioService,
+      getAssetLoader: () => null as unknown as AssetLoader,
+      getResourceManager: () => null as unknown as ResourceManager,
+      getECSService: () => null,
+      getGameTime: () => gameTime,
+      raycastViewport: () => null,
+      reportFrameProfilerActivities: () => undefined,
+    };
+    service.setDelegate(delegate);
+    return service;
+  }
+
+  // Camera2D shake is its own additive state (not a ShakeBehavior component), so
+  // "did it start?" = a solved offset becomes non-zero.
+  function isShaking(cam: Camera2D): boolean {
+    cam.solve(0.05);
+    const off = cam.getShakeOffset(new Vector2());
+    return off.x !== 0 || off.y !== 0;
+  }
+
+  it("'camera2d' shakes the active Camera2D and returns null", () => {
+    const cam2d = new Camera2D({ id: 'c2', name: 'Cam2D' });
+    const service = makeService({ active3D: null, active2D: cam2d });
+
+    const result = service.juice.shake('camera2d', { amplitude: 12, duration: 1 });
+    expect(result).toBeNull();
+    expect(isShaking(cam2d)).toBe(true);
+  });
+
+  it("'camera' falls back to the active Camera2D only when there is no active Camera3D", () => {
+    const cam2d = new Camera2D({ id: 'c2', name: 'Cam2D' });
+    const service = makeService({ active3D: null, active2D: cam2d });
+
+    const result = service.juice.shake('camera', { amplitude: 12, duration: 1 });
+    expect(result).toBeNull();
+    expect(isShaking(cam2d)).toBe(true);
+  });
+
+  it("'camera' targets the Camera3D (not the Camera2D) when a Camera3D is active", () => {
+    const camera3d = new Camera3D({ id: 'cam', name: 'Camera', projection: 'perspective' });
+    const cam2d = new Camera2D({ id: 'c2', name: 'Cam2D' });
+    const service = makeService({ active3D: camera3d, active2D: cam2d });
+
+    const result = service.juice.shake('camera', { amplitude: 12, duration: 1 });
+    expect(result).toBeInstanceOf(ShakeBehavior);
+    expect(camera3d.getComponent(ShakeBehavior)).toBe(result);
+    expect(isShaking(cam2d)).toBe(false);
+  });
+
+  it("'camera2d' returns null when no Camera2D is active", () => {
+    const service = makeService({ active3D: null, active2D: null });
+    expect(service.juice.shake('camera2d')).toBeNull();
   });
 });

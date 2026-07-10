@@ -3322,7 +3322,9 @@ export class ViewportRendererService {
     const shouldAttachTarget =
       this.currentTransformMode === 'translate' &&
       this.activeTargetNodeId === nodeToAttach.nodeId &&
-      (nodeToAttach instanceof Camera3D || nodeToAttach instanceof DirectionalLightNode);
+      (nodeToAttach instanceof Camera3D ||
+        nodeToAttach instanceof DirectionalLightNode ||
+        nodeToAttach instanceof SpotLightNode);
 
     if (shouldAttachTarget) {
       const targetSphere = this.getTargetSphere(nodeToAttach.nodeId);
@@ -3856,8 +3858,8 @@ export class ViewportRendererService {
   private createTargetGizmo(node: Node3D): THREE.Object3D | null {
     if (node instanceof Camera3D) {
       return this.createCameraTargetGizmo(node);
-    } else if (node instanceof DirectionalLightNode) {
-      return this.createDirectionalLightTargetGizmo(node);
+    } else if (node instanceof DirectionalLightNode || node instanceof SpotLightNode) {
+      return this.createLightTargetGizmo(node);
     }
     return null;
   }
@@ -3919,7 +3921,7 @@ export class ViewportRendererService {
     return gizmo;
   }
 
-  private createDirectionalLightTargetGizmo(node: DirectionalLightNode): THREE.Object3D {
+  private createLightTargetGizmo(node: DirectionalLightNode | SpotLightNode): THREE.Object3D {
     const targetPos = node.getTargetPosition();
     const nodeWorldPos = node.getWorldPosition(new THREE.Vector3());
     const rawDirection = targetPos.clone().sub(nodeWorldPos);
@@ -3977,10 +3979,10 @@ export class ViewportRendererService {
   }
 
   private updateTargetGizmo(node: Node3D, gizmo: THREE.Object3D): void {
-    let cameraNode: Camera3D | DirectionalLightNode | null = null;
+    let cameraNode: Camera3D | DirectionalLightNode | SpotLightNode | null = null;
     if (node instanceof Camera3D) {
       cameraNode = node;
-    } else if (node instanceof DirectionalLightNode) {
+    } else if (node instanceof DirectionalLightNode || node instanceof SpotLightNode) {
       cameraNode = node;
     }
     if (!cameraNode) return;
@@ -4043,7 +4045,9 @@ export class ViewportRendererService {
     return sphere;
   }
 
-  private getTargetNodeForObject(object: THREE.Object3D): Camera3D | DirectionalLightNode | null {
+  private getTargetNodeForObject(
+    object: THREE.Object3D
+  ): Camera3D | DirectionalLightNode | SpotLightNode | null {
     const parentNodeId = object.userData.parentNodeId;
     if (typeof parentNodeId !== 'string') {
       return null;
@@ -4055,7 +4059,11 @@ export class ViewportRendererService {
     }
 
     const node = sceneGraph.nodeMap.get(parentNodeId);
-    if (node instanceof Camera3D || node instanceof DirectionalLightNode) {
+    if (
+      node instanceof Camera3D ||
+      node instanceof DirectionalLightNode ||
+      node instanceof SpotLightNode
+    ) {
       return node;
     }
     return null;

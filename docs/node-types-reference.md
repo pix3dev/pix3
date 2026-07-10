@@ -256,6 +256,55 @@ A specialized slot control for inventory systems. Supports drag-and-drop for ite
 
 ---
 
+### Camera2D
+
+A 2D game camera (Godot-style). Like `VirtualCamera3D` it does **not** render — it *describes* how the shared 2D orthographic pass is framed. Each frame the runtime picks the highest-priority visible `Camera2D` and applies its pan (`position` + `offset`), `zoom`, clamped `limits`, and shake to the 2D camera. With no `Camera2D` in the scene the 2D pass keeps its default identity framing, so existing 2D scenes / playable ads are unaffected. Every knob is a flat schema property, so the keyframe timeline animates `position`, `offset`, `zoom`, `priority`, etc. with no animation code.
+
+**Type String:** `Camera2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `priority` | number | 10 | Highest-priority visible Camera2D drives the 2D view (animatable) |
+| `zoom` | number | 1 | >1 magnifies (zooms in), <1 zooms out |
+| `offset` | vector2 | 0,0 | Framing offset added to position (never written by follow / shake) |
+| `followTargetId` | node | — | Node whose position this camera follows (empty = authored position) |
+| `followOffset` | vector2 | 0,0 | Offset from the follow target |
+| `followDamping` | number | 8 | Higher = snappier follow (0 = instant) |
+| `deadzone` | vector2 | 0,0 | World half-extents the target may move within before the camera follows |
+| `limitsEnabled` | boolean | false | Clamp the visible view inside an axis-aligned world box |
+| `limitsCenter` | vector2 | 0,0 | Limits box center |
+| `limitsSize` | vector2 | 1000,1000 | Limits box size |
+| `shakeAmplitude` | number | 8 | Peak shake displacement in world units |
+| `shakeFrequency` | number | 24 | Shake oscillation speed |
+| `shakeDuration` | number | 0.35 | Shake duration in seconds |
+| `shakeDecay` | number | 1.5 | Falloff power (0 = steady, 1 = linear, >1 = punchy tail) |
+
+**Usage Notes:**
+- `position` is the camera center (follow damps it toward the target); `offset` is a separate framing bias that follow and shake never touch.
+- Limits clamp the view **center** zoom-aware, so the view edge never crosses the box; a box smaller than the view pins the center to `limitsCenter`.
+- Shake is additive at apply time (never mutates `position`) and, being tick-driven, respects `Time.scale` — a hitstop freezes it, slow-mo stretches it. Trigger it from a script with `scene.juice.shake('camera2d')` (or `scene.juice.shake('camera')` in a pure-2D scene).
+- v1: screen-anchored HUD shares this camera and pans / zooms with the world. Use a `CanvasLayer2D` to pin a HUD.
+
+---
+
+### CanvasLayer2D
+
+A Godot-style `CanvasLayer` — a clean UI overlay band. Its subtree renders on a separate layer through an always-identity camera **after** the post-processing composer, so it is (a) a **fixed HUD** that ignores any `Camera2D` pan/zoom, and (b) **never post-processed** — bloom/vignette/chromatic-aberration leave it crisp (e.g. a restart dialog over a blurred game-over scene). Extends `Group2D` (width/height container); no extra authored properties in v1.
+
+**Type String:** `CanvasLayer2D`
+
+**Properties:** inherits `Group2D` (`width`, `height`) + `Node2D` transform/anchor/opacity.
+
+**Usage Notes:**
+- Content under a CanvasLayer2D is pinned in design-space coordinates regardless of the active Camera2D, and its pointer hit-tests stay correct while the world camera pans.
+- Multiple CanvasLayer2D nodes stack by scene-tree order (like ordinary 2D draw order).
+- Unlike Godot, inheritance is **not** broken: an ancestor's transform, opacity, and visibility still flow into the overlay subtree — only the render camera differs. Author at the scene root for a fully independent layer.
+- Runtime overlay behavior is play-mode only; in the editor it renders as a normal Group2D container.
+
+---
+
 ## 3D Nodes
 
 All 3D nodes operate in world space using a perspective camera by default. They use a right-handed coordinate system where X is right, Y is up, and Z is toward the viewer.
@@ -511,6 +560,8 @@ A light source that emits a cone of light in a specific direction. Like a flashl
 | Node3D | position (Vector3), rotation (Euler), scale (Vector3) |
 | Layout2D | width, height, resolutionPreset |
 | Sprite2D | texturePath, width, height, color |
+| Camera2D | priority, zoom, offset, followTargetId, limitsEnabled, shakeAmplitude |
+| CanvasLayer2D | width, height (fixed HUD overlay; renders after post) |
 | Camera3D | projection, fov, near, far |
 | VirtualCamera3D | priority, followTargetId, lookAtTargetId, blendDuration, fov |
 | GeometryMesh | geometry, size, material |

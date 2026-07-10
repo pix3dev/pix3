@@ -1,10 +1,10 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import { configure2DTexture } from '../../core/configure-2d-texture';
+import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
 import {
   findAnimationClip,
-  getAnimationFrameTexturePath,
   isSequenceAnimationFrame,
   type AnimationClip,
   type AnimationFrame,
@@ -147,14 +147,35 @@ export class AnimatedSprite2D extends Node2D {
 
       this.timeAccumulator -= frameDuration;
 
+      const prevFrame = this._currentFrame;
       const nextFrame = this.getNextFrameIndex(clip);
 
       this.currentFrame = nextFrame;
+
+      // Fire per-frame events only on a real play-driven advance — never from the
+      // currentFrame setter, which the inspector scrub / syncActiveClip / editor
+      // proxy also call and would spuriously fire.
+      if (this._currentFrame !== prevFrame) {
+        this.emitFrameEvents(this._currentFrame);
+      }
 
       if (!this.isPlaying) {
         this.timeAccumulator = 0;
         break;
       }
+    }
+  }
+
+  private emitFrameEvents(frameIndex: number): void {
+    const frame = this.activeClip?.frames[frameIndex];
+    if (!frame || !frame.events || frame.events.length === 0) {
+      return;
+    }
+    for (const event of frame.events) {
+      if (event.signal.length === 0) {
+        continue;
+      }
+      this.emit(event.signal, ...parseEventArgs(event.args));
     }
   }
 

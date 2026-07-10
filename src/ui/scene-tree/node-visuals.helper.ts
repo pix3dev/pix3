@@ -4,6 +4,8 @@ import { Node3D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
+import { CanvasLayer2D } from '@pix3/runtime';
+import { Camera2D } from '@pix3/runtime';
 import { Joystick2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
@@ -60,6 +62,12 @@ export function getNodeVisuals(node: NodeBase): { color: string; icon: string } 
   }
   if (node instanceof InventorySlot2D) {
     return { color: NODE_2D_COLOR, icon: 'ui-inventory-slot' };
+  }
+  if (node instanceof Camera2D) {
+    return { color: NODE_2D_COLOR, icon: 'camera' };
+  }
+  if (node instanceof CanvasLayer2D) {
+    return { color: NODE_2D_COLOR, icon: 'layers' };
   }
   if (node instanceof Group2D) {
     return { color: NODE_2D_COLOR, icon: 'layout' };

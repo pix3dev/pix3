@@ -38,6 +38,8 @@ export * from './nodes/2D/AnimatedSprite2D';
 export * from './nodes/2D/ColorRect2D';
 export * from './nodes/2D/TiledSprite2D';
 export * from './nodes/2D/Group2D';
+export * from './nodes/2D/Camera2D';
+export * from './nodes/2D/CanvasLayer2D';
 export * from './nodes/2D/UI/UIControl2D';
 export * from './nodes/2D/UI/Joystick2D';
 export * from './nodes/2D/UI/Button2D';

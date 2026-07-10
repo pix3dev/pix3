@@ -4,6 +4,7 @@ import type { NodeBase } from '../NodeBase';
 import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
 import { EASING_NAMES, isKeyframeEasing, type KeyframeEasing } from '../../animation/easing';
+import { clampRange, dampingAlpha, deadzoneGoal } from '../../core/camera-math';
 
 const WORLD_UP = new Vector3(0, 1, 0);
 
@@ -560,31 +561,6 @@ function clamp01(value: number): number {
     return 0;
   }
   return value < 0 ? 0 : value > 1 ? 1 : value;
-}
-
-/** Frame-rate-independent damping factor: `1 - e^(-k·dt)`, clamped to [0, 1]. */
-function dampingAlpha(smoothing: number, dt: number): number {
-  if (smoothing <= 0 || dt <= 0) {
-    return 1;
-  }
-  const alpha = 1 - Math.exp(-smoothing * dt);
-  return alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
-}
-
-/** Deadzone goal: keep `current` until the target exits the half-extent, then
- * chase so the target rests at the box edge. */
-function deadzoneGoal(current: number, desired: number, halfExtent: number): number {
-  const error = desired - current;
-  if (Math.abs(error) <= halfExtent) {
-    return current;
-  }
-  return error > 0 ? desired - halfExtent : desired + halfExtent;
-}
-
-function clampRange(value: number, center: number, halfExtent: number): number {
-  const min = center - halfExtent;
-  const max = center + halfExtent;
-  return value < min ? min : value > max ? max : value;
 }
 
 function vectorValue(v: Vector3): { x: number; y: number; z: number } {

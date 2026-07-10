@@ -1,4 +1,4 @@
-import { MathUtils, type Material, Vector2 } from 'three';
+import { MathUtils, type Material, Vector2, Vector3 } from 'three';
 
 import { NodeBase, type NodeBaseProps } from './NodeBase';
 import type { PropertySchema } from '../fw/property-schema';
@@ -37,6 +37,14 @@ export interface Node2DProps extends Omit<NodeBaseProps, 'type'> {
 }
 
 export class Node2D extends NodeBase {
+  /** Shared scratch for pointer unprojection (single-threaded, reused per call). */
+  private static readonly scratchUnproject = new Vector3();
+  /**
+   * Marks this node as a CanvasLayer2D boundary — its subtree renders in the
+   * fixed overlay band (LAYER_2D_OVERLAY) through the identity overlay camera,
+   * unaffected by an active Camera2D. Set by the CanvasLayer2D constructor.
+   */
+  isCanvasLayer = false;
   private _opacity: number;
   private _computedOpacity: number;
   private _layoutEnabled: boolean;
@@ -214,6 +222,26 @@ export class Node2D extends NodeBase {
 
     const inputWidth = Math.max(1, input.width);
     const inputHeight = Math.max(1, input.height);
+
+    // Unproject through the live 2D ortho camera so pointer→world stays correct
+    // when a Camera2D pans / zooms the 2D pass (Joystick2D, drag hit-tests, etc.).
+    // The camera's matrices reflect the previous frame's applied framing — a
+    // sub-frame lag that is imperceptible for input. Falls back to the fixed
+    // logical-size mapping when no UI camera is available (editor / no scene).
+    //
+    // Overlay-band nodes (under a CanvasLayer2D) are pinned by the identity
+    // overlay camera, NOT the Camera2D-driven main camera — so they must use the
+    // logical-size mapping (mathematically identical to the identity view) or
+    // their hit-tests would drift by the camera pan. Skip the uiCamera branch.
+    const uiCamera = this.scene?.getUICamera();
+    if (uiCamera && !this.isInOverlayBand()) {
+      const ndcX = (input.pointerPosition.x / inputWidth) * 2 - 1;
+      const ndcY = -((input.pointerPosition.y / inputHeight) * 2 - 1);
+      Node2D.scratchUnproject.set(ndcX, ndcY, 0).unproject(uiCamera);
+      target.set(Node2D.scratchUnproject.x, Node2D.scratchUnproject.y);
+      return target;
+    }
+
     const logicalCameraSize = this.scene?.getLogicalCameraSize();
     const worldWidth =
       logicalCameraSize && Number.isFinite(logicalCameraSize.width) && logicalCameraSize.width > 0
@@ -229,6 +257,18 @@ export class Node2D extends NodeBase {
       worldHeight / 2 - (input.pointerPosition.y / inputHeight) * worldHeight
     );
     return target;
+  }
+
+  /** True when this node or an ancestor is a CanvasLayer2D (fixed overlay band). */
+  protected isInOverlayBand(): boolean {
+    let current: Node2D | null = this;
+    while (current) {
+      if (current.isCanvasLayer) {
+        return true;
+      }
+      current = current.parent instanceof Node2D ? current.parent : null;
+    }
+    return false;
   }
 
   applyAnchoredLayoutRecursive(

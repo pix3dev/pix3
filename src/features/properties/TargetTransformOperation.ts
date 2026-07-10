@@ -8,6 +8,7 @@ import type {
 import { Node3D } from '@pix3/runtime';
 import { Camera3D } from '@pix3/runtime';
 import { DirectionalLightNode } from '@pix3/runtime';
+import { SpotLightNode } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 
@@ -119,6 +120,8 @@ export class TargetTransformOperation implements Operation<OperationInvokeResult
     if (node instanceof Camera3D) {
       node.setTargetPosition(targetPos);
     } else if (node instanceof DirectionalLightNode) {
+      node.setTargetPosition(targetPos);
+    } else if (node instanceof SpotLightNode) {
       node.setTargetPosition(targetPos);
     }
   }

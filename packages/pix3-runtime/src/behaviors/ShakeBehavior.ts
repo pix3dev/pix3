@@ -260,8 +260,10 @@ export class ShakeBehavior extends Script {
  * Smooth pseudo-random value in ~[-1, 1] from a sum of incommensurate sines.
  * Deterministic (no Math.random), continuous over time, and decorrelated per
  * axis via the `seed` offset — so shakes look organic and replay identically.
+ * Exported so other shake-driven nodes (e.g. {@link ../nodes/2D/Camera2D})
+ * reuse the exact same deterministic noise.
  */
-function shakeNoise(t: number, seed: number): number {
+export function shakeNoise(t: number, seed: number): number {
   return (
     Math.sin(t * 1.373 + seed * 12.9898) * 0.5 +
     Math.sin(t * 2.917 + seed * 7.233) * 0.3 +

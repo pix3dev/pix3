@@ -5,6 +5,7 @@ import { NodeBase } from '../nodes/NodeBase';
 import { Node3D } from '../nodes/Node3D';
 import { Node2D } from '../nodes/Node2D';
 import { Group2D } from '../nodes/2D/Group2D';
+import { Camera2D } from '../nodes/2D/Camera2D';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
@@ -581,6 +582,8 @@ export class SceneSaver {
         props.far = node.far;
       }
     } else if (node instanceof VirtualCamera3D) {
+      Object.assign(props, node.serializeConfig());
+    } else if (node instanceof Camera2D) {
       Object.assign(props, node.serializeConfig());
     } else if (node instanceof PostProcess) {
       Object.assign(props, node.serializeConfig());

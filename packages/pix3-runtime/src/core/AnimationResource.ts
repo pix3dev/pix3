@@ -17,6 +17,16 @@ export interface AnimationPolygonPoint {
 
 export type AnimationPlaybackMode = 'normal' | 'ping-pong';
 
+/**
+ * A signal emitted when a flipbook clip enters this frame during play-driven
+ * advance (AnimatedSprite2D/3D). `args` is a raw string parsed at fire time by
+ * `parseEventArgs` (same convention as the keyframe event-track).
+ */
+export interface AnimationFrameEvent {
+  signal: string;
+  args: string;
+}
+
 export interface AnimationFrame {
   textureIndex: number;
   offset: AnimationVector2;
@@ -26,6 +36,12 @@ export interface AnimationFrame {
   texturePath: string;
   boundingBox: AnimationBoundingBox;
   collisionPolygon: AnimationPolygonPoint[];
+  /**
+   * Signals fired when the clip enters this frame (play-mode advance only).
+   * Optional so existing frame literals stay valid; `normalizeFrame` always
+   * materializes it to `[]`, so runtime (loaded) frames always carry the field.
+   */
+  events?: AnimationFrameEvent[];
 }
 
 export interface AnimationClip {
@@ -99,6 +115,29 @@ function normalizePolygonPoint(value: unknown): AnimationPolygonPoint {
   return normalizeVector2(value);
 }
 
+function normalizeFrameEvents(value: unknown): AnimationFrameEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const events: AnimationFrameEvent[] = [];
+  for (const entry of value) {
+    const candidate = typeof entry === 'object' && entry !== null ? entry : {};
+    const signal =
+      typeof (candidate as { signal?: unknown }).signal === 'string'
+        ? (candidate as { signal: string }).signal.trim()
+        : '';
+    if (signal.length === 0) {
+      continue;
+    }
+    const args =
+      typeof (candidate as { args?: unknown }).args === 'string'
+        ? (candidate as { args: string }).args
+        : '';
+    events.push({ signal, args });
+  }
+  return events;
+}
+
 function normalizePlaybackMode(value: unknown): AnimationPlaybackMode {
   return value === 'ping-pong' ? 'ping-pong' : 'normal';
 }
@@ -129,6 +168,7 @@ function normalizeFrame(frame: unknown): AnimationFrame {
           normalizePolygonPoint
         )
       : [],
+    events: normalizeFrameEvents((candidate as { events?: unknown }).events),
   };
 }
 

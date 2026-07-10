@@ -1,0 +1,46 @@
+import { describe, expect, it } from 'vitest';
+import { Vector3 } from 'three';
+
+import { SpotLightNode } from './SpotLightNode';
+
+describe('SpotLightNode aim target', () => {
+  it('keeps the light at the node origin (not the three.js DEFAULT_UP offset)', () => {
+    // new SpotLight() defaults position to (0,1,0); the node must reset it so the
+    // light / SpotLightHelper cone apex coincide with the node icon & gizmo.
+    const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
+    expect(spot.light.position.x).toBeCloseTo(0);
+    expect(spot.light.position.y).toBeCloseTo(0);
+    expect(spot.light.position.z).toBeCloseTo(0);
+  });
+
+  it('defaults the target to local -Z (aims per transform, not the three.js origin default)', () => {
+    const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
+    const target = spot.getTargetPosition();
+    expect(target.x).toBeCloseTo(0);
+    expect(target.y).toBeCloseTo(0);
+    expect(target.z).toBeCloseTo(-5);
+  });
+
+  it('constrains the target to a fixed distance along the aim direction', () => {
+    const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
+    spot.setTargetPosition(new Vector3(10, 0, 0));
+
+    const target = spot.getTargetPosition();
+    // Direction (1,0,0) at TARGET_DISTANCE 5 → (5,0,0).
+    expect(target.x).toBeCloseTo(5);
+    expect(target.y).toBeCloseTo(0);
+    expect(target.z).toBeCloseTo(0);
+  });
+
+  it('aims the beam (node → target) toward the requested point', () => {
+    const spot = new SpotLightNode({ id: 'spot', name: 'Spot' });
+    spot.setTargetPosition(new Vector3(0, -8, 4));
+
+    const origin = spot.getWorldPosition(new Vector3());
+    const dir = spot.getTargetPosition().sub(origin).normalize();
+    const expected = new Vector3(0, -8, 4).normalize();
+    expect(dir.x).toBeCloseTo(expected.x);
+    expect(dir.y).toBeCloseTo(expected.y);
+    expect(dir.z).toBeCloseTo(expected.z);
+  });
+});

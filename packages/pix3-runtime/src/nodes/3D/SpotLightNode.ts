@@ -1,7 +1,9 @@
-import { Color, SpotLight } from 'three';
+import { Color, Quaternion, SpotLight, Vector3 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
+
+const TARGET_DISTANCE = 5;
 
 export interface SpotLightNodeProps extends Omit<Node3DProps, 'type'> {
   color?: string;
@@ -27,7 +29,40 @@ export class SpotLightNode extends Node3D {
 
     this.light = new SpotLight(color, intensity, distance, angle, penumbra, decay);
     this.light.castShadow = props.castShadow ?? true;
+    // three.js lights default position to Object3D.DEFAULT_UP (0,1,0); reset so the
+    // light (and its SpotLightHelper cone apex) sits exactly at the node origin —
+    // matching the icon/gizmo — instead of 1 unit above it. (DirectionalLight does
+    // the same.)
+    this.light.position.set(0, 0, 0);
     this.add(this.light);
+    this.add(this.light.target);
+
+    // Initialize the aim target in local space (-Z) without lookAt(), which would
+    // normalize the Euler angles set by super(props) and corrupt saved rotations.
+    this.light.target.position.set(0, 0, -TARGET_DISTANCE);
+    this.light.target.updateMatrixWorld(true);
+  }
+
+  getTargetPosition(): Vector3 {
+    this.light.target.updateMatrixWorld(true);
+    return this.light.target.getWorldPosition(new Vector3());
+  }
+
+  setTargetPosition(targetPos: Vector3): void {
+    const worldPosition = this.getWorldPosition(new Vector3());
+    const rawDirection = targetPos.clone().sub(worldPosition);
+    const direction =
+      rawDirection.lengthSq() > 1e-8
+        ? rawDirection.normalize()
+        : new Vector3(0, 0, 1).applyQuaternion(this.getWorldQuaternion(new Quaternion()));
+    const constrainedTarget = worldPosition.add(direction.multiplyScalar(TARGET_DISTANCE));
+
+    this.lookAt(constrainedTarget);
+
+    const localTarget = constrainedTarget.clone();
+    this.worldToLocal(localTarget);
+    this.light.target.position.copy(localTarget);
+    this.light.target.updateMatrixWorld(true);
   }
 
   static override getPropertySchema(): PropertySchema {
