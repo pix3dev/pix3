@@ -10,6 +10,8 @@ import { ColorRect2D } from '../nodes/2D/ColorRect2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import type { TiledSpriteAxisStretch, TiledSpritePatchMode } from './tiled-sprite-geometry';
 import { Group2D } from '../nodes/2D/Group2D';
+import { Camera2D, CAMERA2D_DEFAULTS } from '../nodes/2D/Camera2D';
+import { CanvasLayer2D } from '../nodes/2D/CanvasLayer2D';
 import { DirectionalLightNode } from '../nodes/3D/DirectionalLightNode';
 import { PointLightNode } from '../nodes/3D/PointLightNode';
 import { SpotLightNode } from '../nodes/3D/SpotLightNode';
@@ -1137,6 +1139,58 @@ export class SceneLoader {
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, 100),
           height: this.asNumber(props.height, 100),
+        });
+      }
+      case 'CanvasLayer2D': {
+        const props = baseProps.properties as Record<string, unknown>;
+        const transform = this.asRecord(props.transform);
+
+        return new CanvasLayer2D({
+          ...baseProps,
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation:
+            typeof (transform?.rotation ?? props.rotation) === 'number'
+              ? ((transform?.rotation ?? props.rotation) as number)
+              : 0,
+          layout: this.parseNode2DLayout(props),
+          opacity: this.asNumber(props.opacity, undefined),
+          width: this.asNumber(props.width, 100),
+          height: this.asNumber(props.height, 100),
+        });
+      }
+      case 'Camera2D': {
+        const props = baseProps.properties as Record<string, unknown>;
+        const transform = this.asRecord(props.transform);
+        const d = CAMERA2D_DEFAULTS;
+
+        return new Camera2D({
+          ...baseProps,
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation:
+            typeof (transform?.rotation ?? props.rotation) === 'number'
+              ? ((transform?.rotation ?? props.rotation) as number)
+              : 0,
+          layout: this.parseNode2DLayout(props),
+          opacity: this.asNumber(props.opacity, undefined),
+          priority: this.asNumber(props.priority, d.priority),
+          zoom: this.asNumber(props.zoom, d.zoom),
+          offset: this.readVector2(props.offset, ZERO_VECTOR2),
+          followTargetId: this.asString(props.followTargetId) ?? '',
+          followDamping: this.asNumber(props.followDamping, d.followDamping),
+          followOffset: this.readVector2(props.followOffset, ZERO_VECTOR2),
+          deadzone: this.readVector2(props.deadzone, ZERO_VECTOR2),
+          limitsEnabled: typeof props.limitsEnabled === 'boolean' ? props.limitsEnabled : false,
+          limitsCenter: this.readVector2(props.limitsCenter, ZERO_VECTOR2),
+          limitsSize:
+            props.limitsSize !== undefined
+              ? this.readVector2(props.limitsSize, ZERO_VECTOR2)
+              : undefined,
+          shakeAmplitude: this.asNumber(props.shakeAmplitude, d.shakeAmplitude),
+          shakeFrequency: this.asNumber(props.shakeFrequency, d.shakeFrequency),
+          shakeDuration: this.asNumber(props.shakeDuration, d.shakeDuration),
+          shakeDecay: this.asNumber(props.shakeDecay, d.shakeDecay),
         });
       }
       case 'ScrollContainer2D': {

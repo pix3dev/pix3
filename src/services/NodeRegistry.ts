@@ -1,4 +1,6 @@
 import { CreateGroup2DCommand } from '@/features/scene/CreateGroup2DCommand';
+import { CreateCamera2DCommand } from '@/features/scene/CreateCamera2DCommand';
+import { CreateCanvasLayer2DCommand } from '@/features/scene/CreateCanvasLayer2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { CreateBoxCommand } from '@/features/scene/CreateBoxCommand';
 import { CreateDirectionalLightCommand } from '@/features/scene/CreateDirectionalLightCommand';
@@ -70,6 +72,30 @@ export class NodeRegistry {
       icon: 'layout',
       keywords: ['create', 'group', '2d', 'container', 'organize'],
       order: 0,
+    });
+
+    this.registerNodeType({
+      id: 'camera2d',
+      displayName: 'Camera2D',
+      description: '2D game camera (pan, zoom, limits, shake)',
+      category: '2D',
+      commandClass: CreateCamera2DCommand,
+      color: '#96cbf6ff',
+      icon: 'camera',
+      keywords: ['create', 'camera', '2d', 'follow', 'zoom', 'limits', 'shake'],
+      order: 0.5,
+    });
+
+    this.registerNodeType({
+      id: 'canvaslayer2d',
+      displayName: 'CanvasLayer2D',
+      description: 'Fixed UI overlay layer (drawn above post-processing)',
+      category: '2D',
+      commandClass: CreateCanvasLayer2DCommand,
+      color: '#96cbf6ff',
+      icon: 'layers',
+      keywords: ['create', 'canvas', 'layer', '2d', 'overlay', 'hud', 'ui'],
+      order: 0.6,
     });
 
     this.registerNodeType({

@@ -93,6 +93,7 @@ describe('SceneService viewport API', () => {
 
     service.setDelegate({
       getActiveCameraNode: () => null,
+      getActiveCamera2DNode: () => null,
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
@@ -124,6 +125,7 @@ describe('SceneService viewport API', () => {
 
     service.setDelegate({
       getActiveCameraNode: () => null,
+      getActiveCamera2DNode: () => null,
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
@@ -151,6 +153,7 @@ describe('SceneService viewport API', () => {
 
     service.setDelegate({
       getActiveCameraNode: () => null,
+      getActiveCamera2DNode: () => null,
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,

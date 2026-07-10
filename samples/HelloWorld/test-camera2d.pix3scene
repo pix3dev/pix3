@@ -1,0 +1,91 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Devs
+  description: Camera2D (pan/zoom/shake) + CanvasLayer2D fixed HUD + PostProcess bloom verification.
+root:
+  - id: postfx
+    type: PostProcess
+    name: Post FX
+    properties:
+      affect2D: true
+      bloomEnabled: true
+      bloomIntensity: 1.6
+      bloomThreshold: 0.5
+      bloomSmoothing: 0.2
+      bloomRadius: 0.85
+      vignetteEnabled: false
+      chromaticAberrationEnabled: false
+    children: []
+  - id: cam2d
+    type: Camera2D
+    name: Game Camera
+    properties:
+      priority: 10
+      zoom: 1
+      offset: [0, 0]
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children: []
+  - id: world-rect
+    type: ColorRect2D
+    name: World Rect
+    properties:
+      width: 320
+      height: 320
+      color: "#ffcf33"
+      transform:
+        position: [-260, 0]
+        scale: [1, 1]
+        rotation: 0
+    children: []
+  - id: world-label
+    type: Label2D
+    name: World Label
+    properties:
+      label: WORLD — pans + blooms
+      labelFontSize: 44
+      labelColor: "#ffffff"
+      labelAlign: center
+      transform:
+        position: [-260, 230]
+        scale: [1, 1]
+        rotation: 0
+    children: []
+  - id: hud
+    type: CanvasLayer2D
+    name: HUD
+    properties:
+      width: 1920
+      height: 1080
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: hud-bar
+        type: ColorRect2D
+        name: HUD Bar
+        properties:
+          width: 620
+          height: 96
+          color: "#2fbf71"
+          transform:
+            position: [0, -420]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-label
+        type: Label2D
+        name: HUD Label
+        properties:
+          label: HUD — fixed, no bloom
+          labelFontSize: 40
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [0, -420]
+            scale: [1, 1]
+            rotation: 0
+        children: []

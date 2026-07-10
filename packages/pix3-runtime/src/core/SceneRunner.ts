@@ -19,6 +19,7 @@ import { ResourceManager } from './ResourceManager';
 import { Camera3D } from '../nodes/3D/Camera3D';
 import { NodeBase } from '../nodes/NodeBase';
 import { Node2D } from '../nodes/Node2D';
+import { Camera2D, findActiveCamera2D } from '../nodes/2D/Camera2D';
 import { Sprite3D } from '../nodes/3D/Sprite3D';
 import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
 import { Particles3D } from '../nodes/3D/Particles3D';
@@ -27,8 +28,9 @@ import { AudioPlayer } from '../nodes/AudioPlayer';
 import { PostProcess } from '../nodes/PostProcess';
 import { GeometryMesh } from '../nodes/3D/GeometryMesh';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
-import { LAYER_3D, LAYER_2D } from '../constants';
+import { LAYER_3D, LAYER_2D, LAYER_2D_OVERLAY } from '../constants';
 import { assign2DRenderOrder } from './render-order-2d';
+import { assign2DLayers } from './assign-2d-layers';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
 import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
@@ -77,7 +79,16 @@ export class SceneRunner {
 
   private scene: Scene;
   private activeCamera: Camera3D | null = null;
+  /** Highest-priority visible Camera2D driving the 2D ortho pass (null = identity). */
+  private activeCamera2D: Camera2D | null = null;
+  private readonly scratchShake2D = new Vector2();
   private orthographicCamera: OrthographicCamera;
+  /** Fixed overlay camera for CanvasLayer2D content (identity, LAYER_2D_OVERLAY,
+   * never Camera2D-driven); rendered after post-processing. */
+  private overlayCamera: OrthographicCamera;
+  /** True this frame when the scene contains a CanvasLayer2D boundary — gates
+   * the extra overlay render/raycast passes. */
+  private overlay2DActive = false;
   private viewportSize = { width: 0, height: 0 };
   /** Adaptive logical camera dimensions computed from viewportBaseSize + viewport aspect. */
   private logicalCameraSize = { width: 1, height: 1 };
@@ -121,6 +132,14 @@ export class SceneRunner {
     this.orthographicCamera.layers.disableAll();
     this.orthographicCamera.layers.enable(LAYER_2D);
 
+    // Fixed overlay camera (CanvasLayer2D): tracks the main frustum size but
+    // stays at identity position/zoom — never driven by Camera2D — and sees
+    // only the overlay layer. Rendered clean, after the post-processing pass.
+    this.overlayCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    this.overlayCamera.position.z = 100;
+    this.overlayCamera.layers.disableAll();
+    this.overlayCamera.layers.enable(LAYER_2D_OVERLAY);
+
     this.bindSceneServiceDelegate();
   }
 
@@ -146,6 +165,7 @@ export class SceneRunner {
     // Setup scene
     this.scene.clear();
     this.activeCamera = null;
+    this.activeCamera2D = null;
 
     // CLONE: Serialize and parse to create an isolated runtime graph
     try {
@@ -263,6 +283,14 @@ export class SceneRunner {
         rootNode.dispose();
       }
       this.runtimeGraph = null;
+    }
+
+    this.activeCamera2D = null;
+    this.overlay2DActive = false;
+    this.orthographicCamera.position.set(0, 0, 100);
+    if (this.orthographicCamera.zoom !== 1) {
+      this.orthographicCamera.zoom = 1;
+      this.orthographicCamera.updateProjectionMatrix();
     }
 
     this.inputService.detach();
@@ -429,6 +457,37 @@ export class SceneRunner {
         this.orthographicCamera.top = halfH;
         this.orthographicCamera.bottom = -halfH;
         this.orthographicCamera.updateProjectionMatrix();
+
+        // The overlay camera mirrors the frustum size (so HUD anchoring matches)
+        // but stays at identity position/zoom — the Camera2D apply below never
+        // touches it, keeping CanvasLayer2D content pinned.
+        this.overlayCamera.left = -halfW;
+        this.overlayCamera.right = halfW;
+        this.overlayCamera.top = halfH;
+        this.overlayCamera.bottom = -halfH;
+        this.overlayCamera.updateProjectionMatrix();
+      }
+
+      // Drive the 2D pass from the active Camera2D (pan / zoom / limits / shake).
+      // Solve already ran this frame in updateNodes(dt); here we only apply the
+      // cached framing. No Camera2D → identity view (position (0,0), zoom 1), so
+      // camera-less 2D scenes render exactly as before.
+      this.activeCamera2D = findActiveCamera2D(this.runtimeGraph?.rootNodes ?? []);
+      let viewX = 0;
+      let viewY = 0;
+      let viewZoom = 1;
+      if (this.activeCamera2D) {
+        const view = this.activeCamera2D.computeView(this.logicalCameraSize);
+        this.activeCamera2D.getShakeOffset(this.scratchShake2D);
+        viewX = view.x + this.scratchShake2D.x;
+        viewY = view.y + this.scratchShake2D.y;
+        viewZoom = view.zoom;
+      }
+      this.orthographicCamera.position.x = viewX;
+      this.orthographicCamera.position.y = viewY;
+      if (this.orthographicCamera.zoom !== viewZoom) {
+        this.orthographicCamera.zoom = viewZoom;
+        this.orthographicCamera.updateProjectionMatrix();
       }
     }
 
@@ -525,6 +584,14 @@ export class SceneRunner {
       // Pass 2: 2D Overlay
       this.renderScene2D();
     }
+
+    // Final pass: fixed HUD overlay (CanvasLayer2D). Drawn last in BOTH paths so
+    // it sits above the post-processed frame; its layer mask kept it out of the
+    // composer, so it is never bloomed/vignetted. Gated so overlay-free scenes
+    // keep their original two passes.
+    if (this.overlay2DActive) {
+      this.renderOverlay2D();
+    }
   }
 
   /** Draw the 2D content band over the current color buffer (clear depth, keep
@@ -537,6 +604,20 @@ export class SceneRunner {
     this.scene.background = null;
 
     this.renderer.render(this.scene, this.orthographicCamera);
+
+    this.scene.background = savedBg;
+  }
+
+  /** Draw the fixed-HUD overlay band (LAYER_2D_OVERLAY, identity overlay camera)
+   * clean over everything — post-processed or plain. Mirrors renderScene2D. */
+  private renderOverlay2D(): void {
+    this.renderer.setAutoClear(false);
+    this.renderer.clearDepth();
+
+    const savedBg = this.scene.background;
+    this.scene.background = null;
+
+    this.renderer.render(this.scene, this.overlayCamera);
 
     this.scene.background = savedBg;
   }
@@ -710,6 +791,9 @@ export class SceneRunner {
       getActiveCameraNode(): Camera3D | null {
         return runner.activeCamera;
       },
+      getActiveCamera2DNode(): Camera2D | null {
+        return runner.activeCamera2D;
+      },
       getUICamera(): Camera | null {
         return runner.orthographicCamera;
       },
@@ -858,6 +942,19 @@ export class SceneRunner {
   private raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null {
     if (!this.runtimeGraph) {
       return null;
+    }
+
+    // Overlay band (CanvasLayer2D) is topmost — pick it first.
+    if (this.overlay2DActive) {
+      const overlayHit = this.raycastWithCamera(
+        normalizedX,
+        normalizedY,
+        this.overlayCamera,
+        LAYER_2D_OVERLAY
+      );
+      if (overlayHit) {
+        return overlayHit;
+      }
     }
 
     const uiHit = this.raycastWithCamera(normalizedX, normalizedY, this.orthographicCamera, LAYER_2D);
@@ -1020,6 +1117,11 @@ export class SceneRunner {
         node.applyAnchoredLayoutRecursive(currentRootSize, this.rootLayoutAuthoredSize);
       }
     }
+
+    // Route CanvasLayer2D subtrees to the fixed overlay band (and everything
+    // else to the main 2D band). Also tells us whether the overlay passes are
+    // needed this frame.
+    this.overlay2DActive = assign2DLayers(this.runtimeGraph.rootNodes);
 
     // Draw order for the 2D overlay pass follows the scene-graph hierarchy.
     assign2DRenderOrder(this.runtimeGraph.rootNodes);

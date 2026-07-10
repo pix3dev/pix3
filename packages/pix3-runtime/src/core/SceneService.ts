@@ -1,4 +1,5 @@
 import { Camera3D } from '../nodes/3D/Camera3D';
+import type { Camera2D } from '../nodes/2D/Camera2D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { GameTime } from './GameTime';
@@ -42,6 +43,7 @@ export interface FrameProfilerActivity {
  */
 export interface SceneServiceDelegate {
   getActiveCameraNode(): Camera3D | null;
+  getActiveCamera2DNode(): Camera2D | null;
   getUICamera(): import('three').Camera | null;
   getLogicalCameraSize(): { width: number; height: number };
   setActiveCameraNode(camera: Camera3D | null): void;
@@ -189,6 +191,15 @@ export class SceneService {
    */
   getActiveCamera(): Camera3D | null {
     return this.delegate?.getActiveCameraNode() ?? null;
+  }
+
+  /**
+   * Returns the currently active {@link Camera2D} node driving the 2D pass, or
+   * null when no 2D camera is present. Used by the juice API to route
+   * `shake('camera2d')` and to fall back for `shake('camera')` in pure-2D scenes.
+   */
+  getActiveCamera2D(): Camera2D | null {
+    return this.delegate?.getActiveCamera2DNode() ?? null;
   }
 
   // ── Node addressing ───────────────────────────────────────────────────────

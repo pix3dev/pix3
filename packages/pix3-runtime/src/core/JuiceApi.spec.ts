@@ -21,6 +21,7 @@ function makeHarness(): Harness {
 
   const delegate: SceneServiceDelegate = {
     getActiveCameraNode: () => camera,
+    getActiveCamera2DNode: () => null,
     getUICamera: () => null,
     getLogicalCameraSize: () => ({ width: 1920, height: 1080 }),
     setActiveCameraNode: () => undefined,
