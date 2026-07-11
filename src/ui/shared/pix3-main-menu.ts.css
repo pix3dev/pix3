@@ -40,11 +40,36 @@
   background-color: rgba(255, 255, 255, 0.15);
 }
 
+.menu-logo-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  margin-right: 12px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.menu-logo-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.menu-logo-button:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.menu-logo-button:focus-visible {
+  outline: 2px solid var(--pix3-accent-color, #ffcf33);
+  outline-offset: 1px;
+}
+
 .menu-logo {
   height: 32px;
   width: auto;
   object-fit: contain;
-  margin-right: 16px;
+  display: block;
 }
 
 .menu-dropdown {

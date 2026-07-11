@@ -35,8 +35,8 @@ export class CloseProjectCommand extends CommandBase<void, void> {
   }
 
   async execute(): Promise<CommandExecutionResult<void>> {
-    await this.projectLifecycleService.closeCurrentProject();
-    if (typeof window !== 'undefined') {
+    const closed = await this.projectLifecycleService.closeCurrentProject();
+    if (closed && typeof window !== 'undefined') {
       window.location.hash = '#welcome';
     }
     return {

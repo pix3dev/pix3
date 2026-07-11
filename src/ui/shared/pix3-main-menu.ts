@@ -234,6 +234,12 @@ export class Pix3MainMenu extends ComponentBase {
     }
   }
 
+  private handleLogoClick = (): void => {
+    this.activeSection = null;
+    this.menuOpenedByClick = false;
+    void this.executeMenuItem('project.close');
+  };
+
   private async executeMenuItem(commandId: string): Promise<void> {
     if (!this.canExecuteCommand(commandId)) {
       this.activeSection = null;
@@ -366,7 +372,15 @@ export class Pix3MainMenu extends ComponentBase {
       </style>
       <div class="main-menu" @keydown=${this.handleKeydown}>
         <div class="menu-bar">
-          <img src="/menu-logo.png" alt="Pix3" class="menu-logo" />
+          <button
+            type="button"
+            class="menu-logo-button"
+            title="Close project and return to the welcome screen"
+            aria-label="Close project"
+            @click=${this.handleLogoClick}
+          >
+            <img src="/menu-logo.png" alt="Pix3" class="menu-logo" />
+          </button>
           ${this.menuSections.map(
             section => html`
               <button

@@ -113,14 +113,60 @@ export class ProjectLifecycleService {
     await this.cloudProjectService.loadProjects();
   }
 
-  async closeCurrentProject(): Promise<void> {
-    if (!(await this.confirmProjectSwitchIfNeeded())) {
-      return;
+  /**
+   * Close the current project and return to the welcome screen.
+   *
+   * Always asks the user to confirm closing. When the "warn about unsaved
+   * changes" editor setting is enabled and there are dirty tabs, the
+   * confirmation escalates to a Save / Don't Save / Cancel choice instead.
+   *
+   * @returns `true` if the project was closed, `false` if the user cancelled.
+   */
+  async closeCurrentProject(): Promise<boolean> {
+    if (!(await this.confirmCloseProject())) {
+      return false;
     }
 
     await this.editorTabService.closeAllTabs(true);
     this.projectService.closeCurrentProject();
     await this.layoutManager.resetLayout();
+    return true;
+  }
+
+  private async confirmCloseProject(): Promise<boolean> {
+    if (appState.project.status !== 'ready') {
+      return true;
+    }
+
+    const hasUnsavedChanges = this.editorTabService.getDirtyTabs().length > 0;
+
+    if (appState.ui.warnOnUnsavedUnload && hasUnsavedChanges) {
+      const choice = await this.dialogService.showChoice({
+        title: 'Close Project',
+        message: 'You have unsaved changes. Save them before closing the project?',
+        confirmLabel: 'Save',
+        secondaryLabel: "Don't Save",
+        cancelLabel: 'Cancel',
+        secondaryIsDangerous: true,
+      });
+
+      if (choice === 'cancel') {
+        return false;
+      }
+
+      if (choice === 'confirm') {
+        await this.editorTabService.saveDirtyTabs();
+      }
+
+      return true;
+    }
+
+    return this.dialogService.showConfirmation({
+      title: 'Close Project',
+      message: 'Are you sure you want to close the project?',
+      confirmLabel: 'Close Project',
+      cancelLabel: 'Cancel',
+    });
   }
 
   private async createProjectInternal(
