@@ -15,6 +15,10 @@ Scene creation commands use a shared `CreateNodeBaseCommand` in `src/features/sc
 See full specification in [docs/pix3-specification.md](docs/pix3-specification.md).
 Additional agent guidelines: [AGENTS.md](AGENTS.md).
 
+## Engine & Editor Capabilities
+
+Before writing custom game logic, consult the **capabilities catalog** — every node, `core:*` behavior, system (juice, time-scale, audio buses, camera brain, cutscene director, keyframe animation, shader effects, post-processing, particles, ECS, input, signals), and scripts-facing runtime API, each with usage notes and the engine-vs-game decision: **[docs/nodes-and-systems.md](docs/nodes-and-systems.md)** (per-node detail in [docs/node-types-reference.md](docs/node-types-reference.md)). Agents building a game on the engine start from the **`pix3-game-dev`** skill (`.claude/skills/pix3-game-dev/`).
+
 ## Collaboration Server (`packages/pix3-collab-server`)
 
 A self-hosted Node.js server that enables real-time multiplayer editing and cloud project storage.
