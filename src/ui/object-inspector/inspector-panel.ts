@@ -5,6 +5,7 @@ import {
   getPropertyDisplayValue,
   getRuntimeSceneRoot,
   AnimatedSprite2D,
+  GeometryMesh,
   MeshInstance,
   NodeBase,
   Node2D,
@@ -19,6 +20,7 @@ import { UpdateSprite2DSizeCommand } from '@/features/properties/UpdateSprite2DS
 import { CreateAndBindAnimationAssetCommand } from '@/features/scene/CreateAndBindAnimationAssetCommand';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { BehaviorPickerService } from '@/services/BehaviorPickerService';
+import { EffectPickerService } from '@/services/EffectPickerService';
 import { ScriptCreatorService } from '@/services/ScriptCreatorService';
 import { ScriptRegistry } from '@pix3/runtime';
 import { IconService } from '@/services/IconService';
@@ -38,6 +40,8 @@ import { EditorTabService } from '@/services/EditorTabService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
+import { AddEffectCommand } from '@/features/effects/AddEffectCommand';
+import { RemoveEffectCommand } from '@/features/effects/RemoveEffectCommand';
 import { ToggleScriptEnabledCommand } from '@/features/scripts/ToggleScriptEnabledCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { normalizeAnimationAssetPath } from '@/features/scene/animation-asset-utils';
@@ -146,6 +150,9 @@ export class InspectorPanel extends ComponentBase {
 
   @inject(BehaviorPickerService)
   private readonly behaviorPickerService!: BehaviorPickerService;
+
+  @inject(EffectPickerService)
+  private readonly effectPickerService!: EffectPickerService;
 
   @inject(ScriptCreatorService)
   private readonly scriptCreatorService!: ScriptCreatorService;
@@ -2174,7 +2181,12 @@ ${textPreview?.content || 'Empty file'}</pre
     );
 
     const sortedGroups = Array.from(groupedProps.entries())
-      .filter(([groupName]) => groupName !== 'Base' && groupName !== 'Editor')
+      // 'Effect: *' groups come from the instance schema and are rendered as
+      // cards by renderEffectsSection, not as plain property groups.
+      .filter(
+        ([groupName]) =>
+          groupName !== 'Base' && groupName !== 'Editor' && !groupName.startsWith('Effect: ')
+      )
       .sort(([nameA], [nameB]) => {
         const orderA = PROPERTY_GROUP_ORDER_INDEX.get(nameA) ?? PROPERTY_GROUP_ORDER.length;
         const orderB = PROPERTY_GROUP_ORDER_INDEX.get(nameB) ?? PROPERTY_GROUP_ORDER.length;
@@ -2197,7 +2209,8 @@ ${textPreview?.content || 'Empty file'}</pre
             `
           : ''}
         ${sortedGroups.map(([groupName, props]) => this.renderPropertyGroup(groupName, props))}
-        ${this.renderAnimationsSection()} ${this.renderScriptsSection()}
+        ${this.renderAnimationsSection()} ${this.renderEffectsSection()}
+        ${this.renderScriptsSection()}
       </div>
     `;
   }
@@ -2632,6 +2645,113 @@ ${textPreview?.content || 'Empty file'}</pre
       enabled,
     });
     void this.commandDispatcher.execute(command);
+  }
+
+  private renderEffectsSection() {
+    const node = this.primaryNode;
+    if (!(node instanceof GeometryMesh)) return '';
+
+    const effects = node.getAttachedEffects();
+    // Effect attach/remove/toggle on a prefab instance is not serialized as an
+    // override, so lock the structural actions (mirrors the components section).
+    const structureLocked = isPrefabNode(node);
+    const lockedTitle = 'Managed by the prefab — open the prefab to edit its effects';
+    const groupedProps = this.propertySchema
+      ? getPropertiesByGroup(this.propertySchema)
+      : new Map<string, PropertyDefinition[]>();
+
+    return html`
+      <div class="property-group-section scripts-section">
+        <div class="group-header">
+          <h4 class="group-title">Effects</h4>
+          <div class="group-actions">
+            <button
+              class="btn-add-behavior"
+              @click=${() => this.onAddEffect()}
+              ?disabled=${structureLocked}
+              title=${structureLocked ? lockedTitle : 'Add Effect'}
+            >
+              ${this.iconService.getIcon('plus', 14)}
+              <span>Add</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="scripts-list">
+          ${effects.map(effect => {
+            const group = `Effect: ${effect.info.displayName}`;
+            const params = (groupedProps.get(group) ?? []).filter(
+              p => p.name !== `fx.${effect.info.key}.enabled` && !p.ui?.hidden
+            );
+            return html`
+              <div class="component-block ${effect.enabled ? '' : 'component-block--disabled'}">
+                <div class="script-item component-item">
+                  <div class="script-icon">${this.iconService.getIcon('zap', 16)}</div>
+                  <div class="script-info">
+                    <div class="script-name">${effect.info.displayName}</div>
+                  </div>
+                  <div class="script-actions">
+                    <button
+                      class="component-action-link"
+                      type="button"
+                      ?disabled=${structureLocked}
+                      title=${structureLocked ? lockedTitle : ''}
+                      @click=${() => this.onToggleEffect(effect.type, !effect.enabled)}
+                    >
+                      ${effect.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      class="component-action-link component-action-link--danger"
+                      type="button"
+                      ?disabled=${structureLocked}
+                      title=${structureLocked ? lockedTitle : ''}
+                      @click=${() => this.onRemoveEffect(effect.type)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+                ${params.length > 0
+                  ? html`<div class="script-props">
+                      ${params.map(p => this.renderPropertyInput(p))}
+                    </div>`
+                  : html`<div class="script-props-empty">No editable properties</div>`}
+              </div>
+            `;
+          })}
+          ${effects.length === 0
+            ? html`<div class="no-scripts">No effects attached</div>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  private async onAddEffect() {
+    const node = this.primaryNode;
+    if (!(node instanceof GeometryMesh)) return;
+    const exclude = node.getAttachedEffects().map(e => e.type);
+    const effectType = await this.effectPickerService.showPicker(exclude);
+    if (effectType) {
+      void this.commandDispatcher.execute(
+        new AddEffectCommand({ nodeId: node.nodeId, effectType })
+      );
+    }
+  }
+
+  private onRemoveEffect(effectType: string) {
+    if (!this.primaryNode) return;
+    void this.commandDispatcher.execute(
+      new RemoveEffectCommand({ nodeId: this.primaryNode.nodeId, effectType })
+    );
+  }
+
+  private onToggleEffect(effectType: string, enabled: boolean) {
+    const node = this.primaryNode;
+    if (!(node instanceof GeometryMesh)) return;
+    const effect = node.getAttachedEffects().find(e => e.type === effectType);
+    if (!effect) return;
+    void this.applyPropertyChange(`fx.${effect.info.key}.enabled`, enabled);
   }
 
   private renderPropertyGroup(groupName: string, props: PropertyDefinition[]) {

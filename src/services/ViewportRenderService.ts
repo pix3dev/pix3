@@ -148,6 +148,7 @@ export class ViewportRendererService {
   private tiledSprite2DVisuals = new Map<string, THREE.Group>();
   private sprite3DTexturePaths = new Map<string, string | null>();
   private particles3DTexturePaths = new Map<string, string | null>();
+  private geometryMeshMapPaths = new Map<string, string | null>();
   private uiControl2DVisuals = new Map<string, THREE.Group>();
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
@@ -2963,6 +2964,10 @@ export class ViewportRendererService {
       if (node instanceof Particles3D) {
         this.syncParticles3DTexture(node);
       }
+
+      if (node instanceof GeometryMesh) {
+        this.syncGeometryMeshMap(node);
+      }
     } else if (node instanceof Group2D) {
       const visualRoot = this.group2DVisuals.get(node.nodeId);
       if (visualRoot) {
@@ -3428,6 +3433,7 @@ export class ViewportRendererService {
       this.tiledSprite2DVisuals.clear();
       this.sprite3DTexturePaths.clear();
       this.particles3DTexturePaths.clear();
+      this.geometryMeshMapPaths.clear();
 
       for (const visual of this.uiControl2DVisuals.values()) {
         if (visual.parent) {
@@ -3515,6 +3521,10 @@ export class ViewportRendererService {
 
     if (node instanceof Particles3D) {
       this.syncParticles3DTexture(node);
+    }
+
+    if (node instanceof GeometryMesh) {
+      this.syncGeometryMeshMap(node);
     }
 
     let current2DVisualRoot = parent2DVisualRoot;
@@ -5126,6 +5136,65 @@ export class ViewportRendererService {
         '[ViewportRenderer] Skipping Particles3D texture load for scheme',
         currentTexturePath
       );
+    })();
+  }
+
+  /**
+   * Load & assign a GeometryMesh's albedo map in the editor viewport when its
+   * res:// path changes (the runtime node only tracks the path; the loader does
+   * this at scene-load / play time). 3D textures keep mipmaps, so — unlike the
+   * 2D sprite path — we do NOT run it through configureSpriteTexture; setMap
+   * forces the colour space and leaves mipmapping on.
+   */
+  private syncGeometryMeshMap(node: GeometryMesh): void {
+    const currentMapPath = node.mapSrc || null;
+    const previousMapPath = this.geometryMeshMapPaths.get(node.nodeId) ?? null;
+    if (currentMapPath === previousMapPath) {
+      return;
+    }
+
+    this.geometryMeshMapPaths.set(node.nodeId, currentMapPath);
+    if (!currentMapPath) {
+      node.setMap(null);
+      this.requestRender();
+      return;
+    }
+
+    const textureLoader = new THREE.TextureLoader();
+    void (async () => {
+      try {
+        const blob = await this.resourceManager.readBlob(currentMapPath);
+        const blobUrl = URL.createObjectURL(blob);
+        textureLoader.load(
+          blobUrl,
+          texture => {
+            try {
+              node.setMap(texture);
+              this.requestRender();
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+          },
+          undefined,
+          () => {
+            URL.revokeObjectURL(blobUrl);
+          }
+        );
+        return;
+      } catch {
+        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(currentMapPath);
+        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
+        if (scheme === 'http' || scheme === 'https' || scheme === '') {
+          const texture = textureLoader.load(currentMapPath, undefined, undefined, () => {
+            console.warn('[ViewportRenderer] Failed to load GeometryMesh map', currentMapPath);
+          });
+          node.setMap(texture);
+          this.requestRender();
+          return;
+        }
+      }
+
+      console.warn('[ViewportRenderer] Skipping GeometryMesh map load for scheme', currentMapPath);
     })();
   }
 
@@ -7095,6 +7164,7 @@ export class ViewportRendererService {
     this.tiledSprite2DVisuals.clear();
     this.sprite3DTexturePaths.clear();
     this.particles3DTexturePaths.clear();
+    this.geometryMeshMapPaths.clear();
 
     for (const visual of this.uiControl2DVisuals.values()) {
       this.disposeObject3D(visual);

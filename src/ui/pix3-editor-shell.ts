@@ -15,6 +15,7 @@ import {
   BehaviorPickerService,
   type ComponentPickerInstance,
 } from '@/services/BehaviorPickerService';
+import { EffectPickerService, type EffectPickerInstance } from '@/services/EffectPickerService';
 import { ScriptCreatorService, type ScriptCreationInstance } from '@/services/ScriptCreatorService';
 import {
   ProjectSettingsService,
@@ -98,6 +99,7 @@ import './shared/pix3-toolbar-button';
 import './shared/pix3-main-menu';
 import './shared/pix3-confirm-dialog';
 import './shared/pix3-behavior-picker';
+import './shared/pix3-effect-picker';
 import './shared/pix3-script-creator';
 import './shared/pix3-create-project-dialog';
 import './shared/pix3-project-settings-dialog';
@@ -169,6 +171,9 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(BehaviorPickerService)
   private readonly behaviorPickerService!: BehaviorPickerService;
 
+  @inject(EffectPickerService)
+  private readonly effectPickerService!: EffectPickerService;
+
   @inject(AnimationAutoSliceDialogService)
   private readonly animationAutoSliceDialogService!: AnimationAutoSliceDialogService;
 
@@ -236,6 +241,9 @@ export class Pix3EditorShell extends ComponentBase {
   private componentPickers: ComponentPickerInstance[] = [];
 
   @state()
+  private effectPickers: EffectPickerInstance[] = [];
+
+  @state()
   private scriptCreators: ScriptCreationInstance[] = [];
 
   @state()
@@ -294,6 +302,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposePlayableExportDialogSubscription?: () => void;
   private disposePlayableExportProgressDialogSubscription?: () => void;
   private disposeBehaviorPickerSubscription?: () => void;
+  private disposeEffectPickerSubscription?: () => void;
   private disposeScriptCreatorSubscription?: () => void;
   private disposeAnimationAutoSliceSubscription?: () => void;
   private disposeAssetImportSubscription?: () => void;
@@ -486,6 +495,12 @@ export class Pix3EditorShell extends ComponentBase {
       this.requestUpdate();
     });
 
+    // Subscribe to effect picker changes
+    this.disposeEffectPickerSubscription = this.effectPickerService.subscribe(pickers => {
+      this.effectPickers = pickers;
+      this.requestUpdate();
+    });
+
     // Subscribe to script creator changes
     this.disposeScriptCreatorSubscription = this.scriptCreatorService.subscribe(creators => {
       this.scriptCreators = creators;
@@ -669,6 +684,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposePlayableExportProgressDialogSubscription = undefined;
     this.disposeBehaviorPickerSubscription?.();
     this.disposeBehaviorPickerSubscription = undefined;
+    this.disposeEffectPickerSubscription?.();
+    this.disposeEffectPickerSubscription = undefined;
     this.disposeScriptCreatorSubscription?.();
     this.disposeScriptCreatorSubscription = undefined;
     this.disposeAnimationAutoSliceSubscription?.();
@@ -924,7 +941,8 @@ export class Pix3EditorShell extends ComponentBase {
         <pix3-status-bar></pix3-status-bar>
         ${this.renderWorkspaceOverlay()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
-        ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderScriptCreatorHost()}
+        ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}
+        ${this.renderScriptCreatorHost()}
         ${this.renderProjectSettingsHost()} ${this.renderProjectSyncHost()}
         ${this.renderEditorSettingsHost()} ${this.renderAnimationAutoSliceHost()}
         ${this.renderAssetImportHost()} ${this.renderSaveGeneratedAssetHost()}
@@ -1215,6 +1233,27 @@ export class Pix3EditorShell extends ComponentBase {
   private onComponentPickerCancelled(e: CustomEvent): void {
     const { pickerId } = e.detail;
     this.behaviorPickerService.cancel(pickerId);
+  }
+
+  private renderEffectPickerHost() {
+    return html`
+      <div
+        class="picker-host"
+        @effect-selected=${(e: CustomEvent) =>
+          this.effectPickerService.select(e.detail.pickerId, e.detail.effectType)}
+        @effect-picker-cancelled=${(e: CustomEvent) =>
+          this.effectPickerService.cancel(e.detail.pickerId)}
+      >
+        ${this.effectPickers.map(
+          picker => html`
+            <pix3-effect-picker
+              .pickerId=${picker.id}
+              .excludeTypes=${picker.excludeTypes}
+            ></pix3-effect-picker>
+          `
+        )}
+      </div>
+    `;
   }
 
   private onComponentPickerCreateNew(e: CustomEvent): void {

@@ -31,7 +31,11 @@ import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
 import { AudioPlayer } from '../nodes/AudioPlayer';
 import type { SceneGraph } from './SceneManager';
 
-import { GeometryMesh } from '../nodes/3D/GeometryMesh';
+import {
+  GeometryMesh,
+  type GeometryMeshEffectsConfig,
+  type GeometryMeshEffectEntry,
+} from '../nodes/3D/GeometryMesh';
 import { InstancedMesh3D } from '../nodes/3D/InstancedMesh3D';
 
 import { Camera3D } from '../nodes/3D/Camera3D';
@@ -102,7 +106,16 @@ export interface SceneDocument {
 export interface GeometryMeshProperties {
   geometry?: string;
   size?: [number, number, number];
-  material?: { color?: string; roughness?: number; metalness?: number; type?: string };
+  material?: {
+    color?: string;
+    roughness?: number;
+    metalness?: number;
+    type?: string;
+    aoMap?: string;
+    aoMapIntensity?: number;
+    map?: string;
+    effects?: unknown[];
+  };
 }
 
 export interface Camera3DProperties {
@@ -1499,6 +1512,8 @@ export class SceneLoader {
           metalness?: number;
           aoMap?: string;
           aoMapIntensity?: number;
+          map?: string;
+          effects?: GeometryMeshEffectsConfig;
         } = {
           color: materialColor,
         };
@@ -1514,6 +1529,14 @@ export class SceneLoader {
         }
         if (typeof material?.aoMapIntensity === 'number') {
           materialConfig.aoMapIntensity = material.aoMapIntensity;
+        }
+        const mapSrc = this.asString(material?.map);
+        if (mapSrc) {
+          materialConfig.map = mapSrc;
+        }
+        const effects = this.parseGeometryMeshEffects(material?.effects);
+        if (effects) {
+          materialConfig.effects = effects;
         }
         const geometryMesh = new GeometryMesh({
           ...baseProps,
@@ -1533,6 +1556,17 @@ export class SceneLoader {
           } catch (error) {
             console.warn(
               `[SceneLoader] Error loading AO map for GeometryMesh "${geometryMesh.nodeId}":`,
+              error
+            );
+          }
+        }
+        if (mapSrc) {
+          try {
+            const albedoTexture = await this.assetLoader.loadTexture(mapSrc);
+            geometryMesh.setMap(albedoTexture);
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading albedo map for GeometryMesh "${geometryMesh.nodeId}":`,
               error
             );
           }
@@ -2078,6 +2112,36 @@ export class SceneLoader {
     }
 
     return fallback.clone();
+  }
+
+  /**
+   * Coerce a serialized `material.effects` array into a typed config. Each entry
+   * needs a `type` (registry id); `enabled` defaults to true; `params` are passed
+   * through as a record and coerced per param-type by the node on attach. Unknown
+   * types are dropped by the node with a warning. Non-array input → no effects.
+   */
+  private parseGeometryMeshEffects(raw: unknown): GeometryMeshEffectsConfig | undefined {
+    if (!Array.isArray(raw)) {
+      return undefined;
+    }
+    const effects: GeometryMeshEffectsConfig = [];
+    for (const item of raw) {
+      const rec = this.asRecord(item);
+      const type = this.asString(rec?.type);
+      if (!type) {
+        continue;
+      }
+      const entry: GeometryMeshEffectEntry = { type };
+      if (rec && typeof rec.enabled === 'boolean') {
+        entry.enabled = rec.enabled;
+      }
+      const params = this.asRecord(rec?.params);
+      if (params) {
+        entry.params = { ...params };
+      }
+      effects.push(entry);
+    }
+    return effects.length > 0 ? effects : undefined;
   }
 
   private readRotationOrder(value: unknown): Euler['order'] | undefined {

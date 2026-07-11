@@ -8,8 +8,27 @@ import type { NodeBase } from '../nodes/NodeBase';
 import type { PropertySchema, PropertyDefinition } from './property-schema';
 
 /**
+ * Optional per-instance schema contribution. A node implementing this appends
+ * instance-specific properties (e.g. attached shader effects) AFTER its static
+ * class schema. Because every schema consumer — the inspector, the animation
+ * timeline, the clip evaluator, `UpdateObjectPropertyOperation`, SceneRunner's
+ * live-property sink, and prefab diffing — funnels through
+ * {@link getNodePropertySchema}, these instance props become editable,
+ * keyframe-animatable, undoable, and prefab-diffable with no per-call-site work.
+ *
+ * IMPORTANT (the one fragile spot): code that wants a node's *full* schema MUST
+ * go through {@link getNodePropertySchema}, never `node.constructor.getPropertySchema()`
+ * directly — the latter returns only the static class props and silently drops
+ * instance contributions.
+ */
+export interface InstancePropertySchemaProvider {
+  getInstancePropertySchema(): PropertySchema | null;
+}
+
+/**
  * Get the property schema for a node instance.
- * Dynamically resolves the correct schema based on the node's class hierarchy.
+ * Dynamically resolves the correct schema based on the node's class hierarchy,
+ * then merges any per-instance contribution (see {@link InstancePropertySchemaProvider}).
  */
 export function getNodePropertySchema(node: NodeBase): PropertySchema {
   // Try to get schema from the node's constructor
@@ -17,12 +36,24 @@ export function getNodePropertySchema(node: NodeBase): PropertySchema {
     getPropertySchema?: () => PropertySchema;
   };
 
-  if (typeof constructor.getPropertySchema === 'function') {
-    return constructor.getPropertySchema();
+  const staticSchema: PropertySchema =
+    typeof constructor.getPropertySchema === 'function'
+      ? constructor.getPropertySchema()
+      : { nodeType: 'Unknown', properties: [] };
+
+  const instance = (
+    node as Partial<InstancePropertySchemaProvider>
+  ).getInstancePropertySchema?.();
+
+  if (!instance || instance.properties.length === 0) {
+    return staticSchema;
   }
 
-  // Fallback to base schema if not found
-  return { nodeType: 'Unknown', properties: [] };
+  return {
+    ...staticSchema,
+    properties: [...staticSchema.properties, ...instance.properties],
+    groups: { ...staticSchema.groups, ...instance.groups },
+  };
 }
 
 /**

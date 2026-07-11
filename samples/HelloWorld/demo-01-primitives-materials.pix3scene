@@ -1,8 +1,3 @@
-# Demo 01 — Primitives, Materials & Lights
-# The "hello cubes" of any engine: every GeometryMesh primitive shape, a range
-# of material colors / roughness / metalness, and the five light types casting
-# real shadows onto a ground plane. Good first scene to sanity-check rendering
-# and to verify the material-color fix (change a color, hit play — it sticks).
 version: 1.0.0
 metadata:
   author: Pix3 Demos
@@ -36,7 +31,7 @@ root:
         name: Key Light
         properties:
           intensity: 2.2
-          color: "#fff4e0"
+          color: "#ffe7be"
           castShadow: true
           shadowCameraSize: 24
           shadowMapSize: 2048
@@ -49,8 +44,8 @@ root:
         type: HemisphereLightNode
         name: Sky Fill
         properties:
-          skyColor: "#bcd8ff"
-          groundColor: "#3a2c22"
+          skyColor: "#80afff"
+          groundColor: "#0b0604"
           intensity: 0.7
           transform:
             position: [0, 6, 0]
@@ -61,7 +56,7 @@ root:
         type: AmbientLightNode
         name: Ambient
         properties:
-          color: "#20242c"
+          color: "#040406"
           intensity: 0.4
           transform:
             position: [0, 0, 0]
@@ -72,7 +67,7 @@ root:
         type: PointLightNode
         name: Accent Point
         properties:
-          color: "#ff6a00"
+          color: "#ff2500"
           intensity: 30
           distance: 22
           decay: 2
@@ -86,7 +81,7 @@ root:
         type: SpotLightNode
         name: Rim Spot
         properties:
-          color: "#66aaff"
+          color: "#2267ff"
           intensity: 40
           distance: 40
           angle: 32
@@ -108,7 +103,7 @@ root:
             type: standard
             color: "#2a2f3a"
             roughness: 0.95
-            metalness: 0.0
+            metalness: 0
           transform:
             position: [0, 0, 0]
             rotationEuler: [0, 0, 0]
@@ -125,6 +120,12 @@ root:
             color: "#e23b3b"
             roughness: 0.5
             metalness: 0.1
+            effects:
+              - type: core:flash
+                enabled: true
+                params:
+                  color: "#22ffff"
+                  amount: 0.85
           transform:
             position: [-6, 0.8, 0]
             rotationEuler: [0, 20, 0]
@@ -141,6 +142,12 @@ root:
             color: "#3b82e2"
             roughness: 0.2
             metalness: 0.6
+            effects:
+              - type: core:rim
+                enabled: true
+                params:
+                  color: "#00ffcc"
+                  intensity: 3
           transform:
             position: [-3, 1, 0]
             rotationEuler: [0, 0, 0]
@@ -157,6 +164,16 @@ root:
             color: "#2fbf71"
             roughness: 0.4
             metalness: 0.2
+            effects:
+              - type: core:dissolve
+                enabled: true
+                params:
+                  amount: 0.35
+              - type: core:rim
+                enabled: true
+                params:
+                  color: "#ff00ff"
+                  intensity: 2
           transform:
             position: [0, 1, 0]
             rotationEuler: [0, 0, 0]
@@ -173,6 +190,14 @@ root:
             color: "#f0a500"
             roughness: 0.6
             metalness: 0.1
+            effects:
+              - type: core:dissolve
+                enabled: true
+                params:
+                  amount: 0.85
+                  edgeColor: "#00ff88"
+              - type: core:rim
+                enabled: true
           transform:
             position: [3, 1, 0]
             rotationEuler: [0, 0, 0]

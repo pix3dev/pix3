@@ -413,6 +413,35 @@ properties.
 | `material.color` | color | #4e8df5 | Surface color |
 | `material.roughness` | number | 0.35 | Surface roughness (0-1) |
 | `material.metalness` | number | 0.25 | Metallic appearance (0-1) |
+| `material.map` | texture | — | Albedo (diffuse) texture (res://); required for UV Scroll to be visible |
+| `material.aoMap` | texture | — | Baked ambient-occlusion map (set by the AO baker) |
+| `material.aoMapIntensity` | number | 1 | Strength of the baked AO map (0 = off) |
+
+**Shader Effects (attached list):**
+
+Shader effects are **added from a picker** (Inspector → **Effects** → **Add**),
+Unity/Godot-style — not fixed checkboxes. Each attached effect shows an **enable
+toggle**, its params, and a **Remove** control; the built-in effects come from a
+registry (`core:*`) and can be extended with `user:*` effects later. One instance
+of each type per mesh (v1). Effects are injected into the standard PBR material
+via `onBeforeCompile` and `#ifdef`-gated on `material.defines`, so a disabled
+effect costs zero GPU and lighting/shadows/albedo/AO maps still apply.
+
+Attached effects contribute their params to the node's schema **per instance**
+(as `fx.<effect>.<param>`), so each param — and each effect's `enabled` flag — is
+individually **keyframe-animatable** from the timeline. Animate the numeric
+params rather than the enable toggles (a toggle flip recompiles the shader; cheap
+after the first compile, which three caches per variant).
+
+| Effect (`type`) | Params | What it does |
+|--------|--------|--------------|
+| Dissolve (`core:dissolve`) | `amount` (0-1), `scale`, `edgeWidth`, `edgeColor` | Noise-thresholded `discard` with an emissive glowing edge; drive `amount` 0→1 to dissolve away |
+| Rim Light (`core:rim`) | `color`, `intensity` (0-5), `power` | Fresnel-based emissive rim, brightest at grazing angles |
+| UV Scroll (`core:uv-scroll`) | `speed` (uv/s) | Scrolls the albedo map. **Play-mode only** (accumulated per tick); static in the edit viewport. Needs `material.map` |
+| Flash Tint (`core:flash`) | `color`, `amount` (0-1) | Blends the final lit color toward a flat color; a hit/damage flash |
+
+Serialized under `material.effects` as an ordered array of `{ type, enabled,
+params }` (only non-default params are written).
 
 **Geometry Types & `size` semantics:**
 
@@ -436,6 +465,11 @@ field works for every primitive:
   (the live material is serialized, not a stale authored snapshot).
 - Node opacity does **not** currently fade a GeometryMesh (its material isn't
   registered for opacity blending).
+- Effects are attached from a registry-backed picker (see above), not fixed
+  checkboxes; their params surface per-instance as `fx.<effect>.<param>` schema
+  props so they remain keyframe-animatable.
+- A dissolving mesh still casts an intact shadow (the depth/shadow pass has no
+  `discard`); accepted for now.
 
 ---
 

@@ -85,6 +85,9 @@ export * from './animation/keyframe-types';
 export * from './animation/clip-evaluator';
 export * from './animation/AnimationPlayerBehavior';
 
+// Shader effects (registry-backed material effects for GeometryMesh)
+export * from './shader-effects';
+
 // Framework
 export * from './fw/property-schema';
 export * from './fw/property-schema-utils';
