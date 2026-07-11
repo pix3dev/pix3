@@ -4,6 +4,7 @@ import { AudioService } from './AudioService';
 import { ECSService } from './ECSService';
 import { ResourceManager } from './ResourceManager';
 import { GameTime } from './GameTime';
+import { InputService } from './InputService';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
 
 describe('SceneService viewport API', () => {
@@ -94,6 +95,7 @@ describe('SceneService viewport API', () => {
     service.setDelegate({
       getActiveCameraNode: () => null,
       getActiveCamera2DNode: () => null,
+      getInputService: () => new InputService(),
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
@@ -126,6 +128,7 @@ describe('SceneService viewport API', () => {
     service.setDelegate({
       getActiveCameraNode: () => null,
       getActiveCamera2DNode: () => null,
+      getInputService: () => new InputService(),
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,
@@ -154,6 +157,7 @@ describe('SceneService viewport API', () => {
     service.setDelegate({
       getActiveCameraNode: () => null,
       getActiveCamera2DNode: () => null,
+      getInputService: () => new InputService(),
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 0, height: 0 }),
       setActiveCameraNode: () => undefined,

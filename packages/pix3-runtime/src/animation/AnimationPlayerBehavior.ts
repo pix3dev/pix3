@@ -7,7 +7,9 @@
  *
  * Signals emitted on the host node:
  * - `animation_started` (clipName)
- * - `animation_finished` (clipName) — non-looping clips only
+ * - `animation_finished` (clipName) — emitted when a non-looping clip reaches
+ *   its end during playback, and by {@link AnimationPlayerBehavior.finish} for
+ *   both looping and non-looping clips (used by the Cutscene Director on skip).
  */
 
 import { Script } from '../core/ScriptComponent';
@@ -196,6 +198,51 @@ export class AnimationPlayerBehavior extends Script {
     this.playing = false;
     this.paused = false;
     this.pendingStartAudio = false;
+  }
+
+  /**
+   * Immediately complete the active clip: fire every event/audio key between the
+   * current time and the clip's end (unless `fireRemainingKeys` is false), snap
+   * to the end pose, stop, and emit `animation_finished`. This is what lets the
+   * Cutscene Director "skip" without silently dropping state-changing event keys
+   * authored near the end of a cinematic ("spawn boss", "unlock door") — which a
+   * plain {@link seek} would lose, since seek only applies value tracks.
+   *
+   * A looping clip has no "end", so this degrades to a plain stop + emit.
+   * A no-op when not currently playing.
+   */
+  finish(fireRemainingKeys = true): void {
+    if (!this.playing) {
+      return;
+    }
+
+    const clip = this.getActiveClip();
+    if (!clip) {
+      this.playing = false;
+      this.paused = false;
+      this.pendingStartAudio = false;
+      return;
+    }
+
+    if (clip.loop) {
+      // No end to fast-forward to — just stop and signal completion.
+      this.playing = false;
+      this.paused = false;
+      this.pendingStartAudio = false;
+      this.node?.emit('animation_finished', clip.name);
+      return;
+    }
+
+    const binding = this.ensureBinding(clip);
+    if (fireRemainingKeys) {
+      this.fireTimeWindow(binding, this.time, clip.duration, this.pendingStartAudio);
+    }
+    this.pendingStartAudio = false;
+    this.time = clip.duration;
+    applyClipAtTime(binding, clip.duration);
+    this.playing = false;
+    this.paused = false;
+    this.node?.emit('animation_finished', clip.name);
   }
 
   pause(): void {

@@ -298,3 +298,118 @@ describe('AnimationPlayerBehavior', () => {
     expect(host.position.x).toBeCloseTo(50, 6);
   });
 });
+
+const FINISH_CLIP = {
+  clips: [
+    {
+      name: 'cut',
+      duration: 1,
+      loop: false,
+      tracks: [
+        {
+          kind: 'property',
+          targetPath: '',
+          property: 'position',
+          valueType: 'vector2',
+          keys: [
+            { time: 0, value: [0, 0], easing: 'linear' },
+            { time: 1, value: [100, 0], easing: 'linear' },
+          ],
+        },
+        {
+          kind: 'event',
+          name: 'Events',
+          targetPath: '',
+          keys: [{ time: 0.9, signal: 'boss_spawn', args: '' }],
+        },
+      ],
+    },
+  ],
+};
+
+describe('AnimationPlayerBehavior.finish (Cutscene Director skip, D8)', () => {
+  it('fires the remaining event keys once, snaps to the end pose, and emits animation_finished', () => {
+    const { host, player } = createPlayer(FINISH_CLIP, { autoplay: 'cut' });
+    const finished = vi.fn();
+    const bossSpawn = vi.fn();
+    host.connect('animation_finished', host, finished);
+    host.connect('boss_spawn', host, bossSpawn);
+
+    host.tick(0.2); // onStart → play('cut'), advance to t=0.2 (x=20); event at 0.9 not yet fired
+    expect(bossSpawn).not.toHaveBeenCalled();
+    expect(host.position.x).toBeCloseTo(20, 6);
+
+    player.finish(true);
+
+    expect(bossSpawn).toHaveBeenCalledTimes(1); // the 0.9 event is not silently dropped
+    expect(host.position.x).toBeCloseTo(100, 6); // end pose applied
+    expect(player.isPlaying).toBe(false);
+    expect(finished).toHaveBeenCalledTimes(1);
+    expect(finished).toHaveBeenCalledWith('cut');
+  });
+
+  it('finish(false) skips the remaining keys but still poses and emits', () => {
+    const { host, player } = createPlayer(FINISH_CLIP, { autoplay: 'cut' });
+    const finished = vi.fn();
+    const bossSpawn = vi.fn();
+    host.connect('animation_finished', host, finished);
+    host.connect('boss_spawn', host, bossSpawn);
+
+    host.tick(0.2);
+    player.finish(false);
+
+    expect(bossSpawn).not.toHaveBeenCalled();
+    expect(host.position.x).toBeCloseTo(100, 6);
+    expect(finished).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades to stop + emit for a looping clip (no end to fast-forward to)', () => {
+    const looping = { clips: [{ ...FINISH_CLIP.clips[0], loop: true }] };
+    const { host, player } = createPlayer(looping, { autoplay: 'cut' });
+    const finished = vi.fn();
+    const bossSpawn = vi.fn();
+    host.connect('animation_finished', host, finished);
+    host.connect('boss_spawn', host, bossSpawn);
+
+    host.tick(0.2);
+    player.finish(true);
+
+    expect(player.isPlaying).toBe(false);
+    expect(finished).toHaveBeenCalledTimes(1);
+    expect(finished).toHaveBeenCalledWith('cut');
+    expect(bossSpawn).not.toHaveBeenCalled(); // no wrap window fired
+    expect(host.position.x).toBeCloseTo(20, 6); // pose left where it was
+  });
+
+  it('is a no-op when not playing', () => {
+    const { host, player } = createPlayer(FINISH_CLIP);
+    const finished = vi.fn();
+    host.connect('animation_finished', host, finished);
+
+    player.finish();
+
+    expect(finished).not.toHaveBeenCalled();
+    expect(player.isPlaying).toBe(false);
+  });
+
+  it('is a no-op after stop() even though the clip is still the active one', () => {
+    // stop() leaves activeClipName set, so this exercises the `!this.playing`
+    // guard (not the missing-clip short-circuit): a stopped player must not
+    // re-fire keys / re-emit on finish().
+    const { host, player } = createPlayer(FINISH_CLIP, { autoplay: 'cut' });
+    const finished = vi.fn();
+    const bossSpawn = vi.fn();
+    host.connect('animation_finished', host, finished);
+    host.connect('boss_spawn', host, bossSpawn);
+
+    host.tick(0.2);
+    player.stop();
+    expect(player.currentClipName).toBe('cut'); // clip still active, just not playing
+
+    player.finish(true);
+
+    expect(finished).not.toHaveBeenCalled();
+    expect(bossSpawn).not.toHaveBeenCalled();
+    expect(host.position.x).toBeCloseTo(20, 6); // pose untouched
+  });
+});

@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`AGENTS.md`** — the canonical coding rules (mutation gateway, DI, Lit component conventions, critical do/don't list). Read it before writing code; the rules there are binding.
 - **`docs/pix3-specification.md`** — the product/architecture source of truth (currently v1.15).
 - **`docs/architecture.md`** — deep-dive diagrams for the operations-first flow, property-schema system, script components, rendering, and state.
+- **`docs/nodes-and-systems.md`** — the capabilities catalog for agents: every node, `core:*` behavior, system, and scripts-facing runtime API, with how-to-use notes and the engine-vs-game decision. Consult it (and the `pix3-game-dev` skill) before writing custom game logic.
 
 This file covers what those don't: commands, repo topology, and the non-obvious wiring.
 

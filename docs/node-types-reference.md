@@ -393,6 +393,7 @@ A lightweight "virtual camera" (Cinemachine-lite). It does **not** render — it
 - Standby cameras are still solved every frame, so a camera is already framed when it is cut to.
 - With no follow target, position is left to authored / keyframed values (dolly by keyframes). Same for rotation with no look-at target.
 - Setting a Camera Brain's **Blend On Switch** off makes cuts instantaneous.
+- Scripts can force the *next* activation blend with `CameraBrainBehavior.overrideNextBlend(durationSec, easing?)` — a one-shot override that wins even when Blend On Switch is off. The Cutscene Director (`scene.cutscene.playCinematic`) uses it to smooth the cut into and out of a cinematic virtual camera. See the runtime spec §6.13.
 
 ---
 

@@ -5,6 +5,8 @@ import { LAYER_3D } from '../constants';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
+import { CutsceneApi } from './CutsceneApi';
+import type { InputService } from './InputService';
 import type { AudioService } from './AudioService';
 import type { AssetLoader } from './AssetLoader';
 import type { ECSService } from './ECSService';
@@ -45,6 +47,7 @@ export interface FrameProfilerActivity {
 export interface SceneServiceDelegate {
   getActiveCameraNode(): Camera3D | null;
   getActiveCamera2DNode(): Camera2D | null;
+  getInputService(): InputService;
   getUICamera(): import('three').Camera | null;
   getLogicalCameraSize(): { width: number; height: number };
   setActiveCameraNode(camera: Camera3D | null): void;
@@ -91,6 +94,7 @@ export class SceneService {
   private flashAnimationId: number | null = null;
   private juiceApi: JuiceApi | null = null;
   private audioApi: AudioApi | null = null;
+  private cutsceneApi: CutsceneApi | null = null;
   /** Inert fallback used when no scene is running (editor previews, etc.). */
   private fallbackGameTime: GameTime | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -118,6 +122,8 @@ export class SceneService {
   dispose(): void {
     this.cancelFade();
     this.cancelFlash();
+    this.cutsceneApi?.dispose();
+    this.cutsceneApi = null;
     this.fadeOverlay?.remove();
     this.fadeOverlay = null;
     this.flashOverlay?.remove();
@@ -167,6 +173,39 @@ export class SceneService {
       this.audioApi = new AudioApi(this);
     }
     return this.audioApi;
+  }
+
+  /**
+   * Cutscene Director — play a keyframe clip authored on a node's
+   * `core:AnimationPlayer` as a cinematic (letterbox, input lock, skip gesture,
+   * one-shot CameraBrain blend override). Example:
+   * `await this.scene.cutscene.playCinematic('Intro', { skippableAfter: 2 }).done`.
+   */
+  get cutscene(): CutsceneApi {
+    if (!this.cutsceneApi) {
+      this.cutsceneApi = new CutsceneApi(this);
+    }
+    return this.cutsceneApi;
+  }
+
+  /**
+   * Hard-stop any active cutscene without lazily creating the API. Called by
+   * `SceneRunner.stop()` early in teardown so the director's rAF handles, DOM
+   * bars, skip listeners and input lock are released while the graph is still
+   * live.
+   */
+  cancelActiveCutscene(): void {
+    this.cutsceneApi?.stopAll('stopped');
+  }
+
+  /** The live InputService for the running scene, or null (editor previews). */
+  getInputService(): InputService | null {
+    return this.delegate?.getInputService() ?? null;
+  }
+
+  /** The canvas the runtime renders into (used for overlay mounting), or null. */
+  getCanvas(): HTMLCanvasElement | null {
+    return this.canvas;
   }
 
   // ── Camera control ──────────────────────────────────────────────────────────

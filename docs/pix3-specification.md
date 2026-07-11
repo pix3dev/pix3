@@ -436,6 +436,51 @@ this.scene.juice.shake('camera', { amplitude: 12 });
 this.scene.juice.flash();
 ```
 
+### 6.13 Cutscene Director (P1 M)
+
+A scripts-facing runtime API — `this.scene.cutscene` — that plays a keyframe clip
+authored on a node's `core:AnimationPlayer` as a **cinematic**: letterbox bars, a
+gameplay-input lock, a skip gesture, and an optional one-shot `core:CameraBrain`
+blend override into and out of the cinematic camera. It adds no node type and no
+serialized state — camera moves, VFX, and gameplay beats are authored as ordinary
+keyframe + event tracks on the clip, exactly like any other animation.
+
+```typescript
+const { done } = this.scene.cutscene.playCinematic('IntroCutscene', {
+  skippableAfter: 2,   // real-time seconds before the skip gesture arms (omit = unskippable)
+  blendDuration: 0.8,  // one-shot CameraBrain blend into + out of the cinematic vcam
+});
+await done; // 'finished' | 'skipped' | 'stopped'
+```
+
+- **`playCinematic(id, options)`** resolves the node by id / name / path, finds its
+  (or a descendant's) `core:AnimationPlayer`, and plays `options.clip` (or the
+  player's default). Options: `clip`, `skippableAfter`, `blendDuration` /
+  `blendEasing`, `letterbox` / `letterboxSize` (0–0.45) / `letterboxEnterSec`,
+  `lockInput`, `fireSkippedEvents`, `skipKeys` (`KeyboardEvent.code` list, default
+  `Escape` / `Space` / `Enter`). Returns a handle with `done` (a promise that never
+  rejects), `isActive`, `skip()`, and `stop()`.
+- **Input lock** is a depth-counted `InputService.lock()` / `unlock()`: while held
+  the polled-input surface (`getAxis` / `getButton` / `pointerEvents` /
+  `pointerPosition`, and every UI control that reads it) goes quiet with no
+  per-consumer change. The skip gesture uses independent raw DOM listeners so it
+  works through the lock.
+- **Skip** fast-forwards via `AnimationPlayerBehavior.finish(fireRemainingKeys)`,
+  which fires the event/audio keys between the skip point and the clip end (so
+  state-changing beats — "spawn boss", "unlock door" — are not dropped), snaps to
+  the end pose, and emits `animation_finished`. Set `fireSkippedEvents: false` for
+  a purely-visual cutscene.
+- **Camera blend** uses `CameraBrainBehavior.overrideNextBlend(duration, easing)`,
+  a one-shot override consumed by the next camera activation that wins even when
+  the brain's *Blend On Switch* is off.
+- **Chrome runs on real time** (`performance.now` + `requestAnimationFrame`): the
+  bars and skip arming never freeze under `hitstop()` or stretch under slow-mo,
+  while the clip itself runs on scaled gameplay `dt`.
+- **Teardown** is automatic: `SceneRunner.stop()` hard-stops any active cutscene
+  (cancels rAF, removes bars, detaches listeners, releases the lock) before the
+  runtime graph is disposed, so nothing leaks across play/stop. Starting a new
+  cutscene while one is active hard-stops the current one first.
+
 ## 6.5 Layout2D Node
 
 ### 6.5.1 Overview

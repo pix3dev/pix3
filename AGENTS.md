@@ -8,6 +8,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - **Stack**: TypeScript + Vite, Lit web components, Valtio state, Three.js, Golden Layout.
 - **Architecture**: Operations-first with `OperationService` as mutation gateway.
 - **Source of Truth**: `docs/pix3-specification.md` (v1.15, 2026-02-26).
+- **Capabilities catalog**: `docs/nodes-and-systems.md` — the inventory of every node, `core:*` behavior, system, and scripts-facing runtime API (and how to use each). **Check it before writing custom game logic**; it also carries the engine-vs-game decision. For agents building on the engine, the `pix3-game-dev` skill is the entry point.
 
 ## Essential Architecture Patterns
 

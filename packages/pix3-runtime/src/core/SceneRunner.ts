@@ -245,6 +245,11 @@ export class SceneRunner {
 
   stop(): void {
     this.isRunning = false;
+    // Tear down any active cutscene FIRST — while the graph is still live — so
+    // its player.stop() targets real nodes and its rAF handles, letterbox DOM,
+    // skip listeners and input lock are all released before we detach scripts
+    // and dispose the graph below (D9).
+    this.sceneService.cancelActiveCutscene();
     registerRuntimeSceneRoot(null);
     registerRuntimeLivePropertySink(null);
     if (this.physicsDebugOverlay) {
@@ -819,6 +824,9 @@ export class SceneRunner {
       },
       getActiveCamera2DNode(): Camera2D | null {
         return runner.activeCamera2D;
+      },
+      getInputService(): InputService {
+        return runner.inputService;
       },
       getUICamera(): Camera | null {
         return runner.orthographicCamera;

@@ -42,6 +42,16 @@ export class InputService {
     private previousTouchAction: string | null = null;
 
     /**
+     * Depth-counted input lock. While > 0 the DOM handlers early-return so the
+     * whole polled-input surface (`getAxis`/`getButton`/`pointerEvents`/
+     * `pointerPosition`, and every UI control that polls it) goes quiet without
+     * any per-consumer change. Used by the Cutscene Director to freeze gameplay
+     * input during a cinematic. Nested locks stack; only the 0→1 transition
+     * clears transient state.
+     */
+    private lockDepth = 0;
+
+    /**
      * Resets frame-based input state. Should be called at the start of each frame.
      */
     beginFrame(): void {
@@ -66,6 +76,63 @@ export class InputService {
      */
     get isHoveringUI(): boolean {
         return this.hoveredUIElements.size > 0;
+    }
+
+    /**
+     * Acquire the input lock (depth-counted). On the 0→1 transition, force-release
+     * all transient input state so nothing stays "held" behind the lock: release
+     * the captured pointer, clear `isPointerDown`/`activePointerId`, drop the
+     * `Action_Primary` button and every held `Key_*` button, and empty the pending
+     * pointer/key/wheel queues. Clearing the held keys is what makes gameplay
+     * actually go quiet (a movement key held at lock time would otherwise keep
+     * polling `true`), and it prevents a key *released* during the lock — whose
+     * keyup the guards swallow — from sticking `true` after {@link unlock}. Keys
+     * physically still held re-assert via OS key-repeat after unlock.
+     */
+    lock(): void {
+        this.lockDepth += 1;
+        if (this.lockDepth !== 1) {
+            return;
+        }
+        if (this.activePointerId !== null) {
+            this.element?.releasePointerCapture?.(this.activePointerId);
+        }
+        this.isPointerDown = false;
+        this.activePointerId = null;
+        this.setButton('Action_Primary', false);
+        this.clearHeldKeyButtons();
+        this.pendingPointerEvents = [];
+        this.pendingKeyEvents = [];
+        this.pendingWheelDelta.set(0, 0);
+        this.wheelDelta.set(0, 0);
+    }
+
+    /**
+     * Release every keyboard-derived button (`Key_*`, set by {@link onKeyDown}).
+     * Custom, script-set virtual buttons are left untouched — the lock only
+     * silences raw DOM input.
+     */
+    private clearHeldKeyButtons(): void {
+        for (const name of this.buttons.keys()) {
+            if (name.startsWith('Key_')) {
+                this.buttons.set(name, false);
+            }
+        }
+    }
+
+    /**
+     * Release one level of the input lock (floored at 0). Input flows again once
+     * the depth returns to 0.
+     */
+    unlock(): void {
+        if (this.lockDepth > 0) {
+            this.lockDepth -= 1;
+        }
+    }
+
+    /** True while the input lock is held (depth > 0). */
+    get isLocked(): boolean {
+        return this.lockDepth > 0;
     }
 
     /**
@@ -167,9 +234,16 @@ export class InputService {
         this.keyEvents = [];
         this.pendingKeyEvents = [];
         this.setButton('Action_Primary', false);
+        // Never leak a lock into the next scene — the InputService instance is
+        // reused across play/stop cycles (a stopped cutscene must not keep the
+        // next run muted).
+        this.lockDepth = 0;
     }
 
     private onPointerDown = (event: PointerEvent): void => {
+        if (this.lockDepth > 0) {
+            return;
+        }
         if (this.activePointerId !== null) {
             return;
         }
@@ -185,6 +259,9 @@ export class InputService {
     };
 
     private onPointerMove = (event: PointerEvent): void => {
+        if (this.lockDepth > 0) {
+            return;
+        }
         if (this.activePointerId !== null && this.activePointerId !== event.pointerId) {
             return;
         }
@@ -196,6 +273,9 @@ export class InputService {
     };
 
     private onPointerUp = (event: PointerEvent): void => {
+        if (this.lockDepth > 0) {
+            return;
+        }
         if (this.activePointerId !== event.pointerId) {
             return;
         }
@@ -215,18 +295,29 @@ export class InputService {
     };
 
     private onWheel = (event: WheelEvent): void => {
+        // Still swallow the gesture while locked (the page must not scroll behind
+        // a cutscene), but accumulate nothing.
+        event.preventDefault();
+        if (this.lockDepth > 0) {
+            return;
+        }
         this.pendingWheelDelta.x += event.deltaX;
         this.pendingWheelDelta.y += event.deltaY;
-        event.preventDefault();
     };
 
     private onKeyDown = (event: KeyboardEvent): void => {
+        if (this.lockDepth > 0) {
+            return;
+        }
         this.setButton(`Key_${event.code}`, true);
         this.setButton(`Key_${event.key.toUpperCase()}`, true);
         this.pendingKeyEvents.push({ type: 'down', code: event.code, key: event.key, repeat: event.repeat });
     };
 
     private onKeyUp = (event: KeyboardEvent): void => {
+        if (this.lockDepth > 0) {
+            return;
+        }
         this.setButton(`Key_${event.code}`, false);
         this.setButton(`Key_${event.key.toUpperCase()}`, false);
         this.pendingKeyEvents.push({ type: 'up', code: event.code, key: event.key, repeat: event.repeat });

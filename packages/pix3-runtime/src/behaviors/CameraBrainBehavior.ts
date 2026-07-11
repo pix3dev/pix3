@@ -24,6 +24,13 @@ export class CameraBrainBehavior extends Script {
   private blendElapsed = 0;
   private blendDuration = 0;
   private blendEasing: KeyframeEasing = 'linear';
+  /**
+   * One-shot blend override consumed by the next {@link beginBlend} (whenever the
+   * active virtual camera changes). Set by {@link overrideNextBlend}; the Cutscene
+   * Director uses it to force a specific blend into and out of a cinematic vcam,
+   * winning even when `blendEnabled` is off.
+   */
+  private pendingBlendOverride: { duration: number; easing?: KeyframeEasing } | null = null;
   private readonly blendFromPos = new Vector3();
   private readonly blendFromQuat = new Quaternion();
   private blendFromFov = 60;
@@ -68,6 +75,18 @@ export class CameraBrainBehavior extends Script {
   onStart(): void {
     this.currentActiveId = null;
     this.blending = false;
+    this.pendingBlendOverride = null;
+  }
+
+  /**
+   * Force the next camera-activation blend to use `durationSec` (and optionally
+   * `easing`), regardless of the target vcam's own blend settings or the
+   * `blendEnabled` flag. Consumed once, by the next {@link beginBlend}. A duration
+   * of 0 makes the next switch a hard cut. Used by the Cutscene Director to
+   * smooth the cut into and out of a cinematic virtual camera.
+   */
+  overrideNextBlend(durationSec: number, easing?: KeyframeEasing): void {
+    this.pendingBlendOverride = { duration: Math.max(0, durationSec), easing };
   }
 
   onUpdate(dt: number): void {
@@ -119,8 +138,12 @@ export class CameraBrainBehavior extends Script {
   }
 
   private beginBlend(host: Camera3D, active: VirtualCamera3D): void {
+    // An explicit one-shot override (Cutscene Director) beats both the vcam's own
+    // blend settings and the authored `blendEnabled` flag; consume it here.
+    const override = this.pendingBlendOverride;
+    this.pendingBlendOverride = null;
     const blendEnabled = this.config.blendEnabled !== false;
-    const duration = blendEnabled ? active.blendDuration : 0;
+    const duration = override ? override.duration : blendEnabled ? active.blendDuration : 0;
     if (duration <= 0) {
       this.blending = false;
       return;
@@ -134,7 +157,7 @@ export class CameraBrainBehavior extends Script {
     this.blendFromOrtho = host.orthographicSize;
     this.blendElapsed = 0;
     this.blendDuration = duration;
-    this.blendEasing = active.blendEasing;
+    this.blendEasing = override?.easing ?? active.blendEasing;
     this.blending = true;
   }
 

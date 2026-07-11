@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Vector2 } from 'three';
 import { SceneService, type SceneServiceDelegate } from './SceneService';
 import { GameTime } from './GameTime';
+import { InputService } from './InputService';
 import { Camera3D } from '../nodes/3D/Camera3D';
 import { Camera2D } from '../nodes/2D/Camera2D';
 import { ShakeBehavior } from '../behaviors/ShakeBehavior';
@@ -24,6 +25,7 @@ function makeHarness(): Harness {
   const delegate: SceneServiceDelegate = {
     getActiveCameraNode: () => camera,
     getActiveCamera2DNode: () => null,
+    getInputService: () => new InputService(),
     getUICamera: () => null,
     getLogicalCameraSize: () => ({ width: 1920, height: 1080 }),
     setActiveCameraNode: () => undefined,
@@ -101,6 +103,7 @@ describe('JuiceApi / 2D camera shake targets', () => {
     const delegate: SceneServiceDelegate = {
       getActiveCameraNode: () => opts.active3D,
       getActiveCamera2DNode: () => opts.active2D,
+      getInputService: () => new InputService(),
       getUICamera: () => null,
       getLogicalCameraSize: () => ({ width: 1920, height: 1080 }),
       setActiveCameraNode: () => undefined,
