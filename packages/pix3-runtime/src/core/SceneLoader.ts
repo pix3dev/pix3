@@ -1106,6 +1106,9 @@ export class SceneLoader {
           autoplay: typeof props.autoplay === 'boolean' ? props.autoplay : undefined,
           loop: typeof props.loop === 'boolean' ? props.loop : undefined,
           volume: this.asNumber(props.volume, undefined),
+          bus: this.asString(props.bus),
+          pitchVariation: this.asNumber(props.pitchVariation, undefined),
+          volumeVariation: this.asNumber(props.volumeVariation, undefined),
         });
       }
       case 'PostProcess': {

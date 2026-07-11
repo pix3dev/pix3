@@ -617,6 +617,70 @@ world-space; there is no migration — the field finally does what its label say
 
 ---
 
+## Audio
+
+### AudioPlayer
+
+A node that plays an audio clip through the runtime mixer. Attach it anywhere in
+the scene; drive it via `autoplay`, from a script (`node.play()`), or from an
+`AnimationPlayer` audio track.
+
+**Type String:** `AudioPlayer`
+
+**Key Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `audioTrack` | string | — | Asset URL (`res://…`, `data:audio/…`, or absolute URL) |
+| `autoplay` | boolean | false | Play automatically on the first tick |
+| `loop` | boolean | false | Loop the clip |
+| `volume` | number | 1 | Per-clip volume (0–1), before the bus gain |
+| `bus` | enum | `sfx` | Mixer bus: `master`, `music`, or `sfx` |
+| `pitchVariation` | number | 0 | Random ± playback-rate spread per play (0–1) |
+| `volumeVariation` | number | 0 | Random ± volume spread per play (0–1) |
+
+`bus`, `pitchVariation` and `volumeVariation` are also available on the
+`core:PlaySound` behavior (`PlaySoundBehavior`), with identical semantics.
+
+### Buses, snapshots & `scene.audio`
+
+The runtime mixer routes every playback through three fixed buses:
+
+```
+sound → sfx  ┐
+       music ┼→ master → output
+```
+
+Each bus has a volume and a permanently-wired (transparent) lowpass filter, so
+mixing and snapshot transitions are click-free `AudioParam` ramps. Scripts reach
+the mixer through `this.scene.audio`:
+
+```ts
+// One-shot playback (loads + caches via the AssetLoader)
+this.scene.audio.play('res://sfx/hit.ogg', { bus: 'sfx', pitchVariation: 0.1 });
+
+// Mixer volume (e.g. from a settings menu)
+this.scene.audio.setBusVolume('music', 0.5);
+
+// Snapshots — named per-bus lowpass + volume-scale states
+this.scene.audio.registerSnapshot({ name: 'underwater', lowpassHz: { master: 500 } });
+this.scene.audio.applySnapshot('underwater');
+this.scene.audio.resetSnapshot();               // back to 'default'
+```
+
+**Built-in snapshots:** `'default'` (fully open) and `'muffled'`
+(`master` lowpass 700 Hz, volume ×0.85). A snapshot's volume scale composes *on
+top of* the user's bus volume, so entering/leaving a snapshot never forgets the
+authored mix.
+
+**Slow-motion auto-muffle:** while `scene.time` is in slow motion the mixer
+automatically blends to `'muffled'` and back on return to normal speed. This is
+driven by the slow-mo base scale, **not** the frozen scale — a `hitstop(…)`
+freeze does **not** muffle audio (otherwise every micro-freeze would pump the
+filter).
+
+---
+
 ## Choosing the Right Node
 
 ### For 2D Projects:
@@ -661,3 +725,4 @@ world-space; there is no migration — the field finally does what its label say
 | Checkbox2D | width, checked |
 | Bar2D | width, value, maxValue |
 | InventorySlot2D | width, itemCount |
+| AudioPlayer | audioTrack, autoplay, loop, volume, bus, pitchVariation, volumeVariation |

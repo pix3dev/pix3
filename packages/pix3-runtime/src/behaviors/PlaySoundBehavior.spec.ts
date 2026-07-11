@@ -58,4 +58,54 @@ describe('PlaySoundBehavior', () => {
     expect(loadAudio).toHaveBeenCalledTimes(1);
     expect(play).toHaveBeenCalledTimes(1);
   });
+
+  it('forwards bus and variation config to AudioService.play', async () => {
+    const node = new NodeBase({ id: 'button', type: 'Button', name: 'Button' });
+    const behavior = new PlaySoundBehavior('play-sound', 'core:PlaySound');
+    const play = vi.fn();
+
+    behavior.node = node;
+    behavior.scene = {
+      getAssetLoader: () => ({
+        loadAudio: vi.fn().mockResolvedValue({} as AudioBuffer),
+        getAudioMetadata: vi.fn().mockReturnValue({ sizeBytes: 128 }),
+      }),
+      getAudioService: () => ({ play }),
+    } as unknown as SceneService;
+    behavior.config.audioTrack = 'res://click.wav';
+    behavior.config.bus = 'music';
+    behavior.config.pitchVariation = 0.3;
+
+    behavior.onStart();
+    node.emit('pointerdown');
+    await flushMicrotasks();
+
+    expect(play).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bus: 'music', pitchVariation: 0.3, volumeVariation: 0 })
+    );
+  });
+
+  it('defaults an unknown bus to sfx', async () => {
+    const node = new NodeBase({ id: 'button', type: 'Button', name: 'Button' });
+    const behavior = new PlaySoundBehavior('play-sound', 'core:PlaySound');
+    const play = vi.fn();
+
+    behavior.node = node;
+    behavior.scene = {
+      getAssetLoader: () => ({
+        loadAudio: vi.fn().mockResolvedValue({} as AudioBuffer),
+        getAudioMetadata: vi.fn().mockReturnValue(null),
+      }),
+      getAudioService: () => ({ play }),
+    } as unknown as SceneService;
+    behavior.config.audioTrack = 'res://click.wav';
+    behavior.config.bus = 'not-a-bus';
+
+    behavior.onStart();
+    node.emit('pointerdown');
+    await flushMicrotasks();
+
+    expect(play).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ bus: 'sfx' }));
+  });
 });

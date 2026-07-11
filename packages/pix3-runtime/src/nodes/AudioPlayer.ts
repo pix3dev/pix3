@@ -1,12 +1,15 @@
 import { NodeBase, type NodeBaseProps } from './NodeBase';
 import type { PropertySchema } from '../fw/property-schema';
-import type { AudioPlayback } from '../core/AudioService';
+import { AUDIO_BUS_NAMES, type AudioBusName, type AudioPlayback } from '../core/AudioService';
 
 export interface AudioPlayerProps extends Omit<NodeBaseProps, 'type'> {
   audioTrack?: string | null;
   autoplay?: boolean;
   loop?: boolean;
   volume?: number;
+  bus?: string;
+  pitchVariation?: number;
+  volumeVariation?: number;
 }
 
 export class AudioPlayer extends NodeBase {
@@ -14,6 +17,9 @@ export class AudioPlayer extends NodeBase {
   autoplay: boolean;
   loop: boolean;
   volume: number;
+  bus: AudioBusName;
+  pitchVariation: number;
+  volumeVariation: number;
 
   private playback: AudioPlayback | null = null;
   private autoPlayed = false;
@@ -25,6 +31,11 @@ export class AudioPlayer extends NodeBase {
     this.autoplay = AudioPlayer.toBoolean(props.autoplay ?? this.properties.autoplay, false);
     this.loop = AudioPlayer.toBoolean(props.loop ?? this.properties.loop, false);
     this.volume = AudioPlayer.clampVolume(props.volume ?? this.properties.volume, 1);
+    this.bus = AudioPlayer.normalizeBus(props.bus ?? this.properties.bus);
+    this.pitchVariation = AudioPlayer.clampVariation(props.pitchVariation ?? this.properties.pitchVariation);
+    this.volumeVariation = AudioPlayer.clampVariation(
+      props.volumeVariation ?? this.properties.volumeVariation
+    );
   }
 
   get treeIcon(): string {
@@ -77,6 +88,9 @@ export class AudioPlayer extends NodeBase {
         sizeBytes: audioMetadata?.sizeBytes,
         loop: this.loop,
         volume: this.volume,
+        bus: this.bus,
+        pitchVariation: this.pitchVariation,
+        volumeVariation: this.volumeVariation,
       });
     } catch (error) {
       console.warn(`[AudioPlayer] Failed to play "${this.audioTrack}":`, error);
@@ -86,6 +100,24 @@ export class AudioPlayer extends NodeBase {
   stop(): void {
     this.playback?.stop();
     this.playback = null;
+  }
+
+  /**
+   * Live authored config for the saver. AudioPlayer schema setters write
+   * instance fields (not the `properties` bag), so — like Camera2D /
+   * VirtualCamera3D — the saver must read them back through here. Without this,
+   * inspector edits were serialized from the stale load-time `properties`.
+   */
+  serializeConfig(): Record<string, unknown> {
+    return {
+      audioTrack: this.audioTrack ?? undefined,
+      autoplay: this.autoplay,
+      loop: this.loop,
+      volume: this.volume,
+      bus: this.bus,
+      pitchVariation: this.pitchVariation,
+      volumeVariation: this.volumeVariation,
+    };
   }
 
   static getPropertySchema(): PropertySchema {
@@ -154,6 +186,53 @@ export class AudioPlayer extends NodeBase {
             (node as AudioPlayer).volume = AudioPlayer.clampVolume(value, 1);
           },
         },
+        {
+          name: 'bus',
+          type: 'enum',
+          ui: {
+            label: 'Bus',
+            group: 'Audio',
+            options: [...AUDIO_BUS_NAMES],
+          },
+          getValue: node => (node as AudioPlayer).bus,
+          setValue: (node, value) => {
+            (node as AudioPlayer).bus = AudioPlayer.normalizeBus(value);
+          },
+        },
+        {
+          name: 'pitchVariation',
+          type: 'number',
+          ui: {
+            label: 'Pitch Variation',
+            description: 'Random ± playback-rate spread per shot',
+            group: 'Audio',
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2,
+          },
+          getValue: node => (node as AudioPlayer).pitchVariation,
+          setValue: (node, value) => {
+            (node as AudioPlayer).pitchVariation = AudioPlayer.clampVariation(value);
+          },
+        },
+        {
+          name: 'volumeVariation',
+          type: 'number',
+          ui: {
+            label: 'Volume Variation',
+            description: 'Random ± volume spread per shot',
+            group: 'Audio',
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2,
+          },
+          getValue: node => (node as AudioPlayer).volumeVariation,
+          setValue: (node, value) => {
+            (node as AudioPlayer).volumeVariation = AudioPlayer.clampVariation(value);
+          },
+        },
       ],
       groups: {
         ...baseSchema.groups,
@@ -196,6 +275,21 @@ export class AudioPlayer extends NodeBase {
     const numberValue = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(numberValue)) {
       return fallback;
+    }
+
+    return Math.min(1, Math.max(0, numberValue));
+  }
+
+  private static normalizeBus(value: unknown): AudioBusName {
+    return typeof value === 'string' && (AUDIO_BUS_NAMES as readonly string[]).includes(value)
+      ? (value as AudioBusName)
+      : 'sfx';
+  }
+
+  private static clampVariation(value: unknown): number {
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return 0;
     }
 
     return Math.min(1, Math.max(0, numberValue));

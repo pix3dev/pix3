@@ -19,6 +19,7 @@ export * from './core/ecs';
 export * from './core/ECSService';
 export * from './core/GameTime';
 export * from './core/JuiceApi';
+export * from './core/AudioApi';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';

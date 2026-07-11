@@ -199,6 +199,8 @@ describe('SceneRunner camera projection updates', () => {
         ])
         .mockReturnValueOnce([]),
       stopAll: vi.fn(),
+      resetBuses: vi.fn(),
+      applySnapshot: vi.fn(),
     } as unknown as AudioService;
     const runner = new SceneRunner(
       createSceneManagerStub(),
@@ -333,6 +335,8 @@ describe('SceneRunner camera projection updates', () => {
   it('scales the gameplay delta by the global Time.scale (slow-mo and hitstop)', () => {
     const audioService = {
       stopAll: vi.fn(),
+      resetBuses: vi.fn(),
+      applySnapshot: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(
@@ -382,9 +386,120 @@ describe('SceneRunner camera projection updates', () => {
     expect(recorder.received[2]).toBe(0);
   });
 
+  it('auto-muffles audio in slow motion and restores at normal speed', () => {
+    const applySnapshot = vi.fn();
+    const audioService = {
+      stopAll: vi.fn(),
+      resetBuses: vi.fn(),
+      applySnapshot,
+      getActivePlaybackSnapshot: vi.fn(() => []),
+    } as unknown as AudioService;
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      audioService,
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const cameraNode = new Camera3D({
+      id: 'runtime-muffle',
+      name: 'Camera',
+      projection: 'perspective',
+    });
+
+    const internals = runner as unknown as {
+      activeCamera: Camera3D;
+      runtimeGraph: SceneGraph;
+      sceneService: import('./SceneService').SceneService;
+      isRunning: boolean;
+      tick: () => void;
+      clock: { getDelta: () => number };
+      gameTime: import('./GameTime').GameTime;
+    };
+
+    cameraNode.scene = internals.sceneService;
+    internals.activeCamera = cameraNode;
+    internals.runtimeGraph = createGraph(cameraNode);
+    internals.isRunning = true;
+
+    vi.spyOn(internals.clock, 'getDelta').mockReturnValue(1 / 60);
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+
+    // Normal speed → no snapshot change.
+    internals.tick();
+    expect(applySnapshot).not.toHaveBeenCalled();
+
+    // Enter slow-mo → muffle exactly once.
+    internals.gameTime.setScale(0.5);
+    internals.tick();
+    expect(applySnapshot).toHaveBeenCalledTimes(1);
+    expect(applySnapshot).toHaveBeenLastCalledWith('muffled');
+
+    // Still slow → guarded, no repeat ramp.
+    internals.tick();
+    expect(applySnapshot).toHaveBeenCalledTimes(1);
+
+    // A hitstop forces scale to 0 but baseScale stays 0.5 → still no new call.
+    internals.gameTime.hitstop(1000);
+    internals.tick();
+    expect(applySnapshot).toHaveBeenCalledTimes(1);
+
+    // Back to normal speed → restore default (clears the hitstop first).
+    internals.gameTime.reset();
+    internals.tick();
+    expect(applySnapshot).toHaveBeenCalledTimes(2);
+    expect(applySnapshot).toHaveBeenLastCalledWith('default');
+  });
+
+  it('does not muffle audio for a hitstop from normal speed', () => {
+    const applySnapshot = vi.fn();
+    const audioService = {
+      stopAll: vi.fn(),
+      resetBuses: vi.fn(),
+      applySnapshot,
+      getActivePlaybackSnapshot: vi.fn(() => []),
+    } as unknown as AudioService;
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      audioService,
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const cameraNode = new Camera3D({
+      id: 'runtime-hitstop',
+      name: 'Camera',
+      projection: 'perspective',
+    });
+
+    const internals = runner as unknown as {
+      activeCamera: Camera3D;
+      runtimeGraph: SceneGraph;
+      sceneService: import('./SceneService').SceneService;
+      isRunning: boolean;
+      tick: () => void;
+      clock: { getDelta: () => number };
+      gameTime: import('./GameTime').GameTime;
+    };
+
+    cameraNode.scene = internals.sceneService;
+    internals.activeCamera = cameraNode;
+    internals.runtimeGraph = createGraph(cameraNode);
+    internals.isRunning = true;
+
+    vi.spyOn(internals.clock, 'getDelta').mockReturnValue(1 / 60);
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+
+    internals.tick();
+    internals.gameTime.hitstop(50);
+    internals.tick();
+
+    expect(applySnapshot).not.toHaveBeenCalled();
+  });
+
   it('detaches runtime scripts and resets started state when stopping', () => {
     const audioService = {
       stopAll: vi.fn(),
+      resetBuses: vi.fn(),
+      applySnapshot: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(
@@ -411,5 +526,6 @@ describe('SceneRunner camera projection updates', () => {
     expect(script.detachCalls).toBe(1);
     expect(script._started).toBe(false);
     expect(vi.mocked(audioService.stopAll)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(audioService.resetBuses)).toHaveBeenCalledTimes(1);
   });
 });

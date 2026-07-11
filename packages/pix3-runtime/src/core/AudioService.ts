@@ -3,6 +3,27 @@ export interface AudioPlayback {
   ended: Promise<void>;
 }
 
+/** The three fixed mixer buses. `music`/`sfx` route into `master`. */
+export type AudioBusName = 'master' | 'music' | 'sfx';
+export const AUDIO_BUS_NAMES: readonly AudioBusName[] = ['master', 'music', 'sfx'];
+
+export interface AudioSnapshot {
+  name: string;
+  /** Per-bus lowpass cutoff (Hz); omitted buses ramp to the open cutoff (20000). */
+  lowpassHz?: Partial<Record<AudioBusName, number>>;
+  /** Per-bus multiplier composed ON TOP of the user bus volume; omitted = 1. */
+  volumeScale?: Partial<Record<AudioBusName, number>>;
+}
+
+interface AudioBus {
+  /** Node other sources / buses connect INTO. */
+  input: GainNode;
+  /** Permanently-wired transparent lowpass; null only when unavailable (mock/legacy). */
+  filter: BiquadFilterNode | null;
+  /** Authoritative mixer volume (gain.value ramps lag behind, so we don't read it back). */
+  userVolume: number;
+}
+
 export interface ActiveAudioPlaybackSnapshot {
   readonly id: string;
   readonly label: string;
@@ -13,6 +34,7 @@ export interface ActiveAudioPlaybackSnapshot {
   readonly volume: number;
   readonly playbackRate: number;
   readonly pan: number | null;
+  readonly bus: AudioBusName;
   readonly durationSeconds: number | null;
   readonly channelCount: number | null;
   readonly sampleRate: number | null;
@@ -27,6 +49,19 @@ export interface PlayAudioOptions {
   loop?: boolean;
   playbackRate?: number;
   pan?: number;
+  /** Destination bus (default `'sfx'`). */
+  bus?: AudioBusName;
+  /** Random ± spread applied to playback rate per shot, 0..1 (default 0). */
+  pitchVariation?: number;
+  /** Random ± spread applied to volume per shot, 0..1 (default 0). */
+  volumeVariation?: number;
+}
+
+function clamp01(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, value));
 }
 
 type ActiveAudioPlaybackEntry = Omit<ActiveAudioPlaybackSnapshot, 'elapsedMs'>;
@@ -38,8 +73,12 @@ interface WindowWithWebkitAudioContext extends Window {
 }
 
 export class AudioService {
+  private static readonly LOWPASS_OPEN_HZ = 20000;
+
   private context: AudioContext | null = null;
-  private masterGain: GainNode | null = null;
+  private readonly buses = new Map<AudioBusName, AudioBus>();
+  private readonly snapshots = new Map<string, AudioSnapshot>();
+  private activeSnapshotName = 'default';
   private readonly activePlaybacks = new Set<AudioPlayback>();
   private readonly activePlaybackEntries = new Map<AudioPlayback, ActiveAudioPlaybackEntry>();
   private nextPlaybackId = 0;
@@ -63,14 +102,28 @@ export class AudioService {
 
     try {
       this.context = new AudioContextCtor();
-      this.masterGain = this.context.createGain();
-      this.masterGain.connect(this.context.destination);
+      // Bus graph: sfx / music feed master's input; master's filter feeds the
+      // output. Filters are permanently wired but transparent (20 kHz Butterworth
+      // lowpass), so snapshots are pure AudioParam ramps with no graph rewiring.
+      const master = this.createBus(this.context.destination);
+      const music = this.createBus(master.input);
+      const sfx = this.createBus(master.input);
+      this.buses.set('master', master);
+      this.buses.set('music', music);
+      this.buses.set('sfx', sfx);
     } catch (error) {
       this.context = null;
-      this.masterGain = null;
+      this.buses.clear();
       console.warn('[AudioService] Failed to initialize AudioContext:', error);
       return;
     }
+
+    this.snapshots.set('default', { name: 'default' });
+    this.snapshots.set('muffled', {
+      name: 'muffled',
+      lowpassHz: { master: 700 },
+      volumeScale: { master: 0.85 },
+    });
 
     // iOS Safari / Web Audio requirement: context must be resumed by user interaction
     window.addEventListener('pointerdown', this.unlockFromPointerDown, { once: true });
@@ -85,10 +138,9 @@ export class AudioService {
     this.handleActivityChange();
   }
 
+  /** Alias for the master bus volume — keeps {@link mute}/{@link unmute} working. */
   setVolume(value: number): void {
-    if (this.masterGain) {
-      this.masterGain.gain.setTargetAtTime(value, this.context?.currentTime ?? 0, 0.01);
-    }
+    this.setBusVolume('master', value, 0.03);
   }
 
   mute(): void {
@@ -97,6 +149,109 @@ export class AudioService {
 
   unmute(): void {
     this.setVolume(1);
+  }
+
+  // ── Bus mixer ─────────────────────────────────────────────────────────────
+
+  /** Set the authored volume of a bus, ramping over ~`fadeSec` to avoid clicks. */
+  setBusVolume(bus: AudioBusName, volume: number, fadeSec = 0.05): void {
+    const entry = this.buses.get(bus);
+    if (!entry || !this.context) {
+      return;
+    }
+    entry.userVolume = Math.max(0, Number.isFinite(volume) ? volume : 1);
+    this.applyBusGain(bus, Math.max(0.001, fadeSec / 3));
+  }
+
+  /** Authoritative user volume of a bus (not the ramping `gain.value`). */
+  getBusVolume(bus: AudioBusName): number {
+    return this.buses.get(bus)?.userVolume ?? 1;
+  }
+
+  /** Compose the active snapshot's per-bus scale on top of the user volume. */
+  private applyBusGain(bus: AudioBusName, timeConstantSec: number): void {
+    const entry = this.buses.get(bus);
+    if (!entry || !this.context) {
+      return;
+    }
+    const scale = this.snapshots.get(this.activeSnapshotName)?.volumeScale?.[bus] ?? 1;
+    entry.input.gain.setTargetAtTime(entry.userVolume * scale, this.context.currentTime, timeConstantSec);
+  }
+
+  /**
+   * Blend the mixer to a named snapshot (per-bus lowpass + volume scale). User
+   * bus volumes compose with the snapshot, so leaving a snapshot restores the
+   * authored mix. Unknown names warn and leave state unchanged.
+   */
+  applySnapshot(name: string, options?: { timeConstantSec?: number }): void {
+    const snap = this.snapshots.get(name);
+    if (!snap || !this.context) {
+      if (!snap) {
+        console.warn(`[AudioService] Unknown snapshot "${name}".`);
+      }
+      return;
+    }
+    this.activeSnapshotName = name;
+    const tc = Math.max(0.001, options?.timeConstantSec ?? 0.08);
+    for (const busName of AUDIO_BUS_NAMES) {
+      this.applyBusGain(busName, tc);
+      const filter = this.buses.get(busName)?.filter;
+      filter?.frequency.setTargetAtTime(
+        snap.lowpassHz?.[busName] ?? AudioService.LOWPASS_OPEN_HZ,
+        this.context.currentTime,
+        tc
+      );
+    }
+  }
+
+  /** Blend back to the transparent `'default'` snapshot. */
+  resetSnapshot(options?: { timeConstantSec?: number }): void {
+    this.applySnapshot('default', options);
+  }
+
+  /** Register (or replace) a named snapshot; user scripts can add their own. */
+  registerSnapshot(snapshot: AudioSnapshot): void {
+    if (!snapshot || typeof snapshot.name !== 'string' || snapshot.name.length === 0) {
+      console.warn('[AudioService] registerSnapshot requires a non-empty name.');
+      return;
+    }
+    this.snapshots.set(snapshot.name, snapshot);
+  }
+
+  getActiveSnapshotName(): string {
+    return this.activeSnapshotName;
+  }
+
+  /** Reset all bus volumes to 1 and snap to `'default'` — called on scene stop. */
+  resetBuses(): void {
+    for (const busName of AUDIO_BUS_NAMES) {
+      const entry = this.buses.get(busName);
+      if (entry) {
+        entry.userVolume = 1;
+      }
+    }
+    this.applySnapshot('default', { timeConstantSec: 0.01 });
+  }
+
+  private createBus(target: AudioNode): AudioBus {
+    const context = this.context!;
+    const input = context.createGain();
+    let filter: BiquadFilterNode | null = null;
+    if (typeof context.createBiquadFilter === 'function') {
+      filter = context.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = AudioService.LOWPASS_OPEN_HZ;
+      filter.Q.value = 0.7071; // Butterworth — no resonance bump, inaudible when open
+      input.connect(filter);
+      filter.connect(target);
+    } else {
+      input.connect(target);
+    }
+    return { input, filter, userVolume: 1 };
+  }
+
+  private getBusInput(bus: AudioBusName | undefined): AudioNode {
+    return this.buses.get(bus ?? 'sfx')?.input ?? this.buses.get('master')!.input;
   }
 
   private handleActivityChange = (): void => {
@@ -147,7 +302,7 @@ export class AudioService {
   }
 
   play(buffer: AudioBuffer, options?: PlayAudioOptions): AudioPlayback {
-    if (!this.context || !this.masterGain) {
+    if (!this.context || this.buses.size === 0) {
       console.warn('[AudioService] Cannot play audio: AudioContext is unavailable.');
       return {
         stop: () => {
@@ -166,11 +321,20 @@ export class AudioService {
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.loop = options?.loop ?? false;
-    const playbackRate = Math.max(0.01, options?.playbackRate ?? 1);
+
+    // Per-shot randomization: linear fraction spread, clamped to audible ranges.
+    // random() is only sampled when a variation is set, so a zero spread stays
+    // exactly deterministic (the diagnostics snapshot records the effective values).
+    const pitchVariation = clamp01(options?.pitchVariation);
+    const volumeVariation = clamp01(options?.volumeVariation);
+    const pitchFactor = pitchVariation > 0 ? 1 + (Math.random() * 2 - 1) * pitchVariation : 1;
+    const volumeFactor = volumeVariation > 0 ? 1 + (Math.random() * 2 - 1) * volumeVariation : 1;
+
+    const playbackRate = Math.max(0.01, (options?.playbackRate ?? 1) * pitchFactor);
     source.playbackRate.value = playbackRate;
 
     const gainNode = this.context.createGain();
-    const volume = Math.max(0, options?.volume ?? 1.0);
+    const volume = Math.max(0, (options?.volume ?? 1.0) * volumeFactor);
     gainNode.gain.value = volume;
 
     let outputNode: AudioNode = gainNode;
@@ -183,8 +347,9 @@ export class AudioService {
       outputNode = pannerNode;
     }
 
+    const bus = options?.bus ?? 'sfx';
     source.connect(gainNode);
-    outputNode.connect(this.masterGain);
+    outputNode.connect(this.getBusInput(bus));
 
     let resolveEnded!: () => void;
     const ended = new Promise<void>((resolve) => {
@@ -237,6 +402,7 @@ export class AudioService {
       volume,
       playbackRate,
       pan,
+      bus,
       durationSeconds,
       channelCount,
       sampleRate,
@@ -283,7 +449,7 @@ export class AudioService {
     this.stopAll();
     void this.context?.close();
     this.context = null;
-    this.masterGain = null;
+    this.buses.clear();
     this.suspendedByFocusLoss = false;
   }
 

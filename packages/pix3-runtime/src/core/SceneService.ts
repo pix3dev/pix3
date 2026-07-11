@@ -4,6 +4,7 @@ import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
+import { AudioApi } from './AudioApi';
 import type { AudioService } from './AudioService';
 import type { AssetLoader } from './AssetLoader';
 import type { ECSService } from './ECSService';
@@ -89,6 +90,7 @@ export class SceneService {
   private flashOverlay: HTMLDivElement | null = null;
   private flashAnimationId: number | null = null;
   private juiceApi: JuiceApi | null = null;
+  private audioApi: AudioApi | null = null;
   /** Inert fallback used when no scene is running (editor previews, etc.). */
   private fallbackGameTime: GameTime | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -153,6 +155,18 @@ export class SceneService {
       this.juiceApi = new JuiceApi(this);
     }
     return this.juiceApi;
+  }
+
+  /**
+   * Audio mixer facade — buses (`master`/`music`/`sfx`), snapshots, and
+   * one-shot playback by path. Example: `this.scene.audio.play('res://sfx/hit.ogg',
+   * { bus: 'sfx', pitchVariation: 0.1 })`. Null-safe when no scene is running.
+   */
+  get audio(): AudioApi {
+    if (!this.audioApi) {
+      this.audioApi = new AudioApi(this);
+    }
+    return this.audioApi;
   }
 
   // ── Camera control ──────────────────────────────────────────────────────────

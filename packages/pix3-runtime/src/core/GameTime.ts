@@ -35,7 +35,7 @@ export class GameTime {
   private effectiveScale = 1;
 
   // Blended "base" scale (slow-mo), independent of hitstop.
-  private baseScale = 1;
+  private blendedScale = 1;
   private blendFrom = 1;
   private blendTo = 1;
   private blendDurationSec = 0;
@@ -52,6 +52,16 @@ export class GameTime {
   /** The multiplier gameplay dt is scaled by this frame. */
   get scale(): number {
     return this.effectiveScale;
+  }
+
+  /**
+   * The slow-motion base scale EXCLUDING hitstop. While a hitstop freeze is
+   * active {@link scale} is 0 but `baseScale` stays at the blended slow-mo
+   * value — use this for state that must not react to micro-freezes (e.g. the
+   * audio muffle snapshot), so an 80 ms hitstop never pumps the filter.
+   */
+  get baseScale(): number {
+    return Math.max(0, this.blendedScale);
   }
 
   /** True while a hitstop freeze is active. */
@@ -93,7 +103,7 @@ export class GameTime {
   /** Snap the base scale immediately (no blend), cancelling any auto-release. */
   setScale(scale: number): void {
     const next = this.sanitizeScale(scale, 1);
-    this.baseScale = next;
+    this.blendedScale = next;
     this.blendFrom = next;
     this.blendTo = next;
     this.blendDurationSec = 0;
@@ -124,9 +134,9 @@ export class GameTime {
     if (this.blendElapsedSec < this.blendDurationSec) {
       this.blendElapsedSec = Math.min(this.blendDurationSec, this.blendElapsedSec + dt);
       const f = this.blendDurationSec > 0 ? this.blendElapsedSec / this.blendDurationSec : 1;
-      this.baseScale = this.blendFrom + (this.blendTo - this.blendFrom) * f;
+      this.blendedScale = this.blendFrom + (this.blendTo - this.blendFrom) * f;
     } else {
-      this.baseScale = this.blendTo;
+      this.blendedScale = this.blendTo;
     }
 
     const blendComplete = this.blendElapsedSec >= this.blendDurationSec;
@@ -145,18 +155,18 @@ export class GameTime {
   }
 
   private startBlend(target: number, durationSec: number): void {
-    this.blendFrom = this.baseScale;
+    this.blendFrom = this.blendedScale;
     this.blendTo = target;
     this.blendDurationSec = Math.max(0, durationSec);
     this.blendElapsedSec = 0;
     if (this.blendDurationSec === 0) {
-      this.baseScale = target;
+      this.blendedScale = target;
     }
     this.updateEffective();
   }
 
   private updateEffective(): void {
-    this.effectiveScale = this.hitstopRemainingSec > 0 ? 0 : Math.max(0, this.baseScale);
+    this.effectiveScale = this.hitstopRemainingSec > 0 ? 0 : Math.max(0, this.blendedScale);
   }
 
   private sanitizeScale(value: number, fallback: number): number {

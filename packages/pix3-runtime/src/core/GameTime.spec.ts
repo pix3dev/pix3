@@ -92,6 +92,29 @@ describe('GameTime', () => {
     expect(time.isFrozen).toBe(false);
   });
 
+  it('keeps baseScale at the slow-mo value while hitstop forces scale to 0', () => {
+    const time = new GameTime();
+    time.hitstop(100);
+
+    time.advance(0.016);
+    // Load-bearing for the audio muffle: a hitstop freezes `scale` but must NOT
+    // pull `baseScale` down (otherwise every micro-freeze would pump the filter).
+    expect(time.scale).toBe(0);
+    expect(time.baseScale).toBe(1);
+  });
+
+  it('reports the blended slow-mo value via baseScale, independent of hitstop', () => {
+    const time = new GameTime();
+    time.slowMotion(0.3, { blendMs: 0 });
+    time.advance(0);
+    expect(time.baseScale).toBeCloseTo(0.3, 5);
+
+    time.hitstop(100);
+    time.advance(0);
+    expect(time.scale).toBe(0);
+    expect(time.baseScale).toBeCloseTo(0.3, 5);
+  });
+
   it('ignores non-finite / negative inputs', () => {
     const time = new GameTime();
     time.setScale(Number.NaN);

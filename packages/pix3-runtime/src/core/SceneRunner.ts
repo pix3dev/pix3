@@ -44,6 +44,13 @@ import { PhysicsDebugOverlay } from './physics-debug-overlay';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { GameTime } from './GameTime';
 
+/**
+ * Below this slow-mo base scale the audio mixer blends to the `'muffled'`
+ * snapshot. Compared against `gameTime.baseScale` (hitstop-independent) so an
+ * 80 ms micro-freeze never touches the filter.
+ */
+const SLOWMO_MUFFLE_THRESHOLD = 0.999;
+
 export interface SceneRunnerFrameSample {
   readonly dt: number;
   readonly elapsedTime: number;
@@ -70,6 +77,8 @@ export class SceneRunner {
   private readonly clock: Clock;
   /** Global time-scale controller (hitstop / slow-mo); scales gameplay dt. */
   private readonly gameTime = new GameTime();
+  /** True while the mixer is in the slow-mo `'muffled'` snapshot (edge-triggered). */
+  private audioMuffled = false;
   private readonly raycaster = new Raycaster();
   private readonly raycastPointer = new Vector2();
   private animationFrameId: number | null = null;
@@ -219,6 +228,7 @@ export class SceneRunner {
     this.elapsedTime = 0;
     this.frameNumber = 0;
     this.gameTime.reset();
+    this.audioMuffled = false;
 
     this.ecsService.beginScene(this.sceneService, this.inputService);
 
@@ -268,6 +278,11 @@ export class SceneRunner {
       }
 
       this.audioService.stopAll();
+      // Restore bus volumes + snapshot so a muffled/quiet mixer never leaks into
+      // editor audio previews (the AudioService is a DI singleton shared with
+      // AnimationTimelinePreviewService).
+      this.audioService.resetBuses();
+      this.audioMuffled = false;
 
       // Clear delegate to prevent any pending async calls from restarting audio/loading
       this.sceneService.setDelegate(null);
@@ -323,6 +338,16 @@ export class SceneRunner {
     // Gameplay (ECS, node ticks, scripts, keyframe clips, fixed-step physics)
     // all run off `dt`; render() below is unscaled so a frozen frame still paints.
     this.gameTime.advance(rawDt);
+
+    // Auto-muffle audio while in slow motion. Reads baseScale (NOT scale) so a
+    // hitstop freeze — which forces scale to 0 — doesn't pump the filter. Guarded
+    // so only a state change issues one AudioParam ramp, never per-frame.
+    const muffled = this.gameTime.baseScale < SLOWMO_MUFFLE_THRESHOLD;
+    if (muffled !== this.audioMuffled) {
+      this.audioMuffled = muffled;
+      this.audioService.applySnapshot(muffled ? 'muffled' : 'default');
+    }
+
     const dt = rawDt * this.gameTime.scale;
     const logicStart = performance.now();
     this.currentFrameProfilerActivities = [];

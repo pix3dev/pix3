@@ -1,5 +1,6 @@
 import { Script } from '../core/ScriptComponent';
 import type { PropertySchema } from '../fw/property-schema';
+import { AUDIO_BUS_NAMES, type AudioBusName } from '../core/AudioService';
 
 export class PlaySoundBehavior extends Script {
   private readonly onNodeSignal = (): void => {
@@ -13,6 +14,9 @@ export class PlaySoundBehavior extends Script {
       triggerEvent: 'pointerdown',
       volume: 1,
       loop: false,
+      bus: 'sfx',
+      pitchVariation: 0,
+      volumeVariation: 0,
     };
   }
 
@@ -73,6 +77,53 @@ export class PlaySoundBehavior extends Script {
           getValue: component => (component as PlaySoundBehavior).getLoop(),
           setValue: (component, value) => {
             (component as PlaySoundBehavior).setLoop(value);
+          },
+        },
+        {
+          name: 'bus',
+          type: 'enum',
+          ui: {
+            label: 'Bus',
+            group: 'Audio',
+            options: [...AUDIO_BUS_NAMES],
+          },
+          getValue: component => (component as PlaySoundBehavior).getBus(),
+          setValue: (component, value) => {
+            (component as PlaySoundBehavior).setBus(value);
+          },
+        },
+        {
+          name: 'pitchVariation',
+          type: 'number',
+          ui: {
+            label: 'Pitch Variation',
+            description: 'Random ± playback-rate spread per shot',
+            group: 'Audio',
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2,
+          },
+          getValue: component => (component as PlaySoundBehavior).getPitchVariation(),
+          setValue: (component, value) => {
+            (component as PlaySoundBehavior).setPitchVariation(value);
+          },
+        },
+        {
+          name: 'volumeVariation',
+          type: 'number',
+          ui: {
+            label: 'Volume Variation',
+            description: 'Random ± volume spread per shot',
+            group: 'Audio',
+            min: 0,
+            max: 1,
+            step: 0.01,
+            precision: 2,
+          },
+          getValue: component => (component as PlaySoundBehavior).getVolumeVariation(),
+          setValue: (component, value) => {
+            (component as PlaySoundBehavior).setVolumeVariation(value);
           },
         },
       ],
@@ -147,6 +198,9 @@ export class PlaySoundBehavior extends Script {
         sizeBytes: audioMetadata?.sizeBytes,
         volume: this.getVolume(),
         loop: this.getLoop(),
+        bus: this.getBus(),
+        pitchVariation: this.getPitchVariation(),
+        volumeVariation: this.getVolumeVariation(),
       });
     } catch (error) {
       console.warn(`[PlaySoundBehavior] Failed to play "${track}" on node "${node.name}":`, error);
@@ -200,6 +254,30 @@ export class PlaySoundBehavior extends Script {
     this.config.loop = this.toBoolean(value, false);
   }
 
+  private getBus(): AudioBusName {
+    return this.toBus(this.config.bus);
+  }
+
+  private setBus(value: unknown): void {
+    this.config.bus = this.toBus(value);
+  }
+
+  private getPitchVariation(): number {
+    return this.toVariation(this.config.pitchVariation);
+  }
+
+  private setPitchVariation(value: unknown): void {
+    this.config.pitchVariation = this.toVariation(value);
+  }
+
+  private getVolumeVariation(): number {
+    return this.toVariation(this.config.volumeVariation);
+  }
+
+  private setVolumeVariation(value: unknown): void {
+    this.config.volumeVariation = this.toVariation(value);
+  }
+
   private normalizeTrack(value: unknown): string {
     return this.toTrimmedString(value, '');
   }
@@ -233,6 +311,20 @@ export class PlaySoundBehavior extends Script {
     const numberValue = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(numberValue)) {
       return fallback;
+    }
+    return Math.min(1, Math.max(0, numberValue));
+  }
+
+  private toBus(value: unknown): AudioBusName {
+    return typeof value === 'string' && (AUDIO_BUS_NAMES as readonly string[]).includes(value)
+      ? (value as AudioBusName)
+      : 'sfx';
+  }
+
+  private toVariation(value: unknown): number {
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return 0;
     }
     return Math.min(1, Math.max(0, numberValue));
   }
