@@ -661,7 +661,7 @@ root:
 
 ### 6.15.1 Overview
 
-Pix3 supports a prefab system for reusing node hierarchies across scenes. Prefabs are standard `.pix3scene` files that can be instantiated (instanced) in other scenes. When a node branch is saved as a prefab, it becomes a reusable asset that can be placed multiple times in any scene. Changes to the source prefab can be propagated to all instances.
+Pix3 supports a prefab system for reusing node hierarchies across scenes. Prefabs are standard `.pix3scene` files that can be instantiated (instanced) in other scenes — `.pix3scene` is the only scene/prefab extension; there is no dedicated `.pix3prefab` format, and "prefab" describes how a scene file is used (instanced via `instance:`), not a distinct file type. When a node branch is saved as a prefab, it becomes a reusable asset that can be placed multiple times in any scene. Changes to the source prefab can be propagated to all instances.
 
 ### 6.15.2 Prefab Metadata
 

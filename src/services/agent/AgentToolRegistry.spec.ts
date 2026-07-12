@@ -42,7 +42,7 @@ describe('AgentToolRegistry', () => {
     clearErrors();
   });
 
-  it('lists the expected tools and defers viewport_screenshot / generate_asset', () => {
+  it('lists the expected tools', () => {
     const names = buildRegistry()
       .list()
       .map(t => t.name);
@@ -66,10 +66,10 @@ describe('AgentToolRegistry', () => {
         'play_status',
         'read_logs',
         'read_errors',
+        'viewport_screenshot',
+        'generate_asset',
       ])
     );
-    expect(names).not.toContain('viewport_screenshot');
-    expect(names).not.toContain('generate_asset');
   });
 
   it('specs() drops the handler', () => {
@@ -81,6 +81,86 @@ describe('AgentToolRegistry', () => {
 
   it('throws on an unknown tool', async () => {
     await expect(buildRegistry().execute('nope')).rejects.toThrow(/Unknown tool/);
+  });
+
+  describe('viewport_screenshot', () => {
+    it('returns the capture with the image lifted into __images', async () => {
+      const captureScreenshot = vi.fn(() => ({
+        dataBase64: 'QUJD',
+        mimeType: 'image/jpeg',
+        width: 640,
+        height: 360,
+      }));
+      const registry = buildRegistry({ viewportRenderer: { captureScreenshot } });
+
+      const result = (await registry.execute('viewport_screenshot', { maxSize: 640 })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(captureScreenshot).toHaveBeenCalledWith({ maxSize: 640 });
+      expect(result.ok).toBe(true);
+      expect(result.__images).toEqual([{ mimeType: 'image/jpeg', data: 'QUJD' }]);
+    });
+
+    it('reports a friendly error when the viewport is not initialized', async () => {
+      const registry = buildRegistry({ viewportRenderer: { captureScreenshot: () => null } });
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/not initialized/);
+    });
+  });
+
+  describe('generate_asset', () => {
+    const makeAssetGen = (keyConfigured: boolean) => ({
+      status: vi.fn(async () => ({ keyConfigured })),
+      generate: vi.fn(async () => ({ id: 'img-1', width: 512, height: 512 })),
+      save: vi.fn(async () => ({
+        path: 'assets/ui/button.png',
+        width: 512,
+        height: 512,
+        bytes: 1234,
+        mimeType: 'image/png',
+      })),
+      preview: vi.fn(async () => 'data:image/webp;base64,UFJFVklFVw=='),
+      discard: vi.fn(),
+    });
+
+    it('refuses without a configured image key', async () => {
+      const assetGen = makeAssetGen(false);
+      const registry = buildRegistry({ assetGen });
+      const result = (await registry.execute('generate_asset', {
+        prompt: 'a button',
+        name: 'assets/ui/button',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/API key/);
+      expect(assetGen.generate).not.toHaveBeenCalled();
+    });
+
+    it('generates, saves, attaches a preview image, and frees the handle', async () => {
+      const assetGen = makeAssetGen(true);
+      const registry = buildRegistry({ assetGen });
+
+      const result = (await registry.execute('generate_asset', {
+        prompt: 'a button',
+        name: 'assets/ui/button',
+        transparent: true,
+      })) as Record<string, unknown>;
+
+      expect(assetGen.generate).toHaveBeenCalledWith({
+        prompt: 'a button',
+        references: undefined,
+        transparent: true,
+      });
+      expect(assetGen.save).toHaveBeenCalledWith('img-1', 'assets/ui/button', {
+        maxSize: undefined,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.saved).toMatchObject({ path: 'assets/ui/button.png' });
+      expect(result.__images).toEqual([{ mimeType: 'image/webp', data: 'UFJFVklFVw==' }]);
+      expect(assetGen.discard).toHaveBeenCalledWith('img-1');
+    });
   });
 
   describe('filesystem tools', () => {

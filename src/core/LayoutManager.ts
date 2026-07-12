@@ -25,6 +25,7 @@ const PANEL_COMPONENT_TYPES = {
   code: 'code',
   runtime: 'runtime',
   assetGenerator: 'asset-generator',
+  agentChat: 'agent-chat',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -44,6 +45,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
   [PANEL_COMPONENT_TYPES.assetGenerator]: 'pix3-asset-generator-panel',
+  [PANEL_COMPONENT_TYPES.agentChat]: 'pix3-agent-chat-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -61,6 +63,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
   [PANEL_COMPONENT_TYPES.assetGenerator]: 'Asset Generator',
+  [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -350,7 +353,9 @@ export class LayoutManagerService {
                 ? PANEL_COMPONENT_TYPES.code
                 : tab.type === 'asset-generator'
                   ? PANEL_COMPONENT_TYPES.assetGenerator
-                  : PANEL_COMPONENT_TYPES.viewport,
+                  : tab.type === 'agent-chat'
+                    ? PANEL_COMPONENT_TYPES.agentChat
+                    : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
         // PREVENT DRAGGING to enforce Single Document Interface
@@ -562,7 +567,8 @@ export class LayoutManagerService {
       componentType === PANEL_COMPONENT_TYPES.animation ||
       componentType === PANEL_COMPONENT_TYPES.game ||
       componentType === PANEL_COMPONENT_TYPES.code ||
-      componentType === PANEL_COMPONENT_TYPES.assetGenerator
+      componentType === PANEL_COMPONENT_TYPES.assetGenerator ||
+      componentType === PANEL_COMPONENT_TYPES.agentChat
     );
   }
 
@@ -750,6 +756,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.assetGenerator) {
           void import('@/ui/asset-generator/asset-generator-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.agentChat) {
+          void import('@/ui/agent-chat/pix3-agent-chat-panel');
         }
         if (componentType === PANEL_COMPONENT_TYPES.animationTimeline) {
           void import('@/ui/animation-timeline/animation-timeline-panel');

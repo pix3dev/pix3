@@ -25,7 +25,8 @@ const DEFAULT_MAX_TOKENS = 4096;
  * Tool-use mapping is the delicate part. Gemini expresses tool calls as `functionCall` parts and
  * results as `functionResponse` parts, and it matches them **by function name, not by id** — there
  * are no call ids on the wire. So we synthesise stable ids for the tool-use blocks we return
- * (`gemini-tool-<n>`) and, when serialising a tool-result back, resolve its function name from the
+ * (`gemini-tool-<n>`, monotonic across the provider instance so ids never collide between turns of
+ * one conversation) and, when serialising a tool-result back, resolve its function name from the
  * originating tool-use block (via `toolName` or a conversation-wide lookup).
  *
  * @see https://ai.google.dev/gemini-api/docs/function-calling
@@ -36,30 +37,56 @@ export class GeminiLlmProvider implements LlmProvider {
   readonly apiKeySecretId = 'ai-provider:gemini:api-key';
   readonly apiKeyHelpUrl = 'https://aistudio.google.com/apikey';
 
+  // The `*-latest` aliases track Google's current stable models, so a deprecated pinned id (e.g.
+  // gemini-2.5-flash, which new-user keys can no longer access) never silently breaks the default.
   readonly models: readonly LlmModel[] = [
     {
-      id: 'gemini-2.5-flash',
-      label: 'Gemini 2.5 Flash',
-      description: 'Fast, reliable default.',
+      id: 'gemini-flash-latest',
+      label: 'Gemini Flash (latest)',
+      description: 'Fast, reliable default — tracks the current stable Flash model.',
       capabilities: {
         supportsTools: true,
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
       },
+      // Indicative Gemini 2.5 Flash paid-tier pricing (the current stable Flash).
+      pricing: { inputPer1M: 0.3, outputPer1M: 2.5 },
     },
     {
-      id: 'gemini-2.5-pro',
-      label: 'Gemini 2.5 Pro',
-      description: 'Higher quality, slower.',
+      id: 'gemini-pro-latest',
+      label: 'Gemini Pro (latest)',
+      description: 'Higher quality, slower — tracks the current stable Pro model.',
       capabilities: {
         supportsTools: true,
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
       },
+      // Gemini 2.5 Pro paid-tier base tier (prompts ≤ 200k tokens); higher above that.
+      pricing: { inputPer1M: 1.25, outputPer1M: 10 },
+    },
+    {
+      id: 'gemini-2.5-flash-lite',
+      label: 'Gemini 2.5 Flash-Lite',
+      description: 'Cheapest / fastest tier.',
+      capabilities: {
+        supportsTools: true,
+        supportsImages: true,
+        supportsSystemPrompt: true,
+        maxOutputTokens: 8192,
+      },
+      pricing: { inputPer1M: 0.1, outputPer1M: 0.4 },
     },
   ];
+
+  /**
+   * Monotonic per-instance source of synthetic tool-use ids. Must NOT reset per response: the ids
+   * live in the conversation history, and a multi-turn tool loop re-serialises that whole history
+   * on every request — colliding ids would make the id→name fallback in `collectToolNames` resolve
+   * a tool-result to the wrong function name.
+   */
+  private toolCallCounter = 0;
 
   getModel(modelId: string): LlmModel | undefined {
     return this.models.find(model => model.id === modelId);
@@ -130,7 +157,7 @@ export class GeminiLlmProvider implements LlmProvider {
           functionDeclarations: params.tools.map(tool => ({
             name: tool.name,
             description: tool.description,
-            parameters: tool.inputSchema,
+            parameters: sanitizeGeminiSchema(tool.inputSchema),
           })),
         },
       ];
@@ -143,7 +170,6 @@ export class GeminiLlmProvider implements LlmProvider {
     const candidate = firstCandidate(payload);
     const parts = candidate && isRecord(candidate.content) ? candidate.content.parts : undefined;
     const content: LlmContentBlock[] = [];
-    let toolIndex = 0;
 
     if (Array.isArray(parts)) {
       for (const part of parts) {
@@ -153,11 +179,15 @@ export class GeminiLlmProvider implements LlmProvider {
         }
         const call = part.functionCall ?? part.function_call;
         if (isRecord(call) && typeof call.name === 'string') {
+          // The thought signature rides on the part (sibling of functionCall) and must be echoed
+          // back verbatim when this call is replayed, or Gemini warns and degrades tool quality.
+          const signature = part.thoughtSignature ?? part.thought_signature;
           content.push({
             type: 'tool-use',
-            id: `gemini-tool-${toolIndex++}`,
+            id: `gemini-tool-${this.toolCallCounter++}`,
             name: call.name,
             input: isRecord(call.args) ? call.args : {},
+            ...(typeof signature === 'string' ? { signature } : {}),
           });
         }
       }
@@ -180,11 +210,44 @@ export class GeminiLlmProvider implements LlmProvider {
   }
 }
 
+/**
+ * Gemini's function-calling `parameters` accepts only a restricted OpenAPI-schema subset and rejects
+ * standard JSON-Schema keywords it doesn't know (notably `additionalProperties`, which every tool
+ * schema here carries) with a hard 400. Deep-clone the schema, dropping those unsupported keys, so
+ * the same tool definitions work across Anthropic/OpenAI (which accept them) and Gemini.
+ */
+const GEMINI_UNSUPPORTED_SCHEMA_KEYS = new Set([
+  'additionalProperties',
+  '$schema',
+  '$id',
+  '$ref',
+  'definitions',
+  'patternProperties',
+]);
+
+const sanitizeGeminiSchema = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeGeminiSchema);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(key)) {
+      continue;
+    }
+    out[key] = sanitizeGeminiSchema(val);
+  }
+  return out;
+};
+
 interface GeminiPart {
   text?: string;
   inline_data?: { mime_type: string; data: string };
   functionCall?: { name: string; args: unknown };
   functionResponse?: { name: string; response: Record<string, unknown> };
+  thoughtSignature?: string;
 }
 
 const toGeminiPart = (block: LlmContentBlock, toolNames: Map<string, string>): GeminiPart => {
@@ -194,7 +257,10 @@ const toGeminiPart = (block: LlmContentBlock, toolNames: Map<string, string>): G
     case 'image':
       return { inline_data: { mime_type: block.mimeType, data: block.data } };
     case 'tool-use':
-      return { functionCall: { name: block.name, args: block.input ?? {} } };
+      return {
+        functionCall: { name: block.name, args: block.input ?? {} },
+        ...(block.signature ? { thoughtSignature: block.signature } : {}),
+      };
     case 'tool-result': {
       const name = block.toolName ?? toolNames.get(block.toolUseId) ?? block.toolUseId;
       return {

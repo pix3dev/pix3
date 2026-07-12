@@ -48,7 +48,7 @@ export const ASSET_CATEGORY_BY_ID: Readonly<Record<AssetCategoryId, AssetCategor
 const EXTENSIONS_BY_CATEGORY: Readonly<
   Record<Exclude<AssetCategoryId, 'other'>, readonly string[]>
 > = {
-  scenes: ['pix3scene', 'pix3prefab'],
+  scenes: ['pix3scene'],
   images: [
     'png',
     'jpg',

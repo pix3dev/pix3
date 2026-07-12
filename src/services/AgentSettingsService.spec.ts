@@ -72,11 +72,21 @@ describe('AgentSettingsService', () => {
 
   it('resolves the selected model id (default first model, custom passthrough)', () => {
     const service = buildService();
-    expect(service.getSelectedModelId('gemini')).toBe('gemini-2.5-flash');
+    expect(service.getSelectedModelId('gemini')).toBe('gemini-flash-latest');
     // Custom / local model id must pass through even when not in the provider list.
     service.updatePreferences({ modelByProvider: { 'openai-compat': 'my-local-model' } });
     expect(service.getSelectedModelId('openai-compat')).toBe('my-local-model');
     expect(service.getSelectedModelId('nope')).toBeUndefined();
+  });
+
+  it('falls back to the first model when a fixed-list provider has a stale/deprecated stored id', () => {
+    const service = buildService();
+    // A previously-stored Gemini id that is no longer in the provider list (deprecated model).
+    service.updatePreferences({ modelByProvider: { gemini: 'gemini-2.5-flash' } });
+    expect(service.getSelectedModelId('gemini')).toBe('gemini-flash-latest');
+    // A still-valid stored id is preserved.
+    service.updatePreferences({ modelByProvider: { gemini: 'gemini-pro-latest' } });
+    expect(service.getSelectedModelId('gemini')).toBe('gemini-pro-latest');
   });
 
   it('returns the custom base URL only for the provider that requires one', () => {

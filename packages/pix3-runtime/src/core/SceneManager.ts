@@ -49,6 +49,27 @@ export class SceneManager {
     });
   }
 
+  /**
+   * Switch the active scene to an already-registered graph WITHOUT replacing it.
+   *
+   * Use this when re-activating an editor tab whose scene is still loaded (the
+   * common tab-switch case): the graph — and with it every live node identity
+   * and the scene's undo history — must be preserved, only the "active" pointer
+   * moves. `setActiveSceneGraph` is the wrong tool there because it disposes and
+   * replaces the graph.
+   *
+   * Returns `false` (and leaves the active pointer unchanged) if no graph is
+   * registered under `sceneId`, so callers can detect a stale id instead of
+   * silently pointing `getActiveSceneGraph()` at nothing.
+   */
+  setActiveScene(sceneId: string): boolean {
+    if (!this.sceneGraphs.has(sceneId)) {
+      return false;
+    }
+    this.activeSceneId = sceneId;
+    return true;
+  }
+
   getSceneGraph(sceneId: string): SceneGraph | null {
     const graph = this.sceneGraphs.get(sceneId) ?? null;
 

@@ -5,6 +5,9 @@ import { OperationService } from '@/services/OperationService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { AiImageSettingsService } from '@/services/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
+import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
+import { formatPricingHint } from '@/services/llm/LlmTypes';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
 import './pix3-editor-settings-dialog.ts.css';
@@ -22,6 +25,12 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(ImageGenProviderRegistry)
   private readonly imageProviders!: ImageGenProviderRegistry;
+
+  @inject(AgentSettingsService)
+  private readonly agentSettings!: AgentSettingsService;
+
+  @inject(LlmProviderRegistry)
+  private readonly llmProviders!: LlmProviderRegistry;
 
   @state()
   private activeTab: EditorSettingsTab = 'general';
@@ -57,6 +66,31 @@ export class EditorSettingsDialog extends ComponentBase {
   private aiKeyMessage: string | null = null;
 
   @state()
+  private llmProviderId = '';
+
+  @state()
+  private llmModelId = '';
+
+  /** True when the LLM model is a hand-typed custom id (local models on OpenAI-compatible). */
+  @state()
+  private llmModelCustomMode = false;
+
+  @state()
+  private llmBaseUrl = '';
+
+  @state()
+  private llmKeyConfigured = false;
+
+  @state()
+  private llmKeyInput = '';
+
+  @state()
+  private llmKeyBusy = false;
+
+  @state()
+  private llmKeyMessage: string | null = null;
+
+  @state()
   private bgEngine: BgRemovalEngine = 'imgly';
 
   @state()
@@ -83,6 +117,20 @@ export class EditorSettingsDialog extends ComponentBase {
     this.bgFillHoles = prefs.bgFillHoles;
     this.defaultSaveMaxSize = prefs.defaultSaveMaxSize;
     void this.refreshAiKeyStatus();
+
+    const agentPrefs = this.agentSettings.getPreferences();
+    this.llmProviderId = agentPrefs.selectedProviderId || this.llmProviders.getDefault()?.id || '';
+    this.llmModelId = this.agentSettings.getSelectedModelId(this.llmProviderId) ?? '';
+    this.llmBaseUrl = agentPrefs.customBaseUrl;
+    this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+    void this.refreshLlmKeyStatus();
+  }
+
+  /** A stored model not in the provider's list is a hand-typed custom id (local models). */
+  private isLlmModelCustom(providerId: string, modelId: string): boolean {
+    if (!modelId) return false;
+    const models = this.llmProviders.get(providerId)?.models ?? [];
+    return !models.some(m => m.id === modelId);
   }
 
   protected render() {
@@ -198,11 +246,137 @@ export class EditorSettingsDialog extends ComponentBase {
   }
 
   private renderAiTab() {
-    const section = this.renderAiProvidersSection();
-    if (!section) {
-      return html`<div class="hint">No AI image providers are registered.</div>`;
+    const imageSection = this.renderAiProvidersSection();
+    const llmSection = this.renderLlmProvidersSection();
+    if (!imageSection && !llmSection) {
+      return html`<div class="hint">No AI providers are registered.</div>`;
     }
-    return section;
+    return html`${llmSection}${imageSection}`;
+  }
+
+  private renderLlmProvidersSection() {
+    const providers = this.llmProviders.list();
+    if (providers.length === 0) {
+      return null;
+    }
+    const provider = this.llmProviders.get(this.llmProviderId) ?? providers[0];
+    const models = provider?.models ?? [];
+    const helpUrl = provider?.apiKeyHelpUrl;
+
+    return html`
+      <div class="settings-section">
+        <h3 class="section-title">Agent (LLM) Provider</h3>
+        <div class="hint">Powers the in-editor Agent chat (Tools → Agent Chat).</div>
+
+        <div class="settings-field">
+          <label class="select-row">
+            <span>Provider</span>
+            <select @change=${this.onLlmProviderChange}>
+              ${providers.map(
+                item =>
+                  html`<option value=${item.id} ?selected=${item.id === this.llmProviderId}>
+                    ${item.label}
+                  </option>`
+              )}
+            </select>
+          </label>
+        </div>
+
+        <div class="settings-field">
+          <label class="select-row">
+            <span>Model</span>
+            <select @change=${this.onLlmModelSelectChange}>
+              ${models.map(model => {
+                const hint = formatPricingHint(model.pricing);
+                return html`<option
+                  value=${model.id}
+                  ?selected=${!this.llmModelCustomMode && model.id === this.llmModelId}
+                >
+                  ${model.label}${hint ? ` · ${hint}` : ''}
+                </option>`;
+              })}
+              ${provider?.requiresBaseUrl
+                ? html`<option value="__custom__" ?selected=${this.llmModelCustomMode}>
+                    Custom…
+                  </option>`
+                : null}
+            </select>
+          </label>
+          ${this.llmModelCustomMode
+            ? html`<input
+                type="text"
+                class="llm-custom-model"
+                .value=${this.llmModelId}
+                @change=${this.onLlmModelChange}
+                placeholder="custom model id (e.g. a local model name)"
+              />`
+            : null}
+        </div>
+
+        ${provider?.requiresBaseUrl
+          ? html`<div class="settings-field">
+              <label class="select-row">
+                <span>Base URL</span>
+                <input
+                  type="text"
+                  .value=${this.llmBaseUrl}
+                  @change=${this.onLlmBaseUrlChange}
+                  placeholder=${provider.defaultBaseUrl ?? 'https://…'}
+                />
+              </label>
+              <div class="hint">
+                Hosted OpenAI by default; point it at Ollama / LM Studio for local models (enable
+                CORS there, e.g. <code>OLLAMA_ORIGINS</code>).
+              </div>
+            </div>`
+          : null}
+
+        <div class="settings-field">
+          <span class="key-label">
+            API Key
+            <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
+              ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
+            </span>
+          </span>
+          <div class="key-row">
+            <input
+              type="password"
+              autocomplete="off"
+              placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+              .value=${this.llmKeyInput}
+              @input=${this.onLlmKeyInput}
+            />
+            <button
+              class="btn-key-save"
+              @click=${this.onSaveLlmKey}
+              ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
+            >
+              Save
+            </button>
+            ${this.llmKeyConfigured
+              ? html`<button
+                  class="btn-key-clear"
+                  @click=${this.onClearLlmKey}
+                  ?disabled=${this.llmKeyBusy}
+                >
+                  Clear
+                </button>`
+              : null}
+          </div>
+          <div class="hint">
+            ${this.llmKeyMessage
+              ? html`<span>${this.llmKeyMessage}</span>`
+              : html`Paste your provider API
+                key${helpUrl
+                  ? html` (get one from
+                      <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+                  : ''}.
+                Stored encrypted in this browser only — never synced, and only sent to the selected
+                provider.`}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   private renderAiProvidersSection() {
@@ -443,6 +617,93 @@ export class EditorSettingsDialog extends ComponentBase {
       this.aiKeyMessage = `Failed to remove key: ${error instanceof Error ? error.message : 'unknown error'}`;
     } finally {
       this.aiKeyBusy = false;
+    }
+  }
+
+  private async refreshLlmKeyStatus(): Promise<void> {
+    if (!this.llmProviderId) {
+      this.llmKeyConfigured = false;
+      return;
+    }
+    try {
+      this.llmKeyConfigured = await this.agentSettings.hasApiKey(this.llmProviderId);
+    } catch {
+      this.llmKeyConfigured = false;
+    }
+  }
+
+  private onLlmProviderChange(e: Event): void {
+    const providerId = (e.target as HTMLSelectElement).value;
+    this.llmProviderId = providerId;
+    this.agentSettings.updatePreferences({ selectedProviderId: providerId });
+    this.llmModelId = this.agentSettings.getSelectedModelId(providerId) ?? '';
+    this.llmModelCustomMode = this.isLlmModelCustom(providerId, this.llmModelId);
+    this.llmKeyInput = '';
+    this.llmKeyMessage = null;
+    void this.refreshLlmKeyStatus();
+  }
+
+  private onLlmModelSelectChange(e: Event): void {
+    const value = (e.target as HTMLSelectElement).value;
+    if (value === '__custom__') {
+      this.llmModelCustomMode = true;
+      return;
+    }
+    this.llmModelCustomMode = false;
+    this.agentSettings.updatePreferences({ modelByProvider: { [this.llmProviderId]: value } });
+    this.llmModelId = value;
+  }
+
+  private onLlmModelChange(e: Event): void {
+    const modelId = (e.target as HTMLInputElement).value.trim();
+    this.llmModelId = modelId;
+    if (modelId) {
+      this.agentSettings.updatePreferences({ modelByProvider: { [this.llmProviderId]: modelId } });
+    }
+  }
+
+  private onLlmBaseUrlChange(e: Event): void {
+    this.llmBaseUrl = (e.target as HTMLInputElement).value.trim();
+    this.agentSettings.updatePreferences({ customBaseUrl: this.llmBaseUrl });
+  }
+
+  private onLlmKeyInput(e: Event): void {
+    this.llmKeyInput = (e.target as HTMLInputElement).value;
+    this.llmKeyMessage = null;
+  }
+
+  private async onSaveLlmKey(): Promise<void> {
+    const key = this.llmKeyInput.trim();
+    if (!key || !this.llmProviderId) {
+      return;
+    }
+    this.llmKeyBusy = true;
+    try {
+      await this.agentSettings.setApiKey(this.llmProviderId, key);
+      this.llmKeyConfigured = true;
+      this.llmKeyInput = '';
+      this.llmKeyMessage = 'API key saved.';
+    } catch (error) {
+      this.llmKeyMessage = `Failed to save key: ${error instanceof Error ? error.message : 'unknown error'}`;
+    } finally {
+      this.llmKeyBusy = false;
+    }
+  }
+
+  private async onClearLlmKey(): Promise<void> {
+    if (!this.llmProviderId) {
+      return;
+    }
+    this.llmKeyBusy = true;
+    try {
+      await this.agentSettings.clearApiKey(this.llmProviderId);
+      this.llmKeyConfigured = false;
+      this.llmKeyInput = '';
+      this.llmKeyMessage = 'API key removed.';
+    } catch (error) {
+      this.llmKeyMessage = `Failed to remove key: ${error instanceof Error ? error.message : 'unknown error'}`;
+    } finally {
+      this.llmKeyBusy = false;
     }
   }
 

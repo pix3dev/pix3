@@ -50,9 +50,9 @@ interface Pipeline {
 }
 
 /**
- * Renders a one-shot thumbnail for a `.pix3scene` / `.pix3prefab` file by
- * parsing it into an isolated runtime graph and drawing a single frame to an
- * offscreen WebGL canvas — the scene/prefab counterpart of
+ * Renders a one-shot thumbnail for a `.pix3scene` file (scene or prefab —
+ * prefabs are plain scene files) by parsing it into an isolated runtime graph
+ * and drawing a single frame to an offscreen WebGL canvas — the counterpart of
  * {@link ../services/ThumbnailGenerator.ThumbnailGenerator} (which handles glTF
  * models).
  *
@@ -83,10 +83,9 @@ export class SceneThumbnailGenerator {
     const text = await blob.text();
     const resourcePath = toProjectResourcePath(filePath);
     const graph = await this.sceneManager.parseScene(text, { filePath: resourcePath });
-    const isPrefab = /\.pix3prefab$/i.test(filePath);
 
     try {
-      return this.renderGraph(graph, isPrefab);
+      return this.renderGraph(graph);
     } finally {
       for (const root of graph.rootNodes) {
         root.dispose();
@@ -103,7 +102,7 @@ export class SceneThumbnailGenerator {
     this.pipeline = null;
   }
 
-  private renderGraph(graph: SceneGraph, isPrefab: boolean): string {
+  private renderGraph(graph: SceneGraph): string {
     if (graph.rootNodes.length === 0) {
       throw new Error('Scene has no root nodes to render.');
     }
@@ -113,16 +112,13 @@ export class SceneThumbnailGenerator {
       scene.add(root);
     }
 
-    // Scenes anchor their 2D content to the project design frame first, so
-    // anchored elements land at their final positions before we measure the
-    // content bounds. Prefabs are laid out by their eventual parent, so they
-    // keep their authored local positions.
-    if (!isPrefab) {
-      const design = this.getDesignSize();
-      for (const root of graph.rootNodes) {
-        if (root instanceof Node2D) {
-          root.applyAnchoredLayoutRecursive(design, design);
-        }
+    // Anchor 2D content to the project design frame first, so anchored
+    // elements land at their final positions before we measure the content
+    // bounds.
+    const design = this.getDesignSize();
+    for (const root of graph.rootNodes) {
+      if (root instanceof Node2D) {
+        root.applyAnchoredLayoutRecursive(design, design);
       }
     }
     assign2DRenderOrder(graph.rootNodes);
@@ -162,14 +158,8 @@ export class SceneThumbnailGenerator {
     const pipeline = this.ensurePipeline();
     pipeline.renderer.setSize(width, height, false);
 
-    // Scenes get the opaque play-view background; prefabs stay transparent so
-    // the content floats over the panel tile.
-    const opaqueBackground = !isPrefab;
-    scene.background = opaqueBackground ? new Color(SCENE_BACKGROUND) : null;
-    pipeline.renderer.setClearColor(
-      opaqueBackground ? SCENE_BACKGROUND : 0x000000,
-      opaqueBackground ? 1 : 0
-    );
+    scene.background = new Color(SCENE_BACKGROUND);
+    pipeline.renderer.setClearColor(SCENE_BACKGROUND, 1);
 
     // Pass 1 — 3D (or a plain background clear when there is no 3D content).
     pipeline.renderer.autoClear = true;

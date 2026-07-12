@@ -13,7 +13,7 @@ import {
 describe('asset-categories', () => {
   it('classifies extensions into categories case-insensitively', () => {
     expect(categorizeAssetPath('scenes/Main.pix3scene')).toBe('scenes');
-    expect(categorizeAssetPath('prefabs/Enemy.PIX3PREFAB')).toBe('scenes');
+    expect(categorizeAssetPath('prefabs/Enemy.PIX3SCENE')).toBe('scenes');
     expect(categorizeAssetPath('assets/sprites/ui/button.png')).toBe('images');
     expect(categorizeAssetPath('icon.SVG')).toBe('images');
     expect(categorizeAssetPath('models/robot.glb')).toBe('models');

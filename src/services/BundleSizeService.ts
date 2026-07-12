@@ -59,7 +59,6 @@ const CATEGORY_BY_EXTENSION: Record<string, BundleSizeCategory> = {
   fbx: 'models',
   obj: 'models',
   pix3scene: 'scenes',
-  pix3prefab: 'scenes',
   ts: 'scripts',
   js: 'scripts',
   mjs: 'scripts',

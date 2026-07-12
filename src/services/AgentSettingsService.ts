@@ -63,9 +63,13 @@ export class AgentSettingsService {
       return undefined;
     }
     const stored = prefs.modelByProvider[providerId];
-    // Allow custom model ids (local models) even when not in the provider's list.
     if (stored) {
-      return stored;
+      // Providers that accept arbitrary ids (OpenAI-compatible / local) pass any stored id through.
+      // For fixed-list providers, a stored id no longer in the list (e.g. a deprecated Gemini model)
+      // falls back to the first model so a stale selection can't keep sending a dead id.
+      if (provider.requiresBaseUrl || provider.models.some(model => model.id === stored)) {
+        return stored;
+      }
     }
     return provider.models[0]?.id;
   }

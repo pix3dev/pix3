@@ -103,7 +103,8 @@ export class EditorTabService {
           t =>
             !t.resourceId.startsWith('templ://') &&
             t.type !== 'game' &&
-            t.type !== 'asset-generator'
+            t.type !== 'asset-generator' &&
+            t.type !== 'agent-chat'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
@@ -114,7 +115,8 @@ export class EditorTabService {
           activeTab &&
           (activeTab.resourceId.startsWith('templ://') ||
             activeTab.type === 'game' ||
-            activeTab.type === 'asset-generator')
+            activeTab.type === 'asset-generator' ||
+            activeTab.type === 'agent-chat')
         ) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
@@ -274,6 +276,14 @@ export class EditorTabService {
     );
   }
 
+  /**
+   * Open the in-editor agent chat. A synthetic resource id keeps it a single instance — repeated
+   * opens re-focus the existing tab (same pattern as the empty Asset Generator).
+   */
+  async focusOrOpenAgentChat(): Promise<void> {
+    await this.openResourceTab('agent-chat', 'agent-chat://main', {}, true, 'Agent');
+  }
+
   remapSceneTabs(remapResourcePath: (resourcePath: string) => string | null): void {
     let didChange = false;
     let nextActiveTabId = appState.tabs.activeTabId;
@@ -360,6 +370,7 @@ export class EditorTabService {
         if (t.resourceId.startsWith('templ://')) return false;
         if (t.type === 'game') return false;
         if (t.type === 'asset-generator') return false;
+        if (t.type === 'agent-chat') return false;
         return true;
       });
 
@@ -564,6 +575,16 @@ export class EditorTabService {
 
       await loadPromise;
     } else {
+      // The scene graph is still loaded from a previous activation; only move
+      // the "active" pointer. This MUST update the SceneManager too, not just
+      // appState — otherwise `getActiveSceneGraph()` keeps pointing at whatever
+      // scene was last loaded via LoadSceneCommand (e.g. the second tab you
+      // opened). That desync silently breaks every consumer that resolves the
+      // active graph rather than an explicit id: property edits (the scene-tree
+      // eye toggle, the inspector) no-op because the node id isn't found in the
+      // wrong graph, and the viewport's 2D render-order pass walks the wrong
+      // tree, so occluded content bleeds through.
+      this.sceneManager.setActiveScene(sceneId);
       appState.scenes.activeSceneId = sceneId;
       const refreshCommand = new RefreshPrefabInstancesCommand({ sceneId });
       try {

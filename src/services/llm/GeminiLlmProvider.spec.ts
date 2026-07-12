@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeminiLlmProvider } from './GeminiLlmProvider';
-import { LlmError, type LlmMessage } from './LlmTypes';
+import { LlmError, type LlmMessage, type LlmResult } from './LlmTypes';
 
 const BASE = 'https://gen.test/v1beta';
 
@@ -56,7 +56,96 @@ describe('GeminiLlmProvider', () => {
     expect(result.stopReason).toBe('end_turn');
   });
 
+  it('strips JSON-Schema keywords Gemini rejects (additionalProperties) from tool parameters', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] })
+    );
+
+    await provider.chat(
+      {
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [
+          {
+            name: 'set_property',
+            description: 'Set a property.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                nodeId: { type: 'string' },
+                nested: {
+                  type: 'object',
+                  properties: { x: { type: 'number' } },
+                  additionalProperties: false,
+                },
+              },
+              required: ['nodeId'],
+              additionalProperties: false,
+            },
+          },
+        ],
+      },
+      { apiKey: 'k', modelId: 'gemini-2.5-flash', baseUrl: BASE, fetchImpl }
+    );
+
+    const body = bodyOf(fetchImpl);
+    const params = (
+      body.tools as Array<{ functionDeclarations: Array<{ parameters: Record<string, unknown> }> }>
+    )[0].functionDeclarations[0].parameters;
+    const serialized = JSON.stringify(params);
+    expect(serialized).not.toContain('additionalProperties');
+    // Supported keys survive, including nested ones.
+    expect(params).toMatchObject({
+      type: 'object',
+      required: ['nodeId'],
+      properties: { nested: { type: 'object', properties: { x: { type: 'number' } } } },
+    });
+  });
+
+  it('round-trips the functionCall thought signature (captured on parse, echoed on replay)', async () => {
+    const provider2 = new GeminiLlmProvider();
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  functionCall: { name: 'scene_tree', args: {} },
+                  thoughtSignature: 'sig-abc123',
+                },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      })
+    );
+
+    const result = await provider2.chat(
+      { messages: [{ role: 'user', content: 'inspect' }] },
+      { apiKey: 'k', modelId: 'gemini-flash-latest', baseUrl: BASE, fetchImpl }
+    );
+
+    const call = result.content[0];
+    expect(call).toMatchObject({ type: 'tool-use', name: 'scene_tree', signature: 'sig-abc123' });
+
+    // Replaying that assistant turn must put the signature back on the functionCall part.
+    const replay = vi.fn(async () =>
+      okJson({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] })
+    );
+    await provider2.chat(
+      { messages: [{ role: 'assistant', content: [call] }] },
+      { apiKey: 'k', modelId: 'gemini-flash-latest', baseUrl: BASE, fetchImpl: replay }
+    );
+    const body = bodyOf(replay) as { contents: Array<{ parts: Array<Record<string, unknown>> }> };
+    expect(body.contents[0].parts[0]).toMatchObject({
+      functionCall: { name: 'scene_tree' },
+      thoughtSignature: 'sig-abc123',
+    });
+  });
+
   it('parses a functionCall part into a tool-use block with tool_use stop reason', async () => {
+    const freshProvider = new GeminiLlmProvider();
     const fetchImpl = vi.fn(async () =>
       okJson({
         candidates: [
@@ -70,7 +159,7 @@ describe('GeminiLlmProvider', () => {
       })
     );
 
-    const result = await provider.chat(
+    const result = await freshProvider.chat(
       { messages: [{ role: 'user', content: 'move it' }] },
       { apiKey: 'k', modelId: 'gemini-2.5-flash', baseUrl: BASE, fetchImpl }
     );
@@ -79,6 +168,44 @@ describe('GeminiLlmProvider', () => {
     expect(result.content).toEqual([
       { type: 'tool-use', id: 'gemini-tool-0', name: 'set_property', input: { nodeId: 'n1' } },
     ]);
+  });
+
+  it('never reuses a synthetic tool-use id across turns of one conversation', async () => {
+    // Regression: ids live in the conversation history; a per-response counter would collide
+    // between turns and make the id→name fallback resolve a tool-result to the wrong function.
+    const freshProvider = new GeminiLlmProvider();
+    const toolCallResponse = (name: string): Response =>
+      okJson({
+        candidates: [
+          { content: { parts: [{ functionCall: { name, args: {} } }] }, finishReason: 'STOP' },
+        ],
+      });
+
+    const first = await freshProvider.chat(
+      { messages: [{ role: 'user', content: 'step 1' }] },
+      {
+        apiKey: 'k',
+        modelId: 'gemini-2.5-flash',
+        baseUrl: BASE,
+        fetchImpl: vi.fn(async () => toolCallResponse('scene_tree')),
+      }
+    );
+    const second = await freshProvider.chat(
+      { messages: [{ role: 'user', content: 'step 2' }] },
+      {
+        apiKey: 'k',
+        modelId: 'gemini-2.5-flash',
+        baseUrl: BASE,
+        fetchImpl: vi.fn(async () => toolCallResponse('node_inspect')),
+      }
+    );
+
+    const idOf = (result: LlmResult): string => {
+      const block = result.content[0];
+      if (block.type !== 'tool-use') throw new Error('expected a tool-use block');
+      return block.id;
+    };
+    expect(idOf(first)).not.toBe(idOf(second));
   });
 
   it('serialises a tool-result as a functionResponse, resolving the name from the tool-use block', async () => {

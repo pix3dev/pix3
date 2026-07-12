@@ -33,6 +33,11 @@ export interface LlmToolUseBlock {
   readonly id: string;
   readonly name: string;
   readonly input: unknown;
+  /**
+   * Opaque provider signature that must be echoed back verbatim when the assistant turn is replayed
+   * (Gemini's `thoughtSignature` on `functionCall` parts). Ignored by providers that don't use it.
+   */
+  readonly signature?: string;
 }
 
 /**
@@ -115,12 +120,29 @@ export interface LlmModelCapabilities {
   readonly maxOutputTokens: number;
 }
 
+/** Indicative USD price per 1M tokens (shown as a hint in the model picker; may drift). */
+export interface LlmModelPricing {
+  readonly inputPer1M: number;
+  readonly outputPer1M: number;
+}
+
 export interface LlmModel {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
   readonly capabilities: LlmModelCapabilities;
+  /** Optional pricing hint. Omitted for providers with user-configurable/local models. */
+  readonly pricing?: LlmModelPricing;
 }
+
+/** Format a pricing hint like "$0.30 / $2.50 per 1M" for display in a model picker. */
+export const formatPricingHint = (pricing: LlmModelPricing | undefined): string => {
+  if (!pricing) {
+    return '';
+  }
+  const fmt = (n: number): string => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
+  return `${fmt(pricing.inputPer1M)} / ${fmt(pricing.outputPer1M)} per 1M`;
+};
 
 /** Per-request context supplied by the caller (key + selected model + optional overrides). */
 export interface LlmRequestContext {

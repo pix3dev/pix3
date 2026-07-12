@@ -11,7 +11,7 @@ import { analyzeAudioBlob } from './audio-preview-utils';
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
-const SCENE_EXTENSIONS = new Set(['pix3scene', 'pix3prefab']);
+const SCENE_EXTENSIONS = new Set(['pix3scene']);
 const TEXT_PREVIEW_EXTENSIONS = new Set([
   'ts',
   'tsx',

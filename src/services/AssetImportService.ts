@@ -83,7 +83,7 @@ export class AssetImportService {
 }
 
 const TEXT_ASSET_EXTENSIONS =
-  /\.(json|pix3scene|pix3anim|pix3prefab|txt|md|csv|xml|svg|glsl|frag|vert|yml|yaml|ts|js)$/i;
+  /\.(json|pix3scene|pix3anim|txt|md|csv|xml|svg|glsl|frag|vert|yml|yaml|ts|js)$/i;
 
 /** Whether a file should be written as UTF-8 text rather than raw bytes. */
 export function isTextAsset(file: File): boolean {

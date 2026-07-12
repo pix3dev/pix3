@@ -25,6 +25,7 @@ import { appState } from '@/state';
 import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { AssetGenService } from '@/services/AssetGenService';
+import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import type {
   AssetGenBgOptions,
   AssetGenCompressOptions,
@@ -226,6 +227,14 @@ export interface Pix3DebugBridge {
     clear(): void;
   };
 
+  // --- in-editor agent tool layer (same tools the Agent chat calls) ---
+  readonly agentTools: {
+    /** Names of all registered agent tools. */
+    list(): string[];
+    /** Execute one agent tool by name (exactly what the Agent chat's loop runs). */
+    execute(name: string, args?: Record<string, unknown>): Promise<unknown>;
+  };
+
   // --- game-specific surface (present only if the running game registered one) ---
   readonly game: {
     /** True if the running game registered a GameDebugProvider. */
@@ -267,6 +276,8 @@ function createBridge(): Pix3DebugBridge {
         'command(id)': "Run a command by id, e.g. 'edit.undo'.",
         'components(id)': 'Script components attached to a node.',
         'errors() / clearErrors()': 'Captured console/runtime errors (ring buffer).',
+        'agentTools.list() / agentTools.execute(name, args)':
+          "The in-editor Agent's tool layer (fs_*, scene_*, play_*, viewport_screenshot, generate_asset, …).",
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',
         'game.snapshot() / game.inspect(q) / game.action(n)':
           'Game-specific debug surface (per-game).',
@@ -459,6 +470,17 @@ function createBridge(): Pix3DebugBridge {
       },
       clear() {
         service<AssetGenService>(AssetGenService).clear();
+      },
+    },
+
+    agentTools: {
+      list() {
+        return service<AgentToolRegistry>(AgentToolRegistry)
+          .specs()
+          .map(spec => spec.name);
+      },
+      execute(name, args) {
+        return service<AgentToolRegistry>(AgentToolRegistry).execute(name, args ?? {});
       },
     },
 

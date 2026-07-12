@@ -46,6 +46,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 16000,
       },
+      pricing: { inputPer1M: 5, outputPer1M: 25 },
     },
     {
       id: 'claude-sonnet-5',
@@ -57,6 +58,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 16000,
       },
+      pricing: { inputPer1M: 3, outputPer1M: 15 },
     },
     {
       id: 'claude-haiku-4-5',
@@ -68,6 +70,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
       },
+      pricing: { inputPer1M: 1, outputPer1M: 5 },
     },
   ];
 

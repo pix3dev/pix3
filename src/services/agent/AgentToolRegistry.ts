@@ -14,11 +14,26 @@ import { ScriptCompilerService, type CompilationError } from '@/services/ScriptC
 import { CommandRegistry } from '@/services/CommandRegistry';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { LoggingService } from '@/services/LoggingService';
+import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { AssetGenService } from '@/services/AssetGenService';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
+
+/** An image a tool wants shown to the model (base64 WITHOUT the `data:` prefix). */
+export interface AgentToolImage {
+  readonly mimeType: string;
+  readonly data: string;
+}
+
+/**
+ * Reserved key in a tool handler's return value: images listed here are lifted out of the JSON
+ * tool-result by the chat loop and attached to the conversation as real image blocks (all three
+ * providers are multimodal), so the model *sees* screenshots/previews instead of reading base64.
+ */
+export const AGENT_TOOL_IMAGES_KEY = '__images';
 
 /** A tool the agent may call. `handler` returns JSON-safe data (never a live object). */
 export interface AgentToolDefinition {
@@ -90,8 +105,8 @@ const MAX_LOG_ENTRIES = 200;
  * whose write/delete methods already bump `appState.project.fileRefreshSignal` (surfacing agent
  * edits to open code tabs and the asset browser) — so tools never poke `appState` directly.
  *
- * Two planned tools (`viewport_screenshot`, `generate_asset`) are intentionally deferred — see the
- * TODO in {@link AgentToolRegistry.buildTools}.
+ * Tools that produce pixels (`viewport_screenshot`, `generate_asset`) return their images under
+ * {@link AGENT_TOOL_IMAGES_KEY}; the chat loop turns those into real image blocks for the model.
  */
 @injectable()
 export class AgentToolRegistry {
@@ -109,6 +124,12 @@ export class AgentToolRegistry {
 
   @inject(LoggingService)
   private readonly logger!: LoggingService;
+
+  @inject(ViewportRendererService)
+  private readonly viewportRenderer!: ViewportRendererService;
+
+  @inject(AssetGenService)
+  private readonly assetGen!: AssetGenService;
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
@@ -321,9 +342,55 @@ export class AgentToolRegistry {
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.readErrors(),
       },
-      // TODO(phase C/D): `viewport_screenshot` and `generate_asset` are deferred pending a decision
-      // on the capture point (viewport canvas vs. same-origin game iframe) and on gating image
-      // generation behind a configured image key. See plan §2.B.
+      {
+        name: 'viewport_screenshot',
+        description:
+          'Capture the editor viewport as an image the model can see (edit-mode scene view; the running game canvas is not captured). Use it to visually check layout, colors, and placement.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            maxSize: {
+              type: 'integer',
+              description: 'Longest-edge cap in px (default 1024).',
+            },
+          },
+          additionalProperties: false,
+        },
+        handler: args => this.viewportScreenshot(asInt(args.maxSize, 1024)),
+      },
+      {
+        name: 'generate_asset',
+        description:
+          "Generate an image asset with the project's AI image provider (uses the user's saved image key) and save it into the project. Returns the saved path plus a small preview you can see. Reference images (project paths) steer the style.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' },
+            name: {
+              type: 'string',
+              description:
+                'Target file name or relative path (e.g. "assets/ui/button.png"); the extension is added automatically when missing.',
+            },
+            transparent: {
+              type: 'boolean',
+              description: 'Request a transparent background (providers that support alpha).',
+            },
+            maxSize: {
+              type: 'integer',
+              description:
+                'Longest-edge downscale applied on save (px); omit to keep the original size.',
+            },
+            references: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Project image paths used as style references.',
+            },
+          },
+          required: ['prompt', 'name'],
+          additionalProperties: false,
+        },
+        handler: args => this.generateAsset(args),
+      },
     ];
   }
 
@@ -565,6 +632,70 @@ export class AgentToolRegistry {
       result.push(entry.path);
     }
     return result;
+  }
+
+  // -- screenshot / asset generation -----------------------------------------
+
+  private viewportScreenshot(maxSize: number): Record<string, unknown> {
+    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
+    if (!shot) {
+      return {
+        ok: false,
+        error: 'The viewport is not initialized yet (open a project with a scene first).',
+      };
+    }
+    return {
+      ok: true,
+      width: shot.width,
+      height: shot.height,
+      mimeType: shot.mimeType,
+      note: 'The screenshot is attached as an image.',
+      [AGENT_TOOL_IMAGES_KEY]: [
+        { mimeType: shot.mimeType, data: shot.dataBase64 },
+      ] satisfies AgentToolImage[],
+    };
+  }
+
+  private async generateAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const status = await this.assetGen.status();
+    if (!status.keyConfigured) {
+      return {
+        ok: false,
+        error:
+          'No image-generation API key is configured. Ask the user to set one (Asset Generator panel or Settings → AI Providers).',
+      };
+    }
+
+    const prompt = asString(args.prompt);
+    const name = this.safePath(asString(args.name));
+    const references = Array.isArray(args.references)
+      ? args.references.filter((r): r is string => typeof r === 'string')
+      : undefined;
+
+    const generated = await this.assetGen.generate({
+      prompt,
+      references,
+      transparent: args.transparent === true,
+    });
+    try {
+      const saved = await this.assetGen.save(generated.id, name, {
+        maxSize: typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined,
+      });
+      // A small preview goes back as a real image so the model can judge the result visually.
+      const previewDataUrl = await this.assetGen.preview(generated.id, 256);
+      const comma = previewDataUrl.indexOf(',');
+      const previewMime = previewDataUrl.slice(5, previewDataUrl.indexOf(';'));
+      return {
+        ok: true,
+        saved,
+        note: 'A 256px preview of the generated asset is attached as an image.',
+        [AGENT_TOOL_IMAGES_KEY]: [
+          { mimeType: previewMime, data: previewDataUrl.slice(comma + 1) },
+        ] satisfies AgentToolImage[],
+      };
+    } finally {
+      this.assetGen.discard(generated.id);
+    }
   }
 
   // -- play mode / logs / errors --------------------------------------------

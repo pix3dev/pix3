@@ -69,6 +69,7 @@ import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFolderCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenAssetGeneratorCommand } from '@/features/editor/OpenAssetGeneratorCommand';
+import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
 import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
@@ -361,6 +362,7 @@ export class Pix3EditorShell extends ComponentBase {
     const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openAssetGeneratorCommand = new OpenAssetGeneratorCommand();
+    const openAgentChatCommand = new OpenAgentChatCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
     const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
@@ -405,6 +407,7 @@ export class Pix3EditorShell extends ComponentBase {
       openGamePopoutWindowCommand,
       editorSettingsCommand,
       openAssetGeneratorCommand,
+      openAgentChatCommand,
       bakeAOCommand,
       clearAOCommand,
       focusAnimationTimelineCommand,

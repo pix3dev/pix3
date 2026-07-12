@@ -150,10 +150,12 @@ export {
 export { LlmProviderRegistry } from './llm/LlmProviderRegistry';
 export {
   LlmError,
+  formatPricingHint,
   type ChatParams,
   type LlmContentBlock,
   type LlmMessage,
   type LlmModel,
+  type LlmModelPricing,
   type LlmProvider,
   type LlmRequestContext,
   type LlmResult,
@@ -166,3 +168,9 @@ export {
   type AgentToolDefinition,
   type AgentToolSpec,
 } from './agent/AgentToolRegistry';
+export {
+  AgentChatService,
+  type AgentChatState,
+  type AgentChatStatus,
+} from './agent/AgentChatService';
+export { AgentChatHistoryStore, type AgentConversationRecord } from './agent/AgentChatHistoryStore';
