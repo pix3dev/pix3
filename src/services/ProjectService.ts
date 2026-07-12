@@ -1,5 +1,10 @@
 import { injectable, ServiceContainer } from '@/fw/di';
-import { appState, createInitialHybridSyncState, type AssetBrowserViewMode } from '@/state';
+import {
+  appState,
+  createInitialHybridSyncState,
+  type AssetBrowserViewMode,
+  type ProjectBackend,
+} from '@/state';
 import { createInitialProjectOpenProgressState } from '@/state';
 import {
   groupedDirectoryExpansionKey,
@@ -7,6 +12,7 @@ import {
 } from '@/core/asset-categories';
 import { resolveFileSystemAPIService, type FileDescriptor } from './FileSystemAPIService';
 import { ProjectStorageService } from './ProjectStorageService';
+import { BrowserProjectStorageService } from './BrowserProjectStorageService';
 import { parse, stringify } from 'yaml';
 import { ref } from 'valtio/vanilla';
 import { ProjectTemplateService } from './ProjectTemplateService';
@@ -36,7 +42,7 @@ export interface AssetBrowserPersistedState {
 export interface RecentProjectEntry {
   readonly id?: string;
   readonly name: string;
-  readonly backend: 'local' | 'cloud';
+  readonly backend: ProjectBackend;
   readonly localAbsolutePath?: string;
   readonly linkedCloudProjectId?: string;
   readonly linkedLocalSessionId?: string;
@@ -48,6 +54,12 @@ export interface CreateProjectOptions {
   readonly manifest: ProjectManifest;
   /** Bundled project template to scaffold from; falls back to the default template. */
   readonly templateId?: string;
+  /**
+   * Storage backend for the new project. `'local'` opens the directory picker;
+   * `'browser'` provisions an OPFS directory with no picker or auth. Defaults to
+   * `'local'`. (Cloud projects are created via {@link CloudProjectService}.)
+   */
+  readonly backend?: 'local' | 'browser';
 }
 
 export interface ActivateProjectOptions {
@@ -63,6 +75,10 @@ export class ProjectService {
   private readonly storage = ServiceContainer.getInstance().getService<ProjectStorageService>(
     ServiceContainer.getInstance().getOrCreateToken(ProjectStorageService)
   );
+  private readonly browserStore =
+    ServiceContainer.getInstance().getService<BrowserProjectStorageService>(
+      ServiceContainer.getInstance().getOrCreateToken(BrowserProjectStorageService)
+    );
 
   constructor() {}
 
@@ -77,7 +93,7 @@ export class ProjectService {
         .map<RecentProjectEntry>(p => ({
           id: p.id,
           name: p.name,
-          backend: p.backend === 'cloud' ? 'cloud' : ('local' as const),
+          backend: p.backend === 'cloud' ? 'cloud' : p.backend === 'browser' ? 'browser' : 'local',
           localAbsolutePath: p.localAbsolutePath,
           linkedCloudProjectId:
             typeof p.linkedCloudProjectId === 'string' ? p.linkedCloudProjectId : undefined,
@@ -288,6 +304,11 @@ export class ProjectService {
       return;
     }
 
+    if (entry.backend === 'browser') {
+      await this.openBrowserProject(entry);
+      return;
+    }
+
     if (entry.id) {
       try {
         const handle = await this.getPersistedProjectDirectoryHandle(entry.id);
@@ -329,6 +350,46 @@ export class ProjectService {
   }
 
   /**
+   * Activate a browser-storage (OPFS) project. Unlike local projects there is no
+   * picker fallback: the data lives in this browser or nowhere, so a missing
+   * directory means the recents entry is stale and is dropped.
+   */
+  private async openBrowserProject(entry: RecentProjectEntry): Promise<void> {
+    if (!entry.id) {
+      throw new Error('Browser recent project is missing its project ID.');
+    }
+
+    // Prefer the persisted handle; re-derive from OPFS if it was never stored.
+    let handle = await this.getPersistedProjectDirectoryHandle(entry.id).catch(() => null);
+    if (!handle) {
+      handle = await this.browserStore.getProjectDirectory(entry.id);
+    }
+
+    if (!handle) {
+      this.removeRecentProject({ id: entry.id, name: entry.name });
+      throw new Error('Project data was removed from browser storage.');
+    }
+
+    this.fs.setProjectDirectory(handle);
+    appState.project.id = entry.id;
+    appState.project.backend = 'browser';
+    appState.project.directoryHandle = ref(handle);
+    appState.project.projectName = entry.name;
+    appState.project.localAbsolutePath = null;
+    appState.project.hybridSync = createInitialHybridSyncState();
+    appState.project.status = 'ready';
+    appState.project.errorMessage = null;
+    appState.project.manifest = await this.loadProjectManifest();
+    this.addRecentProject({
+      id: entry.id,
+      name: appState.project.projectName ?? entry.name,
+      backend: 'browser',
+      lastOpenedAt: Date.now(),
+    });
+    this.scheduleHybridSyncRefresh();
+  }
+
+  /**
    * Directly open a local session by ID, returning false instead of falling back to picker
    * if permissions have been dropped (used by Router/Deep Linking)
    */
@@ -338,24 +399,30 @@ export class ProjectService {
       throw new Error('Local session not found in IndexedDB.');
     }
 
+    // Browser-storage sessions persist their handle here too; recover the
+    // backend from recents so the session reactivates as 'browser', not 'local'.
+    const existing = this.getRecentProjects().find(r => r.id === sessionId);
+    const backend: ProjectBackend = existing?.backend === 'browser' ? 'browser' : 'local';
+    // OPFS handles have no meaningful name, so prefer the stored project name.
+    const projectName = backend === 'browser' ? (existing?.name ?? handle.name) : handle.name;
+
     try {
       // With 'silent' request it only checks if we have permission.
       // Wait, ensurePermission in FileSystemAPIService might prompt.
       // Let's assume it checks first, and if it prompts without user gesture it will throw.
+      // (For browser/OPFS handles ensurePermission is a no-op — always granted.)
       await this.fs.ensurePermission(handle, 'readwrite');
 
       this.fs.setProjectDirectory(handle);
       appState.project.id = sessionId;
-      appState.project.backend = 'local';
+      appState.project.backend = backend;
       appState.project.directoryHandle = ref(handle);
-      appState.project.projectName = handle.name;
+      appState.project.projectName = projectName;
       appState.project.hybridSync = createInitialHybridSyncState();
       appState.project.status = 'ready';
       appState.project.errorMessage = null;
       appState.project.manifest = await this.loadProjectManifest();
 
-      const recents = this.getRecentProjects();
-      const existing = recents.find(r => r.id === sessionId);
       if (existing) {
         this.addRecentProject({
           ...existing,
@@ -370,7 +437,7 @@ export class ProjectService {
       // Silent permission denied (or missing user gesture)
       appState.project.directoryHandle = ref(handle);
       appState.project.id = sessionId;
-      appState.project.projectName = handle.name;
+      appState.project.projectName = projectName;
       return false;
     }
   }
@@ -478,7 +545,7 @@ export class ProjectService {
   }
 
   async listProjectRoot(): Promise<FileDescriptor[]> {
-    if (appState.project.backend === 'local' && !appState.project.directoryHandle) return [];
+    if (appState.project.backend !== 'cloud' && !appState.project.directoryHandle) return [];
     try {
       return await this.storage.listDirectory('.');
     } catch {
@@ -559,9 +626,21 @@ export class ProjectService {
     options: CreateProjectOptions,
     activateOptions?: ActivateProjectOptions
   ): Promise<void> {
+    const backend = options.backend ?? 'local';
     try {
-      const handle = await this.fs.requestProjectDirectory('readwrite');
-      appState.project.backend = 'local';
+      // Browser projects need their id up front (it names the OPFS directory);
+      // local projects pick a folder first, then mint an id.
+      let handle: FileSystemDirectoryHandle;
+      let id: string;
+      if (backend === 'browser') {
+        id = this.createProjectSessionId();
+        handle = await this.browserStore.createProjectDirectory(id);
+        this.fs.setProjectDirectory(handle);
+      } else {
+        handle = await this.fs.requestProjectDirectory('readwrite');
+        id = this.createProjectSessionId();
+      }
+      appState.project.backend = backend;
 
       // Check if directory is empty
       const entries = await this.fs.listDirectory('.');
@@ -577,11 +656,9 @@ export class ProjectService {
       await activateOptions?.beforeActivate?.();
 
       // Set up project state
-      const id = this.createProjectSessionId();
-
       appState.project.directoryHandle = ref(handle);
       appState.project.id = id;
-      appState.project.backend = 'local';
+      appState.project.backend = backend;
       appState.project.projectName = options.name.trim() || handle.name || 'New Project';
       appState.project.hybridSync = createInitialHybridSyncState();
       appState.project.status = 'ready';
@@ -594,7 +671,7 @@ export class ProjectService {
       this.addRecentProject({
         id,
         name: appState.project.projectName ?? (options.name || 'New Project'),
-        backend: 'local',
+        backend,
         lastOpenedAt: Date.now(),
       });
       this.persistProjectDirectoryHandle(id, handle).catch(() => {

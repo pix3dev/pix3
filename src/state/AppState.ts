@@ -136,7 +136,7 @@ export interface AnimationsState {
 }
 
 export type ProjectStatus = 'idle' | 'selecting' | 'opening' | 'ready' | 'error';
-export type ProjectBackend = 'local' | 'cloud';
+export type ProjectBackend = 'local' | 'cloud' | 'browser';
 export type AssetBrowserViewMode = 'folders' | 'by-type';
 export type HybridSyncStatus =
   | 'unlinked'

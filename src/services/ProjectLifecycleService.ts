@@ -8,21 +8,25 @@ import {
 } from '@/core/ProjectManifest';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import { appState } from '@/state';
+import { ref } from 'valtio/vanilla';
 import { ProjectService } from './ProjectService';
 import { CloudProjectService } from './CloudProjectService';
+import { BrowserProjectStorageService } from './BrowserProjectStorageService';
+import { FileSystemAPIService } from './FileSystemAPIService';
 import { EditorTabService } from './EditorTabService';
 import { DialogService } from './DialogService';
 import { AuthService } from './AuthService';
+import type { ProjectBackend } from '@/state';
 
 export interface CreateProjectDialogInstance {
   id: string;
-  initialBackend: 'local' | 'cloud';
+  initialBackend: ProjectBackend;
   resolve: () => void;
 }
 
 export interface CreateProjectParams {
   name: string;
-  backend: 'local' | 'cloud';
+  backend: ProjectBackend;
   viewportBaseWidth: number;
   viewportBaseHeight: number;
   templateId?: string;
@@ -45,6 +49,12 @@ export class ProjectLifecycleService {
   @inject(CloudProjectService)
   private readonly cloudProjectService!: CloudProjectService;
 
+  @inject(BrowserProjectStorageService)
+  private readonly browserStore!: BrowserProjectStorageService;
+
+  @inject(FileSystemAPIService)
+  private readonly fileSystem!: FileSystemAPIService;
+
   @inject(EditorTabService)
   private readonly editorTabService!: EditorTabService;
 
@@ -62,7 +72,9 @@ export class ProjectLifecycleService {
   private nextId = 0;
   private pendingCloudCreation: { params: CreateProjectParams; skipConfirm: boolean } | null = null;
 
-  async showCreateDialog(initialBackend: 'local' | 'cloud' = 'local'): Promise<void> {
+  async showCreateDialog(
+    initialBackend: ProjectBackend = this.browserStore.isSupported() ? 'browser' : 'local'
+  ): Promise<void> {
     if (this.activeCreateDialog) {
       return;
     }
@@ -99,6 +111,82 @@ export class ProjectLifecycleService {
 
   async createProject(params: CreateProjectParams): Promise<void> {
     await this.createProjectInternal(params, false);
+  }
+
+  /**
+   * Promote the active browser-storage (OPFS) project to a real folder on disk.
+   * Copies the whole tree into a user-picked empty folder, switches the project
+   * to the 'local' backend, and only then removes the OPFS copy — so any failure
+   * during the copy leaves the in-browser project untouched.
+   *
+   * Handles the expected non-error outcomes internally (not a browser project,
+   * user cancelled, picker aborted, folder not empty). Unexpected failures
+   * propagate to the caller.
+   */
+  async moveBrowserProjectToFolder(): Promise<void> {
+    if (appState.project.backend !== 'browser') {
+      return;
+    }
+    const projectId = appState.project.id;
+    const source = this.fileSystem.getProjectDirectory();
+    if (!projectId || !source) {
+      return;
+    }
+
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Move Project to Folder',
+      message:
+        'Move this project to a folder on disk? You will pick an empty folder, and the ' +
+        'in-browser copy will be removed once the move succeeds.',
+      confirmLabel: 'Choose Folder…',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    let target: FileSystemDirectoryHandle;
+    try {
+      target = await this.fileSystem.pickDirectory('readwrite');
+    } catch (error) {
+      if (this.isAbortError(error)) {
+        return;
+      }
+      throw error;
+    }
+
+    if (!(await this.fileSystem.isDirectoryEmpty(target))) {
+      await this.dialogService.showConfirmation({
+        title: 'Folder Not Empty',
+        message: 'Please choose an empty folder for the project.',
+        confirmLabel: 'OK',
+        cancelLabel: 'Close',
+      });
+      return;
+    }
+
+    // Flush pending edits so the copied folder reflects the latest state.
+    await this.editorTabService.saveDirtyTabs();
+
+    await this.fileSystem.copyDirectoryContents(source, target);
+
+    // Switch the live project to the on-disk folder before touching OPFS.
+    this.fileSystem.setProjectDirectory(target);
+    appState.project.backend = 'local';
+    appState.project.directoryHandle = ref(target);
+    await this.projectService.persistProjectDirectoryHandle(projectId, target);
+    this.projectService.syncProjectMetadata();
+
+    // Copy + switch succeeded — safe to drop the in-browser copy now.
+    await this.browserStore.deleteProject(projectId);
+  }
+
+  private isAbortError(error: unknown): boolean {
+    if (error instanceof DOMException) {
+      return error.name === 'AbortError';
+    }
+    const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+    return cause instanceof DOMException && cause.name === 'AbortError';
   }
 
   async resumePendingCloudCreation(): Promise<void> {
@@ -198,20 +286,26 @@ export class ProjectLifecycleService {
       await this.editorTabService.closeAllTabs(true);
     };
 
-    if (params.backend === 'local') {
+    if (params.backend === 'cloud') {
+      await this.cloudProjectService.createProjectFromTemplate(
+        {
+          name: params.name,
+          manifest: this.createManifest(params),
+        },
+        { beforeActivate }
+      );
+    } else {
+      // 'local' or 'browser'. Browser projects live in OPFS, which can be
+      // evicted under storage pressure — best-effort request persistence first.
+      if (params.backend === 'browser') {
+        await this.browserStore.requestPersistence();
+      }
       await this.projectService.createNewProjectWithOptions(
         {
           name: params.name,
           manifest: this.createManifest(params),
           templateId: params.templateId,
-        },
-        { beforeActivate }
-      );
-    } else {
-      await this.cloudProjectService.createProjectFromTemplate(
-        {
-          name: params.name,
-          manifest: this.createManifest(params),
+          backend: params.backend,
         },
         { beforeActivate }
       );

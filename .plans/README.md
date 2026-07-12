@@ -11,6 +11,8 @@
 
 - **[ROADMAP.md](ROADMAP.md)** — основной план: цель, проверка гипотез по коду, приоритеты P0–P3 по осям «сочность / кат-сцены / agent pipeline / бизнес», критерии готовности, порядок исполнения.
 - **[cross-engine-ideas.md](cross-engine-ideas.md)** — аудит фич из других движков (Godot, Unity, Unreal, Cocos, Defold и инструментов playable-индустрии): что уже есть в Pix3, что стоит перенять, что осознанно пропускаем.
+- **[browser-storage-projects.md](browser-storage-projects.md)** — implementation-план «проект без выбора папки»: OPFS-бэкенд `'browser'`, дефолт в create-диалоге, Move to Folder, точки правок по файлам.
+- **[asset-library.md](asset-library.md)** — дизайн-план встроенной библиотеки ассетов: единый item-формат, три scope (builtin / user-OPFS / team-сервер), панель с поиском и drag-вставкой, publish из генератора и префабов, API для агента.
 
 **Базис верификации:** commit `d591e68`, 2026-07-06. Все утверждения «есть / partial / нет» проверены по исходникам, ссылки на файлы указаны в документах.
 

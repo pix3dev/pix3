@@ -66,6 +66,7 @@ import { ExportPlayableZipCommand } from '@/features/project/ExportPlayableZipCo
 import { StartRemotePreviewCommand } from '@/features/project/StartRemotePreviewCommand';
 import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
+import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFolderCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenAssetGeneratorCommand } from '@/features/editor/OpenAssetGeneratorCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
@@ -357,6 +358,7 @@ export class Pix3EditorShell extends ComponentBase {
     const startRemotePreviewCommand = new StartRemotePreviewCommand();
     const newProjectCommand = new NewProjectCommand();
     const closeProjectCommand = new CloseProjectCommand();
+    const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openAssetGeneratorCommand = new OpenAssetGeneratorCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
@@ -409,6 +411,7 @@ export class Pix3EditorShell extends ComponentBase {
       addAnimationPlayerCommand,
       newProjectCommand,
       closeProjectCommand,
+      moveProjectToFolderCommand,
       projectSettingsCommand,
       projectSyncCommand,
       openProjectInIdeCommand,
@@ -637,6 +640,7 @@ export class Pix3EditorShell extends ComponentBase {
         if (noTargetFound && appState.project.status !== 'ready') {
           const recents = this.projectService.getRecentProjects();
           const preferredRecent =
+            recents.find(entry => entry.backend === 'browser') ??
             recents.find(entry => entry.backend === 'local') ??
             (this.isAuthenticated ? recents[0] : null);
 

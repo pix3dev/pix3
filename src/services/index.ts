@@ -22,6 +22,7 @@ export {
   type CreateProjectParams,
 } from './ProjectLifecycleService';
 export { ProjectStorageService, resolveProjectStorageService } from './ProjectStorageService';
+export { BrowserProjectStorageService } from './BrowserProjectStorageService';
 export { EditorSettingsService } from './EditorSettingsService';
 export { ProjectSettingsService } from './ProjectSettingsService';
 export { AssetFileActivationService, type AssetActivation } from './AssetFileActivationService';

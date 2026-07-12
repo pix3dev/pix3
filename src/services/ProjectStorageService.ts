@@ -41,7 +41,10 @@ export class ProjectStorageService {
   }
 
   getBackend(): 'local' | 'cloud' {
-    return appState.project.backend;
+    // Browser-storage projects live in an OPFS FileSystemDirectoryHandle, so
+    // they route through the same on-disk path as 'local'. Only 'cloud' uses
+    // the manifest/cache path.
+    return appState.project.backend === 'cloud' ? 'cloud' : 'local';
   }
 
   async listDirectory(path = '.'): Promise<FileDescriptor[]> {

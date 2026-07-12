@@ -300,7 +300,10 @@ export class Pix3Welcome extends ComponentBase {
       return 'Hybrid';
     }
 
-    return entry.backend === 'cloud' ? 'Cloud' : 'Local';
+    if (entry.backend === 'cloud') {
+      return 'Cloud';
+    }
+    return entry.backend === 'browser' ? 'Browser' : 'Local';
   }
 
   private getProjectBadgeClass(entry: RecentProjectEntry): string {
@@ -310,10 +313,13 @@ export class Pix3Welcome extends ComponentBase {
   }
 
   private getProjectIcon(entry: RecentProjectEntry) {
-    return this.iconService.getIcon(
-      entry.backend === 'cloud' ? 'cloud-outline' : 'folder-outline',
-      18
-    );
+    const iconName =
+      entry.backend === 'cloud'
+        ? 'cloud-outline'
+        : entry.backend === 'browser'
+          ? 'globe'
+          : 'folder-outline';
+    return this.iconService.getIcon(iconName, 18);
   }
 
   private isCloudProjectOwner(project: ApiProject): boolean {
@@ -323,7 +329,7 @@ export class Pix3Welcome extends ComponentBase {
   private getLocalProjectItems(): Array<{ entry: RecentProjectEntry; recentIndex: number }> {
     return this.recents
       .map((entry, recentIndex) => ({ entry, recentIndex }))
-      .filter(item => item.entry.backend === 'local');
+      .filter(item => item.entry.backend === 'local' || item.entry.backend === 'browser');
   }
 
   protected render() {

@@ -117,6 +117,21 @@ export class FileSystemAPIService {
     }
   }
 
+  /**
+   * Open the directory picker WITHOUT adopting the result as the active project
+   * directory. Used by flows that need a second folder handle (e.g. moving a
+   * browser project to disk) while the current project stays loaded.
+   */
+  async pickDirectory(mode: PermissionMode = 'readwrite'): Promise<FileSystemDirectoryHandle> {
+    try {
+      const handle = await this.directoryPicker();
+      await this.ensurePermission(handle, mode);
+      return handle;
+    } catch (error) {
+      throw this.normalizeDirectoryPickerError(error);
+    }
+  }
+
   async ensurePermission(
     handle: FileSystemHandle | null = this.directoryHandle,
     mode: PermissionMode = 'read'
@@ -131,10 +146,10 @@ export class FileSystemAPIService {
     };
 
     if (!permissionHandle.queryPermission || !permissionHandle.requestPermission) {
-      throw new FileSystemAPIError(
-        'unsupported',
-        'Permission APIs are unavailable in this environment.'
-      );
+      // Handles without the permission API are always accessible: OPFS
+      // (browser-storage) handles never expose it, and Firefox/Safari omit it
+      // even for picked directories. Treat the absence as an implicit grant.
+      return;
     }
 
     const queryResult = await permissionHandle.queryPermission({ mode });
@@ -558,6 +573,66 @@ export class FileSystemAPIService {
         await this.copyDirectory(sourcePath, targetPath);
       }
     }
+  }
+
+  /** Whether a directory handle has no children. */
+  async isDirectoryEmpty(handle: FileSystemDirectoryHandle): Promise<boolean> {
+    const dir = handle as FileSystemDirectoryHandle & {
+      keys?: () => AsyncIterableIterator<string>;
+    };
+    if (typeof dir.keys !== 'function') {
+      return true;
+    }
+    const first = await dir.keys().next();
+    return Boolean(first.done);
+  }
+
+  /**
+   * Recursively copy the contents of one directory handle into another,
+   * binary-safe. Operates directly on the supplied handles (not the active
+   * project handle), so it works between arbitrary locations — e.g. copying an
+   * OPFS browser-project directory into a user-picked folder on disk.
+   */
+  async copyDirectoryContents(
+    source: FileSystemDirectoryHandle,
+    target: FileSystemDirectoryHandle
+  ): Promise<void> {
+    const dir = source as FileSystemDirectoryHandle & {
+      entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+      values?: () => AsyncIterableIterator<FileSystemHandle & { name?: string }>;
+    };
+
+    const forEachChild = async (
+      handler: (name: string, handle: FileSystemHandle) => Promise<void>
+    ): Promise<void> => {
+      if (dir.entries) {
+        for await (const [name, handle] of dir.entries()) {
+          await handler(name, handle);
+        }
+        return;
+      }
+      if (dir.values) {
+        for await (const handle of dir.values()) {
+          await handler((handle as { name?: string }).name ?? '', handle);
+        }
+      }
+    };
+
+    await forEachChild(async (name, handle) => {
+      if (!name) {
+        return;
+      }
+      if (handle.kind === 'directory') {
+        const childTarget = await target.getDirectoryHandle(name, { create: true });
+        await this.copyDirectoryContents(handle as FileSystemDirectoryHandle, childTarget);
+      } else {
+        const file = await (handle as FileSystemFileHandle).getFile();
+        const dest = await target.getFileHandle(name, { create: true });
+        const writable = await dest.createWritable();
+        await writable.write(await file.arrayBuffer());
+        await writable.close();
+      }
+    });
   }
 
   /**

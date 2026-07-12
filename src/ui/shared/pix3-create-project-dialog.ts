@@ -1,10 +1,11 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { appState } from '@/state';
+import { appState, type ProjectBackend } from '@/state';
 import {
   ProjectAuthRequiredError,
   ProjectLifecycleService,
   type CreateProjectParams,
 } from '@/services/ProjectLifecycleService';
+import { BrowserProjectStorageService } from '@/services/BrowserProjectStorageService';
 import { ProjectTemplateService, type ProjectTemplate } from '@/services/ProjectTemplateService';
 import type { TargetPlatform } from '@/core/ProjectManifest';
 import './pix3-create-project-dialog.ts.css';
@@ -54,16 +55,19 @@ export class Pix3CreateProjectDialog extends ComponentBase {
   @inject(ProjectTemplateService)
   private readonly projectTemplateService!: ProjectTemplateService;
 
+  @inject(BrowserProjectStorageService)
+  private readonly browserStore!: BrowserProjectStorageService;
+
   @property({ type: String, reflect: true })
   public dialogId = '';
 
   @property({ type: String, reflect: true, attribute: 'initial-backend' })
-  public initialBackend: 'local' | 'cloud' = 'local';
+  public initialBackend: ProjectBackend = 'local';
 
   @state() private step: 'template' | 'settings' = 'template';
   @state() private templateId = '';
   @state() private name = 'New Project';
-  @state() private backend: 'local' | 'cloud' = 'local';
+  @state() private backend: ProjectBackend = 'local';
   @state() private targetPlatform: TargetPlatform = 'universal';
   @state() private preset: ViewportPresetId = '1920x1080';
   @state() private viewportBaseWidth = '1920';
@@ -191,12 +195,25 @@ export class Pix3CreateProjectDialog extends ComponentBase {
         <div class="settings-field">
           <label>Storage</label>
           <div class="backend-toggle">
+            ${this.browserStore.isSupported()
+              ? html`
+                  <button
+                    type="button"
+                    class="backend-option ${this.backend === 'browser'
+                      ? 'backend-option--active'
+                      : ''}"
+                    @click=${() => (this.backend = 'browser')}
+                  >
+                    In Browser
+                  </button>
+                `
+              : null}
             <button
               type="button"
               class="backend-option ${this.backend === 'local' ? 'backend-option--active' : ''}"
               @click=${() => (this.backend = 'local')}
             >
-              Local
+              Folder
             </button>
             <button
               type="button"
@@ -207,16 +224,25 @@ export class Pix3CreateProjectDialog extends ComponentBase {
             </button>
           </div>
           <div class="backend-copy">
-            ${this.backend === 'local'
+            ${this.backend === 'browser'
               ? html`
                   <p>
-                    Local will keep all data on your computer in the local folder. Best for private,
-                    small or test projects.
+                    Instant start — the project is stored inside this browser. No folder or account
+                    needed. You can move it to a folder or the cloud later.
                   </p>
                 `
-              : html`
-                  <p>Cloud will keep data on the server and allow you to share and collaborate.</p>
-                `}
+              : this.backend === 'local'
+                ? html`
+                    <p>
+                      Folder will keep all data on your computer in the local folder. Best for
+                      private, small or test projects.
+                    </p>
+                  `
+                : html`
+                    <p>
+                      Cloud will keep data on the server and allow you to share and collaborate.
+                    </p>
+                  `}
           </div>
           ${this.backend === 'cloud'
             ? html`
