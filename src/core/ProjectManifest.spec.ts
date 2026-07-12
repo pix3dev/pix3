@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultProjectManifest, normalizeProjectManifest } from './ProjectManifest';
+import {
+  createDefaultProjectManifest,
+  createDefaultQualitySettings,
+  normalizeProjectManifest,
+} from './ProjectManifest';
 
 describe('ProjectManifest', () => {
   it('normalizes default export scene path from resource path input', () => {
@@ -18,5 +22,47 @@ describe('ProjectManifest', () => {
     });
 
     expect(manifest.defaultExportScenePath).toBeUndefined();
+  });
+
+  it('defaults projectType, targetPlatform and quality for legacy manifests', () => {
+    const manifest = normalizeProjectManifest({
+      version: '1.0.0',
+      autoloads: [],
+      viewportBaseSize: { width: 1280, height: 720 },
+    });
+
+    expect(manifest.projectType).toBe('3d');
+    expect(manifest.targetPlatform).toBe('universal');
+    expect(manifest.quality).toEqual(createDefaultQualitySettings('universal'));
+  });
+
+  it('derives quality defaults from the target platform', () => {
+    const manifest = normalizeProjectManifest({
+      targetPlatform: 'mobile',
+    });
+
+    expect(manifest.quality).toEqual({ antialias: false, shadows: false, maxPixelRatio: 2 });
+  });
+
+  it('keeps explicit quality overrides and clamps the pixel ratio', () => {
+    const manifest = normalizeProjectManifest({
+      targetPlatform: 'mobile',
+      quality: { antialias: true, maxPixelRatio: 99 },
+    });
+
+    expect(manifest.quality.antialias).toBe(true);
+    // shadows falls back to the mobile default
+    expect(manifest.quality.shadows).toBe(false);
+    expect(manifest.quality.maxPixelRatio).toBe(4);
+  });
+
+  it('rejects unknown projectType and targetPlatform values', () => {
+    const manifest = normalizeProjectManifest({
+      projectType: 'vr',
+      targetPlatform: 'console',
+    });
+
+    expect(manifest.projectType).toBe('3d');
+    expect(manifest.targetPlatform).toBe('universal');
   });
 });

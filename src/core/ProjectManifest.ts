@@ -8,6 +8,20 @@ export interface AutoloadConfig {
 export const PROJECT_AO_MODES = ['off', 'baked', 'realtime', 'adaptive'] as const;
 export type ProjectAODefault = (typeof PROJECT_AO_MODES)[number];
 
+export const PROJECT_TYPES = ['2d', '3d'] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number];
+
+export const TARGET_PLATFORMS = ['mobile', 'desktop', 'universal'] as const;
+export type TargetPlatform = (typeof TARGET_PLATFORMS)[number];
+
+/** Renderer quality preset applied in play mode and exported builds. */
+export interface QualitySettings {
+  antialias: boolean;
+  shadows: boolean;
+  /** Upper bound for the renderer pixel ratio; the device ratio is used when lower. */
+  maxPixelRatio: number;
+}
+
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
@@ -18,6 +32,9 @@ export interface ProjectManifest {
   };
   /** Default AO mode scenes inherit when their PostProcess is set to `inherit`. */
   ambientOcclusion: ProjectAODefault;
+  projectType: ProjectType;
+  targetPlatform: TargetPlatform;
+  quality: QualitySettings;
   metadata?: Record<string, unknown>;
 }
 
@@ -25,7 +42,23 @@ export const DEFAULT_PROJECT_MANIFEST_VERSION = '1.0.0';
 export const DEFAULT_AMBIENT_OCCLUSION: ProjectAODefault = 'baked';
 export const DEFAULT_VIEWPORT_BASE_WIDTH = 1920;
 export const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
+export const DEFAULT_PROJECT_TYPE: ProjectType = '3d';
+export const DEFAULT_TARGET_PLATFORM: TargetPlatform = 'universal';
 const MIN_VIEWPORT_BASE_SIZE = 64;
+const MIN_PIXEL_RATIO = 1;
+const MAX_PIXEL_RATIO = 4;
+
+/** Platform-derived quality defaults; explicit `quality` entries override per field. */
+export const createDefaultQualitySettings = (platform: TargetPlatform): QualitySettings => {
+  switch (platform) {
+    case 'mobile':
+      return { antialias: false, shadows: false, maxPixelRatio: 2 };
+    case 'desktop':
+      return { antialias: true, shadows: true, maxPixelRatio: 3 };
+    case 'universal':
+      return { antialias: true, shadows: true, maxPixelRatio: 2 };
+  }
+};
 
 const normalizeViewportBaseSize = (
   input: unknown
@@ -52,6 +85,39 @@ const normalizeAmbientOcclusion = (input: unknown): ProjectAODefault => {
     : DEFAULT_AMBIENT_OCCLUSION;
 };
 
+const normalizeProjectType = (input: unknown): ProjectType => {
+  const value = typeof input === 'string' ? input.toLowerCase() : '';
+  return (PROJECT_TYPES as readonly string[]).includes(value)
+    ? (value as ProjectType)
+    : DEFAULT_PROJECT_TYPE;
+};
+
+const normalizeTargetPlatform = (input: unknown): TargetPlatform => {
+  const value = typeof input === 'string' ? input.toLowerCase() : '';
+  return (TARGET_PLATFORMS as readonly string[]).includes(value)
+    ? (value as TargetPlatform)
+    : DEFAULT_TARGET_PLATFORM;
+};
+
+const normalizeQualitySettings = (input: unknown, platform: TargetPlatform): QualitySettings => {
+  const defaults = createDefaultQualitySettings(platform);
+  if (!input || typeof input !== 'object') {
+    return defaults;
+  }
+
+  const record = input as Record<string, unknown>;
+  const rawRatio = Number(record.maxPixelRatio);
+  const maxPixelRatio = Number.isFinite(rawRatio)
+    ? Math.min(MAX_PIXEL_RATIO, Math.max(MIN_PIXEL_RATIO, rawRatio))
+    : defaults.maxPixelRatio;
+
+  return {
+    antialias: typeof record.antialias === 'boolean' ? record.antialias : defaults.antialias,
+    shadows: typeof record.shadows === 'boolean' ? record.shadows : defaults.shadows,
+    maxPixelRatio,
+  };
+};
+
 const normalizeDefaultExportScenePath = (input: unknown): string | undefined => {
   if (typeof input !== 'string') {
     return undefined;
@@ -73,6 +139,9 @@ export const createDefaultProjectManifest = (): ProjectManifest => ({
     height: DEFAULT_VIEWPORT_BASE_HEIGHT,
   },
   ambientOcclusion: DEFAULT_AMBIENT_OCCLUSION,
+  projectType: DEFAULT_PROJECT_TYPE,
+  targetPlatform: DEFAULT_TARGET_PLATFORM,
+  quality: createDefaultQualitySettings(DEFAULT_TARGET_PLATFORM),
   metadata: {},
 });
 
@@ -104,6 +173,8 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     });
   }
 
+  const targetPlatform = normalizeTargetPlatform(record.targetPlatform);
+
   return {
     version:
       typeof record.version === 'string' && record.version.trim().length > 0
@@ -113,6 +184,9 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     defaultExportScenePath: normalizeDefaultExportScenePath(record.defaultExportScenePath),
     viewportBaseSize: normalizeViewportBaseSize(record.viewportBaseSize),
     ambientOcclusion: normalizeAmbientOcclusion(record.ambientOcclusion),
+    projectType: normalizeProjectType(record.projectType),
+    targetPlatform,
+    quality: normalizeQualitySettings(record.quality, targetPlatform),
     metadata:
       record.metadata && typeof record.metadata === 'object'
         ? (record.metadata as Record<string, unknown>)

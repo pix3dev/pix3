@@ -1,0 +1,9 @@
+id: empty-3d
+title: Empty 3D
+description: Minimal 3D starter — camera, lighting, ground and a demo box, plus a 2D UI layer.
+projectType: 3d
+targetPlatform: universal
+viewport: { width: 1920, height: 1080 }
+order: 10
+directories:
+  - src/assets/models

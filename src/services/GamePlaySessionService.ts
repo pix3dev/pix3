@@ -10,6 +10,7 @@ import {
 } from '@pix3/runtime';
 import { appState } from '@/state';
 import type { GameAspectRatio } from '@/state/AppState';
+import { createDefaultQualitySettings, DEFAULT_TARGET_PLATFORM } from '@/core/ProjectManifest';
 import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
@@ -226,9 +227,12 @@ export class GamePlaySessionService {
     this.updateHostRunningState(false);
     this.profilerSessionService.beginSession(host.kind);
 
+    const quality =
+      appState.project.manifest?.quality ?? createDefaultQualitySettings(DEFAULT_TARGET_PLATFORM);
     const renderer = new RuntimeRenderer({
-      antialias: true,
-      shadows: true,
+      antialias: quality.antialias,
+      shadows: quality.shadows,
+      pixelRatio: Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio),
     });
     renderer.attach(host.mount);
 

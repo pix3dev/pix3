@@ -1,0 +1,108 @@
+# Pix3 Scene File (YAML)
+# Empty 3D starter: environment root with a box mesh, key light, ambient fill,
+# a perspective camera, and a 2D UI layer with the project logo.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Empty 3D starter scene
+root:
+  - id: environment-root
+    type: Node3D
+    name: Environment Root
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    children:
+      - id: main-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 60
+          near: 0.1
+          far: 1000
+          transform:
+            position: [0, 2, 6]
+            rotationEuler: [-10, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 1.2
+          color: "#ffffff"
+          transform:
+            position: [5, 8, 3]
+            rotationEuler: [-45, 35, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ambient-light
+        type: AmbientLightNode
+        name: Ambient Light
+        properties:
+          intensity: 0.5
+          color: "#ffffff"
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: ground
+        type: GeometryMesh
+        name: Ground
+        properties:
+          geometry: box
+          size: [12, 0.2, 12]
+          material:
+            type: standard
+            color: "#2a2a3e"
+          transform:
+            position: [0, -0.1, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: demo-box
+        type: GeometryMesh
+        name: Demo Box
+        properties:
+          geometry: box
+          size: [1, 1, 1]
+          material:
+            type: standard
+            color: "#ffcf33"
+          transform:
+            position: [0, 0.5, 0]
+            rotationEuler: [0, 45, 0]
+            scale: [1, 1, 1]
+        children: []
+
+  - id: ui-root
+    type: Group2D
+    name: UI Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    children:
+      - id: logo-sprite
+        type: Sprite2D
+        name: Logo Sprite
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/pix3-logo.png' }
+          width: 64
+          height: 64
+          transform:
+            position: [0, -460]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: bottom
+        children: []

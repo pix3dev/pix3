@@ -39,17 +39,14 @@ interface ProjectManifestSnapshotLike {
   metadata?: Record<string, unknown>;
 }
 
-const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest => ({
-  version: manifest.version,
-  defaultExportScenePath: manifest.defaultExportScenePath,
-  viewportBaseSize: {
-    width: manifest.viewportBaseSize.width,
-    height: manifest.viewportBaseSize.height,
-  },
-  ambientOcclusion: manifest.ambientOcclusion,
-  autoloads: manifest.autoloads.map(entry => ({ ...entry })),
-  metadata: manifest.metadata ? { ...manifest.metadata } : {},
-});
+const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =>
+  // Normalization deep-fills current manifest fields (incl. projectType,
+  // targetPlatform, quality) so snapshots stay valid as the schema grows.
+  normalizeProjectManifest({
+    ...manifest,
+    metadata: manifest.metadata ? { ...manifest.metadata } : {},
+    autoloads: manifest.autoloads.map(entry => ({ ...entry })),
+  });
 
 /**
  * Persists the given recent project entry to localStorage.

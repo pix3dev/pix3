@@ -1,8 +1,8 @@
 # Pix3 — Technical Specification
 
-Version: 1.16
+Version: 1.17
 
-Date: 2026-07-04
+Date: 2026-07-12
 
 ## 1. Introduction
 
@@ -533,6 +533,22 @@ Layout2D triggers layout recalculation for all Group2D children when its size ch
 - Border visibility can be toggled via checkbox in inspector
 - Children (Group2D, Sprite2D) render normally within Layout2D bounds
 
+## 6.11.5 Project Templates, Target Platform and Agent Overlay
+
+**New Project** is a two-step wizard (`pix3-create-project-dialog`): template picker (cover cards) → parameters (name, storage, target platform, base size). Bundled templates live under `src/templates/projects/<id>/`:
+
+- `template.yaml` — `id`, `title`, `description`, `projectType` (`2d`|`3d`), `targetPlatform`, `viewport`, `order`, optional `directories` (empty dirs; bundles cannot carry them).
+- `cover.png` — wizard card artwork.
+- `files/**` — the project tree copied verbatim (`{{PROJECT_NAME}}` placeholders substituted). Scenes, scripts and binary assets are bundled via `import.meta.glob` and written through the File System Access API (`ProjectService.createProjectStructure`).
+
+v1 templates: `empty-3d`, `empty-2d`, `playable-3d`, `playable-2d` (tap-to-start intro that guarantees the audio-unlock gesture, end screen with a CTA button wired to the runtime **Playable SDK** — `playable.openStore(url)` / `playable.gameEnd()` in `@pix3/runtime`), `minigame-2d` (menu/game screens + reusable `settings-window.pix3scene` prefab whose Music/SFX checkboxes drive the audio buses). Template validity is guarded by `src/services/ProjectTemplateScenes.spec.ts` (every scene must parse through the real `SceneLoader`).
+
+The project manifest (`pix3project.yaml`) additionally stores `projectType`, `targetPlatform` (`mobile`|`desktop`|`universal`) and `quality` (`antialias`, `shadows`, `maxPixelRatio`; defaults derived from the platform). Play mode (`GamePlaySessionService`) and runtime/playable builds (via the generated `scene-manifest.ts` `runtimeQuality` export) apply the preset.
+
+Every new project also receives an **agent overlay** (`src/templates/agent/**`): `design/` (GDD + references folder), `AGENTS.md`, `CLAUDE.md`, `.claude/skills/pix3-game-dev/` (with bundled copies of `nodes-and-systems.md` and `node-types-reference.md`) and `.claude/skills/pix3-remote-preview/`, plus `.pix3/template.json` (template id + editor version). This makes a freshly created project directly usable by coding agents working on the local folder.
+
+The editor ships as an installable **PWA** (`vite-plugin-pwa`, `autoUpdate`): standalone display, offline-precached app shell including `esbuild.wasm` (in-editor script compilation offline); the background-removal ONNX runtimes are excluded from precache. The legacy handwritten `src/sw.ts` remains unregistered.
+
 ## 6.12 Autoload Scripts and Asset Browser Template Flow
 
 Pix3 supports project-level autoload scripts configured in `pix3project.yaml` under `autoloads`.
@@ -1019,3 +1035,4 @@ root:
 - **1.14 (2026-02-23):** Added project autoload manifest support (`pix3project.yaml`) with editor commands/operations for add/remove/toggle/reorder. Added node-local signal and group APIs, scene group serialization, and inspector group editing UI. Added Asset Browser create action `Create autoload script` that scaffolds a template script in `scripts/`, compiles scripts, and auto-registers the singleton in project autoloads.
 - **1.15 (2026-02-26):** Added Node Prefabs System section (6.15). Prefabs are `.pix3scene` files instanced via `instance:` YAML key. Added PrefabMetadata interface stored in node metadata with localId, effectiveLocalId, instanceRootId, sourcePath, and basePropertiesByLocalId. Added prefab-utils.ts with getPrefabMetadata, isPrefabNode, isPrefabInstanceRoot, isPrefabChildNode, and findPrefabInstanceRoot helpers. Implemented CreatePrefabInstanceOperation, SaveAsPrefabOperation, and RefreshPrefabInstancesOperation. Added corresponding commands. Inspector shows base prefab values with revert override capability. Scene tree displays prefab badges. FileWatchService triggers auto-refresh when prefab files change.
 - **1.16 (2026-07-04):** Added Keyframe Animation System section (6.16). New runtime module `packages/pix3-runtime/src/animation/` (easing curves, JSON keyframe clip model with defensive normalization, pure clip evaluator, `AnimationPlayerBehavior` registered as `core:AnimationPlayer`). Clips serialize inside the component `config`; tracks target nodes by relative name paths (prefab-safe). New bottom-docked Animation timeline panel (`animation-timeline`) with clip management, property/audio tracks, keyframe drag with snap and coalesced undo, per-key easing, and a scrub/playback preview service (`AnimationTimelinePreviewService`) that snapshots and restores node state without dirtying the scene, guarded against saves, undo/redo, and play-mode start.
+- **1.17 (2026-07-12):** Added Project Templates, Target Platform and Agent Overlay section (6.11.5). Two-step New Project wizard with a bundled template catalog (`src/templates/projects/`, served by `ProjectTemplateService`); five v1 templates (empty-2d/3d, playable-2d/3d with tap-to-start + CTA, minigame-2d with a settings-window prefab). Manifest extended with `projectType`, `targetPlatform` and `quality` (applied in play mode and exported builds via the generated `runtimeQuality`). Runtime gains the Playable SDK shim (`playable.openStore`/`gameEnd`, MRAID-aware). New projects receive a `design/` folder, `AGENTS.md`/`CLAUDE.md` and bundled agent skills (`src/templates/agent/`). Editor is installable as a PWA via `vite-plugin-pwa`. Full rapid-prototyping design (remote preview relay, agent HTTP API) recorded in `.plans/rapid-prototyping-design.md`.

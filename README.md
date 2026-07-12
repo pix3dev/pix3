@@ -19,6 +19,16 @@ Additional agent guidelines: [AGENTS.md](AGENTS.md).
 
 Before writing custom game logic, consult the **capabilities catalog** — every node, `core:*` behavior, system (juice, time-scale, audio buses, camera brain, cutscene director, keyframe animation, shader effects, post-processing, particles, ECS, input, signals), and scripts-facing runtime API, each with usage notes and the engine-vs-game decision: **[docs/nodes-and-systems.md](docs/nodes-and-systems.md)** (per-node detail in [docs/node-types-reference.md](docs/node-types-reference.md)). Agents building a game on the engine start from the **`pix3-game-dev`** skill (`.claude/skills/pix3-game-dev/`).
 
+## Project Templates & Rapid Prototyping
+
+**New Project** is a two-step wizard: pick a bundled template (cover cards), then set name, storage, target platform and base size. Templates live under `src/templates/projects/<id>/` (`template.yaml` + `cover.png` + `files/**` copied verbatim) and are served by `ProjectTemplateService`; v1 ships `empty-3d`, `empty-2d`, `playable-3d`, `playable-2d` (tap-to-start intro, CTA end screen via the runtime Playable SDK) and `minigame-2d` (menu/game screens + a reusable settings-window prefab wired to audio buses).
+
+Every new project also gets an **agent-workflow overlay**: a `design/` folder for the GDD and visual references, `AGENTS.md`/`CLAUDE.md`, and `.claude/skills/` (`pix3-game-dev` with bundled copies of the capability docs, plus a `pix3-remote-preview` stub) — so the user can open the project folder in an agent app and ask it to build the game from the GDD. Sources: `src/templates/agent/**`.
+
+The **target platform** choice writes `projectType` / `targetPlatform` / `quality` (antialias, shadows, max pixel ratio) into `pix3project.yaml`; play mode and playable-HTML export apply the preset. The editor itself is an installable **PWA** (`vite-plugin-pwa`, offline app shell including `esbuild.wasm`).
+
+The full rapid-prototyping design (remote preview relay, agent HTTP API) is in `.plans/rapid-prototyping-design.md`.
+
 ## Collaboration Server (`packages/pix3-collab-server`)
 
 A self-hosted Node.js server that enables real-time multiplayer editing and cloud project storage.

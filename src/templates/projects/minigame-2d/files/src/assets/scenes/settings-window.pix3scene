@@ -1,0 +1,128 @@
+# Pix3 Scene File (YAML)
+# Settings window prefab: a centered modal panel with Music/SFX checkboxes
+# (wired to the audio buses by user:SettingsWindow) and a CLOSE button.
+# Instance it from any scene:
+#   { id: settings-window, instance: res://src/assets/scenes/settings-window.pix3scene }
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Reusable settings window (music/SFX toggles)
+root:
+  - id: settings-root
+    type: Group2D
+    name: Settings Window
+    properties:
+      width: 640
+      height: 520
+      initiallyVisible: false
+      layout:
+        enabled: true
+        horizontalAlign: center
+        verticalAlign: center
+    components:
+      - id: settings-behavior
+        type: user:SettingsWindow
+        enabled: true
+        config:
+          musicToggle: music-toggle
+          sfxToggle: sfx-toggle
+          closeButton: close-button
+    children:
+      - id: settings-panel
+        type: ColorRect2D
+        name: Panel
+        properties:
+          width: 640
+          height: 520
+          color: "#1a1a2e"
+          opacity: 0.97
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: settings-title
+        type: Label2D
+        name: Title
+        properties:
+          label: "SETTINGS"
+          labelFontSize: 48
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, 190]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: music-label
+        type: Label2D
+        name: Music Label
+        properties:
+          label: "Music"
+          labelFontSize: 36
+          labelColor: "#ffffff"
+          labelAlign: left
+          transform:
+            position: [-120, 70]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: music-toggle
+        type: Checkbox2D
+        name: Music Toggle
+        properties:
+          width: 44
+          height: 44
+          checked: true
+          checkedColor: "#ffcf33"
+          uncheckedColor: "#555577"
+          transform:
+            position: [150, 70]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: sfx-label
+        type: Label2D
+        name: SFX Label
+        properties:
+          label: "Sound FX"
+          labelFontSize: 36
+          labelColor: "#ffffff"
+          labelAlign: left
+          transform:
+            position: [-120, -10]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: sfx-toggle
+        type: Checkbox2D
+        name: SFX Toggle
+        properties:
+          width: 44
+          height: 44
+          checked: true
+          checkedColor: "#ffcf33"
+          uncheckedColor: "#555577"
+          transform:
+            position: [150, -10]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: close-button
+        type: Button2D
+        name: Close Button
+        properties:
+          width: 280
+          height: 88
+          label: "CLOSE"
+          labelFontSize: 36
+          labelColor: "#1a1a2e"
+          backgroundColor: "#ffcf33"
+          hoverColor: "#ffe066"
+          pressedColor: "#e6b800"
+          buttonAction: close-settings
+          transform:
+            position: [0, -180]
+            scale: [1, 1]
+            rotation: 0
+        children: []

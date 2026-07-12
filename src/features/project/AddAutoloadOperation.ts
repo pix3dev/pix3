@@ -6,6 +6,7 @@ import type {
 } from '@/core/Operation';
 import {
   createDefaultProjectManifest,
+  normalizeProjectManifest,
   type AutoloadConfig,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
@@ -33,17 +34,14 @@ interface ProjectManifestSnapshotLike {
   metadata?: Record<string, unknown>;
 }
 
-const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest => ({
-  version: manifest.version,
-  defaultExportScenePath: manifest.defaultExportScenePath,
-  viewportBaseSize: {
-    width: manifest.viewportBaseSize.width,
-    height: manifest.viewportBaseSize.height,
-  },
-  ambientOcclusion: manifest.ambientOcclusion,
-  metadata: manifest.metadata ? { ...manifest.metadata } : {},
-  autoloads: manifest.autoloads.map(entry => ({ ...entry })),
-});
+const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =>
+  // Normalization deep-fills current manifest fields (incl. projectType,
+  // targetPlatform, quality) so snapshots stay valid as the schema grows.
+  normalizeProjectManifest({
+    ...manifest,
+    metadata: manifest.metadata ? { ...manifest.metadata } : {},
+    autoloads: manifest.autoloads.map(entry => ({ ...entry })),
+  });
 
 export class AddAutoloadOperation implements Operation<OperationInvokeResult> {
   readonly metadata: OperationMetadata = {

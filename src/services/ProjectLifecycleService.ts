@@ -1,5 +1,11 @@
 import { inject, injectable } from '@/fw/di';
-import { createDefaultProjectManifest, type ProjectManifest } from '@/core/ProjectManifest';
+import {
+  createDefaultProjectManifest,
+  createDefaultQualitySettings,
+  type ProjectManifest,
+  type ProjectType,
+  type TargetPlatform,
+} from '@/core/ProjectManifest';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import { appState } from '@/state';
 import { ProjectService } from './ProjectService';
@@ -19,6 +25,9 @@ export interface CreateProjectParams {
   backend: 'local' | 'cloud';
   viewportBaseWidth: number;
   viewportBaseHeight: number;
+  templateId?: string;
+  projectType?: ProjectType;
+  targetPlatform?: TargetPlatform;
 }
 
 export class ProjectAuthRequiredError extends Error {
@@ -194,6 +203,7 @@ export class ProjectLifecycleService {
         {
           name: params.name,
           manifest: this.createManifest(params),
+          templateId: params.templateId,
         },
         { beforeActivate }
       );
@@ -244,15 +254,20 @@ export class ProjectLifecycleService {
 
   private createManifest(params: CreateProjectParams): ProjectManifest {
     const manifest = createDefaultProjectManifest();
+    const targetPlatform = params.targetPlatform ?? manifest.targetPlatform;
     return {
       ...manifest,
       viewportBaseSize: {
         width: params.viewportBaseWidth,
         height: params.viewportBaseHeight,
       },
+      projectType: params.projectType ?? manifest.projectType,
+      targetPlatform,
+      quality: createDefaultQualitySettings(targetPlatform),
       metadata: {
         ...(manifest.metadata ?? {}),
         projectName: params.name,
+        ...(params.templateId ? { templateId: params.templateId } : {}),
       },
     };
   }

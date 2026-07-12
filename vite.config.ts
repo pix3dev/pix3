@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import { resolve } from 'path';
 import wasm from 'vite-plugin-wasm';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
@@ -31,7 +32,40 @@ export default defineConfig(async ({ mode }) => {
     // `@dimforge/rapier3d`. The non-compat package becomes a TLA module after
     // wasm instantiation — our ES2022 build target supports native top-level
     // await, so no TLA polyfill plugin is required.
-    plugins: [wasm()],
+    plugins: [
+      wasm(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        // The legacy src/sw.ts is NOT this service worker — generateSW builds
+        // its own precache worker; src/sw.ts stays unregistered.
+        includeAssets: ['icon.png', 'splash.jpg', 'splash-logo.png', 'menu-logo.png'],
+        manifest: {
+          name: 'Pix3 Editor',
+          short_name: 'Pix3',
+          description: 'Browser-based editor for HTML5 games blending 2D and 3D layers.',
+          start_url: '.',
+          display: 'standalone',
+          theme_color: '#1a1a2e',
+          background_color: '#1a1a2e',
+          icons: [
+            { src: 'pwa-192.png', sizes: '192x192', type: 'image/png' },
+            { src: 'pwa-512.png', sizes: '512x512', type: 'image/png' },
+            { src: 'pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          ],
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2,wasm,glb}'],
+          // Background-removal ONNX runtimes (~24 MB each) are an optional,
+          // lazily-loaded feature — not worth precaching for offline use.
+          globIgnores: ['**/ort-wasm*'],
+          // esbuild.wasm (~10 MB) and the three chunk (~19 MB, embeds runtime
+          // sources for playable export) must be precached to work offline.
+          maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
+          // The editor app shell handles its own routing; API/collab traffic must not be cached.
+          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/openai-proxy/],
+        },
+      }),
+    ],
     define: {
       __PIX3_RAPIER_EXPORT_KEYS__: JSON.stringify(rapierExportKeys),
     },

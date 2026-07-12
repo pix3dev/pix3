@@ -43,6 +43,7 @@ import {
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { GameTime } from './GameTime';
+import { playable } from './PlayableSdk';
 
 /**
  * Below this slow-mo base scale the audio mixer blends to the `'muffled'`
@@ -168,6 +169,7 @@ export class SceneRunner {
 
     this.stop();
     this.bindSceneServiceDelegate();
+    playable.reset();
 
     // Ensure fade overlay is positioned over the correct canvas
     this.sceneService.attachCanvas(this.renderer.domElement);

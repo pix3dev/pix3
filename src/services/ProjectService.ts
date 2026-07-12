@@ -9,7 +9,7 @@ import { resolveFileSystemAPIService, type FileDescriptor } from './FileSystemAP
 import { ProjectStorageService } from './ProjectStorageService';
 import { parse, stringify } from 'yaml';
 import { ref } from 'valtio/vanilla';
-import { sceneTemplates } from './template-data';
+import { ProjectTemplateService } from './ProjectTemplateService';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import {
   createDefaultProjectManifest,
@@ -17,6 +17,7 @@ import {
   type ProjectManifest,
 } from '@/core/ProjectManifest';
 import { SceneManager, setProjectAODefault, type SceneGraph } from '@pix3/runtime';
+import { CURRENT_EDITOR_VERSION } from '@/version';
 import type * as Y from 'yjs';
 import { EditorTabService } from './EditorTabService';
 import { CollaborationService } from './CollaborationService';
@@ -45,6 +46,8 @@ export interface RecentProjectEntry {
 export interface CreateProjectOptions {
   readonly name: string;
   readonly manifest: ProjectManifest;
+  /** Bundled project template to scaffold from; falls back to the default template. */
+  readonly templateId?: string;
 }
 
 export interface ActivateProjectOptions {
@@ -569,7 +572,7 @@ export class ProjectService {
       }
 
       // Create base project structure
-      await this.createProjectStructure(options.name, options.manifest);
+      await this.createProjectStructure(options.name, options.manifest, options.templateId);
 
       await activateOptions?.beforeActivate?.();
 
@@ -608,55 +611,136 @@ export class ProjectService {
     }
   }
 
-  private async createProjectStructure(name: string, manifest: ProjectManifest): Promise<void> {
-    const directories = [
+  private async createProjectStructure(
+    name: string,
+    manifest: ProjectManifest,
+    templateId?: string
+  ): Promise<void> {
+    const templateService = ServiceContainer.getInstance().getService<ProjectTemplateService>(
+      ServiceContainer.getInstance().getOrCreateToken(ProjectTemplateService)
+    );
+    const template =
+      (templateId ? templateService.getTemplate(templateId) : null) ??
+      templateService.getDefaultTemplate();
+
+    // Core structure: a failure here genuinely breaks the project, so it aborts
+    // creation with the underlying cause in the error.
+    const directories = new Set<string>([
       'src',
       'scripts',
       'src/scripts',
       'src/assets',
       'src/assets/scenes',
-      'src/assets/models',
       'src/assets/textures',
-    ];
+      ...template.directories,
+    ]);
 
-    // Create directories
+    const ensuredDirectories = new Set<string>();
     for (const dir of directories) {
-      await this.fs.createDirectory(dir);
+      await this.ensureDirectoryPath(dir, ensuredDirectories);
     }
 
-    // Create README.md
-    const readmeContent = `# ${name || 'Pix3 Project'}
-
-This is a new Pix3 project created on ${new Date().toLocaleDateString()}.
-
-## Project Structure
-
-- \`src/\` - Source code
-- \`scripts/\` - Custom scripts and behaviors (primary)
-- \`src/scripts/\` - Custom scripts and behaviors (legacy/supported)
-- \`src/assets/\` - Project assets
-- \`src/assets/scenes/\` - Scene files
-- \`src/assets/models/\` - 3D models
-- \`src/assets/textures/\` - Texture files
-
-## Getting Started
-
-1. Add your 3D models to \`src/assets/models/\`
-2. Create scenes in \`src/assets/scenes/\`
-3. Write custom scripts in \`scripts/\` (or \`src/scripts/\`)
-4. Open your project in Pix3 to start editing
-
-Happy creating! 🎨
-`;
-
-    await this.storage.writeTextFile('README.md', readmeContent);
     await this.saveProjectManifest(manifest);
-    await this.storage.writeTextFile(
-      ProjectService.STARTUP_SCENE_PATH,
-      sceneTemplates.find(template => template.id === 'startup-scene')?.contents ??
-        sceneTemplates[0]?.contents ??
-        ''
+
+    const projectName = name.trim() || 'Pix3 Project';
+    for (const [relativePath, contents] of template.textFiles) {
+      await this.ensureParentDirectories(relativePath, ensuredDirectories);
+      await this.storage.writeTextFile(
+        relativePath,
+        this.renderTemplateText(contents, projectName)
+      );
+    }
+
+    // Companion layer (design/, agent skills, template metadata): the project
+    // must still open if any of this fails — the chosen folder is no longer
+    // empty at this point, so aborting would leave the user unable to retry.
+    const companionWarnings: string[] = [];
+    const writeCompanionFile = async (relativePath: string, contents: string): Promise<void> => {
+      try {
+        await this.ensureParentDirectories(relativePath, ensuredDirectories);
+        await this.storage.writeTextFile(relativePath, contents);
+      } catch (error) {
+        companionWarnings.push(relativePath);
+        console.error(`[ProjectService] Failed to write "${relativePath}":`, error);
+      }
+    };
+
+    for (const dir of ['design', 'design/references']) {
+      try {
+        await this.ensureDirectoryPath(dir, ensuredDirectories);
+      } catch (error) {
+        companionWarnings.push(dir);
+        console.error(`[ProjectService] Failed to create "${dir}":`, error);
+      }
+    }
+
+    for (const [relativePath, contents] of templateService.getAgentOverlayFiles()) {
+      await writeCompanionFile(relativePath, this.renderTemplateText(contents, projectName));
+    }
+
+    for (const [relativePath, url] of template.binaryFiles) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        await this.ensureParentDirectories(relativePath, ensuredDirectories);
+        await this.storage.writeBinaryFile(relativePath, await response.arrayBuffer());
+      } catch (error) {
+        companionWarnings.push(relativePath);
+        console.error(`[ProjectService] Failed to copy template asset "${relativePath}":`, error);
+      }
+    }
+
+    await writeCompanionFile(
+      '.pix3/template.json',
+      JSON.stringify(
+        {
+          templateId: template.id,
+          editorVersion: CURRENT_EDITOR_VERSION.version,
+          createdAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ) + '\n'
     );
+
+    if (companionWarnings.length > 0) {
+      console.warn(
+        `[ProjectService] Project created, but ${companionWarnings.length} companion ` +
+          `file(s) could not be written: ${companionWarnings.join(', ')}. ` +
+          'See errors above for the underlying cause.'
+      );
+    }
+  }
+
+  /** Substitute template placeholders in copied text files. */
+  private renderTemplateText(contents: string, projectName: string): string {
+    return contents.replaceAll('{{PROJECT_NAME}}', projectName);
+  }
+
+  private async ensureParentDirectories(
+    filePath: string,
+    ensuredDirectories: Set<string>
+  ): Promise<void> {
+    const separatorIndex = filePath.lastIndexOf('/');
+    if (separatorIndex <= 0) {
+      return;
+    }
+    await this.ensureDirectoryPath(filePath.slice(0, separatorIndex), ensuredDirectories);
+  }
+
+  private async ensureDirectoryPath(
+    directory: string,
+    ensuredDirectories: Set<string>
+  ): Promise<void> {
+    if (ensuredDirectories.has(directory)) {
+      return;
+    }
+    // createDirectory creates the whole nested chain and is a no-op for
+    // existing directories — errors are real failures and must surface.
+    await this.fs.createDirectory(directory);
+    ensuredDirectories.add(directory);
   }
 
   async loadProjectManifest(): Promise<ProjectManifest> {
@@ -684,6 +768,13 @@ Happy creating! 🎨
         height: normalized.viewportBaseSize.height,
       },
       ambientOcclusion: normalized.ambientOcclusion,
+      projectType: normalized.projectType,
+      targetPlatform: normalized.targetPlatform,
+      quality: {
+        antialias: normalized.quality.antialias,
+        shadows: normalized.quality.shadows,
+        maxPixelRatio: normalized.quality.maxPixelRatio,
+      },
       metadata: normalized.metadata ?? {},
       autoloads: normalized.autoloads.map(entry => ({
         scriptPath: entry.scriptPath,

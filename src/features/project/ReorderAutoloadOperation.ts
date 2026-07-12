@@ -4,7 +4,11 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { createDefaultProjectManifest, type ProjectManifest } from '@/core/ProjectManifest';
+import {
+  createDefaultProjectManifest,
+  normalizeProjectManifest,
+  type ProjectManifest,
+} from '@/core/ProjectManifest';
 import { ProjectService } from '@/services/ProjectService';
 
 export interface ReorderAutoloadParams {
@@ -28,17 +32,14 @@ interface ProjectManifestSnapshotLike {
   metadata?: Record<string, unknown>;
 }
 
-const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest => ({
-  version: manifest.version,
-  defaultExportScenePath: manifest.defaultExportScenePath,
-  viewportBaseSize: {
-    width: manifest.viewportBaseSize.width,
-    height: manifest.viewportBaseSize.height,
-  },
-  ambientOcclusion: manifest.ambientOcclusion,
-  metadata: manifest.metadata ? { ...manifest.metadata } : {},
-  autoloads: manifest.autoloads.map(entry => ({ ...entry })),
-});
+const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =>
+  // Normalization deep-fills current manifest fields (incl. projectType,
+  // targetPlatform, quality) so snapshots stay valid as the schema grows.
+  normalizeProjectManifest({
+    ...manifest,
+    metadata: manifest.metadata ? { ...manifest.metadata } : {},
+    autoloads: manifest.autoloads.map(entry => ({ ...entry })),
+  });
 
 export class ReorderAutoloadOperation implements Operation<OperationInvokeResult> {
   readonly metadata: OperationMetadata = {

@@ -9,7 +9,9 @@ export default [
   js.configs.recommended,
   {
     files: ['src/**/*.ts', 'src/**/*.js'],
-    ignores: ['dist/**', 'node_modules/**'],
+    // Template payloads are copied into user projects verbatim — they compile
+    // against the runtime import map, not this repo's tsconfig project.
+    ignores: ['dist/**', 'node_modules/**', 'src/templates/projects/*/files/**'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

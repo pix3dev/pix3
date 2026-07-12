@@ -1,0 +1,203 @@
+# Pix3 Scene File (YAML)
+# Playable 2D blank (portrait 1080x1920): 2D gameplay placeholder plus a
+# tap-to-start intro overlay and an end screen with a CTA button.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Playable 2D blank with intro overlay and CTA end screen
+root:
+  - id: ui-root
+    type: Group2D
+    name: UI Root
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: game-flow
+        type: user:GameFlow
+        enabled: true
+        config:
+          introNode: intro-overlay
+          endNode: end-screen
+          autoWinAfterSec: 15
+    children:
+      - id: background
+        type: ColorRect2D
+        name: Background
+        properties:
+          width: 1080
+          height: 1920
+          color: "#16213e"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: hero-sprite
+        type: Sprite2D
+        name: Hero Sprite
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/pix3-logo.png' }
+          width: 160
+          height: 160
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        components:
+          - id: hero-bob
+            type: core:Sine
+            enabled: true
+            config:
+              amplitude: 40
+              frequency: 0.6
+              axis: y
+        children: []
+      - id: hud-label
+        type: Label2D
+        name: HUD Label
+        properties:
+          label: "PROTOTYPE"
+          labelFontSize: 40
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [0, 860]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: top
+        children: []
+      - id: intro-overlay
+        type: Group2D
+        name: Intro Overlay
+        properties:
+          width: 1080
+          height: 1920
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children:
+          - id: intro-dim
+            type: ColorRect2D
+            name: Intro Dim
+            properties:
+              width: 1080
+              height: 1920
+              color: "#000000"
+              opacity: 0.65
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: intro-label
+            type: Label2D
+            name: Tap To Start
+            properties:
+              label: "TAP TO START"
+              labelFontSize: 72
+              labelColor: "#ffffff"
+              labelAlign: center
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+      - id: end-screen
+        type: Group2D
+        name: End Screen
+        properties:
+          width: 1080
+          height: 1920
+          initiallyVisible: false
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children:
+          - id: end-dim
+            type: ColorRect2D
+            name: End Dim
+            properties:
+              width: 1080
+              height: 1920
+              color: "#000000"
+              opacity: 0.75
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: end-label
+            type: Label2D
+            name: End Label
+            properties:
+              label: "GREAT RUN!"
+              labelFontSize: 84
+              labelColor: "#ffcf33"
+              labelAlign: center
+              transform:
+                position: [0, 220]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: cta-button
+            type: Button2D
+            name: CTA Button
+            properties:
+              width: 480
+              height: 140
+              label: "PLAY NOW"
+              labelFontSize: 56
+              labelColor: "#1a1a2e"
+              backgroundColor: "#ffcf33"
+              hoverColor: "#ffe066"
+              pressedColor: "#e6b800"
+              buttonAction: cta
+              transform:
+                position: [0, -120]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            components:
+              - id: cta-action
+                type: user:CtaButton
+                enabled: true
+                config:
+                  storeUrl: "https://play.google.com/store/apps"
+            children: []

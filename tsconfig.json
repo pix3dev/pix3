@@ -58,6 +58,7 @@
     "packages/pix3-runtime/src"
   ],
   "exclude": [
-    "samples"
+    "samples",
+    "src/templates/projects/*/files"
   ]
 }

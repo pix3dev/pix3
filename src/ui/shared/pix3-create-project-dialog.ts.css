@@ -25,9 +25,141 @@ pix3-create-project-dialog .create-project-content {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
 }
 
+pix3-create-project-dialog .create-project-content--wide {
+  width: min(100%, 880px);
+}
+
 pix3-create-project-dialog .create-project-title {
   margin: 0 0 18px;
   font-size: 1.4rem;
+}
+
+pix3-create-project-dialog .template-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  max-height: min(56vh, 560px);
+  overflow-y: auto;
+  padding: 2px;
+}
+
+pix3-create-project-dialog .template-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f3f4f6;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+pix3-create-project-dialog .template-card:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+pix3-create-project-dialog .template-card--selected {
+  border-color: rgba(var(--pix3-accent-rgb), 0.6);
+  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.28);
+}
+
+pix3-create-project-dialog .template-card__cover {
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+pix3-create-project-dialog .template-card__cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+pix3-create-project-dialog .template-card__cover-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-weight: 700;
+  color: rgba(243, 244, 246, 0.5);
+}
+
+pix3-create-project-dialog .template-card__body {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 14px;
+}
+
+pix3-create-project-dialog .template-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+pix3-create-project-dialog .template-card__badge {
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #fff7d1;
+  background: rgba(var(--pix3-accent-rgb), 0.2);
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.3);
+}
+
+pix3-create-project-dialog .template-card__description {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: rgba(243, 244, 246, 0.66);
+}
+
+pix3-create-project-dialog .selected-template {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.25);
+  background: rgba(var(--pix3-accent-rgb), 0.08);
+}
+
+pix3-create-project-dialog .selected-template__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(243, 244, 246, 0.7);
+}
+
+pix3-create-project-dialog .selected-template__value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
+pix3-create-project-dialog .selected-template__change {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(243, 244, 246, 0.85);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+pix3-create-project-dialog .selected-template__change:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.09);
 }
 
 pix3-create-project-dialog .settings-form {

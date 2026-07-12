@@ -1,0 +1,7 @@
+id: minigame-2d
+title: Minigame 2D
+description: Menu + game screens with a reusable settings-window prefab (music/SFX toggles wired to audio buses).
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1920, height: 1080 }
+order: 50

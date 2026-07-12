@@ -1,6 +1,11 @@
 import { injectable, inject } from '@/fw/di';
 import { ProjectStorageService } from './ProjectStorageService';
 import type { CommandContext } from '@/core/command';
+import {
+  createDefaultQualitySettings,
+  DEFAULT_TARGET_PLATFORM,
+  type QualitySettings,
+} from '@/core/ProjectManifest';
 
 interface BuildPackagePatch {
   sideEffects?: boolean;
@@ -84,6 +89,9 @@ export class ProjectBuildService {
     const projectScriptFiles = await this.collectProjectScriptFiles();
     const assetPaths = await this.collectAssetPaths(scenePaths, projectScriptFiles, warnings);
     const projectName = context.state.project.projectName ?? 'Pix3 Project';
+    const quality =
+      context.state.project.manifest?.quality ??
+      createDefaultQualitySettings(DEFAULT_TARGET_PLATFORM);
 
     return {
       projectName,
@@ -91,7 +99,7 @@ export class ProjectBuildService {
       entryScenePath,
       assetPaths,
       projectScriptFiles,
-      files: this.buildGeneratedFiles(projectName, scenePaths, entryScenePath, assetPaths),
+      files: this.buildGeneratedFiles(projectName, scenePaths, entryScenePath, assetPaths, quality),
       warnings,
     };
   }
@@ -427,7 +435,8 @@ export class ProjectBuildService {
     projectName: string,
     scenePaths: readonly string[],
     entryScenePath: string,
-    assetPaths: readonly string[]
+    assetPaths: readonly string[],
+    quality: QualitySettings
   ): ReadonlyMap<string, string> {
     const replacements: Record<string, string> = {
       PROJECT_NAME: projectName,
@@ -446,7 +455,7 @@ export class ProjectBuildService {
 
     files.set(
       'src/generated/scene-manifest.ts',
-      this.buildSceneManifestTs(scenePaths, entryScenePath)
+      this.buildSceneManifestTs(scenePaths, entryScenePath, quality)
     );
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
@@ -572,13 +581,27 @@ export class ProjectBuildService {
     return null;
   }
 
-  private buildSceneManifestTs(scenePaths: string[], activeScenePath: string): string {
+  private buildSceneManifestTs(
+    scenePaths: readonly string[],
+    activeScenePath: string,
+    quality: QualitySettings
+  ): string {
     const scenePathsJson = JSON.stringify(scenePaths, null, 2);
     const activeJson = JSON.stringify(activeScenePath);
+    const qualityJson = JSON.stringify(
+      {
+        antialias: quality.antialias,
+        shadows: quality.shadows,
+        maxPixelRatio: quality.maxPixelRatio,
+      },
+      null,
+      2
+    );
 
     return [
       'export const scenePaths = ' + scenePathsJson + ' as const;',
       'export const activeScenePath = ' + activeJson + ';',
+      'export const runtimeQuality = ' + qualityJson + ' as const;',
       '',
     ].join('\n');
   }

@@ -1,0 +1,188 @@
+# Pix3 Scene File (YAML)
+# Minigame 2D starter: menu screen (PLAY / SETTINGS), game screen placeholder
+# with a BACK button, and an instanced settings-window prefab.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Minigame starter with menu, game screen and settings window
+root:
+  - id: ui-root
+    type: Group2D
+    name: UI Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: menu-flow
+        type: user:MenuFlow
+        enabled: true
+        config:
+          menuNode: menu-screen
+          gameNode: game-screen
+          settingsNode: settings-window
+          playButton: play-button
+          settingsButton: settings-button
+          backButton: back-button
+    children:
+      - id: menu-screen
+        type: Group2D
+        name: Menu Screen
+        properties:
+          width: 1920
+          height: 1080
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children:
+          - id: menu-background
+            type: ColorRect2D
+            name: Menu Background
+            properties:
+              width: 1920
+              height: 1080
+              color: "#16213e"
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: menu-title
+            type: Label2D
+            name: Menu Title
+            properties:
+              label: "{{PROJECT_NAME}}"
+              labelFontSize: 96
+              labelColor: "#ffcf33"
+              labelAlign: center
+              transform:
+                position: [0, 250]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: play-button
+            type: Button2D
+            name: Play Button
+            properties:
+              width: 420
+              height: 120
+              label: "PLAY"
+              labelFontSize: 48
+              labelColor: "#1a1a2e"
+              backgroundColor: "#ffcf33"
+              hoverColor: "#ffe066"
+              pressedColor: "#e6b800"
+              buttonAction: play
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: settings-button
+            type: Button2D
+            name: Settings Button
+            properties:
+              width: 420
+              height: 120
+              label: "SETTINGS"
+              labelFontSize: 48
+              labelColor: "#ffffff"
+              backgroundColor: "#3a3a5e"
+              hoverColor: "#4a4a6e"
+              pressedColor: "#2a2a4e"
+              buttonAction: open-settings
+              transform:
+                position: [0, -170]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+      - id: game-screen
+        type: Group2D
+        name: Game Screen
+        properties:
+          width: 1920
+          height: 1080
+          initiallyVisible: false
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children:
+          - id: game-background
+            type: ColorRect2D
+            name: Game Background
+            properties:
+              width: 1920
+              height: 1080
+              color: "#0f3460"
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: game-placeholder
+            type: Label2D
+            name: Game Placeholder
+            properties:
+              label: "YOUR GAME GOES HERE"
+              labelFontSize: 64
+              labelColor: "#ffffff"
+              labelAlign: center
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: back-button
+            type: Button2D
+            name: Back Button
+            properties:
+              width: 220
+              height: 80
+              label: "BACK"
+              labelFontSize: 32
+              labelColor: "#ffffff"
+              backgroundColor: "#3a3a5e"
+              hoverColor: "#4a4a6e"
+              pressedColor: "#2a2a4e"
+              buttonAction: back-to-menu
+              transform:
+                position: [-820, 460]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: left
+                verticalAlign: top
+            children: []
+      - id: settings-window
+        name: Settings Window
+        instance: res://src/assets/scenes/settings-window.pix3scene

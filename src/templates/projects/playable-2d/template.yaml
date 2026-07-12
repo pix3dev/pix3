@@ -1,0 +1,7 @@
+id: playable-2d
+title: Playable 2D
+description: Portrait 2D playable-ad blank — tap-to-start intro (unlocks audio), gameplay placeholder, end screen with a store CTA button.
+projectType: 2d
+targetPlatform: mobile
+viewport: { width: 1080, height: 1920 }
+order: 40

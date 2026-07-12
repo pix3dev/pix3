@@ -197,6 +197,15 @@ connections where the script is the target).
 `scene.fadeToBlack(sec)` / `fadeFromBlack(sec)` / `switchCameraWithFade(id, out, in)`
 / `flash(opts)`. Real-time overlays (survive hitstop).
 
+### Playable SDK (store CTA / game end)
+`import { playable } from '@pix3/runtime'` — `playable.openStore(url?)` opens the
+app-store page (prefers `mraid.open` when an ad network injects it, else
+`window.open`; default URL via `setDefaultStoreUrl`), `playable.gameEnd()` marks
+the session over (idempotent; `onGameEnd(cb)` to observe, auto-`reset()` on every
+`SceneRunner.startScene`). Ad-network adapters plug in via `setPlayableAdapter`.
+Use for playable-ad CTA buttons and end screens; the `playable-2d/3d` project
+templates ship a `user:CtaButton` script wired to it.
+
 ---
 
 ## 5. Scripts-facing runtime API (the surface a `Script` sees)

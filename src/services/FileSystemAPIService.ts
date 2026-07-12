@@ -402,17 +402,28 @@ export class FileSystemAPIService {
       return error;
     }
 
+    // Surface the underlying cause in the message — a bare "Failed to write
+    // file at X" hides whether it was permissions, a missing parent directory,
+    // or a name the browser refused.
+    const detail =
+      error instanceof DOMException
+        ? ` (${error.name}: ${error.message})`
+        : error instanceof Error
+          ? ` (${error.message})`
+          : '';
+    const detailedMessage = `${message}${detail}`;
+
     if (error instanceof DOMException) {
       if (error.name === 'NotAllowedError') {
-        return new FileSystemAPIError('permission-denied', message, error);
+        return new FileSystemAPIError('permission-denied', detailedMessage, error);
       }
       if (error.name === 'NotFoundError') {
-        return new FileSystemAPIError('not-found', message, error);
+        return new FileSystemAPIError('not-found', detailedMessage, error);
       }
     }
 
-    this.logger?.(message, error);
-    return new FileSystemAPIError('unknown', message, error);
+    this.logger?.(detailedMessage, error);
+    return new FileSystemAPIError('unknown', detailedMessage, error);
   }
 
   private normalizeResolutionError(

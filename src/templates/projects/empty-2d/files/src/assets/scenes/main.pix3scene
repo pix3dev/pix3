@@ -1,0 +1,68 @@
+# Pix3 Scene File (YAML)
+# Empty 2D starter: a Full HD canvas with a background, a centered label and the
+# project logo. All content lives on the 2D layer.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Empty 2D starter scene
+root:
+  - id: ui-root
+    type: Group2D
+    name: UI Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    children:
+      - id: background
+        type: ColorRect2D
+        name: Background
+        properties:
+          width: 1920
+          height: 1080
+          color: "#1a1a2e"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: title-label
+        type: Label2D
+        name: Title Label
+        properties:
+          label: "{{PROJECT_NAME}}"
+          labelFontSize: 72
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [0, 60]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []
+      - id: logo-sprite
+        type: Sprite2D
+        name: Logo Sprite
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/pix3-logo.png' }
+          width: 96
+          height: 96
+          transform:
+            position: [0, -80]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []

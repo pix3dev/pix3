@@ -12,7 +12,7 @@ import {
   SceneSaver,
   ScriptRegistry,
 } from '@pix3/runtime';
-import { activeScenePath, scenePaths } from './generated/scene-manifest';
+import { activeScenePath, scenePaths, runtimeQuality } from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
 
@@ -42,7 +42,11 @@ async function bootstrap(): Promise<void> {
   const graph = await sceneManager.parseScene(sceneText, { filePath: scenePath });
   sceneManager.setActiveSceneGraph(scenePath, graph);
 
-  const renderer = new RuntimeRenderer({ antialias: true, shadows: true });
+  const renderer = new RuntimeRenderer({
+    antialias: runtimeQuality.antialias,
+    shadows: runtimeQuality.shadows,
+    pixelRatio: Math.min(window.devicePixelRatio || 1, runtimeQuality.maxPixelRatio),
+  });
   renderer.attach(app);
 
   const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);

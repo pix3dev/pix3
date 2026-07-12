@@ -200,6 +200,9 @@ function createManifest(metadata: Record<string, unknown> = {}): ProjectManifest
       width: 1920,
       height: 1080,
     },
+    projectType: '3d',
+    targetPlatform: 'universal',
+    quality: { antialias: true, shadows: true, maxPixelRatio: 2 },
     metadata,
   };
 }

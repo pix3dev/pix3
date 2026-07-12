@@ -1,0 +1,7 @@
+id: empty-2d
+title: Empty 2D
+description: Minimal 2D starter — background, centered label and logo on a Full HD canvas.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1920, height: 1080 }
+order: 20
