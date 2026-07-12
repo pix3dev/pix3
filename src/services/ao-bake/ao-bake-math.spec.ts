@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { Box3, BoxGeometry, Mesh, MeshBasicMaterial, OrthographicCamera, Vector3, Vector4 } from 'three';
+import {
+  Box3,
+  BoxGeometry,
+  Mesh,
+  MeshBasicMaterial,
+  OrthographicCamera,
+  Vector3,
+  Vector4,
+} from 'three';
 
 import {
   computeWorldBounds,
@@ -20,7 +28,9 @@ describe('ao-bake-math', () => {
 
     it('is roughly balanced over the sphere (mean near origin)', () => {
       const dirs = generateSphereDirections(256);
-      const mean = dirs.reduce((acc, d) => acc.add(d), new Vector3()).multiplyScalar(1 / dirs.length);
+      const mean = dirs
+        .reduce((acc, d) => acc.add(d), new Vector3())
+        .multiplyScalar(1 / dirs.length);
       expect(mean.length()).toBeLessThan(0.1);
     });
 

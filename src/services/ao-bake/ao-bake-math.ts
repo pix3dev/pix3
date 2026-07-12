@@ -92,8 +92,5 @@ export function fitOrthoToBounds(
 /** View-projection matrix for a fitted camera (world → clip), for depth reprojection. */
 export function viewProjectionMatrix(camera: OrthographicCamera): Matrix4 {
   camera.updateMatrixWorld(true);
-  return new Matrix4().multiplyMatrices(
-    camera.projectionMatrix,
-    camera.matrixWorldInverse
-  );
+  return new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
 }

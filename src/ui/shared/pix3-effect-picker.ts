@@ -78,7 +78,9 @@ export class EffectPicker extends ComponentBase {
                       ${grouped.get(category)!.map(
                         e => html`
                           <div
-                            class="behavior-item ${this.selectedEffectId === e.id ? 'selected' : ''}"
+                            class="behavior-item ${this.selectedEffectId === e.id
+                              ? 'selected'
+                              : ''}"
                             @click=${() => (this.selectedEffectId = e.id)}
                             @dblclick=${() => this.dispatchSelect(e)}
                           >
@@ -94,7 +96,9 @@ export class EffectPicker extends ComponentBase {
                 `
               )}
               ${filtered.length === 0
-                ? html`<div class="no-results">No effects found matching "${this.searchQuery}"</div>`
+                ? html`<div class="no-results">
+                    No effects found matching "${this.searchQuery}"
+                  </div>`
                 : ''}
             </div>
 
@@ -104,7 +108,9 @@ export class EffectPicker extends ComponentBase {
                     <div class="description-title">${selected.displayName}</div>
                     <div class="description-text">${selected.description}</div>
                   `
-                : html`<div class="description-empty">Select an effect to see its description.</div>`}
+                : html`<div class="description-empty">
+                    Select an effect to see its description.
+                  </div>`}
             </div>
           </div>
 

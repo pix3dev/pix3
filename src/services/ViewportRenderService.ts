@@ -1246,17 +1246,13 @@ export class ViewportRendererService {
 
   private shouldSkipSelectionBounds(node: Node3D): boolean {
     return (
-      node instanceof Camera3D ||
-      node instanceof VirtualCamera3D ||
-      this.isExplicitLightNode(node)
+      node instanceof Camera3D || node instanceof VirtualCamera3D || this.isExplicitLightNode(node)
     );
   }
 
   private shouldKeepSelectedNodeIcon(node: Node3D): boolean {
     return (
-      node instanceof Camera3D ||
-      node instanceof VirtualCamera3D ||
-      this.isExplicitLightNode(node)
+      node instanceof Camera3D || node instanceof VirtualCamera3D || this.isExplicitLightNode(node)
     );
   }
 

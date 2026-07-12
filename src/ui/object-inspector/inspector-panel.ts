@@ -2719,9 +2719,7 @@ ${textPreview?.content || 'Empty file'}</pre
               </div>
             `;
           })}
-          ${effects.length === 0
-            ? html`<div class="no-scripts">No effects attached</div>`
-            : ''}
+          ${effects.length === 0 ? html`<div class="no-scripts">No effects attached</div>` : ''}
         </div>
       </div>
     `;

@@ -201,9 +201,7 @@ export class ProjectSettingsDialog extends ComponentBase {
                           .value as ProjectAODefault;
                       }}
                     >
-                      ${PROJECT_AO_MODES.map(
-                        mode => html`<option value=${mode}>${mode}</option>`
-                      )}
+                      ${PROJECT_AO_MODES.map(mode => html`<option value=${mode}>${mode}</option>`)}
                     </select>
                     <div class="hint">
                       Default AO strategy scenes inherit when their PostProcess node is set to
