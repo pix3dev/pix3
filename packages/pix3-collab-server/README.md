@@ -52,6 +52,9 @@ packages/pix3-collab-server/
 
 - `PORT`: Единый порт для HTTP API и WebSocket (по умолчанию `4001`)
 - `COLLABORATION_PATH`: WebSocket endpoint для Hocuspocus (по умолчанию `/collaboration`)
+- `PREVIEW_PATH`: WebSocket endpoint для remote-preview relay (по умолчанию `/preview`)
+- `PREVIEW_PUBLIC_URL`: публичный origin этого сервера (например `https://cloud.pix3.dev`). Возвращается редактору при создании preview-сессии: join-ссылка получает `&relay=<origin>`, плеер и агент подключаются к серверу напрямую, где бы ни была открыта страница плеера. Для локального запуска оставить пустым.
+- `PREVIEW_SESSION_TTL_MS`: скользящий TTL preview-сессии (по умолчанию 6 часов)
 - `DB_PATH`: Путь к основной SQLite БД (по умолчанию `./data/core.sqlite`)
 - `HOCUSPOCUS_DB_PATH`: Путь к SQLite БД для CRDT-состояния (по умолчанию `./data/crdt.sqlite`)
 - `PROJECTS_STORAGE_DIR`: Путь к директории с проектами и ассетами (по умолчанию `./data/projects`)
@@ -142,6 +145,7 @@ HOCUSPOCUS_DB_PATH=./data/crdt.sqlite
 PROJECTS_STORAGE_DIR=./data/projects
 JWT_SECRET=replace-with-strong-secret
 PASSWORD_SALT_ROUNDS=10
+PREVIEW_PUBLIC_URL=https://cloud.pix3.dev
 EOF
 ```
 
@@ -207,6 +211,23 @@ location /collaboration {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Remote-preview relay: тот же upgrade-passthrough, что и для /collaboration.
+location /preview {
+    client_max_body_size 100m;
+    proxy_pass http://127.0.0.1:4001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Relay гоняет крупные бинарные фреймы (ассеты, скриншоты) — не буферизуем
+    # и держим соединение дольше дефолтных 60s.
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
 }
 ```
 

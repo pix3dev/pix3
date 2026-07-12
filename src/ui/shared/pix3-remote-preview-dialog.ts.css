@@ -2,6 +2,12 @@
   width: min(92vw, 620px);
 }
 
+/* The global .dialog-message keeps template newlines (pre-wrap for confirm
+   dialogs); this dialog uses regular markup, so collapse whitespace. */
+.remote-preview-dialog-content .dialog-message {
+  white-space: normal;
+}
+
 .remote-preview-body {
   display: flex;
   gap: 20px;
@@ -24,10 +30,20 @@
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.remote-preview-details .dialog-field {
+  margin-top: 0;
+  min-width: 0;
 }
 
 .remote-preview-link {
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 40px;
   padding: 8px 12px;
   border-radius: 10px;
@@ -36,6 +52,7 @@
   color: #fff;
   font: inherit;
   font-size: 12px;
+  text-overflow: ellipsis;
 }
 
 .remote-preview-link:focus {

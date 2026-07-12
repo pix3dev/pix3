@@ -44,6 +44,10 @@ previewRouter.post('/sessions', (req: Request, res: Response) => {
     guestToken: session.guestToken,
     expiresAt: session.expiresAt,
     previewPath: config.PREVIEW_PATH,
+    // Public origin of this server (PREVIEW_PUBLIC_URL), or null when it is
+    // reached same-origin/through a proxy. Lets join links carry an explicit
+    // relay origin so players connect here directly from any page host.
+    serverUrl: config.PREVIEW_PUBLIC_URL || null,
     joinPath: `/player.html?session=${encodeURIComponent(session.id)}&token=${encodeURIComponent(session.guestToken)}`,
   });
 });

@@ -22,6 +22,8 @@ export interface PreviewHostSessionInfo {
   readonly joinUrl: string;
   readonly agentToken: string;
   readonly expiresAt: number;
+  /** Origin the session's HTTP API + relay live on (this editor's view of it). */
+  readonly apiOrigin: string;
 }
 
 export interface PreviewHostState {
@@ -38,6 +40,32 @@ interface CreateSessionResponse {
   guestToken: string;
   expiresAt: number;
   joinPath: string;
+  serverUrl?: string | null;
+}
+
+/**
+ * Where this editor reaches the preview server. Mirrors the ApiClient
+ * convention: dev goes same-origin through the Vite proxy (target =
+ * VITE_COLLAB_SERVER_URL, e.g. https://cloud.pix3.dev), production talks to
+ * VITE_COLLAB_SERVER_URL directly. Empty string means same-origin.
+ */
+function resolvePreviewApiOrigin(): string {
+  if (import.meta.env.DEV) {
+    return '';
+  }
+
+  const configured = (import.meta.env.VITE_COLLAB_SERVER_URL as string | undefined)?.trim();
+  return (configured || 'http://localhost:4001').replace(/\/+$/, '');
+}
+
+/**
+ * Public base URL of the player page used in join links/QR (e.g. the deployed
+ * editor origin, so phones can open it while this editor runs on localhost).
+ * Defaults to this editor's own origin.
+ */
+function resolvePlayerBaseUrl(): string {
+  const configured = (import.meta.env.VITE_PREVIEW_PLAYER_URL as string | undefined)?.trim();
+  return (configured || location.origin).replace(/\/+$/, '');
 }
 
 const SCENE_UPDATE_DEBOUNCE_MS = 400;
@@ -154,7 +182,8 @@ export class PreviewHostService {
   // ── Session / connection ───────────────────────────────────────────────────
 
   private async createSession(): Promise<PreviewHostSessionInfo> {
-    const response = await fetch('/api/preview/sessions', { method: 'POST' });
+    const apiOrigin = resolvePreviewApiOrigin();
+    const response = await fetch(`${apiOrigin}/api/preview/sessions`, { method: 'POST' });
     if (!response.ok) {
       throw new Error(
         `Failed to create a preview session (HTTP ${response.status}). Is the collab server running?`
@@ -164,16 +193,27 @@ export class PreviewHostService {
     const payload = (await response.json()) as CreateSessionResponse;
     this.hostToken = payload.hostToken;
 
+    // When the server advertises its public origin (PREVIEW_PUBLIC_URL, e.g.
+    // https://cloud.pix3.dev), bake it into the join link so the player
+    // connects to that relay directly no matter where the page is hosted.
+    const serverUrl = (payload.serverUrl ?? '').replace(/\/+$/, '');
+    const relaySuffix = serverUrl ? `&relay=${encodeURIComponent(serverUrl)}` : '';
+
     return {
       sessionId: payload.sessionId,
-      joinUrl: `${location.origin}${payload.joinPath}`,
+      joinUrl: `${resolvePlayerBaseUrl()}${payload.joinPath}${relaySuffix}`,
       agentToken: payload.agentToken,
       expiresAt: payload.expiresAt,
+      apiOrigin: serverUrl || apiOrigin || location.origin,
     };
   }
 
   private async connect(session: PreviewHostSessionInfo): Promise<void> {
-    const wsUrl = buildPreviewWsUrl(location.origin, session.sessionId, this.hostToken);
+    const wsUrl = buildPreviewWsUrl(
+      resolvePreviewApiOrigin() || location.origin,
+      session.sessionId,
+      this.hostToken
+    );
 
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(wsUrl);
@@ -471,7 +511,9 @@ export class PreviewHostService {
 
       const payload = {
         sessionId: session.sessionId,
-        apiBaseUrl: `${location.origin}/api/preview`,
+        // Prefers the server's advertised public origin (agents can then hit
+        // e.g. cloud.pix3.dev directly, independent of this dev server).
+        apiBaseUrl: `${session.apiOrigin}/api/preview`,
         agentToken: session.agentToken,
         joinUrl: session.joinUrl,
         expiresAt: session.expiresAt,

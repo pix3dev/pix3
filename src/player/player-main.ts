@@ -66,11 +66,14 @@ class PreviewPlayerApp {
   private lastSample: SceneRunnerFrameSample | null = null;
   private lastMetricsFlush = performance.now();
 
-  constructor(ui: PlayerUi, sessionId: string, token: string) {
+  constructor(ui: PlayerUi, sessionId: string, token: string, relayOrigin: string | null) {
     this.ui = ui;
     this.client = new PreviewPlayerClient(
       sessionId,
-      buildPreviewWsUrl(location.origin, sessionId, token),
+      // An explicit relay origin in the join link (set when the preview server
+      // advertises PREVIEW_PUBLIC_URL, e.g. https://cloud.pix3.dev) beats the
+      // page origin, so the player works no matter where this page is hosted.
+      buildPreviewWsUrl(relayOrigin || location.origin, sessionId, token),
       {
         onSessionConfig: config => {
           const entrySceneChanged = this.sessionConfig?.entryScenePath !== config.entryScenePath;
@@ -548,6 +551,8 @@ function bootstrap(): void {
   const params = new URLSearchParams(location.search);
   const sessionId = params.get('session') ?? '';
   const token = params.get('token') ?? '';
+  const relayParam = (params.get('relay') ?? '').trim().replace(/\/+$/, '');
+  const relayOrigin = /^https?:\/\//i.test(relayParam) ? relayParam : null;
 
   if (!sessionId || !token) {
     ui.statusTitle.textContent = 'Missing session';
@@ -556,7 +561,7 @@ function bootstrap(): void {
     return;
   }
 
-  const playerApp = new PreviewPlayerApp(ui, sessionId, token);
+  const playerApp = new PreviewPlayerApp(ui, sessionId, token, relayOrigin);
   playerApp.start();
 }
 

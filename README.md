@@ -29,6 +29,15 @@ The **target platform** choice writes `projectType` / `targetPlatform` / `qualit
 
 **Remote Preview** (`Project → Start Remote Preview`) shares a live QR/link: a standalone player (`player.html`) streams the active scene, compiled scripts and every `res://` asset straight out of the open editor through a WebSocket relay on the collab server — nothing is uploaded; phones join over the same link. The editor pushes changes on every save, and an **agent HTTP API** (`/api/preview/sessions/:id/…`, token in `.pix3/preview-session.json`) lets a CLI agent reload its on-disk edits, restart players, read logs/metrics and take screenshots (see the `pix3-remote-preview` skill).
 
+A localhost editor can use the **cloud relay instead of a local collab server** — put in `.env.local`:
+
+```bash
+VITE_COLLAB_SERVER_URL=https://cloud.pix3.dev   # dev proxy target for /api, /collaboration, /preview
+VITE_PREVIEW_PLAYER_URL=https://editor.pix3.dev # optional: public player page for QR links (phones)
+```
+
+The cloud server sets `PREVIEW_PUBLIC_URL=https://cloud.pix3.dev`, so join links carry `&relay=…` and players/agents connect to the cloud relay directly regardless of where the player page is served. In production builds the editor talks to `VITE_COLLAB_SERVER_URL` directly (same convention as the rest of the API).
+
 **Export** ships two flavors: single-file playable HTML (assets base64-embedded) and **HTML + assets zip** (`Project → Export HTML + Assets (Zip)`) for static hosting without the base64 overhead.
 
 The full rapid-prototyping design is in `.plans/rapid-prototyping-design.md`.
