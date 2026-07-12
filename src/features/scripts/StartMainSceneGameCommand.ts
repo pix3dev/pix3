@@ -10,16 +10,20 @@ import { GamePlaySessionService } from '@/services/GamePlaySessionService';
 import { OperationService } from '@/services/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 
-export class StartGameCommand extends CommandBase<void, void> {
+/**
+ * Starts the game from the project's main scene (Project Settings →
+ * Default Export Scene Path), opening that scene first when needed. Falls
+ * back to the active scene when no main scene is configured.
+ */
+export class StartMainSceneGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
-    id: 'game.start',
-    title: 'Start Current Scene',
-    description: 'Start the game from the active scene',
-    keywords: ['play', 'game', 'start', 'scene', 'current'],
+    id: 'game.start-main',
+    title: 'Start Game',
+    description: 'Start the game from the project main scene',
+    keywords: ['play', 'game', 'start', 'main', 'run'],
     menuPath: 'project',
-    keybinding: 'Mod+Ctrl+Enter',
     addToMenu: true,
-    menuOrder: 102,
+    menuOrder: 101,
   };
 
   private readonly editorTabService: EditorTabService;
@@ -32,6 +36,14 @@ export class StartGameCommand extends CommandBase<void, void> {
   }
 
   preconditions(context: CommandContext): CommandPreconditionResult {
+    if (context.state.project.status !== 'ready') {
+      return {
+        canExecute: false,
+        reason: 'Project must be opened',
+        scope: 'project',
+      };
+    }
+
     if (context.snapshot.ui.isPlaying) {
       return {
         canExecute: false,
@@ -45,6 +57,22 @@ export class StartGameCommand extends CommandBase<void, void> {
   }
 
   async execute(context: CommandContext): Promise<CommandExecutionResult<void>> {
+    const mainScenePath = this.resolveMainScenePath(context);
+    if (mainScenePath) {
+      await this.editorTabService.focusOrOpenScene(`res://${mainScenePath}`);
+    } else if (!context.state.scenes.activeSceneId) {
+      const firstDescriptor = Object.values(context.state.scenes.descriptors)[0];
+      if (!firstDescriptor) {
+        console.warn('[StartMainSceneGameCommand] No scenes available to play.');
+        return { didMutate: false, payload: undefined };
+      }
+      await this.editorTabService.focusOrOpenScene(firstDescriptor.filePath);
+    } else {
+      console.warn(
+        '[StartMainSceneGameCommand] No main scene configured (Project Settings → Default Export Scene Path); playing the active scene.'
+      );
+    }
+
     const operationService = context.container.getService<OperationService>(
       context.container.getOrCreateToken(OperationService)
     );
@@ -67,5 +95,14 @@ export class StartGameCommand extends CommandBase<void, void> {
       didMutate: true,
       payload: undefined,
     };
+  }
+
+  private resolveMainScenePath(context: CommandContext): string | null {
+    const configured = context.state.project.manifest?.defaultExportScenePath?.trim() ?? '';
+    if (!configured) {
+      return null;
+    }
+
+    return configured.replace(/^res:\/\//i, '');
   }
 }

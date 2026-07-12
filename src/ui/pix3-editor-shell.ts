@@ -57,6 +57,7 @@ import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { UndoCommand } from '@/features/history/UndoCommand';
 import { RedoCommand } from '@/features/history/RedoCommand';
 import { StartGameCommand } from '@/features/scripts/StartGameCommand';
+import { StartMainSceneGameCommand } from '@/features/scripts/StartMainSceneGameCommand';
 import { StopGameCommand } from '@/features/scripts/StopGameCommand';
 import { RestartGameCommand } from '@/features/scripts/RestartGameCommand';
 import { OpenGamePopoutWindowCommand } from '@/features/scripts/OpenGamePopoutWindowCommand';
@@ -102,6 +103,8 @@ import {
 } from '@/services/ProjectLifecycleService';
 import './shared/pix3-toolbar';
 import './shared/pix3-toolbar-button';
+import './shared/pix3-dropdown-button';
+import type { DropdownItem } from './shared/pix3-dropdown-button';
 import './shared/pix3-main-menu';
 import './shared/pix3-confirm-dialog';
 import './shared/pix3-behavior-picker';
@@ -348,6 +351,10 @@ export class Pix3EditorShell extends ComponentBase {
       this.editorTabService,
       this.gamePlaySessionService
     );
+    const startMainSceneGameCommand = new StartMainSceneGameCommand(
+      this.editorTabService,
+      this.gamePlaySessionService
+    );
     const stopGameCommand = new StopGameCommand(this.editorTabService, this.gamePlaySessionService);
     const restartGameCommand = new RestartGameCommand(this.gamePlaySessionService);
     const openGamePopoutWindowCommand = new OpenGamePopoutWindowCommand(
@@ -402,6 +409,7 @@ export class Pix3EditorShell extends ComponentBase {
       groupSelectedCommand,
       saveAsPrefabCommand,
       startGameCommand,
+      startMainSceneGameCommand,
       stopGameCommand,
       restartGameCommand,
       openGamePopoutWindowCommand,
@@ -969,24 +977,30 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderWorkspaceOverlay()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}
-        ${this.renderScriptCreatorHost()}
-        ${this.renderProjectSettingsHost()} ${this.renderProjectSyncHost()}
-        ${this.renderEditorSettingsHost()} ${this.renderAnimationAutoSliceHost()}
-        ${this.renderAssetImportHost()} ${this.renderSaveGeneratedAssetHost()}
-        ${this.renderCreateProjectHost()} ${this.renderNodeTypePickerHost()}
-        ${this.renderPlayableExportDialogHost()} ${this.renderPlayableExportProgressDialogHost()}
-        ${this.renderRemotePreviewDialogHost()} ${this.renderAuthModal()}
+        ${this.renderScriptCreatorHost()} ${this.renderProjectSettingsHost()}
+        ${this.renderProjectSyncHost()} ${this.renderEditorSettingsHost()}
+        ${this.renderAnimationAutoSliceHost()} ${this.renderAssetImportHost()}
+        ${this.renderSaveGeneratedAssetHost()} ${this.renderCreateProjectHost()}
+        ${this.renderNodeTypePickerHost()} ${this.renderPlayableExportDialogHost()}
+        ${this.renderPlayableExportProgressDialogHost()} ${this.renderRemotePreviewDialogHost()}
+        ${this.renderAuthModal()}
       </div>
     `;
   }
 
   private renderToolbar() {
     const isPlaying = appState.ui.isPlaying;
+    const runOptions: DropdownItem[] = [
+      { id: 'game.start-main', label: 'Start Game', icon: 'play', disabled: isPlaying },
+      { id: 'game.start', label: 'Start Current Scene', icon: 'film', disabled: isPlaying },
+      { id: 'run-options-divider', label: '', divider: true },
+      { id: 'project.start-remote-preview', label: 'Remote Preview…', icon: 'cast' },
+    ];
     return html`
       <pix3-toolbar aria-label="Editor toolbar">
         <pix3-main-menu slot="start"></pix3-main-menu>
         <div class="toolbar-content">
-          <div class="toolbar-group">
+          <div class="toolbar-group toolbar-group--play">
             <pix3-toolbar-button
               icon=${isPlaying ? 'square' : 'play'}
               iconOnly
@@ -995,6 +1009,13 @@ export class Pix3EditorShell extends ComponentBase {
               @click=${() => this.togglePlayMode()}
               aria-label=${isPlaying ? 'Stop Scene' : 'Play Scene'}
             ></pix3-toolbar-button>
+            <pix3-dropdown-button
+              class="run-options-dropdown"
+              aria-label="Run options"
+              title="Run options"
+              .items=${runOptions}
+              @item-select=${this.onRunOptionSelect}
+            ></pix3-dropdown-button>
           </div>
           <span> Project: ${appState.project.projectName ?? 'No project open'} </span>
           <collab-participants-strip></collab-participants-strip>
@@ -1236,6 +1257,11 @@ export class Pix3EditorShell extends ComponentBase {
     const commandId = appState.ui.isPlaying ? 'game.stop' : 'game.start';
     void this.commandDispatcher.executeById(commandId);
   }
+
+  private onRunOptionSelect = (event: CustomEvent<DropdownItem>): void => {
+    event.stopPropagation();
+    void this.commandDispatcher.executeById(event.detail.id);
+  };
 
   private renderPickerHost() {
     return html`

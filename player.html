@@ -14,6 +14,8 @@
 
     * {
       box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     html,
@@ -27,6 +29,12 @@
       color: #f5f7fa;
       overscroll-behavior: none;
       touch-action: none;
+      /* Game surface: taps must never select text, show the iOS long-press
+         callout, or flash the tap highlight. */
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
     #app {

@@ -164,9 +164,11 @@ export class Pix3DropdownButton extends ComponentBase {
   protected render() {
     return html`
       <div class="dropdown__trigger">
-        <span class="dropdown__icon"
-          >${this.iconService.getIconOrRawSvg(this.icon, IconSize.LARGE)}</span
-        >
+        ${this.icon
+          ? html`<span class="dropdown__icon"
+              >${this.iconService.getIconOrRawSvg(this.icon, IconSize.LARGE)}</span
+            >`
+          : null}
         ${this.iconService.getIcon('chevron-down-caret', 12)}
       </div>
       <div class="dropdown__menu dropdown__menu--hidden" role="menu">
