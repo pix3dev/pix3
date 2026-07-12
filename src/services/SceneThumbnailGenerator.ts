@@ -15,13 +15,10 @@ import {
 } from 'three';
 import {
   AnimatedSprite3D,
-  Camera3D,
   Node2D,
-  NodeBase,
   SceneManager,
   Sprite3D,
   assign2DRenderOrder,
-  findActiveCamera2D,
   type SceneGraph,
 } from '@pix3/runtime';
 import { appState } from '@/state';
@@ -116,11 +113,12 @@ export class SceneThumbnailGenerator {
       scene.add(root);
     }
 
-    const design = this.getDesignSize();
-
-    // Scene files render at their design frame (matching the play view); prefab
-    // files auto-frame their content so a reusable widget/model fills the tile.
+    // Scenes anchor their 2D content to the project design frame first, so
+    // anchored elements land at their final positions before we measure the
+    // content bounds. Prefabs are laid out by their eventual parent, so they
+    // keep their authored local positions.
     if (!isPrefab) {
+      const design = this.getDesignSize();
       for (const root of graph.rootNodes) {
         if (root instanceof Node2D) {
           root.applyAnchoredLayoutRecursive(design, design);
@@ -132,40 +130,32 @@ export class SceneThumbnailGenerator {
 
     const bounds3D = this.collectLayerBounds(scene, LAYER_3D);
     const bounds2D = this.collectLayerBounds(scene, LAYER_2D);
-    const activeCamera3D = this.findActiveCamera3D(graph.rootNodes);
-    const has3D = !!activeCamera3D || !!bounds3D;
-    const has2D = !!bounds2D;
 
-    if (!has3D && !has2D) {
+    if (!bounds3D && !bounds2D) {
       throw new Error('Scene has no renderable content.');
     }
 
     // ── Framing ─────────────────────────────────────────────────────────────
+    // Always frame to the actual content bounds — the same "fit everything"
+    // behaviour as the viewport's Show All button — so the tile is filled by the
+    // scene/prefab instead of the (often mostly-empty) design frame.
     let aspect: number;
     let camera3D: Camera | null = null;
     let camera2D: OrthographicCamera | null = null;
 
-    if (isPrefab) {
-      if (has3D) {
-        aspect = 1;
-        camera3D = this.buildFramedPerspectiveCamera(bounds3D, activeCamera3D, aspect);
-        // A 3D prefab may still carry a HUD; keep it framed to the design rect.
-        if (has2D) {
-          camera2D = this.buildDesignOrthographicCamera(design, graph.rootNodes);
-        }
-      } else {
-        const framed = this.buildFittedOrthographicCamera(bounds2D!);
-        camera2D = framed.camera;
-        aspect = framed.aspect;
+    if (bounds2D) {
+      const framed = this.buildFittedOrthographicCamera(bounds2D);
+      camera2D = framed.camera;
+      aspect = framed.aspect;
+      // Any 3D content sits behind the 2D pass, framed to its own bounds so it
+      // reads as a backdrop rather than dictating the tile aspect.
+      if (bounds3D) {
+        camera3D = this.buildFramedPerspectiveCamera(bounds3D, aspect);
       }
     } else {
-      aspect = design.width / design.height;
-      if (has3D) {
-        camera3D = this.buildFramedPerspectiveCamera(bounds3D, activeCamera3D, aspect);
-      }
-      if (has2D) {
-        camera2D = this.buildDesignOrthographicCamera(design, graph.rootNodes);
-      }
+      // Pure 3D content — square tile, framed like a model thumbnail.
+      aspect = 1;
+      camera3D = this.buildFramedPerspectiveCamera(bounds3D, aspect);
     }
 
     const { width, height } = this.resolveCanvasSize(aspect);
@@ -211,21 +201,6 @@ export class SceneThumbnailGenerator {
     };
   }
 
-  private findActiveCamera3D(nodes: readonly NodeBase[]): Camera3D | null {
-    for (const node of nodes) {
-      if (node instanceof Camera3D && node.visible) {
-        return node;
-      }
-      const child = this.findActiveCamera3D(
-        node.children.filter((entry): entry is NodeBase => entry instanceof NodeBase)
-      );
-      if (child) {
-        return child;
-      }
-    }
-    return null;
-  }
-
   /** Union bounds of every visible geometry-bearing object on `layer`, or null. */
   private collectLayerBounds(scene: Scene, layer: number): Box3 | null {
     const box = new Box3();
@@ -248,18 +223,8 @@ export class SceneThumbnailGenerator {
     return box;
   }
 
-  private buildFramedPerspectiveCamera(
-    bounds: Box3 | null,
-    authored: Camera3D | null,
-    aspect: number
-  ): Camera {
-    if (authored) {
-      authored.updateAspectRatio(aspect);
-      authored.camera.layers.disableAll();
-      authored.camera.layers.enable(LAYER_3D);
-      return authored.camera;
-    }
-
+  /** Perspective camera orbit-framed to `bounds` (like a model thumbnail). */
+  private buildFramedPerspectiveCamera(bounds: Box3 | null, aspect: number): Camera {
     const camera = new PerspectiveCamera(40, aspect, 0.01, 1000);
     camera.layers.disableAll();
     camera.layers.enable(LAYER_3D);
@@ -282,29 +247,6 @@ export class SceneThumbnailGenerator {
     camera.near = Math.max(distance / 100, 0.01);
     camera.far = Math.max(distance * 12, 10);
     camera.lookAt(center);
-    camera.updateProjectionMatrix();
-    return camera;
-  }
-
-  /** Ortho camera covering the full design rect, honoring an active Camera2D. */
-  private buildDesignOrthographicCamera(
-    design: { width: number; height: number },
-    roots: readonly NodeBase[]
-  ): OrthographicCamera {
-    const halfW = design.width / 2;
-    const halfH = design.height / 2;
-    const camera = new OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 1000);
-    camera.position.z = 100;
-    camera.layers.disableAll();
-    camera.layers.enable(LAYER_2D);
-
-    const activeCamera2D = findActiveCamera2D(roots);
-    if (activeCamera2D) {
-      const view = activeCamera2D.computeView(design);
-      camera.position.x = view.x;
-      camera.position.y = view.y;
-      camera.zoom = view.zoom;
-    }
     camera.updateProjectionMatrix();
     return camera;
   }

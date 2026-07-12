@@ -147,3 +147,22 @@ export {
   type UpdateCheckStatus,
   type UpdateCheckListener,
 } from './UpdateCheckService';
+export { LlmProviderRegistry } from './llm/LlmProviderRegistry';
+export {
+  LlmError,
+  type ChatParams,
+  type LlmContentBlock,
+  type LlmMessage,
+  type LlmModel,
+  type LlmProvider,
+  type LlmRequestContext,
+  type LlmResult,
+  type LlmStopReason,
+  type LlmToolDefinition,
+} from './llm/LlmTypes';
+export { AgentSettingsService, type AgentPreferences } from './AgentSettingsService';
+export {
+  AgentToolRegistry,
+  type AgentToolDefinition,
+  type AgentToolSpec,
+} from './agent/AgentToolRegistry';

@@ -11,6 +11,11 @@
  * JSON-serialisable data — Three.js `Object3D`s and Valtio proxies are
  * circular and huge, so we hand back curated DTOs instead of live objects.
  *
+ * The serialisation/introspection primitives (DTOs, `safeSerialize`, error ring
+ * buffer) live in the production-safe `agent-introspection` module and are
+ * shared with the in-editor AI agent's tool layer — this bridge just wires them
+ * to `window`.
+ *
  * Mutations go through the normal mutation gateway (`CommandDispatcher`), so
  * they stay consistent and land in undo/redo — never poke `appState` or nodes
  * directly from here.
@@ -32,6 +37,23 @@ import type {
 } from '@/services/AssetGenService';
 import type { CropRectPixels } from '@/services/image-gen/image-ops';
 import {
+  clearErrors,
+  errors,
+  flattenLive,
+  installErrorCapture,
+  liveObjectToDTO,
+  nodeToDTO,
+  componentToDTO,
+  safeSerialize,
+  type CapturedError,
+  type ComponentDTO,
+  type Json,
+  type LiveObjectDTO,
+  type NodeDTO,
+  type NodeSummary,
+  type Object3DLike,
+} from '@/core/agent-introspection';
+import {
   SceneManager,
   NodeBase,
   getGameDebug,
@@ -39,115 +61,6 @@ import {
   getPhysicsDebugSource,
   isPhysicsDebugEnabled,
 } from '@pix3/runtime';
-
-// ---------------------------------------------------------------------------
-// JSON-safe serialisation
-// ---------------------------------------------------------------------------
-
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-const MAX_KEYS = 60;
-const MAX_ARRAY = 100;
-
-/**
- * Depth-limited, cycle-safe serialiser. Drops functions/symbols, collapses
- * Vector/Euler-like objects to `{x,y,z[,w]}`, and truncates deep/large values
- * so a single `evaluate_script` round-trip stays small.
- */
-function safeSerialize(value: unknown, depth = 2): Json {
-  if (value === null) return null;
-  const t = typeof value;
-  if (t === 'number' || t === 'boolean' || t === 'string') return value as Json;
-  if (t === 'bigint') return Number(value as bigint);
-  if (t === 'undefined' || t === 'function' || t === 'symbol') return null;
-
-  if (Array.isArray(value)) {
-    if (depth <= 0) return `[Array(${value.length})]`;
-    return value.slice(0, MAX_ARRAY).map(item => safeSerialize(item, depth - 1));
-  }
-
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj);
-  // Collapse only *pure* vectors (Vector3/Euler/Quaternion-like): an object
-  // whose only keys are x/y/z[/w]. A richer DTO that merely happens to carry
-  // x/y/z fields must NOT be flattened, or its other fields are silently lost.
-  const isPureVector =
-    keys.length <= 4 &&
-    typeof obj.x === 'number' &&
-    typeof obj.y === 'number' &&
-    typeof obj.z === 'number' &&
-    keys.every(k => k === 'x' || k === 'y' || k === 'z' || k === 'w');
-  if (isPureVector) {
-    const vec: { [key: string]: Json } = {
-      x: obj.x as number,
-      y: obj.y as number,
-      z: obj.z as number,
-    };
-    if (typeof obj.w === 'number') vec.w = obj.w;
-    return vec;
-  }
-
-  if (depth <= 0) return '[Object]';
-  const out: { [key: string]: Json } = {};
-  let count = 0;
-  for (const key of keys) {
-    if (key.startsWith('_')) continue;
-    if (count >= MAX_KEYS) {
-      out['…'] = `(+${Object.keys(obj).length - count} more keys)`;
-      break;
-    }
-    count += 1;
-    out[key] = safeSerialize(obj[key], depth - 1);
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// DTOs
-// ---------------------------------------------------------------------------
-
-interface TransformDTO {
-  position: Json;
-  rotation: Json;
-  scale: Json;
-}
-
-interface ComponentDTO {
-  index: number;
-  className: string;
-  scriptId: string | null;
-  state: Json;
-}
-
-interface NodeDTO {
-  nodeId: string;
-  type: string;
-  name: string;
-  visible: boolean;
-  transform: TransformDTO;
-  groups: string[];
-  componentCount: number;
-  properties: Json;
-  /** Present when children were expanded (tree view within maxDepth). */
-  children?: NodeDTO[];
-  /** Present when children exist but were not expanded (depth limit hit). */
-  childCount?: number;
-  /** Present only on single-node inspection (`node(id)`). */
-  components?: ComponentDTO[];
-}
-
-interface NodeSummary {
-  nodeId: string;
-  type: string;
-  name: string;
-}
-
-interface CapturedError {
-  at: number;
-  source: 'console.error' | 'window.onerror' | 'unhandledrejection';
-  message: string;
-  stack?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Service access helpers
@@ -188,205 +101,6 @@ function liveSceneRoot(): Object3DLike | null {
     node = node.parent;
   }
   return node;
-}
-
-function transformOf(node: NodeBase): TransformDTO {
-  return {
-    position: { x: node.position.x, y: node.position.y, z: node.position.z },
-    rotation: { x: node.rotation.x, y: node.rotation.y, z: node.rotation.z },
-    scale: { x: node.scale.x, y: node.scale.y, z: node.scale.z },
-  };
-}
-
-function nodeToDTO(node: NodeBase, depth: number): NodeDTO {
-  const childNodes = node.children.filter((c): c is NodeBase => c instanceof NodeBase);
-  const dto: NodeDTO = {
-    nodeId: node.nodeId,
-    type: node.type,
-    name: node.name,
-    visible: node.visible,
-    transform: transformOf(node),
-    groups: [...node.groups],
-    componentCount: node.components.length,
-    properties: safeSerialize(node.properties, 2),
-  };
-  if (childNodes.length === 0) return dto;
-  if (depth > 0) {
-    dto.children = childNodes.map(child => nodeToDTO(child, depth - 1));
-  } else {
-    dto.childCount = childNodes.length;
-  }
-  return dto;
-}
-
-// ---------------------------------------------------------------------------
-// Live Three.js object tree (play-mode runtime instances)
-// ---------------------------------------------------------------------------
-
-/**
- * During play, games spawn raw Three.js objects (sprites, instanced meshes,
- * falling-cluster meshes) as children of authored nodes — they are NOT NodeBase
- * and so never appear in `scene()`. This walks the *actual* Object3D tree so
- * tooling/the Runtime panel can see the live render hierarchy.
- */
-interface Object3DLike {
-  name?: string;
-  type?: string;
-  uuid?: string;
-  visible?: boolean;
-  renderOrder?: number;
-  position?: { x: number; y: number; z: number };
-  matrixWorld?: { elements: number[] };
-  children?: unknown[];
-  userData?: Record<string, unknown>;
-  count?: number;
-  isInstancedMesh?: boolean;
-}
-
-interface LiveObjectDTO {
-  threeType: string;
-  name: string;
-  uuid: string | null;
-  visible: boolean;
-  renderOrder: number;
-  /** World-space position read from matrixWorld (updated every play frame). */
-  worldPos: { x: number; y: number; z: number } | null;
-  isNodeBase: boolean;
-  nodeId: string | null;
-  /** Instance count for InstancedMesh (else null). */
-  instances: number | null;
-  flags: { droppable?: boolean; gizmo?: boolean; overlay2D?: boolean };
-  childCount: number;
-  children?: LiveObjectDTO[];
-}
-
-function liveObjectToDTO(obj: Object3DLike, depth: number): LiveObjectDTO {
-  const ctorName = (obj as { constructor?: { name?: string } }).constructor?.name;
-  const m = obj.matrixWorld?.elements;
-  const worldPos =
-    m && m.length >= 15
-      ? { x: round3(m[12]), y: round3(m[13]), z: round3(m[14]) }
-      : obj.position
-        ? { x: round3(obj.position.x), y: round3(obj.position.y), z: round3(obj.position.z) }
-        : null;
-  const ud = obj.userData ?? {};
-  const rawChildren = Array.isArray(obj.children) ? (obj.children as Object3DLike[]) : [];
-  const isNode = obj instanceof NodeBase;
-
-  const dto: LiveObjectDTO = {
-    threeType: obj.type || ctorName || 'Object3D',
-    name: obj.name || '',
-    uuid: obj.uuid ?? null,
-    visible: obj.visible !== false,
-    renderOrder: obj.renderOrder ?? 0,
-    worldPos,
-    isNodeBase: isNode,
-    nodeId: isNode ? (obj as unknown as NodeBase).nodeId : null,
-    instances: obj.isInstancedMesh ? (obj.count ?? null) : null,
-    flags: {
-      droppable: 'droppableItemRef' in ud || undefined,
-      gizmo: ud.isGizmo === true || undefined,
-      overlay2D: ud.overlay2D === true || undefined,
-    },
-    childCount: rawChildren.length,
-  };
-
-  if (rawChildren.length > 0 && depth > 0) {
-    dto.children = rawChildren.slice(0, MAX_ARRAY).map(child => liveObjectToDTO(child, depth - 1));
-  }
-  return dto;
-}
-
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
-}
-
-/** Flatten the live tree to a filtered list (for searching spawned objects). */
-function flattenLive(
-  obj: Object3DLike,
-  predicate: (dto: LiveObjectDTO, raw: Object3DLike) => boolean,
-  out: LiveObjectDTO[],
-  budget: { n: number }
-): void {
-  if (budget.n <= 0) return;
-  const dto = liveObjectToDTO(obj, 0);
-  if (predicate(dto, obj)) {
-    out.push(dto);
-    budget.n -= 1;
-  }
-  const children = Array.isArray(obj.children) ? (obj.children as Object3DLike[]) : [];
-  for (const child of children) flattenLive(child, predicate, out, budget);
-}
-
-function componentToDTO(component: unknown, index: number): ComponentDTO {
-  const rec = component as Record<string, unknown>;
-  const ctor = (component as { constructor?: { name?: string } }).constructor;
-  const scriptId =
-    (typeof rec.scriptId === 'string' && rec.scriptId) ||
-    (typeof rec.typeId === 'string' && rec.typeId) ||
-    (typeof rec.id === 'string' && rec.id) ||
-    null;
-
-  // Serialise only the component's own data fields (skip framework refs).
-  const skip = new Set(['node', 'input', 'scene', 'constructor']);
-  const state: { [key: string]: Json } = {};
-  for (const key of Object.keys(rec)) {
-    if (key.startsWith('_') || skip.has(key)) continue;
-    state[key] = safeSerialize(rec[key], 1);
-  }
-
-  return {
-    index,
-    className: ctor?.name ?? 'Unknown',
-    scriptId,
-    state,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Error capture (ring buffer)
-// ---------------------------------------------------------------------------
-
-const MAX_ERRORS = 200;
-const errorBuffer: CapturedError[] = [];
-
-function pushError(error: CapturedError): void {
-  errorBuffer.push(error);
-  if (errorBuffer.length > MAX_ERRORS) errorBuffer.shift();
-}
-
-function installErrorCapture(): void {
-  const originalConsoleError = console.error.bind(console);
-  console.error = (...args: unknown[]): void => {
-    pushError({
-      at: Date.now(),
-      source: 'console.error',
-      message: args
-        .map(a => (a instanceof Error ? `${a.name}: ${a.message}` : String(a)))
-        .join(' '),
-      stack: args.find((a): a is Error => a instanceof Error)?.stack,
-    });
-    originalConsoleError(...args);
-  };
-
-  window.addEventListener('error', event => {
-    pushError({
-      at: Date.now(),
-      source: 'window.onerror',
-      message: event.message,
-      stack: event.error instanceof Error ? event.error.stack : undefined,
-    });
-  });
-
-  window.addEventListener('unhandledrejection', event => {
-    const reason = event.reason;
-    pushError({
-      at: Date.now(),
-      source: 'unhandledrejection',
-      message: reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason),
-      stack: reason instanceof Error ? reason.stack : undefined,
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -693,11 +407,11 @@ function createBridge(): Pix3DebugBridge {
     },
 
     errors() {
-      return [...errorBuffer];
+      return errors();
     },
 
     clearErrors() {
-      errorBuffer.length = 0;
+      clearErrors();
     },
 
     assets: {
