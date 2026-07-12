@@ -10,6 +10,13 @@ to **reach for them** and wire them correctly, not to reimplement them.
 
 ## The loop
 
+0. **Search the Asset Library before generating art or building UI/prefabs from
+   scratch.** It holds reusable prefabs, images, fonts, audio and shaders (built-in
+   starter pack + personal + team). Open the **Library** panel (tabbed with the Asset
+   Browser), filter/search, and drag a card into the scene to insert (a snapshot copy
+   under `res://assets/library/<slug>/`). Publish reusable nodes back with **Publish to
+   Library** (Edit menu), and keep good generator results via **Save to Library**.
+
 1. **Consult the catalog: [references/nodes-and-systems.md](references/nodes-and-systems.md).**
    It lists every node, `core:*` behavior, system, and scripts-facing runtime API,
    each with how to use it. Per-node property detail is in
