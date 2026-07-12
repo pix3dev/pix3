@@ -1,6 +1,6 @@
 # Rapid Prototyping — бесшовный сценарий «прототип игры по идее»
 
-Дизайн-документ. Статус: фаза 1 в работе, фазы 2–4 — проектирование зафиксировано.
+Дизайн-документ. Статус: фазы 1–4 реализованы (см. пометки в фазировке).
 
 ## Целевой сценарий
 
@@ -23,10 +23,10 @@
 
 ## Фазировка
 
-- **Фаза 1 — Project bootstrap**: PWA, визард нового проекта с каталогом шаблонов, папка `design/`, копирование скиллов и AGENTS.md, платформенные пресеты качества.
-- **Фаза 2 — Remote preview (живой relay)**: preview-сессии на collab-сервере, standalone-плеер, relay ассетов из редактора, QR для телефона.
-- **Фаза 3 — Agent HTTP API + скилл**: управление preview-сессией по токену (логи/метрики/скриншоты/restart/reload-from-disk), скилл `pix3-remote-preview` в проекте.
-- **Фаза 4 — Полировка экспорта**: zip-архив рядом с single-file HTML, orientation/resize, CTA/openStore SDK (заглушка появляется уже в шаблонах фазы 1).
+- **Фаза 1 — Project bootstrap** ✅: PWA, визард нового проекта с каталогом шаблонов, папка `design/`, копирование скиллов и AGENTS.md, платформенные пресеты качества.
+- **Фаза 2 — Remote preview (живой relay)** ✅: preview-сессии на collab-сервере (`/api/preview` + WS `/preview`), standalone-плеер (`player.html`, `src/player/`), relay ассетов из редактора (`PreviewHostService`, hash-ревалидация + Cache API), QR-диалог (`project.start-remote-preview`).
+- **Фаза 3 — Agent HTTP API + скилл** ✅: commands (restart / reload-from-disk / screenshot / set-property / snapshot / inspect / game-action с ack), logs (курсор), metrics, screenshot (`?fresh=true`); `.pix3/preview-session.json` пишется при старте сессии; скилл `pix3-remote-preview` в шаблонах переписан на реальный curl-workflow.
+- **Фаза 4 — Полировка экспорта** ✅: `project.export-playable-zip` (index.html + ассеты файлами, jszip, без base64-оверхеда; `ResourceManager('./')` в runtime main для хостинга из подпапки); PlayableSDK — DAPI `openStoreUrl()` в цепочке CTA, `getViewport()/getOrientation()/onResize()` (window + MRAID `sizeChange` + DAPI `adResized`). MRAID/DAPI lifecycle-адаптеры глубже (ready/viewable) — вне v1.
 
 ---
 

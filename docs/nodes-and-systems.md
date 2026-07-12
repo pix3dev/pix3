@@ -197,14 +197,19 @@ connections where the script is the target).
 `scene.fadeToBlack(sec)` / `fadeFromBlack(sec)` / `switchCameraWithFade(id, out, in)`
 / `flash(opts)`. Real-time overlays (survive hitstop).
 
-### Playable SDK (store CTA / game end)
+### Playable SDK (store CTA / game end / viewport)
 `import { playable } from '@pix3/runtime'` — `playable.openStore(url?)` opens the
-app-store page (prefers `mraid.open` when an ad network injects it, else
-`window.open`; default URL via `setDefaultStoreUrl`), `playable.gameEnd()` marks
-the session over (idempotent; `onGameEnd(cb)` to observe, auto-`reset()` on every
-`SceneRunner.startScene`). Ad-network adapters plug in via `setPlayableAdapter`.
-Use for playable-ad CTA buttons and end screens; the `playable-2d/3d` project
-templates ship a `user:CtaButton` script wired to it.
+app-store page (delivery order: installed adapter → `dapi.openStoreUrl()`
+(ironSource/Unity, network-configured URL) → `mraid.open` → `window.open`;
+default URL via `setDefaultStoreUrl`), `playable.gameEnd()` marks the session
+over (idempotent; `onGameEnd(cb)` to observe, auto-`reset()` on every
+`SceneRunner.startScene`). Viewport helpers: `playable.getViewport()` /
+`getOrientation()` return size + `'portrait' | 'landscape'`, and
+`playable.onResize(cb)` fires on window resize/orientation change plus MRAID
+`sizeChange` and DAPI `adResized`. Ad-network adapters plug in via
+`setPlayableAdapter`. Use for playable-ad CTA buttons, end screens and
+orientation-aware layouts; the `playable-2d/3d` project templates ship a
+`user:CtaButton` script wired to it.
 
 ---
 

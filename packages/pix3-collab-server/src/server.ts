@@ -11,12 +11,20 @@ import { authRouter } from './core/auth/auth-router.js';
 import { projectsRouter } from './core/projects/projects-router.js';
 import { storageRouter } from './core/storage/storage-router.js';
 import { adminRouter } from './core/admin/admin-router.js';
+import { previewRouter } from './core/preview/preview-router.js';
 import { createHocuspocusServer } from './sync/hocuspocus.js';
+import { createPreviewRelayServer } from './sync/preview-relay.js';
 
 function isCollaborationUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
   return requestUrl === config.COLLABORATION_PATH
     || requestUrl.startsWith(`${config.COLLABORATION_PATH}?`);
+}
+
+function isPreviewUpgrade(request: IncomingMessage): boolean {
+  const requestUrl = request.url ?? '';
+  return requestUrl === config.PREVIEW_PATH
+    || requestUrl.startsWith(`${config.PREVIEW_PATH}?`);
 }
 
 function closeUpgradeSocket(socket: Socket): void {
@@ -58,6 +66,7 @@ export async function startServer(): Promise<void> {
   app.use('/api/projects', projectsRouter);
   app.use('/api/projects', storageRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/preview', previewRouter);
 
   // Admin UI
   const adminPath = path.resolve('src/admin/index.html');
@@ -81,11 +90,22 @@ export async function startServer(): Promise<void> {
   });
 
   const hocuspocus = createHocuspocusServer();
+  const previewRelay = createPreviewRelayServer();
   const server = createServer(app);
 
   server.on('upgrade', async (request: IncomingMessage, socket: Socket, head: Buffer) => {
     const requestUrl = request.url ?? '';
     console.log(`[pix3-collab] Upgrade request: ${requestUrl}`);
+
+    if (isPreviewUpgrade(request)) {
+      try {
+        previewRelay.handleUpgrade(request, socket, head);
+      } catch (error) {
+        console.error(`[pix3-collab] Failed to upgrade ${requestUrl}`, error);
+        socket.destroy();
+      }
+      return;
+    }
 
     if (!isCollaborationUpgrade(request)) {
       console.log(`[pix3-collab] Rejected upgrade for ${requestUrl}`);
@@ -102,6 +122,7 @@ export async function startServer(): Promise<void> {
   });
 
   console.log(`[pix3-collab] Collaboration WS attached on ${config.COLLABORATION_PATH}`);
+  console.log(`[pix3-collab] Preview relay WS attached on ${config.PREVIEW_PATH}`);
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -124,6 +145,8 @@ export async function startServer(): Promise<void> {
     try {
       await closeHttpServer(server);
       console.log('[pix3-collab] HTTP server closed');
+      await previewRelay.destroy();
+      console.log('[pix3-collab] Preview relay closed');
       await hocuspocus.destroy();
       console.log('[pix3-collab] Collaboration server closed');
       process.exit(0);

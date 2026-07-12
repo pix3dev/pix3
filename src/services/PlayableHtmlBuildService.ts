@@ -8,7 +8,6 @@ import {
 import { ProjectStorageService } from './ProjectStorageService';
 import {
   ScriptCompilerService,
-  type CompilationResult,
   type VirtualBundleOptions,
   type VirtualFileLoadContext,
 } from './ScriptCompilerService';
@@ -43,6 +42,17 @@ export interface PlayableHtmlBuildArtifact {
   readonly warnings: readonly string[];
   readonly bundleWarnings: readonly string[];
   readonly externalModuleIds: readonly string[];
+}
+
+export interface PlayableZipBuildArtifact {
+  readonly zipBlob: Blob;
+  readonly entryScenePath: string;
+  readonly sceneCount: number;
+  readonly assetCount: number;
+  readonly htmlBytes: number;
+  readonly assetBytes: number;
+  readonly warnings: readonly string[];
+  readonly bundleWarnings: readonly string[];
 }
 
 interface EmbeddedAssetsBuildStats {
@@ -123,6 +133,66 @@ export class PlayableHtmlBuildService {
   @inject(ScriptCompilerService)
   private readonly scriptCompiler!: ScriptCompilerService;
 
+  /**
+   * Zip variant of the playable export: the same compiled bundle in an
+   * `index.html`, but assets ship as plain files next to it instead of being
+   * base64-embedded — no 33% base64 overhead, and the archive can be unpacked
+   * onto any static host.
+   */
+  async buildPlayableZip(
+    context: CommandContext,
+    options: PlayableHtmlBuildOptions = {}
+  ): Promise<PlayableZipBuildArtifact> {
+    const { default: JSZip } = await import('jszip');
+
+    const model = await this.projectBuildService.buildRuntimeProjectModel(context, options);
+    const prepared = await this.prepareBundlerFiles(model, { embedAssets: false });
+    const compileOptions = this.createCompileOptions();
+    const compilation = await this.scriptCompiler.bundleVirtualProject(prepared.files, {
+      ...compileOptions,
+      fileLoader: (filePath, loadContext) => this.loadBundlerDependency(filePath, loadContext),
+    });
+
+    const warnings = [...model.warnings, ...prepared.warnings];
+    const html = this.renderHtmlDocument(
+      options.title?.trim() || model.projectName,
+      compilation.code
+    );
+
+    const zip = new JSZip();
+    zip.file('index.html', html);
+
+    let assetBytes = 0;
+    let packedAssets = 0;
+    for (const assetPath of model.assetPaths) {
+      try {
+        const blob = await this.storage.readBlob(assetPath);
+        zip.file(assetPath, blob);
+        assetBytes += blob.size;
+        packedAssets += 1;
+      } catch {
+        warnings.push(`Failed to pack asset into zip export: ${assetPath}`);
+      }
+    }
+
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    return {
+      zipBlob,
+      entryScenePath: model.entryScenePath,
+      sceneCount: model.scenePaths.length,
+      assetCount: packedAssets,
+      htmlBytes: this.measureUtf8Bytes(html),
+      assetBytes,
+      warnings,
+      bundleWarnings: compilation.warnings,
+    };
+  }
+
   async buildPlayableHtml(
     context: CommandContext,
     options: PlayableHtmlBuildOptions = {}
@@ -176,11 +246,24 @@ export class PlayableHtmlBuildService {
   }
 
   private async prepareBundlerFiles(
-    model: RuntimeProjectBuildModel
+    model: RuntimeProjectBuildModel,
+    options: { embedAssets?: boolean } = {}
   ): Promise<PreparedBundlerFiles> {
     const files = new Map(model.files);
     const warnings: string[] = [];
-    const embeddedAssetsModule = await this.buildEmbeddedAssetsModule(model.assetPaths, warnings);
+    // The zip export ships assets as plain files next to index.html; the
+    // ResourceManager then loads them over relative URLs instead of base64.
+    const embeddedAssetsModule =
+      options.embedAssets === false
+        ? {
+            moduleSource: 'export const embeddedAssets = {};\n',
+            stats: {
+              entries: [],
+              rawTotalBytes: 0,
+              base64TotalBytes: 0,
+            } as EmbeddedAssetsBuildStats,
+          }
+        : await this.buildEmbeddedAssetsModule(model.assetPaths, warnings);
 
     files.set(
       REGISTER_PROJECT_SCRIPTS_PATH,

@@ -22,7 +22,9 @@ async function bootstrap(): Promise<void> {
     throw new Error('Missing #app container');
   }
 
-  const resourceManager = new ResourceManager('/', embeddedAssets);
+  // Relative base so builds work from any directory (zip exports unpacked into
+  // a subfolder, itch.io-style hosting), not just a server root.
+  const resourceManager = new ResourceManager('./', embeddedAssets);
   const audioService = new AudioService();
   const scriptRegistry = new ScriptRegistry();
   registerBuiltInScripts(scriptRegistry);

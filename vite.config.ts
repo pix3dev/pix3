@@ -62,7 +62,9 @@ export default defineConfig(async ({ mode }) => {
           // sources for playable export) must be precached to work offline.
           maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
-          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/openai-proxy/],
+          // player.html carries session query params, so navigation to it must
+          // not fall back to the editor shell.
+          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/player\.html/],
         },
       }),
     ],
@@ -79,6 +81,10 @@ export default defineConfig(async ({ mode }) => {
       target: 'es2022',
       sourcemap: 'hidden',
       rollupOptions: {
+        input: {
+          main: resolve(__dirname, 'index.html'),
+          player: resolve(__dirname, 'player.html'),
+        },
         output: {
           manualChunks(id) {
             if (id.includes('node_modules/@dimforge/rapier3d')) return 'rapier';
@@ -106,6 +112,12 @@ export default defineConfig(async ({ mode }) => {
           secure: false,
         },
         '/collaboration': {
+          target: collabTarget,
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+        },
+        '/preview': {
           target: collabTarget,
           changeOrigin: true,
           secure: false,
