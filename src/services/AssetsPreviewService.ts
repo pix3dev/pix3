@@ -5,11 +5,13 @@ import { resolveProjectService } from './ProjectService';
 import { resolveProjectStorageService } from './ProjectStorageService';
 import { resolveThumbnailCacheService } from './ThumbnailCacheService';
 import { resolveThumbnailGenerator } from './ThumbnailGenerator';
+import { resolveSceneThumbnailGenerator } from './SceneThumbnailGenerator';
 import { analyzeAudioBlob } from './audio-preview-utils';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
+const SCENE_EXTENSIONS = new Set(['pix3scene', 'pix3prefab']);
 const TEXT_PREVIEW_EXTENSIONS = new Set([
   'ts',
   'tsx',
@@ -29,8 +31,13 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   'less',
 ]);
 
-export type AssetPreviewType = 'image' | 'model' | 'audio' | 'text' | 'icon';
+export type AssetPreviewType = 'image' | 'model' | 'scene' | 'audio' | 'text' | 'icon';
 export type AssetThumbnailStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/** Preview types whose thumbnails are rendered offscreen on demand. */
+function isRenderedThumbnailType(previewType: AssetPreviewType): boolean {
+  return previewType === 'model' || previewType === 'scene';
+}
 
 export interface AssetPreviewItem {
   readonly name: string;
@@ -70,6 +77,7 @@ export class AssetsPreviewService {
   private readonly storage = resolveProjectStorageService();
   private readonly thumbnailCacheService = resolveThumbnailCacheService();
   private readonly thumbnailGenerator = resolveThumbnailGenerator();
+  private readonly sceneThumbnailGenerator = resolveSceneThumbnailGenerator();
   private readonly listeners = new Set<AssetsPreviewListener>();
   private readonly objectUrls = new Set<string>();
   private readonly thumbnailQueue: string[] = [];
@@ -133,7 +141,7 @@ export class AssetsPreviewService {
   public requestThumbnail(path: string): void {
     const normalizedPath = this.normalizePath(path);
     const item = this.state.items.find(entry => this.normalizePath(entry.path) === normalizedPath);
-    if (!item || item.previewType !== 'model' || item.kind !== 'file') {
+    if (!item || !isRenderedThumbnailType(item.previewType) || item.kind !== 'file') {
       return;
     }
 
@@ -461,6 +469,31 @@ export class AssetsPreviewService {
       };
     }
 
+    if (SCENE_EXTENSIONS.has(extension)) {
+      const cacheKey = this.buildThumbnailCacheKey(path, lastModified, sizeBytes);
+      const cachedThumbnail = cacheKey ? await this.thumbnailCacheService.get(cacheKey) : null;
+
+      return {
+        name,
+        path,
+        kind,
+        extension,
+        previewType: 'scene',
+        thumbnailUrl: cachedThumbnail,
+        previewUrl: null,
+        previewText: null,
+        thumbnailStatus: cachedThumbnail ? 'ready' : fileBlob ? 'loading' : 'idle',
+        iconName: 'film',
+        sizeBytes,
+        width: null,
+        height: null,
+        durationSeconds: null,
+        channelCount: null,
+        sampleRate: null,
+        lastModified,
+      };
+    }
+
     return {
       name,
       path,
@@ -489,7 +522,7 @@ export class AssetsPreviewService {
     for (const item of items) {
       if (
         item.kind !== 'file' ||
-        item.previewType !== 'model' ||
+        !isRenderedThumbnailType(item.previewType) ||
         item.thumbnailStatus === 'ready'
       ) {
         continue;
@@ -562,9 +595,16 @@ export class AssetsPreviewService {
 
     const normalizedPath = this.normalizePath(path);
     const item = this.state.items.find(entry => this.normalizePath(entry.path) === normalizedPath);
-    if (!item || item.kind !== 'file' || item.previewType !== 'model' || item.thumbnailUrl) {
+    if (
+      !item ||
+      item.kind !== 'file' ||
+      !isRenderedThumbnailType(item.previewType) ||
+      item.thumbnailUrl
+    ) {
       return;
     }
+
+    const previewType = item.previewType;
 
     try {
       const fileBlob = await this.storage.readBlob(path);
@@ -586,7 +626,10 @@ export class AssetsPreviewService {
         }
       }
 
-      const thumbnailUrl = await this.thumbnailGenerator.generate(fileBlob, path);
+      const thumbnailUrl =
+        previewType === 'scene'
+          ? await this.sceneThumbnailGenerator.generate(fileBlob, path)
+          : await this.thumbnailGenerator.generate(fileBlob, path);
       if (cacheKey) {
         await this.thumbnailCacheService.set(cacheKey, thumbnailUrl);
       }

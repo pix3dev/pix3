@@ -214,7 +214,8 @@ export class AssetsPreviewPanel extends ComponentBase {
               ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
               : html`
                   <span class="icon">${this.iconService.getIcon(item.iconName, 24)}</span>
-                  ${item.previewType === 'model' && item.thumbnailStatus === 'loading'
+                  ${(item.previewType === 'model' || item.previewType === 'scene') &&
+                  item.thumbnailStatus === 'loading'
                     ? html`<span class="thumb-spinner" aria-hidden="true"></span>`
                     : null}
                 `}
@@ -250,7 +251,7 @@ export class AssetsPreviewPanel extends ComponentBase {
     }
     this.updateSelectionFromClick(event, item);
     this.assetsPreviewService.selectItem(item.path);
-    if (item.previewType === 'model') {
+    if (item.previewType === 'model' || item.previewType === 'scene') {
       this.assetsPreviewService.requestThumbnail(item.path);
     }
   }

@@ -111,6 +111,7 @@ export {
 } from './AssetsPreviewService';
 export { ThumbnailCacheService } from './ThumbnailCacheService';
 export { ThumbnailGenerator } from './ThumbnailGenerator';
+export { SceneThumbnailGenerator } from './SceneThumbnailGenerator';
 export {
   ScriptCreatorService,
   type ScriptCreationParams,

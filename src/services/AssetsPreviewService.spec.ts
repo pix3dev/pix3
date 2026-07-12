@@ -20,6 +20,10 @@ const mockThumbnailGenerator = {
   generate: vi.fn(),
 };
 
+const mockSceneThumbnailGenerator = {
+  generate: vi.fn(),
+};
+
 const mockDecodeAudioData = vi.fn();
 
 class MockAudioContext {
@@ -46,6 +50,11 @@ vi.mock('./ThumbnailGenerator', () => ({
   resolveThumbnailGenerator: () => mockThumbnailGenerator,
 }));
 
+vi.mock('./SceneThumbnailGenerator', () => ({
+  SceneThumbnailGenerator: class SceneThumbnailGenerator {},
+  resolveSceneThumbnailGenerator: () => mockSceneThumbnailGenerator,
+}));
+
 const { AssetsPreviewService } = await import('./AssetsPreviewService');
 
 describe('AssetsPreviewService', () => {
@@ -58,6 +67,7 @@ describe('AssetsPreviewService', () => {
     mockThumbnailCacheService.get.mockReset();
     mockThumbnailCacheService.set.mockReset();
     mockThumbnailGenerator.generate.mockReset();
+    mockSceneThumbnailGenerator.generate.mockReset();
     mockDecodeAudioData.mockReset();
 
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -133,6 +143,40 @@ describe('AssetsPreviewService', () => {
       );
     } finally {
       unsubscribe();
+      service.dispose();
+    }
+  });
+
+  it('generates and caches missing scene thumbnails via the scene generator', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'main.pix3scene', path: 'scenes/main.pix3scene', kind: 'file' },
+    ]);
+
+    const file = createFile('main.pix3scene', 'version: "1"\nroot: []', 'text/yaml', 512);
+    mockProjectStorageService.readBlob.mockResolvedValue(file);
+    mockThumbnailCacheService.get.mockResolvedValue(null);
+    mockSceneThumbnailGenerator.generate.mockResolvedValue('data:image/webp;base64,scene');
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => {
+        const currentItem = service.getSnapshot().items[0];
+        expect(currentItem?.thumbnailStatus).toBe('ready');
+      });
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('scene');
+      expect(item.thumbnailUrl).toBe('data:image/webp;base64,scene');
+      expect(mockSceneThumbnailGenerator.generate).toHaveBeenCalledWith(
+        file,
+        'scenes/main.pix3scene'
+      );
+      expect(mockThumbnailGenerator.generate).not.toHaveBeenCalled();
+      expect(mockThumbnailCacheService.set).toHaveBeenCalledWith(
+        expect.stringContaining('scenes/main.pix3scene'),
+        'data:image/webp;base64,scene'
+      );
+    } finally {
       service.dispose();
     }
   });
