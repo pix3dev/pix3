@@ -211,6 +211,19 @@ over (idempotent; `onGameEnd(cb)` to observe, auto-`reset()` on every
 orientation-aware layouts; the `playable-2d/3d` project templates ship a
 `user:CtaButton` script wired to it.
 
+### Asset Library (reuse before you build)
+**Before generating graphics or writing UI/prefabs from scratch, search the Asset
+Library** — it holds reusable prefabs, images, fonts, audio and shaders across three
+scopes (built-in starter pack, your personal library, and the team library). In the
+editor: the **Library** panel (tabbed with the Asset Browser) — filter by scope/type,
+search, then drag a card into the viewport (or double-click) to insert. Inserting
+copies the bundle into `res://assets/library/<slug>/` and remaps its paths; it is a
+snapshot, so later edits to the library item do not change the project. Publish a
+reusable node with **Publish to Library** (Edit menu, or `library.publish-node`),
+which packs the subtree and its asset dependencies into a personal item. Good results
+from the Asset Generator can be kept with its **Save to Library** action. Programmatic
+scope (agent HTTP/preview commands) arrives in Phase 2 — see `.plans/asset-library.md`.
+
 ---
 
 ## 5. Scripts-facing runtime API (the surface a `Script` sees)
@@ -263,5 +276,6 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 - Runtime (nodes, systems, script APIs): `packages/pix3-runtime/src/` — public surface re-exported from its `index.ts`.
 - Built-in behaviors: `packages/pix3-runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
+- Asset Library: services `src/services/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.
 - Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [ecs-instancing.md](ecs-instancing.md), the `property-schema-*.md` set.

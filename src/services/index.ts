@@ -166,3 +166,32 @@ export {
   type AgentToolDefinition,
   type AgentToolSpec,
 } from './agent/AgentToolRegistry';
+export { AssetLibraryService } from './AssetLibraryService';
+export { PublishToLibraryService, type PublishNodeParams } from './PublishToLibraryService';
+export {
+  LibraryInsertService,
+  type InsertedBundle,
+  type LibraryInsertPlacement,
+} from './LibraryInsertService';
+export {
+  type LibraryScope,
+  type LibraryItemType,
+  type LibraryItemSource,
+  type LibraryItem,
+  type LibraryItemManifest,
+  type LibraryBundle,
+  type LibraryProvider,
+  LIBRARY_ITEM_TYPES,
+  LIBRARY_SCOPES,
+  LIBRARY_SCOPE_LABELS,
+  categoryForItemType,
+  inferItemTypeFromPath,
+} from './library/library-types';
+export {
+  type LibraryFilter,
+  slugify,
+  uniqueSlug,
+  matchesFilter,
+  filterItems,
+  collectTags,
+} from './library/library-search';

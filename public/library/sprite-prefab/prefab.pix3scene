@@ -1,0 +1,18 @@
+version: 1.0.0
+metadata:
+  description: Built-in library sprite prefab.
+root:
+  - id: library-sprite-root
+    type: Sprite2D
+    name: Library Sprite
+    properties:
+      texture:
+        type: texture
+        url: res://logo.png
+      width: 64
+      height: 64
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children: []

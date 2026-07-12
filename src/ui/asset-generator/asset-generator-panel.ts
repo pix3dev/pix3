@@ -18,6 +18,7 @@ import {
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { EditorSettingsService } from '@/services/EditorSettingsService';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { AssetLibraryService } from '@/services/AssetLibraryService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import {
   getDroppedAssetResourcePath,
@@ -114,6 +115,9 @@ export class AssetGeneratorPanel extends ComponentBase {
 
   @inject(CommandDispatcher)
   private readonly commandDispatcher!: CommandDispatcher;
+
+  @inject(AssetLibraryService)
+  private readonly assetLibrary!: AssetLibraryService;
 
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
@@ -430,6 +434,13 @@ export class AssetGeneratorPanel extends ComponentBase {
             @click=${this.onInsertSprite}
           >
             Insert as Sprite2D
+          </button>
+          <button
+            class="ag-action-button"
+            ?disabled=${!this.saveName.trim() || !this.assetLibrary.isUserScopeSupported()}
+            @click=${this.onSaveToLibrary}
+          >
+            Save to Library
           </button>
           ${this.boundImagePath
             ? html`<button
@@ -1539,6 +1550,54 @@ export class AssetGeneratorPanel extends ComponentBase {
       return null;
     }
   }
+
+  /**
+   * Save the current image into the personal Asset Library (editor-level; no project needed).
+   * The blob becomes a one-file `image` bundle; the file name (minus folders) seeds the item name.
+   */
+  private onSaveToLibrary = async (): Promise<void> => {
+    if (!this.current) {
+      return;
+    }
+    const output = await this.resolveSaveBlob();
+    if (!output) {
+      return;
+    }
+    const fileName = ensureImageExt(normalizeRelativePath(this.saveName), output.mimeType)
+      .split('/')
+      .pop();
+    if (!fileName) {
+      this.saveError = 'Enter a file name.';
+      return;
+    }
+    const name = fileName.replace(/\.[^.]+$/, '') || 'Generated image';
+    this.saveError = null;
+    this.saveMessage = null;
+    try {
+      const slug = await this.assetLibrary.suggestSlug(name);
+      const files = new Map<string, Blob>([[fileName, output.blob]]);
+      await this.assetLibrary.putUserItem({
+        manifest: {
+          id: crypto.randomUUID(),
+          slug,
+          name,
+          type: 'image',
+          tags: ['generated'],
+          description: this.prompt || undefined,
+          preview: fileName,
+          entry: fileName,
+          files: [fileName],
+          source: 'generated',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        files,
+      });
+      this.saveMessage = `Saved "${name}" to your library.`;
+    } catch (error) {
+      this.saveError = `Save to Library failed: ${describeError(error)}`;
+    }
+  };
 
   /** Human-readable confirmation, noting the downscaled dimensions when a resize was applied. */
   private describeSaveResult(path: string, blob: Blob): string {

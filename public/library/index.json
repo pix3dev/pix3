@@ -1,0 +1,41 @@
+{
+  "$comment": "Built-in Asset Library pack. BuiltinLibraryProvider reads this file; each entry's `dir` is the folder under public/library/ and `manifest.files` are copied into a project on insert (preview is a thumbnail only, not copied). Licenses are white-listed (CC0/OFL/MIT/CC-BY).",
+  "items": [
+    {
+      "dir": "sprite-prefab",
+      "manifest": {
+        "id": "builtin-sprite-prefab",
+        "slug": "library-sprite",
+        "name": "Library Sprite",
+        "type": "prefab",
+        "tags": ["ui", "sprite", "starter"],
+        "description": "A simple Sprite2D prefab referencing a bundled texture. Drag into the scene to instantiate.",
+        "preview": "preview.png",
+        "entry": "prefab.pix3scene",
+        "files": ["prefab.pix3scene", "logo.png"],
+        "source": "packed",
+        "license": "CC0",
+        "createdAt": 0,
+        "updatedAt": 0
+      }
+    },
+    {
+      "dir": "rounded-panel",
+      "manifest": {
+        "id": "builtin-rounded-panel",
+        "slug": "rounded-panel",
+        "name": "Rounded Panel",
+        "type": "image",
+        "tags": ["ui", "panel", "starter"],
+        "description": "A 64x64 panel texture. Drag into the scene to create a Sprite2D.",
+        "preview": "panel.png",
+        "entry": "panel.png",
+        "files": ["panel.png"],
+        "source": "packed",
+        "license": "CC0",
+        "createdAt": 0,
+        "updatedAt": 0
+      }
+    }
+  ]
+}
