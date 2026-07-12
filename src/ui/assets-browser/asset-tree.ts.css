@@ -158,6 +158,13 @@ asset-tree {
   letter-spacing: 0.02em;
 }
 
+/* Path of a lone folder lifted into its category row, e.g. Images (textures) */
+.node-name-suffix {
+  color: rgba(245, 247, 250, 0.4);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
 .icon.category {
   color: rgba(var(--pix3-accent-rgb), 0.8);
 }

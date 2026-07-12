@@ -213,6 +213,7 @@ describe('ViewportRendererService', () => {
     Object.defineProperty(service, 'sceneManager', {
       value: {
         getSceneGraph: () => ({ rootNodes, nodeMap }),
+        getActiveSceneGraph: () => ({ rootNodes, nodeMap }),
       },
       configurable: true,
     });
@@ -253,6 +254,10 @@ describe('ViewportRendererService', () => {
     Object.defineProperty(service, 'sceneManager', {
       value: {
         getSceneGraph: () => ({
+          rootNodes: [rotatedSprite],
+          nodeMap: new Map([[rotatedSprite.nodeId, rotatedSprite]]),
+        }),
+        getActiveSceneGraph: () => ({
           rootNodes: [rotatedSprite],
           nodeMap: new Map([[rotatedSprite.nodeId, rotatedSprite]]),
         }),

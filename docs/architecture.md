@@ -559,6 +559,14 @@ Pix3 supports specialized navigation modes for 2D and 3D authoring, controlled v
 - **Behavior**: Handled via `pan2D` and `zoom2D` in `ViewportRendererService`. Trackpad gestures and wheel events are mapped to 2D transformations.
 - **Integration**: Viewport interaction changes to flat, axis-aligned movement, ideal for working with `Layout2D` and 2D elements.
 
+### Adaptive layer & navigation availability
+
+The viewport adapts to what the active scene actually contains, so single-medium scenes never expose irrelevant controls. `deriveSceneLayerCapabilities` (`src/features/viewport/scene-layer-capabilities.ts`) classifies the scene graph into `{ has2D, has3D }` by scanning `nodeMap` for `Node2D` / `Node3D` (neutral nodes such as `PostProcess` / `AudioPlayer` count toward neither; empty or content-less scenes stay permissive so either kind can be added).
+
+- **Toolbar** (`editor-tab` → `viewport-toolbar`): the layer-visibility buttons and the navigation-mode toggle appear only for a **mixed** scene (`isMixedScene` = `has2D && has3D`). A single-layer scene has nothing to reveal by hiding its only layer, so both layer buttons and the mode toggle are hidden; they reappear as soon as the other content type is added.
+- **Navigation lock**: for the active tab, `editor-tab` re-derives capabilities on scene changes and dispatches `setNavigationMode` to snap navigation to the only available dimension. `ToggleNavigationModeCommand` refuses a target mode whose dimension is absent, and `ToggleLayer2D/3DCommand` preconditions only allow a toggle in a mixed scene — so the `N` / `2` / `3` shortcuts respect the lock too.
+- **Effective rendering**: `ViewportRendererService` gates its render passes, raycasting, and adornments on _effective_ visibility (`showLayer2D/3D` **AND** the scene has that content, cached per `nodeDataChangeSignal`), so a 2D-only scene never paints the empty 3D band or grid.
+
 ## Service Layer
 
 Pix3 implements a comprehensive service layer providing core functionality:

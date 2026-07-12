@@ -14,6 +14,13 @@ export interface ViewportToolbarState {
   readonly navigationMode: NavigationMode | null;
   readonly showLayer3D: boolean;
   readonly showLayer2D: boolean;
+  /**
+   * Scene mixes 2D and 3D content — the layer-visibility buttons are shown only
+   * then. With a single layer there is nothing to reveal by hiding it.
+   */
+  readonly canToggleLayerVisibility: boolean;
+  /** Both navigation modes are usable — the mode toggle is shown only when true. */
+  readonly canToggleNavigationMode: boolean;
   readonly previewCameraLabel: string;
   readonly previewCameraItems: DropdownItem[];
   readonly isPreviewCameraActive: boolean;
@@ -183,7 +190,7 @@ export function renderViewportToolbar(
       @pointerup=${(e: Event) => e.stopPropagation()}
     >
       <div class="toolbar-group" role="toolbar" aria-label="Viewport controls">
-        ${handlers.onToggleNavigationMode && state.navigationMode
+        ${handlers.onToggleNavigationMode && state.navigationMode && state.canToggleNavigationMode
           ? renderToolbarButton(
               {
                 ariaLabel: 'Toggle navigation mode',
@@ -229,32 +236,36 @@ export function renderViewportToolbar(
 
       <div class="toolbar-spacer"></div>
 
-      <div class="toolbar-group" role="group" aria-label="Layer visibility">
-        ${renderToolbarButton(
-          {
-            ariaLabel: 'Toggle 2D layer visibility',
-            title: `2D Layer: ${state.showLayer2D ? 'Visible' : 'Hidden'} (2)`,
-            iconName: 'layer-2d',
-            isPressed: state.showLayer2D,
-            isActive: state.showLayer2D,
-            onClick: handlers.onToggleLayer2D,
-            extraClass: 'toolbar-button--layer',
-          },
-          iconService
-        )}
-        ${renderToolbarButton(
-          {
-            ariaLabel: 'Toggle 3D layer visibility',
-            title: `3D Layer: ${state.showLayer3D ? 'Visible' : 'Hidden'} (3)`,
-            iconName: 'layer-3d',
-            isPressed: state.showLayer3D,
-            isActive: state.showLayer3D,
-            onClick: handlers.onToggleLayer3D,
-            extraClass: 'toolbar-button--layer',
-          },
-          iconService
-        )}
-      </div>
+      ${state.canToggleLayerVisibility
+        ? html`
+            <div class="toolbar-group" role="group" aria-label="Layer visibility">
+              ${renderToolbarButton(
+                {
+                  ariaLabel: 'Toggle 2D layer visibility',
+                  title: `2D Layer: ${state.showLayer2D ? 'Visible' : 'Hidden'} (2)`,
+                  iconName: 'layer-2d',
+                  isPressed: state.showLayer2D,
+                  isActive: state.showLayer2D,
+                  onClick: handlers.onToggleLayer2D,
+                  extraClass: 'toolbar-button--layer',
+                },
+                iconService
+              )}
+              ${renderToolbarButton(
+                {
+                  ariaLabel: 'Toggle 3D layer visibility',
+                  title: `3D Layer: ${state.showLayer3D ? 'Visible' : 'Hidden'} (3)`,
+                  iconName: 'layer-3d',
+                  isPressed: state.showLayer3D,
+                  isActive: state.showLayer3D,
+                  onClick: handlers.onToggleLayer3D,
+                  extraClass: 'toolbar-button--layer',
+                },
+                iconService
+              )}
+            </div>
+          `
+        : null}
 
       <div class="toolbar-group" role="toolbar" aria-label="Viewport visibility settings">
         ${renderToolbarButton(

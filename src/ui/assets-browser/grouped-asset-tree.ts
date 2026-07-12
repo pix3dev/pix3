@@ -25,6 +25,13 @@ export type AssetTreeNode = {
   categoryId?: AssetCategoryId;
   /** Total matching files in the category (category nodes only). */
   fileCount?: number;
+  /**
+   * Folder path shown in parentheses on a category row whose content was lifted
+   * out of a lone top-level folder (VS Code single-folder compaction, e.g.
+   * `Images (textures)`). Set only when the category collapsed exactly one root
+   * folder into itself; undefined otherwise.
+   */
+  folderLabel?: string;
 };
 
 export const CATEGORY_PATH_PREFIX = 'category:';
@@ -122,6 +129,18 @@ export function buildGroupedTree(
       current.files.push(file);
     }
 
+    let children = trieToNodes(root, definition.id, options.expandedKeys);
+    let folderLabel: string | undefined;
+    // VS Code-style single-folder compaction: when a category holds exactly one
+    // top-level folder and no loose files, drop that redundant intermediate level
+    // and lift its content straight into the category row, surfacing the folder's
+    // (already chain-compacted) path in parentheses on the category label.
+    if (children.length === 1 && children[0].nodeType === 'dir') {
+      const [lone] = children;
+      folderLabel = lone.name;
+      children = lone.children ?? [];
+    }
+
     tree.push({
       name: definition.label,
       path: categoryPathFor(definition.id),
@@ -129,11 +148,12 @@ export function buildGroupedTree(
       nodeType: 'category',
       categoryId: definition.id,
       fileCount: categoryFiles.length,
+      folderLabel,
       sizeBytes: null,
       expanded:
         options.expandedKeys.has(groupedCategoryExpansionKey(definition.id)) ||
         options.defaultCategoryExpanded,
-      children: trieToNodes(root, definition.id, options.expandedKeys),
+      children,
     });
   }
 

@@ -3,6 +3,10 @@ import { OperationService } from '@/services/OperationService';
 import { SceneManager, Node3D } from '@pix3/runtime';
 import { SelectObjectOperation } from '@/features/selection/SelectObjectOperation';
 import type { NavigationMode } from '@/state';
+import {
+  deriveSceneLayerCapabilities,
+  isNavigationModeAvailable,
+} from '@/features/viewport/scene-layer-capabilities';
 
 export interface ToggleNavigationModeParams {
   mode?: NavigationMode;
@@ -37,12 +41,20 @@ export class ToggleNavigationModeCommand extends CommandBase<void, void> {
       return { didMutate: false, payload: undefined };
     }
 
+    const sceneManager = container.getService<SceneManager>(
+      container.getOrCreateToken(SceneManager)
+    );
+    const capabilities = deriveSceneLayerCapabilities(sceneManager.getActiveSceneGraph());
+
+    // Respect the layer lock: a scene with only one kind of content cannot enter
+    // the navigation mode for the absent dimension (keyboard shortcut / command).
+    if (!isNavigationModeAvailable(nextMode, capabilities)) {
+      return { didMutate: false, payload: undefined };
+    }
+
     state.ui.navigationMode = nextMode;
 
     if (nextMode === '2d' && snapshot.selection.nodeIds.length > 0) {
-      const sceneManager = container.getService<SceneManager>(
-        container.getOrCreateToken(SceneManager)
-      );
       const sceneGraph = sceneManager.getActiveSceneGraph();
       if (sceneGraph) {
         const has3DSelection = snapshot.selection.nodeIds.some(nodeId => {

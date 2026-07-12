@@ -64,6 +64,10 @@ import {
 import { Nudge2DNodesOperation } from '@/features/properties/Nudge2DNodesOperation';
 import { TargetTransformOperation } from '@/features/properties/TargetTransformOperation';
 import {
+  deriveSceneLayerCapabilities,
+  type SceneLayerCapabilities,
+} from '@/features/viewport/scene-layer-capabilities';
+import {
   TransformTool2d,
   type TwoDHandle,
   type Active2DTransform,
@@ -182,6 +186,9 @@ export class ViewportRendererService {
   private lastActiveSceneId: string | null = null;
   private lastNavigationMode = appState.ui.navigationMode;
   private lastNodeDataChangeSignal = appState.scenes.nodeDataChangeSignal;
+  private cachedLayerCapabilities: SceneLayerCapabilities = { has2D: true, has3D: true };
+  private cachedLayerCapabilitiesSceneId: string | null = null;
+  private cachedLayerCapabilitiesSignal = -1;
   private viewportSize = { width: 0, height: 0 };
   private transformTool2d: TransformTool2d;
 
@@ -719,6 +726,42 @@ export class ViewportRendererService {
 
   private hasMeasuredViewport(): boolean {
     return this.viewportSize.width > 0 && this.viewportSize.height > 0;
+  }
+
+  /**
+   * Capabilities of the active scene (whether it holds 2D and/or 3D content),
+   * cached and recomputed only when the active scene or its node data changes.
+   */
+  private getSceneLayerCapabilities(): SceneLayerCapabilities {
+    const sceneId = appState.scenes.activeSceneId;
+    const signal = appState.scenes.nodeDataChangeSignal;
+    if (
+      sceneId !== this.cachedLayerCapabilitiesSceneId ||
+      signal !== this.cachedLayerCapabilitiesSignal
+    ) {
+      this.cachedLayerCapabilities = deriveSceneLayerCapabilities(
+        this.sceneManager.getActiveSceneGraph()
+      );
+      this.cachedLayerCapabilitiesSceneId = sceneId;
+      this.cachedLayerCapabilitiesSignal = signal;
+    }
+    return this.cachedLayerCapabilities;
+  }
+
+  /**
+   * Effective 2D-layer visibility: the user's toggle AND the scene actually
+   * having 2D content. A 3D-only scene never paints (or hit-tests) the 2D band.
+   */
+  private isLayer2DVisible(): boolean {
+    return appState.ui.showLayer2D && this.getSceneLayerCapabilities().has2D;
+  }
+
+  /**
+   * Effective 3D-layer visibility: the user's toggle AND the scene actually
+   * having 3D content. A 2D-only scene never paints the (empty) 3D band or grid.
+   */
+  private isLayer3DVisible(): boolean {
+    return appState.ui.showLayer3D && this.getSceneLayerCapabilities().has3D;
   }
 
   private createEditorOrbitControls(): void {
@@ -1561,7 +1604,7 @@ export class ViewportRendererService {
     this.applyAOModeSuppression();
 
     const postNode = this.findActivePostProcessNode();
-    const canPost = appState.ui.showLayer3D && !!postNode;
+    const canPost = this.isLayer3DVisible() && !!postNode;
 
     if (canPost) {
       if (!this.postFx) {
@@ -1599,7 +1642,7 @@ export class ViewportRendererService {
       this.renderer.render(this.scene, this.camera);
       this.scene.background = savedGizmoBg;
       this.camera.layers.mask = savedMask;
-    } else if (appState.ui.showLayer3D) {
+    } else if (this.isLayer3DVisible()) {
       this.renderer.autoClear = true;
       this.renderer.render(this.scene, this.camera);
     } else {
@@ -1608,7 +1651,7 @@ export class ViewportRendererService {
     }
 
     // Render 2D layer with orthographic camera if enabled
-    if (appState.ui.showLayer2D && this.orthographicCamera) {
+    if (this.isLayer2DVisible() && this.orthographicCamera) {
       // Draw order for 2D scene content follows the scene-graph hierarchy.
       // The editor draws proxy visuals rather than the runtime nodes, so the
       // hierarchy-driven order must be assigned to the proxy meshes directly.
@@ -2052,7 +2095,7 @@ export class ViewportRendererService {
       this.scene.add(this.baseViewportFrame);
     }
 
-    this.baseViewportFrame.visible = appState.ui.showLayer2D;
+    this.baseViewportFrame.visible = this.isLayer2DVisible();
     this.sync2DServiceFrameThickness();
   }
 
@@ -2469,8 +2512,8 @@ export class ViewportRendererService {
 
     const is2DMode = appState.ui.navigationMode === '2d';
 
-    const layer2DEnabled = appState.ui.showLayer2D && Boolean(this.orthographicCamera);
-    const layer3DEnabled = appState.ui.showLayer3D && Boolean(this.camera) && !is2DMode;
+    const layer2DEnabled = this.isLayer2DVisible() && Boolean(this.orthographicCamera);
+    const layer3DEnabled = this.isLayer3DVisible() && Boolean(this.camera) && !is2DMode;
 
     if (!layer2DEnabled && !layer3DEnabled) {
       return null;
@@ -2573,7 +2616,7 @@ export class ViewportRendererService {
     endX: number,
     endY: number
   ): string[] {
-    if (!this.orthographicCamera || !appState.ui.showLayer2D) {
+    if (!this.orthographicCamera || !this.isLayer2DVisible()) {
       return [];
     }
 
@@ -2671,7 +2714,7 @@ export class ViewportRendererService {
   }
 
   private raycastNodeIcon(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.nodeIcons.size === 0 || !appState.ui.showLayer3D) {
+    if (!this.camera || this.nodeIcons.size === 0 || !this.isLayer3DVisible()) {
       return null;
     }
 
@@ -2698,7 +2741,7 @@ export class ViewportRendererService {
   }
 
   private raycastTargetSphere(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.targetGizmos.size === 0 || !appState.ui.showLayer3D) {
+    if (!this.camera || this.targetGizmos.size === 0 || !this.isLayer3DVisible()) {
       return null;
     }
 
@@ -2733,7 +2776,7 @@ export class ViewportRendererService {
   }
 
   private raycast2D(pixelX: number, pixelY: number): NodeBase | null {
-    if (!this.orthographicCamera || !appState.ui.showLayer2D) {
+    if (!this.orthographicCamera || !this.isLayer2DVisible()) {
       return null;
     }
 
@@ -3809,7 +3852,7 @@ export class ViewportRendererService {
       const keepVisibleWhenSelected =
         node instanceof Node3D && this.shouldKeepSelectedNodeIcon(node);
       const shouldShow =
-        appState.ui.showLayer3D &&
+        this.isLayer3DVisible() &&
         node instanceof Node3D &&
         node.visible &&
         (!isSelected || keepVisibleWhenSelected);

@@ -20,7 +20,14 @@ import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSp
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstanceCommand';
 import { isPrefabNode } from '@/features/scene/prefab-utils';
-import { toggleNavigationMode } from '@/features/viewport/ToggleNavigationModeCommand';
+import {
+  setNavigationMode,
+  toggleNavigationMode,
+} from '@/features/viewport/ToggleNavigationModeCommand';
+import {
+  deriveSceneLayerCapabilities,
+  resolveValidNavigationMode,
+} from '@/features/viewport/scene-layer-capabilities';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
@@ -116,6 +123,12 @@ export class EditorTabComponent extends ComponentBase {
   private canDistributeSelection = false;
 
   @state()
+  private sceneHas2D = true;
+
+  @state()
+  private sceneHas3D = true;
+
+  @state()
   private isAssetDragOver = false;
 
   private readonly resizeObserver = new ResizeObserver(entries => {
@@ -142,6 +155,7 @@ export class EditorTabComponent extends ComponentBase {
     this.navigationMode = appState.ui.navigationMode;
     this.editorCameraProjection = appState.ui.editorCameraProjection;
     this.syncAlignmentToolbarState();
+    this.syncSceneLayerCapabilities();
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.showGrid = appState.ui.showGrid;
@@ -160,6 +174,7 @@ export class EditorTabComponent extends ComponentBase {
 
     this.disposeScenesSubscription = subscribe(appState.scenes, () => {
       this.syncAlignmentToolbarState();
+      this.syncSceneLayerCapabilities();
       this.requestUpdate();
     });
 
@@ -263,6 +278,8 @@ export class EditorTabComponent extends ComponentBase {
               navigationMode: this.navigationMode,
               showLayer3D: this.showLayer3D,
               showLayer2D: this.showLayer2D,
+              canToggleLayerVisibility: this.sceneHas2D && this.sceneHas3D,
+              canToggleNavigationMode: this.sceneHas2D && this.sceneHas3D,
               previewCameraLabel,
               previewCameraItems,
               isPreviewCameraActive,
@@ -592,6 +609,31 @@ export class EditorTabComponent extends ComponentBase {
       sharesParent && (sharedParent === null || sharedParent instanceof Node2D);
     this.canAlignToSelectionBounds = selected2DNodes.length > 1;
     this.canDistributeSelection = selected2DNodes.length > 2;
+  }
+
+  /**
+   * Derive which layers/navigation modes the active scene needs from its
+   * content and adapt the viewport accordingly: the toolbar hides the layer and
+   * navigation controls that don't apply, and — for the active tab — navigation
+   * is locked to the only available mode when the scene is single-dimensional.
+   */
+  private syncSceneLayerCapabilities(): void {
+    const activeSceneId = appState.scenes.activeSceneId;
+    const sceneGraph = activeSceneId ? this.sceneManager.getSceneGraph(activeSceneId) : null;
+    const capabilities = deriveSceneLayerCapabilities(sceneGraph);
+    this.sceneHas2D = capabilities.has2D;
+    this.sceneHas3D = capabilities.has3D;
+
+    // Only the active viewport enforces the navigation lock, so background tabs
+    // never fight over the shared navigation mode.
+    if (appState.tabs.activeTabId !== this.tabId) {
+      return;
+    }
+
+    const validMode = resolveValidNavigationMode(appState.ui.navigationMode, capabilities);
+    if (validMode !== appState.ui.navigationMode) {
+      void this.commandDispatcher.execute(setNavigationMode(validMode));
+    }
   }
 
   private handleTransformModeChange(mode: TransformMode): void {

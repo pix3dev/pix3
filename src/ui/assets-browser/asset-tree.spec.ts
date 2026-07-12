@@ -72,22 +72,25 @@ describe('AssetTree', () => {
       expect(Array.from(tree.querySelectorAll('.node-row--category'))).toHaveLength(2);
     });
 
+    // Each category owns a single top-level folder, so it is lifted into the
+    // category row and its (compacted) path is shown in parentheses.
     const categoryNames = Array.from(tree.querySelectorAll('.node-row--category .node-name')).map(
-      el => el.textContent?.trim()
+      el => el.textContent?.replace(/\s+/g, ' ').trim()
     );
-    expect(categoryNames).toEqual(['Scenes', 'Images']);
+    expect(categoryNames).toEqual(['Scenes (scenes)', 'Images (textures/ui)']);
 
     const counts = Array.from(tree.querySelectorAll('.node-count')).map(el =>
       el.textContent?.trim()
     );
     expect(counts).toEqual(['1', '2']);
 
-    // Categories start expanded on first use; the folder chain is compacted.
+    // Categories start expanded on first use; lifted folders show their files directly.
     const allNames = Array.from(tree.querySelectorAll('.node-name')).map(el =>
-      el.textContent?.trim()
+      el.textContent?.replace(/\s+/g, ' ').trim()
     );
-    expect(allNames).toContain('textures/ui');
-    expect(allNames).toContain('scenes');
+    expect(allNames).toContain('main.pix3scene');
+    expect(allNames).toContain('button.png');
+    expect(allNames).toContain('panel.png');
   });
 
   it('formats byte values consistently', () => {

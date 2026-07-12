@@ -913,6 +913,10 @@ export class AssetTree extends ComponentBase {
     const isSelected = this.isNodeSelected(node);
     const isDragOver = this.dragOverPath === node.path && node.kind === 'directory' && !isCategory;
     const metaLabel = isCategory ? null : this.getNodeMetaLabel(node);
+    const nameContent =
+      isCategory && node.folderLabel
+        ? html`${node.name}<span class="node-name-suffix"> (${node.folderLabel})</span>`
+        : node.name;
     return html`<div
       class="tree-node"
       data-path=${node.path}
@@ -962,7 +966,7 @@ export class AssetTree extends ComponentBase {
               @keydown=${(e: KeyboardEvent) => this.onEditKeyDown(e, node)}
               @blur=${() => this.commitCreateFolder(node)}
             />`
-          : html`<span class="node-name">${node.name}</span>`}
+          : html`<span class="node-name">${nameContent}</span>`}
         ${isCategory && node.fileCount !== undefined
           ? html`<span class="node-meta node-count">${node.fileCount}</span>`
           : metaLabel

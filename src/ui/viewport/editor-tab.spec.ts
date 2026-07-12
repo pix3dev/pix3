@@ -5,7 +5,7 @@ import { ASSET_RESOURCE_MIME } from '@/ui/shared/asset-drag-drop';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import type { CreateSprite2DOperationParams } from '@/features/scene/CreateSprite2DOperation';
-import { Group2D, Sprite2D, type NodeBase, type SceneGraph } from '@pix3/runtime';
+import { Group2D, Node3D, Sprite2D, type NodeBase, type SceneGraph } from '@pix3/runtime';
 import { Vector2 } from 'three';
 
 const { EditorTabComponent } = await import('./editor-tab');
@@ -412,7 +412,73 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
     expect(panel.shadowRoot?.querySelector('.viewport-marquee-selection')).toBeNull();
   });
+
+  it('hides both layer buttons and the navigation toggle for a 2D-only scene', async () => {
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    services.sceneManager.getSceneGraph.mockReturnValue(
+      graphOf(new Sprite2D({ id: 'sprite', name: 'Sprite', width: 16, height: 16 }))
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const root = panel.shadowRoot;
+    // A single-layer scene has nothing to reveal by hiding a layer, so neither
+    // layer button nor the mode toggle is shown.
+    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).toBeNull();
+  });
+
+  it('hides both layer buttons and the navigation toggle for a 3D-only scene', async () => {
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    services.sceneManager.getSceneGraph.mockReturnValue(
+      graphOf(new Node3D({ id: 'mesh', name: 'Mesh' }))
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const root = panel.shadowRoot;
+    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).toBeNull();
+  });
+
+  it('shows both layer buttons and the navigation toggle for a mixed scene', async () => {
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    services.sceneManager.getSceneGraph.mockReturnValue(
+      graphOf(
+        new Sprite2D({ id: 'sprite', name: 'Sprite', width: 16, height: 16 }),
+        new Node3D({ id: 'mesh', name: 'Mesh' })
+      )
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const root = panel.shadowRoot;
+    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).not.toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).not.toBeNull();
+    expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).not.toBeNull();
+  });
 });
+
+function graphOf(...nodes: NodeBase[]): SceneGraph {
+  return {
+    rootNodes: nodes,
+    nodeMap: new Map(nodes.map(node => [node.nodeId, node])),
+  } as unknown as SceneGraph;
+}
 
 function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
   const stubCanvas = document.createElement('canvas');

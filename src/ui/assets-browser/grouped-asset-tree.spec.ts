@@ -43,9 +43,15 @@ describe('buildGroupedTree', () => {
   });
 
   it('compacts single-child folder chains into one node with the deepest real path', () => {
-    const tree = build([file('assets/sprites/ui/button.png'), file('assets/sprites/ui/panel.png')]);
+    // A loose root file keeps the category from lifting its lone folder chain.
+    const tree = build([
+      file('assets/sprites/ui/button.png'),
+      file('assets/sprites/ui/panel.png'),
+      file('cover.png'),
+    ]);
     const images = tree.find(node => node.categoryId === 'images');
-    expect(names(images?.children)).toEqual(['assets/sprites/ui']);
+    expect(images?.folderLabel).toBeUndefined();
+    expect(names(images?.children)).toEqual(['assets/sprites/ui', 'cover.png']);
     const chain = images?.children?.[0];
     expect(chain?.path).toBe('assets/sprites/ui');
     expect(chain?.nodeType).toBe('dir');
@@ -57,9 +63,10 @@ describe('buildGroupedTree', () => {
       file('assets/grass.png'),
       file('assets/ui/icons/close.png'),
       file('assets/ui/icons/open.png'),
+      file('top.png'),
     ]);
     const images = tree.find(node => node.categoryId === 'images');
-    const assets = images?.children?.[0];
+    const assets = images?.children?.find(node => node.name === 'assets');
     // `assets` holds a file, so it is not merged with `ui/icons` below it.
     expect(assets?.name).toBe('assets');
     expect(names(assets?.children)).toEqual(['ui/icons', 'grass.png']);
@@ -68,9 +75,49 @@ describe('buildGroupedTree', () => {
   it('prunes folders that contain no files of the category', () => {
     const tree = build([file('assets/audio/theme.ogg'), file('assets/tex/grass.png')]);
     const images = tree.find(node => node.categoryId === 'images');
-    expect(names(images?.children)).toEqual(['assets/tex']);
+    // The audio-only branch is pruned, so `assets` collapses straight to `assets/tex`.
+    expect(images?.folderLabel).toBe('assets/tex');
+    expect(names(images?.children)).toEqual(['grass.png']);
     const audio = tree.find(node => node.categoryId === 'audio');
-    expect(names(audio?.children)).toEqual(['assets/audio']);
+    expect(audio?.folderLabel).toBe('assets/audio');
+    expect(names(audio?.children)).toEqual(['theme.ogg']);
+  });
+
+  it('lifts a lone top-level folder into its category and labels it with its path', () => {
+    const tree = build([file('images/64x64.png'), file('images/ai.jpg')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBe('images');
+    expect(names(images?.children)).toEqual(['64x64.png', 'ai.jpg']);
+    expect(images?.children?.every(child => child.nodeType === 'file')).toBe(true);
+    expect(images?.fileCount).toBe(2);
+  });
+
+  it('uses the compacted chain path as the lifted folder label', () => {
+    const tree = build([file('assets/textures/ui/button.png')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBe('assets/textures/ui');
+    expect(names(images?.children)).toEqual(['button.png']);
+  });
+
+  it('keeps nested subfolders visible after lifting the lone root folder', () => {
+    const tree = build([file('images/logo.png'), file('images/icons/close.png')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBe('images');
+    expect(names(images?.children)).toEqual(['icons', 'logo.png']);
+  });
+
+  it('does not lift when the category has multiple top-level folders', () => {
+    const tree = build([file('a/one.png'), file('b/two.png')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBeUndefined();
+    expect(names(images?.children)).toEqual(['a', 'b']);
+  });
+
+  it('does not lift when loose files sit at the category root', () => {
+    const tree = build([file('loose.png'), file('folder/inner.png')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBeUndefined();
+    expect(names(images?.children)).toEqual(['folder', 'loose.png']);
   });
 
   it('sorts directories before files within a level', () => {
@@ -80,13 +127,16 @@ describe('buildGroupedTree', () => {
   });
 
   it('sums directory sizes from contained files', () => {
-    const tree = build([file('tex/a.png', 100), file('tex/deep/b.png', 50)]);
+    // A loose root file keeps `tex` as a real dir node rather than lifting it.
+    const tree = build([file('tex/a.png', 100), file('tex/deep/b.png', 50), file('cover.png', 7)]);
     const images = tree.find(node => node.categoryId === 'images');
-    expect(images?.children?.[0]?.sizeBytes).toBe(150);
+    const tex = images?.children?.find(node => node.name === 'tex');
+    expect(tex?.sizeBytes).toBe(150);
   });
 
   it('expands the same real folder independently per category', () => {
-    const files = [file('shared/a.png'), file('shared/b.mp3')];
+    // Loose root files keep both categories from lifting their `shared` folder.
+    const files = [file('shared/a.png'), file('shared/b.mp3'), file('root.png'), file('root.mp3')];
     const tree = build(files, [
       groupedCategoryExpansionKey('images'),
       groupedDirectoryExpansionKey('images', 'shared'),
@@ -94,10 +144,12 @@ describe('buildGroupedTree', () => {
 
     const images = tree.find(node => node.categoryId === 'images');
     const audio = tree.find(node => node.categoryId === 'audio');
+    const imagesShared = images?.children?.find(node => node.name === 'shared');
+    const audioShared = audio?.children?.find(node => node.name === 'shared');
     expect(images?.expanded).toBe(true);
-    expect(images?.children?.[0]?.expanded).toBe(true);
+    expect(imagesShared?.expanded).toBe(true);
     expect(audio?.expanded).toBe(false);
-    expect(audio?.children?.[0]?.expanded).toBe(false);
+    expect(audioShared?.expanded).toBe(false);
   });
 
   it('expands all categories when defaultCategoryExpanded is set', () => {
@@ -109,7 +161,7 @@ describe('buildGroupedTree', () => {
 describe('collectGroupedExpandedKeys', () => {
   it('collects category and directory keys of expanded rows', () => {
     const tree = build(
-      [file('shared/a.png'), file('shared/b.mp3')],
+      [file('shared/a.png'), file('shared/b.mp3'), file('root.png'), file('root.mp3')],
       [groupedCategoryExpansionKey('images'), groupedDirectoryExpansionKey('images', 'shared')]
     );
 
