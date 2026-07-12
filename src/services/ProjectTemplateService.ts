@@ -64,6 +64,19 @@ const AGENT_OVERLAY_MODULES = import.meta.glob('../templates/agent/**/*.{md,json
   eager: true,
 }) as Record<string, string>;
 
+/**
+ * Same dot-file limitation as the skills tree: the project .gitignore is
+ * stored as `agent/gitignore.txt` and written to the project root as
+ * `.gitignore` (keeps the ephemeral `.pix3/preview-session.json` agent token
+ * out of git). The wildcard is required — Vite's import-glob rejects patterns
+ * without any glob magic.
+ */
+const AGENT_GITIGNORE_MODULES = import.meta.glob('../templates/agent/gitignore*', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
 /** Engine capability docs bundled into projects so agents can work offline. */
 const AGENT_DOC_REFERENCE_MODULES = import.meta.glob(
   '../../docs/{nodes-and-systems,node-types-reference}.md',
@@ -228,6 +241,10 @@ export class ProjectTemplateService {
     for (const [modulePath, contents] of Object.entries(AGENT_DOC_REFERENCE_MODULES)) {
       const fileName = modulePath.slice(modulePath.lastIndexOf('/') + 1);
       files.set(AGENT_DOC_REFERENCES_TARGET + fileName, contents);
+    }
+
+    for (const contents of Object.values(AGENT_GITIGNORE_MODULES)) {
+      files.set('.gitignore', contents);
     }
 
     return files;
