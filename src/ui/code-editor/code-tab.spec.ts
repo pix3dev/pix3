@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ServiceContainer } from '@/fw/di';
 import { CodeDocumentService } from '@/services/CodeDocumentService';
+import { MonacoIntelliSenseService } from '@/services/MonacoIntelliSenseService';
 import { appState, resetAppState, type EditorTab } from '@/state';
 
 type MonacoSelectionLike = {
@@ -149,6 +150,11 @@ class CodeDocumentServiceStub {
   }
 }
 
+class MonacoIntelliSenseServiceStub {
+  async ensureConfigured(): Promise<void> {}
+  dispose(): void {}
+}
+
 beforeEach(() => {
   resetAppState();
   createdEditors.length = 0;
@@ -166,6 +172,13 @@ beforeEach(() => {
   container.addService(
     container.getOrCreateToken(CodeDocumentService),
     CodeDocumentServiceStub,
+    'singleton'
+  );
+  // Stub IntelliSense so the editor doesn't try to load the (large, browser-only)
+  // Monaco type libraries during this unit test.
+  container.addService(
+    container.getOrCreateToken(MonacoIntelliSenseService),
+    MonacoIntelliSenseServiceStub,
     'singleton'
   );
 });
@@ -322,6 +335,7 @@ function createMonacoMock(): {
     editor: {
       create,
       createModel,
+      getModel: vi.fn(() => null),
     },
     Selection,
     Uri: {

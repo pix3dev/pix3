@@ -21,6 +21,21 @@ export interface EditorPreviewContext {
 export type Constructor<T> = new (...args: unknown[]) => T;
 
 /**
+ * Names (and matching node types) of the nodes available to scripts, keyed by
+ * node name or slash-separated path.
+ *
+ * This interface is intentionally **empty** in the runtime. The Pix3 editor
+ * augments it at authoring time (via a generated ambient declaration fed to the
+ * in-editor code editor) so that {@link Script.getNode} returns the exact node
+ * type for a known name — the same ergonomics as Godot's `$Node` or WPF/WinForms
+ * `x:Name` fields. In exported games, consumer projects, and tests it stays
+ * empty, so `keyof SceneNodeNames` is `never`, only the generic `getNode`
+ * overload applies, and the runtime package remains editor-agnostic.
+ */
+
+export interface SceneNodeNames {}
+
+/**
  * ScriptComponent - Unified interface for all script components.
  * Replaces the previous dual system of behaviors and controllers.
  * All scripts implement this interface with lifecycle methods and configuration.
@@ -140,6 +155,27 @@ export abstract class Script implements ScriptComponent {
       root = root.parentNode;
     }
     return root?.findNode(query) ?? null;
+  }
+
+  /**
+   * Resolve another node by id, name, or slash-separated path and return it,
+   * throwing if it does not exist. This is the non-null counterpart to
+   * {@link findNode} (Godot's `get_node` vs `get_node_or_null`).
+   *
+   * When a name is known to the editor (see {@link SceneNodeNames}) the return
+   * type is the exact node type, so member access autocompletes. Any other
+   * string falls through to the generic overload and resolves to `NodeBase`,
+   * so a script reused in a scene that lacks the name still type-checks — the
+   * editor-provided names are hints, never constraints.
+   */
+  protected getNode<K extends keyof SceneNodeNames & string>(name: K): SceneNodeNames[K];
+  protected getNode<T extends NodeBase = NodeBase>(query: string): T;
+  protected getNode(query: string): NodeBase {
+    const node = this.findNode(query);
+    if (!node) {
+      throw new Error(`[${this.type}] getNode("${query}"): node not found in scene`);
+    }
+    return node;
   }
 
   onAttach?(node: NodeBase): void;

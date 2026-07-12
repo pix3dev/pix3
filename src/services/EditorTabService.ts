@@ -17,6 +17,7 @@ import { SceneManager } from '@pix3/runtime';
 import { subscribe } from 'valtio/vanilla';
 import { CodeDocumentService } from '@/services/CodeDocumentService';
 import { PreviewHostService } from '@/services/PreviewHostService';
+import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
 
 export type DirtyCloseDecision = 'save' | 'dont-save' | 'cancel';
 
@@ -48,6 +49,9 @@ export class EditorTabService {
 
   @inject(PreviewHostService)
   private readonly previewHostService!: PreviewHostService;
+
+  @inject(ProjectScriptLoaderService)
+  private readonly projectScriptLoader!: ProjectScriptLoaderService;
 
   private disposeSceneSubscription?: () => void;
   private disposeAnimationSubscription?: () => void;
@@ -537,6 +541,15 @@ export class EditorTabService {
     // Load if needed.
     const alreadyLoaded = Boolean(appState.scenes.descriptors[sceneId]);
     if (!alreadyLoaded) {
+      // Wait for project scripts to be compiled and registered before parsing the
+      // scene. Otherwise `user:*` script components are instantiated before their
+      // classes exist in the ScriptRegistry, so SceneLoader silently drops them
+      // (only a console.warn) — the scene renders but its logic is dead. This is
+      // the fresh-project race: on create-from-template the startup scene opens via
+      // firstUpdated while esbuild is still bundling. ensureReady() returns
+      // immediately once scripts are ready/errored, so there is no steady-state cost.
+      await this.projectScriptLoader.ensureReady();
+
       let loadPromise = this.sceneLoadInFlight.get(sceneId);
       if (!loadPromise) {
         const command = new LoadSceneCommand({ filePath: tab.resourceId, sceneId });

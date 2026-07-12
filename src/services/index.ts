@@ -94,6 +94,7 @@ export { ScriptRegistry } from '@pix3/runtime';
 export { ScriptExecutionService } from './ScriptExecutionService';
 export { AutoloadService } from './AutoloadService';
 export { ProjectScriptLoaderService } from './ProjectScriptLoaderService';
+export { MonacoIntelliSenseService } from './MonacoIntelliSenseService';
 export { BehaviorPickerService } from './BehaviorPickerService';
 export { NodeTypePickerService, type NodeTypePickerInstance } from './NodeTypePickerService';
 export {

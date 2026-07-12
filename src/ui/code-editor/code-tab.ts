@@ -2,6 +2,7 @@ import { customElement, html, inject, property, state, ComponentBase } from '@/f
 import { appState, type CodeEditorContextState, type CodeEditorSelectionState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { CodeDocumentService } from '@/services/CodeDocumentService';
+import { MonacoIntelliSenseService } from '@/services/MonacoIntelliSenseService';
 import './code-tab.ts.css';
 import { ensureMonacoLoaded } from './monaco-loader';
 
@@ -16,6 +17,9 @@ type MonacoDisposable = import('monaco-editor').IDisposable;
 export class CodeTabComponent extends ComponentBase {
   @inject(CodeDocumentService)
   private readonly codeDocumentService!: CodeDocumentService;
+
+  @inject(MonacoIntelliSenseService)
+  private readonly intelliSense!: MonacoIntelliSenseService;
 
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
@@ -191,11 +195,22 @@ export class CodeTabComponent extends ComponentBase {
       this.monaco = monaco;
       this.disposeEditor();
 
-      this.model = monaco.editor.createModel(
-        snapshot.text,
-        snapshot.language,
-        monaco.Uri.parse(resourcePath)
-      );
+      // Configure the shared TypeScript language service (types, compiler
+      // options, scene-node names) once. Best-effort — a failure here must not
+      // stop the editor from opening, so we don't await/throw on it.
+      void this.intelliSense.ensureConfigured(monaco);
+
+      // Reuse an existing model at this URI if one is present (e.g. a sibling
+      // mirror was promoted, or the tab was reopened) — creating a second model
+      // at the same URI throws in Monaco.
+      const uri = monaco.Uri.parse(resourcePath);
+      const existingModel = monaco.editor.getModel(uri);
+      if (existingModel) {
+        existingModel.setValue(snapshot.text);
+        this.model = existingModel;
+      } else {
+        this.model = monaco.editor.createModel(snapshot.text, snapshot.language, uri);
+      }
 
       this.modelContentListener = this.model.onDidChangeContent(() => {
         if (this.isApplyingExternalUpdate) {
@@ -212,6 +227,9 @@ export class CodeTabComponent extends ComponentBase {
         theme: 'vs-dark',
         tabSize: 2,
         insertSpaces: true,
+        // Render suggestion/hover/parameter-hint popups with position:fixed so
+        // they escape the tab container instead of being clipped by it.
+        fixedOverflowWidgets: true,
       });
 
       this.editorStateListeners = [

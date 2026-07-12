@@ -69,6 +69,11 @@ export class ProjectScriptLoaderService {
   // Track watched files to avoid redundant watchers
   private watchedFilePaths = new Set<string>();
 
+  // Last set of project source files read during a build (path -> contents).
+  // Consumed by MonacoIntelliSenseService to mirror sibling files into the
+  // code editor so relative imports resolve. Updated on every build.
+  private lastCollectedFiles: Map<string, string> = new Map();
+
   // Enable auto-compilation
   enableAutoCompilation = true;
 
@@ -113,6 +118,14 @@ export class ProjectScriptLoaderService {
     this.debounceTimer = window.setTimeout(() => {
       void this.performSyncAndBuild();
     }, this.debounceMs);
+  }
+
+  /**
+   * The project source files (path → contents) read during the most recent
+   * build. Used by the code editor to mirror sibling scripts for IntelliSense.
+   */
+  getCollectedFiles(): ReadonlyMap<string, string> {
+    return this.lastCollectedFiles;
   }
 
   async ensureReady(): Promise<void> {
@@ -171,6 +184,7 @@ export class ProjectScriptLoaderService {
         this.logger.info(
           `No TypeScript files found in any script directory (${checkedDirectories.join(', ')})`
         );
+        this.lastCollectedFiles = new Map();
         this.clearRegisteredScripts();
         appState.project.errorMessage = null;
         appState.project.scriptsStatus = 'ready';
@@ -217,9 +231,14 @@ export class ProjectScriptLoaderService {
 
       if (filesMap.size === 0) {
         this.logger.warn('No script files could be read');
+        this.lastCollectedFiles = new Map();
         appState.project.scriptsStatus = 'ready'; // Treat as ready but empty
         return;
       }
+
+      // Expose the collected sources (mutated in place with lazily-loaded
+      // dependencies during bundling) for the code editor's sibling mirroring.
+      this.lastCollectedFiles = filesMap;
 
       const entryFiles = this.findComponentEntryFiles(filesMap);
 
