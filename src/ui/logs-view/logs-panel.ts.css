@@ -57,6 +57,18 @@
   color: #f48771;
 }
 
+.source-filter {
+  margin-left: auto;
+  padding: 3px 6px;
+  background-color: #3e3e42;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #d4d4d4;
+  font: inherit;
+  font-size: 11px;
+  max-width: 160px;
+}
+
 .clear-btn {
   padding: 4px 8px;
   background-color: #3e3e42;
@@ -67,6 +79,10 @@
   font-size: 11px;
   transition: background-color 0.2s;
   margin-left: auto;
+}
+
+.source-filter + .clear-btn {
+  margin-left: 0;
 }
 
 .clear-btn:hover {
@@ -143,6 +159,20 @@
   width: 40px;
   font-weight: bold;
   text-align: left;
+}
+
+.log-source {
+  flex-shrink: 0;
+  max-width: 120px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9cdcfe;
+  font-size: 10px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .log-message {

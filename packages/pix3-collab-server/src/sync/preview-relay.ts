@@ -222,6 +222,13 @@ function handlePlayerText(peer: RelayPeer, message: JsonMessage): void {
       }
       break;
     }
+    case 'device-info': {
+      session.deviceInfoByClient.set(clientId, message.info ?? null);
+      if (host) {
+        sendJson(host, { ...message, from: clientId });
+      }
+      break;
+    }
     case 'status': {
       if (typeof message.playModeStatus === 'string') {
         session.playModeStatus = message.playModeStatus;
@@ -358,6 +365,7 @@ function attachPeer(peer: RelayPeer): void {
       }
     } else {
       session.sockets.players.delete(clientId);
+      session.deviceInfoByClient.delete(clientId);
     }
     notifyPeerStatus(session);
   });

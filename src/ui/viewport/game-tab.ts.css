@@ -132,6 +132,14 @@
   pointer-events: none;
 }
 
+/* The remote preview card is interactive (copy/stop/restart) and can exceed
+   small panels vertically. */
+.game-placeholder-remote {
+  pointer-events: auto;
+  overflow-y: auto;
+  align-items: safe center;
+}
+
 .game-placeholder-card {
   width: min(420px, 100%);
   padding: 28px;

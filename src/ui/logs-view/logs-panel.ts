@@ -26,6 +26,10 @@ export class LogsPanel extends ComponentBase {
   @state()
   private expandedLogs: Set<string> = new Set();
 
+  /** '' = editor logs, 'all' = everything, otherwise a remote source label. */
+  @state()
+  private sourceFilter = 'all';
+
   private disposeListen?: () => void;
   private contentElement?: HTMLElement;
 
@@ -76,6 +80,21 @@ export class LogsPanel extends ComponentBase {
     this.logs = [];
     this.expandedLogs = new Set();
     this.requestUpdate();
+  }
+
+  private handleSourceFilterChange(event: Event) {
+    this.sourceFilter = (event.currentTarget as HTMLSelectElement).value;
+  }
+
+  /** Distinct remote source labels present in the current log buffer. */
+  private getRemoteSources(): string[] {
+    const sources = new Set<string>();
+    for (const log of this.logs) {
+      if (log.source) {
+        sources.add(log.source);
+      }
+    }
+    return [...sources].sort((left, right) => left.localeCompare(right));
   }
 
   private toggleLogExpansion(id: string) {
@@ -183,7 +202,18 @@ export class LogsPanel extends ComponentBase {
   }
 
   protected render() {
-    const visibleLogs = this.logs.filter(log => this.enabledLevels.has(log.level));
+    const remoteSources = this.getRemoteSources();
+    const sourceFilter =
+      this.sourceFilter !== 'all' &&
+      this.sourceFilter !== '' &&
+      !remoteSources.includes(this.sourceFilter)
+        ? 'all'
+        : this.sourceFilter;
+    const visibleLogs = this.logs.filter(
+      log =>
+        this.enabledLevels.has(log.level) &&
+        (sourceFilter === 'all' || (log.source ?? '') === sourceFilter)
+    );
 
     return html`
       <div class="logs-container">
@@ -192,6 +222,20 @@ export class LogsPanel extends ComponentBase {
             ${this.renderLevelToggle('debug')} ${this.renderLevelToggle('info')}
             ${this.renderLevelToggle('warn')} ${this.renderLevelToggle('error')}
           </div>
+          ${remoteSources.length > 0
+            ? html`
+                <select
+                  class="source-filter"
+                  .value=${sourceFilter}
+                  @change=${this.handleSourceFilterChange}
+                  aria-label="Filter logs by source"
+                >
+                  <option value="all">All sources</option>
+                  <option value="">Editor</option>
+                  ${remoteSources.map(source => html`<option value=${source}>${source}</option>`)}
+                </select>
+              `
+            : null}
           <button class="clear-btn" @click=${() => this.handleClear()} aria-label="Clear all logs">
             Clear
           </button>
@@ -221,6 +265,11 @@ export class LogsPanel extends ComponentBase {
                               : ''}
                           </span>
                           <span class="log-level">${log.level.toUpperCase()}</span>
+                          ${log.source
+                            ? html`<span class="log-source" title=${log.source}
+                                >${log.source}</span
+                              >`
+                            : ''}
                           <span class="log-message">${log.message}</span>
                           <span class="log-timestamp">${this.formatTime(log.timestamp)}</span>
                         </div>

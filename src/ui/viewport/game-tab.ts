@@ -5,6 +5,8 @@ import { subscribe } from 'valtio/vanilla';
 import styles from './game-tab.ts.css?raw';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { PreviewHostService } from '@/services/PreviewHostService';
+import './pix3-remote-preview-card';
 
 interface AspectRatioPreset {
   readonly value: GameAspectRatio;
@@ -29,6 +31,9 @@ export class GameViewTab extends ComponentBase {
   @inject(GamePlaySessionService)
   private readonly gamePlaySessionService!: GamePlaySessionService;
 
+  @inject(PreviewHostService)
+  private readonly previewHostService!: PreviewHostService;
+
   @state()
   private aspectRatio: GameAspectRatio = appState.ui.gameAspectRatio;
 
@@ -44,14 +49,21 @@ export class GameViewTab extends ComponentBase {
   @state()
   private showColliders = appState.ui.showPhysicsColliders;
 
+  @state()
+  private isRemotePreviewActive = false;
+
   private gameContainer?: HTMLElement;
   private viewportContainer?: HTMLElement;
   private resizeObserver?: ResizeObserver;
   private disposeSubscription?: () => void;
+  private disposePreviewSubscription?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.startResizeObserver();
+    this.disposePreviewSubscription = this.previewHostService.subscribe(state => {
+      this.isRemotePreviewActive = state.status !== 'idle';
+    });
   }
 
   disconnectedCallback(): void {
@@ -61,6 +73,8 @@ export class GameViewTab extends ComponentBase {
     }
     this.resizeObserver?.disconnect();
     this.disposeSubscription?.();
+    this.disposePreviewSubscription?.();
+    this.disposePreviewSubscription = undefined;
   }
 
   protected firstUpdated(): void {
@@ -340,14 +354,20 @@ export class GameViewTab extends ComponentBase {
           </div>
           ${this.isRunning
             ? null
-            : html`
-                <div class="game-placeholder" part="game-placeholder">
-                  <div class="game-placeholder-card">
-                    <p class="game-placeholder-title">${this.getPlaceholderTitle()}</p>
-                    <p class="game-placeholder-copy">${this.getPlaceholderCopy()}</p>
+            : this.isRemotePreviewActive
+              ? html`
+                  <div class="game-placeholder game-placeholder-remote" part="game-placeholder">
+                    <pix3-remote-preview-card></pix3-remote-preview-card>
                   </div>
-                </div>
-              `}
+                `
+              : html`
+                  <div class="game-placeholder" part="game-placeholder">
+                    <div class="game-placeholder-card">
+                      <p class="game-placeholder-title">${this.getPlaceholderTitle()}</p>
+                      <p class="game-placeholder-copy">${this.getPlaceholderCopy()}</p>
+                    </div>
+                  </div>
+                `}
         </div>
       </div>
     `;

@@ -42,8 +42,10 @@ ask the user to open the project in the Pix3 editor and run
 without an open editor.
 
 **If `playerCount` is 0:** there is nobody running the game. Ask the user to
-open the `joinUrl` (or scan the QR in the editor dialog) on a phone or in
-another browser tab. Logs/metrics/screenshots all come from a connected player.
+open the `joinUrl` (or scan the QR shown in the editor's Game tab) on a phone
+or in another browser tab. Logs/metrics/screenshots all come from a connected
+player. The session status also lists connected devices under `players[]`
+(clientId + reported device info: model/GPU/screen).
 
 ## The iteration loop
 
@@ -60,7 +62,10 @@ curl -s -H "$AUTH" "$BASE/sessions/$SESSION/logs?since=0"
 
 # 3. Check performance (1-second aggregates from the player)
 curl -s -H "$AUTH" "$BASE/sessions/$SESSION/metrics"
-# → { "sample": { "fps": 59.8, "frameMs": 4.1, "drawCalls": 63, ... } }
+# → { "sample": { "fps": 59.8, "frameMs": 4.1, "drawCalls": 63,
+#      "maxFrameMs": 21.3, "longFrameCount": 0, "jsHeapUsedMb": 38.2, ... } }
+# maxFrameMs / longFrameCount expose hitches that 1s averages hide — check them
+# when diagnosing stutter on a real device.
 
 # 4. See the game
 curl -s -H "$AUTH" "$BASE/sessions/$SESSION/screenshot?fresh=true" -o shot.jpg

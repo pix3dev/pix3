@@ -33,6 +33,8 @@ export interface PreviewSession {
   logSeq: number;
   metrics: unknown | null;
   metricsUpdatedAt: number | null;
+  /** Static device facts reported by each connected player, keyed by clientId. */
+  readonly deviceInfoByClient: Map<string, unknown>;
   screenshot: PreviewScreenshot | null;
   playModeStatus: string;
   /** Last session-config JSON message from the host, replayed to late-joining players. */
@@ -121,6 +123,7 @@ export class PreviewSessionService {
       logSeq: 0,
       metrics: null,
       metricsUpdatedAt: null,
+      deviceInfoByClient: new Map(),
       screenshot: null,
       playModeStatus: 'idle',
       cachedSessionConfig: null,

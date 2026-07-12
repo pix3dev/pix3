@@ -21,6 +21,43 @@ pix3-profiler-panel .profiler-idle {
   line-height: 1.5;
 }
 
+pix3-profiler-panel .profiler-source-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+pix3-profiler-panel .profiler-source-button {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-subtle, #2a2a2a);
+  background: transparent;
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.72rem;
+  cursor: pointer;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+pix3-profiler-panel .profiler-source-button:hover {
+  color: var(--color-text-primary, #eee);
+}
+
+pix3-profiler-panel .profiler-source-button.active {
+  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.92);
+  border-color: transparent;
+  color: rgba(18, 20, 24, 0.95);
+}
+
+pix3-profiler-panel .profiler-source-button-offline:not(.active) {
+  opacity: 0.55;
+}
+
 pix3-profiler-panel .profiler-section {
   display: flex;
   flex-direction: column;

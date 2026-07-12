@@ -44,6 +44,28 @@ export interface PreviewMetricsSample {
   readonly textures: number;
   readonly elapsedTime: number;
   readonly frameNumber: number;
+  /** Worst frame inside the aggregation window — 1s averages hide hitches. */
+  readonly maxFrameMs?: number;
+  /** Frames above ~33ms (missed-2-vsync) inside the window. */
+  readonly longFrameCount?: number;
+  /** Chrome-only (performance.memory); null on other engines. */
+  readonly jsHeapUsedMb?: number | null;
+}
+
+/** Static facts about the player device, reported once per connection. */
+export interface PreviewDeviceInfo {
+  readonly userAgent: string;
+  readonly devicePixelRatio: number;
+  readonly screenWidth: number;
+  readonly screenHeight: number;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  /** UNMASKED_RENDERER_WEBGL when available — the real GPU/driver string. */
+  readonly gpu: string | null;
+  /** navigator.deviceMemory (GiB, Chrome-only). */
+  readonly deviceMemoryGb: number | null;
+  readonly hardwareConcurrency: number | null;
+  readonly language: string | null;
 }
 
 export type PreviewPlayModeStatus = 'idle' | 'loading' | 'running' | 'error';
@@ -106,6 +128,11 @@ export interface StatusMessage extends PreviewJsonMessage {
   readonly type: 'status';
   readonly playModeStatus: PreviewPlayModeStatus;
   readonly detail?: string;
+}
+
+export interface DeviceInfoMessage extends PreviewJsonMessage {
+  readonly type: 'device-info';
+  readonly info: PreviewDeviceInfo;
 }
 
 /** Binary frame headers. */

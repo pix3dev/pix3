@@ -3,6 +3,7 @@ import {
   encodeBinaryFrame,
   sha256Hex,
   type FileResponseHeader,
+  type PreviewDeviceInfo,
   type PreviewJsonMessage,
   type PreviewLogEntryPayload,
   type PreviewMetricsSample,
@@ -51,6 +52,11 @@ const FILE_REQUEST_TIMEOUT_MS = 30_000;
 const FILE_CACHE_NAME = 'pix3-preview-files';
 const LOG_FLUSH_INTERVAL_MS = 500;
 const MAX_LOG_MESSAGE_LENGTH = 4000;
+/**
+ * Cap per flush window so a game logging every frame cannot flood the relay or
+ * spend device CPU stringifying — the overflow is dropped and counted.
+ */
+const MAX_LOGS_PER_FLUSH = 25;
 const RECONNECT_DELAY_MS = 2000;
 
 /**
@@ -74,6 +80,8 @@ export class PreviewPlayerClient implements PreviewFileProvider {
   private reconnectTimer: number | null = null;
   private readonly pendingLogs: PreviewLogEntryPayload[] = [];
   private logFlushTimer: number | null = null;
+  private droppedLogCount = 0;
+  private deviceInfo: PreviewDeviceInfo | null = null;
 
   constructor(sessionId: string, wsUrl: string, events: PreviewPlayerClientEvents) {
     this.wsUrl = wsUrl;
@@ -94,6 +102,7 @@ export class PreviewPlayerClient implements PreviewFileProvider {
 
     socket.addEventListener('open', () => {
       this.events.onConnectionStateChanged(this.hostOnline ? 'connected' : 'host-offline');
+      this.sendDeviceInfo();
     });
 
     socket.addEventListener('message', event => {
@@ -198,7 +207,18 @@ export class PreviewPlayerClient implements PreviewFileProvider {
 
   // ── Reporting ──────────────────────────────────────────────────────────────
 
+  /** Remembered and (re)sent whenever a connection or host appears. */
+  setDeviceInfo(info: PreviewDeviceInfo): void {
+    this.deviceInfo = info;
+    this.sendDeviceInfo();
+  }
+
   reportLog(level: PreviewLogEntryPayload['level'], message: string): void {
+    if (this.pendingLogs.length >= MAX_LOGS_PER_FLUSH) {
+      this.droppedLogCount += 1;
+      return;
+    }
+
     this.pendingLogs.push({
       level,
       message:
@@ -274,6 +294,11 @@ export class PreviewPlayerClient implements PreviewFileProvider {
         this.hostOnline = hostOnline;
         if (changed || message.type === 'hello') {
           this.events.onConnectionStateChanged(hostOnline ? 'connected' : 'host-offline');
+        }
+        // The relay only forwards to a live host, so (re)introduce this device
+        // whenever a host (re)appears.
+        if (changed && hostOnline) {
+          this.sendDeviceInfo();
         }
         break;
       }
@@ -467,12 +492,26 @@ export class PreviewPlayerClient implements PreviewFileProvider {
   }
 
   private flushLogs(): void {
-    if (this.pendingLogs.length === 0) {
+    if (this.pendingLogs.length === 0 && this.droppedLogCount === 0) {
       return;
     }
 
     const entries = this.pendingLogs.splice(0, this.pendingLogs.length);
+    if (this.droppedLogCount > 0) {
+      entries.push({
+        level: 'warn',
+        message: `[Pix3 Player] Dropped ${this.droppedLogCount} log entries (rate limit)`,
+        timestamp: Date.now(),
+      });
+      this.droppedLogCount = 0;
+    }
     this.sendJson({ type: 'log', entries });
+  }
+
+  private sendDeviceInfo(): void {
+    if (this.deviceInfo) {
+      this.sendJson({ type: 'device-info', info: this.deviceInfo });
+    }
   }
 
   private sendJson(message: PreviewJsonMessage): void {

@@ -81,7 +81,13 @@ export {
   type ProfilerCountersSnapshot,
   type ProfilerFrameImpactSnapshot,
   type ProfilerFrameImpactEntrySnapshot,
+  type ProfilerAudioSnapshot,
+  type ProfilerAudioFileSnapshot,
 } from './ProfilerSessionService';
+export {
+  RemotePreviewTelemetryService,
+  type RemotePlayerTelemetry,
+} from './RemotePreviewTelemetryService';
 export { IconService, IconSize, type IconSizeValue } from './IconService';
 export { ScriptRegistry } from '@pix3/runtime';
 export { ScriptExecutionService } from './ScriptExecutionService';

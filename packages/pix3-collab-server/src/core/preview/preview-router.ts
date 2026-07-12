@@ -27,6 +27,10 @@ function sessionStatusPayload(session: PreviewSession): Record<string, unknown> 
     metricsUpdatedAt: session.metricsUpdatedAt,
     lastLogSeq: session.logSeq,
     hasScreenshot: session.screenshot !== null,
+    players: Array.from(session.sockets.players.keys()).map(clientId => ({
+      clientId,
+      deviceInfo: session.deviceInfoByClient.get(clientId) ?? null,
+    })),
   };
 }
 

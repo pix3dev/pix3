@@ -16,6 +16,7 @@ import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 import { SceneManager } from '@pix3/runtime';
 import { subscribe } from 'valtio/vanilla';
 import { CodeDocumentService } from '@/services/CodeDocumentService';
+import { PreviewHostService } from '@/services/PreviewHostService';
 
 export type DirtyCloseDecision = 'save' | 'dont-save' | 'cancel';
 
@@ -44,6 +45,9 @@ export class EditorTabService {
 
   @inject(CodeDocumentService)
   private readonly codeDocumentService!: CodeDocumentService;
+
+  @inject(PreviewHostService)
+  private readonly previewHostService!: PreviewHostService;
 
   private disposeSceneSubscription?: () => void;
   private disposeAnimationSubscription?: () => void;
@@ -704,6 +708,12 @@ export class EditorTabService {
           status: 'stopped',
         })
       );
+    }
+
+    // The Game tab hosts the remote preview session card; closing it ends the
+    // session (mirrors how closing the tab stops a local game).
+    if (tab.type === 'game' && this.previewHostService.isActive()) {
+      this.previewHostService.stop();
     }
 
     const wasActive = appState.tabs.activeTabId === tab.id;

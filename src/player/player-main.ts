@@ -20,6 +20,7 @@ import {
 } from '@pix3/runtime';
 import {
   buildPreviewWsUrl,
+  type PreviewDeviceInfo,
   type PreviewMetricsSample,
   type PreviewSessionConfig,
 } from '@/core/remote-preview/protocol';
@@ -43,6 +44,58 @@ interface RuntimeStack {
 
 const RESTART_DEBOUNCE_MS = 300;
 const METRICS_INTERVAL_MS = 1000;
+/** ~2 missed vsyncs at 60Hz; frames above this count as hitches. */
+const LONG_FRAME_THRESHOLD_MS = 33.4;
+
+interface MemoryPerformance extends Performance {
+  memory?: { usedJSHeapSize: number };
+}
+
+function readJsHeapUsedMb(): number | null {
+  const usedBytes = (globalThis.performance as MemoryPerformance | undefined)?.memory
+    ?.usedJSHeapSize;
+  if (typeof usedBytes !== 'number' || !Number.isFinite(usedBytes) || usedBytes < 0) {
+    return null;
+  }
+  return Math.round((usedBytes / (1024 * 1024)) * 10) / 10;
+}
+
+/** One-time throwaway GL context: UNMASKED_RENDERER identifies the real GPU. */
+function readGpuRendererString(): string | null {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl =
+      canvas.getContext('webgl2') ?? (canvas.getContext('webgl') as WebGLRenderingContext | null);
+    if (!gl) {
+      return null;
+    }
+    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = debugInfo
+      ? (gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) as string)
+      : (gl.getParameter(gl.RENDERER) as string);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return typeof renderer === 'string' && renderer.length > 0 ? renderer : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectDeviceInfo(): PreviewDeviceInfo {
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  return {
+    userAgent: navigator.userAgent,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    screenWidth: window.screen?.width ?? 0,
+    screenHeight: window.screen?.height ?? 0,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    gpu: readGpuRendererString(),
+    deviceMemoryGb: typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null,
+    hardwareConcurrency:
+      typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : null,
+    language: navigator.language ?? null,
+  };
+}
 
 class PreviewPlayerApp {
   private readonly ui: PlayerUi;
@@ -63,6 +116,8 @@ class PreviewPlayerApp {
   private frameMsSum = 0;
   private logicMsSum = 0;
   private renderMsSum = 0;
+  private maxFrameMs = 0;
+  private longFrameCount = 0;
   private lastSample: SceneRunnerFrameSample | null = null;
   private lastMetricsFlush = performance.now();
 
@@ -106,6 +161,7 @@ class PreviewPlayerApp {
       }
     );
 
+    this.client.setDeviceInfo(collectDeviceInfo());
     this.interceptConsole();
     window.addEventListener('error', event => {
       this.client.reportLog(
@@ -438,6 +494,12 @@ class PreviewPlayerApp {
     this.frameMsSum += sample.totalFrameMs;
     this.logicMsSum += sample.logicMs;
     this.renderMsSum += sample.renderMs;
+    if (sample.totalFrameMs > this.maxFrameMs) {
+      this.maxFrameMs = sample.totalFrameMs;
+    }
+    if (sample.totalFrameMs > LONG_FRAME_THRESHOLD_MS) {
+      this.longFrameCount += 1;
+    }
     this.lastSample = sample;
 
     if (this.pendingScreenshotRequestId !== undefined) {
@@ -470,6 +532,9 @@ class PreviewPlayerApp {
         textures: this.lastSample?.rendererStats.textures ?? 0,
         elapsedTime: round2(this.lastSample?.elapsedTime ?? 0),
         frameNumber: this.lastSample?.frameNumber ?? 0,
+        maxFrameMs: round2(this.maxFrameMs),
+        longFrameCount: this.longFrameCount,
+        jsHeapUsedMb: readJsHeapUsedMb(),
       };
       this.client.reportMetrics(metrics);
       this.resetMetricsWindow();
@@ -481,6 +546,8 @@ class PreviewPlayerApp {
     this.frameMsSum = 0;
     this.logicMsSum = 0;
     this.renderMsSum = 0;
+    this.maxFrameMs = 0;
+    this.longFrameCount = 0;
     this.lastMetricsFlush = performance.now();
   }
 

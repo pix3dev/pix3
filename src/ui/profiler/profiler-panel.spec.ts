@@ -4,6 +4,7 @@ import type { ProfilerSessionService, ProfilerSessionSnapshot } from '@/services
 
 vi.mock('@/services', () => ({
   ProfilerSessionService: class ProfilerSessionService {},
+  RemotePreviewTelemetryService: class RemotePreviewTelemetryService {},
 }));
 
 await import('./profiler-panel');
@@ -407,6 +408,17 @@ function stubPanelService(panel: ProfilerPanelElement, snapshot: ProfilerSession
 
   Object.defineProperty(panel, 'profilerSessionService', {
     value: profilerSessionService,
+    configurable: true,
+  });
+
+  Object.defineProperty(panel, 'remotePreviewTelemetryService', {
+    value: {
+      subscribe(listener: (players: readonly unknown[]) => void) {
+        listener([]);
+        return () => undefined;
+      },
+      getProfilerSnapshot: () => null,
+    },
     configurable: true,
   });
 }

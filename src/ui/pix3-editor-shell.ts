@@ -38,10 +38,6 @@ import {
   PlayableExportProgressDialogService,
   type PlayableExportProgressDialogInstance,
 } from '@/services/PlayableExportProgressDialogService';
-import {
-  RemotePreviewDialogService,
-  type RemotePreviewDialogInstance,
-} from '@/services/RemotePreviewDialogService';
 import { ScriptExecutionService } from '@/services/ScriptExecutionService';
 import { AutoloadService } from '@/services/AutoloadService';
 import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
@@ -120,7 +116,6 @@ import './shared/pix3-save-asset-dialog';
 import './shared/pix3-node-type-picker';
 import './shared/pix3-playable-export-dialog';
 import './shared/pix3-playable-export-progress-dialog';
-import './shared/pix3-remote-preview-dialog';
 import './shared/pix3-status-bar';
 import './shared/pix3-background';
 import './collab/collab-participants-strip';
@@ -217,9 +212,6 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(PlayableExportProgressDialogService)
   private readonly playableExportProgressDialogService!: PlayableExportProgressDialogService;
 
-  @inject(RemotePreviewDialogService)
-  private readonly remotePreviewDialogService!: RemotePreviewDialogService;
-
   @inject(ScriptExecutionService)
   private readonly scriptExecutionService!: ScriptExecutionService;
 
@@ -287,9 +279,6 @@ export class Pix3EditorShell extends ComponentBase {
   private activePlayableExportProgressDialog: PlayableExportProgressDialogInstance | null = null;
 
   @state()
-  private activeRemotePreviewDialog: RemotePreviewDialogInstance | null = null;
-
-  @state()
   private isAuthModalOpen = false;
 
   @state()
@@ -317,7 +306,6 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeNodeTypePickerSubscription?: () => void;
   private disposePlayableExportDialogSubscription?: () => void;
   private disposePlayableExportProgressDialogSubscription?: () => void;
-  private disposeRemotePreviewDialogSubscription?: () => void;
   private disposeBehaviorPickerSubscription?: () => void;
   private disposeEffectPickerSubscription?: () => void;
   private disposeScriptCreatorSubscription?: () => void;
@@ -500,13 +488,6 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposePlayableExportDialogSubscription = this.playableExportDialogService.subscribe(
       dialog => {
         this.activePlayableExportDialog = dialog;
-        this.requestUpdate();
-      }
-    );
-
-    this.disposeRemotePreviewDialogSubscription = this.remotePreviewDialogService.subscribe(
-      dialog => {
-        this.activeRemotePreviewDialog = dialog;
         this.requestUpdate();
       }
     );
@@ -715,8 +696,6 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposePlayableExportDialogSubscription = undefined;
     this.disposePlayableExportProgressDialogSubscription?.();
     this.disposePlayableExportProgressDialogSubscription = undefined;
-    this.disposeRemotePreviewDialogSubscription?.();
-    this.disposeRemotePreviewDialogSubscription = undefined;
     this.disposeBehaviorPickerSubscription?.();
     this.disposeBehaviorPickerSubscription = undefined;
     this.disposeEffectPickerSubscription?.();
@@ -982,8 +961,7 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderAnimationAutoSliceHost()} ${this.renderAssetImportHost()}
         ${this.renderSaveGeneratedAssetHost()} ${this.renderCreateProjectHost()}
         ${this.renderNodeTypePickerHost()} ${this.renderPlayableExportDialogHost()}
-        ${this.renderPlayableExportProgressDialogHost()} ${this.renderRemotePreviewDialogHost()}
-        ${this.renderAuthModal()}
+        ${this.renderPlayableExportProgressDialogHost()} ${this.renderAuthModal()}
       </div>
     `;
   }
@@ -1588,18 +1566,6 @@ export class Pix3EditorShell extends ComponentBase {
       >
         <pix3-node-type-picker .pickerId=${this.activeNodeTypePicker.id}></pix3-node-type-picker>
       </div>
-    `;
-  }
-
-  private renderRemotePreviewDialogHost() {
-    if (!this.activeRemotePreviewDialog) {
-      return null;
-    }
-
-    return html`
-      <pix3-remote-preview-dialog
-        .dialogId=${this.activeRemotePreviewDialog.id}
-      ></pix3-remote-preview-dialog>
     `;
   }
 

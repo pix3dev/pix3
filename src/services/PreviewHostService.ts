@@ -9,13 +9,18 @@ import {
   sha256Hex,
   type FileRequestMessage,
   type FileResponseHeader,
+  type PreviewDeviceInfo,
   type PreviewJsonMessage,
+  type PreviewLogEntryPayload,
+  type PreviewMetricsSample,
+  type PreviewPlayModeStatus,
   type PreviewSessionConfig,
   type ScriptBundleHeader,
 } from '@/core/remote-preview/protocol';
 import { ProjectStorageService } from './ProjectStorageService';
 import { ScriptCompilerService } from './ScriptCompilerService';
 import { LoggingService } from './LoggingService';
+import { RemotePreviewTelemetryService } from './RemotePreviewTelemetryService';
 
 export interface PreviewHostSessionInfo {
   readonly sessionId: string;
@@ -92,6 +97,9 @@ export class PreviewHostService {
   @inject(LoggingService)
   private readonly logger!: LoggingService;
 
+  @inject(RemotePreviewTelemetryService)
+  private readonly telemetry!: RemotePreviewTelemetryService;
+
   private socket: WebSocket | null = null;
   private hostToken = '';
   private state: PreviewHostState = {
@@ -166,6 +174,7 @@ export class PreviewHostService {
     this.scriptBundle = null;
     this.hostToken = '';
     void this.removeSessionFile();
+    this.telemetry.reset();
     this.setState({ status: 'idle', session: null, playerCount: 0, errorMessage: null });
   }
 
@@ -277,29 +286,45 @@ export class PreviewHostService {
       return;
     }
 
+    const from = typeof message.from === 'string' ? message.from : '';
+
     switch (message.type) {
       case 'hello':
-      case 'peer-status':
-        this.setState({
-          playerCount: typeof message.playerCount === 'number' ? message.playerCount : 0,
-        });
+      case 'peer-status': {
+        const playerCount = typeof message.playerCount === 'number' ? message.playerCount : 0;
+        this.setState({ playerCount });
+        this.telemetry.handlePlayerCount(playerCount);
         break;
+      }
       case 'file-request':
         await this.handleFileRequest(message as FileRequestMessage);
         break;
       case 'log': {
         const entries = Array.isArray(message.entries) ? message.entries : [];
-        for (const entry of entries) {
-          const record = entry as { level?: string; message?: string };
-          if (record.level === 'error' && typeof record.message === 'string') {
-            this.logger.warn(`[Remote Preview] Player error: ${record.message}`);
-          }
+        if (from) {
+          this.telemetry.handleLogEntries(from, entries as PreviewLogEntryPayload[]);
+        }
+        break;
+      }
+      case 'metrics': {
+        if (from && message.sample && typeof message.sample === 'object') {
+          this.telemetry.handleMetrics(from, message.sample as PreviewMetricsSample);
         }
         break;
       }
       case 'status': {
-        if (message.playModeStatus === 'error' && typeof message.detail === 'string') {
-          this.logger.warn(`[Remote Preview] Player failed to start: ${message.detail}`);
+        if (from && typeof message.playModeStatus === 'string') {
+          this.telemetry.handleStatus(
+            from,
+            message.playModeStatus as PreviewPlayModeStatus,
+            typeof message.detail === 'string' ? message.detail : undefined
+          );
+        }
+        break;
+      }
+      case 'device-info': {
+        if (from && message.info && typeof message.info === 'object') {
+          this.telemetry.handleDeviceInfo(from, message.info as PreviewDeviceInfo);
         }
         break;
       }

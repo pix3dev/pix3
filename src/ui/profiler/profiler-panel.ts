@@ -5,6 +5,8 @@ import {
   type ProfilerFrameImpactEntrySnapshot,
   type ProfilerFrameImpactSnapshot,
   ProfilerSessionService,
+  RemotePreviewTelemetryService,
+  type RemotePlayerTelemetry,
   type ProfilerCountersSnapshot,
   type ProfilerHistorySnapshot,
   type ProfilerPerformanceSnapshot,
@@ -14,13 +16,20 @@ import './profiler-panel.ts.css';
 import '../shared/pix3-panel';
 
 const IDLE_COPY = 'Profiler metrics appear here while Play mode is running.';
+const REMOTE_IDLE_COPY = 'Waiting for metrics from the remote device…';
 const FRAME_IMPACT_EMPTY_COPY = 'No frame activity breakdown reported by the active runtime yet.';
 const AUDIO_EMPTY_COPY = 'No audio files have played in this session yet.';
+
+/** selectedSource value for the local editor game session. */
+const LOCAL_SOURCE = 'local';
 
 @customElement('pix3-profiler-panel')
 export class ProfilerPanel extends ComponentBase {
   @inject(ProfilerSessionService)
   private readonly profilerSessionService!: ProfilerSessionService;
+
+  @inject(RemotePreviewTelemetryService)
+  private readonly remotePreviewTelemetryService!: RemotePreviewTelemetryService;
 
   @state()
   private snapshot: ProfilerSessionSnapshot = {
@@ -60,6 +69,7 @@ export class ProfilerPanel extends ComponentBase {
   };
 
   private disposeSubscription?: () => void;
+  private disposeTelemetrySubscription?: () => void;
   private resizeObserver?: ResizeObserver;
 
   @state()
@@ -68,11 +78,26 @@ export class ProfilerPanel extends ComponentBase {
   @state()
   private selectedAudioKey: string | null = null;
 
+  @state()
+  private remotePlayers: readonly RemotePlayerTelemetry[] = [];
+
+  @state()
+  private selectedSource: string = LOCAL_SOURCE;
+
+  /** True once the user picked a source explicitly; disables auto-switching. */
+  private sourceManuallySelected = false;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.disposeSubscription = this.profilerSessionService.subscribe(snapshot => {
       this.snapshot = snapshot;
       this.syncSelectedAudioKey(snapshot);
+      this.syncSelectedSource();
+      this.requestUpdate();
+    });
+    this.disposeTelemetrySubscription = this.remotePreviewTelemetryService.subscribe(players => {
+      this.remotePlayers = players;
+      this.syncSelectedSource();
       this.requestUpdate();
     });
   }
@@ -80,6 +105,8 @@ export class ProfilerPanel extends ComponentBase {
   disconnectedCallback(): void {
     this.disposeSubscription?.();
     this.disposeSubscription = undefined;
+    this.disposeTelemetrySubscription?.();
+    this.disposeTelemetrySubscription = undefined;
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
     super.disconnectedCallback();
@@ -90,23 +117,140 @@ export class ProfilerPanel extends ComponentBase {
   }
 
   protected render() {
+    const remotePlayer = this.getSelectedRemotePlayer();
+    const snapshot = remotePlayer
+      ? (this.remotePreviewTelemetryService.getProfilerSnapshot(remotePlayer.clientId) ??
+        this.snapshot)
+      : this.snapshot;
+    const idleCopy = remotePlayer ? REMOTE_IDLE_COPY : IDLE_COPY;
+
     return html`
-      <pix3-panel panel-description=${this.snapshot.status === 'idle' ? IDLE_COPY : ''}>
+      <pix3-panel panel-description=${snapshot.status === 'idle' ? idleCopy : ''}>
         <div class="profiler-root">
-          ${this.snapshot.status === 'idle'
-            ? html`<p class="profiler-idle">${IDLE_COPY}</p>`
+          ${this.renderSourceSwitcher()}
+          ${snapshot.status === 'idle'
+            ? html`<p class="profiler-idle">${idleCopy}</p>`
             : html`
-                ${this.renderCharts(this.snapshot.history, this.snapshot.performance)}
+                ${this.renderCharts(snapshot.history, snapshot.performance)}
                 ${this.renderSection(
                   'Performance',
-                  this.renderPerformanceRows(this.snapshot.performance)
+                  this.renderPerformanceRows(snapshot.performance, remotePlayer)
                 )}
-                ${this.renderSection('Session', this.renderCounterRows(this.snapshot.counters))}
-                ${this.renderAudioSection(this.snapshot.audio)}
-                ${this.renderFrameImpactSection(this.snapshot.frameImpact)}
+                ${this.renderSection('Session', this.renderCounterRows(snapshot.counters))}
+                ${remotePlayer
+                  ? this.renderDeviceSection(remotePlayer)
+                  : html`
+                      ${this.renderAudioSection(snapshot.audio)}
+                      ${this.renderFrameImpactSection(snapshot.frameImpact)}
+                    `}
               `}
         </div>
       </pix3-panel>
+    `;
+  }
+
+  private getSelectedRemotePlayer(): RemotePlayerTelemetry | null {
+    if (this.selectedSource === LOCAL_SOURCE) {
+      return null;
+    }
+
+    return this.remotePlayers.find(player => player.clientId === this.selectedSource) ?? null;
+  }
+
+  private syncSelectedSource(): void {
+    if (this.selectedSource !== LOCAL_SOURCE && !this.getSelectedRemotePlayer()) {
+      this.selectedSource = LOCAL_SOURCE;
+      this.sourceManuallySelected = false;
+    }
+
+    if (this.sourceManuallySelected) {
+      return;
+    }
+
+    // Follow the action: a local play session wins, otherwise show the first
+    // live remote device (remote preview without local play).
+    if (this.snapshot.status !== 'idle') {
+      this.selectedSource = LOCAL_SOURCE;
+      return;
+    }
+
+    if (this.selectedSource === LOCAL_SOURCE) {
+      const liveRemote = this.remotePlayers.find(
+        player => player.connected && player.lastSample !== null
+      );
+      if (liveRemote) {
+        this.selectedSource = liveRemote.clientId;
+      }
+    }
+  }
+
+  private selectSource(source: string): void {
+    this.sourceManuallySelected = true;
+    this.selectedSource = source;
+  }
+
+  private renderSourceSwitcher() {
+    if (this.remotePlayers.length === 0) {
+      return null;
+    }
+
+    return html`
+      <div class="profiler-source-switcher" role="group" aria-label="Metrics source">
+        <button
+          type="button"
+          class="profiler-source-button ${this.selectedSource === LOCAL_SOURCE ? 'active' : ''}"
+          aria-pressed=${String(this.selectedSource === LOCAL_SOURCE)}
+          @click=${() => this.selectSource(LOCAL_SOURCE)}
+        >
+          Editor
+        </button>
+        ${this.remotePlayers.map(
+          player => html`
+            <button
+              type="button"
+              class="profiler-source-button ${this.selectedSource === player.clientId
+                ? 'active'
+                : ''} ${player.connected ? '' : 'profiler-source-button-offline'}"
+              aria-pressed=${String(this.selectedSource === player.clientId)}
+              title=${player.connected ? player.label : `${player.label} (offline)`}
+              @click=${() => this.selectSource(player.clientId)}
+            >
+              ${player.label}
+            </button>
+          `
+        )}
+      </div>
+    `;
+  }
+
+  private renderDeviceSection(player: RemotePlayerTelemetry) {
+    const info = player.deviceInfo;
+    const sample = player.lastSample;
+    return html`
+      <section class="profiler-section">
+        <h3 class="profiler-section-title">Device</h3>
+        <div class="profiler-grid">
+          ${this.renderMetricRow('Status', player.connected ? 'connected' : 'offline')}
+          ${info
+            ? html`
+                ${this.renderMetricRow('GPU', info.gpu ?? '—')}
+                ${this.renderMetricRow(
+                  'Screen',
+                  `${info.screenWidth}×${info.screenHeight} @${info.devicePixelRatio}x`
+                )}
+                ${this.renderMetricRow('Viewport', `${info.viewportWidth}×${info.viewportHeight}`)}
+                ${this.renderMetricRow(
+                  'Memory',
+                  info.deviceMemoryGb !== null ? `${info.deviceMemoryGb} GB` : '—'
+                )}
+                ${this.renderMetricRow('CPU cores', this.formatInteger(info.hardwareConcurrency))}
+              `
+            : this.renderMetricRow('Info', 'not reported')}
+          ${sample && typeof sample.longFrameCount === 'number'
+            ? this.renderMetricRow('Long frames/s', this.formatInteger(sample.longFrameCount))
+            : null}
+        </div>
+      </section>
     `;
   }
 
@@ -119,10 +263,17 @@ export class ProfilerPanel extends ComponentBase {
     `;
   }
 
-  private renderPerformanceRows(snapshot: ProfilerPerformanceSnapshot) {
+  private renderPerformanceRows(
+    snapshot: ProfilerPerformanceSnapshot,
+    remotePlayer: RemotePlayerTelemetry | null = null
+  ) {
+    const remoteSample = remotePlayer?.lastSample ?? null;
     return html`
       ${this.renderMetricRow('FPS', this.formatInteger(snapshot.fps))}
       ${this.renderMetricRow('Frame', this.formatMilliseconds(snapshot.frameTimeMs))}
+      ${remoteSample && typeof remoteSample.maxFrameMs === 'number'
+        ? this.renderMetricRow('Max frame', this.formatMilliseconds(remoteSample.maxFrameMs))
+        : null}
       ${this.renderMetricRow('Logic', this.formatMilliseconds(snapshot.logicMs))}
       ${this.renderMetricRow('Render', this.formatMilliseconds(snapshot.renderMs))}
       ${this.renderMetricRow('Draw calls', this.formatInteger(snapshot.drawCalls))}

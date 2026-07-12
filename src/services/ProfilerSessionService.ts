@@ -8,7 +8,7 @@ import type {
   SceneRunnerFrameSample,
 } from '@pix3/runtime';
 
-type GameHostKind = 'tab' | 'popout';
+export type GameHostKind = 'tab' | 'popout' | 'remote';
 export type ProfilerSessionStatus = 'idle' | 'starting' | 'running';
 
 export interface ProfilerPerformanceSnapshot {

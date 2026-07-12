@@ -8,6 +8,8 @@ export interface LogEntry {
   readonly message: string;
   readonly timestamp: number;
   readonly data?: unknown;
+  /** Origin label for non-editor entries (e.g. a remote preview device). */
+  readonly source?: string;
 }
 
 export type LogListener = (entry: LogEntry) => void;
@@ -49,9 +51,16 @@ export class LoggingService {
   }
 
   /**
+   * Log an entry attributed to an external source (e.g. a remote preview device).
+   */
+  logFrom(source: string, level: LogLevel, message: string, data?: unknown): void {
+    this.log(level, message, data, source);
+  }
+
+  /**
    * Internal log method
    */
-  private log(level: LogLevel, message: string, data?: unknown): void {
+  private log(level: LogLevel, message: string, data?: unknown, source?: string): void {
     if (!this.enabledLevels.has(level)) {
       return;
     }
@@ -62,6 +71,7 @@ export class LoggingService {
       message,
       timestamp: Date.now(),
       data,
+      ...(source ? { source } : {}),
     };
 
     this.logs.push(entry);
