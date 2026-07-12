@@ -36,8 +36,11 @@ import {
   classifySceneCreateAssetResource,
   deriveAssetNodeName,
   getDroppedAssetResourcePath,
+  getLibraryItemDragData,
   hasAssetDragData,
+  hasLibraryItemDragData,
 } from '@/ui/shared/asset-drag-drop';
+import { LibraryInsertService } from '@/services/LibraryInsertService';
 import {
   renderTransformToolbarOverlay,
   renderViewportToolbar,
@@ -64,6 +67,9 @@ export class EditorTabComponent extends ComponentBase {
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
+
+  @inject(LibraryInsertService)
+  private readonly libraryInsert!: LibraryInsertService;
 
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId: string = '';
@@ -344,7 +350,8 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private handleDragOver = (event: DragEvent): void => {
-    if (!hasAssetDragData(event.dataTransfer ?? null)) {
+    const dataTransfer = event.dataTransfer ?? null;
+    if (!hasAssetDragData(dataTransfer) && !hasLibraryItemDragData(dataTransfer)) {
       return;
     }
 
@@ -363,8 +370,15 @@ export class EditorTabComponent extends ComponentBase {
     event.preventDefault();
     event.stopPropagation();
 
-    const resourcePath = getDroppedAssetResourcePath(event.dataTransfer ?? null);
     this.isAssetDragOver = false;
+
+    const libraryDrag = getLibraryItemDragData(event.dataTransfer ?? null);
+    if (libraryDrag) {
+      this.dropLibraryItem(libraryDrag.itemId, this.getViewportScreenPoint(event));
+      return;
+    }
+
+    const resourcePath = getDroppedAssetResourcePath(event.dataTransfer ?? null);
     if (!resourcePath) {
       return;
     }
@@ -418,6 +432,27 @@ export class EditorTabComponent extends ComponentBase {
       void this.commandDispatcher.execute(command);
     }
   };
+
+  private dropLibraryItem(itemId: string, screenPoint: { x: number; y: number } | null): void {
+    void (async () => {
+      const inserted = await this.libraryInsert.copyBundleIntoProject(itemId);
+      if (!inserted || !inserted.entryResourcePath) {
+        return;
+      }
+      if (inserted.type === 'image') {
+        const placement = this.resolve2DAssetDropPlacement(screenPoint);
+        await this.libraryInsert.dispatchInsertCommand(inserted, {
+          parentNodeId: placement.parentNodeId,
+          position: placement.position,
+        });
+        return;
+      }
+      // Prefab/scene: position at the drop point (CreatePrefabInstance handles the rest).
+      await this.libraryInsert.dispatchInsertCommand(inserted, {
+        viewportScreenPoint: screenPoint,
+      });
+    })();
+  }
 
   private getViewportScreenPoint(event: DragEvent): { x: number; y: number } | null {
     const canvas = this.viewportRenderer.getCanvasElement();

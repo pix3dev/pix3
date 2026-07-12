@@ -25,6 +25,7 @@ const PANEL_COMPONENT_TYPES = {
   code: 'code',
   runtime: 'runtime',
   assetGenerator: 'asset-generator',
+  library: 'library',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -44,6 +45,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
   [PANEL_COMPONENT_TYPES.assetGenerator]: 'pix3-asset-generator-panel',
+  [PANEL_COMPONENT_TYPES.library]: 'pix3-library-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -61,6 +63,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
   [PANEL_COMPONENT_TYPES.assetGenerator]: 'Asset Generator',
+  [PANEL_COMPONENT_TYPES.library]: 'Library',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -112,11 +115,22 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
             ],
           },
           {
-            type: 'component',
-            componentType: PANEL_COMPONENT_TYPES.assetBrowser,
-            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assetBrowser],
+            type: 'stack',
             height: 50,
-            isClosable: false,
+            content: [
+              {
+                type: 'component',
+                componentType: PANEL_COMPONENT_TYPES.assetBrowser,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assetBrowser],
+                isClosable: false,
+              },
+              {
+                type: 'component',
+                componentType: PANEL_COMPONENT_TYPES.library,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library],
+                isClosable: false,
+              },
+            ],
           },
         ],
       },
@@ -753,6 +767,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.animationTimeline) {
           void import('@/ui/animation-timeline/animation-timeline-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.library) {
+          void import('@/ui/asset-library/library-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;
