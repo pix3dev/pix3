@@ -22,6 +22,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
   - Light DOM: `import './component.ts.css';`
   - Shadow DOM: `import styles from './component.ts.css?raw';` + `static styles = css`${unsafeCSS(styles)}`;`
 - **Accent Color**: Use CSS variables `--pix3-accent-color` (#ffcf33) and `--pix3-accent-rgb`.
+- **Icons**: Use **vector icons via `IconService`** (`@inject(IconService)` → `getIcon(name, IconSize.*)`), never emoji or Unicode symbol glyphs (📎🔑✕✓📄↻●⏸). Register a custom SVG in `IconService` if the icon isn't in Feather. Emoji belong only in user-authored content, never in UI chrome.
 
 ### Dependency Injection
 
@@ -84,6 +85,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 3. **Types**: Never use `any`. Use explicit types or `unknown` with type guards.
 4. **Selection**: When creating nodes, update both `selection.nodeIds` and `selection.primaryNodeId`.
 5. **Portals**: Use `DropdownPortal` for floating UI (dropdowns, tooltips) to avoid clipping.
+5a. **Icons**: All UI icons render through `IconService.getIcon(...)` (vector SVG). Never hardcode emoji/glyphs as icons.
 6. **Async Safety**: Use `CommandDispatcher` to handle command execution flow and errors.
 7. **Proactiveness**: If a command requires a service, check its availability and register if necessary.
 8. **Documentation**: Maintain only `README.md`, `AGENTS.md`, and `docs/pix3-specification.md`. Do not create feature-specific `.md` files.

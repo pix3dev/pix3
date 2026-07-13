@@ -11,6 +11,12 @@ export interface AgentPreferences {
   customBaseUrl: string;
   /** Max LLM ⇄ tool-call round trips per agent turn (safety cap on the agentic loop). */
   maxToolIterations: number;
+  /**
+   * When on, the Agent panel exposes the raw wire-format conversation log, the resolved system
+   * prompt, and per-response timing / tokens-per-second, and {@link AgentChatService} logs each
+   * request and response to the browser devtools console.
+   */
+  debugMode: boolean;
 }
 
 const STORAGE_KEY = 'pix3.agentSettings:v1';
@@ -157,6 +163,7 @@ export class AgentSettingsService {
       modelByProvider: {},
       customBaseUrl: '',
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
+      debugMode: false,
     };
   }
 
@@ -189,6 +196,7 @@ export class AgentSettingsService {
           parsed.maxToolIterations > 0
             ? Math.min(Math.round(parsed.maxToolIterations), 100)
             : defaults.maxToolIterations,
+        debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,
       };
     } catch {
       return defaults;

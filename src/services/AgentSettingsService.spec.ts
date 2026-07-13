@@ -41,6 +41,13 @@ describe('AgentSettingsService', () => {
     expect(prefs.maxToolIterations).toBe(25);
     expect(prefs.customBaseUrl).toBe('');
     expect(prefs.modelByProvider).toEqual({});
+    expect(prefs.debugMode).toBe(false);
+  });
+
+  it('persists the debug-mode flag', () => {
+    const service = buildService();
+    service.updatePreferences({ debugMode: true });
+    expect(buildService().getPreferences().debugMode).toBe(true);
   });
 
   it('persists preferences to localStorage and reloads them in a fresh instance', () => {

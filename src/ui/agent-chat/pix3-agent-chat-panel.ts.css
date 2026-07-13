@@ -5,6 +5,7 @@ pix3-agent-chat-panel {
 }
 
 pix3-agent-chat-panel .agent-chat {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -72,6 +73,10 @@ pix3-agent-chat-panel .agent-stop,
 pix3-agent-chat-panel .agent-key-save,
 pix3-agent-chat-panel .agent-key-clear,
 pix3-agent-chat-panel .agent-banner-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
   height: 1.6rem;
   padding: 0 0.55rem;
   border-radius: 0.25rem;
@@ -82,6 +87,34 @@ pix3-agent-chat-panel .agent-banner-action {
   font-size: 0.72rem;
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* ── Icons (vector, from IconService — never emoji) ──────────────────────── */
+
+/* Inline icon that sits beside a text label inside a button. */
+pix3-agent-chat-panel .agent-btn-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: currentcolor;
+  opacity: 0.9;
+}
+
+/* Square, label-less button whose only content is an icon. */
+pix3-agent-chat-panel .agent-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Normalise every icon SVG: currentColor stroke, block layout, crisp size. */
+pix3-agent-chat-panel .agent-btn-icon svg,
+pix3-agent-chat-panel .agent-icon-btn svg,
+pix3-agent-chat-panel .agent-tool-status svg,
+pix3-agent-chat-panel .agent-attachment-icon svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 pix3-agent-chat-panel .agent-key-button:hover,
@@ -330,13 +363,30 @@ pix3-agent-chat-panel .agent-tool-call[open] summary {
 }
 
 pix3-agent-chat-panel .agent-tool-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
   width: 1rem;
-  text-align: center;
+}
+
+pix3-agent-chat-panel .agent-tool-status.is-ok {
   color: #5ec27a;
 }
 
+pix3-agent-chat-panel .agent-tool-status.is-error,
 pix3-agent-chat-panel .agent-tool-call.is-error .agent-tool-status {
   color: #e05c5c;
+}
+
+/* Pending tool call — a small spinner that mirrors the running indicator. */
+pix3-agent-chat-panel .agent-inline-spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 2px solid rgba(var(--pix3-accent-rgb), 0.25);
+  border-top-color: var(--pix3-accent-color);
+  animation: pix3-agent-spin 0.8s linear infinite;
 }
 
 pix3-agent-chat-panel .agent-tool-detail {
@@ -473,4 +523,181 @@ pix3-agent-chat-panel .agent-usage {
   font-size: 0.62rem;
   color: rgba(245, 247, 250, 0.45);
   white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-attach {
+  height: 1.6rem;
+  min-width: 1.7rem;
+  padding: 0 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.82);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-attach:hover {
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  color: rgba(245, 247, 250, 1);
+}
+
+/* ── Debug affordances (raw log / system prompt / metrics) ───────────────── */
+
+pix3-agent-chat-panel .agent-debug-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 1.6rem;
+  padding: 0 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.7);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-debug-btn.agent-icon-btn {
+  width: 1.6rem;
+  padding: 0;
+}
+
+pix3-agent-chat-panel .agent-debug-btn:hover,
+pix3-agent-chat-panel .agent-debug-btn.is-active {
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  color: var(--pix3-accent-color);
+}
+
+pix3-agent-chat-panel .agent-metrics {
+  align-self: flex-start;
+  margin-top: -0.25rem;
+  padding: 0 0.1rem;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(245, 247, 250, 0.4);
+}
+
+pix3-agent-chat-panel .agent-debug-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: rgba(12, 15, 18, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+pix3-agent-chat-panel .agent-debug-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.74rem;
+  color: rgba(245, 247, 250, 0.85);
+}
+
+pix3-agent-chat-panel .agent-debug-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.6rem;
+  overflow: auto;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: rgba(245, 247, 250, 0.82);
+}
+
+/* ── Composer attachments + drag-drop ───────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-composer.is-drag {
+  outline: 2px dashed rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: -3px;
+}
+
+pix3-agent-chat-panel .agent-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border-radius: 0.3rem;
+  background: rgba(12, 15, 18, 0.72);
+  color: var(--pix3-accent-color);
+  font-size: 0.8rem;
+}
+
+pix3-agent-chat-panel .agent-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+pix3-agent-chat-panel .agent-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 12rem;
+  padding: 0.15rem 0.3rem 0.15rem 0.15rem;
+  border-radius: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.68rem;
+}
+
+pix3-agent-chat-panel .agent-attachment-thumb {
+  width: 1.5rem;
+  height: 1.5rem;
+  object-fit: cover;
+  border-radius: 0.2rem;
+}
+
+pix3-agent-chat-panel .agent-attachment-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  color: rgba(245, 247, 250, 0.6);
+}
+
+pix3-agent-chat-panel .agent-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(245, 247, 250, 0.8);
+}
+
+pix3-agent-chat-panel .agent-attachment-remove {
+  flex: 0 0 auto;
+  padding: 0 0.15rem;
+  border: none;
+  background: none;
+  color: rgba(245, 247, 250, 0.5);
+  cursor: pointer;
+  line-height: 1;
+}
+
+pix3-agent-chat-panel .agent-attachment-remove svg {
+  display: block;
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+pix3-agent-chat-panel .agent-attachment-remove:hover {
+  color: #e08c8c;
+}
+
+pix3-agent-chat-panel .agent-attachment-warning {
+  font-size: 0.66rem;
+  color: #e0a85c;
 }

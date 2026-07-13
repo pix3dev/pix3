@@ -19,6 +19,9 @@ interface Fakes {
   execute: ReturnType<typeof vi.fn>;
   put: ReturnType<typeof vi.fn>;
   maxToolIterations?: number;
+  debugMode?: boolean;
+  /** Optional project file reader (AGENTS.md lookup). Defaults to "no such file". */
+  readTextFile?: (path: string) => Promise<string>;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -36,12 +39,20 @@ const buildService = (fakes: Fakes): AgentChatService => {
         modelByProvider: {},
         customBaseUrl: '',
         maxToolIterations: fakes.maxToolIterations ?? 5,
+        debugMode: fakes.debugMode ?? false,
       }),
     },
     modelCatalog: { getModel: () => undefined },
     toolRegistry: { specs: () => [], execute: fakes.execute },
     historyStore: { get: async () => undefined, put: fakes.put, delete: async () => undefined },
     sceneManager: { getActiveSceneGraph: () => null },
+    storage: {
+      readTextFile:
+        fakes.readTextFile ??
+        (async () => {
+          throw new Error('not found');
+        }),
+    },
   };
   for (const [key, value] of Object.entries(overrides)) {
     Object.defineProperty(service, key, { value, configurable: true });
@@ -206,6 +217,63 @@ describe('AgentChatService', () => {
     if (blocks[0].type !== 'tool-result') throw new Error('expected a tool-result block');
     expect(blocks[0].content).not.toContain('QUJD');
     expect(blocks[1]).toEqual({ type: 'image', mimeType: 'image/jpeg', data: 'QUJD' });
+  });
+
+  it('includes AGENTS.md from the project root in the system prompt', async () => {
+    const chat = vi.fn().mockResolvedValue(textResult('ok'));
+    const readTextFile = vi.fn(async (path: string) => {
+      if (path === 'AGENTS.md') return 'Always answer like a pirate.';
+      throw new Error('not found');
+    });
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      readTextFile,
+    });
+
+    await service.send('hi');
+
+    const system = (chat.mock.calls[0][0] as { system: string }).system;
+    expect(system).toContain('AGENTS.md');
+    expect(system).toContain('Always answer like a pirate.');
+    // previewSystemPrompt resolves the same content for the debug viewer.
+    expect(await service.previewSystemPrompt()).toContain('Always answer like a pirate.');
+  });
+
+  it('sends pasted/dropped image and text-file attachments in the user turn', async () => {
+    const chat = vi.fn(async () => textResult('done'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('look at this', {
+      images: [{ type: 'image', mimeType: 'image/png', data: 'QUJD' }],
+      texts: [{ name: 'notes.txt', content: 'hello world' }],
+    });
+
+    const userTurn = service.getState().messages[0];
+    expect(userTurn.role).toBe('user');
+    if (typeof userTurn.content === 'string') throw new Error('expected content blocks');
+    const blocks = userTurn.content;
+    expect(blocks[0].type).toBe('text');
+    if (blocks[0].type !== 'text') throw new Error('expected a text block');
+    expect(blocks[0].text).toContain('look at this');
+    expect(blocks[0].text).toContain('notes.txt');
+    expect(blocks[0].text).toContain('hello world');
+    expect(blocks[1]).toEqual({ type: 'image', mimeType: 'image/png', data: 'QUJD' });
+  });
+
+  it('records a per-turn timing/token metric keyed by the assistant message index', async () => {
+    const chat = vi.fn(async () => textResult('hi'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hello');
+
+    // user is index 0, assistant reply is index 1.
+    const metric = service.getState().turnMetrics[1];
+    expect(metric).toBeDefined();
+    expect(metric.inputTokens).toBe(10);
+    expect(metric.outputTokens).toBe(5);
+    expect(typeof metric.elapsedMs).toBe('number');
   });
 
   it('persists the conversation after a turn', async () => {

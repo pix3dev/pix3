@@ -3,6 +3,7 @@ import { appState } from '@/state';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
+import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
 import { AgentChatHistoryStore } from './AgentChatHistoryStore';
 import {
@@ -12,12 +13,33 @@ import {
   type LlmErrorKind,
   type LlmImageBlock,
   type LlmMessage,
+  type LlmTextBlock,
   type LlmToolResultBlock,
   type LlmToolUseBlock,
   type LlmUsage,
 } from '@/services/llm/LlmTypes';
 
 export type AgentChatStatus = 'idle' | 'running' | 'error';
+
+/** A text file attached to a user message (its content is inlined into the prompt as a fenced block). */
+export interface AgentTextAttachment {
+  readonly name: string;
+  readonly content: string;
+}
+
+/** Attachments carried alongside a user message (vision images + text files). */
+export interface AgentAttachments {
+  readonly images?: readonly LlmImageBlock[];
+  readonly texts?: readonly AgentTextAttachment[];
+}
+
+/** Timing / token accounting for a single provider round-trip (surfaced only in debug mode). */
+export interface AgentTurnMetric {
+  /** Wall-clock time for the provider request (ms). */
+  readonly elapsedMs: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+}
 
 export interface AgentChatState {
   readonly status: AgentChatStatus;
@@ -32,7 +54,17 @@ export interface AgentChatState {
   readonly activeTool: string | null;
   /** Token usage accumulated across this conversation (when providers report it). */
   readonly totalUsage: LlmUsage;
+  /**
+   * Per-assistant-turn timing/token metrics, keyed by the assistant message's index in
+   * {@link messages}. Populated on every turn; the UI only surfaces it in debug mode.
+   */
+  readonly turnMetrics: Readonly<Record<number, AgentTurnMetric>>;
 }
+
+/** Project-root files scanned (in order) for user-authored agent instructions. */
+const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'] as const;
+/** Cap the AGENTS.md slice of the system prompt so a huge file can't dominate the context. */
+const MAX_AGENTS_MD_CHARS = 16_000;
 
 /** Cap serialized tool results so one verbose tool cannot blow up the context window. */
 const MAX_TOOL_RESULT_CHARS = 24_000;
@@ -48,6 +80,7 @@ const IDLE_STATE: AgentChatState = {
   notice: null,
   activeTool: null,
   totalUsage: {},
+  turnMetrics: {},
 };
 
 /**
@@ -77,6 +110,9 @@ export class AgentChatService {
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
+
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
 
   private state: AgentChatState = IDLE_STATE;
   private readonly listeners = new Set<(state: AgentChatState) => void>();
@@ -116,17 +152,23 @@ export class AgentChatService {
     }
   }
 
-  /** Send a user message and run the agentic loop until the model stops calling tools. */
-  async send(text: string): Promise<void> {
+  /**
+   * Send a user message and run the agentic loop until the model stops calling tools. Optional
+   * attachments (pasted/dropped images and text files) ride in the same user turn — images become
+   * real image blocks (multimodal models only) and text files are inlined into the prompt.
+   */
+  async send(text: string, attachments?: AgentAttachments): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed || this.isRunning()) {
+    const images = attachments?.images ?? [];
+    const texts = attachments?.texts ?? [];
+    if ((!trimmed && images.length === 0 && texts.length === 0) || this.isRunning()) {
       return;
     }
 
     await this.ensureLoaded();
 
     this.abortController = new AbortController();
-    this.appendMessage({ role: 'user', content: [{ type: 'text', text: trimmed }] });
+    this.appendMessage({ role: 'user', content: buildUserContent(trimmed, images, texts) });
     this.setState({ status: 'running', errorMessage: null, errorKind: null, notice: null });
 
     try {
@@ -190,21 +232,49 @@ export class AgentChatService {
     const model = this.modelCatalog.getModel(provider.id, modelId);
     const tools =
       model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
+    // AGENTS.md is authored per project; read it once per user turn so mid-session edits land.
+    const agentsMd = await this.loadAgentsMd();
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      const system = this.buildSystemPrompt(agentsMd);
+      this.debugLog('request', {
+        provider: provider.id,
+        modelId,
+        iteration,
+        system,
+        tools: tools?.map(tool => tool.name),
+        messages: this.state.messages,
+      });
+
+      const startedAt = performance.now();
       const result = await provider.chat(
         {
           messages: this.state.messages,
           tools,
-          system: this.buildSystemPrompt(),
+          system,
           maxTokens: model?.capabilities.maxOutputTokens,
           signal,
         },
         { apiKey, modelId, baseUrl }
       );
+      const elapsedMs = performance.now() - startedAt;
+
+      this.debugLog('response', {
+        elapsedMs: Math.round(elapsedMs),
+        stopReason: result.stopReason,
+        usage: result.usage,
+        content: result.content,
+        raw: result.raw,
+      });
 
       this.accumulateUsage(result.usage);
+      const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
+      this.recordTurnMetric(assistantIndex, {
+        elapsedMs,
+        inputTokens: result.usage?.inputTokens,
+        outputTokens: result.usage?.outputTokens,
+      });
 
       const calls = result.content.filter(
         (block): block is LlmToolUseBlock => block.type === 'tool-use'
@@ -273,8 +343,16 @@ export class AgentChatService {
 
   // ── System prompt ───────────────────────────────────────────────────────────
 
+  /**
+   * Resolve the full system prompt exactly as it is sent to the provider (including AGENTS.md and
+   * the live scene context). Used by the debug panel's "system prompt" viewer.
+   */
+  async previewSystemPrompt(): Promise<string> {
+    return this.buildSystemPrompt(await this.loadAgentsMd());
+  }
+
   /** Rebuilt per request — the scene outline and active scene change as the agent works. */
-  private buildSystemPrompt(): string {
+  private buildSystemPrompt(agentsMd: string | null): string {
     const lines: string[] = [
       'You are Pix3 Agent, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).',
       '',
@@ -285,9 +363,23 @@ export class AgentChatService {
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
       '- Be concise. Reply in the language the user writes in.',
-      '',
-      'Project context:',
     ];
+
+    if (agentsMd) {
+      const trimmed =
+        agentsMd.length > MAX_AGENTS_MD_CHARS
+          ? `${agentsMd.slice(0, MAX_AGENTS_MD_CHARS)}\n… [AGENTS.md truncated]`
+          : agentsMd;
+      lines.push(
+        '',
+        'Project-specific instructions (from AGENTS.md at the project root) — follow these:',
+        '"""',
+        trimmed.trim(),
+        '"""'
+      );
+    }
+
+    lines.push('', 'Project context:');
 
     const project = appState.project;
     lines.push(`- Project: ${project.projectName ?? 'Pix3 Project'} (backend: ${project.backend})`);
@@ -360,10 +452,39 @@ export class AgentChatService {
     return lines;
   }
 
+  /**
+   * Read the project's AGENTS.md (best-effort). Returns the first non-empty candidate, or null when
+   * none exists / the project has no file backend. Never throws — a missing file is the common case.
+   */
+  private async loadAgentsMd(): Promise<string | null> {
+    for (const path of AGENTS_FILES) {
+      try {
+        const content = await this.storage?.readTextFile(path);
+        if (content && content.trim()) {
+          return content;
+        }
+      } catch {
+        // Not present / unreadable — try the next candidate.
+      }
+    }
+    return null;
+  }
+
+  private debugLog(label: string, data: unknown): void {
+    if (!this.settings.getPreferences().debugMode) {
+      return;
+    }
+    console.debug(`[Pix3 Agent] ${label}`, data);
+  }
+
   // ── State / persistence plumbing ───────────────────────────────────────────
 
   private appendMessage(message: LlmMessage): void {
     this.setState({ messages: [...this.state.messages, message] });
+  }
+
+  private recordTurnMetric(index: number, metric: AgentTurnMetric): void {
+    this.setState({ turnMetrics: { ...this.state.turnMetrics, [index]: metric } });
   }
 
   private accumulateUsage(usage: LlmUsage | undefined): void {
@@ -398,6 +519,35 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+/**
+ * Assemble a user turn from the typed text plus attachments. Text files are inlined into the text
+ * block (fenced by name); images become real image blocks after the text. When nothing but the text
+ * exists this yields exactly one text block, keeping the common case identical to the old behaviour.
+ */
+const buildUserContent = (
+  text: string,
+  images: readonly LlmImageBlock[],
+  texts: readonly AgentTextAttachment[]
+): LlmContentBlock[] => {
+  let body = text;
+  for (const file of texts) {
+    body += `${body ? '\n\n' : ''}--- Attached file: ${file.name} ---\n${file.content}`;
+  }
+
+  const blocks: LlmContentBlock[] = [];
+  if (body.trim()) {
+    blocks.push({ type: 'text', text: body } satisfies LlmTextBlock);
+  }
+  for (const image of images) {
+    blocks.push(image);
+  }
+  if (blocks.length === 0) {
+    // Defensive: at least send an empty text block so the turn is well-formed.
+    blocks.push({ type: 'text', text } satisfies LlmTextBlock);
+  }
+  return blocks;
+};
 
 /** Type-only re-export so UI code can render content blocks without importing llm internals. */
 export type { LlmContentBlock, LlmMessage };

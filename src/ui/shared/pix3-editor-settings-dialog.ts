@@ -9,6 +9,7 @@ import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { formatPricingHint } from '@/services/llm/LlmTypes';
+import { IconService, IconSize } from '@/services/IconService';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
 import './pix3-editor-settings-dialog.ts.css';
@@ -35,6 +36,9 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(LlmModelCatalogService)
   private readonly llmModelCatalog!: LlmModelCatalogService;
+
+  @inject(IconService)
+  private readonly icons!: IconService;
 
   @state()
   private activeTab: EditorSettingsTab = 'general';
@@ -101,6 +105,9 @@ export class EditorSettingsDialog extends ComponentBase {
   private llmModelsMessage: string | null = null;
 
   @state()
+  private llmDebugMode = false;
+
+  @state()
   private bgEngine: BgRemovalEngine = 'imgly';
 
   @state()
@@ -133,6 +140,7 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmModelId = this.agentSettings.getSelectedModelId(this.llmProviderId) ?? '';
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+    this.llmDebugMode = agentPrefs.debugMode;
     void this.refreshLlmKeyStatus();
 
     // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
@@ -328,13 +336,13 @@ export class EditorSettingsDialog extends ComponentBase {
             </select>
             ${canRefreshModels
               ? html`<button
-                  class="btn-key-save llm-models-refresh"
+                  class="btn-key-save llm-models-refresh ${this.llmModelsBusy ? 'is-busy' : ''}"
                   title="Fetch the provider's current model list"
                   aria-label="Refresh model list"
                   @click=${this.onRefreshLlmModels}
                   ?disabled=${this.llmModelsBusy}
                 >
-                  ${this.llmModelsBusy ? '…' : '↻'}
+                  ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
                 </button>`
               : null}
           </label>
@@ -412,8 +420,29 @@ export class EditorSettingsDialog extends ComponentBase {
                 provider.`}
           </div>
         </div>
+
+        <div class="settings-field">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.llmDebugMode}
+              @change=${this.onLlmDebugModeChange}
+            />
+            <span>Debug mode</span>
+          </label>
+          <div class="hint">
+            Reveals the raw wire-format conversation log, the resolved system prompt, and
+            per-response timing / tokens-per-second in the Agent panel, and logs every request and
+            response to the browser devtools console.
+          </div>
+        </div>
       </div>
     `;
+  }
+
+  private onLlmDebugModeChange(e: Event): void {
+    this.llmDebugMode = (e.target as HTMLInputElement).checked;
+    this.agentSettings.updatePreferences({ debugMode: this.llmDebugMode });
   }
 
   private renderAiProvidersSection() {
