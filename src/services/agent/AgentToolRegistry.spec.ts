@@ -51,6 +51,7 @@ describe('AgentToolRegistry', () => {
       .map(t => t.name);
     expect(names).toEqual(
       expect.arrayContaining([
+        'read_skill',
         'scene_tree',
         'node_inspect',
         'find_nodes',
@@ -75,7 +76,9 @@ describe('AgentToolRegistry', () => {
         'read_logs',
         'read_errors',
         'viewport_screenshot',
+        'analyze_image',
         'generate_asset',
+        'process_asset',
       ])
     );
   });
@@ -119,14 +122,123 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  describe('read_skill', () => {
+    it('returns a bundled skill by id', async () => {
+      const registry = buildRegistry();
+      const result = (await registry.execute('read_skill', { id: 'game-prototype' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(true);
+      expect(String(result.content)).toMatch(/game-prototype/i);
+    });
+
+    it('reports an error for an unknown skill', async () => {
+      const registry = buildRegistry();
+      const result = (await registry.execute('read_skill', { id: 'nope' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/Unknown skill/);
+    });
+  });
+
+  describe('analyze_image', () => {
+    it('captures the viewport and routes it to the vision helper', async () => {
+      const captureScreenshot = vi.fn(() => ({
+        dataBase64: 'QUJD',
+        mimeType: 'image/jpeg',
+        width: 640,
+        height: 360,
+      }));
+      const analyze = vi.fn(async () => 'a red car, top-down, flat shading');
+      const vision = {
+        analyze,
+        describeHelper: async () => ({
+          providerLabel: 'Google Gemini',
+          modelLabel: 'Gemini Flash',
+          modelId: 'gemini-flash',
+        }),
+      };
+      const registry = buildRegistry({ viewportRenderer: { captureScreenshot }, vision });
+
+      const result = (await registry.execute('analyze_image', {
+        source: 'viewport',
+        question: 'what is this?',
+      })) as Record<string, unknown>;
+
+      expect(analyze).toHaveBeenCalledWith(
+        { type: 'image', mimeType: 'image/jpeg', data: 'QUJD' },
+        'what is this?'
+      );
+      expect(result.ok).toBe(true);
+      expect(result.answer).toMatch(/red car/);
+      expect(result.model).toContain('Gemini');
+    });
+
+    it('opens a project path, previews it, and frees the handle', async () => {
+      const assetGen = {
+        get: vi.fn(() => null),
+        open: vi.fn(async () => ({ id: 'img-x' })),
+        preview: vi.fn(async () => 'data:image/png;base64,QUJD'),
+        discard: vi.fn(),
+      };
+      const analyze = vi.fn(async () => 'blue palette');
+      const registry = buildRegistry({
+        assetGen,
+        vision: { analyze, describeHelper: async () => null },
+      });
+
+      const result = (await registry.execute('analyze_image', {
+        source: 'res://design/references/screen1.jpg',
+      })) as Record<string, unknown>;
+
+      expect(assetGen.open).toHaveBeenCalledWith('design/references/screen1.jpg');
+      expect(analyze).toHaveBeenCalledWith(
+        { type: 'image', mimeType: 'image/png', data: 'QUJD' },
+        ''
+      );
+      expect(assetGen.discard).toHaveBeenCalledWith('img-x');
+      expect(result.ok).toBe(true);
+    });
+
+    it('reports the vision error when no helper is available', async () => {
+      const captureScreenshot = vi.fn(() => ({
+        dataBase64: 'QUJD',
+        mimeType: 'image/jpeg',
+        width: 10,
+        height: 10,
+      }));
+      const vision = {
+        analyze: vi.fn(async () => {
+          throw new Error('No vision-capable model with a configured API key is available.');
+        }),
+        describeHelper: async () => null,
+      };
+      const registry = buildRegistry({ viewportRenderer: { captureScreenshot }, vision });
+
+      const result = (await registry.execute('analyze_image', { source: 'viewport' })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/vision-capable/);
+    });
+  });
+
   describe('generate_asset', () => {
     const makeAssetGen = (keyConfigured: boolean) => ({
       status: vi.fn(async () => ({ keyConfigured })),
       generate: vi.fn(async () => ({ id: 'img-1', width: 512, height: 512 })),
+      // The pipeline yields a new handle (bg-removed → trimmed → downscaled).
+      postProcess: vi.fn(async () => ({ id: 'img-2', width: 256, height: 256 })),
+      open: vi.fn(async () => ({ id: 'img-open', width: 512, height: 512 })),
       save: vi.fn(async () => ({
         path: 'assets/ui/button.png',
-        width: 512,
-        height: 512,
+        width: 256,
+        height: 256,
         bytes: 1234,
         mimeType: 'image/png',
       })),
@@ -146,7 +258,7 @@ describe('AgentToolRegistry', () => {
       expect(assetGen.generate).not.toHaveBeenCalled();
     });
 
-    it('generates, saves, attaches a preview image, and frees the handle', async () => {
+    it('generates, post-processes with the sprite preset, saves the result, previews it, and frees every handle', async () => {
       const assetGen = makeAssetGen(true);
       const registry = buildRegistry({ assetGen });
 
@@ -161,13 +273,91 @@ describe('AgentToolRegistry', () => {
         references: undefined,
         transparent: true,
       });
-      expect(assetGen.save).toHaveBeenCalledWith('img-1', 'assets/ui/button', {
-        maxSize: undefined,
-      });
+      // transparent → sprite preset; the processed handle is what gets saved & previewed.
+      expect(assetGen.postProcess).toHaveBeenCalledWith('img-1', 'sprite', { maxSize: undefined });
+      expect(assetGen.save).toHaveBeenCalledWith('img-2', 'assets/ui/button', {});
+      expect(assetGen.preview).toHaveBeenCalledWith('img-2', 256);
       expect(result.ok).toBe(true);
+      expect(result.preset).toBe('sprite');
       expect(result.saved).toMatchObject({ path: 'assets/ui/button.png' });
+      expect(result.original).toEqual({ width: 512, height: 512 });
       expect(result.__images).toEqual([{ mimeType: 'image/webp', data: 'UFJFVklFVw==' }]);
       expect(assetGen.discard).toHaveBeenCalledWith('img-1');
+      expect(assetGen.discard).toHaveBeenCalledWith('img-2');
+    });
+
+    it('defaults an opaque generation to the texture preset', async () => {
+      const assetGen = makeAssetGen(true);
+      const registry = buildRegistry({ assetGen });
+
+      await registry.execute('generate_asset', { prompt: 'a tiled floor', name: 'floor' });
+
+      expect(assetGen.postProcess).toHaveBeenCalledWith('img-1', 'texture', { maxSize: undefined });
+    });
+
+    it('honours an explicit postProcess preset and maxSize', async () => {
+      const assetGen = makeAssetGen(true);
+      const registry = buildRegistry({ assetGen });
+
+      await registry.execute('generate_asset', {
+        prompt: 'an icon',
+        name: 'icon',
+        transparent: true,
+        postProcess: 'icon',
+        maxSize: 128,
+      });
+
+      expect(assetGen.postProcess).toHaveBeenCalledWith('img-1', 'icon', { maxSize: 128 });
+    });
+  });
+
+  describe('process_asset', () => {
+    const makeAssetGen = () => ({
+      open: vi.fn(async () => ({ id: 'img-open', width: 900, height: 700 })),
+      postProcess: vi.fn(async () => ({ id: 'img-proc', width: 256, height: 256 })),
+      save: vi.fn(async () => ({
+        path: 'src/assets/textures/car.png',
+        width: 256,
+        height: 256,
+        bytes: 999,
+        mimeType: 'image/png',
+      })),
+      preview: vi.fn(async () => 'data:image/webp;base64,UFJFVklFVw=='),
+      discard: vi.fn(),
+    });
+
+    it('opens, processes, saves back in place and frees the handles', async () => {
+      appState.project.status = 'ready';
+      const assetGen = makeAssetGen();
+      const registry = buildRegistry({ assetGen });
+
+      const result = (await registry.execute('process_asset', {
+        path: 'res://src/assets/textures/car.png',
+      })) as Record<string, unknown>;
+
+      expect(assetGen.open).toHaveBeenCalledWith('src/assets/textures/car.png');
+      expect(assetGen.postProcess).toHaveBeenCalledWith('img-open', 'sprite', { maxSize: undefined });
+      // No `name` → overwrite the source path.
+      expect(assetGen.save).toHaveBeenCalledWith('img-proc', 'src/assets/textures/car.png', {});
+      expect(result.ok).toBe(true);
+      expect(result.preset).toBe('sprite');
+      expect(result.__images).toEqual([{ mimeType: 'image/webp', data: 'UFJFVklFVw==' }]);
+      expect(assetGen.discard).toHaveBeenCalledWith('img-open');
+      expect(assetGen.discard).toHaveBeenCalledWith('img-proc');
+    });
+
+    it('refuses when no project is open', async () => {
+      appState.project.status = 'idle';
+      const assetGen = makeAssetGen();
+      const registry = buildRegistry({ assetGen });
+
+      const result = (await registry.execute('process_asset', { path: 'car.png' })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.ok).toBe(false);
+      expect(assetGen.open).not.toHaveBeenCalled();
     });
   });
 

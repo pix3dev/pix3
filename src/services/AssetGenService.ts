@@ -25,6 +25,7 @@ import {
   normalizeAssetPath,
   readBlobSize,
   resizeImageBlob,
+  trimImageBlob,
   type CropRectPixels,
   type ImageEncoding,
 } from '@/services/image-gen/image-ops';
@@ -36,6 +37,7 @@ export type AssetImageSource =
   | 'history'
   | 'resized'
   | 'cropped'
+  | 'trimmed'
   | 'bg-removed'
   | 'compressed'
   | 'import';
@@ -107,6 +109,31 @@ export interface AssetGenBgOptions {
   engine?: BgRemovalEngine;
   quality?: BgRemovalQuality;
   fillHoles?: boolean;
+}
+
+export interface AssetGenTrimOptions {
+  /** Transparent padding (px) kept around the opaque content. Default 2. */
+  padding?: number;
+  /** Alpha (0..255) at/below which a pixel counts as empty. Default 0. */
+  alphaThreshold?: number;
+  /** Center the trimmed content on a square canvas (for icon grids). */
+  square?: boolean;
+}
+
+/**
+ * Game-ready post-processing preset for a generated/opened image:
+ * - `sprite` — remove background, trim to the opaque bounding box, downscale.
+ * - `icon` — as `sprite`, then center on a square canvas so icon grids align.
+ * - `texture` — downscale only, keep the background (tiles, photos, backgrounds).
+ * - `none` — no processing (raw save).
+ */
+export type AssetPostProcessPreset = 'sprite' | 'icon' | 'texture' | 'none';
+
+export interface AssetPostProcessOptions {
+  /** Longest-edge cap in px; defaults to the AI-image preference `defaultSaveMaxSize`. */
+  maxSize?: number;
+  bgEngine?: BgRemovalEngine;
+  bgQuality?: BgRemovalQuality;
 }
 
 export interface AssetGenSaveOptions {
@@ -331,6 +358,23 @@ export class AssetGenService {
     return this.toMeta(stored);
   }
 
+  /** Crop to the opaque bounding box of an image (see {@link trimImageBlob}). */
+  async trim(id: string, options: AssetGenTrimOptions = {}): Promise<AssetImageMeta> {
+    const image = this.require(id);
+    const result = await trimImageBlob(image.blob, {
+      padding: options.padding,
+      alphaThreshold: options.alphaThreshold,
+      square: options.square,
+    });
+    const stored = await this.store(
+      result.blob,
+      result.blob.type || 'image/png',
+      'trimmed',
+      image.prompt
+    );
+    return this.toMeta(stored);
+  }
+
   async compress(id: string, options: AssetGenCompressOptions = {}): Promise<AssetImageMeta> {
     const image = this.require(id);
     const result = await compressImageBlob(image.blob, {
@@ -360,6 +404,60 @@ export class AssetGenService {
     });
     const stored = await this.store(output, 'image/png', 'bg-removed', image.prompt);
     return this.toMeta(stored);
+  }
+
+  /**
+   * Run the game-ready pipeline for a {@link AssetPostProcessPreset} over a handle and return the
+   * final handle's metadata. Intermediate handles are freed automatically. Background removal is
+   * best-effort — a worker failure falls back to the un-cut image so a save is never blocked. The
+   * input handle `id` is left intact for the caller to discard.
+   */
+  async postProcess(
+    id: string,
+    preset: AssetPostProcessPreset,
+    options: AssetPostProcessOptions = {}
+  ): Promise<AssetImageMeta> {
+    if (preset === 'none') {
+      return this.toMeta(this.require(id));
+    }
+    const intermediates: string[] = [];
+    let currentId = id;
+    try {
+      if (preset === 'sprite' || preset === 'icon') {
+        try {
+          const bg = await this.removeBackground(currentId, {
+            engine: options.bgEngine,
+            quality: options.bgQuality,
+          });
+          intermediates.push(bg.id);
+          currentId = bg.id;
+          const trimmed = await this.trim(currentId, {
+            padding: 2,
+            alphaThreshold: 8,
+            square: preset === 'icon',
+          });
+          intermediates.push(trimmed.id);
+          currentId = trimmed.id;
+        } catch {
+          // Background removal is best-effort: a worker hiccup must not block the save. Keep the
+          // un-cut image and still downscale below; the caller's preview shows the result so the
+          // agent/user can retry via process_asset.
+        }
+      }
+      const maxSize = options.maxSize ?? this.aiSettings.getPreferences().defaultSaveMaxSize;
+      if (maxSize && maxSize > 0) {
+        const resized = await this.resize(currentId, { maxSize });
+        intermediates.push(resized.id);
+        currentId = resized.id;
+      }
+      return this.toMeta(this.require(currentId));
+    } finally {
+      for (const intermediateId of intermediates) {
+        if (intermediateId !== currentId) {
+          this.discard(intermediateId);
+        }
+      }
+    }
   }
 
   // -- project I/O -----------------------------------------------------------

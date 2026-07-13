@@ -22,6 +22,8 @@ interface Fakes {
   debugMode?: boolean;
   /** Optional project file reader (AGENTS.md lookup). Defaults to "no such file". */
   readTextFile?: (path: string) => Promise<string>;
+  /** When set, the model catalog reports this vision capability for the active model. */
+  supportsImages?: boolean;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -42,7 +44,12 @@ const buildService = (fakes: Fakes): AgentChatService => {
         debugMode: fakes.debugMode ?? false,
       }),
     },
-    modelCatalog: { getModel: () => undefined },
+    modelCatalog: {
+      getModel: () =>
+        fakes.supportsImages === undefined
+          ? undefined
+          : { capabilities: { supportsImages: fakes.supportsImages } },
+    },
     toolRegistry: { specs: () => [], execute: fakes.execute },
     historyStore: {
       list: async () => [],
@@ -222,6 +229,33 @@ describe('AgentChatService', () => {
     if (blocks[0].type !== 'tool-result') throw new Error('expected a tool-result block');
     expect(blocks[0].content).not.toContain('QUJD');
     expect(blocks[1]).toEqual({ type: 'image', mimeType: 'image/jpeg', data: 'QUJD' });
+  });
+
+  it('drops tool-emitted images for a text-only model and leaves an analyze_image note', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('viewport_screenshot', 'call-1'))
+      .mockResolvedValueOnce(textResult('ok'));
+    const execute = vi.fn(async () => ({
+      ok: true,
+      __images: [{ mimeType: 'image/jpeg', data: 'QUJD' }],
+    }));
+    const service = buildService({
+      chat,
+      execute,
+      put: vi.fn(async () => undefined),
+      supportsImages: false,
+    });
+
+    await service.send('show me the viewport');
+
+    const toolTurn = service.getState().messages[2];
+    if (typeof toolTurn.content === 'string') throw new Error('expected content blocks');
+    const blocks = toolTurn.content;
+    // No image block survives; a text note points at analyze_image instead.
+    expect(blocks.some(b => b.type === 'image')).toBe(false);
+    const note = blocks.find(b => b.type === 'text');
+    expect(note && note.type === 'text' ? note.text : '').toMatch(/analyze_image/);
   });
 
   it('includes AGENTS.md from the project root in the system prompt', async () => {

@@ -5,6 +5,7 @@ import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
+import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import {
   AgentChatHistoryStore,
   type AgentConversationMeta,
@@ -114,6 +115,9 @@ export class AgentChatService {
 
   @inject(AgentToolRegistry)
   private readonly toolRegistry!: AgentToolRegistry;
+
+  @inject(AgentSkillsService)
+  private readonly skills!: AgentSkillsService;
 
   @inject(AgentChatHistoryStore)
   private readonly historyStore!: AgentChatHistoryStore;
@@ -399,8 +403,13 @@ export class AgentChatService {
         return;
       }
 
+      // Text-only models (e.g. DeepSeek) can't consume image blocks — drop tool-emitted images for
+      // them and leave a note pointing at analyze_image (routes to a vision helper). Unknown models
+      // (not in the catalog) default to receiving images, preserving prior behaviour.
+      const modelSupportsImages = model?.capabilities.supportsImages !== false;
       const results: LlmToolResultBlock[] = [];
       const images: LlmImageBlock[] = [];
+      let droppedImages = 0;
       for (const call of calls) {
         if (signal.aborted) {
           throw new LlmError('aborted', 'The request was cancelled.');
@@ -408,12 +417,23 @@ export class AgentChatService {
         this.setState({ activeTool: call.name });
         const executed = await this.executeToolCall(call);
         results.push(executed.result);
-        images.push(...executed.images);
+        if (modelSupportsImages) {
+          images.push(...executed.images);
+        } else {
+          droppedImages += executed.images.length;
+        }
       }
       this.setState({ activeTool: null });
-      // Tool-emitted images ride in the same user turn, after the results — all three providers
-      // accept mixed tool-result + image content there.
-      this.appendMessage({ role: 'user', content: [...results, ...images] });
+      // Tool-emitted images ride in the same user turn, after the results — all providers accept
+      // mixed tool-result + image (and text) content there.
+      const extra: LlmContentBlock[] = [];
+      if (droppedImages > 0) {
+        extra.push({
+          type: 'text',
+          text: `Note: ${droppedImages} image(s) returned by tools were omitted because the current model cannot see images. Call analyze_image (source: a project image path, "viewport", or the generated asset) to inspect them via a vision helper.`,
+        });
+      }
+      this.appendMessage({ role: 'user', content: [...results, ...extra, ...images] });
     }
 
     this.setState({
@@ -480,8 +500,18 @@ export class AgentChatService {
       '- After editing scripts with fs_write, run compile_scripts to check they build.',
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
+      '- When a task matches a skill below and you are not already sure of this editor\'s exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.',
       '- Be concise. Reply in the language the user writes in.',
     ];
+
+    const skillIndex = this.skills.indexLines();
+    if (skillIndex.length > 0) {
+      lines.push(
+        '',
+        'Skills (read the relevant one with read_skill when you need the editor-specific recipe):',
+        ...skillIndex
+      );
+    }
 
     if (agentsMd) {
       const trimmed =

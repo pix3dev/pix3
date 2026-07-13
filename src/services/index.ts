@@ -176,6 +176,12 @@ export {
   type AgentChatStatus,
 } from './agent/AgentChatService';
 export { AgentChatHistoryStore, type AgentConversationRecord } from './agent/AgentChatHistoryStore';
+export {
+  AgentVisionService,
+  type VisionHelper,
+  type VisionHelperInfo,
+} from './agent/AgentVisionService';
+export { AgentSkillsService, type AgentSkill } from './agent/AgentSkillsService';
 export { AssetLibraryService } from './AssetLibraryService';
 export { PublishToLibraryService, type PublishNodeParams } from './PublishToLibraryService';
 export {

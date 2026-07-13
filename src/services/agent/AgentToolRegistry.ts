@@ -15,8 +15,11 @@ import { CommandRegistry } from '@/services/CommandRegistry';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { LoggingService } from '@/services/LoggingService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
-import { AssetGenService } from '@/services/AssetGenService';
+import { AssetGenService, type AssetPostProcessPreset } from '@/services/AssetGenService';
+import { AgentVisionService } from '@/services/agent/AgentVisionService';
+import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
+import type { LlmImageBlock } from '@/services/llm/LlmTypes';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
@@ -135,6 +138,12 @@ export class AgentToolRegistry {
   @inject(AssetGenService)
   private readonly assetGen!: AssetGenService;
 
+  @inject(AgentVisionService)
+  private readonly vision!: AgentVisionService;
+
+  @inject(AgentSkillsService)
+  private readonly skills!: AgentSkillsService;
+
   @inject(ProjectDiagnosticsService)
   private readonly diagnostics!: ProjectDiagnosticsService;
 
@@ -185,6 +194,28 @@ export class AgentToolRegistry {
 
   private buildTools(): AgentToolDefinition[] {
     return [
+      {
+        name: 'read_skill',
+        description:
+          'Read a bundled skill: a short step-by-step guide for a class of task (see the skill index in the system prompt). Call this BEFORE starting a matching task — e.g. read "game-prototype" before building from a GDD, "asset-generation" before making art, "verify-and-fix" before/while debugging a run. Optionally pass a section heading to read just that part.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              enum: this.skills.list().map(skill => skill.id),
+              description: 'The skill id to read.',
+            },
+            section: {
+              type: 'string',
+              description: 'Optional: a "## Section" heading to read just that part of the skill.',
+            },
+          },
+          required: ['id'],
+          additionalProperties: false,
+        },
+        handler: args => this.readSkill(args),
+      },
       {
         name: 'scene_tree',
         description: 'Return the active scene as a node tree, expanded up to maxDepth levels.',
@@ -446,9 +477,31 @@ export class AgentToolRegistry {
         handler: args => this.viewportScreenshot(asInt(args.maxSize, 1024)),
       },
       {
+        name: 'analyze_image',
+        description:
+          'Ask a vision-capable helper model to look at an image and answer a question — use this when YOUR model cannot see images (no vision). source is a project image path (res:// or relative), "viewport" (a fresh editor screenshot), or a generated-image handle id. Ideal for extracting style tokens from a design reference before generating art, or QC-ing a generated sprite / the scene layout.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            source: {
+              type: 'string',
+              description: 'A project image path, "viewport", or a generation handle id.',
+            },
+            question: {
+              type: 'string',
+              description:
+                'What to ask about the image (e.g. "list the style tokens for an image prompt"). Defaults to a general description.',
+            },
+          },
+          required: ['source'],
+          additionalProperties: false,
+        },
+        handler: args => this.analyzeImage(args),
+      },
+      {
         name: 'generate_asset',
         description:
-          "Generate an image asset with the project's AI image provider (uses the user's saved image key) and save it into the project. Returns the saved path plus a small preview you can see. Reference images (project paths) steer the style.",
+          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background. Pass design reference image paths so the style matches. Returns the saved path, original vs saved size, and a small preview you can see.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -456,21 +509,29 @@ export class AgentToolRegistry {
             name: {
               type: 'string',
               description:
-                'Target file name or relative path (e.g. "assets/ui/button.png"); the extension is added automatically when missing.',
+                'Target file name or relative path (e.g. "src/assets/textures/car.png"); the extension is added automatically when missing.',
             },
             transparent: {
               type: 'boolean',
-              description: 'Request a transparent background (providers that support alpha).',
+              description:
+                'Request a transparent background from the image provider (recommended for sprites/icons).',
+            },
+            postProcess: {
+              type: 'string',
+              enum: ['sprite', 'icon', 'texture', 'none'],
+              description:
+                'Post-processing preset before saving. sprite = remove background + trim to content + downscale. icon = sprite + pad to a centered square (aligns icon grids). texture = downscale only, keep the background (tiles, photos, backgrounds). none = save the raw generation untouched. Default: transparent→sprite, otherwise→texture.',
             },
             maxSize: {
               type: 'integer',
               description:
-                'Longest-edge downscale applied on save (px); omit to keep the original size.',
+                'Longest-edge downscale applied on save (px); omit to use the project default.',
             },
             references: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Project image paths used as style references.',
+              description:
+                'Project image paths used as style references — pass the design reference(s) so generated art matches the game.',
             },
           },
           required: ['prompt', 'name'],
@@ -478,7 +539,59 @@ export class AgentToolRegistry {
         },
         handler: args => this.generateAsset(args),
       },
+      {
+        name: 'process_asset',
+        description:
+          'Post-process an EXISTING project image: background removal, trim to content, downscale, re-encode. Use it to fix an image that has an unwanted background, is too large, or is not cropped tight (e.g. a previously generated sprite or a user import). Presets match generate_asset: sprite / icon / texture / none. Writes back to `path` unless `name` is given. Returns the saved path and a preview.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Project image to read (res:// or project-relative).',
+            },
+            preset: {
+              type: 'string',
+              enum: ['sprite', 'icon', 'texture', 'none'],
+              description:
+                'Processing preset (see generate_asset). Defaults to sprite (remove background + trim + downscale).',
+            },
+            name: {
+              type: 'string',
+              description: 'Optional output path; defaults to overwriting `path`.',
+            },
+            maxSize: {
+              type: 'integer',
+              description: 'Longest-edge cap in px; omit to use the project default.',
+            },
+          },
+          required: ['path'],
+          additionalProperties: false,
+        },
+        handler: args => this.processAsset(args),
+      },
     ];
+  }
+
+  // -- skills ----------------------------------------------------------------
+
+  private readSkill(args: Record<string, unknown>): Record<string, unknown> {
+    const id = asString(args.id);
+    const section = typeof args.section === 'string' ? args.section : undefined;
+    const content = this.skills.read(id, section);
+    if (content === null) {
+      const available = this.skills
+        .list()
+        .map(skill => skill.id)
+        .join(', ');
+      return {
+        ok: false,
+        error: section
+          ? `No section matching "${section}" in skill "${id}" (or unknown skill). Skills: ${available}.`
+          : `Unknown skill "${id}". Available: ${available}.`,
+      };
+    }
+    return { ok: true, id, section: section ?? null, content };
   }
 
   // -- introspection ---------------------------------------------------------
@@ -863,6 +976,51 @@ export class AgentToolRegistry {
     };
   }
 
+  private async analyzeImage(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const source = asString(args.source);
+    const question = typeof args.question === 'string' ? args.question : '';
+    let image: LlmImageBlock;
+    try {
+      image = await this.resolveImageForAnalysis(source);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    try {
+      const answer = await this.vision.analyze(image, question);
+      const helper = await this.vision.describeHelper();
+      return {
+        ok: true,
+        answer,
+        model: helper ? `${helper.providerLabel} · ${helper.modelLabel ?? helper.modelId}` : null,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Turn an `analyze_image` source (viewport / handle / project path) into an inline image block. */
+  private async resolveImageForAnalysis(source: string): Promise<LlmImageBlock> {
+    if (source === 'viewport') {
+      const shot = this.viewportRenderer.captureScreenshot({ maxSize: 1024 });
+      if (!shot) {
+        throw new Error('The viewport is not initialized yet (open a project with a scene first).');
+      }
+      return { type: 'image', mimeType: shot.mimeType, data: shot.dataBase64 };
+    }
+    // A live generation handle from generate_asset?
+    if (this.assetGen.get(source)) {
+      return dataUrlToImageBlock(await this.assetGen.preview(source, 1024));
+    }
+    // Otherwise a project image path — open, downscale for token economy, then release the handle.
+    const path = this.safePath(source);
+    const opened = await this.assetGen.open(path);
+    try {
+      return dataUrlToImageBlock(await this.assetGen.preview(opened.id, 1024));
+    } finally {
+      this.assetGen.discard(opened.id);
+    }
+  }
+
   private async generateAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const status = await this.assetGen.status();
     if (!status.keyConfigured) {
@@ -878,31 +1036,75 @@ export class AgentToolRegistry {
     const references = Array.isArray(args.references)
       ? args.references.filter((r): r is string => typeof r === 'string')
       : undefined;
+    const transparent = args.transparent === true;
+    const maxSize = typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined;
+    const preset = resolvePreset(args.postProcess, transparent ? 'sprite' : 'texture');
 
-    const generated = await this.assetGen.generate({
-      prompt,
-      references,
-      transparent: args.transparent === true,
-    });
+    const generated = await this.assetGen.generate({ prompt, references, transparent });
+    // The generation plus every intermediate handle the pipeline creates must be freed.
+    const handleIds = new Set<string>([generated.id]);
     try {
-      const saved = await this.assetGen.save(generated.id, name, {
-        maxSize: typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined,
-      });
-      // A small preview goes back as a real image so the model can judge the result visually.
-      const previewDataUrl = await this.assetGen.preview(generated.id, 256);
-      const comma = previewDataUrl.indexOf(',');
-      const previewMime = previewDataUrl.slice(5, previewDataUrl.indexOf(';'));
+      const processed = await this.assetGen.postProcess(generated.id, preset, { maxSize });
+      handleIds.add(processed.id);
+      const saved = await this.assetGen.save(processed.id, name, {});
+      // Preview the PROCESSED handle (what was actually saved), not the raw generation.
       return {
         ok: true,
         saved,
-        note: 'A 256px preview of the generated asset is attached as an image.',
-        [AGENT_TOOL_IMAGES_KEY]: [
-          { mimeType: previewMime, data: previewDataUrl.slice(comma + 1) },
-        ] satisfies AgentToolImage[],
+        preset,
+        original: { width: generated.width, height: generated.height },
+        note: `Saved with the "${preset}" preset. A 256px preview of the final asset is attached as an image.`,
+        ...(await this.previewImages(processed.id)),
       };
     } finally {
-      this.assetGen.discard(generated.id);
+      for (const id of handleIds) {
+        this.assetGen.discard(id);
+      }
     }
+  }
+
+  private async processAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot process an asset.' };
+    }
+    const path = this.safePath(asString(args.path));
+    const preset = resolvePreset(args.preset, 'sprite');
+    const maxSize = typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined;
+    const outName =
+      typeof args.name === 'string' && args.name.trim() ? this.safePath(args.name) : path;
+
+    const opened = await this.assetGen.open(path);
+    const handleIds = new Set<string>([opened.id]);
+    try {
+      const processed = await this.assetGen.postProcess(opened.id, preset, { maxSize });
+      handleIds.add(processed.id);
+      const saved = await this.assetGen.save(processed.id, outName, {});
+      return {
+        ok: true,
+        saved,
+        preset,
+        note: `Processed "${path}" → "${saved.path}" with the "${preset}" preset. Preview attached.`,
+        ...(await this.previewImages(processed.id)),
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      for (const id of handleIds) {
+        this.assetGen.discard(id);
+      }
+    }
+  }
+
+  /** Build the `__images` payload from a 256px preview of a handle, for visual QC by the model. */
+  private async previewImages(handleId: string): Promise<Record<string, unknown>> {
+    const previewDataUrl = await this.assetGen.preview(handleId, 256);
+    const comma = previewDataUrl.indexOf(',');
+    const previewMime = previewDataUrl.slice(5, previewDataUrl.indexOf(';'));
+    return {
+      [AGENT_TOOL_IMAGES_KEY]: [
+        { mimeType: previewMime, data: previewDataUrl.slice(comma + 1) },
+      ] satisfies AgentToolImage[],
+    };
   }
 
   // -- play mode / logs / errors --------------------------------------------
@@ -956,3 +1158,19 @@ const asString = (value: unknown): string => {
 
 const asInt = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+
+const ASSET_PRESETS: readonly AssetPostProcessPreset[] = ['sprite', 'icon', 'texture', 'none'];
+
+/** Coerce a tool argument to a known post-processing preset, else the supplied fallback. */
+const resolvePreset = (value: unknown, fallback: AssetPostProcessPreset): AssetPostProcessPreset =>
+  typeof value === 'string' && (ASSET_PRESETS as readonly string[]).includes(value)
+    ? (value as AssetPostProcessPreset)
+    : fallback;
+
+/** Split a `data:<mime>;base64,<data>` URL into an inline image block (base64 without the prefix). */
+const dataUrlToImageBlock = (dataUrl: string): LlmImageBlock => {
+  const comma = dataUrl.indexOf(',');
+  const semi = dataUrl.indexOf(';');
+  const mimeType = comma > 5 && semi > 5 && semi < comma ? dataUrl.slice(5, semi) : 'image/png';
+  return { type: 'image', mimeType, data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl };
+};

@@ -26,6 +26,10 @@ import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { AssetGenService } from '@/services/AssetGenService';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
+import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
+import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentVisionService, type VisionHelperInfo } from '@/services/agent/AgentVisionService';
+import { toBlocks, type LlmMessage } from '@/services/llm/LlmTypes';
 import type {
   AssetGenBgOptions,
   AssetGenCompressOptions,
@@ -103,6 +107,81 @@ function liveSceneRoot(): Object3DLike | null {
   }
   return node;
 }
+
+// ---------------------------------------------------------------------------
+// Agent-eval surface types
+// ---------------------------------------------------------------------------
+
+/** JSON-safe snapshot of the in-editor agent chat after a turn. */
+export interface AgentStateSummary {
+  status: string;
+  errorKind: string | null;
+  errorMessage: string | null;
+  notice: string | null;
+  activeTool: string | null;
+  messageCount: number;
+  totalUsage: { inputTokens?: number; outputTokens?: number };
+  /** Text of the most recent assistant message (null if none). */
+  lastAssistant: string | null;
+}
+
+/** One conversation turn, flattened for eval inspection. */
+export interface AgentTranscriptEntry {
+  role: string;
+  texts: string[];
+  toolCalls: Array<{ name: string; input: unknown }>;
+  toolResults: Array<{ name: string | null; isError: boolean; preview: string }>;
+}
+
+const agentTextOf = (message: LlmMessage): string =>
+  toBlocks(message.content)
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+    .trim();
+
+const summarizeAgentState = (state: AgentChatState): AgentStateSummary => {
+  const lastAssistant = [...state.messages].reverse().find(m => m.role === 'assistant');
+  return {
+    status: state.status,
+    errorKind: state.errorKind,
+    errorMessage: state.errorMessage,
+    notice: state.notice,
+    activeTool: state.activeTool,
+    messageCount: state.messages.length,
+    totalUsage: state.totalUsage,
+    lastAssistant: lastAssistant ? agentTextOf(lastAssistant) : null,
+  };
+};
+
+const agentTranscript = (
+  messages: readonly LlmMessage[],
+  limit?: number
+): AgentTranscriptEntry[] => {
+  const sliced = limit && limit > 0 ? messages.slice(-limit) : messages;
+  return sliced.map(message => {
+    const entry: AgentTranscriptEntry = {
+      role: message.role,
+      texts: [],
+      toolCalls: [],
+      toolResults: [],
+    };
+    for (const block of toBlocks(message.content)) {
+      if (block.type === 'text') {
+        entry.texts.push(block.text);
+      } else if (block.type === 'tool-use') {
+        entry.toolCalls.push({ name: block.name, input: block.input });
+      } else if (block.type === 'tool-result') {
+        entry.toolResults.push({
+          name: block.toolName ?? null,
+          isError: !!block.isError,
+          preview: block.content.slice(0, 300),
+        });
+      }
+    }
+    return entry;
+  });
+};
 
 // ---------------------------------------------------------------------------
 // The bridge API
@@ -235,6 +314,30 @@ export interface Pix3DebugBridge {
     execute(name: string, args?: Record<string, unknown>): Promise<unknown>;
   };
 
+  /**
+   * Drive the in-editor Agent chat programmatically — this is the eval harness: send a message,
+   * wait for the whole agentic loop to finish, and read back what the model did. Uses the real
+   * chat service (selected provider/model + saved key), so it exercises exactly what a user gets.
+   */
+  readonly agent: {
+    /** Snapshot of the current chat state (status, last assistant text, usage). */
+    getState(): AgentStateSummary;
+    /** Send a message and resolve when the turn (all tool iterations) completes. */
+    send(text: string): Promise<AgentStateSummary>;
+    /** Abort the running turn (keeps partial history). */
+    stop(): void;
+    /** Start a fresh conversation (old ones stay in history). */
+    newConversation(): Promise<void>;
+    /** Flattened transcript (texts + tool calls/results) — pass a limit for the last N turns. */
+    transcript(limit?: number): AgentTranscriptEntry[];
+    /** Set the main coding provider/model. */
+    setProvider(providerId: string, modelId?: string): void;
+    /** Set the vision-helper provider/model used by analyze_image (empty modelId = auto). */
+    setVisionHelper(providerId: string, modelId?: string): void;
+    /** Describe the currently-resolved vision helper (or null when none is available). */
+    visionHelper(): Promise<VisionHelperInfo | null>;
+  };
+
   // --- game-specific surface (present only if the running game registered one) ---
   readonly game: {
     /** True if the running game registered a GameDebugProvider. */
@@ -256,7 +359,7 @@ export interface Pix3DebugBridge {
 
 function createBridge(): Pix3DebugBridge {
   return {
-    version: 2,
+    version: 3,
 
     help() {
       return {
@@ -278,6 +381,13 @@ function createBridge(): Pix3DebugBridge {
         'errors() / clearErrors()': 'Captured console/runtime errors (ring buffer).',
         'agentTools.list() / agentTools.execute(name, args)':
           "The in-editor Agent's tool layer (fs_*, scene_*, play_*, viewport_screenshot, generate_asset, …).",
+        'agent.send(text)':
+          'Drive the Agent chat end-to-end (awaits the whole loop). Returns a state summary.',
+        'agent.getState() / agent.transcript(limit)':
+          'Chat status/last-reply summary, or a flattened transcript (texts + tool calls/results).',
+        'agent.setProvider(id,model) / agent.setVisionHelper(id,model) / agent.visionHelper()':
+          'Configure the coding model / vision helper for eval runs.',
+        'agent.newConversation() / agent.stop()': 'Reset the conversation / abort a running turn.',
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',
         'game.snapshot() / game.inspect(q) / game.action(n)':
           'Game-specific debug surface (per-game).',
@@ -481,6 +591,43 @@ function createBridge(): Pix3DebugBridge {
       },
       execute(name, args) {
         return service<AgentToolRegistry>(AgentToolRegistry).execute(name, args ?? {});
+      },
+    },
+
+    agent: {
+      getState() {
+        return summarizeAgentState(service<AgentChatService>(AgentChatService).getState());
+      },
+      async send(text) {
+        const chat = service<AgentChatService>(AgentChatService);
+        // send() awaits the whole agentic loop and sets status idle/error before returning
+        // (provider/tool errors are captured into state, not thrown).
+        await chat.send(text);
+        return summarizeAgentState(chat.getState());
+      },
+      stop() {
+        service<AgentChatService>(AgentChatService).stop();
+      },
+      newConversation() {
+        return service<AgentChatService>(AgentChatService).newConversation();
+      },
+      transcript(limit) {
+        return agentTranscript(service<AgentChatService>(AgentChatService).getState().messages, limit);
+      },
+      setProvider(providerId, modelId) {
+        service<AgentSettingsService>(AgentSettingsService).updatePreferences({
+          selectedProviderId: providerId,
+          ...(modelId ? { modelByProvider: { [providerId]: modelId } } : {}),
+        });
+      },
+      setVisionHelper(providerId, modelId) {
+        service<AgentSettingsService>(AgentSettingsService).updatePreferences({
+          visionProviderId: providerId,
+          visionModelId: modelId ?? '',
+        });
+      },
+      visionHelper() {
+        return service<AgentVisionService>(AgentVisionService).describeHelper();
       },
     },
 

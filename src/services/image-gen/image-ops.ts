@@ -65,7 +65,19 @@ export async function readBlobSize(blob: Blob): Promise<ImageDimensions | null> 
   }
 }
 
-function drawToBlob(
+/** Encode a canvas to a Blob (Promise wrapper over the callback-style `toBlob`). */
+function canvasToBlob(canvas: HTMLCanvasElement, encode: EncodeOptions): Promise<Blob> {
+  const mimeType = encode.mimeType ?? 'image/png';
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      result => (result ? resolve(result) : reject(new Error('Failed to encode image'))),
+      mimeType,
+      encode.quality
+    );
+  });
+}
+
+async function drawToBlob(
   bitmap: ImageBitmap,
   target: { width: number; height: number },
   source: { x: number; y: number; width: number; height: number },
@@ -83,20 +95,8 @@ function drawToBlob(
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, source.x, source.y, source.width, source.height, 0, 0, width, height);
-  const mimeType = encode.mimeType ?? 'image/png';
-  return new Promise<RasterResult>((resolve, reject) => {
-    canvas.toBlob(
-      result => {
-        if (result) {
-          resolve({ blob: result, width, height });
-        } else {
-          reject(new Error('Failed to encode image'));
-        }
-      },
-      mimeType,
-      encode.quality
-    );
-  });
+  const blob = await canvasToBlob(canvas, encode);
+  return { blob, width, height };
 }
 
 /**
@@ -172,6 +172,123 @@ export async function cropImageBlob(
       { x: sx, y: sy, width: sw, height: sh },
       { mimeType: encode.mimeType ?? 'image/png', quality: encode.quality }
     );
+  } finally {
+    bitmap.close();
+  }
+}
+
+export interface TrimOptions extends EncodeOptions {
+  /** Transparent padding (px) kept around the opaque content on every side. Default 2. */
+  padding?: number;
+  /**
+   * Alpha value (0..255) at or below which a pixel counts as empty when finding the content
+   * bounds. Default 0 (only fully transparent pixels trim away). Raise slightly (e.g. 8) to also
+   * crop the near-transparent halo background removal tends to leave behind.
+   */
+  alphaThreshold?: number;
+  /** Center the trimmed content on a square transparent canvas (side = longest content edge). */
+  square?: boolean;
+}
+
+export interface TrimResult extends RasterResult {
+  /** True when the image had no opaque pixels — the source is returned unchanged. */
+  readonly empty: boolean;
+  /** The detected content bounding box in source pixels (null when {@link empty}). */
+  readonly bounds: CropRectPixels | null;
+}
+
+/**
+ * Crop an image down to the bounding box of its non-transparent pixels (plus optional padding).
+ * This is what turns a background-removed generation into a tight sprite. With `square: true` the
+ * content is centered on a square canvas so icon grids line up. Returns the source unchanged when
+ * the image is fully transparent, has no alpha channel worth trimming, or can't be decoded.
+ */
+export async function trimImageBlob(blob: Blob, options: TrimOptions = {}): Promise<TrimResult> {
+  if (!canUseBitmap()) {
+    const size = await readBlobSize(blob);
+    return {
+      blob,
+      width: size?.width ?? 0,
+      height: size?.height ?? 0,
+      empty: false,
+      bounds: null,
+    };
+  }
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const sw = bitmap.width;
+    const sh = bitmap.height;
+    const scan = document.createElement('canvas');
+    scan.width = sw;
+    scan.height = sh;
+    const scanCtx = scan.getContext('2d');
+    if (!scanCtx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    scanCtx.drawImage(bitmap, 0, 0);
+    const { data } = scanCtx.getImageData(0, 0, sw, sh);
+    const threshold = clamp(Math.round(options.alphaThreshold ?? 0), 0, 255);
+
+    let minX = sw;
+    let minY = sh;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        if (data[(y * sw + x) * 4 + 3] > threshold) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) {
+      return { blob, width: sw, height: sh, empty: true, bounds: null };
+    }
+
+    const bounds: CropRectPixels = {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+    const padding = Math.max(0, Math.round(options.padding ?? 2));
+    const outW = options.square
+      ? Math.max(bounds.width, bounds.height) + padding * 2
+      : bounds.width + padding * 2;
+    const outH = options.square
+      ? Math.max(bounds.width, bounds.height) + padding * 2
+      : bounds.height + padding * 2;
+    const dx = Math.round((outW - bounds.width) / 2);
+    const dy = Math.round((outH - bounds.height) / 2);
+
+    const out = document.createElement('canvas');
+    out.width = outW;
+    out.height = outH;
+    const outCtx = out.getContext('2d');
+    if (!outCtx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    outCtx.imageSmoothingEnabled = true;
+    outCtx.imageSmoothingQuality = 'high';
+    outCtx.drawImage(
+      bitmap,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      dx,
+      dy,
+      bounds.width,
+      bounds.height
+    );
+    const outBlob = await canvasToBlob(out, {
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+    return { blob: outBlob, width: outW, height: outH, empty: false, bounds };
   } finally {
     bitmap.close();
   }

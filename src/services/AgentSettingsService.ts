@@ -9,6 +9,13 @@ export interface AgentPreferences {
   modelByProvider: Record<string, string>;
   /** Base URL override for the OpenAI-compatible provider (OpenAI / Ollama / LM Studio). */
   customBaseUrl: string;
+  /**
+   * Optional override for the vision-helper provider (used by `analyze_image` when the main model
+   * can't see images). Empty = auto-resolve to the first provider with a key + a vision model.
+   */
+  visionProviderId: string;
+  /** Vision-helper model id (paired with {@link visionProviderId}). Empty = first vision model. */
+  visionModelId: string;
   /** Max LLM ⇄ tool-call round trips per agent turn (safety cap on the agentic loop). */
   maxToolIterations: number;
   /**
@@ -162,6 +169,8 @@ export class AgentSettingsService {
       selectedProviderId: defaultProvider?.id ?? '',
       modelByProvider: {},
       customBaseUrl: '',
+      visionProviderId: '',
+      visionModelId: '',
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
       debugMode: false,
     };
@@ -190,6 +199,13 @@ export class AgentSettingsService {
             : {},
         customBaseUrl:
           typeof parsed.customBaseUrl === 'string' ? parsed.customBaseUrl : defaults.customBaseUrl,
+        visionProviderId:
+          typeof parsed.visionProviderId === 'string' &&
+          this.registry.get(parsed.visionProviderId)
+            ? parsed.visionProviderId
+            : defaults.visionProviderId,
+        visionModelId:
+          typeof parsed.visionModelId === 'string' ? parsed.visionModelId : defaults.visionModelId,
         maxToolIterations:
           typeof parsed.maxToolIterations === 'number' &&
           Number.isFinite(parsed.maxToolIterations) &&

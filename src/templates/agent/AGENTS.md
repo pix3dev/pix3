@@ -1,8 +1,19 @@
 # AGENTS.md — {{PROJECT_NAME}}
 
 This is a **Pix3 game project**: a browser game edited in the Pix3 editor and runnable
-as an exported single-file HTML. You (the agent) work directly on the files in this
-folder; the user runs the Pix3 editor separately.
+as an exported single-file HTML.
+
+## Which agent are you?
+
+- **The in-editor Pix3 Agent** (running inside the editor's Agent panel): work through your
+  **tools**, not by hand-editing files — `add_component` / `set_property` for behaviour and
+  properties, `fs_write` + `compile_scripts` for scripts, `generate_asset` / `process_asset`
+  for art, `play_start` + `read_errors` to verify. Call **`read_skill`** for the matching
+  built-in skill (`game-prototype`, `asset-generation`, `verify-and-fix`) before starting a
+  task. The file-format details below are background — prefer the tools.
+- **An external file-editing agent** (editing this folder directly): you author the
+  `.pix3scene` YAML and `scripts/*.ts` files yourself, following the rules below, and ask the
+  user to run the game in the editor to verify.
 
 ## Where things are
 
