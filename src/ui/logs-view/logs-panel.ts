@@ -1,6 +1,8 @@
 import { ComponentBase, customElement, html, inject, state, css, unsafeCSS } from '@/fw';
 import { LoggingService, type LogLevel, type LogEntry } from '@/services/LoggingService';
 import { IconService, IconSize } from '@/services/IconService';
+import { AgentChatService } from '@/services/agent/AgentChatService';
+import { LayoutManagerService } from '@/core/LayoutManager';
 import styles from './logs-panel.ts.css?raw';
 
 @customElement('pix3-logs-panel')
@@ -16,6 +18,12 @@ export class LogsPanel extends ComponentBase {
 
   @inject(IconService)
   private readonly iconService!: IconService;
+
+  @inject(AgentChatService)
+  private readonly agentChat!: AgentChatService;
+
+  @inject(LayoutManagerService)
+  private readonly layoutManager!: LayoutManagerService;
 
   @state()
   private logs: LogEntry[] = [];
@@ -84,6 +92,22 @@ export class LogsPanel extends ComponentBase {
 
   private handleSourceFilterChange(event: Event) {
     this.sourceFilter = (event.currentTarget as HTMLSelectElement).value;
+  }
+
+  /** Open a fresh agent chat prefilled with this log entry so the agent can fix the cause. */
+  private handleFixWithAgent(log: LogEntry, event: Event) {
+    event.stopPropagation();
+    const details = this.formatErrorDetails(log.data);
+    const prompt = [
+      'Fix this error reported in the editor logs. Investigate the root cause and fix it.',
+      '',
+      `[${log.level.toUpperCase()}] ${log.message}`,
+      ...(details ? ['', details] : []),
+      '',
+      'Use read_errors and read_logs for more context, inspect the relevant node/script, fix the cause, then verify your fix.',
+    ].join('\n');
+    this.layoutManager.revealAgentPanel();
+    void this.agentChat.composeFix(prompt);
   }
 
   /** Distinct remote source labels present in the current log buffer. */
@@ -272,6 +296,16 @@ export class LogsPanel extends ComponentBase {
                             : ''}
                           <span class="log-message">${log.message}</span>
                           <span class="log-timestamp">${this.formatTime(log.timestamp)}</span>
+                          ${log.level === 'error'
+                            ? html`<button
+                                class="log-fix-btn"
+                                title="Fix with Agent"
+                                aria-label="Fix with Agent"
+                                @click=${(event: Event) => this.handleFixWithAgent(log, event)}
+                              >
+                                ${this.iconService.getIcon('tool', IconSize.SMALL)}
+                              </button>`
+                            : ''}
                         </div>
                         ${hasDetails && isExpanded
                           ? html`<pre class="log-details">

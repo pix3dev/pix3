@@ -247,6 +247,17 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
+.game-error-button-primary {
+  border-color: rgba(var(--pix3-accent-rgb), 0.7);
+  background: rgba(var(--pix3-accent-rgb), 0.18);
+  color: var(--pix3-accent-color);
+  font-weight: 600;
+}
+
+.game-error-button-primary:hover {
+  background: rgba(var(--pix3-accent-rgb), 0.28);
+}
+
 .game-error-dismiss {
   border: none;
   background: transparent;

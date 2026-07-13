@@ -18,7 +18,10 @@ import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AssetGenService } from '@/services/AssetGenService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
-import { SceneManager, NodeBase } from '@pix3/runtime';
+import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
+import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
+import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
+import { SceneManager, NodeBase, ScriptRegistry } from '@pix3/runtime';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
@@ -138,6 +141,9 @@ export class AgentToolRegistry {
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
+  @inject(ScriptRegistry)
+  private readonly scriptRegistry!: ScriptRegistry;
+
   private tools: AgentToolDefinition[] | null = null;
 
   constructor() {
@@ -235,6 +241,76 @@ export class AgentToolRegistry {
         },
         handler: args =>
           this.setProperty(asString(args.nodeId), asString(args.propertyPath), args.value),
+      },
+      {
+        name: 'list_component_types',
+        description:
+          'List every script/behaviour component type that can be attached to a node: built-ins ("core:*", e.g. core:Rotate) and this project\'s user scripts ("user:*"). Each entry includes its configurable properties (name + type). Call this before add_component so you use a real type id and valid config keys.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        handler: () => this.listComponentTypes(),
+      },
+      {
+        name: 'add_component',
+        description:
+          'Attach a script/behaviour component to a node (undoable). Use a componentType from list_component_types. `config` sets initial property values (must match that type\'s property names). Returns the created componentId — pass it to set_component_property / remove_component. For a user script, write & compile_scripts the file first, then attach with its "user:<ExportName>" type.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string' },
+            componentType: {
+              type: 'string',
+              description: 'A type id from list_component_types (e.g. "core:Rotate" or "user:Foo").',
+            },
+            config: {
+              type: 'object',
+              description: 'Optional initial property values keyed by property name.',
+              additionalProperties: true,
+            },
+            enabled: { type: 'boolean', description: 'Initial enabled state (default true).' },
+          },
+          required: ['nodeId', 'componentType'],
+          additionalProperties: false,
+        },
+        handler: args => this.addComponent(args),
+      },
+      {
+        name: 'set_component_property',
+        description:
+          'Set one property on a component already attached to a node (undoable). Identify the component by the componentId from node_inspect or add_component.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string' },
+            componentId: { type: 'string' },
+            propertyName: { type: 'string' },
+            value: {},
+          },
+          required: ['nodeId', 'componentId', 'propertyName'],
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.setComponentProperty(
+            asString(args.nodeId),
+            asString(args.componentId),
+            asString(args.propertyName),
+            args.value
+          ),
+      },
+      {
+        name: 'remove_component',
+        description:
+          'Detach a component from a node (undoable). Identify it by the componentId from node_inspect.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string' },
+            componentId: { type: 'string' },
+          },
+          required: ['nodeId', 'componentId'],
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.removeComponent(asString(args.nodeId), asString(args.componentId)),
       },
       {
         name: 'list_commands',
@@ -425,11 +501,18 @@ export class AgentToolRegistry {
     return { ...tree, sceneVersion: graph.version };
   }
 
-  private nodeInspect(nodeId: string): NodeDTO | null {
+  private nodeInspect(nodeId: string): (NodeDTO & { components?: unknown[] }) | null {
     const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
     if (!(node instanceof NodeBase)) return null;
     const dto = nodeToDTO(node, 0);
-    dto.components = node.components.map((c, i) => componentToDTO(c, i));
+    // Enrich each component with the explicit ids the mutation tools need (componentId + type),
+    // which the generic ComponentDTO only exposes ambiguously as `scriptId`.
+    dto.components = node.components.map((c, i) => ({
+      ...componentToDTO(c, i),
+      componentId: c.id,
+      componentType: c.type,
+      enabled: c.enabled,
+    }));
     return dto;
   }
 
@@ -469,6 +552,101 @@ export class AgentToolRegistry {
       new UpdateObjectPropertyCommand({ nodeId, propertyPath, value })
     );
     return { ok };
+  }
+
+  private listComponentTypes(): Array<{
+    id: string;
+    displayName: string;
+    category: string;
+    description: string;
+    properties: Array<{ name: string; type: string; label?: string }>;
+  }> {
+    return this.scriptRegistry.getAllComponentTypes().map(info => {
+      let properties: Array<{ name: string; type: string; label?: string }> = [];
+      try {
+        const schema = this.scriptRegistry.getComponentPropertySchema(info.id);
+        properties = (schema?.properties ?? []).map(prop => ({
+          name: prop.name,
+          type: String(prop.type),
+          ...(prop.ui?.label ? { label: prop.ui.label } : {}),
+        }));
+      } catch {
+        // Schema resolution is best-effort — a type with a broken schema still lists.
+      }
+      return {
+        id: info.id,
+        displayName: info.displayName,
+        category: info.category,
+        description: info.description,
+        properties,
+      };
+    });
+  }
+
+  private async addComponent(
+    args: Record<string, unknown>
+  ): Promise<{ ok: boolean; componentId?: string; error?: string }> {
+    const nodeId = asString(args.nodeId);
+    const componentType = asString(args.componentType);
+    if (!this.scriptRegistry.getComponentType(componentType)) {
+      const available = this.scriptRegistry
+        .getAllComponentTypes()
+        .map(type => type.id)
+        .join(', ');
+      return {
+        ok: false,
+        error: `Unknown component type "${componentType}". Call list_component_types first. Available: ${available || '(none registered)'}`,
+      };
+    }
+    const config =
+      args.config && typeof args.config === 'object' && !Array.isArray(args.config)
+        ? (args.config as Record<string, unknown>)
+        : undefined;
+    const enabled = typeof args.enabled === 'boolean' ? args.enabled : undefined;
+    // Generate the id here (rather than letting the operation default it) so it can be returned.
+    const componentId = `${nodeId}-${componentType}-${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const ok = await this.dispatcher.execute(
+      new AddComponentCommand({ nodeId, componentType, componentId, config, enabled })
+    );
+    return ok
+      ? { ok: true, componentId }
+      : {
+          ok: false,
+          error:
+            'Failed to attach the component (node not found, the type failed to instantiate, or the node is a prefab instance — components are locked there).',
+        };
+  }
+
+  private async setComponentProperty(
+    nodeId: string,
+    componentId: string,
+    propertyName: string,
+    value: unknown
+  ): Promise<{ ok: boolean; error?: string }> {
+    const ok = await this.dispatcher.execute(
+      new UpdateComponentPropertyCommand({ nodeId, componentId, propertyName, value })
+    );
+    return ok
+      ? { ok: true }
+      : {
+          ok: false,
+          error:
+            'Property was not updated — the component/property was not found, the value is invalid or unchanged, or the node is a prefab instance. Re-check node_inspect and list_component_types.',
+        };
+  }
+
+  private async removeComponent(
+    nodeId: string,
+    componentId: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const ok = await this.dispatcher.execute(new RemoveComponentCommand({ nodeId, componentId }));
+    return ok
+      ? { ok: true }
+      : {
+          ok: false,
+          error:
+            'Failed to remove the component (node/component not found, or the node is a prefab instance).',
+        };
   }
 
   private listCommands(): Array<{

@@ -4,8 +4,114 @@ import { FileWatchService } from '@/services/FileWatchService';
 import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 
-export type CodeDocumentLanguage = 'typescript' | 'javascript' | 'json';
+export type CodeDocumentLanguage =
+  | 'typescript'
+  | 'javascript'
+  | 'json'
+  | 'markdown'
+  | 'html'
+  | 'css'
+  | 'scss'
+  | 'less'
+  | 'xml'
+  | 'yaml'
+  | 'ini'
+  | 'shell'
+  | 'bat'
+  | 'powershell'
+  | 'wgsl'
+  | 'plaintext';
 export type CodeDocumentEventReason = 'load' | 'change' | 'save' | 'reload' | 'external-change';
+
+/**
+ * File extension (lower-case, no dot) → Monaco language id. This is the single
+ * source of truth for "which files open in the built-in code editor" — the
+ * asset-activation router and the code tab both resolve through it. Every id
+ * here must be a language Monaco tokenizes (basic-languages Monarch grammar or a
+ * language service); text formats without a dedicated grammar map to
+ * `plaintext`. See `monaco-loader.ts` for the workers backing css/html/json/ts.
+ */
+const EXTENSION_TO_LANGUAGE: Readonly<Record<string, CodeDocumentLanguage>> = {
+  // Scripts / code
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  tsx: 'typescript',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'javascript',
+  json: 'json',
+  json5: 'json',
+  jsonc: 'json',
+  // Markdown / docs
+  md: 'markdown',
+  markdown: 'markdown',
+  mdx: 'markdown',
+  // Web / styles
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'scss',
+  less: 'less',
+  // Data / config
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  ini: 'ini',
+  cfg: 'ini',
+  conf: 'ini',
+  properties: 'ini',
+  env: 'ini',
+  editorconfig: 'ini',
+  toml: 'ini',
+  // Shell
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  bat: 'bat',
+  cmd: 'bat',
+  ps1: 'powershell',
+  psm1: 'powershell',
+  // Shaders
+  wgsl: 'wgsl',
+  glsl: 'plaintext',
+  vert: 'plaintext',
+  frag: 'plaintext',
+  // Plain text
+  txt: 'plaintext',
+  text: 'plaintext',
+  log: 'plaintext',
+  csv: 'plaintext',
+  tsv: 'plaintext',
+  gitignore: 'plaintext',
+  gitattributes: 'plaintext',
+  npmrc: 'plaintext',
+};
+
+/** Lower-cased extension (without the dot) of a resource path; '' when absent. */
+function extensionOfPath(resourcePath: string): string {
+  const name = resourcePath.replace(/\\+/g, '/').split('/').pop() ?? '';
+  const lastDot = name.lastIndexOf('.');
+  // `lastDot === 0` keeps dotfiles like `.gitignore`/`.env` (extension = the
+  // whole suffix), matching how the asset tree derives extensions.
+  if (lastDot < 0 || lastDot === name.length - 1) {
+    return '';
+  }
+  return name.slice(lastDot + 1).toLowerCase();
+}
+
+/** Monaco language id for a file extension, or `undefined` if not editable as text. */
+export function getCodeDocumentLanguageForExtension(
+  extension: string
+): CodeDocumentLanguage | undefined {
+  return EXTENSION_TO_LANGUAGE[extension.toLowerCase()];
+}
+
+/** Whether a file extension can be opened in the built-in code editor. */
+export function isCodeDocumentExtension(extension: string): boolean {
+  return getCodeDocumentLanguageForExtension(extension) !== undefined;
+}
 
 export interface CodeDocumentSnapshot {
   resourcePath: string;
@@ -146,19 +252,11 @@ export class CodeDocumentService {
   }
 
   isSupportedResourcePath(resourcePath: string): boolean {
-    const normalized = resourcePath.toLowerCase();
-    return normalized.endsWith('.ts') || normalized.endsWith('.js') || normalized.endsWith('.json');
+    return isCodeDocumentExtension(extensionOfPath(resourcePath));
   }
 
   resolveLanguage(resourcePath: string): CodeDocumentLanguage {
-    const normalized = resourcePath.toLowerCase();
-    if (normalized.endsWith('.json')) {
-      return 'json';
-    }
-    if (normalized.endsWith('.js')) {
-      return 'javascript';
-    }
-    return 'typescript';
+    return getCodeDocumentLanguageForExtension(extensionOfPath(resourcePath)) ?? 'plaintext';
   }
 
   private async loadDocument(resourcePath: string): Promise<CodeDocumentSnapshot> {

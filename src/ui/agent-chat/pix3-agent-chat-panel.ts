@@ -163,6 +163,20 @@ const extractUserPrompts = (messages: readonly LlmMessage[]): string[] => {
   return prompts;
 };
 
+/** Compact "3m / 2h / 5d ago" style label for the history list. */
+const formatRelativeTime = (timestamp: number): string => {
+  if (!timestamp) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
+};
+
 const formatToolPayload = (value: unknown): string => {
   if (typeof value === 'string') {
     try {
@@ -220,9 +234,12 @@ export class AgentChatPanel extends ComponentBase {
   /** Which debug overlay is open, if any. */
   @state() private debugView: 'none' | 'raw' | 'system' = 'none';
   @state() private systemPromptText = '';
+  /** Whether the conversation-history popover is open. */
+  @state() private historyOpen = false;
 
   private disposeChatSubscription?: () => void;
   private disposeSettingsSubscription?: () => void;
+  private disposeComposeSubscription?: () => void;
   private disposeCatalogSubscription?: () => void;
   private readonly messagesRef = createRef<HTMLDivElement>();
   private readonly fileInputRef = createRef<HTMLInputElement>();
@@ -237,6 +254,10 @@ export class AgentChatPanel extends ComponentBase {
 
     this.disposeChatSubscription = this.chat.subscribe(chatState => {
       this.chatState = chatState;
+    });
+    // "Fix with Agent" and other prefill requests drop a prompt into the composer for review.
+    this.disposeComposeSubscription = this.chat.subscribeCompose(text => {
+      this.applyComposePrefill(text);
     });
     this.disposeSettingsSubscription = this.settings.subscribe(prefs => {
       this.providerId = prefs.selectedProviderId;
@@ -268,6 +289,8 @@ export class AgentChatPanel extends ComponentBase {
   disconnectedCallback(): void {
     this.disposeChatSubscription?.();
     this.disposeChatSubscription = undefined;
+    this.disposeComposeSubscription?.();
+    this.disposeComposeSubscription = undefined;
     this.disposeSettingsSubscription?.();
     this.disposeSettingsSubscription = undefined;
     this.disposeCatalogSubscription?.();
@@ -676,10 +699,24 @@ export class AgentChatPanel extends ComponentBase {
                 >${usageText}</span
               >`
             : null}
+          <div class="agent-history-wrap">
+            <button
+              type="button"
+              class="agent-history-btn ${this.historyOpen ? 'is-active' : ''}"
+              title="Past conversations"
+              aria-label="Past conversations"
+              aria-expanded=${String(this.historyOpen)}
+              @click=${this.toggleHistory}
+            >
+              <span class="agent-btn-icon">${this.icons.getIcon('clock', IconSize.SMALL)}</span>
+              History
+            </button>
+            ${this.historyOpen ? this.renderHistoryPopover() : null}
+          </div>
           <button
             type="button"
             class="agent-new-chat"
-            title="Start a new conversation (clears history for this project)"
+            title="Start a new conversation (keeps the old ones in History)"
             @click=${this.handleNewConversation}
           >
             <span class="agent-btn-icon">${this.icons.getIcon('plus', IconSize.SMALL)}</span>
@@ -783,6 +820,26 @@ export class AgentChatPanel extends ComponentBase {
   /** Set the draft to a recalled prompt and move the caret to the end after the DOM updates. */
   private setDraftFromHistory(text: string): void {
     this.draft = text;
+    void this.updateComplete.then(() => {
+      const ta = this.querySelector<HTMLTextAreaElement>('.agent-input');
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  }
+
+  /**
+   * Drop a prefilled prompt (e.g. from a "Fix with Agent" button) into the composer and focus it so
+   * the user can review/edit before sending — the service has already opened a fresh conversation.
+   */
+  private applyComposePrefill(text: string): void {
+    this.draft = text;
+    this.attachments = [];
+    this.attachWarning = '';
+    this.historyIndex = -1;
+    this.historyOpen = false;
+    this.shouldStickToBottom = true;
     void this.updateComplete.then(() => {
       const ta = this.querySelector<HTMLTextAreaElement>('.agent-input');
       if (ta) {
@@ -958,8 +1015,69 @@ export class AgentChatPanel extends ComponentBase {
   };
 
   private handleNewConversation = (): void => {
+    this.historyOpen = false;
+    this.draft = '';
+    this.attachments = [];
+    this.attachWarning = '';
+    this.historyIndex = -1;
     void this.chat.newConversation();
   };
+
+  private toggleHistory = (): void => {
+    this.historyOpen = !this.historyOpen;
+  };
+
+  private handleSwitchConversation(id: string): void {
+    this.historyOpen = false;
+    this.draft = '';
+    this.historyIndex = -1;
+    void this.chat.switchConversation(id);
+  }
+
+  private handleDeleteConversation(id: string, event: Event): void {
+    event.stopPropagation();
+    void this.chat.deleteConversation(id);
+  }
+
+  private renderHistoryPopover() {
+    const conversations = this.chatState?.conversations ?? [];
+    const activeId = this.chatState?.activeConversationId ?? null;
+    return html`
+      <div class="agent-history-popover">
+        <div class="agent-history-head">Conversations</div>
+        ${conversations.length === 0
+          ? html`<div class="agent-history-empty">No past conversations yet.</div>`
+          : html`<ul class="agent-history-list">
+              ${conversations.map(
+                conversation => html`
+                  <li
+                    class="agent-history-item ${conversation.id === activeId ? 'is-active' : ''}"
+                    @click=${() => this.handleSwitchConversation(conversation.id)}
+                  >
+                    <div class="agent-history-item-main">
+                      <span class="agent-history-item-title">${conversation.title}</span>
+                      <span class="agent-history-item-meta">
+                        ${formatRelativeTime(conversation.updatedAt)} ·
+                        ${conversation.messageCount} msg
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="agent-history-delete agent-icon-btn"
+                      title="Delete this conversation"
+                      aria-label="Delete conversation"
+                      @click=${(event: Event) =>
+                        this.handleDeleteConversation(conversation.id, event)}
+                    >
+                      ${this.icons.getIcon('trash-2', IconSize.SMALL)}
+                    </button>
+                  </li>
+                `
+              )}
+            </ul>`}
+      </div>
+    `;
+  }
 
   private async refreshKeyConfigured(): Promise<void> {
     const providerId = this.providerId;

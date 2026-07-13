@@ -75,4 +75,70 @@ describe('AssetFileActivationService', () => {
     );
     expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(3, 'res://config.json');
   });
+
+  it('routes markdown and plain-text assets to code tabs', async () => {
+    const service = new AssetFileActivationService();
+    const editorTabService = {
+      focusOrOpenAnimation: vi.fn().mockResolvedValue(undefined),
+      focusOrOpenCode: vi.fn().mockResolvedValue(undefined),
+    };
+
+    Object.defineProperty(service, 'editorTabService', {
+      value: editorTabService,
+    });
+
+    const payloads: AssetActivation[] = [
+      {
+        name: 'README.md',
+        path: 'README.md',
+        kind: 'file',
+        resourcePath: 'res://README.md',
+        extension: 'md',
+      },
+      {
+        name: 'notes.txt',
+        path: 'docs/notes.txt',
+        kind: 'file',
+        resourcePath: 'res://docs/notes.txt',
+        extension: 'txt',
+      },
+      {
+        name: 'settings.yaml',
+        path: 'settings.yaml',
+        kind: 'file',
+        resourcePath: 'res://settings.yaml',
+        extension: 'yaml',
+      },
+    ];
+
+    for (const payload of payloads) {
+      await service.handleActivation(payload);
+    }
+
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(1, 'res://README.md');
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(2, 'res://docs/notes.txt');
+    expect(editorTabService.focusOrOpenCode).toHaveBeenNthCalledWith(3, 'res://settings.yaml');
+  });
+
+  it('does not route unsupported binary assets to code tabs', async () => {
+    const service = new AssetFileActivationService();
+    const editorTabService = {
+      focusOrOpenAnimation: vi.fn().mockResolvedValue(undefined),
+      focusOrOpenCode: vi.fn().mockResolvedValue(undefined),
+    };
+
+    Object.defineProperty(service, 'editorTabService', {
+      value: editorTabService,
+    });
+
+    await service.handleActivation({
+      name: 'sound.wav',
+      path: 'audio/sound.wav',
+      kind: 'file',
+      resourcePath: 'res://audio/sound.wav',
+      extension: 'wav',
+    });
+
+    expect(editorTabService.focusOrOpenCode).not.toHaveBeenCalled();
+  });
 });

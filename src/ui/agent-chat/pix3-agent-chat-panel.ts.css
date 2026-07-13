@@ -193,6 +193,135 @@ pix3-agent-chat-panel .agent-key-note {
   color: rgba(245, 247, 250, 0.5);
 }
 
+/* ── Conversation history ───────────────────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-history-wrap {
+  /* Like .agent-key-wrap: the popover anchors to the composer, not this button. */
+  flex: 0 0 auto;
+}
+
+pix3-agent-chat-panel .agent-history-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 1.6rem;
+  padding: 0 0.55rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.82);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-history-btn:hover,
+pix3-agent-chat-panel .agent-history-btn.is-active {
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  color: rgba(245, 247, 250, 1);
+}
+
+pix3-agent-chat-panel .agent-history-popover {
+  position: absolute;
+  bottom: calc(100% + 0.3rem);
+  right: 0.6rem;
+  z-index: 30;
+  width: 20rem;
+  max-width: calc(100% - 1.2rem);
+  max-height: 22rem;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(18, 22, 26, 0.98);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+pix3-agent-chat-panel .agent-history-head {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(245, 247, 250, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+pix3-agent-chat-panel .agent-history-empty {
+  padding: 0.8rem 0.6rem;
+  font-size: 0.72rem;
+  color: rgba(245, 247, 250, 0.5);
+}
+
+pix3-agent-chat-panel .agent-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+}
+
+pix3-agent-chat-panel .agent-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-history-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+pix3-agent-chat-panel .agent-history-item.is-active {
+  background: rgba(var(--pix3-accent-rgb), 0.14);
+}
+
+pix3-agent-chat-panel .agent-history-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+pix3-agent-chat-panel .agent-history-item-title {
+  font-size: 0.75rem;
+  color: rgba(245, 247, 250, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+pix3-agent-chat-panel .agent-history-item-meta {
+  font-size: 0.66rem;
+  color: rgba(245, 247, 250, 0.5);
+}
+
+pix3-agent-chat-panel .agent-history-delete {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.55);
+  cursor: pointer;
+  opacity: 0;
+}
+
+pix3-agent-chat-panel .agent-history-item:hover .agent-history-delete {
+  opacity: 1;
+}
+
+pix3-agent-chat-panel .agent-history-delete:hover {
+  border-color: rgba(233, 90, 90, 0.5);
+  color: #e95a5a;
+}
+
 /* ── Messages ───────────────────────────────────────────────────────────── */
 
 pix3-agent-chat-panel .agent-messages {

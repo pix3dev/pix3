@@ -5,6 +5,7 @@ import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SceneManager } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import { EditorTabService } from '@/services/EditorTabService';
+import { isCodeDocumentExtension } from '@/services/CodeDocumentService';
 
 export interface AssetActivation {
   name: string;
@@ -60,7 +61,9 @@ export class AssetFileActivationService {
       return;
     }
 
-    if (extension === 'ts' || extension === 'js' || extension === 'json') {
+    // Text-editable files (scripts, JSON, markdown, config, plain text, …) open
+    // in the built-in Monaco editor. CodeDocumentService owns the supported set.
+    if (isCodeDocumentExtension(extension)) {
       await this.editorTabService.focusOrOpenCode(resourcePath);
       return;
     }

@@ -378,9 +378,9 @@ export class SceneLoader {
           component.config = { ...configData };
 
           // Set config values using PropertySchema if available
-          const schema = this.scriptRegistry.getComponentPropertySchema(componentDef.type);
-          if (schema && configData) {
-            for (const prop of schema.properties) {
+          const properties = this.getComponentSchemaProperties(componentDef.type);
+          if (properties && configData) {
+            for (const prop of properties) {
               if (configData[prop.name] !== undefined) {
                 prop.setValue(component, configData[prop.name]);
               }
@@ -647,9 +647,9 @@ export class SceneLoader {
       const configData = componentDef.config ?? {};
       component.config = { ...configData };
 
-      const schema = this.scriptRegistry.getComponentPropertySchema(componentDef.type);
-      if (schema && configData) {
-        for (const prop of schema.properties) {
+      const properties = this.getComponentSchemaProperties(componentDef.type);
+      if (properties && configData) {
+        for (const prop of properties) {
           if (configData[prop.name] !== undefined) {
             prop.setValue(component, configData[prop.name]);
           }
@@ -658,6 +658,32 @@ export class SceneLoader {
 
       node.addComponent(component);
     }
+  }
+
+  /**
+   * Resolve a component's editable properties from its registered schema,
+   * guarding against malformed schemas. A component whose static
+   * `getPropertySchema()` returns an object without a `properties` array (a
+   * common mistake in user-authored scripts — e.g. forgetting `properties: []`)
+   * must not abort the entire scene load. Returns `null` when there is no usable
+   * schema, warning and naming the offending component type in that case.
+   */
+  private getComponentSchemaProperties(componentType: string): PropertyDefinition[] | null {
+    const schema = this.scriptRegistry.getComponentPropertySchema(componentType);
+    if (!schema) {
+      return null;
+    }
+
+    if (!Array.isArray(schema.properties)) {
+      console.warn(
+        `[SceneLoader] Component "${componentType}" has a malformed property schema: ` +
+          `getPropertySchema() must return an object with a "properties" array. ` +
+          `Skipping config application for this component.`
+      );
+      return null;
+    }
+
+    return schema.properties;
   }
 
   private generateUniqueRuntimeNodeId(

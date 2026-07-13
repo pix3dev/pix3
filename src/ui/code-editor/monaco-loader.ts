@@ -1,6 +1,8 @@
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 
 let monacoPromise: Promise<typeof import('monaco-editor')> | null = null;
 let environmentConfigured = false;
@@ -47,6 +49,16 @@ const configureEnvironment = (): void => {
         return new TsWorker();
       }
 
+      if (label === 'css' || label === 'scss' || label === 'less') {
+        return new CssWorker();
+      }
+
+      if (label === 'html' || label === 'handlebars' || label === 'razor') {
+        return new HtmlWorker();
+      }
+
+      // markdown, plaintext, xml, yaml, ini, shell, wgsl, … tokenize on the main
+      // thread (no language service worker) and use the base editor worker.
       return new EditorWorker();
     },
   };

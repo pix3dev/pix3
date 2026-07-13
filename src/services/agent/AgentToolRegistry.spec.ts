@@ -4,6 +4,9 @@ import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
 import { AgentToolRegistry } from './AgentToolRegistry';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
+import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
+import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 
 interface CommandMeta {
   metadata: { id: string; title: string; menuPath?: string };
@@ -53,6 +56,10 @@ describe('AgentToolRegistry', () => {
         'find_nodes',
         'get_selection',
         'set_property',
+        'list_component_types',
+        'add_component',
+        'set_component_property',
+        'remove_component',
         'list_commands',
         'run_command',
         'fs_list',
@@ -322,6 +329,108 @@ describe('AgentToolRegistry', () => {
     expect(result).toEqual({ ok: true });
     expect(dispatcher.execute).toHaveBeenCalledTimes(1);
     expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(UpdateObjectPropertyCommand);
+  });
+
+  describe('component tools', () => {
+    const makeScriptRegistry = () => ({
+      getAllComponentTypes: () => [
+        {
+          id: 'core:Rotate',
+          displayName: 'Rotate',
+          category: 'Behaviour',
+          description: 'Spins a node.',
+        },
+      ],
+      getComponentType: (id: string) => (id === 'core:Rotate' ? { id } : undefined),
+      getComponentPropertySchema: (id: string) =>
+        id === 'core:Rotate'
+          ? { properties: [{ name: 'speed', type: 'number', ui: { label: 'Speed' } }] }
+          : null,
+    });
+
+    it('list_component_types maps types with their property schema', async () => {
+      const registry = buildRegistry({ scriptRegistry: makeScriptRegistry() });
+      const types = (await registry.execute('list_component_types')) as Array<{
+        id: string;
+        properties: Array<{ name: string; type: string; label?: string }>;
+      }>;
+      expect(types).toEqual([
+        {
+          id: 'core:Rotate',
+          displayName: 'Rotate',
+          category: 'Behaviour',
+          description: 'Spins a node.',
+          properties: [{ name: 'speed', type: 'number', label: 'Speed' }],
+        },
+      ]);
+    });
+
+    it('add_component routes through AddComponentCommand and returns a componentId', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, scriptRegistry: makeScriptRegistry() });
+      const result = (await registry.execute('add_component', {
+        nodeId: 'n1',
+        componentType: 'core:Rotate',
+        config: { speed: 2 },
+      })) as { ok: boolean; componentId?: string };
+      expect(result.ok).toBe(true);
+      expect(typeof result.componentId).toBe('string');
+      expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(AddComponentCommand);
+    });
+
+    it('add_component rejects an unknown component type without dispatching', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, scriptRegistry: makeScriptRegistry() });
+      const result = (await registry.execute('add_component', {
+        nodeId: 'n1',
+        componentType: 'core:Nope',
+      })) as { ok: boolean; error?: string };
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/Unknown component type/);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('set_component_property routes through UpdateComponentPropertyCommand', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher });
+      const result = await registry.execute('set_component_property', {
+        nodeId: 'n1',
+        componentId: 'c1',
+        propertyName: 'speed',
+        value: 3,
+      });
+      expect(result).toEqual({ ok: true });
+      expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(UpdateComponentPropertyCommand);
+    });
+
+    it('remove_component routes through RemoveComponentCommand', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher });
+      const result = await registry.execute('remove_component', {
+        nodeId: 'n1',
+        componentId: 'c1',
+      });
+      expect(result).toEqual({ ok: true });
+      expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(RemoveComponentCommand);
+    });
+
+    it('node_inspect surfaces componentId / componentType / enabled', async () => {
+      const node = makeNode({
+        components: [{ id: 'c1', type: 'core:Rotate', enabled: true, config: { speed: 1 } }],
+      });
+      const sceneManager = {
+        getActiveSceneGraph: () => ({ nodeMap: new Map([['n1', node]]) }),
+      };
+      const registry = buildRegistry({ sceneManager });
+      const dto = (await registry.execute('node_inspect', { nodeId: 'n1' })) as {
+        components: Array<{ componentId: string; componentType: string; enabled: boolean }>;
+      };
+      expect(dto.components[0]).toMatchObject({
+        componentId: 'c1',
+        componentType: 'core:Rotate',
+        enabled: true,
+      });
+    });
   });
 
   it('play tools drive the game.* commands and report status', async () => {

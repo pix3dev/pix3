@@ -7,6 +7,7 @@ import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
 import { PreviewHostService } from '@/services/PreviewHostService';
 import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
+import { AgentChatService } from '@/services/agent/AgentChatService';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import './pix3-remote-preview-card';
 
@@ -41,6 +42,9 @@ export class GameViewTab extends ComponentBase {
 
   @inject(RuntimeErrorBridgeService)
   private readonly runtimeErrorBridge!: RuntimeErrorBridgeService;
+
+  @inject(AgentChatService)
+  private readonly agentChat!: AgentChatService;
 
   @state()
   private aspectRatio: GameAspectRatio = appState.ui.gameAspectRatio;
@@ -214,6 +218,15 @@ export class GameViewTab extends ComponentBase {
     this.runtimeErrorBridge.clearPlayModeError();
   }
 
+  private handleFixWithAgent() {
+    const error = this.playModeError;
+    if (!error) {
+      return;
+    }
+    this.layoutManager.revealAgentPanel();
+    void this.agentChat.composeFix(buildPlayModeErrorPrompt(error));
+  }
+
   private formatErrorLocation(error: PlayModeError): string {
     const parts: string[] = [];
     if (error.phase) {
@@ -267,6 +280,14 @@ export class GameViewTab extends ComponentBase {
           <div class="game-error-message">${error.message}</div>
         </div>
         <div class="game-error-actions">
+          <button
+            type="button"
+            class="game-error-button game-error-button-primary"
+            @click=${this.handleFixWithAgent}
+            title="Open a new agent chat prefilled with this error"
+          >
+            Fix with Agent
+          </button>
           <button
             type="button"
             class="game-error-button"
@@ -457,6 +478,29 @@ export class GameViewTab extends ComponentBase {
     ${unsafeCSS(styles)}
   `;
 }
+
+/** Build the prefilled agent prompt for a play-mode runtime error. */
+const buildPlayModeErrorPrompt = (error: PlayModeError): string => {
+  const lines = ['A runtime error occurred while playing the scene. Investigate and fix it.', ''];
+  lines.push(`Error: ${error.message}`);
+  if (error.phase) {
+    lines.push(`Phase: ${error.phase}`);
+  }
+  if (error.nodeName) {
+    lines.push(
+      error.componentType
+        ? `Node: ${error.nodeName} (component ${error.componentType})`
+        : `Node: ${error.nodeName}`
+    );
+  } else if (error.componentType) {
+    lines.push(`Component: ${error.componentType}`);
+  }
+  lines.push(
+    '',
+    'Use read_errors and read_logs for the full stack, inspect the relevant node/script, fix the root cause, then verify with play_start.'
+  );
+  return lines.join('\n');
+};
 
 declare global {
   interface HTMLElementTagNameMap {

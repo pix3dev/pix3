@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CodeDocumentService } from './CodeDocumentService';
+import {
+  CodeDocumentService,
+  getCodeDocumentLanguageForExtension,
+  isCodeDocumentExtension,
+} from './CodeDocumentService';
 
 describe('CodeDocumentService', () => {
   const createService = () => {
@@ -34,6 +38,35 @@ describe('CodeDocumentService', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('resolves Monaco languages for text and markdown file extensions', () => {
+    const { service } = createService();
+
+    expect(service.resolveLanguage('res://scripts/player.ts')).toBe('typescript');
+    expect(service.resolveLanguage('res://config.json')).toBe('json');
+    expect(service.resolveLanguage('res://README.md')).toBe('markdown');
+    expect(service.resolveLanguage('res://docs/notes.txt')).toBe('plaintext');
+    expect(service.resolveLanguage('res://settings.yaml')).toBe('yaml');
+    expect(service.resolveLanguage('res://styles/main.css')).toBe('css');
+    // Dotfiles keep their whole suffix as the extension.
+    expect(service.resolveLanguage('res://.gitignore')).toBe('plaintext');
+    // Unknown extensions still open, as plain text.
+    expect(service.resolveLanguage('res://data/unknown.xyz')).toBe('plaintext');
+  });
+
+  it('reports which paths and extensions are editable as code documents', () => {
+    const { service } = createService();
+
+    expect(service.isSupportedResourcePath('res://README.md')).toBe(true);
+    expect(service.isSupportedResourcePath('res://scripts/player.ts')).toBe(true);
+    expect(service.isSupportedResourcePath('res://audio/sound.wav')).toBe(false);
+    expect(service.isSupportedResourcePath('res://textures/atlas.png')).toBe(false);
+
+    expect(isCodeDocumentExtension('MD')).toBe(true);
+    expect(isCodeDocumentExtension('wav')).toBe(false);
+    expect(getCodeDocumentLanguageForExtension('markdown')).toBe('markdown');
+    expect(getCodeDocumentLanguageForExtension('bin')).toBeUndefined();
   });
 
   it('loads, tracks dirty state, and saves local code documents', async () => {

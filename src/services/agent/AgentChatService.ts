@@ -5,7 +5,11 @@ import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
-import { AgentChatHistoryStore } from './AgentChatHistoryStore';
+import {
+  AgentChatHistoryStore,
+  type AgentConversationMeta,
+  type AgentConversationRecord,
+} from './AgentChatHistoryStore';
 import {
   LlmError,
   isRecord,
@@ -59,6 +63,10 @@ export interface AgentChatState {
    * {@link messages}. Populated on every turn; the UI only surfaces it in debug mode.
    */
   readonly turnMetrics: Readonly<Record<number, AgentTurnMetric>>;
+  /** All conversations of the current project (newest first) — powers the history list. */
+  readonly conversations: readonly AgentConversationMeta[];
+  /** Id of the conversation currently shown, or null for a fresh unsaved one. */
+  readonly activeConversationId: string | null;
 }
 
 /** Project-root files scanned (in order) for user-authored agent instructions. */
@@ -81,6 +89,8 @@ const IDLE_STATE: AgentChatState = {
   activeTool: null,
   totalUsage: {},
   turnMetrics: {},
+  conversations: [],
+  activeConversationId: null,
 };
 
 /**
@@ -117,8 +127,14 @@ export class AgentChatService {
   private state: AgentChatState = IDLE_STATE;
   private readonly listeners = new Set<(state: AgentChatState) => void>();
   private abortController: AbortController | null = null;
-  /** Project id whose conversation is currently loaded (histories are per project). */
+  /** Project id whose conversations are currently loaded (histories are per project). */
   private loadedProjectId: string | null = null;
+  /** createdAt of the active conversation (0 = not yet persisted). */
+  private activeCreatedAt = 0;
+  /** Composer prefill channel — carries "Fix with Agent" prompts to the panel. */
+  private readonly composeListeners = new Set<(text: string) => void>();
+  /** Prefill queued before the panel mounted; delivered on the next subscribe. */
+  private pendingCompose: string | null = null;
 
   getState(): AgentChatState {
     return this.state;
@@ -135,8 +151,9 @@ export class AgentChatService {
   }
 
   /**
-   * Load the current project's persisted conversation (no-op when already loaded). Safe to call
-   * from the panel on connect; a running turn is never interrupted by a load.
+   * Load the current project's conversation list (no-op when already loaded) and open the most
+   * recent conversation. Safe to call from the panel on connect; a running turn is never
+   * interrupted by a load.
    */
   async ensureLoaded(): Promise<void> {
     const projectId = appState.project.id ?? '';
@@ -145,8 +162,21 @@ export class AgentChatService {
     }
     this.loadedProjectId = projectId;
     try {
-      const record = await this.historyStore.get(projectId);
-      this.setState({ ...IDLE_STATE, messages: record?.messages ?? [] });
+      const conversations = await this.historyStore.list(projectId);
+      if (conversations.length > 0) {
+        const latest = conversations[0]; // list() returns newest first
+        const record = await this.historyStore.get(latest.id);
+        this.setState({
+          ...IDLE_STATE,
+          conversations,
+          activeConversationId: latest.id,
+          messages: record?.messages ?? [],
+        });
+        this.activeCreatedAt = record?.createdAt ?? Date.now();
+      } else {
+        this.setState({ ...IDLE_STATE, conversations });
+        this.activeCreatedAt = 0;
+      }
     } catch {
       this.setState({ ...IDLE_STATE });
     }
@@ -166,6 +196,12 @@ export class AgentChatService {
     }
 
     await this.ensureLoaded();
+
+    // A fresh (unsaved) conversation gets its id/created-at on the first message.
+    if (!this.state.activeConversationId) {
+      this.setState({ activeConversationId: newConversationId() });
+      this.activeCreatedAt = Date.now();
+    }
 
     this.abortController = new AbortController();
     this.appendMessage({ role: 'user', content: buildUserContent(trimmed, images, texts) });
@@ -198,22 +234,102 @@ export class AgentChatService {
     this.abortController?.abort();
   }
 
-  /** Drop the conversation (memory + persisted copy) and start fresh. */
+  /**
+   * Start a fresh conversation. Any prior conversation stays in history (it was persisted per turn);
+   * this only clears the in-memory view and drops the active id so the next message opens a new one.
+   */
   async newConversation(): Promise<void> {
     this.stop();
-    this.setState({ ...IDLE_STATE });
-    const projectId = appState.project.id ?? '';
-    this.loadedProjectId = projectId;
-    try {
-      await this.historyStore.delete(projectId);
-    } catch {
-      // Persistence is best-effort.
+    await this.ensureLoaded();
+    this.setState({
+      ...IDLE_STATE,
+      conversations: this.state.conversations,
+      activeConversationId: null,
+    });
+    this.activeCreatedAt = 0;
+  }
+
+  /** Open a stored conversation by id (no-op while a turn is running). */
+  async switchConversation(id: string): Promise<void> {
+    if (this.isRunning() || id === this.state.activeConversationId) {
+      return;
     }
+    await this.ensureLoaded();
+    try {
+      const record = await this.historyStore.get(id);
+      if (!record) {
+        return;
+      }
+      this.setState({
+        ...IDLE_STATE,
+        conversations: this.state.conversations,
+        activeConversationId: record.id,
+        messages: record.messages ?? [],
+      });
+      this.activeCreatedAt = record.createdAt ?? Date.now();
+    } catch {
+      // Best-effort — leave the current view untouched on failure.
+    }
+  }
+
+  /** Delete a stored conversation. If it is the active one, reset to a fresh conversation. */
+  async deleteConversation(id: string): Promise<void> {
+    try {
+      await this.historyStore.delete(id);
+    } catch {
+      // Best-effort.
+    }
+    if (id === this.state.activeConversationId) {
+      this.setState({ ...IDLE_STATE, activeConversationId: null });
+      this.activeCreatedAt = 0;
+    }
+    await this.refreshConversations();
+  }
+
+  /**
+   * Compose channel: start a fresh conversation and hand a prefilled prompt to the panel (used by
+   * the "Fix with Agent" affordances). The panel drops the text into the composer and focuses it so
+   * the user can review/edit before sending. If the panel is not mounted yet (it is being revealed),
+   * the prompt is queued and delivered when it subscribes.
+   */
+  async composeFix(text: string): Promise<void> {
+    await this.newConversation();
+    if (this.composeListeners.size > 0) {
+      for (const listener of this.composeListeners) {
+        listener(text);
+      }
+    } else {
+      this.pendingCompose = text;
+    }
+  }
+
+  /** Subscribe to composer-prefill requests. Immediately flushes any queued prompt. */
+  subscribeCompose(listener: (text: string) => void): () => void {
+    this.composeListeners.add(listener);
+    if (this.pendingCompose !== null) {
+      const text = this.pendingCompose;
+      this.pendingCompose = null;
+      listener(text);
+    }
+    return () => {
+      this.composeListeners.delete(listener);
+    };
   }
 
   dispose(): void {
     this.stop();
     this.listeners.clear();
+    this.composeListeners.clear();
+  }
+
+  private async refreshConversations(): Promise<void> {
+    const projectId = this.loadedProjectId ?? appState.project.id ?? '';
+    try {
+      const conversations = await this.historyStore.list(projectId);
+      this.setState({ conversations });
+    } catch {
+      // Best-effort — the history list is a convenience, not the source of truth.
+    }
   }
 
   // ── Agentic loop ────────────────────────────────────────────────────────────
@@ -359,6 +475,8 @@ export class AgentChatService {
       'Rules:',
       '- Use the provided tools to inspect and change the project; never guess scene or file contents you can read.',
       '- Scene changes go through set_property / run_command — they are undoable, so prefer them over rewriting scene files.',
+      '- To give a node behaviour, attach a component: call list_component_types, then add_component (built-in "core:*" behaviours or a project "user:*" script), then configure it with set_component_property. Never hand-edit scene files to add a component.',
+      '- For custom logic, write a Script subclass with fs_write under scripts/, run compile_scripts, then attach it with add_component using its "user:<ExportName>" type.',
       '- After editing scripts with fs_write, run compile_scripts to check they build.',
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
@@ -501,10 +619,33 @@ export class AgentChatService {
   }
 
   private persist(): void {
-    const projectId = this.loadedProjectId ?? '';
-    this.historyStore.put(projectId, this.state.messages).catch(() => {
-      // Persistence is best-effort; the in-memory conversation stays authoritative.
-    });
+    const messages = this.state.messages;
+    if (messages.length === 0) {
+      return; // Never persist an empty conversation — it would clutter the history list.
+    }
+    const projectId = this.loadedProjectId ?? appState.project.id ?? '';
+    let id = this.state.activeConversationId;
+    if (!id) {
+      id = newConversationId();
+      this.setState({ activeConversationId: id });
+    }
+    if (!this.activeCreatedAt) {
+      this.activeCreatedAt = Date.now();
+    }
+    const record: AgentConversationRecord = {
+      id,
+      projectId,
+      title: deriveConversationTitle(messages),
+      messages: [...messages],
+      createdAt: this.activeCreatedAt,
+      updatedAt: Date.now(),
+    };
+    this.historyStore
+      .put(record)
+      .then(() => this.refreshConversations())
+      .catch(() => {
+        // Persistence is best-effort; the in-memory conversation stays authoritative.
+      });
   }
 
   private setState(patch: Partial<AgentChatState>): void {
@@ -519,6 +660,37 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+/** Max length of a derived conversation title. */
+const MAX_TITLE_CHARS = 48;
+
+/** Unique conversation id. Uses crypto.randomUUID when available, else a timestamped fallback. */
+const newConversationId = (): string => {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  return `conv-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`;
+};
+
+/** Short label for the history list, taken from the first user message's text. */
+const deriveConversationTitle = (messages: readonly LlmMessage[]): string => {
+  const firstUser = messages.find(message => message.role === 'user');
+  if (!firstUser) {
+    return 'New chat';
+  }
+  const raw =
+    typeof firstUser.content === 'string'
+      ? firstUser.content
+      : firstUser.content
+          .map(block => (block.type === 'text' ? block.text : ''))
+          .join(' ');
+  const clean = raw.replace(/\s+/g, ' ').trim();
+  if (!clean) {
+    return 'New chat';
+  }
+  return clean.length > MAX_TITLE_CHARS ? `${clean.slice(0, MAX_TITLE_CHARS)}…` : clean;
+};
 
 /**
  * Assemble a user turn from the typed text plus attachments. Text files are inlined into the text

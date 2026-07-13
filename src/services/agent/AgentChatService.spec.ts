@@ -44,7 +44,12 @@ const buildService = (fakes: Fakes): AgentChatService => {
     },
     modelCatalog: { getModel: () => undefined },
     toolRegistry: { specs: () => [], execute: fakes.execute },
-    historyStore: { get: async () => undefined, put: fakes.put, delete: async () => undefined },
+    historyStore: {
+      list: async () => [],
+      get: async () => undefined,
+      put: fakes.put,
+      delete: async () => undefined,
+    },
     sceneManager: { getActiveSceneGraph: () => null },
     storage: {
       readTextFile:
@@ -286,6 +291,40 @@ describe('AgentChatService', () => {
 
     await service.send('hi');
 
-    expect(put).toHaveBeenCalledWith('proj-1', expect.any(Array));
+    expect(put).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'proj-1', messages: expect.any(Array) })
+    );
+  });
+
+  it('composeFix starts a fresh conversation and prefills subscribed composers', async () => {
+    const service = buildService({
+      chat: vi.fn(async () => textResult('ok')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+    });
+    // Seed a conversation, then a fix request must clear it and hand the prompt to the composer.
+    await service.send('hi');
+    expect(service.getState().messages.length).toBeGreaterThan(0);
+
+    const received: string[] = [];
+    service.subscribeCompose(text => received.push(text));
+    await service.composeFix('Fix this runtime error: boom');
+
+    expect(service.getState().messages).toHaveLength(0);
+    expect(service.getState().activeConversationId).toBeNull();
+    expect(received).toEqual(['Fix this runtime error: boom']);
+  });
+
+  it('composeFix queues the prompt when no composer is subscribed yet', async () => {
+    const service = buildService({
+      chat: vi.fn(async () => textResult('ok')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+    });
+    await service.composeFix('deferred prompt');
+
+    const received: string[] = [];
+    service.subscribeCompose(text => received.push(text));
+    expect(received).toEqual(['deferred prompt']);
   });
 });

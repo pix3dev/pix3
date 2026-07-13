@@ -58,6 +58,8 @@ export { KeybindingService } from './KeybindingService';
 export { FileWatchService } from './FileWatchService';
 export {
   CodeDocumentService,
+  getCodeDocumentLanguageForExtension,
+  isCodeDocumentExtension,
   type CodeDocumentEvent,
   type CodeDocumentEventReason,
   type CodeDocumentLanguage,
