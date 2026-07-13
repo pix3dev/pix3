@@ -5,6 +5,7 @@ import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
+import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import {
   AgentChatHistoryStore,
@@ -118,6 +119,9 @@ export class AgentChatService {
 
   @inject(AgentSkillsService)
   private readonly skills!: AgentSkillsService;
+
+  @inject(AgentAdvisorService)
+  private readonly advisorService!: AgentAdvisorService;
 
   @inject(AgentChatHistoryStore)
   private readonly historyStore!: AgentChatHistoryStore;
@@ -354,22 +358,31 @@ export class AgentChatService {
       model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
     // AGENTS.md is authored per project; read it once per user turn so mid-session edits land.
     const agentsMd = await this.loadAgentsMd();
+    // The ask_advisor rule is only worth prompt space when an advisor is actually usable.
+    const advisorAvailable = await this.isAdvisorAvailable();
+    // Text-only models can't consume image blocks. We KEEP images in history (so the chat UI shows
+    // screenshots/generation previews to the user, and vision models see them) and strip them only
+    // from the outbound request, swapping each for a placeholder that points at analyze_image.
+    const modelSupportsImages = model?.capabilities.supportsImages !== false;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const system = this.buildSystemPrompt(agentsMd);
+      const system = this.buildSystemPrompt(agentsMd, advisorAvailable);
+      const outboundMessages = modelSupportsImages
+        ? this.state.messages
+        : stripImagesForModel(this.state.messages);
       this.debugLog('request', {
         provider: provider.id,
         modelId,
         iteration,
         system,
         tools: tools?.map(tool => tool.name),
-        messages: this.state.messages,
+        messages: outboundMessages,
       });
 
       const startedAt = performance.now();
       const result = await provider.chat(
         {
-          messages: this.state.messages,
+          messages: outboundMessages,
           tools,
           system,
           maxTokens: model?.capabilities.maxOutputTokens,
@@ -403,13 +416,8 @@ export class AgentChatService {
         return;
       }
 
-      // Text-only models (e.g. DeepSeek) can't consume image blocks — drop tool-emitted images for
-      // them and leave a note pointing at analyze_image (routes to a vision helper). Unknown models
-      // (not in the catalog) default to receiving images, preserving prior behaviour.
-      const modelSupportsImages = model?.capabilities.supportsImages !== false;
       const results: LlmToolResultBlock[] = [];
       const images: LlmImageBlock[] = [];
-      let droppedImages = 0;
       for (const call of calls) {
         if (signal.aborted) {
           throw new LlmError('aborted', 'The request was cancelled.');
@@ -417,23 +425,13 @@ export class AgentChatService {
         this.setState({ activeTool: call.name });
         const executed = await this.executeToolCall(call);
         results.push(executed.result);
-        if (modelSupportsImages) {
-          images.push(...executed.images);
-        } else {
-          droppedImages += executed.images.length;
-        }
+        images.push(...executed.images);
       }
       this.setState({ activeTool: null });
       // Tool-emitted images ride in the same user turn, after the results — all providers accept
-      // mixed tool-result + image (and text) content there.
-      const extra: LlmContentBlock[] = [];
-      if (droppedImages > 0) {
-        extra.push({
-          type: 'text',
-          text: `Note: ${droppedImages} image(s) returned by tools were omitted because the current model cannot see images. Call analyze_image (source: a project image path, "viewport", or the generated asset) to inspect them via a vision helper.`,
-        });
-      }
-      this.appendMessage({ role: 'user', content: [...results, ...extra, ...images] });
+      // mixed tool-result + image content there. They are always kept in history (so the UI shows
+      // them and vision models see them); the outbound request strips them for text-only models.
+      this.appendMessage({ role: 'user', content: [...results, ...images] });
     }
 
     this.setState({
@@ -484,11 +482,20 @@ export class AgentChatService {
    * the live scene context). Used by the debug panel's "system prompt" viewer.
    */
   async previewSystemPrompt(): Promise<string> {
-    return this.buildSystemPrompt(await this.loadAgentsMd());
+    return this.buildSystemPrompt(await this.loadAgentsMd(), await this.isAdvisorAvailable());
+  }
+
+  /** Whether ask_advisor can actually reach a model (configured + keyed). Never throws. */
+  private async isAdvisorAvailable(): Promise<boolean> {
+    try {
+      return (await this.advisorService.resolveAdvisor()) !== null;
+    } catch {
+      return false;
+    }
   }
 
   /** Rebuilt per request — the scene outline and active scene change as the agent works. */
-  private buildSystemPrompt(agentsMd: string | null): string {
+  private buildSystemPrompt(agentsMd: string | null, advisorAvailable = false): string {
     const lines: string[] = [
       'You are Pix3 Agent, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).',
       '',
@@ -503,6 +510,12 @@ export class AgentChatService {
       '- When a task matches a skill below and you are not already sure of this editor\'s exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.',
       '- Be concise. Reply in the language the user writes in.',
     ];
+
+    if (advisorAvailable) {
+      lines.push(
+        '- A stronger advisor model is available via ask_advisor. Consult it when an error survives ~2 fix attempts or before committing to a non-obvious design/architecture choice — pass the goal, exact error, and relevant code in `context`. Use it sparingly (a couple of calls per task at most) and weigh its advice against what you actually observe.'
+      );
+    }
 
     const skillIndex = this.skills.indexLines();
     if (skillIndex.length > 0) {
@@ -690,6 +703,29 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+const IMAGE_PLACEHOLDER =
+  '[image not shown — this model cannot see images; call analyze_image with the image source ' +
+  '(a project image path, "viewport", or the generated asset) to inspect it via a vision helper]';
+
+/**
+ * Return a copy of the history with every image block swapped for a text placeholder, for sending
+ * to a model that can't see images. The images stay in {@link AgentChatState.messages} untouched —
+ * only the outbound provider payload is sanitized — so the chat UI still shows them to the user.
+ */
+const stripImagesForModel = (messages: readonly LlmMessage[]): LlmMessage[] =>
+  messages.map(message => {
+    if (typeof message.content === 'string') {
+      return message;
+    }
+    if (!message.content.some(block => block.type === 'image')) {
+      return message;
+    }
+    const content: LlmContentBlock[] = message.content.map(block =>
+      block.type === 'image' ? { type: 'text', text: IMAGE_PLACEHOLDER } : block
+    );
+    return { role: message.role, content };
+  });
 
 /** Max length of a derived conversation title. */
 const MAX_TITLE_CHARS = 48;

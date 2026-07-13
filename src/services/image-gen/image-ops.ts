@@ -294,6 +294,51 @@ export async function trimImageBlob(blob: Blob, options: TrimOptions = {}): Prom
   }
 }
 
+export interface AlphaStats {
+  /** True when any pixel is meaningfully transparent (alpha ≤ 250 for >0.5% of pixels). */
+  readonly hasAlpha: boolean;
+  /** Fraction (0..1) of pixels that are fully/near transparent (alpha ≤ 16). */
+  readonly transparentFraction: number;
+}
+
+/**
+ * Deterministically measure an image's transparency. This exists because **vision models cannot
+ * judge transparency** — a transparent PNG is flattened onto an opaque (usually white) background
+ * before the model sees it, so asking a vision helper "is the background transparent?" reliably
+ * returns a wrong "it's white". Read the alpha channel directly instead. Returns `hasAlpha:false`
+ * when the image can't be decoded (no canvas).
+ */
+export async function imageAlphaStats(blob: Blob): Promise<AlphaStats> {
+  if (!canUseBitmap()) {
+    return { hasAlpha: false, transparentFraction: 0 };
+  }
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const w = bitmap.width;
+    const h = bitmap.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return { hasAlpha: false, transparentFraction: 0 };
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const total = w * h || 1;
+    let transparent = 0;
+    let anyPartial = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] <= 16) transparent++;
+      if (data[i] <= 250) anyPartial++;
+    }
+    const transparentFraction = transparent / total;
+    return { hasAlpha: anyPartial / total > 0.005, transparentFraction };
+  } finally {
+    bitmap.close();
+  }
+}
+
 /**
  * Re-encode an image to a (typically lossy) format to shrink its byte size, optionally downscaling
  * at the same time. Defaults to WebP at quality 0.85 — good compression with alpha support.

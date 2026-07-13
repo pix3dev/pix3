@@ -52,6 +52,7 @@ describe('AgentToolRegistry', () => {
     expect(names).toEqual(
       expect.arrayContaining([
         'read_skill',
+        'ask_advisor',
         'scene_tree',
         'node_inspect',
         'find_nodes',
@@ -141,6 +142,54 @@ describe('AgentToolRegistry', () => {
       >;
       expect(result.ok).toBe(false);
       expect(String(result.error)).toMatch(/Unknown skill/);
+    });
+  });
+
+  describe('ask_advisor', () => {
+    it('passes the question plus a project-grounded context to the advisor', async () => {
+      const consult = vi.fn(async () => 'use a Timer component instead of setInterval');
+      const advisor = {
+        consult,
+        describeAdvisor: async () => ({
+          providerId: 'cerebras',
+          providerLabel: 'Cerebras',
+          modelId: 'zai-glm-4.7',
+          modelLabel: 'GLM 4.7',
+        }),
+      };
+      const registry = buildRegistry({ advisor });
+
+      const result = (await registry.execute('ask_advisor', {
+        question: 'How do I schedule a repeating spawn?',
+        context: 'GameManager.ts uses setInterval and leaks between plays.',
+      })) as Record<string, unknown>;
+
+      expect(consult).toHaveBeenCalledTimes(1);
+      const [question, context] = consult.mock.calls[0] as unknown as [string, string];
+      expect(question).toBe('How do I schedule a repeating spawn?');
+      expect(context).toMatch(/^Pix3 project /); // grounding header prepended
+      expect(context).toContain('GameManager.ts uses setInterval');
+      expect(result.ok).toBe(true);
+      expect(result.answer).toBe('use a Timer component instead of setInterval');
+      expect(result.advisor).toBe('Cerebras · GLM 4.7');
+    });
+
+    it('returns a friendly error when no advisor is configured', async () => {
+      const advisor = {
+        consult: vi.fn(async () => {
+          throw new Error('No advisor model is configured.');
+        }),
+        describeAdvisor: async () => null,
+      };
+      const registry = buildRegistry({ advisor });
+
+      const result = (await registry.execute('ask_advisor', {
+        question: 'help',
+        context: 'ctx',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/No advisor model/);
     });
   });
 
@@ -242,6 +291,7 @@ describe('AgentToolRegistry', () => {
         bytes: 1234,
         mimeType: 'image/png',
       })),
+      alphaStats: vi.fn(async () => ({ hasAlpha: true, transparentFraction: 0.4 })),
       preview: vi.fn(async () => 'data:image/webp;base64,UFJFVklFVw=='),
       discard: vi.fn(),
     });
@@ -322,6 +372,7 @@ describe('AgentToolRegistry', () => {
         bytes: 999,
         mimeType: 'image/png',
       })),
+      alphaStats: vi.fn(async () => ({ hasAlpha: true, transparentFraction: 0.4 })),
       preview: vi.fn(async () => 'data:image/webp;base64,UFJFVklFVw=='),
       discard: vi.fn(),
     });

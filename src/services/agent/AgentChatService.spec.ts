@@ -24,6 +24,8 @@ interface Fakes {
   readTextFile?: (path: string) => Promise<string>;
   /** When set, the model catalog reports this vision capability for the active model. */
   supportsImages?: boolean;
+  /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */
+  advisorAvailable?: boolean;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -51,6 +53,10 @@ const buildService = (fakes: Fakes): AgentChatService => {
           : { capabilities: { supportsImages: fakes.supportsImages } },
     },
     toolRegistry: { specs: () => [], execute: fakes.execute },
+    advisorService: {
+      resolveAdvisor: async () =>
+        fakes.advisorAvailable ? { modelId: 'adv-model', apiKey: 'k' } : null,
+    },
     historyStore: {
       list: async () => [],
       get: async () => undefined,
@@ -231,7 +237,7 @@ describe('AgentChatService', () => {
     expect(blocks[1]).toEqual({ type: 'image', mimeType: 'image/jpeg', data: 'QUJD' });
   });
 
-  it('drops tool-emitted images for a text-only model and leaves an analyze_image note', async () => {
+  it('keeps tool-emitted images in history but strips them (to a placeholder) for a text-only model', async () => {
     const chat = vi
       .fn()
       .mockResolvedValueOnce(toolCallResult('viewport_screenshot', 'call-1'))
@@ -249,13 +255,44 @@ describe('AgentChatService', () => {
 
     await service.send('show me the viewport');
 
+    // History keeps the real image (so the chat UI shows it to the user).
     const toolTurn = service.getState().messages[2];
     if (typeof toolTurn.content === 'string') throw new Error('expected content blocks');
-    const blocks = toolTurn.content;
-    // No image block survives; a text note points at analyze_image instead.
-    expect(blocks.some(b => b.type === 'image')).toBe(false);
-    const note = blocks.find(b => b.type === 'text');
-    expect(note && note.type === 'text' ? note.text : '').toMatch(/analyze_image/);
+    expect(toolTurn.content.some(b => b.type === 'image' && b.data === 'QUJD')).toBe(true);
+
+    // The outbound request (2nd chat call) has the image swapped for an analyze_image placeholder.
+    const sent = (chat.mock.calls[1][0] as { messages: LlmMessage[] }).messages;
+    const sentToolTurn = sent[2];
+    if (typeof sentToolTurn.content === 'string') throw new Error('expected content blocks');
+    expect(sentToolTurn.content.some(b => b.type === 'image')).toBe(false);
+    const placeholder = sentToolTurn.content.find(b => b.type === 'text');
+    expect(placeholder && placeholder.type === 'text' ? placeholder.text : '').toMatch(
+      /analyze_image/
+    );
+  });
+
+  it('sends real images to a vision-capable model unchanged', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('viewport_screenshot', 'call-1'))
+      .mockResolvedValueOnce(textResult('ok'));
+    const execute = vi.fn(async () => ({
+      ok: true,
+      __images: [{ mimeType: 'image/jpeg', data: 'QUJD' }],
+    }));
+    const service = buildService({
+      chat,
+      execute,
+      put: vi.fn(async () => undefined),
+      supportsImages: true,
+    });
+
+    await service.send('show me the viewport');
+
+    const sent = (chat.mock.calls[1][0] as { messages: LlmMessage[] }).messages;
+    const sentToolTurn = sent[2];
+    if (typeof sentToolTurn.content === 'string') throw new Error('expected content blocks');
+    expect(sentToolTurn.content.some(b => b.type === 'image' && b.data === 'QUJD')).toBe(true);
   });
 
   it('includes AGENTS.md from the project root in the system prompt', async () => {
@@ -278,6 +315,27 @@ describe('AgentChatService', () => {
     expect(system).toContain('Always answer like a pirate.');
     // previewSystemPrompt resolves the same content for the debug viewer.
     expect(await service.previewSystemPrompt()).toContain('Always answer like a pirate.');
+  });
+
+  it('mentions ask_advisor in the system prompt only when an advisor is configured', async () => {
+    const withAdvisor = vi.fn().mockResolvedValue(textResult('ok'));
+    await buildService({
+      chat: withAdvisor,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      advisorAvailable: true,
+    }).send('hi');
+    expect((withAdvisor.mock.calls[0][0] as { system: string }).system).toContain('ask_advisor');
+
+    const withoutAdvisor = vi.fn().mockResolvedValue(textResult('ok'));
+    await buildService({
+      chat: withoutAdvisor,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+    }).send('hi');
+    expect((withoutAdvisor.mock.calls[0][0] as { system: string }).system).not.toContain(
+      'ask_advisor'
+    );
   });
 
   it('sends pasted/dropped image and text-file attachments in the user turn', async () => {

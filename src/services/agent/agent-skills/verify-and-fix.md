@@ -42,5 +42,8 @@ declare a feature done without running it.
 
 - Re-read the failing script with `fs_read` — don't guess its contents.
 - `read_logs` shows your own `console.log` output from scripts; add logging to narrow it down.
-- Report the exact error text to the user with the file/line if you can't resolve it in two
-  attempts, and say what you tried.
+- After two failed fix attempts, consult the advisor (if `ask_advisor` is available): put the
+  exact error text, the failing script's source, and what you already tried into `context`.
+  Apply its fix, then re-run this loop.
+- Report the exact error text to the user with the file/line if you can't resolve it (advisor
+  included) — and say what you tried.

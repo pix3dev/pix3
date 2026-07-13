@@ -16,6 +16,14 @@ export interface AgentPreferences {
   visionProviderId: string;
   /** Vision-helper model id (paired with {@link visionProviderId}). Empty = first vision model. */
   visionModelId: string;
+  /**
+   * Provider of the **advisor** model — a deliberately stronger model the agent may consult via
+   * `ask_advisor` when stuck or facing a design decision. Empty = the advisor feature is off
+   * (never auto-picked: "stronger than the main model" is a judgment only the user can make).
+   */
+  advisorProviderId: string;
+  /** Advisor model id (paired with {@link advisorProviderId}). Empty = the provider's selected model. */
+  advisorModelId: string;
   /** Max LLM ⇄ tool-call round trips per agent turn (safety cap on the agentic loop). */
   maxToolIterations: number;
   /**
@@ -171,6 +179,8 @@ export class AgentSettingsService {
       customBaseUrl: '',
       visionProviderId: '',
       visionModelId: '',
+      advisorProviderId: '',
+      advisorModelId: '',
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
       debugMode: false,
     };
@@ -206,6 +216,15 @@ export class AgentSettingsService {
             : defaults.visionProviderId,
         visionModelId:
           typeof parsed.visionModelId === 'string' ? parsed.visionModelId : defaults.visionModelId,
+        advisorProviderId:
+          typeof parsed.advisorProviderId === 'string' &&
+          this.registry.get(parsed.advisorProviderId)
+            ? parsed.advisorProviderId
+            : defaults.advisorProviderId,
+        advisorModelId:
+          typeof parsed.advisorModelId === 'string'
+            ? parsed.advisorModelId
+            : defaults.advisorModelId,
         maxToolIterations:
           typeof parsed.maxToolIterations === 'number' &&
           Number.isFinite(parsed.maxToolIterations) &&

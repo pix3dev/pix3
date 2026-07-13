@@ -181,6 +181,7 @@ export {
   type VisionHelper,
   type VisionHelperInfo,
 } from './agent/AgentVisionService';
+export { AgentAdvisorService, type Advisor, type AdvisorInfo } from './agent/AgentAdvisorService';
 export { AgentSkillsService, type AgentSkill } from './agent/AgentSkillsService';
 export { AssetLibraryService } from './AssetLibraryService';
 export { PublishToLibraryService, type PublishNodeParams } from './PublishToLibraryService';

@@ -42,17 +42,25 @@ Default when you omit it: `transparent:true`→sprite, otherwise→texture.
 
 ## 4. Check the result, then apply it
 
-- The tool returns a preview image and the original→saved sizes. If your model can see
-  images, look at the preview. If not, call `analyze_image` on the saved path with
-  `question: "is the subject cleanly cut out with a transparent background, centered and not
-  cropped? any leftover background or halo?"`.
-- If it looks wrong (leftover background, too big, not cropped): call `process_asset` on the
-  saved path with an explicit preset (usually `sprite`) to reprocess in place — no need to
-  regenerate. Regenerate only if the *content* is wrong.
+- **Transparency is already handled — trust the `transparency` field in the result, do NOT
+  check it with vision.** `generate_asset`/`process_asset` remove the background and report
+  `transparency.hasAlpha` measured from the alpha channel. **Never** ask `analyze_image` "is the
+  background transparent/white?" — vision models see transparent pixels as *white* and will
+  falsely tell you the cutout failed, sending you into a pointless regeneration loop. If
+  `hasAlpha` is true, the background is transparent, full stop.
+- Use `analyze_image` only for **content/framing** questions your model can't see for itself,
+  e.g. `question: "is this the right subject (a top-down red car), centered and not cut off at
+  the edges?"` — never for transparency.
+- If the *content* is wrong (wrong subject, cropped, bad framing): regenerate with a better
+  prompt. If only the *processing* is off (`hasAlpha` false = background not removed, or too
+  large): call `process_asset` on the saved path (preset `sprite`) — no regeneration needed.
+- **Accept and move on.** One good result is enough; do not regenerate to chase small nits —
+  each generation costs money.
 - **Apply it to a node**: find the node (`find_nodes` / `scene_tree`), then `set_property` its
   texture/skin property to the saved `res://…` path. Common targets: `Sprite2D.texture`,
   `ColorRect2D` → swap for a `Sprite2D`, `Button2D` state skins (normal/hover/pressed/
   disabled), panel/background skins. Use `node_inspect` to see the exact property names.
+  (Tip: generating straight into the path a node already references updates it automatically.)
 
 ## 5. Batch related icons cheaply
 

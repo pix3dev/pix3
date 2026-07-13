@@ -29,6 +29,7 @@ import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { AgentVisionService, type VisionHelperInfo } from '@/services/agent/AgentVisionService';
+import { AgentAdvisorService, type AdvisorInfo } from '@/services/agent/AgentAdvisorService';
 import { toBlocks, type LlmMessage } from '@/services/llm/LlmTypes';
 import type {
   AssetGenBgOptions,
@@ -336,6 +337,10 @@ export interface Pix3DebugBridge {
     setVisionHelper(providerId: string, modelId?: string): void;
     /** Describe the currently-resolved vision helper (or null when none is available). */
     visionHelper(): Promise<VisionHelperInfo | null>;
+    /** Set the advisor provider/model used by ask_advisor (empty providerId = feature off). */
+    setAdvisor(providerId: string, modelId?: string): void;
+    /** Describe the currently-configured advisor (or null when off / no key). */
+    advisor(): Promise<AdvisorInfo | null>;
   };
 
   // --- game-specific surface (present only if the running game registered one) ---
@@ -359,7 +364,7 @@ export interface Pix3DebugBridge {
 
 function createBridge(): Pix3DebugBridge {
   return {
-    version: 3,
+    version: 4,
 
     help() {
       return {
@@ -387,6 +392,8 @@ function createBridge(): Pix3DebugBridge {
           'Chat status/last-reply summary, or a flattened transcript (texts + tool calls/results).',
         'agent.setProvider(id,model) / agent.setVisionHelper(id,model) / agent.visionHelper()':
           'Configure the coding model / vision helper for eval runs.',
+        'agent.setAdvisor(id,model) / agent.advisor()':
+          "Configure the stronger advisor model behind ask_advisor ('' = off).",
         'agent.newConversation() / agent.stop()': 'Reset the conversation / abort a running turn.',
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',
         'game.snapshot() / game.inspect(q) / game.action(n)':
@@ -628,6 +635,15 @@ function createBridge(): Pix3DebugBridge {
       },
       visionHelper() {
         return service<AgentVisionService>(AgentVisionService).describeHelper();
+      },
+      setAdvisor(providerId, modelId) {
+        service<AgentSettingsService>(AgentSettingsService).updatePreferences({
+          advisorProviderId: providerId,
+          advisorModelId: modelId ?? '',
+        });
+      },
+      advisor() {
+        return service<AgentAdvisorService>(AgentAdvisorService).describeAdvisor();
       },
     },
 

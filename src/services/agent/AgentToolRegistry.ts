@@ -16,7 +16,9 @@ import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { LoggingService } from '@/services/LoggingService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/AssetGenService';
+import type { AlphaStats } from '@/services/image-gen/image-ops';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
+import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
 import type { LlmImageBlock } from '@/services/llm/LlmTypes';
@@ -141,6 +143,9 @@ export class AgentToolRegistry {
   @inject(AgentVisionService)
   private readonly vision!: AgentVisionService;
 
+  @inject(AgentAdvisorService)
+  private readonly advisor!: AgentAdvisorService;
+
   @inject(AgentSkillsService)
   private readonly skills!: AgentSkillsService;
 
@@ -215,6 +220,28 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.readSkill(args),
+      },
+      {
+        name: 'ask_advisor',
+        description:
+          'Consult a stronger "advisor" model when you are genuinely stuck or facing a non-obvious decision: an error that survived ~2 fix attempts, an architecture/approach choice, or a review of your plan before a large change. NOT for routine operations or anything another tool answers directly. The advisor sees ONLY what you pass here (no scene, no files, no conversation) — put the goal, the exact error text, and the relevant code/snippets into `context`, or you will get generic advice. Costly: at most a couple of calls per task.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: 'One specific question (one decision or one problem per call).',
+            },
+            context: {
+              type: 'string',
+              description:
+                'Everything needed to answer: relevant code, exact error messages, what you already tried, constraints/goal. The advisor cannot look anything up itself.',
+            },
+          },
+          required: ['question', 'context'],
+          additionalProperties: false,
+        },
+        handler: args => this.askAdvisor(args),
       },
       {
         name: 'scene_tree',
@@ -592,6 +619,32 @@ export class AgentToolRegistry {
       };
     }
     return { ok: true, id, section: section ?? null, content };
+  }
+
+  // -- advisor -----------------------------------------------------------------
+
+  private async askAdvisor(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const question = asString(args.question);
+    const context = typeof args.context === 'string' ? args.context : '';
+    // Ground the advisor with the one thing the caller always forgets to mention: where it is.
+    const activeSceneId = appState.scenes.activeSceneId;
+    const activePath = activeSceneId
+      ? (appState.scenes.descriptors[activeSceneId]?.filePath ?? null)
+      : null;
+    const header = `Pix3 project "${appState.project.projectName ?? 'Untitled'}"${
+      activePath ? `, active scene: ${activePath}` : ''
+    }`;
+    try {
+      const answer = await this.advisor.consult(question, `${header}\n\n${context}`);
+      const info = await this.advisor.describeAdvisor();
+      return {
+        ok: true,
+        answer,
+        advisor: info ? `${info.providerLabel} · ${info.modelLabel ?? info.modelId}` : null,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   // -- introspection ---------------------------------------------------------
@@ -1047,13 +1100,15 @@ export class AgentToolRegistry {
       const processed = await this.assetGen.postProcess(generated.id, preset, { maxSize });
       handleIds.add(processed.id);
       const saved = await this.assetGen.save(processed.id, name, {});
+      const transparency = await this.assetGen.alphaStats(processed.id);
       // Preview the PROCESSED handle (what was actually saved), not the raw generation.
       return {
         ok: true,
         saved,
         preset,
         original: { width: generated.width, height: generated.height },
-        note: `Saved with the "${preset}" preset. A 256px preview of the final asset is attached as an image.`,
+        transparency,
+        note: transparencyNote(preset, transparency),
         ...(await this.previewImages(processed.id)),
       };
     } finally {
@@ -1079,11 +1134,13 @@ export class AgentToolRegistry {
       const processed = await this.assetGen.postProcess(opened.id, preset, { maxSize });
       handleIds.add(processed.id);
       const saved = await this.assetGen.save(processed.id, outName, {});
+      const transparency = await this.assetGen.alphaStats(processed.id);
       return {
         ok: true,
         saved,
         preset,
-        note: `Processed "${path}" → "${saved.path}" with the "${preset}" preset. Preview attached.`,
+        transparency,
+        note: `Processed "${path}" → "${saved.path}" with the "${preset}" preset. ${transparencyNote(preset, transparency)}`,
         ...(await this.previewImages(processed.id)),
       };
     } catch (error) {
@@ -1166,6 +1223,21 @@ const resolvePreset = (value: unknown, fallback: AssetPostProcessPreset): AssetP
   typeof value === 'string' && (ASSET_PRESETS as readonly string[]).includes(value)
     ? (value as AssetPostProcessPreset)
     : fallback;
+
+/**
+ * A note the model can trust for transparency — because vision models CANNOT judge it (a
+ * transparent PNG is flattened onto white before they see it). The `hasAlpha` fact is measured
+ * from the alpha channel, so the model must not re-check transparency via analyze_image.
+ */
+const transparencyNote = (preset: AssetPostProcessPreset, alpha: AlphaStats): string => {
+  const base = `Saved with the "${preset}" preset. A 256px preview is attached.`;
+  if (preset === 'sprite' || preset === 'icon') {
+    return alpha.hasAlpha
+      ? `${base} The background WAS removed — the PNG has a transparent background (${Math.round(alpha.transparentFraction * 100)}% transparent pixels, measured from the alpha channel). Do NOT use analyze_image to check transparency: vision models see transparent pixels as white and will wrongly report a white background.`
+      : `${base} Warning: no transparency was detected in the result — background removal may have failed. You can retry with process_asset.`;
+  }
+  return base;
+};
 
 /** Split a `data:<mime>;base64,<data>` URL into an inline image block (base64 without the prefix). */
 const dataUrlToImageBlock = (dataUrl: string): LlmImageBlock => {

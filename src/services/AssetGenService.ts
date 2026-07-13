@@ -22,10 +22,12 @@ import {
   compressImageBlob,
   cropImageBlob,
   ensureImageExtension,
+  imageAlphaStats,
   normalizeAssetPath,
   readBlobSize,
   resizeImageBlob,
   trimImageBlob,
+  type AlphaStats,
   type CropRectPixels,
   type ImageEncoding,
 } from '@/services/image-gen/image-ops';
@@ -128,6 +130,19 @@ export interface AssetGenTrimOptions {
  * - `none` — no processing (raw save).
  */
 export type AssetPostProcessPreset = 'sprite' | 'icon' | 'texture' | 'none';
+
+/**
+ * Sane longest-edge caps (px) applied by {@link AssetGenService.postProcess} when neither an
+ * explicit `maxSize` nor the user's `defaultSaveMaxSize` preference is set. Without these an unset
+ * default (0) means "keep original", which saves multi-hundred-KB, ~1400px game assets — not
+ * game-ready. The agent generates for games, so it caps by intent instead.
+ */
+const PRESET_DEFAULT_MAX_SIZE: Record<AssetPostProcessPreset, number> = {
+  sprite: 512,
+  icon: 256,
+  texture: 1024,
+  none: 0,
+};
 
 export interface AssetPostProcessOptions {
   /** Longest-edge cap in px; defaults to the AI-image preference `defaultSaveMaxSize`. */
@@ -444,7 +459,12 @@ export class AssetGenService {
           // agent/user can retry via process_asset.
         }
       }
-      const maxSize = options.maxSize ?? this.aiSettings.getPreferences().defaultSaveMaxSize;
+      // Explicit arg wins; else the user's configured default; else a sane per-preset cap so an
+      // unset "keep original" preference doesn't silently save huge game assets.
+      const maxSize =
+        options.maxSize && options.maxSize > 0
+          ? options.maxSize
+          : this.aiSettings.getPreferences().defaultSaveMaxSize || PRESET_DEFAULT_MAX_SIZE[preset];
       if (maxSize && maxSize > 0) {
         const resized = await this.resize(currentId, { maxSize });
         intermediates.push(resized.id);
@@ -562,6 +582,14 @@ export class AssetGenService {
     return [...this.images.values()]
       .sort((a, b) => b.createdAt - a.createdAt)
       .map(image => this.toMeta(image));
+  }
+
+  /**
+   * Deterministic transparency stats for a handle (see {@link imageAlphaStats}). Use this instead of
+   * asking a vision model whether a background is transparent — vision flattens alpha onto white.
+   */
+  async alphaStats(id: string): Promise<AlphaStats> {
+    return imageAlphaStats(this.require(id).blob);
   }
 
   /** A `data:` URL preview (downscaled to `maxSize` on the longest edge) for visual QC. */

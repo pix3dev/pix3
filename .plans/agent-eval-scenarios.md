@@ -19,6 +19,7 @@ in-editor agent (a cheap model like DeepSeek v4 on Zen).
 const D = window.__PIX3_DEBUG__;
 D.agent.setProvider('opencode-zen', '<deepseek-model-id>');   // model under test
 D.agent.setVisionHelper('opencode-zen');                       // '' modelId = auto-pick a vision model
+D.agent.setAdvisor('cerebras', 'zai-glm-4.7');                 // ask_advisor target ('' = off)
 await D.agent.newConversation();
 const summary = await D.agent.send('собери каркас игры по GDD в main сцене');  // resolves when the loop ends
 D.agent.transcript(40);        // texts + tool calls/results the model produced
@@ -62,6 +63,14 @@ Expect across turns:
 - Input actually drives the player (inspect via `D.liveFind` during play, or game debug surface).
 - A reachable win/lose state; no captured errors at the end.
 Fail signals: declares done without running; never reads errors; win/lose unreachable.
+
+### Advisor as an eval knob
+
+`ask_advisor` (bridge ≥ v4) lets the model under test consult a stronger model (stateless, one
+Q + caller-passed context per call). Run S1/S3 in three configurations — advisor off /
+`cerebras zai-glm-4.7` / a Claude model — and compare pass rate, tokens, and advisor-call count
+(visible in `transcript()`). Expected failure modes to watch: over-delegation (advisor called for
+routine steps), vague questions with empty context (generic advice), ignoring the advice.
 
 ## Recording results
 
