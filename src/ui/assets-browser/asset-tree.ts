@@ -304,6 +304,23 @@ export class AssetTree extends ComponentBase {
   }
 
   /**
+   * Reveal a file path in the tree and open it, mirroring a double-click activation
+   * (dispatches `asset-activate`, so it goes through the same handler as opening a file
+   * directly in the Asset Browser). Returns true when the path was found.
+   */
+  public async revealAndOpen(targetPath: string): Promise<boolean> {
+    const selected = await this.selectPath(targetPath);
+    if (!selected) {
+      return false;
+    }
+    const found = this.findNodeByPath(this.selectedPath ?? targetPath);
+    if (found?.node && found.node.kind === 'file') {
+      this.activateAsset(found.node);
+    }
+    return true;
+  }
+
+  /**
    * Reveal a real file/folder path inside the grouped view: expand its category and
    * the directory chain leading to it. Paths compacted away (intermediate chain
    * segments) are not present in the grouped tree and report a miss.

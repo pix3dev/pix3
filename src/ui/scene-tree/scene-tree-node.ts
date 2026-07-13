@@ -47,6 +47,8 @@ interface ScriptRevealRequestDetail {
   scriptType: string;
   scriptName: string;
   candidatePaths: string[];
+  /** When true, the file is opened in a code tab (double-click); otherwise it is only revealed. */
+  open?: boolean;
 }
 
 interface NodeContextMenuDetail {
@@ -255,6 +257,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
                       @focus=${(event: FocusEvent) => this.onScriptIndicatorFocus(event)}
                       @blur=${() => this.closeScriptPopover()}
                       @click=${(event: Event) => this.onScriptIndicatorClick(event)}
+                      @dblclick=${(event: Event) => this.onScriptIndicatorDoubleClick(event)}
                     >
                       ${this.renderToggleIcon(this.getScriptIndicatorIconName())}
                     </button>
@@ -498,7 +501,17 @@ export class SceneTreeNodeComponent extends ComponentBase {
 
   private onScriptIndicatorClick(event: Event): void {
     event.stopPropagation();
+    this.dispatchScriptFileRevealRequest(false);
+  }
 
+  private onScriptIndicatorDoubleClick(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    // Single-click reveals the script in the Asset Browser; double-click also opens it in a code tab.
+    this.dispatchScriptFileRevealRequest(true);
+  }
+
+  private dispatchScriptFileRevealRequest(open: boolean): void {
     const userScriptType = this.node.scripts.find(scriptType => scriptType.startsWith('user:'));
     if (!userScriptType) {
       return;
@@ -514,6 +527,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
       scriptType: userScriptType,
       scriptName,
       candidatePaths: [`scripts/${fileName}`, `src/scripts/${fileName}`],
+      open,
     };
 
     window.dispatchEvent(

@@ -32,6 +32,17 @@ container
   )
   .initialize();
 
+// Type-check project scripts and surface errors (with file + line) in the Logs
+// panel — automatically after compiles / on play once the code editor is loaded,
+// and on demand via the `scripts.check` command.
+import { ProjectDiagnosticsService } from './services/ProjectDiagnosticsService';
+
+container
+  .getService<ProjectDiagnosticsService>(
+    container.getOrCreateToken(ProjectDiagnosticsService)
+  )
+  .initialize();
+
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';

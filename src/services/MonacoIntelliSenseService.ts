@@ -96,6 +96,21 @@ export class MonacoIntelliSenseService {
     this.recomputeDynamicLibs();
   }
 
+  /**
+   * Force an immediate rebuild of the dynamic libs, bypassing the debounce.
+   * The project type-checker calls this after it creates/disposes temporary
+   * models so the sibling mirrors (which would otherwise collide with those
+   * models and produce spurious duplicate-identifier diagnostics) are dropped
+   * and later restored synchronously around the check.
+   */
+  refreshNow(): void {
+    if (this.recomputeTimer !== null) {
+      window.clearTimeout(this.recomputeTimer);
+      this.recomputeTimer = null;
+    }
+    this.recomputeDynamicLibs();
+  }
+
   private scheduleRecompute(): void {
     if (this.recomputeTimer !== null) {
       window.clearTimeout(this.recomputeTimer);

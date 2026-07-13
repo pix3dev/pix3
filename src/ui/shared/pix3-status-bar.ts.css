@@ -99,6 +99,36 @@ pix3-status-bar .status-update-button:focus-visible {
   outline-offset: 2px;
 }
 
+pix3-status-bar .status-diagnostics {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-status-bar .status-diagnostics.error {
+  background: rgba(248, 113, 113, 0.16);
+  color: rgba(248, 113, 113, 0.95);
+}
+
+pix3-status-bar .status-diagnostics.error:hover {
+  background: rgba(248, 113, 113, 0.26);
+}
+
+pix3-status-bar .status-diagnostics.warning {
+  background: rgba(251, 191, 36, 0.14);
+  color: rgba(251, 191, 36, 0.95);
+}
+
+pix3-status-bar .status-diagnostics.warning:hover {
+  background: rgba(251, 191, 36, 0.24);
+}
+
+pix3-status-bar .status-diagnostics:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
 pix3-status-bar .status-bundle-size {
   border: none;
   cursor: pointer;

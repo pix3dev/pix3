@@ -22,6 +22,8 @@ interface ScriptRevealRequestDetail {
   scriptType: string;
   scriptName: string;
   candidatePaths: string[];
+  /** When true, the resolved file is opened in a code tab, not just revealed/selected. */
+  open?: boolean;
 }
 
 interface AssetsPreviewRevealPathDetail {
@@ -406,9 +408,16 @@ export class ${singletonName} extends Script {
     }
 
     for (const candidatePath of detail.candidatePaths) {
-      const selected = await this.assetTreeRef.selectPath(candidatePath);
+      const selected = detail.open
+        ? await this.assetTreeRef.revealAndOpen(candidatePath)
+        : await this.assetTreeRef.selectPath(candidatePath);
       if (selected) {
-        console.log('[AssetBrowserPanel] Revealed user script:', candidatePath);
+        console.log(
+          detail.open
+            ? '[AssetBrowserPanel] Opened user script:'
+            : '[AssetBrowserPanel] Revealed user script:',
+          candidatePath
+        );
         return;
       }
     }

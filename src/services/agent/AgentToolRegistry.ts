@@ -16,6 +16,7 @@ import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { LoggingService } from '@/services/LoggingService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AssetGenService } from '@/services/AssetGenService';
+import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 
@@ -130,6 +131,9 @@ export class AgentToolRegistry {
 
   @inject(AssetGenService)
   private readonly assetGen!: AssetGenService;
+
+  @inject(ProjectDiagnosticsService)
+  private readonly diagnostics!: ProjectDiagnosticsService;
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
@@ -301,6 +305,13 @@ export class AgentToolRegistry {
           'Compile the project user scripts (esbuild). Returns compilation diagnostics as the result — a syntax check for agent edits before play.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.compileScripts(),
+      },
+      {
+        name: 'check_scripts',
+        description:
+          'Type-check ALL project scripts and return semantic + syntax problems with { file, line, column, message, category, code }. Catches TypeScript type errors that compile_scripts (esbuild, transpile-only) misses — e.g. assigning to the read-only `position`/`rotation`/`scale`, wrong argument types, misspelled imports. Use this to find why a script misbehaves and to verify your own edits.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        handler: () => this.checkScripts(),
       },
       {
         name: 'play_start',
@@ -595,6 +606,24 @@ export class AgentToolRegistry {
         file: compileError?.file,
         line: compileError?.line,
         column: compileError?.column,
+      };
+    }
+  }
+
+  private async checkScripts(): Promise<Record<string, unknown>> {
+    try {
+      const summary = await this.diagnostics.checkProject();
+      return {
+        ok: true,
+        filesChecked: summary.filesChecked,
+        errorCount: summary.errorCount,
+        warningCount: summary.warningCount,
+        diagnostics: summary.diagnostics,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }

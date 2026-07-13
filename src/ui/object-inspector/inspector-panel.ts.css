@@ -900,6 +900,14 @@ pix3-panel {
   padding: 0;
 }
 
+.component-item--openable .script-name {
+  cursor: pointer;
+}
+
+.component-item--openable:hover .script-name {
+  color: var(--color-accent, #ffcf33);
+}
+
 .component-block {
   display: flex;
   flex-direction: column;

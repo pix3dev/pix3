@@ -13,6 +13,13 @@ declare global {
   }
 }
 
+/**
+ * Whether Monaco has already been loaded this session. Lets callers (e.g. the
+ * project type-checker) opt into work that only makes sense once the heavy
+ * Monaco chunk + TS worker are in memory, without forcing the load themselves.
+ */
+export const isMonacoLoaded = (): boolean => monacoPromise !== null;
+
 export const ensureMonacoLoaded = async (): Promise<typeof import('monaco-editor')> => {
   if (!monacoPromise) {
     monacoPromise = (async () => {

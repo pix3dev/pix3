@@ -74,6 +74,7 @@ import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
 import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
+import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
@@ -368,6 +369,7 @@ export class Pix3EditorShell extends ComponentBase {
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
     const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
+    const checkScriptsCommand = new CheckScriptsCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
 
     // Register viewport commands
@@ -414,6 +416,7 @@ export class Pix3EditorShell extends ComponentBase {
       bakeAOCommand,
       clearAOCommand,
       focusAnimationTimelineCommand,
+      checkScriptsCommand,
       addAnimationPlayerCommand,
       newProjectCommand,
       closeProjectCommand,

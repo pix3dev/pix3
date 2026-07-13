@@ -2530,10 +2530,17 @@ ${textPreview?.content || 'Empty file'}</pre
         </div>
 
         <div class="scripts-list">
-          ${components.map(
-            component => html`
+          ${components.map(component => {
+            const isUserScript = component.type.startsWith('user:');
+            return html`
               <div class="component-block ${component.enabled ? '' : 'component-block--disabled'}">
-                <div class="script-item component-item">
+                <div
+                  class="script-item component-item ${isUserScript ? 'component-item--openable' : ''}"
+                  title=${isUserScript ? 'Double-click to open script file' : ''}
+                  @dblclick=${isUserScript
+                    ? () => this.onOpenComponentScript(component.type)
+                    : null}
+                >
                   <div class="script-icon">
                     ${this.iconService.getIcon(this.getComponentIconName(component.type), 16)}
                   </div>
@@ -2563,8 +2570,8 @@ ${textPreview?.content || 'Empty file'}</pre
                 </div>
                 ${this.renderComponentProperties(component)}
               </div>
-            `
-          )}
+            `;
+          })}
           ${components.length === 0
             ? html`<div class="no-scripts">No components attached</div>`
             : ''}
@@ -2624,6 +2631,19 @@ ${textPreview?.content || 'Empty file'}</pre
       });
       void this.commandDispatcher.execute(command);
     }
+  }
+
+  /**
+   * Double-clicking a user script component opens its source file in a code tab.
+   * Core (`core:`) components are engine built-ins with no project file, so they no-op.
+   */
+  private onOpenComponentScript(componentType: string): void {
+    if (!componentType.startsWith('user:')) return;
+
+    const scriptName = componentType.slice('user:'.length).trim();
+    if (!scriptName) return;
+
+    void this.editorTabService.focusOrOpenCode(`res://scripts/${scriptName}.ts`);
   }
 
   private onRemoveComponent(componentId: string) {

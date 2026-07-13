@@ -62,6 +62,8 @@ export class AssetsPreviewPanel extends ComponentBase {
   private disposePreviewSubscription?: () => void;
   private selectedPaths = new Set<string>();
   private lastSelectedPath: string | null = null;
+  /** Last service-driven selected item we mirrored, so unrelated snapshot updates don't clobber local selection. */
+  private lastSyncedSelectedItemPath: string | null | undefined = undefined;
   /** Shared element for asset-browser audio preview; reused across items. */
   private audioPreviewEl: HTMLAudioElement | null = null;
   private lastPreviewFolderPath: string | null = null;
@@ -90,6 +92,20 @@ export class AssetsPreviewPanel extends ComponentBase {
         !snapshot.items.some(entry => entry.path === this.playingAudioPath)
       ) {
         this.stopAudioPreview();
+      }
+      // Mirror an externally-driven selection (reveal from Scene Tree / selection in Asset
+      // Browser) into the local highlight set. Only react when the service's selected item
+      // actually changes, so local multi-selection made inside this panel isn't clobbered by
+      // unrelated snapshot updates (e.g. thumbnails becoming ready).
+      if (snapshot.selectedItemPath !== this.lastSyncedSelectedItemPath) {
+        this.lastSyncedSelectedItemPath = snapshot.selectedItemPath;
+        if (snapshot.selectedItemPath) {
+          this.selectedPaths = new Set([snapshot.selectedItemPath]);
+          this.lastSelectedPath = snapshot.selectedItemPath;
+        } else {
+          this.selectedPaths = new Set();
+          this.lastSelectedPath = null;
+        }
       }
       this.snapshot = snapshot;
       this.requestUpdate();

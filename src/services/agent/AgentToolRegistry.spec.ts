@@ -60,6 +60,7 @@ describe('AgentToolRegistry', () => {
         'fs_write',
         'fs_delete',
         'compile_scripts',
+        'check_scripts',
         'play_start',
         'play_stop',
         'play_restart',

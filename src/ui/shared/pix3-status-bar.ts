@@ -8,6 +8,11 @@ import {
   type BundleSizeCategory,
 } from '@/services/BundleSizeService';
 import { UpdateCheckService, type UpdateCheckState } from '@/services/UpdateCheckService';
+import {
+  ProjectDiagnosticsService,
+  type ScriptDiagnosticsSummary,
+} from '@/services/ProjectDiagnosticsService';
+import { LayoutManagerService } from '@/core/LayoutManager';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
@@ -36,6 +41,12 @@ export class Pix3StatusBar extends ComponentBase {
   @inject(BundleSizeService)
   private readonly bundleSizeService!: BundleSizeService;
 
+  @inject(ProjectDiagnosticsService)
+  private readonly diagnosticsService!: ProjectDiagnosticsService;
+
+  @inject(LayoutManagerService)
+  private readonly layoutManager!: LayoutManagerService;
+
   @state()
   private currentMessage: StatusMessage | null = null;
 
@@ -52,6 +63,9 @@ export class Pix3StatusBar extends ComponentBase {
   private isPlaying = false;
 
   @state()
+  private diagnostics: ScriptDiagnosticsSummary | null = null;
+
+  @state()
   private updateState: UpdateCheckState = {
     status: 'idle',
     currentVersion: CURRENT_EDITOR_VERSION,
@@ -63,6 +77,7 @@ export class Pix3StatusBar extends ComponentBase {
   private disposeProjectSubscription?: () => void;
   private disposeUiSubscription?: () => void;
   private disposeUpdateCheckSubscription?: () => void;
+  private disposeDiagnosticsSubscription?: () => void;
 
   connectedCallback() {
     super.connectedCallback();
@@ -95,9 +110,14 @@ export class Pix3StatusBar extends ComponentBase {
       }
     });
 
+    this.disposeDiagnosticsSubscription = this.diagnosticsService.subscribe(summary => {
+      this.diagnostics = summary;
+    });
+
     // Initialize state
     this.projectName = appState.project.projectName;
     this.isPlaying = appState.ui.isPlaying;
+    this.diagnostics = this.diagnosticsService.getLastSummary();
   }
 
   disconnectedCallback() {
@@ -105,6 +125,7 @@ export class Pix3StatusBar extends ComponentBase {
     this.disposeProjectSubscription?.();
     this.disposeUiSubscription?.();
     this.disposeUpdateCheckSubscription?.();
+    this.disposeDiagnosticsSubscription?.();
     if (this.messageTimeout !== null) {
       window.clearTimeout(this.messageTimeout);
     }
@@ -162,7 +183,7 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
-          ${this.projectName ? this.renderBundleSize() : html``}
+          ${this.renderDiagnostics()} ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`
@@ -171,6 +192,37 @@ export class Pix3StatusBar extends ComponentBase {
       </div>
     `;
   }
+
+  private renderDiagnostics() {
+    const summary = this.diagnostics;
+    if (!summary || (summary.errorCount === 0 && summary.warningCount === 0)) {
+      return html``;
+    }
+
+    const hasErrors = summary.errorCount > 0;
+    const label = hasErrors
+      ? `⨯ ${summary.errorCount}${summary.warningCount > 0 ? ` ⚠ ${summary.warningCount}` : ''}`
+      : `⚠ ${summary.warningCount}`;
+    const title =
+      `${summary.errorCount} script error(s), ${summary.warningCount} warning(s) ` +
+      `in ${summary.filesChecked} file(s).\nClick to re-check and open the Logs panel.`;
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-diagnostics ${hasErrors ? 'error' : 'warning'}"
+        title=${title}
+        @click=${this.onDiagnosticsClick}
+      >
+        ${label}
+      </button>
+    `;
+  }
+
+  private onDiagnosticsClick = (): void => {
+    this.layoutManager.focusPanel('logs');
+    void this.diagnosticsService.checkProject();
+  };
 
   private renderBundleSize() {
     const label = this.bundleSizeComputing
