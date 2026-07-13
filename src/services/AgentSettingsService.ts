@@ -64,10 +64,16 @@ export class AgentSettingsService {
     }
     const stored = prefs.modelByProvider[providerId];
     if (stored) {
-      // Providers that accept arbitrary ids (OpenAI-compatible / local) pass any stored id through.
-      // For fixed-list providers, a stored id no longer in the list (e.g. a deprecated Gemini model)
-      // falls back to the first model so a stale selection can't keep sending a dead id.
-      if (provider.requiresBaseUrl || provider.models.some(model => model.id === stored)) {
+      // Providers that accept arbitrary ids (OpenAI-compatible / local) or fetch a live catalog
+      // (their real model set is wider than the static fallback list) pass any stored id through.
+      // For static fixed-list providers, a stored id no longer in the list (e.g. a deprecated
+      // Gemini model) falls back to the first model so a stale selection can't keep sending a
+      // dead id.
+      if (
+        provider.requiresBaseUrl ||
+        typeof provider.listModels === 'function' ||
+        provider.models.some(model => model.id === stored)
+      ) {
         return stored;
       }
     }

@@ -3,6 +3,7 @@ import { createRef, ref } from 'lit/directives/ref.js';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
+import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
   formatPricingHint,
   type LlmContentBlock,
@@ -90,6 +91,9 @@ export class AgentChatPanel extends ComponentBase {
   @inject(LlmProviderRegistry)
   private readonly providers!: LlmProviderRegistry;
 
+  @inject(LlmModelCatalogService)
+  private readonly modelCatalog!: LlmModelCatalogService;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -106,6 +110,7 @@ export class AgentChatPanel extends ComponentBase {
 
   private disposeChatSubscription?: () => void;
   private disposeSettingsSubscription?: () => void;
+  private disposeCatalogSubscription?: () => void;
   private readonly messagesRef = createRef<HTMLDivElement>();
   private shouldStickToBottom = true;
 
@@ -119,13 +124,23 @@ export class AgentChatPanel extends ComponentBase {
       this.providerId = prefs.selectedProviderId;
       this.modelId = this.settings.getSelectedModelId(prefs.selectedProviderId) ?? '';
       this.customBaseUrl = prefs.customBaseUrl;
-      // A stored model that isn't in the provider's list is a hand-typed custom id (local models).
-      const models = this.providers.get(this.providerId)?.models ?? [];
-      this.modelCustomMode = this.modelId !== '' && !models.some(m => m.id === this.modelId);
+      this.syncModelCustomMode();
       void this.refreshKeyConfigured();
     });
 
+    // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
+    this.disposeCatalogSubscription = this.modelCatalog.subscribe(() => {
+      this.syncModelCustomMode();
+      this.requestUpdate();
+    });
+
     void this.chat.ensureLoaded();
+  }
+
+  /** A stored model that isn't in the provider's (live or static) list is a hand-typed custom id. */
+  private syncModelCustomMode(): void {
+    const models = this.modelCatalog.getModels(this.providerId);
+    this.modelCustomMode = this.modelId !== '' && !models.some(m => m.id === this.modelId);
   }
 
   disconnectedCallback(): void {
@@ -133,6 +148,8 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeChatSubscription = undefined;
     this.disposeSettingsSubscription?.();
     this.disposeSettingsSubscription = undefined;
+    this.disposeCatalogSubscription?.();
+    this.disposeCatalogSubscription = undefined;
     super.disconnectedCallback();
   }
 
@@ -208,7 +225,7 @@ export class AgentChatPanel extends ComponentBase {
   /** Provider / model / base-URL / key controls, shown in the composer footer (below the input). */
   private renderComposerControls() {
     const provider = this.providers.get(this.providerId);
-    const models = provider?.models ?? [];
+    const models = provider ? this.modelCatalog.getModels(provider.id) : [];
 
     return html`
       <select

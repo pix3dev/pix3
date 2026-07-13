@@ -5,6 +5,7 @@ import {
   toBlocks,
   type ChatParams,
   type LlmContentBlock,
+  type LlmListModelsContext,
   type LlmMessage,
   type LlmModel,
   type LlmProvider,
@@ -32,12 +33,13 @@ const DEFAULT_MAX_TOKENS = 4096;
  * @see https://platform.openai.com/docs/api-reference/chat
  */
 export class OpenAICompatLlmProvider implements LlmProvider {
-  readonly id = 'openai-compat';
-  readonly label = 'OpenAI-compatible (OpenAI / Ollama / LM Studio)';
-  readonly apiKeySecretId = 'ai-provider:openai-compat:api-key';
-  readonly apiKeyHelpUrl = 'https://platform.openai.com/api-keys';
-  readonly requiresBaseUrl = true;
-  readonly defaultBaseUrl = DEFAULT_BASE_URL;
+  // Widened (not literal) types so subclasses like CerebrasLlmProvider can override the identity/host.
+  readonly id: string = 'openai-compat';
+  readonly label: string = 'OpenAI-compatible (OpenAI / Ollama / LM Studio)';
+  readonly apiKeySecretId: string = 'ai-provider:openai-compat:api-key';
+  readonly apiKeyHelpUrl: string = 'https://platform.openai.com/api-keys';
+  readonly requiresBaseUrl: boolean = true;
+  readonly defaultBaseUrl: string = DEFAULT_BASE_URL;
 
   readonly models: readonly LlmModel[] = [
     {
@@ -79,12 +81,86 @@ export class OpenAICompatLlmProvider implements LlmProvider {
     return this.models.find(model => model.id === modelId);
   }
 
+  /**
+   * Live model listing via the standard discovery endpoint (`GET {base}/models`, `{data: [{id}]}`).
+   * Works for hosted OpenAI, Cerebras, OpenCode Zen and local Ollama / LM Studio — so a local
+   * endpoint's actually-installed models show up in the picker instead of a hand-typed id. Ids that
+   * match a static catalog entry keep its capability hints; unknown ids get safe defaults.
+   */
+  async listModels(ctx: LlmListModelsContext): Promise<LlmModel[]> {
+    const baseUrl = (ctx.baseUrl ?? this.defaultBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
+    const headers: Record<string, string> = {};
+    if (ctx.apiKey) {
+      headers.Authorization = `Bearer ${ctx.apiKey}`;
+    }
+
+    let response: Response;
+    try {
+      response = await fetchImpl(`${baseUrl}/models`, {
+        method: 'GET',
+        headers,
+        signal: ctx.signal,
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw new LlmError('aborted', 'The request was cancelled.');
+      }
+      throw new LlmError('network', 'Network error fetching the model list.', undefined, {
+        cause: error,
+      });
+    }
+
+    const payload = await readJson(response);
+    if (!response.ok) {
+      throw new LlmError(
+        'http',
+        extractErrorMessage(payload) ?? describeStatus(response.status),
+        response.status
+      );
+    }
+
+    const data = isRecord(payload) && Array.isArray(payload.data) ? payload.data : [];
+    const models: LlmModel[] = [];
+    for (const item of data) {
+      if (!isRecord(item) || typeof item.id !== 'string' || !item.id) continue;
+      models.push(
+        this.getModel(item.id) ?? {
+          id: item.id,
+          label: item.id,
+          capabilities: {
+            supportsTools: true,
+            supportsImages: false,
+            supportsSystemPrompt: true,
+            maxOutputTokens: DEFAULT_MAX_TOKENS,
+          },
+        }
+      );
+    }
+    if (models.length === 0) {
+      throw new LlmError('unknown', 'The endpoint returned no models.');
+    }
+    return models.sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  /**
+   * Whether an empty API key should be rejected before hitting the endpoint. A locally-hosted
+   * endpoint (Ollama / LM Studio) needs no key, so the hosted OpenAI default is the only host that
+   * requires one here. Subclasses that target an always-keyed host (e.g. Cerebras) override this.
+   */
+  protected requiresApiKey(baseUrl: string): boolean {
+    return baseUrl === DEFAULT_BASE_URL;
+  }
+
+  /** User-facing message when {@link requiresApiKey} rejects a missing key. */
+  protected readonly missingKeyMessage: string = 'No OpenAI API key configured.';
+
   async chat(params: ChatParams, ctx: LlmRequestContext): Promise<LlmResult> {
-    // A locally-hosted endpoint may not require a key; only reject an empty key for the hosted
-    // OpenAI default host, where it is always required.
-    const baseUrl = (ctx.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-    if (!ctx.apiKey && baseUrl === DEFAULT_BASE_URL) {
-      throw new LlmError('missing-key', 'No OpenAI API key configured.');
+    // A locally-hosted endpoint may not require a key; only reject an empty key when the target host
+    // requires one (see requiresApiKey).
+    const baseUrl = (ctx.baseUrl ?? this.defaultBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    if (!ctx.apiKey && this.requiresApiKey(baseUrl)) {
+      throw new LlmError('missing-key', this.missingKeyMessage);
     }
     if (!ctx.modelId) {
       throw new LlmError('unknown', 'No model selected.');
@@ -141,7 +217,12 @@ export class OpenAICompatLlmProvider implements LlmProvider {
 
     const body: Record<string, unknown> = {
       model: modelId,
-      max_tokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // Prefer the model's advertised output budget over the flat default (dynamic-catalog models
+      // are not in the static list; callers pass their budget via params.maxTokens).
+      max_tokens:
+        params.maxTokens ??
+        this.getModel(modelId)?.capabilities.maxOutputTokens ??
+        DEFAULT_MAX_TOKENS,
       messages,
     };
 

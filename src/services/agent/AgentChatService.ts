@@ -2,6 +2,7 @@ import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
 import { AgentChatHistoryStore } from './AgentChatHistoryStore';
 import {
@@ -64,6 +65,9 @@ const IDLE_STATE: AgentChatState = {
 export class AgentChatService {
   @inject(AgentSettingsService)
   private readonly settings!: AgentSettingsService;
+
+  @inject(LlmModelCatalogService)
+  private readonly modelCatalog!: LlmModelCatalogService;
 
   @inject(AgentToolRegistry)
   private readonly toolRegistry!: AgentToolRegistry;
@@ -181,7 +185,11 @@ export class AgentChatService {
     const apiKey = (await this.settings.getApiKey(provider.id)) ?? '';
     const baseUrl = this.settings.getBaseUrl(provider.id);
     const maxIterations = Math.max(1, this.settings.getPreferences().maxToolIterations);
-    const tools = this.toolRegistry.specs();
+    // Model capabilities come from the (possibly live-fetched) catalog: strip tools for models
+    // that can't call them, and pass the model's output budget instead of provider flat defaults.
+    const model = this.modelCatalog.getModel(provider.id, modelId);
+    const tools =
+      model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const result = await provider.chat(
@@ -189,6 +197,7 @@ export class AgentChatService {
           messages: this.state.messages,
           tools,
           system: this.buildSystemPrompt(),
+          maxTokens: model?.capabilities.maxOutputTokens,
           signal,
         },
         { apiKey, modelId, baseUrl }

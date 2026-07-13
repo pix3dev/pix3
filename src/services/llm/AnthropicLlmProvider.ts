@@ -30,10 +30,13 @@ const DEFAULT_MAX_TOKENS = 8192;
  * @see https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
  */
 export class AnthropicLlmProvider implements LlmProvider {
-  readonly id = 'anthropic';
-  readonly label = 'Anthropic (Claude)';
-  readonly apiKeySecretId = 'ai-provider:anthropic:api-key';
-  readonly apiKeyHelpUrl = 'https://console.anthropic.com/settings/keys';
+  // Widened (not literal) types so subclasses (e.g. OpenCode Zen's Claude lane) can override the
+  // identity, host and auth scheme while reusing the Messages wire mapping.
+  readonly id: string = 'anthropic';
+  readonly label: string = 'Anthropic (Claude)';
+  readonly apiKeySecretId: string = 'ai-provider:anthropic:api-key';
+  readonly apiKeyHelpUrl: string = 'https://console.anthropic.com/settings/keys';
+  readonly defaultBaseUrl: string = DEFAULT_BASE_URL;
 
   readonly models: readonly LlmModel[] = [
     {
@@ -78,28 +81,39 @@ export class AnthropicLlmProvider implements LlmProvider {
     return this.models.find(model => model.id === modelId);
   }
 
+  /** User-facing message when an empty key is rejected. */
+  protected readonly missingKeyMessage: string = 'No Anthropic API key configured.';
+
+  /**
+   * Request headers. Native Anthropic wants the key as `x-api-key` plus the browser-access opt-in;
+   * gateways that proxy the Messages API (OpenCode Zen) override this with a plain Bearer header.
+   */
+  protected buildHeaders(ctx: LlmRequestContext): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'x-api-key': ctx.apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true',
+    };
+  }
+
   async chat(params: ChatParams, ctx: LlmRequestContext): Promise<LlmResult> {
     if (!ctx.apiKey) {
-      throw new LlmError('missing-key', 'No Anthropic API key configured.');
+      throw new LlmError('missing-key', this.missingKeyMessage);
     }
     if (!ctx.modelId) {
       throw new LlmError('unknown', 'No Anthropic model selected.');
     }
 
     const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
-    const baseUrl = (ctx.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    const baseUrl = (ctx.baseUrl ?? this.defaultBaseUrl).replace(/\/$/, '');
     const body = this.buildBody(params, ctx.modelId);
 
     let response: Response;
     try {
       response = await fetchImpl(`${baseUrl}/messages`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ctx.apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
+        headers: this.buildHeaders(ctx),
         body: JSON.stringify(body),
         signal: params.signal,
       });

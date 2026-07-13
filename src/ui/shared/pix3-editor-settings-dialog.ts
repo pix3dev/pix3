@@ -7,6 +7,7 @@ import { AiImageSettingsService } from '@/services/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
+import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { formatPricingHint } from '@/services/llm/LlmTypes';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
@@ -31,6 +32,9 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(LlmProviderRegistry)
   private readonly llmProviders!: LlmProviderRegistry;
+
+  @inject(LlmModelCatalogService)
+  private readonly llmModelCatalog!: LlmModelCatalogService;
 
   @state()
   private activeTab: EditorSettingsTab = 'general';
@@ -91,6 +95,12 @@ export class EditorSettingsDialog extends ComponentBase {
   private llmKeyMessage: string | null = null;
 
   @state()
+  private llmModelsBusy = false;
+
+  @state()
+  private llmModelsMessage: string | null = null;
+
+  @state()
   private bgEngine: BgRemovalEngine = 'imgly';
 
   @state()
@@ -124,12 +134,26 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
     void this.refreshLlmKeyStatus();
+
+    // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
+    this.disposeCatalogSubscription = this.llmModelCatalog.subscribe(() => {
+      this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+      this.requestUpdate();
+    });
   }
 
-  /** A stored model not in the provider's list is a hand-typed custom id (local models). */
+  disconnectedCallback(): void {
+    this.disposeCatalogSubscription?.();
+    this.disposeCatalogSubscription = undefined;
+    super.disconnectedCallback();
+  }
+
+  private disposeCatalogSubscription?: () => void;
+
+  /** A stored model not in the provider's (live or static) list is a hand-typed custom id. */
   private isLlmModelCustom(providerId: string, modelId: string): boolean {
     if (!modelId) return false;
-    const models = this.llmProviders.get(providerId)?.models ?? [];
+    const models = this.llmModelCatalog.getModels(providerId);
     return !models.some(m => m.id === modelId);
   }
 
@@ -260,7 +284,8 @@ export class EditorSettingsDialog extends ComponentBase {
       return null;
     }
     const provider = this.llmProviders.get(this.llmProviderId) ?? providers[0];
-    const models = provider?.models ?? [];
+    const models = provider ? this.llmModelCatalog.getModels(provider.id) : [];
+    const canRefreshModels = provider ? this.llmModelCatalog.supportsRefresh(provider.id) : false;
     const helpUrl = provider?.apiKeyHelpUrl;
 
     return html`
@@ -301,7 +326,19 @@ export class EditorSettingsDialog extends ComponentBase {
                   </option>`
                 : null}
             </select>
+            ${canRefreshModels
+              ? html`<button
+                  class="btn-key-save llm-models-refresh"
+                  title="Fetch the provider's current model list"
+                  aria-label="Refresh model list"
+                  @click=${this.onRefreshLlmModels}
+                  ?disabled=${this.llmModelsBusy}
+                >
+                  ${this.llmModelsBusy ? '…' : '↻'}
+                </button>`
+              : null}
           </label>
+          ${this.llmModelsMessage ? html`<div class="hint">${this.llmModelsMessage}</div>` : null}
           ${this.llmModelCustomMode
             ? html`<input
                 type="text"
@@ -640,7 +677,25 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmModelCustomMode = this.isLlmModelCustom(providerId, this.llmModelId);
     this.llmKeyInput = '';
     this.llmKeyMessage = null;
+    this.llmModelsMessage = null;
     void this.refreshLlmKeyStatus();
+  }
+
+  private async onRefreshLlmModels(): Promise<void> {
+    if (!this.llmProviderId || this.llmModelsBusy) {
+      return;
+    }
+    this.llmModelsBusy = true;
+    this.llmModelsMessage = null;
+    try {
+      const models = await this.llmModelCatalog.refresh(this.llmProviderId);
+      this.llmModelsMessage = `Model list updated (${models.length} models).`;
+      this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+    } catch (error) {
+      this.llmModelsMessage = `Failed to fetch models: ${error instanceof Error ? error.message : 'unknown error'}`;
+    } finally {
+      this.llmModelsBusy = false;
+    }
   }
 
   private onLlmModelSelectChange(e: Event): void {

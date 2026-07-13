@@ -212,6 +212,29 @@ pix3-editor-settings-dialog {
   color: var(--pix3-accent-color, #ffcf33);
 }
 
+/* Live model-list refresh (providers with a dynamic catalog). */
+.select-row .llm-models-refresh {
+  align-self: flex-start;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  border: 1px solid var(--pix3-border, #444);
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  transition: all 0.15s;
+}
+
+.select-row .llm-models-refresh:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.select-row .llm-models-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .settings-field .hint a {
   color: var(--pix3-accent-color, #ffcf33);
 }

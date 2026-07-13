@@ -3,11 +3,19 @@ import { LlmProviderRegistry } from './LlmProviderRegistry';
 import type { LlmProvider } from './LlmTypes';
 
 describe('LlmProviderRegistry', () => {
-  it('ships gemini, anthropic and openai-compat with gemini as the default', () => {
+  it('ships gemini, anthropic, cerebras, opencode-zen and openai-compat with gemini as the default', () => {
     const registry = new LlmProviderRegistry();
-    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'anthropic', 'openai-compat']);
+    expect(registry.list().map(p => p.id)).toEqual([
+      'gemini',
+      'anthropic',
+      'cerebras',
+      'opencode-zen',
+      'openai-compat',
+    ]);
     expect(registry.getDefault()?.id).toBe('gemini');
     expect(registry.get('anthropic')?.label).toContain('Claude');
+    expect(registry.get('cerebras')?.label).toBe('Cerebras');
+    expect(registry.get('opencode-zen')?.label).toBe('OpenCode Zen');
     expect(registry.get('nope')).toBeUndefined();
   });
 
@@ -25,6 +33,8 @@ describe('LlmProviderRegistry', () => {
     expect(registry.list().map(p => p.id)).toEqual([
       'gemini',
       'anthropic',
+      'cerebras',
+      'opencode-zen',
       'openai-compat',
       'custom',
     ]);
@@ -40,5 +50,8 @@ describe('LlmProviderRegistry', () => {
     expect(registry.get('openai-compat')?.requiresBaseUrl).toBe(true);
     expect(registry.get('openai-compat')?.defaultBaseUrl).toBeTruthy();
     expect(registry.get('gemini')?.requiresBaseUrl).toBeUndefined();
+    // Cerebras is a fixed hosted endpoint: no user-typed base URL, but a default host is set.
+    expect(registry.get('cerebras')?.requiresBaseUrl).toBe(false);
+    expect(registry.get('cerebras')?.defaultBaseUrl).toBe('https://api.cerebras.ai/v1');
   });
 });

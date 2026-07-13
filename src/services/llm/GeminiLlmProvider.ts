@@ -67,16 +67,17 @@ export class GeminiLlmProvider implements LlmProvider {
       pricing: { inputPer1M: 1.25, outputPer1M: 10 },
     },
     {
-      id: 'gemini-2.5-flash-lite',
-      label: 'Gemini 2.5 Flash-Lite',
-      description: 'Cheapest / fastest tier.',
+      id: 'gemini-3.1-flash-lite',
+      label: 'Gemini 3.1 Flash-Lite',
+      description: 'Cheapest / fastest tier — most cost-efficient, tuned for high-volume agentic tasks.',
       capabilities: {
         supportsTools: true,
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
       },
-      pricing: { inputPer1M: 0.1, outputPer1M: 0.4 },
+      // Gemini 3.1 Flash-Lite paid-tier pricing (text/image input).
+      pricing: { inputPer1M: 0.25, outputPer1M: 1.5 },
     },
   ];
 

@@ -60,7 +60,8 @@ pix3-agent-chat-panel .agent-input:focus-visible {
 }
 
 pix3-agent-chat-panel .agent-key-wrap {
-  position: relative;
+  /* NOT position:relative — the popover anchors to the composer (see .agent-key-popover), so a
+     17rem popover can't overflow the panel edge from a button sitting near it. */
   flex: 0 0 auto;
 }
 
@@ -104,12 +105,15 @@ pix3-agent-chat-panel .agent-key-button.is-configured {
 }
 
 pix3-agent-chat-panel .agent-key-popover {
+  /* Anchored to .agent-composer (its containing block), not the key button: the button sits at
+     the right side of the toolbar, so a button-anchored popover would overflow the panel edge and
+     get clipped by the layout container. Right-aligned above the composer, clamped to its width. */
   position: absolute;
-  /* Toolbar sits at the bottom of the panel, so the popover opens upward. */
   bottom: calc(100% + 0.3rem);
-  left: 0;
+  right: 0.6rem;
   z-index: 30;
   width: 17rem;
+  max-width: calc(100% - 1.2rem);
   padding: 0.6rem;
   border-radius: 0.35rem;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -415,6 +419,8 @@ pix3-agent-chat-panel .agent-banner.is-notice {
 /* ── Composer (input + toolbar below it) ────────────────────────────────── */
 
 pix3-agent-chat-panel .agent-composer {
+  /* Containing block for the key popover (see .agent-key-popover). */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;

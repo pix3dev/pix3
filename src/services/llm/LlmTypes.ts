@@ -140,6 +140,9 @@ export const formatPricingHint = (pricing: LlmModelPricing | undefined): string 
   if (!pricing) {
     return '';
   }
+  if (pricing.inputPer1M === 0 && pricing.outputPer1M === 0) {
+    return 'Free';
+  }
   const fmt = (n: number): string => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
   return `${fmt(pricing.inputPer1M)} / ${fmt(pricing.outputPer1M)} per 1M`;
 };
@@ -154,9 +157,25 @@ export interface LlmRequestContext {
   readonly baseUrl?: string;
 }
 
+/**
+ * Context for {@link LlmProvider.listModels}. No model is selected yet, and the key is optional —
+ * public catalogs (models.dev, OpenCode Zen) and keyless local endpoints list without one.
+ */
+export interface LlmListModelsContext {
+  readonly apiKey?: string;
+  readonly baseUrl?: string;
+  readonly fetchImpl?: typeof fetch;
+  readonly signal?: AbortSignal;
+}
+
 export interface LlmProvider {
   readonly id: string;
   readonly label: string;
+  /**
+   * Static model catalog: the fallback (and capability hints) when no live catalog has been
+   * fetched. Consumers should read models through `LlmModelCatalogService`, which overlays the
+   * result of {@link listModels} on top of this list.
+   */
   readonly models: readonly LlmModel[];
   /** SecretStorageService id under which this provider's API key is stored. */
   readonly apiKeySecretId: string;
@@ -168,6 +187,12 @@ export interface LlmProvider {
   readonly defaultBaseUrl?: string;
   getModel(modelId: string): LlmModel | undefined;
   chat(params: ChatParams, ctx: LlmRequestContext): Promise<LlmResult>;
+  /**
+   * Fetch the provider's live model catalog (hosted catalogs churn — new/free models appear and
+   * disappear weekly). Optional: fixed-list providers omit it. Throws {@link LlmError} on failure;
+   * `LlmModelCatalogService` caches successful results and falls back to {@link models} otherwise.
+   */
+  listModels?(ctx: LlmListModelsContext): Promise<LlmModel[]>;
 }
 
 export type LlmErrorKind = 'missing-key' | 'network' | 'http' | 'blocked' | 'aborted' | 'unknown';

@@ -38,6 +38,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
         maxToolIterations: fakes.maxToolIterations ?? 5,
       }),
     },
+    modelCatalog: { getModel: () => undefined },
     toolRegistry: { specs: () => [], execute: fakes.execute },
     historyStore: { get: async () => undefined, put: fakes.put, delete: async () => undefined },
     sceneManager: { getActiveSceneGraph: () => null },

@@ -154,6 +154,22 @@ describe('OpenAICompatLlmProvider', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('lists models from GET {base}/models, merging static capability hints for known ids', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ object: 'list', data: [{ id: 'qwen3:8b' }, { id: 'gpt-4.1' }] })
+    );
+
+    const models = await provider.listModels({ apiKey: 'sk-1', baseUrl: BASE, fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${BASE}/models`);
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-1');
+    expect(models.map(m => m.id)).toEqual(['gpt-4.1', 'qwen3:8b']);
+    // A known id keeps its static capability hints; an unknown one gets safe defaults.
+    expect(models[0].capabilities.supportsImages).toBe(true);
+    expect(models[1].capabilities).toMatchObject({ supportsTools: true, supportsImages: false });
+  });
+
   it('maps a 404 to an http LlmError carrying the status', async () => {
     const fetchImpl = vi.fn(async () => errJson(404, 'no model'));
     const error = await provider

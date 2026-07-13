@@ -89,6 +89,16 @@ describe('AgentSettingsService', () => {
     expect(service.getSelectedModelId('gemini')).toBe('gemini-pro-latest');
   });
 
+  it('passes stored ids through for providers with a live catalog (wider than the static list)', () => {
+    const service = buildService();
+    // A model picked from a live-fetched Zen catalog is not in the static fallback list — it must
+    // survive (the live catalog rotates; the static list is only a bootstrap).
+    service.updatePreferences({ modelByProvider: { 'opencode-zen': 'glm-5-free' } });
+    expect(service.getSelectedModelId('opencode-zen')).toBe('glm-5-free');
+    service.updatePreferences({ modelByProvider: { cerebras: 'qwen-3-235b' } });
+    expect(service.getSelectedModelId('cerebras')).toBe('qwen-3-235b');
+  });
+
   it('returns the custom base URL only for the provider that requires one', () => {
     const service = buildService();
     service.updatePreferences({ customBaseUrl: 'http://localhost:1234/v1' });

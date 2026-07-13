@@ -2,12 +2,14 @@ import { injectable } from '@/fw/di';
 import { GeminiLlmProvider } from './GeminiLlmProvider';
 import { AnthropicLlmProvider } from './AnthropicLlmProvider';
 import { OpenAICompatLlmProvider } from './OpenAICompatLlmProvider';
+import { CerebrasLlmProvider } from './CerebrasLlmProvider';
+import { OpenCodeZenLlmProvider } from './OpenCodeZenLlmProvider';
 import type { LlmProvider } from './LlmTypes';
 
 /**
- * Registry of available LLM providers for the in-editor agent. Ships with Gemini, Anthropic, and an
- * OpenAI-compatible provider (covering hosted OpenAI plus local Ollama / LM Studio endpoints).
- * Mirrors `ImageGenProviderRegistry`: the default provider is the first registered one.
+ * Registry of available LLM providers for the in-editor agent. Ships with Gemini, Anthropic, Cerebras,
+ * OpenCode Zen, and an OpenAI-compatible provider (covering hosted OpenAI plus local Ollama / LM Studio
+ * endpoints). Mirrors `ImageGenProviderRegistry`: the default provider is the first registered one.
  */
 @injectable()
 export class LlmProviderRegistry {
@@ -17,6 +19,8 @@ export class LlmProviderRegistry {
   constructor() {
     this.register(new GeminiLlmProvider());
     this.register(new AnthropicLlmProvider());
+    this.register(new CerebrasLlmProvider());
+    this.register(new OpenCodeZenLlmProvider());
     this.register(new OpenAICompatLlmProvider());
   }
 
