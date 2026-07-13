@@ -29,14 +29,16 @@ describe('CerebrasLlmProvider', () => {
     resetModelsDevCache();
   });
 
-  it('advertises the fixed Cerebras host and a fixed (no base-URL) model list', () => {
+  it('advertises the same-origin proxy base URL and a fixed (no base-URL) model list', () => {
     expect(provider.id).toBe('cerebras');
     expect(provider.requiresBaseUrl).toBe(false);
-    expect(provider.defaultBaseUrl).toBe('https://api.cerebras.ai/v1');
+    // Cerebras sends no CORS headers, so the browser goes through the /cerebras-proxy dev route
+    // rather than calling api.cerebras.ai directly.
+    expect(provider.defaultBaseUrl).toBe('/cerebras-proxy/v1');
     expect(provider.models.map(m => m.id)).toEqual(['gpt-oss-120b', 'zai-glm-4.7', 'gemma-4-31b']);
   });
 
-  it('posts to the Cerebras host with a Bearer key when no base URL is supplied', async () => {
+  it('posts to the proxy route with a Bearer key when no base URL is supplied', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({ choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }] })
     );
@@ -47,7 +49,7 @@ describe('CerebrasLlmProvider', () => {
     );
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.cerebras.ai/v1/chat/completions');
+    expect(url).toBe('/cerebras-proxy/v1/chat/completions');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer csk-1');
     expect(result.content).toEqual([{ type: 'text', text: 'hi' }]);
   });

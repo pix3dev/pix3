@@ -64,7 +64,7 @@ export default defineConfig(async ({ mode }) => {
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
           // player.html carries session query params, so navigation to it must
           // not fall back to the editor shell.
-          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/player\.html/],
+          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/player\.html/],
         },
       }),
     ],
@@ -142,6 +142,17 @@ export default defineConfig(async ({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: path => path.replace(/^\/zen-proxy/, ''),
+        },
+        // Cerebras sends no CORS headers, so the browser cannot call api.cerebras.ai directly
+        // (a rejected key even surfaces as an opaque CORS/network error rather than a readable 401).
+        // Same-origin dev proxy mirroring /openai-proxy; the user's key rides along as the
+        // Authorization header. For production, host an equivalent proxy and set
+        // VITE_CEREBRAS_PROXY_URL. See CerebrasLlmProvider.
+        '/cerebras-proxy': {
+          target: 'https://api.cerebras.ai',
+          changeOrigin: true,
+          secure: true,
+          rewrite: path => path.replace(/^\/cerebras-proxy/, ''),
         },
       },
     },

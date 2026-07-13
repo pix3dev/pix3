@@ -2,7 +2,17 @@ import { OpenAICompatLlmProvider } from './OpenAICompatLlmProvider';
 import { fetchModelsDevCatalog, sortCatalogModels } from './models-dev';
 import { LlmError, type LlmListModelsContext, type LlmModel } from './LlmTypes';
 
-const CEREBRAS_BASE_URL = 'https://api.cerebras.ai/v1';
+/**
+ * Default endpoint. Cerebras sends **no CORS headers**, so a browser cannot call `api.cerebras.ai`
+ * directly — the fetch is blocked before any response is read, and even a rejected key surfaces as
+ * an opaque CORS/network error rather than a readable 401. Requests therefore go through a
+ * **same-origin proxy** by default: the Vite dev server rewrites `/cerebras-proxy` →
+ * `https://api.cerebras.ai` (see `vite.config.ts`), mirroring `/openai-proxy` and `/zen-proxy`. For
+ * a production static build, host an equivalent proxy and point `VITE_CEREBRAS_PROXY_URL` at it. The
+ * user's key still travels from the browser as a Bearer token — the proxy is a dumb pass-through.
+ */
+const CEREBRAS_BASE_URL =
+  (import.meta.env.VITE_CEREBRAS_PROXY_URL as string | undefined) ?? '/cerebras-proxy/v1';
 
 /**
  * Cerebras Inference provider. Cerebras exposes an OpenAI-compatible Chat Completions API
@@ -63,6 +73,11 @@ export class CerebrasLlmProvider extends OpenAICompatLlmProvider {
   }
 
   protected override readonly missingKeyMessage = 'No Cerebras API key configured.';
+
+  protected override readonly networkErrorMessage =
+    'Network error contacting Cerebras. In a production build a /cerebras-proxy route must be ' +
+    'configured — browsers cannot call api.cerebras.ai directly. Otherwise, check your connection ' +
+    'and API key.';
 
   /**
    * Live catalog: `GET /v1/models` is authoritative for what the key can use but returns bare ids

@@ -155,6 +155,17 @@ export class OpenAICompatLlmProvider implements LlmProvider {
   /** User-facing message when {@link requiresApiKey} rejects a missing key. */
   protected readonly missingKeyMessage: string = 'No OpenAI API key configured.';
 
+  /**
+   * User-facing message for an opaque fetch failure in {@link chat}. A browser cannot tell a CORS
+   * rejection from a real network error — and when the endpoint omits CORS headers on its error
+   * responses, a rejected key lands here too (not on the readable HTTP path) — so the message must
+   * cover connectivity, CORS, and the key/base URL together. Hosted subclasses override it.
+   */
+  protected readonly networkErrorMessage: string =
+    'Network error contacting the endpoint. The endpoint may be unreachable or missing CORS ' +
+    'headers (for local models like Ollama / LM Studio, set OLLAMA_ORIGINS), or the base URL / ' +
+    'API key may be wrong.';
+
   async chat(params: ChatParams, ctx: LlmRequestContext): Promise<LlmResult> {
     // A locally-hosted endpoint may not require a key; only reject an empty key when the target host
     // requires one (see requiresApiKey).
@@ -185,12 +196,7 @@ export class OpenAICompatLlmProvider implements LlmProvider {
       if (isAbortError(error)) {
         throw new LlmError('aborted', 'The request was cancelled.');
       }
-      throw new LlmError(
-        'network',
-        'Network error contacting the endpoint. For local models (Ollama / LM Studio), enable CORS (e.g. set OLLAMA_ORIGINS) and check the base URL.',
-        undefined,
-        { cause: error }
-      );
+      throw new LlmError('network', this.networkErrorMessage, undefined, { cause: error });
     }
 
     const payload = await readJson(response);

@@ -50,8 +50,8 @@ describe('LlmProviderRegistry', () => {
     expect(registry.get('openai-compat')?.requiresBaseUrl).toBe(true);
     expect(registry.get('openai-compat')?.defaultBaseUrl).toBeTruthy();
     expect(registry.get('gemini')?.requiresBaseUrl).toBeUndefined();
-    // Cerebras is a fixed hosted endpoint: no user-typed base URL, but a default host is set.
+    // Cerebras is a fixed hosted endpoint: no user-typed base URL, but a default (proxy) host is set.
     expect(registry.get('cerebras')?.requiresBaseUrl).toBe(false);
-    expect(registry.get('cerebras')?.defaultBaseUrl).toBe('https://api.cerebras.ai/v1');
+    expect(registry.get('cerebras')?.defaultBaseUrl).toBe('/cerebras-proxy/v1');
   });
 });
