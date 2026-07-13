@@ -1,11 +1,13 @@
 import { ComponentBase, customElement, html, inject, state, css, unsafeCSS } from '@/fw';
 import { appState } from '@/state';
-import type { GameAspectRatio } from '@/state/AppState';
+import type { GameAspectRatio, PlayModeError } from '@/state/AppState';
 import { subscribe } from 'valtio/vanilla';
 import styles from './game-tab.ts.css?raw';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
 import { PreviewHostService } from '@/services/PreviewHostService';
+import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
+import { LayoutManagerService } from '@/core/LayoutManager';
 import './pix3-remote-preview-card';
 
 interface AspectRatioPreset {
@@ -34,6 +36,12 @@ export class GameViewTab extends ComponentBase {
   @inject(PreviewHostService)
   private readonly previewHostService!: PreviewHostService;
 
+  @inject(LayoutManagerService)
+  private readonly layoutManager!: LayoutManagerService;
+
+  @inject(RuntimeErrorBridgeService)
+  private readonly runtimeErrorBridge!: RuntimeErrorBridgeService;
+
   @state()
   private aspectRatio: GameAspectRatio = appState.ui.gameAspectRatio;
 
@@ -51,6 +59,9 @@ export class GameViewTab extends ComponentBase {
 
   @state()
   private isRemotePreviewActive = false;
+
+  @state()
+  private playModeError: PlayModeError | null = appState.ui.playModeError;
 
   private gameContainer?: HTMLElement;
   private viewportContainer?: HTMLElement;
@@ -97,6 +108,7 @@ export class GameViewTab extends ComponentBase {
       this.isPlaying = appState.ui.isPlaying;
       this.isGamePopoutOpen = appState.ui.isGamePopoutOpen;
       this.showColliders = appState.ui.showPhysicsColliders;
+      this.playModeError = appState.ui.playModeError;
       requestAnimationFrame(() => this.handleResize());
       this.requestUpdate();
     });
@@ -194,6 +206,27 @@ export class GameViewTab extends ComponentBase {
     void this.commandDispatcher.executeById('view.toggle-colliders');
   }
 
+  private handleOpenLogsClick() {
+    this.layoutManager.focusPanel('logs');
+  }
+
+  private handleDismissError() {
+    this.runtimeErrorBridge.clearPlayModeError();
+  }
+
+  private formatErrorLocation(error: PlayModeError): string {
+    const parts: string[] = [];
+    if (error.phase) {
+      parts.push(error.phase);
+    }
+    if (error.nodeName) {
+      parts.push(error.componentType ? `${error.nodeName} · ${error.componentType}` : error.nodeName);
+    } else if (error.componentType) {
+      parts.push(error.componentType);
+    }
+    return parts.join(' — ');
+  }
+
   private getPlaceholderTitle(): string {
     if (this.isGamePopoutOpen && !this.isRunning) {
       return 'Game is rendering in a separate window';
@@ -216,6 +249,52 @@ export class GameViewTab extends ComponentBase {
     }
 
     return 'Press Play to run the active scene in this tab, or open a detached game window for an external preview.';
+  }
+
+  private renderErrorBanner(error: PlayModeError) {
+    const location = this.formatErrorLocation(error);
+    return html`
+      <div class="game-error-banner" part="game-error-banner" role="alert">
+        <svg class="game-error-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 2 1 21h22L12 2zm0 5.5c.55 0 1 .45 1 1v5a1 1 0 0 1-2 0v-5c0-.55.45-1 1-1zm0 9.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5z"
+          />
+        </svg>
+        <div class="game-error-body">
+          <div class="game-error-title">Runtime error — the game may have stopped updating</div>
+          ${location ? html`<div class="game-error-location">${location}</div>` : null}
+          <div class="game-error-message">${error.message}</div>
+        </div>
+        <div class="game-error-actions">
+          <button
+            type="button"
+            class="game-error-button"
+            @click=${this.handleOpenLogsClick}
+            title="Open the Logs panel"
+          >
+            Open Logs
+          </button>
+          <button
+            type="button"
+            class="game-error-button"
+            @click=${this.handleRestartClick}
+            title="Restart the game"
+          >
+            Restart
+          </button>
+          <button
+            type="button"
+            class="game-error-dismiss"
+            @click=${this.handleDismissError}
+            aria-label="Dismiss error"
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    `;
   }
 
   protected render() {
@@ -352,6 +431,7 @@ export class GameViewTab extends ComponentBase {
           <div class="game-host aspect-${this.aspectRatio.replace(':', '-')}" part="game-host">
             <!-- Canvas will be attached here -->
           </div>
+          ${this.playModeError ? this.renderErrorBanner(this.playModeError) : null}
           ${this.isRunning
             ? null
             : this.isRemotePreviewActive

@@ -103,8 +103,7 @@ export class EditorTabService {
           t =>
             !t.resourceId.startsWith('templ://') &&
             t.type !== 'game' &&
-            t.type !== 'asset-generator' &&
-            t.type !== 'agent-chat'
+            t.type !== 'asset-generator'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
@@ -115,8 +114,7 @@ export class EditorTabService {
           activeTab &&
           (activeTab.resourceId.startsWith('templ://') ||
             activeTab.type === 'game' ||
-            activeTab.type === 'asset-generator' ||
-            activeTab.type === 'agent-chat')
+            activeTab.type === 'asset-generator')
         ) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
@@ -277,11 +275,12 @@ export class EditorTabService {
   }
 
   /**
-   * Open the in-editor agent chat. A synthetic resource id keeps it a single instance — repeated
-   * opens re-focus the existing tab (same pattern as the empty Asset Generator).
+   * Reveal the in-editor agent chat. It is a docked panel to the right of the viewport (not an
+   * editor tab), so this focuses the existing panel or re-adds it if the user closed it.
    */
   async focusOrOpenAgentChat(): Promise<void> {
-    await this.openResourceTab('agent-chat', 'agent-chat://main', {}, true, 'Agent');
+    this.initialize();
+    this.layoutManager.revealAgentPanel();
   }
 
   remapSceneTabs(remapResourcePath: (resourcePath: string) => string | null): void {
@@ -370,7 +369,6 @@ export class EditorTabService {
         if (t.resourceId.startsWith('templ://')) return false;
         if (t.type === 'game') return false;
         if (t.type === 'asset-generator') return false;
-        if (t.type === 'agent-chat') return false;
         return true;
       });
 

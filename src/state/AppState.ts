@@ -18,8 +18,7 @@ export type EditorTabType =
   | 'animation'
   | 'game'
   | 'code'
-  | 'asset-generator'
-  | 'agent-chat';
+  | 'asset-generator';
 
 export interface CodeEditorSelectionState {
   startLineNumber: number;
@@ -278,6 +277,26 @@ export interface Navigation2DSettings {
 
 export type GameAspectRatio = 'free' | '16:9-landscape' | '16:9-portrait' | '4:3';
 
+/**
+ * Details of the most recent runtime/script failure raised while the game was
+ * launching or playing. Surfaced in the Game tab and the Logs panel so a broken
+ * script no longer fails silently. Ephemeral UI state — never part of undo
+ * history — so it is written directly (not via the mutation gateway), the same
+ * way `project.errorMessage`/`scriptsStatus` are.
+ */
+export interface PlayModeError {
+  /** Short, human-readable summary (usually the thrown Error's message). */
+  message: string;
+  /** Lifecycle stage the failure came from (start/update/scene-start/…). */
+  phase?: string;
+  /** Node this error is attributed to, when known. */
+  nodeName?: string;
+  /** Script component type that threw, when known. */
+  componentType?: string;
+  /** Epoch ms the error was recorded. */
+  at: number;
+}
+
 export interface UIState {
   theme: ThemeName;
   isLayoutReady: boolean;
@@ -314,6 +333,8 @@ export interface UIState {
   /** True when a dedicated external game preview window is open */
   isGamePopoutOpen: boolean;
   playModeStatus: 'stopped' | 'playing' | 'paused';
+  /** Most recent runtime/script failure while playing, or null when clean. */
+  playModeError: PlayModeError | null;
 }
 
 export interface OperationState {
@@ -550,6 +571,7 @@ export const createInitialAppState = (): AppState => ({
     isPlaying: false,
     isGamePopoutOpen: false,
     playModeStatus: 'stopped',
+    playModeError: null,
   },
   operations: {
     isExecuting: false,

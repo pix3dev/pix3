@@ -13,6 +13,7 @@ import type { GameAspectRatio } from '@/state/AppState';
 import { createDefaultQualitySettings, DEFAULT_TARGET_PLATFORM } from '@/core/ProjectManifest';
 import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
+import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
@@ -53,6 +54,9 @@ export class GamePlaySessionService {
   @inject(ProfilerSessionService)
   private readonly profilerSessionService!: ProfilerSessionService;
 
+  @inject(RuntimeErrorBridgeService)
+  private readonly runtimeErrorBridge!: RuntimeErrorBridgeService;
+
   private initialized = false;
   private disposeUiSubscription?: () => void;
   private activeHostKind: GameHostKind | null = null;
@@ -86,6 +90,9 @@ export class GamePlaySessionService {
     }
 
     this.initialized = true;
+    // Ensure runtime script/uncaught errors are bridged into the Logs panel and
+    // the Game-tab banner before any scene can be launched.
+    this.runtimeErrorBridge.initialize();
     // Mirror the collider-debug toggle into the runtime's global flag, which the
     // SceneRunner reads each frame. Set it once up front so the current value
     // applies even before any further UI change fires the subscription.
@@ -184,6 +191,9 @@ export class GamePlaySessionService {
     if (!appState.ui.isPlaying) {
       this.detachRuntime();
       this.updateHostRunningState(false);
+      // Play mode has ended; the banner ("the game may have stopped updating")
+      // no longer applies. The failure is retained in the Logs panel.
+      this.runtimeErrorBridge.clearPlayModeError();
       return;
     }
 
@@ -225,6 +235,9 @@ export class GamePlaySessionService {
     this.detachRuntime();
     this.activeHostKind = host.kind;
     this.updateHostRunningState(false);
+    // Each launch/restart begins with a clean slate — clear any banner from a
+    // previous run so a fresh attempt isn't shadowed by a stale error.
+    this.runtimeErrorBridge.clearPlayModeError();
     this.profilerSessionService.beginSession(host.kind);
 
     const quality =
@@ -255,9 +268,11 @@ export class GamePlaySessionService {
 
     const activeSceneId = appState.scenes.activeSceneId;
     if (!activeSceneId) {
-      console.warn('[GamePlaySessionService] No active scene to play.');
       this.profilerSessionService.endSession();
       this.updateHostRunningState(false);
+      this.runtimeErrorBridge.reportPlayModeFailure(
+        'Cannot start the game: no active scene is open.'
+      );
       return;
     }
 
@@ -267,8 +282,12 @@ export class GamePlaySessionService {
       this.handleFocusPause();
     } catch (error) {
       this.profilerSessionService.endSession();
-      console.error('[GamePlaySessionService] Failed to start scene', error);
       this.updateHostRunningState(false);
+      const detail = error instanceof Error ? error.message : String(error);
+      this.runtimeErrorBridge.reportPlayModeFailure(
+        `Failed to start the scene: ${detail}`,
+        error
+      );
       throw error;
     }
   }

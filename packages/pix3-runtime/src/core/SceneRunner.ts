@@ -39,6 +39,8 @@ import {
   registerRuntimeSceneRoot,
   registerRuntimeLivePropertySink,
   isPhysicsDebugEnabled,
+  reportScriptError,
+  describeThrown,
 } from './game-debug';
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
@@ -185,7 +187,10 @@ export class SceneRunner {
       this.runtimeGraph = await this.sceneManager.parseScene(serialized);
     } catch (err) {
       console.error('[SceneRunner] Failed to clone scene for runtime:', err);
-      return;
+      // Surface to the caller (the editor's GamePlaySessionService wraps this in
+      // a try/catch that reports the failure); previously this returned silently,
+      // leaving the Game tab stuck on "Preparing runtime preview".
+      throw err;
     }
 
     // Add root nodes to the THREE.Scene
@@ -375,7 +380,7 @@ export class SceneRunner {
     this.ecsService.update(dt, alpha);
 
     this.renderer.beginStatsFrame();
-    this.updateNodes(dt);
+    this.updateGameLogicSafe(dt);
     this.flushInstancedNodes();
     const logicMs = performance.now() - logicStart;
     const renderStart = performance.now();
@@ -403,6 +408,30 @@ export class SceneRunner {
     return () => {
       this.frameListeners.delete(listener);
     };
+  }
+
+  /** De-duped last error surfaced from the per-frame game-logic pass. */
+  private lastTickErrorMessage: string | null = null;
+
+  /**
+   * Run the per-frame node tick with a hard error boundary. Individual script
+   * hooks already isolate themselves (NodeBase.runComponentHook), so this is the
+   * belt-and-braces guard for anything else that throws in the update pass — a
+   * single throw must never prevent `requestAnimationFrame` from rescheduling
+   * and freezing the game. Duplicate consecutive messages are reported once.
+   */
+  private updateGameLogicSafe(dt: number): void {
+    try {
+      this.updateNodes(dt);
+      this.lastTickErrorMessage = null;
+    } catch (thrown) {
+      const { message, stack } = describeThrown(thrown);
+      if (message !== this.lastTickErrorMessage) {
+        this.lastTickErrorMessage = message;
+        console.error('[SceneRunner] Error during game update:', thrown);
+        reportScriptError({ phase: 'tick', message, stack });
+      }
+    }
   }
 
   private updateNodes(dt: number): void {

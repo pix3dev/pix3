@@ -199,3 +199,95 @@ export function isPhysicsDebugEnabled(): boolean {
   const store = globalThis as unknown as PhysicsDebugEnabledGlobal;
   return store[PHYSICS_DEBUG_ENABLED_KEY] === true;
 }
+
+/**
+ * The lifecycle stage a script error was thrown from. `scene-start` covers
+ * failures while cloning/loading the scene before any script ran; `tick` covers
+ * an error escaping the per-frame update outside a single component.
+ */
+export type ScriptErrorPhase =
+  | 'attach'
+  | 'start'
+  | 'update'
+  | 'detach'
+  | 'scene-start'
+  | 'tick';
+
+/**
+ * A runtime script/lifecycle failure, in an editor-agnostic shape. The runtime
+ * builds these when a user script (or scene load) throws; the editor's bridge
+ * forwards them into the Logs panel and the Game tab. Keep it JSON-serialisable.
+ */
+export interface ScriptErrorInfo {
+  phase: ScriptErrorPhase;
+  message: string;
+  stack?: string;
+  nodeId?: string;
+  nodeName?: string;
+  componentType?: string;
+  componentId?: string;
+}
+
+export type ScriptErrorSink = (error: ScriptErrorInfo) => void;
+
+/**
+ * Well-known global key for the **script-error sink**. The runtime catches
+ * throws from script lifecycle hooks (`onStart`/`onUpdate`/…) and scene loading
+ * so one bad script can no longer kill the game loop; it reports each failure
+ * here. The editor registers a sink that surfaces the error in the Logs panel
+ * and Game tab; in exported builds/tests no sink is registered and reporting is
+ * a no-op. Stored on `globalThis` so it bridges runtime module copies (in-editor
+ * user scripts resolve `@pix3/runtime` through a separate import map).
+ */
+export const SCRIPT_ERROR_SINK_GLOBAL_KEY = '__PIX3_SCRIPT_ERROR_SINK__';
+
+type ScriptErrorSinkGlobal = Record<string, ScriptErrorSink | null | undefined>;
+
+/**
+ * Register (or clear, with `null`) the script-error sink. Called by the editor
+ * on startup; returns a disposer that clears it.
+ */
+export function registerScriptErrorSink(sink: ScriptErrorSink | null): () => void {
+  const store = globalThis as unknown as ScriptErrorSinkGlobal;
+  store[SCRIPT_ERROR_SINK_GLOBAL_KEY] = sink ?? undefined;
+  return () => {
+    if (store[SCRIPT_ERROR_SINK_GLOBAL_KEY] === sink) {
+      delete store[SCRIPT_ERROR_SINK_GLOBAL_KEY];
+    }
+  };
+}
+
+/** The registered script-error sink, if any. */
+export function getScriptErrorSink(): ScriptErrorSink | null {
+  const store = globalThis as unknown as ScriptErrorSinkGlobal;
+  return store[SCRIPT_ERROR_SINK_GLOBAL_KEY] ?? null;
+}
+
+/**
+ * Report a script/lifecycle failure to the registered sink, if any. A missing
+ * sink is a no-op, and a sink that itself throws is swallowed — reporting an
+ * error must never be able to break the game loop.
+ */
+export function reportScriptError(error: ScriptErrorInfo): void {
+  const sink = getScriptErrorSink();
+  if (!sink) {
+    return;
+  }
+  try {
+    sink(error);
+  } catch {
+    // A broken sink must not take down the runtime.
+  }
+}
+
+/**
+ * Normalise an unknown thrown value into the message/stack fields shared by
+ * {@link ScriptErrorInfo}. Kept here so both the runtime and its consumers
+ * format thrown values the same way.
+ */
+export function describeThrown(thrown: unknown): { message: string; stack?: string } {
+  if (thrown instanceof Error) {
+    return { message: `${thrown.name}: ${thrown.message}`, stack: thrown.stack };
+  }
+  return { message: String(thrown) };
+}

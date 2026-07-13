@@ -83,7 +83,12 @@ describe('LayoutManagerService', () => {
     const config = loadLayout.mock.calls[0]?.[0] as {
       root: { content: Array<{ content?: Array<{ componentType?: string }> }> };
     };
-    const rightSidebar = config.root.content[2];
+
+    // Agent chat is its own column to the right of the viewport, before the Inspector sidebar.
+    const agentColumn = config.root.content[2];
+    expect(agentColumn.content?.map(item => item.componentType)).toEqual(['agent-chat']);
+
+    const rightSidebar = config.root.content[3];
     const componentTypes = rightSidebar.content?.map(item => item.componentType);
 
     expect(componentTypes).toEqual(['inspector', 'profiler']);

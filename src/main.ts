@@ -22,6 +22,16 @@ const container = ServiceContainer.getInstance();
 const registry = container.getService<ScriptRegistry>(container.getOrCreateToken(ScriptRegistry));
 registerBuiltInScripts(registry);
 
+// Bridge runtime script/uncaught errors into the Logs panel and Game tab from
+// app start, so a broken script surfaces its error instead of failing silently.
+import { RuntimeErrorBridgeService } from './services/RuntimeErrorBridgeService';
+
+container
+  .getService<RuntimeErrorBridgeService>(
+    container.getOrCreateToken(RuntimeErrorBridgeService)
+  )
+  .initialize();
+
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';

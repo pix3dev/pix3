@@ -98,7 +98,7 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
     content: [
       {
         type: 'column',
-        width: 20,
+        width: 18,
         content: [
           {
             type: 'stack',
@@ -139,7 +139,7 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
       },
       {
         type: 'column',
-        width: 50,
+        width: 42,
         content: [
           {
             type: 'stack',
@@ -183,7 +183,21 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
 
       {
         type: 'stack',
-        width: 30,
+        id: 'agent-stack',
+        width: 20,
+        content: [
+          {
+            type: 'component',
+            componentType: PANEL_COMPONENT_TYPES.agentChat,
+            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat],
+            isClosable: true,
+          },
+        ],
+      },
+
+      {
+        type: 'stack',
+        width: 20,
         content: [
           {
             type: 'component',
@@ -367,9 +381,7 @@ export class LayoutManagerService {
                 ? PANEL_COMPONENT_TYPES.code
                 : tab.type === 'asset-generator'
                   ? PANEL_COMPONENT_TYPES.assetGenerator
-                  : tab.type === 'agent-chat'
-                    ? PANEL_COMPONENT_TYPES.agentChat
-                    : PANEL_COMPONENT_TYPES.viewport,
+                  : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
         // PREVENT DRAGGING to enforce Single Document Interface
@@ -548,6 +560,65 @@ export class LayoutManagerService {
     }
   }
 
+  /**
+   * Reveal the Agent chat panel. It lives as a docked column to the right of the viewport in the
+   * default layout, so normally this just brings it to the front of its stack. If the user closed
+   * the panel, re-add it as a new column before the Inspector (falling back to Golden Layout's
+   * default placement if the tree can't be navigated).
+   */
+  revealAgentPanel(): void {
+    if (!this.layout) {
+      return;
+    }
+
+    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
+    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.agentChat);
+    if (existing) {
+      this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
+      return;
+    }
+
+    const componentConfig: ComponentItemConfig = {
+      type: 'component',
+      componentType: PANEL_COMPONENT_TYPES.agentChat,
+      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat],
+      isClosable: true,
+    };
+
+    // Re-add as its own column just before the Inspector (the last top-level child).
+    try {
+      const root = rootItem as
+        | (ContentItem & {
+            addItem?: (config: unknown, index?: number) => number;
+            contentItems?: ContentItem[];
+          })
+        | undefined;
+      if (root && root.type === 'row' && typeof root.addItem === 'function') {
+        const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
+        root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
+        this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
+        return;
+      }
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Agent panel as a column', error);
+    }
+
+    // Fallback: let Golden Layout choose a placement.
+    try {
+      const layoutApi = this.layout as unknown as {
+        addComponent?: (componentType: string, state?: unknown, title?: string) => void;
+      };
+      layoutApi.addComponent?.(
+        PANEL_COMPONENT_TYPES.agentChat,
+        undefined,
+        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat]
+      );
+      this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Agent panel', error);
+    }
+  }
+
   private findEditorTabByTabId(
     node: ContentItem | null | undefined,
     tabId: string
@@ -581,8 +652,7 @@ export class LayoutManagerService {
       componentType === PANEL_COMPONENT_TYPES.animation ||
       componentType === PANEL_COMPONENT_TYPES.game ||
       componentType === PANEL_COMPONENT_TYPES.code ||
-      componentType === PANEL_COMPONENT_TYPES.assetGenerator ||
-      componentType === PANEL_COMPONENT_TYPES.agentChat
+      componentType === PANEL_COMPONENT_TYPES.assetGenerator
     );
   }
 

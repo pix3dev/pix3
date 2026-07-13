@@ -2,6 +2,7 @@ import { Object3D, type BufferGeometry, type Material } from 'three';
 import type { PropertySchema } from '../fw/property-schema';
 import type { ScriptComponent } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
+import { describeThrown, reportScriptError, type ScriptErrorPhase } from '../core/game-debug';
 
 export interface NodeMetadata {
   [key: string]: unknown;
@@ -250,16 +251,55 @@ export class NodeBase extends Object3D {
     this.components.push(component);
 
     // Call onAttach if defined
-    if (component.onAttach) {
-      component.onAttach(this);
+    const onAttach = component.onAttach;
+    if (onAttach) {
+      this.runComponentHook(component, 'attach', () => onAttach.call(component, this));
     }
 
     // If the scene is already running (node has been started), start the component immediately
     // We detect this by checking if any existing component has been started
     const sceneRunning = this.components.some(c => c._started);
-    if (sceneRunning && component.enabled && component.onStart) {
-      component.onStart();
+    const onStart = component.onStart;
+    if (sceneRunning && component.enabled && onStart) {
+      this.runComponentHook(component, 'start', () => onStart.call(component));
       component._started = true;
+    }
+  }
+
+  /**
+   * Run a script lifecycle hook with error isolation. A throwing script must not
+   * kill the frame, its siblings, or the game loop, so we catch, report the
+   * failure through the runtime's script-error sink (surfaced by the editor's
+   * Logs panel / Game tab), log to the console for DevTools, and disable the
+   * offending component so it can't spam an error every frame. Returns whether
+   * the hook completed without throwing.
+   */
+  private runComponentHook(
+    component: ScriptComponent,
+    phase: ScriptErrorPhase,
+    run: () => void
+  ): boolean {
+    try {
+      run();
+      return true;
+    } catch (thrown) {
+      // Disable first so any re-entrant work sees the component as inactive.
+      component.enabled = false;
+      const { message, stack } = describeThrown(thrown);
+      console.error(
+        `[NodeBase] Script "${component.type}" threw in ${phase} on node "${this.name}" (disabled):`,
+        thrown
+      );
+      reportScriptError({
+        phase,
+        message,
+        stack,
+        nodeId: this.nodeId,
+        nodeName: this.name,
+        componentType: component.type,
+        componentId: component.id,
+      });
+      return false;
     }
   }
 
@@ -306,18 +346,29 @@ export class NodeBase extends Object3D {
    * @param dt - Delta time in seconds since last frame
    */
   tick(dt: number): void {
-    // Update all enabled components
+    // Update all enabled components. Each hook runs isolated (see
+    // runComponentHook) so one throwing script disables itself instead of
+    // killing this frame, its siblings, or the whole game loop.
     for (const component of this.components) {
-      if (component.enabled) {
-        // Call onStart on first update
-        if (!component._started && component.onStart) {
-          component.onStart();
-          component._started = true;
+      if (!component.enabled) {
+        continue;
+      }
+
+      // Call onStart on first update.
+      const onStart = component.onStart;
+      if (!component._started && onStart) {
+        const started = this.runComponentHook(component, 'start', () => onStart.call(component));
+        component._started = true;
+        // A failed onStart disabled the component; skip onUpdate this frame.
+        if (!started) {
+          continue;
         }
-        // Call onUpdate
-        if (component.onUpdate) {
-          component.onUpdate(dt);
-        }
+      }
+
+      // Call onUpdate (component may have been disabled by a failed onStart).
+      const onUpdate = component.onUpdate;
+      if (component.enabled && onUpdate) {
+        this.runComponentHook(component, 'update', () => onUpdate.call(component, dt));
       }
     }
 

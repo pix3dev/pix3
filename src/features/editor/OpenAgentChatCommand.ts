@@ -3,8 +3,9 @@ import { EditorTabService } from '@/services/EditorTabService';
 import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '@/core/command';
 
 /**
- * Opens the in-editor AI agent chat as an editor tab. Opening an editor is not an undoable state
- * change, so this returns `didMutate: false` and never creates an Operation.
+ * Reveals the in-editor AI agent chat, a docked panel to the right of the viewport. Revealing a
+ * panel is not an undoable state change, so this returns `didMutate: false` and never creates an
+ * Operation.
  */
 export class OpenAgentChatCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
