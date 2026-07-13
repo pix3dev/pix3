@@ -93,6 +93,43 @@ describe('AssetTree', () => {
     expect(allNames).toContain('panel.png');
   });
 
+  it('opens the mapped folder in the preview when a single-folder category is clicked', async () => {
+    const tree = document.createElement('pix3-asset-tree') as AssetTreeElement;
+    const assetsPreviewService = stubTreeServices(
+      tree,
+      {
+        '.': [
+          { name: 'scenes', path: 'scenes', kind: 'directory', size: 0 },
+          { name: 'textures', path: 'textures', kind: 'directory', size: 0 },
+        ],
+        scenes: [{ name: 'main.pix3scene', path: 'scenes/main.pix3scene', kind: 'file', size: 10 }],
+        textures: [{ name: 'ui', path: 'textures/ui', kind: 'directory', size: 0 }],
+        'textures/ui': [
+          { name: 'button.png', path: 'textures/ui/button.png', kind: 'file', size: 2048 },
+        ],
+      },
+      {
+        expandedPaths: [],
+        selectedPath: null,
+        viewMode: 'by-type',
+        groupedExpandedKeys: [],
+      }
+    );
+
+    document.body.appendChild(tree);
+    await vi.waitFor(() => {
+      expect(Array.from(tree.querySelectorAll('.node-row--category'))).toHaveLength(2);
+    });
+
+    assetsPreviewService.syncFromAssetSelection.mockClear();
+
+    const scenesRow = tree.querySelector('.node-row--category') as HTMLElement;
+    scenesRow.click();
+
+    // The category maps to exactly one project folder, so clicking it previews that folder.
+    expect(assetsPreviewService.syncFromAssetSelection).toHaveBeenCalledWith('scenes', 'directory');
+  });
+
   it('formats byte values consistently', () => {
     const tree = new AssetTree();
     const formatFileSize = (
@@ -116,7 +153,7 @@ function stubTreeServices(
     viewMode: 'folders' | 'by-type';
     groupedExpandedKeys: string[];
   } | null = null
-): void {
+): { syncFromAssetSelection: ReturnType<typeof vi.fn> } {
   const projectService = {
     listDirectory: vi.fn(async (path = '.') => directories[path] ?? []),
     saveAssetBrowserState: vi.fn(),
@@ -159,4 +196,6 @@ function stubTreeServices(
     value: assetsPreviewService,
     configurable: true,
   });
+
+  return assetsPreviewService;
 }

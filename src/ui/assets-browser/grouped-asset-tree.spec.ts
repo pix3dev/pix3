@@ -87,6 +87,7 @@ describe('buildGroupedTree', () => {
     const tree = build([file('images/64x64.png'), file('images/ai.jpg')]);
     const images = tree.find(node => node.categoryId === 'images');
     expect(images?.folderLabel).toBe('images');
+    expect(images?.folderPath).toBe('images');
     expect(names(images?.children)).toEqual(['64x64.png', 'ai.jpg']);
     expect(images?.children?.every(child => child.nodeType === 'file')).toBe(true);
     expect(images?.fileCount).toBe(2);
@@ -96,7 +97,15 @@ describe('buildGroupedTree', () => {
     const tree = build([file('assets/textures/ui/button.png')]);
     const images = tree.find(node => node.categoryId === 'images');
     expect(images?.folderLabel).toBe('assets/textures/ui');
+    expect(images?.folderPath).toBe('assets/textures/ui');
     expect(names(images?.children)).toEqual(['button.png']);
+  });
+
+  it('leaves folderPath undefined when the category spans multiple folders', () => {
+    const tree = build([file('a/one.png'), file('b/two.png'), file('loose.png')]);
+    const images = tree.find(node => node.categoryId === 'images');
+    expect(images?.folderLabel).toBeUndefined();
+    expect(images?.folderPath).toBeUndefined();
   });
 
   it('keeps nested subfolders visible after lifting the lone root folder', () => {

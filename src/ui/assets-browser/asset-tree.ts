@@ -790,7 +790,11 @@ export class AssetTree extends ComponentBase {
 
   private notifyAssetSelected(node: Node): void {
     if (node.nodeType === 'category') {
-      // Virtual rows have no backing file; keep the preview and listeners untouched.
+      // A category that compacted a single project folder opens that folder in the
+      // preview; categories spanning multiple folders keep the preview untouched.
+      if (node.folderPath) {
+        void this.assetsPreviewService.syncFromAssetSelection(node.folderPath, 'directory');
+      }
       return;
     }
     void this.assetsPreviewService.syncFromAssetSelection(node.path, node.kind);

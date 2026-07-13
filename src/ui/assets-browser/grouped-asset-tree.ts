@@ -32,6 +32,12 @@ export type AssetTreeNode = {
    * folder into itself; undefined otherwise.
    */
   folderLabel?: string;
+  /**
+   * Real FS path of the folder a category row was lifted from (the sibling of
+   * `folderLabel`). Set only when the category maps to exactly one project
+   * folder, so clicking the row can open that folder in the asset preview.
+   */
+  folderPath?: string;
 };
 
 export const CATEGORY_PATH_PREFIX = 'category:';
@@ -131,6 +137,7 @@ export function buildGroupedTree(
 
     let children = trieToNodes(root, definition.id, options.expandedKeys);
     let folderLabel: string | undefined;
+    let folderPath: string | undefined;
     // VS Code-style single-folder compaction: when a category holds exactly one
     // top-level folder and no loose files, drop that redundant intermediate level
     // and lift its content straight into the category row, surfacing the folder's
@@ -138,6 +145,7 @@ export function buildGroupedTree(
     if (children.length === 1 && children[0].nodeType === 'dir') {
       const [lone] = children;
       folderLabel = lone.name;
+      folderPath = lone.path;
       children = lone.children ?? [];
     }
 
@@ -149,6 +157,7 @@ export function buildGroupedTree(
       categoryId: definition.id,
       fileCount: categoryFiles.length,
       folderLabel,
+      folderPath,
       sizeBytes: null,
       expanded:
         options.expandedKeys.has(groupedCategoryExpansionKey(definition.id)) ||
