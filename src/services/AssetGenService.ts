@@ -22,14 +22,18 @@ import {
   compressImageBlob,
   cropImageBlob,
   ensureImageExtension,
+  flipImageBlob,
   imageAlphaStats,
   normalizeAssetPath,
   readBlobSize,
   resizeImageBlob,
+  rotateImageBlob,
   trimImageBlob,
   type AlphaStats,
   type CropRectPixels,
+  type FlipAxis,
   type ImageEncoding,
+  type QuarterTurns,
 } from '@/services/image-gen/image-ops';
 
 /** Where an in-memory image handle came from (informational). */
@@ -40,6 +44,8 @@ export type AssetImageSource =
   | 'resized'
   | 'cropped'
   | 'trimmed'
+  | 'rotated'
+  | 'flipped'
   | 'bg-removed'
   | 'compressed'
   | 'import';
@@ -368,6 +374,32 @@ export class AssetGenService {
       result.blob,
       result.blob.type || 'image/png',
       'cropped',
+      image.prompt
+    );
+    return this.toMeta(stored);
+  }
+
+  /** Rotate a handle clockwise by 90° (`1`), 180° (`2`) or 270° (`3`). Returns a NEW handle. */
+  async rotate(id: string, quarterTurns: QuarterTurns): Promise<AssetImageMeta> {
+    const image = this.require(id);
+    const result = await rotateImageBlob(image.blob, quarterTurns);
+    const stored = await this.store(
+      result.blob,
+      result.blob.type || image.mimeType,
+      'rotated',
+      image.prompt
+    );
+    return this.toMeta(stored);
+  }
+
+  /** Mirror a handle horizontally or vertically. Returns a NEW handle. */
+  async flip(id: string, axis: FlipAxis): Promise<AssetImageMeta> {
+    const image = this.require(id);
+    const result = await flipImageBlob(image.blob, axis);
+    const stored = await this.store(
+      result.blob,
+      result.blob.type || image.mimeType,
+      'flipped',
       image.prompt
     );
     return this.toMeta(stored);

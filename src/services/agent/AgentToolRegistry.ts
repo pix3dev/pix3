@@ -36,6 +36,13 @@ import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { SceneManager, NodeBase, ScriptRegistry, getNodePropertySchema } from '@pix3/runtime';
+import { Vector2 } from 'three';
+import {
+  buildCreateNodeCommand,
+  CREATABLE_NODE_TYPES,
+  type CreateNodeOptions,
+} from '@/services/agent/create-node-registry';
+import { ConvertNodeTypeCommand } from '@/features/scene/ConvertNodeTypeCommand';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
@@ -328,6 +335,73 @@ export class AgentToolRegistry {
           await this.ensureActiveScene();
           return this.setProperty(asString(args.nodeId), asString(args.propertyPath), args.value);
         },
+      },
+      {
+        name: 'create_node',
+        description:
+          "Create a new node in the active scene (undoable). Use it to build scenes and — importantly — to turn placeholder art into real graphics, e.g. add a Sprite2D that shows a generated texture. `nodeType` is case-insensitive; creatable types: " +
+          CREATABLE_NODE_TYPES.join(', ') +
+          ". Pass `texturePath` (res://…) for sprites (it also auto-sizes them), an optional `parentId` (defaults to a sensible root) and `position` {x,y}, and a `properties` object for anything else (color/width/height/label/opacity/…) applied via set_property after creation. Returns the new nodeId. To REPLACE an existing placeholder such as a ColorRect2D with a sprite, prefer convert_node_type — it keeps the node's transform, components and children.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeType: { type: 'string', description: 'e.g. "Sprite2D" (case-insensitive).' },
+            name: { type: 'string' },
+            parentId: {
+              type: 'string',
+              description: 'Parent node id; omit for a sensible default root.',
+            },
+            position: {
+              type: 'object',
+              description: "2D position {x,y} in the parent's space.",
+              properties: { x: { type: 'number' }, y: { type: 'number' } },
+            },
+            texturePath: {
+              type: 'string',
+              description:
+                'res:// image path for Sprite2D / TiledSprite2D / Sprite3D (also auto-sizes the sprite).',
+            },
+            width: { type: 'number' },
+            height: { type: 'number' },
+            text: { type: 'string', description: 'Initial text for Label2D.' },
+            src: { type: 'string', description: 'res://….glb path for MeshInstance3D.' },
+            properties: {
+              type: 'object',
+              description:
+                'Extra schema properties applied after creation via set_property, e.g. {"color":"#ff0000","opacity":0.5}.',
+              additionalProperties: true,
+            },
+          },
+          required: ['nodeType'],
+          additionalProperties: false,
+        },
+        handler: args => this.createNode(args),
+      },
+      {
+        name: 'convert_node_type',
+        description:
+          "Replace an existing node with a new node of a different type IN PLACE, keeping its id, name, transform, size, attached components AND children (undoable). This is the right way to \"skin\" a placeholder: e.g. convert a scaffolding ColorRect2D into a Sprite2D showing a generated texture without losing the script component on it. Pass the new visual bits via `properties` (e.g. {\"texturePath\":\"res://…\"} for a sprite). Common target types: " +
+          CREATABLE_NODE_TYPES.join(', ') +
+          ' (most serializable node types work). Returns the (unchanged) nodeId and its new type.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string', description: 'Id of the node to replace.' },
+            toType: {
+              type: 'string',
+              description: 'Target node type, e.g. "Sprite2D" (case-sensitive type name).',
+            },
+            properties: {
+              type: 'object',
+              description:
+                'Property overrides for the new node, applied on top of the migrated ones — e.g. {"texturePath":"res://…"} for a Sprite2D.',
+              additionalProperties: true,
+            },
+          },
+          required: ['nodeId', 'toType'],
+          additionalProperties: false,
+        },
+        handler: args => this.convertNodeType(args),
       },
       {
         name: 'list_component_types',
@@ -721,6 +795,17 @@ export class AgentToolRegistry {
               description:
                 'Project image paths used as style references. WARNING: the generator copies composition, not just style — a full gameplay screenshot as reference for a single-object sprite tends to reproduce the whole scene. For single-object sprites/icons prefer style keywords in the prompt and omit this; pass references when you want a scene-like result (backgrounds, mockups).',
             },
+            rotate: {
+              type: 'integer',
+              enum: [90, 180, 270],
+              description:
+                'Rotate the result clockwise by this many degrees AFTER post-processing. Use to fix a top-down sprite that came out sideways (e.g. a car whose nose points left/down instead of up) without regenerating.',
+            },
+            flip: {
+              type: 'string',
+              enum: ['horizontal', 'vertical'],
+              description: 'Mirror the result horizontally or vertically (applied after rotate).',
+            },
           },
           required: ['prompt', 'name'],
           additionalProperties: false,
@@ -730,7 +815,7 @@ export class AgentToolRegistry {
       {
         name: 'process_asset',
         description:
-          'Post-process an EXISTING project image: background removal, trim to content, downscale, re-encode. Use it to fix an image that has an unwanted background, is too large, or is not cropped tight (e.g. a previously generated sprite or a user import). Presets match generate_asset: sprite / icon / texture / none. Writes back to `path` unless `name` is given. Returns the saved path and a preview.',
+          'Post-process an EXISTING project image: background removal, trim to content, downscale, re-encode, and optional rotate/flip. Use it to fix an image that has an unwanted background, is too large, is not cropped tight, or is mis-oriented (e.g. a previously generated sprite or a user import). Presets match generate_asset: sprite / icon / texture / none. Pass rotate (90/180/270) and/or flip (horizontal/vertical) to re-orient without regenerating. Writes back to `path` unless `name` is given. Returns the saved path and a preview.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -751,6 +836,17 @@ export class AgentToolRegistry {
             maxSize: {
               type: 'integer',
               description: 'Longest-edge cap in px; omit to use the project default.',
+            },
+            rotate: {
+              type: 'integer',
+              enum: [90, 180, 270],
+              description:
+                'Rotate clockwise by this many degrees after the preset runs — fixes a sideways sprite (e.g. a top-down car whose nose points the wrong way) without regenerating.',
+            },
+            flip: {
+              type: 'string',
+              enum: ['horizontal', 'vertical'],
+              description: 'Mirror horizontally or vertically (applied after rotate).',
             },
           },
           required: ['path'],
@@ -923,6 +1019,105 @@ export class AgentToolRegistry {
       await this.saveActiveSceneBestEffort();
     }
     return { ok };
+  }
+
+  private async createNode(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot create a node.' };
+    }
+    await this.ensureActiveScene();
+    if (!this.sceneManager.getActiveSceneGraph()) {
+      return { ok: false, error: 'No active scene — open a scene first.' };
+    }
+    const nodeType = asString(args.nodeType);
+    const options: CreateNodeOptions = {
+      name: typeof args.name === 'string' ? args.name : undefined,
+      parentNodeId: typeof args.parentId === 'string' ? args.parentId : undefined,
+      position: parseVector2(args.position),
+      width: typeof args.width === 'number' ? args.width : undefined,
+      height: typeof args.height === 'number' ? args.height : undefined,
+      texturePath: typeof args.texturePath === 'string' ? args.texturePath : undefined,
+      text: typeof args.text === 'string' ? args.text : undefined,
+      src: typeof args.src === 'string' ? args.src : undefined,
+    };
+    const command = buildCreateNodeCommand(nodeType, options);
+    if (!command) {
+      return {
+        ok: false,
+        error: `Cannot create node type "${nodeType}". Creatable types: ${CREATABLE_NODE_TYPES.join(', ')}.`,
+      };
+    }
+    const didMutate = await this.dispatcher.execute(command);
+    if (!didMutate) {
+      return {
+        ok: false,
+        error: `Creating a ${nodeType} did not mutate the scene (blocked by preconditions?).`,
+      };
+    }
+    // The create operation selects the new node — that's how its id surfaces to callers (see
+    // getCreatedNodeIdFromSelection in scene-command-utils).
+    const nodeId = appState.selection.primaryNodeId ?? '';
+
+    // Apply any extra schema properties the create params didn't cover (color, opacity, label, …).
+    const propertyErrors: Record<string, string> = {};
+    const props = args.properties;
+    if (nodeId && props && typeof props === 'object' && !Array.isArray(props)) {
+      for (const [path, value] of Object.entries(props as Record<string, unknown>)) {
+        const result = await this.setProperty(nodeId, path, value);
+        if (!result.ok) {
+          propertyErrors[path] = result.error ?? 'property could not be set';
+        }
+      }
+    }
+    await this.saveActiveSceneBestEffort();
+
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    return {
+      ok: true,
+      nodeId,
+      nodeType: node?.type ?? nodeType,
+      name: node?.name,
+      ...(Object.keys(propertyErrors).length > 0 ? { propertyErrors } : {}),
+    };
+  }
+
+  private async convertNodeType(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot convert a node.' };
+    }
+    await this.ensureActiveScene();
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) {
+      return { ok: false, error: 'No active scene — open a scene first.' };
+    }
+    const nodeId = asString(args.nodeId);
+    const toType = asString(args.toType);
+    const source = graph.nodeMap.get(nodeId);
+    if (!(source instanceof NodeBase)) {
+      return { ok: false, error: `Node "${nodeId}" not found in the active scene.` };
+    }
+    if (source.type === toType) {
+      return { ok: false, error: `Node "${nodeId}" is already a ${toType}.` };
+    }
+    const props = args.properties;
+    const properties =
+      props && typeof props === 'object' && !Array.isArray(props)
+        ? (props as Record<string, unknown>)
+        : undefined;
+
+    const didMutate = await this.dispatcher.execute(
+      new ConvertNodeTypeCommand({ nodeId, toType, properties })
+    );
+    if (!didMutate) {
+      return {
+        ok: false,
+        error: `Could not convert "${nodeId}" to "${toType}" — the target type may be unknown or the node is a prefab instance. Common target types: ${CREATABLE_NODE_TYPES.join(', ')}.`,
+      };
+    }
+    await this.saveActiveSceneBestEffort();
+
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    return { ok: true, nodeId, nodeType: node?.type ?? toType, name: node?.name };
   }
 
   /**
@@ -1490,9 +1685,12 @@ export class AgentToolRegistry {
     try {
       const processed = await this.assetGen.postProcess(generated.id, preset, { maxSize });
       handleIds.add(processed.id);
-      const saved = await this.assetGen.save(processed.id, name, {});
-      const transparency = await this.assetGen.alphaStats(processed.id);
-      // Preview the PROCESSED handle (what was actually saved), not the raw generation.
+      // Optional orientation fix (rotate/flip) applied AFTER post-processing — top-down sprites
+      // often come out sideways and the model can't otherwise re-orient without regenerating.
+      const oriented = await this.applyOrientation(processed.id, args, id => handleIds.add(id));
+      const saved = await this.assetGen.save(oriented, name, {});
+      const transparency = await this.assetGen.alphaStats(oriented);
+      // Preview the ORIENTED handle (what was actually saved), not the raw generation.
       return {
         ok: true,
         saved,
@@ -1500,7 +1698,7 @@ export class AgentToolRegistry {
         original: { width: generated.width, height: generated.height },
         transparency,
         note: transparencyNote(preset, transparency),
-        ...(await this.previewImages(processed.id)),
+        ...(await this.previewImages(oriented)),
       };
     } finally {
       for (const id of handleIds) {
@@ -1524,15 +1722,16 @@ export class AgentToolRegistry {
     try {
       const processed = await this.assetGen.postProcess(opened.id, preset, { maxSize });
       handleIds.add(processed.id);
-      const saved = await this.assetGen.save(processed.id, outName, {});
-      const transparency = await this.assetGen.alphaStats(processed.id);
+      const oriented = await this.applyOrientation(processed.id, args, id => handleIds.add(id));
+      const saved = await this.assetGen.save(oriented, outName, {});
+      const transparency = await this.assetGen.alphaStats(oriented);
       return {
         ok: true,
         saved,
         preset,
         transparency,
         note: `Processed "${path}" → "${saved.path}" with the "${preset}" preset. ${transparencyNote(preset, transparency)}`,
-        ...(await this.previewImages(processed.id)),
+        ...(await this.previewImages(oriented)),
       };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -1541,6 +1740,33 @@ export class AgentToolRegistry {
         this.assetGen.discard(id);
       }
     }
+  }
+
+  /**
+   * Apply optional `rotate` (90/180/270, clockwise) then `flip` ('horizontal'/'vertical') to an
+   * image handle, returning the id of the final handle (the input id when neither is requested).
+   * Each intermediate handle is registered via `track` so the caller frees it. Invalid values are
+   * ignored rather than erroring — orientation is a best-effort refinement.
+   */
+  private async applyOrientation(
+    handleId: string,
+    args: Record<string, unknown>,
+    track: (id: string) => void
+  ): Promise<string> {
+    let currentId = handleId;
+    const rotate = asInt(args.rotate, 0);
+    if (rotate === 90 || rotate === 180 || rotate === 270) {
+      const rotated = await this.assetGen.rotate(currentId, (rotate / 90) as 1 | 2 | 3);
+      track(rotated.id);
+      currentId = rotated.id;
+    }
+    const flip = typeof args.flip === 'string' ? args.flip : '';
+    if (flip === 'horizontal' || flip === 'vertical') {
+      const flipped = await this.assetGen.flip(currentId, flip);
+      track(flipped.id);
+      currentId = flipped.id;
+    }
+    return currentId;
   }
 
   /** Build the `__images` payload from a 256px preview of a handle, for visual QC by the model. */
@@ -1622,6 +1848,25 @@ const asString = (value: unknown): string => {
 
 const asInt = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+
+/** Parse an agent-supplied 2D position ({x,y} object or [x,y] array) into a Vector2, or undefined. */
+const parseVector2 = (value: unknown): Vector2 | undefined => {
+  if (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number'
+  ) {
+    return new Vector2(value[0], value[1]);
+  }
+  if (value && typeof value === 'object') {
+    const v = value as { x?: unknown; y?: unknown };
+    if (typeof v.x === 'number' && typeof v.y === 'number') {
+      return new Vector2(v.x, v.y);
+    }
+  }
+  return undefined;
+};
 
 const ASSET_PRESETS: readonly AssetPostProcessPreset[] = ['sprite', 'icon', 'texture', 'none'];
 

@@ -17,6 +17,7 @@ import {
 } from '@/services/BackgroundRemovalService';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { EditorSettingsService } from '@/services/EditorSettingsService';
+import { IconService, IconSize } from '@/services/IconService';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { AssetLibraryService } from '@/services/AssetLibraryService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
@@ -26,7 +27,13 @@ import {
   setGenerationDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
-import { resizeImageBlob, scaledDimensions } from '@/services/image-gen/image-ops';
+import {
+  flipImageBlob,
+  resizeImageBlob,
+  rotateImageBlob,
+  scaledDimensions,
+  type FlipAxis,
+} from '@/services/image-gen/image-ops';
 import './asset-generator-panel.ts.css';
 
 /** Longest-edge downscale presets offered in the save popover (px); 0 = keep original size. */
@@ -82,7 +89,7 @@ interface ReferenceItem {
   label: string;
 }
 
-type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped';
+type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped' | 'rotated' | 'flipped';
 
 interface CurrentImage {
   blob: Blob;
@@ -118,6 +125,9 @@ export class AssetGeneratorPanel extends ComponentBase {
 
   @inject(AssetLibraryService)
   private readonly assetLibrary!: AssetLibraryService;
+
+  @inject(IconService)
+  private readonly icons!: IconService;
 
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
@@ -157,6 +167,8 @@ export class AssetGeneratorPanel extends ComponentBase {
   @state() private apiKeyMessage: string | null = null;
   @state() private cropMode = false;
   @state() private cropRect: CropRect | null = null;
+  /** True while a rotate/flip transform is re-encoding the current image. */
+  @state() private transformBusy = false;
 
   private readonly cropOverlayRef = createRef<HTMLDivElement>();
   private readonly cropImageRef = createRef<HTMLImageElement>();
@@ -385,6 +397,33 @@ export class AssetGeneratorPanel extends ComponentBase {
           ?disabled=${!this.current || this.bgBusy || this.cropMode}
         >
           ${this.bgBusy ? 'Removing…' : 'Remove background'}
+        </button>
+        <button
+          class="ag-icon-button"
+          title="Rotate 90° clockwise"
+          aria-label="Rotate 90° clockwise"
+          @click=${this.onRotate}
+          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+        >
+          ${this.icons.getIcon('rotate-cw', IconSize.SMALL)}
+        </button>
+        <button
+          class="ag-icon-button"
+          title="Flip horizontally"
+          aria-label="Flip horizontally"
+          @click=${this.onFlipHorizontal}
+          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+        >
+          ${this.icons.getIcon('flip-horizontal', IconSize.SMALL)}
+        </button>
+        <button
+          class="ag-icon-button"
+          title="Flip vertically"
+          aria-label="Flip vertically"
+          @click=${this.onFlipVertical}
+          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+        >
+          ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>
         ${this.renderSaveMenu()}
       </header>
@@ -1258,6 +1297,55 @@ export class AssetGeneratorPanel extends ComponentBase {
     } finally {
       this.bgBusy = false;
       this.bgProgress = null;
+    }
+  }
+
+  // -- rotate / flip ---------------------------------------------------------
+
+  private onRotate(): void {
+    void this.applyTransform('rotated', blob => rotateImageBlob(blob, 1));
+  }
+
+  private onFlipHorizontal(): void {
+    void this.applyFlip('horizontal');
+  }
+
+  private onFlipVertical(): void {
+    void this.applyFlip('vertical');
+  }
+
+  private applyFlip(axis: FlipAxis): Promise<void> {
+    return this.applyTransform('flipped', blob => flipImageBlob(blob, axis));
+  }
+
+  /**
+   * Run a geometric transform over the current working image and swap it in. The transform is a
+   * plain canvas re-encode (no network / model), so it's cheap; `transformBusy` just guards against
+   * overlapping clicks. The save name is intentionally left untouched.
+   */
+  private async applyTransform(
+    source: CurrentSource,
+    transform: (blob: Blob) => Promise<{ blob: Blob; width: number; height: number }>
+  ): Promise<void> {
+    if (!this.current || this.transformBusy || this.cropMode) {
+      return;
+    }
+    this.transformBusy = true;
+    try {
+      const result = await transform(this.current.blob);
+      const objectUrl = this.trackUrl(URL.createObjectURL(result.blob));
+      this.setCurrent({
+        blob: result.blob,
+        mimeType: result.blob.type || this.current.mimeType,
+        objectUrl,
+        source,
+        width: result.width,
+        height: result.height,
+      });
+    } catch (error) {
+      this.bgError = `Transform failed: ${describeError(error)}`;
+    } finally {
+      this.transformBusy = false;
     }
   }
 

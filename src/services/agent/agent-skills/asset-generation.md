@@ -63,6 +63,13 @@ Default when you omit it: `transparent:true`→sprite, otherwise→texture.
 - If the *content* is wrong (wrong subject, cropped, bad framing): regenerate with a better
   prompt. If only the *processing* is off (`hasAlpha` false = background not removed, or too
   large): call `process_asset` on the saved path (preset `sprite`) — no regeneration needed.
+- **If only the *orientation* is wrong, DON'T regenerate — rotate/flip it.** Top-down sprites
+  (cars, arrows, ships) frequently generate pointing sideways/down even when the prompt says
+  "nose up", and the aspect ratio isn't controllable. Pass `rotate` (90/180/270, clockwise)
+  and/or `flip` (`horizontal`/`vertical`) to `generate_asset`/`process_asset` to snap the sprite
+  to the orientation your controller expects (this engine treats **+Y / up** as "forward" for
+  top-down movement). Verify with an `analyze_image` checklist, e.g. `"Answer yes/no: does the
+  car's nose/front point UP toward the top edge?"`, then rotate until it does.
 - **Accept and move on.** One good result is enough; do not regenerate to chase small nits —
   each generation costs money.
 - **Apply it to a node**: find the node (`find_nodes` / `scene_tree`), then `set_property` its

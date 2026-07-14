@@ -82,6 +82,26 @@ const MAX_TOOL_RESULT_CHARS = 24_000;
 const MAX_OUTLINE_LINES = 120;
 const OUTLINE_DEPTH = 2;
 
+/**
+ * Directories holding user script files (mirrors PreviewHostService / AgentToolRegistry). The
+ * system prompt lists what lives here so the agent knows the project's game logic exists — the
+ * scene outline only names nodes, never the `.ts` files, so without this an overview turn reports
+ * "no game scripts" even when they are on disk.
+ */
+const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+const EXCLUDED_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
+/** Grab each exported `class X extends Script` so we can surface its attachable `user:X` id. */
+const SCRIPT_CLASS_PATTERN =
+  /export\s+(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)\s+extends\s+Script\b/g;
+/** Cap the inventory so a project with hundreds of scripts can't dominate the prompt. */
+const MAX_SCRIPT_INVENTORY = 60;
+
+/** One project script file plus the Script subclasses it exports (for the `user:<Class>` ids). */
+interface ScriptInventoryEntry {
+  readonly path: string;
+  readonly classes: readonly string[];
+}
+
 /** Component edits that change how the game behaves — gate the verify nudge on them. */
 const GAME_MUTATION_COMPONENT_TOOLS = new Set([
   'add_component',
@@ -379,6 +399,9 @@ export class AgentChatService {
       model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
     // AGENTS.md is authored per project; read it once per user turn so mid-session edits land.
     const agentsMd = await this.loadAgentsMd();
+    // Script inventory shares AGENTS.md's cadence: once per turn, so the agent always knows the
+    // project's game-logic files exist (the scene outline names only nodes, never the .ts files).
+    const scriptInventory = await this.loadScriptInventory();
     // The ask_advisor rule is only worth prompt space when an advisor is actually usable.
     const advisorAvailable = await this.isAdvisorAvailable();
     // Text-only models can't consume image blocks. We KEEP images in history (so the chat UI shows
@@ -399,7 +422,7 @@ export class AgentChatService {
     let gameVerifyNudged = false;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const system = this.buildSystemPrompt(agentsMd, advisorAvailable);
+      const system = this.buildSystemPrompt(agentsMd, advisorAvailable, scriptInventory);
       const outboundMessages = modelSupportsImages
         ? this.state.messages
         : stripImagesForModel(this.state.messages);
@@ -602,7 +625,11 @@ export class AgentChatService {
    * the live scene context). Used by the debug panel's "system prompt" viewer.
    */
   async previewSystemPrompt(): Promise<string> {
-    return this.buildSystemPrompt(await this.loadAgentsMd(), await this.isAdvisorAvailable());
+    return this.buildSystemPrompt(
+      await this.loadAgentsMd(),
+      await this.isAdvisorAvailable(),
+      await this.loadScriptInventory()
+    );
   }
 
   /** Whether ask_advisor can actually reach a model (configured + keyed). Never throws. */
@@ -615,7 +642,11 @@ export class AgentChatService {
   }
 
   /** Rebuilt per request — the scene outline and active scene change as the agent works. */
-  private buildSystemPrompt(agentsMd: string | null, advisorAvailable = false): string {
+  private buildSystemPrompt(
+    agentsMd: string | null,
+    advisorAvailable = false,
+    scripts: readonly ScriptInventoryEntry[] = []
+  ): string {
     const lines: string[] = [
       'You are Pix3 Agent, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).',
       '',
@@ -675,6 +706,21 @@ export class AgentChatService {
       lines.push(`- Active scene: ${activePath}`);
     }
 
+    if (scripts.length > 0) {
+      lines.push(
+        `- Project scripts (${SCRIPT_DIRECTORIES.join(
+          ', '
+        )}) — the game logic; attach one to a node with add_component using the shown user:<Class> id:`
+      );
+      for (const script of scripts) {
+        const ids =
+          script.classes.length > 0
+            ? script.classes.map(className => `user:${className}`).join(', ')
+            : '(no exported Script subclass)';
+        lines.push(`    - ${script.path} → ${ids}`);
+      }
+    }
+
     const selectedIds = appState.selection.nodeIds;
     if (selectedIds.length > 0) {
       const graph = this.sceneManager.getActiveSceneGraph();
@@ -731,6 +777,53 @@ export class AgentChatService {
       lines.push(`  … (+${truncatedNodes} more nodes — use scene_tree)`);
     }
     return lines;
+  }
+
+  /**
+   * Enumerate the project's user scripts (scripts/ + src/scripts/) with the Script subclasses each
+   * exports, so buildSystemPrompt can list them. Best-effort: any fs error (no project, missing
+   * directory) yields an empty inventory and thus no "Project scripts" bullet. Gathered once per
+   * user turn (like AGENTS.md), not per tool-iteration — script files rarely change mid-turn.
+   */
+  private async loadScriptInventory(): Promise<ScriptInventoryEntry[]> {
+    const scripts: ScriptInventoryEntry[] = [];
+    for (const directory of SCRIPT_DIRECTORIES) {
+      for (const path of await this.collectScriptPaths(directory)) {
+        if (scripts.length >= MAX_SCRIPT_INVENTORY) {
+          return scripts;
+        }
+        try {
+          const content = await this.storage.readTextFile(path);
+          // matchAll clones the regex, so the shared /g instance carries no lastIndex state.
+          const classes = [...content.matchAll(SCRIPT_CLASS_PATTERN)].map(match => match[1]);
+          scripts.push({ path, classes });
+        } catch {
+          // A file that vanished mid-scan is fine — skip it.
+        }
+      }
+    }
+    return scripts;
+  }
+
+  private async collectScriptPaths(directory: string): Promise<string[]> {
+    let entries: Awaited<ReturnType<ProjectStorageService['listDirectory']>>;
+    try {
+      entries = await this.storage.listDirectory(directory);
+    } catch {
+      return [];
+    }
+    const result: string[] = [];
+    for (const entry of entries) {
+      if (entry.kind === 'directory') {
+        result.push(...(await this.collectScriptPaths(entry.path)));
+        continue;
+      }
+      const lower = entry.path.toLowerCase();
+      if (!lower.endsWith('.ts') && !lower.endsWith('.js')) continue;
+      if (EXCLUDED_SCRIPT_SUFFIXES.some(suffix => lower.endsWith(suffix))) continue;
+      result.push(entry.path);
+    }
+    return result;
   }
 
   /**

@@ -22,6 +22,10 @@ interface Fakes {
   debugMode?: boolean;
   /** Optional project file reader (AGENTS.md lookup). Defaults to "no such file". */
   readTextFile?: (path: string) => Promise<string>;
+  /** Optional directory lister (script-inventory scan). Defaults to "no such directory". */
+  listDirectory?: (
+    path: string
+  ) => Promise<Array<{ name: string; kind: 'file' | 'directory'; path: string }>>;
   /** When set, the model catalog reports this vision capability for the active model. */
   supportsImages?: boolean;
   /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */

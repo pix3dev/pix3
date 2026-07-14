@@ -47,8 +47,29 @@ export interface CropRectPixels {
   readonly height: number;
 }
 
+/** Clockwise quarter-turn count for {@link rotateImageBlob}: 1 = 90°, 2 = 180°, 3 = 270°. */
+export type QuarterTurns = 1 | 2 | 3;
+
+/** Mirror axis for {@link flipImageBlob}. */
+export type FlipAxis = 'horizontal' | 'vertical';
+
 const canUseBitmap = (): boolean =>
   typeof createImageBitmap === 'function' && typeof document !== 'undefined';
+
+/**
+ * Pick the output encoding for a lossless geometric transform (rotate/flip): honour an explicit
+ * request, else keep the source encoding when it is one we can write, else fall back to PNG so an
+ * unknown/empty type never drops the alpha channel.
+ */
+const preservedEncoding = (blob: Blob, encode: EncodeOptions): EncodeOptions => {
+  if (encode.mimeType) {
+    return encode;
+  }
+  const type = blob.type;
+  const mimeType: ImageEncoding =
+    type === 'image/jpeg' || type === 'image/webp' || type === 'image/png' ? type : 'image/png';
+  return { mimeType, quality: encode.quality };
+};
 
 /** Read a blob's intrinsic pixel dimensions, or `null` if it can't be decoded. */
 export async function readBlobSize(blob: Blob): Promise<ImageDimensions | null> {
@@ -172,6 +193,91 @@ export async function cropImageBlob(
       { x: sx, y: sy, width: sw, height: sh },
       { mimeType: encode.mimeType ?? 'image/png', quality: encode.quality }
     );
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * Rotate an image clockwise by a quarter-turn multiple. For 90°/270° the output width/height are
+ * swapped. Alpha and the source encoding are preserved (see {@link preservedEncoding}). Returns the
+ * source blob unchanged when rotation isn't possible (no canvas) or is a no-op.
+ */
+export async function rotateImageBlob(
+  blob: Blob,
+  quarterTurns: QuarterTurns,
+  encode: EncodeOptions = {}
+): Promise<RasterResult> {
+  if (!canUseBitmap()) {
+    const size = await readBlobSize(blob);
+    return { blob, width: size?.width ?? 0, height: size?.height ?? 0 };
+  }
+  const turns = (((quarterTurns % 4) + 4) % 4) as 0 | 1 | 2 | 3;
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const sw = bitmap.width;
+    const sh = bitmap.height;
+    if (turns === 0) {
+      return { blob, width: sw, height: sh };
+    }
+    const swap = turns === 1 || turns === 3;
+    const width = swap ? sh : sw;
+    const height = swap ? sw : sh;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.translate(width / 2, height / 2);
+    ctx.rotate((turns * Math.PI) / 2);
+    ctx.drawImage(bitmap, -sw / 2, -sh / 2);
+    const outBlob = await canvasToBlob(canvas, preservedEncoding(blob, encode));
+    return { blob: outBlob, width, height };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * Mirror an image horizontally or vertically. Dimensions are unchanged; alpha and the source
+ * encoding are preserved. Returns the source blob unchanged when no canvas is available.
+ */
+export async function flipImageBlob(
+  blob: Blob,
+  axis: FlipAxis,
+  encode: EncodeOptions = {}
+): Promise<RasterResult> {
+  if (!canUseBitmap()) {
+    const size = await readBlobSize(blob);
+    return { blob, width: size?.width ?? 0, height: size?.height ?? 0 };
+  }
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    if (axis === 'horizontal') {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    } else {
+      ctx.translate(0, height);
+      ctx.scale(1, -1);
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const outBlob = await canvasToBlob(canvas, preservedEncoding(blob, encode));
+    return { blob: outBlob, width, height };
   } finally {
     bitmap.close();
   }

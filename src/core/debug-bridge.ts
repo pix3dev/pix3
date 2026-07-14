@@ -374,6 +374,10 @@ export interface Pix3DebugBridge {
     compress(id: string, options?: AssetGenCompressOptions): Promise<AssetImageMeta>;
     /** Remove the background of a handle (local Web Worker; transparent PNG out). */
     removeBackground(id: string, options?: AssetGenBgOptions): Promise<AssetImageMeta>;
+    /** Rotate a handle clockwise (1 = 90°, 2 = 180°, 3 = 270°). Returns a new handle. */
+    rotate(id: string, quarterTurns: 1 | 2 | 3): Promise<AssetImageMeta>;
+    /** Mirror a handle horizontally or vertically. Returns a new handle. */
+    flip(id: string, axis: 'horizontal' | 'vertical'): Promise<AssetImageMeta>;
     /** Load an existing project asset into a handle for editing. */
     open(pathOrRef: string): Promise<AssetImageMeta>;
     /** Metadata for one handle, or null. */
@@ -517,6 +521,8 @@ function createBridge(): Pix3DebugBridge {
           "Generate an image with the user's saved key. Returns a handle {id,width,height,bytes}.",
         'assets.resize(id,{maxSize}) / crop(id,{x,y,width,height}) / compress(id,{format,quality})':
           'Transform a handle; each returns a NEW handle id.',
+        'assets.rotate(id,1|2|3) / flip(id,"horizontal"|"vertical")':
+          'Rotate clockwise (1=90°,2=180°,3=270°) or mirror a handle; each returns a NEW handle id.',
         'assets.removeBackground(id) / open(path) / openHistory(recordId)':
           'Cut out background / load a project asset / pull a cached generation into a handle.',
         'assets.preview(id,maxSize=256)': 'data: URL preview of a handle for visual QC.',
@@ -665,6 +671,12 @@ function createBridge(): Pix3DebugBridge {
       },
       removeBackground(id, options) {
         return service<AssetGenService>(AssetGenService).removeBackground(id, options);
+      },
+      rotate(id, quarterTurns) {
+        return service<AssetGenService>(AssetGenService).rotate(id, quarterTurns);
+      },
+      flip(id, axis) {
+        return service<AssetGenService>(AssetGenService).flip(id, axis);
       },
       open(pathOrRef) {
         return service<AssetGenService>(AssetGenService).open(pathOrRef);
