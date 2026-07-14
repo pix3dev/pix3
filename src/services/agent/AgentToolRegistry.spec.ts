@@ -578,6 +578,74 @@ describe('AgentToolRegistry', () => {
     expect(dispatcher.execute.mock.calls[1][0]).toBeInstanceOf(SaveSceneCommand);
   });
 
+  describe('set_property value-shape guard', () => {
+    // A fake node whose schema exposes a vector2 `position`, so coercePropertyValue engages.
+    const makeVectorNode = (): NodeBase => {
+      const node = Object.create(NodeBase.prototype) as Record<string, unknown>;
+      Object.assign(node, { nodeId: 'v1', type: 'Sprite2D', name: 'Car' });
+      Object.defineProperty(node, 'constructor', {
+        value: {
+          getPropertySchema: () => ({
+            nodeType: 'FakeNode2D',
+            properties: [
+              {
+                name: 'position',
+                type: 'vector2',
+                ui: {},
+                getValue: () => ({ x: 0, y: 0 }),
+                setValue: () => {},
+              },
+            ],
+          }),
+        },
+        configurable: true,
+      });
+      return node as unknown as NodeBase;
+    };
+    const vectorSceneManager = () => ({
+      getActiveSceneGraph: () => ({ nodeMap: new Map([['v1', makeVectorNode()]]) }),
+    });
+    const readValue = (cmd: unknown): unknown =>
+      (cmd as { params: { value: unknown } }).params.value;
+
+    it('coerces a [x, y] array to { x, y } for a vector2 property', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager: vectorSceneManager() });
+      const result = await registry.execute('set_property', {
+        nodeId: 'v1',
+        propertyPath: 'position',
+        value: [10, 350],
+      });
+      expect(result).toEqual({ ok: true });
+      expect(readValue(dispatcher.execute.mock.calls[0][0])).toEqual({ x: 10, y: 350 });
+    });
+
+    it('passes a valid { x, y } object through unchanged', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager: vectorSceneManager() });
+      const result = await registry.execute('set_property', {
+        nodeId: 'v1',
+        propertyPath: 'position',
+        value: { x: 10, y: 350 },
+      });
+      expect(result).toEqual({ ok: true });
+      expect(readValue(dispatcher.execute.mock.calls[0][0])).toEqual({ x: 10, y: 350 });
+    });
+
+    it('rejects a bad vector shape with an error and does not dispatch', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager: vectorSceneManager() });
+      const result = (await registry.execute('set_property', {
+        nodeId: 'v1',
+        propertyPath: 'position',
+        value: 42,
+      })) as { ok: boolean; error?: string };
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/vector2/);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+  });
+
   describe('component tools', () => {
     const makeScriptRegistry = () => ({
       getAllComponentTypes: () => [

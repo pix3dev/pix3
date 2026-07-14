@@ -29,7 +29,7 @@ import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
-import { SceneManager, NodeBase, ScriptRegistry } from '@pix3/runtime';
+import { SceneManager, NodeBase, ScriptRegistry, getNodePropertySchema } from '@pix3/runtime';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
@@ -775,14 +775,78 @@ export class AgentToolRegistry {
     nodeId: string,
     propertyPath: string,
     value: unknown
-  ): Promise<{ ok: boolean }> {
+  ): Promise<{ ok: boolean; error?: string }> {
+    // Guard the value SHAPE before dispatch. The schema setters assume an exact shape (a vector2
+    // wants {x,y}); a wrong shape like the array [x,y] slips straight through as a silent no-op,
+    // which misleads models into concluding "the engine ignores this property" (observed in eval:
+    // waypoints set with [x,y] stayed at 0,0 and the model then hardcoded them in script).
+    const coerced = this.coercePropertyValue(nodeId, propertyPath, value);
+    if ('error' in coerced) {
+      return { ok: false, error: coerced.error };
+    }
     const ok = await this.dispatcher.execute(
-      new UpdateObjectPropertyCommand({ nodeId, propertyPath, value })
+      new UpdateObjectPropertyCommand({ nodeId, propertyPath, value: coerced.value })
     );
     if (ok) {
       await this.saveActiveSceneBestEffort();
     }
     return { ok };
+  }
+
+  /**
+   * Coerce/validate an agent-supplied property value against the node's schema. Only vector types
+   * are touched (the observed silent-no-op class): an array of the right arity is coerced to the
+   * {x,y[,z[,w]]} object the setter expects, an already-valid object passes through, and any other
+   * shape returns an error naming the expected form instead of a mystery no-op. Every other
+   * property type passes through unchanged so this cannot regress existing edits.
+   */
+  private coercePropertyValue(
+    nodeId: string,
+    propertyPath: string,
+    value: unknown
+  ): { value: unknown } | { error: string } {
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    if (!(node instanceof NodeBase)) {
+      return { value }; // node resolution is the operation's job; don't second-guess it here
+    }
+    let propDef;
+    try {
+      propDef = getNodePropertySchema(node).properties.find(p => p.name === propertyPath);
+    } catch {
+      return { value };
+    }
+    if (!propDef) {
+      return { value };
+    }
+    const arity =
+      propDef.type === 'vector2'
+        ? 2
+        : propDef.type === 'vector3'
+          ? 3
+          : propDef.type === 'vector4'
+            ? 4
+            : 0;
+    if (arity === 0) {
+      return { value };
+    }
+    const keys = ['x', 'y', 'z', 'w'].slice(0, arity);
+    const isFiniteNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      keys.every(k => isFiniteNumber((value as Record<string, unknown>)[k]))
+    ) {
+      return { value };
+    }
+    if (Array.isArray(value) && value.length === arity && value.every(isFiniteNumber)) {
+      const obj: Record<string, number> = {};
+      keys.forEach((k, i) => (obj[k] = value[i] as number));
+      return { value: obj };
+    }
+    return {
+      error: `Property "${propertyPath}" on this node is a ${propDef.type}; its value must be an object { ${keys.join(', ')} } (an array [${keys.join(', ')}] is also accepted). Received ${JSON.stringify(value)}.`,
+    };
   }
 
   /**

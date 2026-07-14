@@ -369,6 +369,8 @@ export class AgentChatService {
     // repeat an exact failing call verbatim when the error gives them nothing new (observed with
     // read_skill on an invented section name) — detect the repeat and say so explicitly.
     const lastResultBySignature = new Map<string, string>();
+    // Fire the "you ended with no reply" nudge at most once, so an empty↔nudge exchange can't loop.
+    let emptyAnswerNudged = false;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const system = this.buildSystemPrompt(agentsMd, advisorAvailable);
@@ -429,6 +431,25 @@ export class AgentChatService {
               {
                 type: 'text',
                 text: '[Pix3] Your reply was cut off by the output-token limit before any tool call. Continue from where you stopped. If you were about to write a large file, split it into smaller pieces.',
+              },
+            ],
+          });
+          continue;
+        }
+        // A turn that ends with neither a tool call nor any text is a dropped thread, not an
+        // answer (observed: a fix turn that finished silently — no summary, nothing for the
+        // user). Ask once for a wrap-up; the flag prevents an empty↔nudge loop.
+        const hasText = result.content.some(
+          block => block.type === 'text' && block.text.trim().length > 0
+        );
+        if (!hasText && !emptyAnswerNudged && iteration < maxIterations - 1) {
+          emptyAnswerNudged = true;
+          this.appendMessage({
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: '[Pix3] You ended your turn with an empty reply. Summarize for the user what you changed, whether the game runs now, and the single most useful next step.',
               },
             ],
           });

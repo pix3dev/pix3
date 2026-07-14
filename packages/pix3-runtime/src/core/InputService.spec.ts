@@ -119,3 +119,34 @@ describe('InputService lock (Cutscene Director input freeze)', () => {
     expect(input.getButton('Key_Space')).toBe(true);
   });
 });
+
+describe('InputService pointer capture (synthetic events)', () => {
+  it('swallows a NotFoundError from set/releasePointerCapture and still tracks the pointer', () => {
+    const input = new InputService();
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    // A synthetic PointerEvent (automation / agent harness) has no live pointer, so the DOM
+    // throws NotFoundError — which must not escape as an uncaught runtime error during play.
+    canvas.setPointerCapture = () => {
+      throw new DOMException('No active pointer with the given id is found.', 'NotFoundError');
+    };
+    canvas.releasePointerCapture = () => {
+      throw new DOMException('No active pointer with the given id is found.', 'NotFoundError');
+    };
+    input.attach(canvas);
+
+    const down = new Event('pointerdown');
+    Object.defineProperty(down, 'pointerId', { value: 7 });
+    expect(() => canvas.dispatchEvent(down)).not.toThrow();
+    expect(input.isPointerDown).toBe(true);
+    expect(input.activePointerId).toBe(7);
+
+    const up = new Event('pointerup');
+    Object.defineProperty(up, 'pointerId', { value: 7 });
+    expect(() => canvas.dispatchEvent(up)).not.toThrow();
+    expect(input.activePointerId).toBeNull();
+
+    input.detach();
+    canvas.remove();
+  });
+});

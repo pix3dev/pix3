@@ -59,6 +59,13 @@ moving on. Stop play mode (`play_stop`) before large edits.
   attached with `add_component` exist only in the loaded scene — include them in the YAML you
   write (a `components:` block on the node), or they are silently lost. After a scene
   `fs_write`, `node_inspect` your key nodes to confirm their components survived.
+- **Level/config data lives in the scene or component config, not hardcoded in a script.**
+  Waypoint positions, spawn points, speeds, lap counts — put them on nodes (positions in the
+  scene) or as component `config` (via `add_component` config / `set_component_property`) so the
+  editor and the designer can see and tweak them. Hardcoding an array of coordinates inside a
+  `Script` hides the data from the editor and is a last resort. If a `set_property` looks
+  ignored, check the value *shape* first — a vector wants `{ x, y }` (an `[x, y]` array is also
+  accepted), a rotation wants a number — rather than hardcoding a workaround.
 
 ## 4½. Engine API traps (these compile clean and then break at runtime)
 

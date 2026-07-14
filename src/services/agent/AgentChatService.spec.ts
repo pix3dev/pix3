@@ -225,6 +225,33 @@ describe('AgentChatService', () => {
     expect(JSON.stringify(state.messages[4].content)).toMatch(/force-stopped/);
   });
 
+  it('nudges once for a summary when a turn ends with no tool call and no text', async () => {
+    const empty: LlmResult = { content: [], stopReason: 'end_turn' };
+    const chat = vi.fn().mockResolvedValueOnce(empty).mockResolvedValueOnce(textResult('all done'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    // user, assistant(empty), user(nudge), assistant(text)
+    expect(state.messages).toHaveLength(4);
+    expect(JSON.stringify(state.messages[2].content)).toMatch(/empty reply/);
+  });
+
+  it('does not loop when the model keeps returning empty replies', async () => {
+    const empty: LlmResult = { content: [], stopReason: 'end_turn' };
+    const chat = vi.fn(async () => empty);
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    // One real request + exactly one nudge-retry, then it gives up (no infinite loop).
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(service.getState().status).toBe('idle');
+  });
+
   it('flags a repeated identical tool call that returns the identical result', async () => {
     const chat = vi
       .fn()

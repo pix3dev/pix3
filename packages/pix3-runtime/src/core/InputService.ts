@@ -95,7 +95,7 @@ export class InputService {
             return;
         }
         if (this.activePointerId !== null) {
-            this.element?.releasePointerCapture?.(this.activePointerId);
+            this.releasePointer(this.activePointerId);
         }
         this.isPointerDown = false;
         this.activePointerId = null;
@@ -252,7 +252,7 @@ export class InputService {
         this.isPointerDown = true;
         const position = this.updatePointerPosition(event);
         this.pendingPointerEvents.push({ type: 'down', pointerId: event.pointerId, x: position.x, y: position.y });
-        this.element?.setPointerCapture?.(event.pointerId);
+        this.capturePointer(event.pointerId);
 
         // Global "Tap to Action" - Map primary pointer down to "Action_Primary"
         this.setButton('Action_Primary', true);
@@ -284,11 +284,34 @@ export class InputService {
         this.activePointerId = null;
         const position = this.updatePointerPosition(event);
         this.pendingPointerEvents.push({ type: 'up', pointerId: event.pointerId, x: position.x, y: position.y });
-        this.element?.releasePointerCapture?.(event.pointerId);
+        this.releasePointer(event.pointerId);
 
         // Release "Action_Primary"
         this.setButton('Action_Primary', false);
     };
+
+    /**
+     * Pointer capture is best-effort. Real user gestures always have a live pointer, but synthetic
+     * PointerEvents (automation, tests, or an agent harness driving the canvas) do not, so the DOM
+     * throws `NotFoundError: No active pointer with the given id` — which would otherwise surface
+     * as an uncaught runtime error during play. Capture failing is harmless: pointer tracking still
+     * works from the event stream; capture only keeps events flowing during an out-of-bounds drag.
+     */
+    private capturePointer(pointerId: number): void {
+        try {
+            this.element?.setPointerCapture?.(pointerId);
+        } catch {
+            // No live pointer (synthetic event) — safe to ignore.
+        }
+    }
+
+    private releasePointer(pointerId: number): void {
+        try {
+            this.element?.releasePointerCapture?.(pointerId);
+        } catch {
+            // Capture was never established or already released — safe to ignore.
+        }
+    }
 
     private onContextMenu = (event: Event): void => {
         event.preventDefault();
