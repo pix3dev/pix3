@@ -383,6 +383,9 @@ describe('ScrollContainer2D', () => {
 
         container.scene = {
             getLogicalCameraSize: () => logicalSize,
+            // No UI camera in this fixture → pointer mapping falls back to the
+            // logical-size path these tests exercise (matches the pre-Camera2D setup).
+            getUICamera: () => null,
         } as unknown as SceneService;
 
         button.position.set(40, 40, 0);
@@ -407,6 +410,7 @@ describe('ScrollContainer2D', () => {
 
         container.scene = {
             getLogicalCameraSize: () => logicalSize,
+            getUICamera: () => null,
         } as unknown as SceneService;
         container.position.set(-120, 150, 0);
 

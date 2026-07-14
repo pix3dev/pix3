@@ -78,6 +78,8 @@ describe('AgentToolRegistry', () => {
         'play_stop',
         'play_restart',
         'play_status',
+        'game_input',
+        'game_observe',
         'read_logs',
         'read_errors',
         'viewport_screenshot',
@@ -391,7 +393,9 @@ describe('AgentToolRegistry', () => {
       })) as Record<string, unknown>;
 
       expect(assetGen.open).toHaveBeenCalledWith('src/assets/textures/car.png');
-      expect(assetGen.postProcess).toHaveBeenCalledWith('img-open', 'sprite', { maxSize: undefined });
+      expect(assetGen.postProcess).toHaveBeenCalledWith('img-open', 'sprite', {
+        maxSize: undefined,
+      });
       // No `name` → overwrite the source path.
       expect(assetGen.save).toHaveBeenCalledWith('img-proc', 'src/assets/textures/car.png', {});
       expect(result.ok).toBe(true);
@@ -643,6 +647,29 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/vector2/);
       expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('game input tools', () => {
+    it('game_input forwards steps, observe and settleMs to the service', async () => {
+      const run = vi.fn(async () => ({ ok: true, stepsRun: 1 }));
+      const registry = buildRegistry({ gameInput: { run } });
+      await registry.execute('game_input', {
+        steps: [{ type: 'key', code: 'KeyW', ms: 100 }],
+        observe: ['Player'],
+        settleMs: 50,
+      });
+      expect(run).toHaveBeenCalledWith([{ type: 'key', code: 'KeyW', ms: 100 }], {
+        observe: ['Player'],
+        settleMs: 50,
+      });
+    });
+
+    it('game_observe forwards node queries and the sample window', async () => {
+      const observe = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({ gameInput: { observe } });
+      await registry.execute('game_observe', { nodes: ['AICar'], sampleMs: 1000 });
+      expect(observe).toHaveBeenCalledWith(['AICar'], 1000);
     });
   });
 

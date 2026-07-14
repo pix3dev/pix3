@@ -69,6 +69,7 @@ export class GamePlaySessionService {
   private runner?: SceneRunner;
   private renderer?: RuntimeRenderer;
   private focusCleanup?: () => void;
+  private focusPauseSuppressed = false;
   private syncPromise: Promise<void> = Promise.resolve();
   private readonly onPopoutAspectChange = (event: Event): void => {
     const target = event.target as HTMLSelectElement;
@@ -179,6 +180,41 @@ export class GamePlaySessionService {
     await this.restartRuntime();
   }
 
+  /**
+   * The live play-mode runtime, or null when nothing is running. For automation
+   * (the agent's `game_input`/`game_observe` tools and the debug bridge) that
+   * needs the running clone's nodes, the canvas to aim synthetic pointer events
+   * at, and the host window. The returned objects are live — treat as read-only.
+   */
+  getActiveRuntime(): {
+    runner: SceneRunner;
+    canvas: HTMLCanvasElement;
+    windowRef: Window;
+  } | null {
+    if (!this.runner || !this.renderer) {
+      return null;
+    }
+    const host = this.activeHostKind === 'popout' ? this.popoutHost : this.tabHost;
+    return {
+      runner: this.runner,
+      canvas: this.renderer.domElement,
+      windowRef: host?.windowRef ?? window,
+    };
+  }
+
+  /**
+   * Temporarily exempt the runner from the focus-pause rule
+   * (`pauseRenderingOnUnfocus`). Synthetic input from automation works without
+   * window focus (dispatchEvent doesn't need it), but a blurred window pauses
+   * the runner — so nothing would consume the events. Suppression re-evaluates
+   * immediately in both directions; callers MUST pair it with a `finally`.
+   * Note it cannot help a fully hidden tab: rAF stops there regardless.
+   */
+  setFocusPauseSuppressed(suppressed: boolean): void {
+    this.focusPauseSuppressed = suppressed;
+    this.handleFocusPause();
+  }
+
   private queueSync(): void {
     this.syncPromise = this.syncPromise
       .then(() => this.syncRuntimeToUiState())
@@ -284,10 +320,7 @@ export class GamePlaySessionService {
       this.profilerSessionService.endSession();
       this.updateHostRunningState(false);
       const detail = error instanceof Error ? error.message : String(error);
-      this.runtimeErrorBridge.reportPlayModeFailure(
-        `Failed to start the scene: ${detail}`,
-        error
-      );
+      this.runtimeErrorBridge.reportPlayModeFailure(`Failed to start the scene: ${detail}`, error);
       throw error;
     }
   }
@@ -354,7 +387,8 @@ export class GamePlaySessionService {
 
     const documentRef = host.windowRef.document;
     const isVisible = isDocumentActive(documentRef);
-    const shouldPause = appState.ui.pauseRenderingOnUnfocus && !isVisible;
+    const shouldPause =
+      appState.ui.pauseRenderingOnUnfocus && !isVisible && !this.focusPauseSuppressed;
     if (shouldPause) {
       this.runner.pause();
     } else {

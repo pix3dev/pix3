@@ -43,6 +43,7 @@ import {
   describeThrown,
 } from './game-debug';
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
+import { worldToCanvasLogical, worldToCanvasThroughCamera } from './world-to-canvas';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { GameTime } from './GameTime';
 import { playable } from './PlayableSdk';
@@ -341,6 +342,117 @@ export class SceneRunner {
     this.tick();
   }
 
+  /** True while the loop is halted by {@link pause} (focus loss / host request). */
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  /** True while a scene is loaded and the loop is (or can be) ticking. */
+  get running(): boolean {
+    return this.isRunning;
+  }
+
+  /**
+   * Look up a node of the *running clone* by its authored nodeId (ids survive the
+   * serialize→parse clone one-to-one). For automation/inspection tooling — the
+   * returned node is live; do not mutate it outside the property-sink path.
+   */
+  getLiveNodeById(id: string): NodeBase | null {
+    return this.findNodeById(id);
+  }
+
+  /** Root nodes of the running clone (empty when nothing is running). */
+  getLiveRootNodes(): readonly NodeBase[] {
+    return this.runtimeGraph?.rootNodes ?? [];
+  }
+
+  /**
+   * Case-insensitive exact-name lookup over the running clone (first match in
+   * DFS order). Convenience for automation that targets nodes the way a user
+   * talks about them ("PlayButton") rather than by id.
+   */
+  findLiveNodeByName(name: string): NodeBase | null {
+    const needle = name.toLowerCase();
+    const stack: NodeBase[] = [...(this.runtimeGraph?.rootNodes ?? [])];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.name.toLowerCase() === needle) {
+        return node;
+      }
+      for (const child of node.children) {
+        if (child instanceof NodeBase) {
+          stack.push(child);
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Project a live node's world position to canvas backing-store pixels — where
+   * a synthetic pointer event must land to hit that node. Exact inverse of the
+   * pointer→world mapping the runtime's own hit-tests use (`Node2D.pointerToWorld`):
+   * 2D nodes go through the Camera2D-driven ortho camera (pan/zoom-correct),
+   * overlay-band (CanvasLayer2D) nodes use the identity logical mapping, and 3D
+   * nodes project through the active perspective camera. Null when nothing is
+   * running, the canvas has no size yet, or the point is unprojectable.
+   */
+  projectNodeToCanvas(node: NodeBase): { x: number; y: number } | null {
+    const world = node.getWorldPosition(SceneRunner.scratchProject);
+    if (node instanceof Node2D) {
+      return this.projectWorldPointToCanvas(world.x, world.y, {
+        overlay: this.isInOverlayBand(node),
+      });
+    }
+    if (!this.activeCamera) {
+      return null;
+    }
+    return worldToCanvasThroughCamera(world, this.activeCamera.camera, this.canvasBackingSize());
+  }
+
+  /**
+   * Project a 2D world point (the same coordinate space node `position`
+   * properties use) to canvas backing-store pixels. `overlay: true` selects the
+   * fixed CanvasLayer2D mapping (identity camera) instead of the Camera2D view.
+   */
+  projectWorldPointToCanvas(
+    x: number,
+    y: number,
+    opts?: { overlay?: boolean }
+  ): { x: number; y: number } | null {
+    const canvasSize = this.canvasBackingSize();
+    if (!opts?.overlay && this.orthographicCamera) {
+      SceneRunner.scratchProject.set(x, y, 0);
+      return worldToCanvasThroughCamera(
+        SceneRunner.scratchProject,
+        this.orthographicCamera,
+        canvasSize
+      );
+    }
+    return worldToCanvasLogical(x, y, this.logicalCameraSize, canvasSize);
+  }
+
+  private static readonly scratchProject = new Vector3();
+
+  private canvasBackingSize(): { width: number; height: number } {
+    const canvas = this.renderer.domElement;
+    return { width: canvas.width, height: canvas.height };
+  }
+
+  /** True when the node or an ancestor is a CanvasLayer2D (fixed overlay band). */
+  private isInOverlayBand(node: Node2D): boolean {
+    let current: NodeBase | null = node;
+    let guard = 0;
+    while (current && guard++ < 128) {
+      if (current instanceof Node2D && current.isCanvasLayer) {
+        return true;
+      }
+      current = current.parent instanceof NodeBase ? current.parent : null;
+    }
+    return false;
+  }
+
   private tick = (): void => {
     if (!this.isRunning || this.isPaused) return;
 
@@ -477,7 +589,6 @@ export class SceneRunner {
       }
 
       this.logicalCameraSize = { width: cameraWidth, height: cameraHeight };
-
     }
 
     // 1. Update Cameras
@@ -1022,7 +1133,12 @@ export class SceneRunner {
       }
     }
 
-    const uiHit = this.raycastWithCamera(normalizedX, normalizedY, this.orthographicCamera, LAYER_2D);
+    const uiHit = this.raycastWithCamera(
+      normalizedX,
+      normalizedY,
+      this.orthographicCamera,
+      LAYER_2D
+    );
     if (uiHit) {
       return uiHit;
     }

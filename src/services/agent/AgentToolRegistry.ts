@@ -20,6 +20,7 @@ import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/AssetGenService';
 import type { AlphaStats } from '@/services/image-gen/image-ops';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
+import { GameInputService, type GameInputStep } from '@/services/agent/GameInputService';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
@@ -145,6 +146,9 @@ export class AgentToolRegistry {
 
   @inject(AgentVisionService)
   private readonly vision!: AgentVisionService;
+
+  @inject(GameInputService)
+  private readonly gameInput!: GameInputService;
 
   @inject(AgentAdvisorService)
   private readonly advisor!: AgentAdvisorService;
@@ -337,7 +341,8 @@ export class AgentToolRegistry {
             nodeId: { type: 'string' },
             componentType: {
               type: 'string',
-              description: 'A type id from list_component_types (e.g. "core:Rotate" or "user:Foo").',
+              description:
+                'A type id from list_component_types (e.g. "core:Rotate" or "user:Foo").',
             },
             config: {
               type: 'object',
@@ -499,6 +504,85 @@ export class AgentToolRegistry {
         description: 'Whether the scene is playing and the current play-mode status.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.playStatus(),
+      },
+      {
+        name: 'game_input',
+        description:
+          "Send REAL input to the RUNNING game and verify the result in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Pass observe:['Player'] to get each node's live position before/after with a `moved` flag — USE THIS to PROVE controls/movement work instead of assuming. Example: {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['PlayerCar']} → observed.PlayerCar.moved === true means the car really drives.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            steps: {
+              type: 'array',
+              description: 'Input steps, executed in order. Total duration is capped at 15s.',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['tap', 'key', 'keys', 'drag', 'wait'] },
+                  target: { type: 'string', description: 'Node name or nodeId to tap/drag from.' },
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  to: {
+                    type: 'object',
+                    description: 'Drag destination: coordinates or a target node.',
+                    properties: {
+                      x: { type: 'number' },
+                      y: { type: 'number' },
+                      target: { type: 'string' },
+                    },
+                    additionalProperties: false,
+                  },
+                  code: { type: 'string', description: "KeyboardEvent.code, e.g. 'KeyW'." },
+                  codes: { type: 'array', items: { type: 'string' } },
+                  ms: { type: 'number', description: 'Hold/drag/wait duration in ms.' },
+                  holdMs: {
+                    type: 'number',
+                    description: 'Tap press duration (default 700 — UI buttons need a real press).',
+                  },
+                },
+                required: ['type'],
+                additionalProperties: false,
+              },
+            },
+            observe: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Node names/ids to snapshot before and after (position + moved flag).',
+            },
+            settleMs: {
+              type: 'number',
+              description: 'Extra wait before the "after" snapshot (default 300).',
+            },
+          },
+          required: ['steps'],
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.gameInput.run(Array.isArray(args.steps) ? (args.steps as GameInputStep[]) : [], {
+            observe: Array.isArray(args.observe) ? (args.observe as string[]) : undefined,
+            settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
+          }),
+      },
+      {
+        name: 'game_observe',
+        description:
+          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + a `moving` flag — e.g. verify an AI car is driving around WITHOUT sending input.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodes: { type: 'array', items: { type: 'string' } },
+            sampleMs: {
+              type: 'number',
+              description: 'Optional: wait this long and sample again to detect motion (max 5000).',
+            },
+          },
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.gameInput.observe(
+            Array.isArray(args.nodes) ? (args.nodes as string[]) : [],
+            typeof args.sampleMs === 'number' ? args.sampleMs : 0
+          ),
       },
       {
         name: 'read_logs',

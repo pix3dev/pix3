@@ -26,6 +26,7 @@ export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
 export * from './core/tiled-sprite-geometry';
 export * from './core/game-debug';
+export * from './core/world-to-canvas';
 export * from './core/PlayableSdk';
 
 // Nodes

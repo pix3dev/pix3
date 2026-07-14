@@ -41,6 +41,16 @@ Order increments so the game is runnable as early as possible:
 After each increment: `play_start`, then `play_status` and `read_errors`. Fix errors before
 moving on. Stop play mode (`play_stop`) before large edits.
 
+**Prove gameplay with `game_input` — do not assume controls work.** While the game is
+playing, send real input and check that the right node actually moved:
+`game_input {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['Player']}` — the result's
+`observed.Player.moved` / `delta` tells you whether movement really happened. Tap UI buttons
+by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long press — don't
+shorten `holdMs`). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`). For
+self-moving things (an AI car, a spawner) use `game_observe {nodes:['AICar'],sampleMs:1000}` —
+`movement.AICar.moving` shows whether it drives on its own. A movement increment is DONE only
+when `game_input`/`game_observe` confirms it, not when the code compiles.
+
 ## 4. How to make changes (use tools, not hand-edited files)
 
 - **Give a node behaviour** → `list_component_types`, then `add_component` (a built-in
