@@ -15,6 +15,12 @@ declare a feature done without running it.
 2. **Run it**: `play_start`, then `play_status`. Give it a moment, then `read_errors` (runtime
    errors: thrown exceptions, rejections) and `read_logs` (log output). A clean run has no
    captured errors.
+2b. **Prove the behaviour** — a clean compile is NOT proof the change works. For anything that
+   moves or responds to input, drive it: `game_input` with `expect` (e.g.
+   `{steps:[{type:'key',code:'KeyW',ms:800}],expect:{PlayerCar:'forward'}}` → read
+   `observed.PlayerCar.directionOk`), or `game_observe` with `sampleMs` for self-movers (AI).
+   Do NOT trust `moved:true` alone — a car driving sideways or backwards is still `moved:true`;
+   check `alignForward` (≈1 forward, ≈0 sideways, ≈−1 backward) / `directionOk`.
 3. **Look at it** (optional but valuable): `viewport_screenshot` to see edit-mode layout, or
    `analyze_image` with `source:"viewport"` if your model can't see images — ask e.g. "are the
    menu buttons visible and inside the screen?".
@@ -37,6 +43,14 @@ declare a feature done without running it.
 - **`Cannot assign to read only property 'position'/'rotation'`** — three.js transforms are
   read-only references; use `node.position.set(x, y, z)` / `node.rotation.z = radians`. Never
   hide this with `as any` — that's what `check_scripts` exists to catch.
+- **Moves, but in the WRONG direction (sideways / backwards / turns the wrong way)** — this is a
+  math bug, not a "does it move" bug, and blind sign-flipping never converges. Verify with
+  `game_input`/`game_observe` and read `alignForward`/`alignRight`, don't guess. `rotation.z`
+  rotates the node's local +Y ("nose") to world `(-sin θ, cos θ)` and local +X to `(cos θ, sin θ)`,
+  counter-clockwise (with world +Y up). So a car whose nose is +Y moves forward with
+  `vx = -Math.sin(rot.z)*speed`, `vy = Math.cos(rot.z)*speed`; an AI aiming its nose along a
+  velocity `(dx, dy)` sets `rotation.z = Math.atan2(-dx, dy)`. Using `+sin` (or `atan2(dx, dy)`)
+  mirrors X → the body slides sideways the moment it turns.
 - **A button does nothing** — buttons emit `pressed`/`released`/`click` signals; something must
   `node.connect('pressed', target, handler)`. Check the flow script is attached to a node that
   exists and references the right node ids/names.

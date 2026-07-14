@@ -42,6 +42,14 @@ export interface LiveNodeSnapshot {
   rotationZ: number;
 }
 
+/**
+ * What a node is expected to do over an input run, checked against its ACTUAL
+ * motion relative to its own facing (so "car drives forward when I press W" is a
+ * verifiable claim, not an eyeball call). 'sideways' is the classic controller
+ * bug — moving across the body instead of along the nose.
+ */
+export type GameInputExpectation = 'forward' | 'backward' | 'sideways' | 'moving' | 'still';
+
 export interface ObservedNodeDelta {
   before: LiveNodeSnapshot | null;
   after: LiveNodeSnapshot | null;
@@ -49,6 +57,21 @@ export interface ObservedNodeDelta {
   delta?: { x: number; y: number; z: number; distance: number };
   /** True when the node's world position changed by more than ~half a unit. */
   moved?: boolean;
+  /**
+   * Travel direction vs. the node's local +Y ("nose") world axis: +1 = moving
+   * straight forward, −1 = backward, ~0 = sliding sideways. Present only when the
+   * node moved. This is the signal that catches "moved but in the wrong direction"
+   * — `moved` alone is true even when a car drives sideways.
+   */
+  alignForward?: number;
+  /** Travel direction vs. the local +X ("right") world axis: large |value| = sliding sideways. */
+  alignRight?: number;
+  /** Travel direction in degrees (atan2(dy, dx)); present only when the node moved. */
+  moveDirDeg?: number;
+  /** Verdict for this node's `expect` entry (present only when `expect` was given). */
+  directionOk?: boolean;
+  /** Human-readable reason behind `directionOk`. */
+  directionNote?: string;
 }
 
 export interface GameInputResult {
@@ -78,10 +101,14 @@ const DEFAULT_KEY_HOLD_MS = 500;
 const DEFAULT_DRAG_MS = 300;
 const DEFAULT_SETTLE_MS = 300;
 const MOVED_THRESHOLD = 0.5;
+/** Dot-product floor for an `expect` verdict to pass (≈ within 45° of the axis). */
+const DIRECTION_ALIGN_MIN = 0.7;
 /** Distinctive id so synthetic gestures never collide with a real pointer. */
 const SYNTHETIC_POINTER_ID = 31337;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
+const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 /** Best-effort `key` value for a `code` (InputService latches both, scripts poll `code`). */
 const keyForCode = (code: string): string => {
@@ -109,7 +136,12 @@ export class GameInputService {
   /** Run a scripted input sequence against the running game. */
   async run(
     steps: GameInputStep[],
-    options?: { observe?: string[]; settleMs?: number }
+    options?: {
+      observe?: string[];
+      settleMs?: number;
+      /** Per-node motion assertion → each observed node gets a `directionOk` verdict. */
+      expect?: Record<string, GameInputExpectation>;
+    }
   ): Promise<GameInputResult> {
     const failure = (error: string): GameInputResult => ({
       ok: false,
@@ -145,9 +177,13 @@ export class GameInputService {
     const errorsBefore = capturedErrors().length;
     const wasPaused = runner.paused;
     this.playSession.setFocusPauseSuppressed(true);
+    // Any node named in `expect` is implicitly observed, so a model can just state its assertion.
+    const observeQueries = Array.from(
+      new Set([...(options?.observe ?? []), ...Object.keys(options?.expect ?? {})])
+    );
     let stepsRun = 0;
     try {
-      const before = this.snapshotMany(runner, options?.observe ?? []);
+      const before = this.snapshotMany(runner, observeQueries);
 
       for (const step of steps) {
         const stepError = await this.runStep(runtime, step);
@@ -169,12 +205,22 @@ export class GameInputService {
         const afterSnap = this.snapshotOne(runner, query);
         observed[query] = this.describeDelta(beforeSnap, afterSnap);
       }
+      if (options?.expect) {
+        for (const [query, expectation] of Object.entries(options.expect)) {
+          const delta = observed[query];
+          if (delta) {
+            const verdict = this.evaluateExpectation(expectation, delta);
+            delta.directionOk = verdict.ok;
+            delta.directionNote = verdict.note;
+          }
+        }
+      }
 
       return {
         ok: true,
         stepsRun,
         resumedFromFocusPause: wasPaused,
-        ...(options?.observe?.length ? { observed } : {}),
+        ...(observeQueries.length ? { observed } : {}),
         newErrors: this.newErrorsSince(errorsBefore),
       };
     } finally {
@@ -438,12 +484,64 @@ export class GameInputService {
     const dy = after.worldPosition.y - before.worldPosition.y;
     const dz = after.worldPosition.z - before.worldPosition.z;
     const distance = Math.hypot(dx, dy, dz);
-    return {
+    const base: ObservedNodeDelta = {
       before,
       after,
       delta: { x: dx, y: dy, z: dz, distance },
       moved: distance > MOVED_THRESHOLD,
     };
+    // Direction-of-travel relative to the node's facing. three.js rotates the
+    // local +Y ("nose") axis by rotation.z to world (-sin, cos) and +X ("right")
+    // to (cos, sin); dotting the unit travel vector with those tells forward vs
+    // sideways. Only meaningful once the node actually moved in the XY plane.
+    const planar = Math.hypot(dx, dy);
+    if (planar > 1e-6) {
+      const th = after.rotationZ;
+      const ndx = dx / planar;
+      const ndy = dy / planar;
+      base.alignForward = round3(ndx * -Math.sin(th) + ndy * Math.cos(th));
+      base.alignRight = round3(ndx * Math.cos(th) + ndy * Math.sin(th));
+      base.moveDirDeg = round1((Math.atan2(dy, dx) * 180) / Math.PI);
+    }
+    return base;
+  }
+
+  /** Judge an actual delta against an expected motion, relative to the node's facing. */
+  private evaluateExpectation(
+    expectation: GameInputExpectation,
+    d: ObservedNodeDelta
+  ): { ok: boolean; note: string } {
+    const moved = d.moved === true;
+    const dist = d.delta ? Math.round(d.delta.distance) : 0;
+    const fwd = d.alignForward;
+    const right = d.alignRight;
+    const facing =
+      fwd === undefined ? '' : ` (alignForward=${fwd}, alignRight=${right}, moved ${dist}u)`;
+    switch (expectation) {
+      case 'moving':
+        return { ok: moved, note: moved ? `moved ${dist}u` : 'did not move' };
+      case 'still':
+        return moved
+          ? { ok: false, note: `expected still but moved ${dist}u` }
+          : { ok: true, note: 'stayed put' };
+      case 'forward':
+        return {
+          ok: moved && fwd !== undefined && fwd >= DIRECTION_ALIGN_MIN,
+          note: !moved ? 'did not move' : `forward alignment ${fwd}${facing}`,
+        };
+      case 'backward':
+        return {
+          ok: moved && fwd !== undefined && fwd <= -DIRECTION_ALIGN_MIN,
+          note: !moved ? 'did not move' : `backward alignment ${fwd}${facing}`,
+        };
+      case 'sideways':
+        return {
+          ok: moved && right !== undefined && Math.abs(right) >= DIRECTION_ALIGN_MIN,
+          note: !moved ? 'did not move' : `sideways alignment ${right}${facing}`,
+        };
+      default:
+        return { ok: false, note: `unknown expectation "${String(expectation)}"` };
+    }
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */

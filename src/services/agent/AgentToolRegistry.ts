@@ -20,7 +20,11 @@ import { ViewportRendererService } from '@/services/ViewportRenderService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/AssetGenService';
 import type { AlphaStats } from '@/services/image-gen/image-ops';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
-import { GameInputService, type GameInputStep } from '@/services/agent/GameInputService';
+import {
+  GameInputService,
+  type GameInputStep,
+  type GameInputExpectation,
+} from '@/services/agent/GameInputService';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
@@ -509,7 +513,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the result in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Pass observe:['Player'] to get each node's live position before/after with a `moved` flag — USE THIS to PROVE controls/movement work instead of assuming. Example: {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['PlayerCar']} → observed.PlayerCar.moved === true means the car really drives.",
+          "Send REAL input to the RUNNING game and verify the result in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Pass observe:['Player'] to get each node's live position before/after. Each observed delta reports `moved`, plus `alignForward`/`alignRight` — the travel direction vs the node's facing (+1 forward along its nose, ~0 = sliding SIDEWAYS, −1 backward). `moved` alone does NOT prove correctness: a car driving sideways is still `moved:true`. To assert direction, pass expect:{'PlayerCar':'forward'} and read observed.PlayerCar.directionOk (values: forward | backward | sideways | moving | still). Example: {steps:[{type:'key',code:'ArrowUp',ms:800}],expect:{PlayerCar:'forward'}} → directionOk===true means the car really drives along its nose.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -548,7 +552,17 @@ export class AgentToolRegistry {
             observe: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Node names/ids to snapshot before and after (position + moved flag).',
+              description:
+                'Node names/ids to snapshot before and after (position, moved, alignForward/alignRight).',
+            },
+            expect: {
+              type: 'object',
+              description:
+                "Per-node motion assertion, e.g. {'PlayerCar':'forward'}. Each named node is auto-observed and gets a directionOk verdict. Values: forward | backward | sideways | moving | still.",
+              additionalProperties: {
+                type: 'string',
+                enum: ['forward', 'backward', 'sideways', 'moving', 'still'],
+              },
             },
             settleMs: {
               type: 'number',
@@ -562,12 +576,16 @@ export class AgentToolRegistry {
           this.gameInput.run(Array.isArray(args.steps) ? (args.steps as GameInputStep[]) : [], {
             observe: Array.isArray(args.observe) ? (args.observe as string[]) : undefined,
             settleMs: typeof args.settleMs === 'number' ? args.settleMs : undefined,
+            expect:
+              args.expect && typeof args.expect === 'object'
+                ? (args.expect as Record<string, GameInputExpectation>)
+                : undefined,
           }),
       },
       {
         name: 'game_observe',
         description:
-          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + a `moving` flag — e.g. verify an AI car is driving around WITHOUT sending input.",
+          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + `moved`, plus `alignForward`/`alignRight` (travel direction vs the node's nose: ~0 forward-alignment = moving sideways) — e.g. verify an AI car is driving around, and driving in the direction it faces, WITHOUT sending input.",
         inputSchema: {
           type: 'object',
           properties: {

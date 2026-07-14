@@ -271,6 +271,73 @@ describe('AgentChatService', () => {
     expect(JSON.stringify(state.messages[4].content)).toMatch(/repeated an identical read_skill/);
   });
 
+  it('gates the turn: nudges once when game logic changed but the game was never run', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(textResult('Fixed the steering.')) // tries to end without running it
+      .mockResolvedValueOnce(toolCallResult('game_input', 'c2', { steps: [] }))
+      .mockResolvedValueOnce(textResult('Verified: it drives forward.'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix the car direction');
+
+    expect(chat).toHaveBeenCalledTimes(4);
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    const gate = state.messages.find(
+      m => m.role === 'user' && JSON.stringify(m.content).includes('changed game logic')
+    );
+    expect(gate).toBeDefined();
+  });
+
+  it('does not gate when the change was verified with game_input in the same turn', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(toolCallResult('game_input', 'c2', { steps: [] }))
+      .mockResolvedValueOnce(textResult('done and verified'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+  });
+
+  it('does not gate a documentation write (design/progress.md is not game logic)', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'design/progress.md', content: '- [x] done' })
+      )
+      .mockResolvedValueOnce(textResult('progress updated'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('update the checklist');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+  });
+
+  it('gate fires at most once, so an unverified change cannot loop forever', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(textResult('done')) // gate nudge fires here
+      .mockResolvedValueOnce(textResult('still done, not running it')); // ignores nudge → ends
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(service.getState().status).toBe('idle');
+  });
+
   it('stops at the tool-iteration cap with a notice (not an error)', async () => {
     let n = 0;
     const chat = vi.fn(async () => toolCallResult('scene_tree', `call-${n++}`));

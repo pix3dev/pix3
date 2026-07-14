@@ -684,17 +684,19 @@ describe('AgentToolRegistry', () => {
   });
 
   describe('game input tools', () => {
-    it('game_input forwards steps, observe and settleMs to the service', async () => {
+    it('game_input forwards steps, observe, settleMs and expect to the service', async () => {
       const run = vi.fn(async () => ({ ok: true, stepsRun: 1 }));
       const registry = buildRegistry({ gameInput: { run } });
       await registry.execute('game_input', {
         steps: [{ type: 'key', code: 'KeyW', ms: 100 }],
         observe: ['Player'],
         settleMs: 50,
+        expect: { Player: 'forward' },
       });
       expect(run).toHaveBeenCalledWith([{ type: 'key', code: 'KeyW', ms: 100 }], {
         observe: ['Player'],
         settleMs: 50,
+        expect: { Player: 'forward' },
       });
     });
 

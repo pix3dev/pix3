@@ -198,4 +198,62 @@ describe('GameInputService', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/play_start/);
   });
+
+  it('reports travel direction relative to the node facing (forward vs sideways)', async () => {
+    // Nose = local +Y (rotation 0), and the node moves +Y → straight forward.
+    const fwd = makeLiveNode({ rotation: { z: 0 } });
+    const runtimeF = makeRuntime([fwd]);
+    const moverF = setInterval(() => {
+      fwd.position.y += 5;
+    }, 5);
+    const forward = await buildService(runtimeF).service.run([{ type: 'key', code: 'KeyW', ms: 60 }], {
+      observe: ['Player'],
+      settleMs: 0,
+    });
+    clearInterval(moverF);
+    expect(forward.observed?.Player.moved).toBe(true);
+    expect(forward.observed?.Player.alignForward!).toBeGreaterThan(0.9);
+    expect(Math.abs(forward.observed?.Player.alignRight!)).toBeLessThan(0.1);
+
+    // Same facing (rotation 0) but the node slides +X → sideways across the body.
+    const side = makeLiveNode({ rotation: { z: 0 } });
+    const runtimeS = makeRuntime([side]);
+    const moverS = setInterval(() => {
+      side.position.x += 5;
+    }, 5);
+    const sideways = await buildService(runtimeS).service.run([{ type: 'key', code: 'KeyD', ms: 60 }], {
+      observe: ['Player'],
+      settleMs: 0,
+    });
+    clearInterval(moverS);
+    expect(Math.abs(sideways.observed?.Player.alignForward!)).toBeLessThan(0.1);
+    expect(Math.abs(sideways.observed?.Player.alignRight!)).toBeGreaterThan(0.9);
+  });
+
+  it('expect: "forward" verdict passes along the nose and fails when sliding sideways', async () => {
+    const good = makeLiveNode({ rotation: { z: 0 } });
+    const runtimeG = makeRuntime([good]);
+    const moverG = setInterval(() => {
+      good.position.y += 5;
+    }, 5);
+    const passed = await buildService(runtimeG).service.run([{ type: 'key', code: 'KeyW', ms: 60 }], {
+      expect: { Player: 'forward' },
+      settleMs: 0,
+    });
+    clearInterval(moverG);
+    expect(passed.observed?.Player.directionOk).toBe(true);
+
+    const bad = makeLiveNode({ rotation: { z: 0 } });
+    const runtimeB = makeRuntime([bad]);
+    const moverB = setInterval(() => {
+      bad.position.x += 5;
+    }, 5);
+    const failed = await buildService(runtimeB).service.run([{ type: 'key', code: 'KeyD', ms: 60 }], {
+      expect: { Player: 'forward' },
+      settleMs: 0,
+    });
+    clearInterval(moverB);
+    expect(failed.observed?.Player.directionOk).toBe(false);
+    expect(failed.observed?.Player.directionNote).toMatch(/forward alignment/);
+  });
 });

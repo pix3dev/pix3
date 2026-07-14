@@ -82,6 +82,27 @@ const MAX_TOOL_RESULT_CHARS = 24_000;
 const MAX_OUTLINE_LINES = 120;
 const OUTLINE_DEPTH = 2;
 
+/** Component edits that change how the game behaves — gate the verify nudge on them. */
+const GAME_MUTATION_COMPONENT_TOOLS = new Set([
+  'add_component',
+  'set_component_property',
+  'remove_component',
+]);
+
+/**
+ * True when a tool call changed game *behaviour*: a script/scene write or a component edit. A
+ * design/progress `.md` write or an asset op does not count, so the verify-gate stays quiet for
+ * documentation and content turns.
+ */
+const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
+  if (GAME_MUTATION_COMPONENT_TOOLS.has(toolName)) return true;
+  if (toolName === 'fs_write') {
+    const path = (input as { path?: unknown } | null | undefined)?.path;
+    return typeof path === 'string' && /\.(ts|pix3scene)$/i.test(path);
+  }
+  return false;
+};
+
 const IDLE_STATE: AgentChatState = {
   status: 'idle',
   messages: [],
@@ -371,6 +392,11 @@ export class AgentChatService {
     const lastResultBySignature = new Map<string, string>();
     // Fire the "you ended with no reply" nudge at most once, so an empty↔nudge exchange can't loop.
     let emptyAnswerNudged = false;
+    // Verify-gate: cheap models edit a script and declare victory on `compile_scripts ok` without
+    // ever running the game (a real session flipped a car's steering blind 4× and regressed). Track
+    // whether game logic changed this turn with no game_input/game_observe proof since; nudge once.
+    let unverifiedGameMutation = false;
+    let gameVerifyNudged = false;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const system = this.buildSystemPrompt(agentsMd, advisorAvailable);
@@ -455,6 +481,21 @@ export class AgentChatService {
           });
           continue;
         }
+        // Verify-gate: don't let a game-logic change close the turn unproven. `compile_scripts ok`
+        // is not proof, and `moved:true` is not proof of the RIGHT motion. Ask once for a real run.
+        if (unverifiedGameMutation && !gameVerifyNudged && iteration < maxIterations - 1) {
+          gameVerifyNudged = true;
+          this.appendMessage({
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: "[Pix3] You changed game logic (a script or scene) this turn but never ran the game to prove it. Before finishing: play_start, then game_input/game_observe on the affected node(s). Check the DIRECTION of motion (expect:{Node:'forward'} → directionOk, or alignForward/delta), not just that it compiles or that `moved` is true — a car driving sideways still reports moved:true. If you genuinely cannot run it, say why in your summary.",
+              },
+            ],
+          });
+          continue;
+        }
         return;
       }
 
@@ -478,6 +519,16 @@ export class AgentChatService {
           repeatedCalls.push(call.name);
         }
         lastResultBySignature.set(signature, resultText);
+        // A game-logic change is a script/scene write or a component edit; a design/progress .md
+        // write or an asset op is not. A successful game_input/game_observe clears the debt.
+        if (isGameLogicMutation(call.name, call.input)) {
+          unverifiedGameMutation = true;
+        } else if (
+          (call.name === 'game_input' || call.name === 'game_observe') &&
+          /"ok"\s*:\s*true/.test(resultText)
+        ) {
+          unverifiedGameMutation = false;
+        }
       }
       this.setState({ activeTool: null });
       // Tool-emitted images ride in the same user turn, after the results — all providers accept
