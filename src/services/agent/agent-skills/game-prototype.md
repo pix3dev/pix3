@@ -8,6 +8,10 @@ project. Do the small, safe thing first; verify; then continue.
 
 ## 1. Understand the design (do this before touching anything)
 
+- **First, `fs_read` `design/progress.md`.** If it exists, a previous session already planned
+  (and partly built) this game — resume from the first unchecked `[ ]` item and skip the
+  exploration you already did; the Notes section lists traps that were already hit. A missing
+  file just means a fresh start.
 - `fs_list` the `design/` folder, then `fs_read` every text/markdown file in it — that is
   the GDD. Note the game name, core loop, controls, win/lose, and screens.
 - For each image in `design/` (references, mockups), call `analyze_image` with
@@ -23,11 +27,16 @@ project. Do the small, safe thing first; verify; then continue.
   parameter, or read only the doc section for the node types you actually plan to use.
   Aim to start building after ~6–8 exploration calls.
 
-## 2. Restate the plan (one short message to the user)
+## 2. Restate the plan (one short message to the user) and write it down
 
 List, in 5 bullets or fewer: the game in one line, the screens, the core mechanic, the
 win/lose condition, and the 2–3 increments you will build. Then start building — do not wait
 for approval unless the user asked a question.
+
+**Also `fs_write` the same plan to `design/progress.md`** as a short markdown checklist —
+one `[ ]` line per increment plus a `## Notes` section. This file is your memory across
+turns and sessions: a turn that hits the iteration cap (or gets cut off) resumes from it
+instead of starting over. Keep it under ~40 lines; overwrite the whole file on each update.
 
 ## 3. Build in increments — verify each before the next
 
@@ -39,7 +48,9 @@ Order increments so the game is runnable as early as possible:
 4. **Feel & art** — juice, sound, then generated art (see the `asset-generation` skill).
 
 After each increment: `play_start`, then `play_status` and `read_errors`. Fix errors before
-moving on. Stop play mode (`play_stop`) before large edits.
+moving on. Stop play mode (`play_stop`) before large edits. When an increment is verified,
+mark it `[x]` in `design/progress.md` — and add a Notes line for anything you tried that did
+NOT work (wrong property shape, a trap from §4½), so a resumed session does not repeat it.
 
 **Prove gameplay with `game_input` — do not assume controls work.** While the game is
 playing, send real input and check that the right node actually moved:
@@ -105,5 +116,6 @@ sprites via the `asset-generation` skill. List every placeholder you leave in yo
 
 ## 6. Finish
 
-Summarize: what plays now, how to test it (which button, which key), what art is still a
-placeholder, and the single most useful next step.
+Update `design/progress.md` one last time (checkboxes + remaining work), then summarize:
+what plays now, how to test it (which button, which key), what art is still a placeholder,
+and the single most useful next step.

@@ -221,6 +221,8 @@ describe('AgentChatService', () => {
     const state = service.getState();
     // Tool-result message after iteration 0 (2 remaining) carries the wrap-up warning…
     expect(JSON.stringify(state.messages[2].content)).toMatch(/force-stopped/);
+    // …which also reminds the model to persist its progress file for the next turn.
+    expect(JSON.stringify(state.messages[2].content)).toMatch(/progress\.md/);
     // …and so does the one after iteration 1 (1 remaining).
     expect(JSON.stringify(state.messages[4].content)).toMatch(/force-stopped/);
   });

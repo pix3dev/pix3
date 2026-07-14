@@ -60,6 +60,13 @@ import {
   type Object3DLike,
 } from '@/core/agent-introspection';
 import {
+  runEvalSpec,
+  EVAL_CHECK_KINDS,
+  type EvalHarness,
+  type EvalReport,
+  type EvalSpec,
+} from '@/core/agent-eval';
+import {
   SceneManager,
   NodeBase,
   getGameDebug,
@@ -107,6 +114,20 @@ function liveSceneRoot(): Object3DLike | null {
     node = node.parent;
   }
   return node;
+}
+
+/** Case-insensitive scene search across node name + type (shared by `find` and the eval harness). */
+function findNodeSummaries(text: string): NodeSummary[] {
+  const graph = activeGraph();
+  if (!graph) return [];
+  const needle = text.toLowerCase();
+  const matches: NodeSummary[] = [];
+  for (const node of graph.nodeMap.values()) {
+    if (node.name.toLowerCase().includes(needle) || node.type.toLowerCase().includes(needle)) {
+      matches.push({ nodeId: node.nodeId, type: node.type, name: node.name });
+    }
+  }
+  return matches;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +204,83 @@ const agentTranscript = (
     return entry;
   });
 };
+
+/** Live-service implementation of the eval-scorecard harness (see `agent-eval.ts`). */
+function createEvalHarness(): EvalHarness {
+  return {
+    executeTool(name, args) {
+      return service<AgentToolRegistry>(AgentToolRegistry).execute(name, args ?? {});
+    },
+    toolCalls() {
+      const calls: Array<{ name: string; input: unknown }> = [];
+      for (const message of service<AgentChatService>(AgentChatService).getState().messages) {
+        if (message.role !== 'assistant') continue;
+        for (const block of toBlocks(message.content)) {
+          if (block.type === 'tool-use') {
+            calls.push({ name: block.name, input: block.input });
+          }
+        }
+      }
+      return calls;
+    },
+    agentSummary() {
+      const state = service<AgentChatService>(AgentChatService).getState();
+      return {
+        status: state.status,
+        notice: state.notice,
+        messageCount: state.messages.length,
+        inputTokens: state.totalUsage.inputTokens,
+        outputTokens: state.totalUsage.outputTokens,
+      };
+    },
+    findNodes(query) {
+      return findNodeSummaries(query);
+    },
+    nodeDetail(nodeId) {
+      const node = activeGraph()?.nodeMap.get(nodeId);
+      if (!(node instanceof NodeBase)) return null;
+      return {
+        properties: nodeToDTO(node, 0).properties,
+        components: node.components.map((c, i) => {
+          const dto = componentToDTO(c, i);
+          return { className: dto.className, scriptId: dto.scriptId };
+        }),
+      };
+    },
+    errors() {
+      return errors().map(e => ({ source: e.source, message: e.message }));
+    },
+    clearErrors() {
+      clearErrors();
+    },
+    isPlaying() {
+      return appState.ui.isPlaying;
+    },
+    async imageStats(path) {
+      const assets = service<AssetGenService>(AssetGenService);
+      try {
+        const meta = await assets.open(path);
+        try {
+          const stats = await assets.alphaStats(meta.id);
+          return {
+            width: meta.width,
+            height: meta.height,
+            bytes: meta.bytes,
+            hasAlpha: stats.hasAlpha,
+            transparentFraction: stats.transparentFraction,
+          };
+        } finally {
+          assets.discard(meta.id);
+        }
+      } catch {
+        return null;
+      }
+    },
+    wait(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The bridge API
@@ -343,6 +441,19 @@ export interface Pix3DebugBridge {
     advisor(): Promise<AdvisorInfo | null>;
   };
 
+  /**
+   * Deterministic eval scorecard — the automated judge of the agent-harness tuning loop.
+   * After `agent.send(...)` finishes, run a JSON spec of typed checks (tool-trace patterns,
+   * scene structure, compile status, error-free play, `game_input` movement, asset alpha/size)
+   * and get a reproducible pass/fail report. Specs for S1–S3 live in
+   * `.plans/agent-eval-scenarios.md`. Checks run in order; play-mode checks change state.
+   */
+  readonly eval: {
+    run(spec: EvalSpec): Promise<EvalReport>;
+    /** All supported check kinds (spec authoring aid). */
+    checkKinds(): string[];
+  };
+
   // --- game-specific surface (present only if the running game registered one) ---
   readonly game: {
     /** True if the running game registered a GameDebugProvider. */
@@ -364,7 +475,7 @@ export interface Pix3DebugBridge {
 
 function createBridge(): Pix3DebugBridge {
   return {
-    version: 4,
+    version: 5,
 
     help() {
       return {
@@ -395,6 +506,9 @@ function createBridge(): Pix3DebugBridge {
         'agent.setAdvisor(id,model) / agent.advisor()':
           "Configure the stronger advisor model behind ask_advisor ('' = off).",
         'agent.newConversation() / agent.stop()': 'Reset the conversation / abort a running turn.',
+        'eval.run({name,checks:[...]})':
+          'Deterministic scorecard for eval runs: tool-trace, scene, compile, play, game_input and asset checks → a reproducible pass/fail report (specs: .plans/agent-eval-scenarios.md).',
+        'eval.checkKinds()': 'List the supported check kinds.',
         'game.available() / game.info()': 'Whether the running game exposed a debug provider.',
         'game.snapshot() / game.inspect(q) / game.action(n)':
           'Game-specific debug surface (per-game).',
@@ -440,16 +554,7 @@ function createBridge(): Pix3DebugBridge {
     },
 
     find(text) {
-      const graph = activeGraph();
-      if (!graph) return [];
-      const needle = text.toLowerCase();
-      const matches: NodeSummary[] = [];
-      for (const node of graph.nodeMap.values()) {
-        if (node.name.toLowerCase().includes(needle) || node.type.toLowerCase().includes(needle)) {
-          matches.push({ nodeId: node.nodeId, type: node.type, name: node.name });
-        }
-      }
-      return matches;
+      return findNodeSummaries(text);
     },
 
     selection() {
@@ -619,7 +724,10 @@ function createBridge(): Pix3DebugBridge {
         return service<AgentChatService>(AgentChatService).newConversation();
       },
       transcript(limit) {
-        return agentTranscript(service<AgentChatService>(AgentChatService).getState().messages, limit);
+        return agentTranscript(
+          service<AgentChatService>(AgentChatService).getState().messages,
+          limit
+        );
       },
       setProvider(providerId, modelId) {
         service<AgentSettingsService>(AgentSettingsService).updatePreferences({
@@ -644,6 +752,15 @@ function createBridge(): Pix3DebugBridge {
       },
       advisor() {
         return service<AgentAdvisorService>(AgentAdvisorService).describeAdvisor();
+      },
+    },
+
+    eval: {
+      run(spec) {
+        return runEvalSpec(createEvalHarness(), spec);
+      },
+      checkKinds() {
+        return [...EVAL_CHECK_KINDS];
       },
     },
 

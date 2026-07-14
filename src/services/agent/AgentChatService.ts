@@ -497,7 +497,7 @@ export class AgentChatService {
       if (remaining > 0 && remaining <= 2) {
         resultContent.push({
           type: 'text',
-          text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors, then reply with a short summary of what is done and what remains. Do not start new rewrites.`,
+          text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors; if you keep design/progress.md, fs_write the updated checklist so the next turn can resume; then reply with a short summary of what is done and what remains. Do not start new rewrites.`,
         });
       }
       this.appendMessage({ role: 'user', content: resultContent });

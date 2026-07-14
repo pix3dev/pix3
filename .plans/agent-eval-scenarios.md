@@ -32,6 +32,60 @@ D.agentTools.execute('play_status');
 state, never thrown). Read `summary.status` (`idle`/`error`), `summary.lastAssistant`,
 `summary.totalUsage`, then `transcript()` for the tool trace.
 
+## Scorecard — the deterministic judge (bridge ≥ v5)
+
+`D.eval.run(spec)` replaces the hand-driven expectation tables: after `agent.send()` finishes,
+run a JSON spec of typed checks and get a reproducible pass/fail report. No LLM judgment
+anywhere — checks measure the tool trace, scene graph, compile diagnostics, captured errors,
+live gameplay (`game_input`/`game_observe`) and image alpha stats. `D.eval.checkKinds()` lists
+the vocabulary; the engine is `src/core/agent-eval.ts`.
+
+```js
+const report = await D.eval.run(S1_SPEC);   // { name, ok, passed, failed, checks: [{label, pass, detail}], agent }
+```
+
+Checks run **in order** (play checks change state: they start/stop play mode themselves).
+The report's `agent` footer carries status/notice/tokens for the results table. The judge's
+remaining job is what the scorecard can't measure: reading the transcript for *process*
+quality (churn, over-delegation to the advisor, ignored skill advice) and judging content
+beyond binary checks. Judge each step as it lands — don't wait for the end of the run.
+
+Ready-made specs for the Ring Racing template project (adjust node/file names per project):
+
+```js
+const S1_SPEC = { name: 'S1 каркас по GDD', checks: [
+  { kind: 'tool-called', tool: 'read_skill', inputMatch: 'game-prototype', withinFirstCalls: 6 },
+  { kind: 'file', path: 'design/progress.md', contains: '[' },       // plan written down
+  { kind: 'compile-clean', typeCheck: true },
+  { kind: 'node-exists', name: 'Player Car' },
+  { kind: 'node-component', node: 'Player Car', componentType: 'user:' },
+  { kind: 'play-clean', settleMs: 2000 },
+]};
+
+const S2_SPEC = { name: 'S2 спрайт из референса', checks: [
+  { kind: 'tool-order', first: 'analyze_image', then: 'generate_asset' },
+  { kind: 'tool-called', tool: 'generate_asset', inputMatch: '"transparent":\\s*true' },
+  { kind: 'asset', path: 'src/assets/textures/player_car.png', requireAlpha: true, maxDimension: 1024 },
+  { kind: 'node-property', node: 'Player Car', property: 'texture', matches: '^res://.*player_car\\.png$' },
+]};
+// + content QC stays on the judge: D.assets.open(path) → preview → your own eyes
+// ("exactly ONE car, no scene?") — the scorecard proves mechanics, not art content.
+
+const S3_SPEC = { name: 'S3 играбельный прототип', checks: [
+  { kind: 'tool-called', tool: 'read_errors' },                       // verify loop ran
+  { kind: 'compile-clean', typeCheck: true },
+  { kind: 'play-clean', settleMs: 2000, keepPlaying: true },
+  { kind: 'input-moves', steps: [{ type: 'key', code: 'ArrowUp', ms: 1500 }],
+    observe: ['Player Car'], keepPlaying: true },
+  { kind: 'observe-moving', nodes: ['AI Car 1'], sampleMs: 1500 },    // stops play (last gameplay check)
+  { kind: 'no-errors' },
+]};
+```
+
+Paste a spec + `D.eval.run(...)` into one `evaluate_script` call. On failure, `detail` carries
+the evidence (`AI Car 1: did NOT move`, `compile failed: … (scripts/Car.ts:127)`) — that string
+goes straight into the results table and points at what to tune.
+
 ## Scenarios
 
 ### S1 — "каркас по GDD" (structure + behaviour, no art)

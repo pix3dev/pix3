@@ -121,6 +121,10 @@ single-shot scene dump; behavior is steerable by editing md files, not code.
 
 Files: `src/core/debug-bridge.ts` (+ a scenario checklist doc, no product UI).
 
+> **Update 2026-07-14:** shipped, plus a deterministic scorecard (`D.eval.run(spec)`,
+> engine in `src/core/agent-eval.ts`, bridge v5) that automates the S1–S3 expectation
+> tables — see the "Scorecard" section in `.plans/agent-eval-scenarios.md`.
+
 1. **Expose the agent on the debug bridge**: `__PIX3_DEBUG__.agent = { send(text), stop(),
    newConversation(), getState(), setProvider(id, modelId) }` where `send()` resolves when
    status returns to `idle`/`error` (subscribe + promise). Mirrors how `assets` is exposed.
