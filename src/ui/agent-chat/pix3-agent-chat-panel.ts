@@ -95,6 +95,38 @@ const formatMetric = (metric: AgentTurnMetric): string => {
   return parts.join(' · ');
 };
 
+/** Compact token count for the context meter: 980, 24K, 1.2M. */
+const formatTokenCount = (tokens: number): string => {
+  if (tokens < 1000) return String(tokens);
+  if (tokens < 1_000_000) {
+    const k = tokens / 1000;
+    return `${k >= 100 ? Math.round(k) : Number(k.toFixed(1))}K`;
+  }
+  const m = tokens / 1_000_000;
+  return `${Number(m.toFixed(m >= 10 ? 0 : 1))}M`;
+};
+
+/**
+ * Tokens the model received on the most recent turn — i.e. the current context size (system prompt
+ * + full history + tool specs). Read from the highest-indexed turn metric that carries an input
+ * count; `undefined` until a provider reports usage. This tracks context *fill*, unlike
+ * {@link AgentChatState.totalUsage} which sums input across every turn (double-counting history).
+ */
+const latestContextTokens = (
+  turnMetrics: Readonly<Record<number, AgentTurnMetric>>
+): number | undefined => {
+  let bestIndex = -1;
+  let tokens: number | undefined;
+  for (const [key, metric] of Object.entries(turnMetrics)) {
+    const index = Number(key);
+    if (index > bestIndex && metric.inputTokens !== undefined) {
+      bestIndex = index;
+      tokens = metric.inputTokens;
+    }
+  }
+  return tokens;
+};
+
 /** File extensions treated as attachable text (mirrors the agent's fs_read text set, loosely). */
 const TEXT_ATTACHMENT_EXT = new Set([
   'txt',
@@ -625,11 +657,6 @@ export class AgentChatPanel extends ComponentBase {
 
   private renderComposer() {
     const running = this.chatState?.status === 'running';
-    const usage = this.chatState?.totalUsage;
-    const usageText =
-      usage && (usage.inputTokens || usage.outputTokens)
-        ? `${usage.inputTokens ?? 0}↑ ${usage.outputTokens ?? 0}↓ tokens`
-        : '';
     const canSend = Boolean(this.draft.trim()) || this.attachments.length > 0;
 
     return html`
@@ -694,11 +721,7 @@ export class AgentChatPanel extends ComponentBase {
                   Sys
                 </button>`
             : null}
-          ${usageText
-            ? html`<span class="agent-usage" title="Token usage this conversation"
-                >${usageText}</span
-              >`
-            : null}
+          ${this.renderContextMeter()}
           <div class="agent-history-wrap">
             <button
               type="button"
@@ -738,6 +761,53 @@ export class AgentChatPanel extends ComponentBase {
               </button>`}
         </div>
       </div>
+    `;
+  }
+
+  /**
+   * Context-fill indicator: how full the selected model's context window is, based on the token
+   * count sent on the last turn. A mini bar + "used / limit · %" when the window size is known;
+   * a bare "used ctx" count for models that don't report a window (local / custom endpoints).
+   * Renders nothing until the first turn reports usage. Cumulative session tokens ride in the
+   * tooltip so the old total is still one hover away.
+   */
+  private renderContextMeter() {
+    const chatState = this.chatState;
+    if (!chatState) return null;
+    const used = latestContextTokens(chatState.turnMetrics);
+    if (used === undefined) return null;
+
+    const contextWindow = this.modelCatalog.getModel(this.providerId, this.modelId)?.capabilities
+      .contextWindow;
+    const usage = chatState.totalUsage;
+    const sessionTip =
+      usage.inputTokens || usage.outputTokens
+        ? ` · session ${usage.inputTokens ?? 0}↑ ${usage.outputTokens ?? 0}↓`
+        : '';
+
+    if (!contextWindow) {
+      return html`<span
+        class="agent-context"
+        title="Context used on the last request: ${used.toLocaleString()} tokens${sessionTip}"
+        >${formatTokenCount(used)} ctx</span
+      >`;
+    }
+
+    const ratio = Math.min(1, used / contextWindow);
+    const pct = Math.round(ratio * 100);
+    const level = ratio >= 0.9 ? 'is-high' : ratio >= 0.7 ? 'is-mid' : '';
+    return html`
+      <span
+        class="agent-context ${level}"
+        title="Context: ${used.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)${sessionTip}"
+      >
+        <span class="agent-context-bar">
+          <span class="agent-context-fill" style=${`width: ${pct}%`}></span>
+        </span>
+        <span class="agent-context-text"
+          >${formatTokenCount(used)} / ${formatTokenCount(contextWindow)} · ${pct}%</span
+        >
+      </span>
     `;
   }
 

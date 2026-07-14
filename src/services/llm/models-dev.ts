@@ -101,6 +101,7 @@ export const mapModelsDevModel = (id: string, entry: unknown): LlmModel | null =
       supportsImages,
       supportsSystemPrompt: true,
       maxOutputTokens: Math.min(output ?? DEFAULT_OUTPUT_TOKENS, MAX_ADVERTISED_OUTPUT_TOKENS),
+      contextWindow: context,
     },
     pricing:
       inputCost !== undefined && outputCost !== undefined

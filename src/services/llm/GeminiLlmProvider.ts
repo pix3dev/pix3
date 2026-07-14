@@ -49,6 +49,7 @@ export class GeminiLlmProvider implements LlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 1_048_576,
       },
       // Indicative Gemini 2.5 Flash paid-tier pricing (the current stable Flash).
       pricing: { inputPer1M: 0.3, outputPer1M: 2.5 },
@@ -62,6 +63,7 @@ export class GeminiLlmProvider implements LlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 1_048_576,
       },
       // Gemini 2.5 Pro paid-tier base tier (prompts ≤ 200k tokens); higher above that.
       pricing: { inputPer1M: 1.25, outputPer1M: 10 },
@@ -75,6 +77,7 @@ export class GeminiLlmProvider implements LlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 1_048_576,
       },
       // Gemini 3.1 Flash-Lite paid-tier pricing (text/image input).
       pricing: { inputPer1M: 0.25, outputPer1M: 1.5 },

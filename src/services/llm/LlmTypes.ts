@@ -118,6 +118,12 @@ export interface LlmModelCapabilities {
   readonly supportsSystemPrompt: boolean;
   /** Default cap on generated tokens for this model. */
   readonly maxOutputTokens: number;
+  /**
+   * Total context-window size in tokens (prompt + generation). Optional — providers that can't
+   * report it (local/OpenAI-compatible endpoints) omit it. The chat UI uses it to show how full
+   * the context is; when absent, the fill indicator degrades to a bare token count.
+   */
+  readonly contextWindow?: number;
 }
 
 /** Indicative USD price per 1M tokens (shown as a hint in the model picker; may drift). */

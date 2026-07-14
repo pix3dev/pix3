@@ -41,6 +41,7 @@ export class CerebrasLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 65_536,
       },
     },
     {
@@ -52,6 +53,7 @@ export class CerebrasLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 8192,
       },
     },
     {
@@ -63,6 +65,7 @@ export class CerebrasLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 8192,
+        contextWindow: 65_536,
       },
     },
   ];

@@ -648,10 +648,46 @@ pix3-agent-chat-panel .agent-stop {
   color: #e08c8c;
 }
 
-pix3-agent-chat-panel .agent-usage {
+pix3-agent-chat-panel .agent-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.62rem;
-  color: rgba(245, 247, 250, 0.45);
+  color: rgba(245, 247, 250, 0.5);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+pix3-agent-chat-panel .agent-context-bar {
+  position: relative;
+  width: 2.75rem;
+  height: 0.32rem;
+  border-radius: 0.2rem;
+  background: rgba(245, 247, 250, 0.12);
+  overflow: hidden;
+}
+
+pix3-agent-chat-panel .agent-context-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  min-width: 0.15rem;
+  border-radius: inherit;
+  background: var(--pix3-accent-color, #ffcf33);
+  transition: width 0.25s ease;
+}
+
+pix3-agent-chat-panel .agent-context.is-mid .agent-context-fill {
+  background: #f5a623;
+}
+
+pix3-agent-chat-panel .agent-context.is-high {
+  color: #ff9a8a;
+}
+
+pix3-agent-chat-panel .agent-context.is-high .agent-context-fill {
+  background: #ff5a4d;
 }
 
 pix3-agent-chat-panel .agent-attach {
