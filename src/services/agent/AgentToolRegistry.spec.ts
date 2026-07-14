@@ -5,6 +5,7 @@ import { clearErrors } from '@/core/agent-introspection';
 import { AgentToolRegistry } from './AgentToolRegistry';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
+import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
@@ -468,6 +469,38 @@ describe('AgentToolRegistry', () => {
       expect(storage.writeTextFile).toHaveBeenCalledWith('scripts/spin.ts', 'code');
       expect(result).toEqual({ ok: true, path: 'scripts/spin.ts' });
       expect(appState.project.fileRefreshSignal || 0).toBeGreaterThan(before);
+    });
+
+    it('fs_write to an OPEN scene file force-reloads that scene', async () => {
+      const storage = makeStorage();
+      const dispatcher = { execute: vi.fn(async () => true), executeById: vi.fn() };
+      const registry = buildRegistry({ storage, dispatcher });
+      appState.scenes.descriptors['scene-main'] = {
+        filePath: 'res://src/assets/scenes/main.pix3scene',
+      } as never;
+      try {
+        const result = (await registry.execute('fs_write', {
+          path: 'src/assets/scenes/main.pix3scene',
+          content: 'root: []',
+        })) as Record<string, unknown>;
+        expect(result.reloadedScene).toBe('scene-main');
+        expect(dispatcher.execute).toHaveBeenCalledTimes(1);
+        expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(ReloadSceneCommand);
+      } finally {
+        delete appState.scenes.descriptors['scene-main'];
+      }
+    });
+
+    it('fs_write to a non-open file does not dispatch a reload', async () => {
+      const storage = makeStorage();
+      const dispatcher = { execute: vi.fn(async () => true), executeById: vi.fn() };
+      const registry = buildRegistry({ storage, dispatcher });
+      const result = (await registry.execute('fs_write', {
+        path: 'scripts/spin.ts',
+        content: 'code',
+      })) as Record<string, unknown>;
+      expect(result.reloadedScene).toBeUndefined();
+      expect(dispatcher.execute).not.toHaveBeenCalled();
     });
 
     it('fs_delete delegates and bumps fileRefreshSignal', async () => {

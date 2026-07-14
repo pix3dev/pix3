@@ -27,6 +27,7 @@ import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService'
 import type { LlmImageBlock } from '@/services/llm/LlmTypes';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
+import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
@@ -1115,12 +1116,47 @@ export class AgentToolRegistry {
     };
   }
 
-  private async fsWrite(path: string, content: string): Promise<{ ok: true; path: string }> {
+  private async fsWrite(
+    path: string,
+    content: string
+  ): Promise<{ ok: true; path: string; reloadedScene?: string }> {
     const safe = this.safePath(path);
     // ProjectStorageService.writeTextFile bumps appState.project.fileRefreshSignal internally, so
     // open code tabs / the asset browser pick the change up — no direct appState mutation here.
     await this.storage.writeTextFile(safe, content);
-    return { ok: true, path: safe };
+    const reloadedScene = await this.reloadSceneIfOpen(safe);
+    return { ok: true, path: safe, ...(reloadedScene ? { reloadedScene } : {}) };
+  }
+
+  /**
+   * Deterministically reload an OPEN scene the agent just overwrote. The file watcher cannot be
+   * relied on here: browser-OPFS scene descriptors carry no usable fileHandle and a blurred
+   * automation window pauses polling — observed in eval: the agent rewrote the active scene,
+   * the editor silently kept the stale graph, and every follow-up edit targeted dead nodes.
+   */
+  private async reloadSceneIfOpen(safePath: string): Promise<string | null> {
+    if (!safePath.toLowerCase().endsWith('.pix3scene')) {
+      return null;
+    }
+    const entry = Object.entries(appState.scenes.descriptors).find(([, descriptor]) => {
+      const descriptorPath = (descriptor?.filePath ?? '')
+        .replace(/^res:\/\//i, '')
+        .replace(/^\/+/, '');
+      return descriptorPath === safePath;
+    });
+    if (!entry) {
+      return null;
+    }
+    const [sceneId, descriptor] = entry;
+    try {
+      const ok = await this.dispatcher.execute(
+        new ReloadSceneCommand({ sceneId, filePath: descriptor.filePath })
+      );
+      return ok ? sceneId : null;
+    } catch (error) {
+      console.warn('[AgentToolRegistry] Scene reload after fs_write failed:', error);
+      return null;
+    }
   }
 
   private async fsDelete(path: string): Promise<{ ok: true; path: string }> {
