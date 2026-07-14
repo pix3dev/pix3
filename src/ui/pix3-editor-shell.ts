@@ -86,6 +86,7 @@ import { ZoomInCommand } from '@/features/viewport/ZoomInCommand';
 import { ZoomOutCommand } from '@/features/viewport/ZoomOutCommand';
 import { ToggleLightingCommand } from '@/features/viewport/ToggleLightingCommand';
 import { ToggleCollidersCommand } from '@/features/viewport/ToggleCollidersCommand';
+import { ToggleDirectionAxesCommand } from '@/features/viewport/ToggleDirectionAxesCommand';
 import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigationModeCommand';
 import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
 import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
@@ -387,6 +388,7 @@ export class Pix3EditorShell extends ComponentBase {
     const zoomOutCommand = new ZoomOutCommand();
     const toggleLightingCommand = new ToggleLightingCommand();
     const toggleCollidersCommand = new ToggleCollidersCommand();
+    const toggleDirectionAxesCommand = new ToggleDirectionAxesCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
 
     // Arrow-key nudge for selected 2D nodes (Shift = larger step).
@@ -442,6 +444,7 @@ export class Pix3EditorShell extends ComponentBase {
       zoomOutCommand,
       toggleLightingCommand,
       toggleCollidersCommand,
+      toggleDirectionAxesCommand,
       toggleNavigationModeCommand,
       ...nudgeCommands
     );

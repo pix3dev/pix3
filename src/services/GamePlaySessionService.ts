@@ -7,6 +7,7 @@ import {
   SceneManager,
   SceneRunner,
   setPhysicsDebugEnabled,
+  setDirectionAxesEnabled,
 } from '@pix3/runtime';
 import { appState } from '@/state';
 import type { GameAspectRatio } from '@/state/AppState';
@@ -94,12 +95,14 @@ export class GamePlaySessionService {
     // Ensure runtime script/uncaught errors are bridged into the Logs panel and
     // the Game-tab banner before any scene can be launched.
     this.runtimeErrorBridge.initialize();
-    // Mirror the collider-debug toggle into the runtime's global flag, which the
-    // SceneRunner reads each frame. Set it once up front so the current value
-    // applies even before any further UI change fires the subscription.
+    // Mirror the collider- and axes-debug toggles into the runtime's global
+    // flags, which the SceneRunner reads each frame. Set once up front so the
+    // current values apply even before any further UI change fires the subscription.
     setPhysicsDebugEnabled(appState.ui.showPhysicsColliders);
+    setDirectionAxesEnabled(appState.ui.showDirectionAxes);
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       setPhysicsDebugEnabled(appState.ui.showPhysicsColliders);
+      setDirectionAxesEnabled(appState.ui.showDirectionAxes);
       this.queueSync();
       this.updatePopoutPresentation();
     });

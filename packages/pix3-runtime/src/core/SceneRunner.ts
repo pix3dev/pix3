@@ -39,10 +39,12 @@ import {
   registerRuntimeSceneRoot,
   registerRuntimeLivePropertySink,
   isPhysicsDebugEnabled,
+  isDirectionAxesEnabled,
   reportScriptError,
   describeThrown,
 } from './game-debug';
 import { PhysicsDebugOverlay } from './physics-debug-overlay';
+import { DirectionAxesOverlay } from './direction-axes-overlay';
 import { worldToCanvasLogical, worldToCanvasThroughCamera } from './world-to-canvas';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { GameTime } from './GameTime';
@@ -111,6 +113,8 @@ export class SceneRunner {
   private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
   /** Lazily created collider wireframe overlay (only while physics debug is on). */
   private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
+  /** Lazily created direction-axis gizmo overlay (only while axes debug is on). */
+  private directionAxesOverlay: DirectionAxesOverlay | null = null;
   /** Lazily created post-processing composer (only while a PostProcess node is
    * active). Null when no effects are enabled — then the plain two-pass path runs. */
   private postFx: PostProcessingPipeline | null = null;
@@ -263,6 +267,10 @@ export class SceneRunner {
     if (this.physicsDebugOverlay) {
       this.physicsDebugOverlay.dispose();
       this.physicsDebugOverlay = null;
+    }
+    if (this.directionAxesOverlay) {
+      this.directionAxesOverlay.dispose();
+      this.directionAxesOverlay = null;
     }
     if (this.postFx) {
       this.postFx.dispose();
@@ -723,12 +731,21 @@ export class SceneRunner {
         this.physicsDebugOverlay.render(this.renderer, camera3D);
       }
 
+      // Direction-axis gizmos for 3D nodes — before the 2D layer so UI stays on top.
+      if (camera3D) {
+        this.renderDirectionAxes('node3d', camera3D);
+      }
+
       // When a 3D scene opts 2D out of post, the 2D layer was NOT rendered inside
       // the composer — draw it clean on top. (With no 3D camera, 2D is already the
       // composer's base band, so nothing to add here.)
       if (!postConfig.affect2D && camera3D) {
         this.renderScene2D();
       }
+
+      // Direction-axis gizmos for 2D nodes — over the 2D content in all sub-cases
+      // (whether it was the composer's base band or drawn clean above).
+      this.renderDirectionAxes('node2d', this.orthographicCamera);
     } else {
       // ── Plain two-pass path ────────────────────────────────────────────────
 
@@ -754,8 +771,17 @@ export class SceneRunner {
         this.physicsDebugOverlay.render(this.renderer, this.activeCamera.camera);
       }
 
+      // Pass 1.6: Direction-axis gizmos for 3D nodes — before the 2D pass so UI
+      // stays on top of the world-space gizmos.
+      if (this.activeCamera) {
+        this.renderDirectionAxes('node3d', this.activeCamera.camera);
+      }
+
       // Pass 2: 2D Overlay
       this.renderScene2D();
+
+      // Pass 2.5: Direction-axis gizmos for 2D nodes — over the 2D content.
+      this.renderDirectionAxes('node2d', this.orthographicCamera);
     }
 
     // Final pass: fixed HUD overlay (CanvasLayer2D). Drawn last in BOTH paths so
@@ -765,6 +791,28 @@ export class SceneRunner {
     if (this.overlay2DActive) {
       this.renderOverlay2D();
     }
+  }
+
+  /**
+   * Draw per-node local-axis gizmos for one layer (debug-only). Gated on the
+   * global axes flag the editor's toggle writes; lazily builds the overlay on
+   * first use so scenes that never enable it pay nothing. `camera` must be the
+   * one the matching content pass used so world-space endpoints line up.
+   */
+  private renderDirectionAxes(kind: 'node2d' | 'node3d', camera: Camera): void {
+    if (!isDirectionAxesEnabled()) {
+      return;
+    }
+    if (!this.directionAxesOverlay) {
+      this.directionAxesOverlay = new DirectionAxesOverlay();
+    }
+    this.renderer.setAutoClear(false);
+    this.directionAxesOverlay.render(
+      this.renderer,
+      camera,
+      this.runtimeGraph?.rootNodes ?? [],
+      kind
+    );
   }
 
   /** Draw the 2D content band over the current color buffer (clear depth, keep

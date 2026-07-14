@@ -201,6 +201,30 @@ export function isPhysicsDebugEnabled(): boolean {
 }
 
 /**
+ * Well-known global key for the **direction-axes debug flag**. The editor's
+ * axes toggle writes it; the runtime's `SceneRunner` reads it every frame to
+ * decide whether to draw per-node local-axis gizmos over the running scene
+ * (X = red, Y = green, Z = blue). It reveals object orientation — e.g. which
+ * way a moving sprite is actually facing — which a flat screenshot can't show.
+ * Stored on `globalThis` so it bridges module copies, matching the physics flag.
+ */
+export const DIRECTION_AXES_ENABLED_KEY = '__PIX3_DIRECTION_AXES_ENABLED__';
+
+type DirectionAxesEnabledGlobal = Record<string, boolean | undefined>;
+
+/** Enable or disable per-node direction-axis gizmos in the runtime. */
+export function setDirectionAxesEnabled(enabled: boolean): void {
+  const store = globalThis as unknown as DirectionAxesEnabledGlobal;
+  store[DIRECTION_AXES_ENABLED_KEY] = enabled;
+}
+
+/** Whether direction-axis gizmos are currently enabled (defaults to false). */
+export function isDirectionAxesEnabled(): boolean {
+  const store = globalThis as unknown as DirectionAxesEnabledGlobal;
+  return store[DIRECTION_AXES_ENABLED_KEY] === true;
+}
+
+/**
  * The lifecycle stage a script error was thrown from. `scene-start` covers
  * failures while cloning/loading the scene before any script ran; `tick` covers
  * an error escaping the per-frame update outside a single component.

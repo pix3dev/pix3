@@ -62,6 +62,9 @@ export class GameViewTab extends ComponentBase {
   private showColliders = appState.ui.showPhysicsColliders;
 
   @state()
+  private showDirectionAxes = appState.ui.showDirectionAxes;
+
+  @state()
   private isRemotePreviewActive = false;
 
   @state()
@@ -112,6 +115,7 @@ export class GameViewTab extends ComponentBase {
       this.isPlaying = appState.ui.isPlaying;
       this.isGamePopoutOpen = appState.ui.isGamePopoutOpen;
       this.showColliders = appState.ui.showPhysicsColliders;
+      this.showDirectionAxes = appState.ui.showDirectionAxes;
       this.playModeError = appState.ui.playModeError;
       requestAnimationFrame(() => this.handleResize());
       this.requestUpdate();
@@ -208,6 +212,10 @@ export class GameViewTab extends ComponentBase {
 
   private handleCollidersClick() {
     void this.commandDispatcher.executeById('view.toggle-colliders');
+  }
+
+  private handleDirectionAxesClick() {
+    void this.commandDispatcher.executeById('view.toggle-direction-axes');
   }
 
   private handleOpenLogsClick() {
@@ -424,6 +432,36 @@ export class GameViewTab extends ComponentBase {
                   stroke="none"
                 ></path>
               </g>
+            </svg>
+          </button>
+
+          <button
+            class="toolbar-button toolbar-icon-button ${this.showDirectionAxes ? 'active' : ''}"
+            @click=${this.handleDirectionAxesClick}
+            title="Toggle direction axes (X/Y/Z orientation gizmos)"
+            aria-label="Toggle direction axes"
+            aria-pressed=${String(this.showDirectionAxes)}
+          >
+            <svg
+              class="toolbar-svg-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
+            >
+              <!-- Y axis (up) -->
+              <path d="M6 20V4" />
+              <path d="M3 7l3-3 3 3" />
+              <!-- X axis (right) -->
+              <path d="M6 20h14" />
+              <path d="M17 17l3 3-3 3" />
+              <!-- Z axis (depth, up-right) -->
+              <path d="M6 20l9-9" />
+              <path d="M11 10.5l4-.5-.5 4" />
             </svg>
           </button>
 

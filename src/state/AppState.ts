@@ -322,6 +322,8 @@ export interface UIState {
   showLighting: boolean;
   /** Toggle for the physics collider wireframe overlay in the running game preview */
   showPhysicsColliders: boolean;
+  /** Toggle for per-node direction-axis gizmos in the running game preview */
+  showDirectionAxes: boolean;
   /** Warn before leaving the page with unsaved changes */
   warnOnUnsavedUnload: boolean;
   /** Pause rendering when the window is unfocused for battery economy */
@@ -565,6 +567,7 @@ export const createInitialAppState = (): AppState => ({
     grid2DSize: 16,
     showLighting: true,
     showPhysicsColliders: false,
+    showDirectionAxes: false,
     warnOnUnsavedUnload: true,
     pauseRenderingOnUnfocus: true,
     gameAspectRatio: 'free',
