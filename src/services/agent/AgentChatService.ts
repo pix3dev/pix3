@@ -365,6 +365,11 @@ export class AgentChatService {
     // from the outbound request, swapping each for a placeholder that points at analyze_image.
     const modelSupportsImages = model?.capabilities.supportsImages !== false;
 
+    // Loop-breaker bookkeeping: last result per identical (tool, args) signature. Cheap models
+    // repeat an exact failing call verbatim when the error gives them nothing new (observed with
+    // read_skill on an invented section name) — detect the repeat and say so explicitly.
+    const lastResultBySignature = new Map<string, string>();
+
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       const system = this.buildSystemPrompt(agentsMd, advisorAvailable);
       const outboundMessages = modelSupportsImages
@@ -413,11 +418,28 @@ export class AgentChatService {
         (block): block is LlmToolUseBlock => block.type === 'tool-use'
       );
       if (calls.length === 0) {
+        // A generation cut off by the output-token limit is not a finished turn — the model
+        // usually stopped mid-plan, right before a tool call it never got to emit (eval S1
+        // ended this way: "Теперь RaceManager:" and silence). Nudge it to continue; the nudge
+        // consumes an iteration slot, so it cannot loop past the cap.
+        if (result.stopReason === 'max_tokens' && iteration < maxIterations - 1) {
+          this.appendMessage({
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: '[Pix3] Your reply was cut off by the output-token limit before any tool call. Continue from where you stopped. If you were about to write a large file, split it into smaller pieces.',
+              },
+            ],
+          });
+          continue;
+        }
         return;
       }
 
       const results: LlmToolResultBlock[] = [];
       const images: LlmImageBlock[] = [];
+      const repeatedCalls: string[] = [];
       for (const call of calls) {
         if (signal.aborted) {
           throw new LlmError('aborted', 'The request was cancelled.');
@@ -426,12 +448,38 @@ export class AgentChatService {
         const executed = await this.executeToolCall(call);
         results.push(executed.result);
         images.push(...executed.images);
+        const signature = `${call.name}:${JSON.stringify(call.input ?? {})}`;
+        const resultText =
+          typeof executed.result.content === 'string'
+            ? executed.result.content
+            : JSON.stringify(executed.result.content);
+        if (lastResultBySignature.get(signature) === resultText) {
+          repeatedCalls.push(call.name);
+        }
+        lastResultBySignature.set(signature, resultText);
       }
       this.setState({ activeTool: null });
       // Tool-emitted images ride in the same user turn, after the results — all providers accept
       // mixed tool-result + image content there. They are always kept in history (so the UI shows
       // them and vision models see them); the outbound request strips them for text-only models.
-      this.appendMessage({ role: 'user', content: [...results, ...images] });
+      const resultContent: LlmContentBlock[] = [...results, ...images];
+      if (repeatedCalls.length > 0) {
+        resultContent.push({
+          type: 'text',
+          text: `[Pix3] You repeated an identical ${[...new Set(repeatedCalls)].join(', ')} call and got the identical result. Repeating it again will not change anything — re-read the result above and take a different action (different arguments, different tool, or proceed with what you already know).`,
+        });
+      }
+      // Near the iteration cap, tell the model to land the work instead of silently cutting it
+      // off mid-task (eval S3 hit the cap right after play_start every turn — errors never read,
+      // no final answer). Two iterations is enough for one verification round plus a summary.
+      const remaining = maxIterations - 1 - iteration;
+      if (remaining > 0 && remaining <= 2) {
+        resultContent.push({
+          type: 'text',
+          text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors, then reply with a short summary of what is done and what remains. Do not start new rewrites.`,
+        });
+      }
+      this.appendMessage({ role: 'user', content: resultContent });
     }
 
     this.setState({

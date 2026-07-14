@@ -69,12 +69,36 @@ export class AgentSkillsService {
     }
     return extractSection(skill.content, section.trim());
   }
+
+  /**
+   * The section headings of a skill, for self-correcting `read_skill` errors: when a model asks
+   * for a section that doesn't exist it tends to retry the same invented name verbatim unless the
+   * error shows it what actually exists.
+   */
+  sections(id: string): string[] {
+    const skill = this.get(id);
+    if (!skill) {
+      return [];
+    }
+    return skill.content
+      .split('\n')
+      .filter(line => /^#{1,3}\s/.test(line))
+      .map(line => line.replace(/^#{1,3}\s+/, '').trim());
+  }
 }
 
 /** Extract a `## <section>` block (up to the next `## `/`# ` heading). Case-insensitive contains. */
 const extractSection = (content: string, section: string): string | null => {
   const lines = content.split('\n');
-  const needle = section.toLowerCase();
+  // Models often pass the heading with its `##` marks or numbering ("## 3. Build…") — strip both
+  // from the needle so any reasonable spelling of a real heading matches.
+  const needle = section
+    .replace(/^#{1,3}\s*/, '')
+    .replace(/^[\d½.\s]+/, '')
+    .toLowerCase();
+  if (!needle) {
+    return null;
+  }
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];

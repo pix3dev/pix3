@@ -15,7 +15,13 @@ Before generating anything, get the game's visual style as a reusable phrase:
   `question: "list style tokens for an image prompt: palette hex, rendering style, line/shading,
   lighting, camera angle, mood"`.
 - Keep that comma-separated answer. Paste it into **every** `generate_asset` prompt so all
-  assets share one look. Also pass the reference file path(s) in the `references` array.
+  assets share one look.
+- **Be careful with the `references` array — the generator copies composition, not just
+  style.** Passing a full gameplay screenshot as a reference for a single-object sprite
+  routinely produces the *whole scene* (track, several cars, UI) instead of the one object.
+  For single-object sprites/icons, carry the style in words (the tokens above) and omit
+  `references`, or reference only a tight crop of a single object. Full-scene references are
+  fine when you actually want a scene (backgrounds, mockups).
 
 ## 2. Pick the right preset (this controls post-processing)
 
@@ -48,9 +54,12 @@ Default when you omit it: `transparent:true`→sprite, otherwise→texture.
   background transparent/white?" — vision models see transparent pixels as *white* and will
   falsely tell you the cutout failed, sending you into a pointless regeneration loop. If
   `hasAlpha` is true, the background is transparent, full stop.
-- Use `analyze_image` only for **content/framing** questions your model can't see for itself,
-  e.g. `question: "is this the right subject (a top-down red car), centered and not cut off at
-  the edges?"` — never for transparency.
+- Use `analyze_image` only for **content/framing** questions your model can't see for itself
+  — never for transparency. Ask a **pass/fail checklist, not "describe the image"**: a vision
+  model will happily describe a wrong image in neutral words and you will misread it as
+  success. e.g. `question: "Answer each with yes/no: (1) exactly ONE subject (a single
+  top-down car), not a whole scene? (2) subject centered and not cut off? (3) no UI, track or
+  other objects around it?"`. Any "no" → the content is wrong.
 - If the *content* is wrong (wrong subject, cropped, bad framing): regenerate with a better
   prompt. If only the *processing* is off (`hasAlpha` false = background not removed, or too
   large): call `process_asset` on the saved path (preset `sprite`) — no regeneration needed.

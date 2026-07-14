@@ -99,9 +99,15 @@ export class ProjectScriptLoaderService {
   /**
    * Main workflow: Scan supported script directories, compile, and register.
    * This method is debounced to avoid excessive rebuilds.
+   *
+   * `force` builds even when the page is hidden/unfocused. Background deferral is a CPU
+   * courtesy, but an explicit caller that *waits* on the result (ensureReady before a scene
+   * load, the agent's compile_scripts) must not be deferred — agent-driven sessions run in an
+   * automation browser window that is visible yet never focused, and deferring there means
+   * user scripts never register at all.
    */
-  async syncAndBuild(): Promise<void> {
-    if (!this.isPageActive) {
+  async syncAndBuild(options?: { force?: boolean }): Promise<void> {
+    if (!this.isPageActive && !options?.force) {
       this.pendingBuildWhileHidden = true;
       return;
     }
@@ -137,8 +143,8 @@ export class ProjectScriptLoaderService {
       return;
     }
 
-    if (appState.project.scriptsStatus === 'idle') {
-      await this.syncAndBuild();
+    if (appState.project.scriptsStatus === 'idle' || this.pendingBuildWhileHidden) {
+      await this.syncAndBuild({ force: true });
     }
 
     await new Promise<void>(resolve => {

@@ -28,15 +28,24 @@ declare a feature done without running it.
 - **A component threw and got auto-disabled** — the engine disables a component that throws in
   `onStart`/`onUpdate` and logs it. `read_errors` shows the throw; fix the script, re-enable
   via `set_component_property` `enabled: true` (or re-add), and replay.
-- **Nothing moves / input dead** — check the script is actually attached (`node_inspect` the
-  node → look at `components`) and `enabled`. For taps use
-  `this.input?.pointerEvents.some(e => e.type === 'down')`.
+- **Nothing moves / input dead** — first `read_errors`: a component that threw was
+  auto-disabled and will not tick again until fixed and re-enabled. Then check the script is
+  actually attached (`node_inspect` the node → look at `components`) and `enabled`. For taps
+  use `this.input?.pointerEvents.some(e => e.type === 'down')`. For keyboard, match on
+  `event.code` (`'KeyW'`, `'ArrowUp'`) — `event.key` is case-sensitive (`'ArrowUp'`, never
+  `'arrowup'`).
+- **`Cannot assign to read only property 'position'/'rotation'`** — three.js transforms are
+  read-only references; use `node.position.set(x, y, z)` / `node.rotation.z = radians`. Never
+  hide this with `as any` — that's what `check_scripts` exists to catch.
 - **A button does nothing** — buttons emit `pressed`/`released`/`click` signals; something must
   `node.connect('pressed', target, handler)`. Check the flow script is attached to a node that
   exists and references the right node ids/names.
 - **Sprite looks wrong** (semi-transparent, box background, huge) — an art problem, not code.
   Reprocess the texture with `process_asset` (preset `sprite`). See the `asset-generation` skill.
-- **Scene didn't update after editing a `.pix3scene` file** — run `run_command scene.reload`.
+- **Scene didn't update after editing a `.pix3scene` file** — the editor watches the active
+  scene file and reloads automatically (there is no `scene.reload` command); confirm with
+  `scene_tree`. Remember a scene `fs_write` replaces the scene wholesale — components added
+  earlier via `add_component` are lost unless they are in the YAML.
 
 ## When you're stuck
 

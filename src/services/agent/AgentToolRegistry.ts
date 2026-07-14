@@ -10,6 +10,8 @@ import {
   type NodeSummary,
 } from '@/core/agent-introspection';
 import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { EditorTabService } from '@/services/EditorTabService';
+import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
 import { ScriptCompilerService, type CompilationError } from '@/services/ScriptCompilerService';
 import { CommandRegistry } from '@/services/CommandRegistry';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
@@ -23,6 +25,7 @@ import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
 import type { LlmImageBlock } from '@/services/llm/LlmTypes';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
@@ -155,6 +158,12 @@ export class AgentToolRegistry {
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
+  @inject(EditorTabService)
+  private readonly editorTabs!: EditorTabService;
+
+  @inject(ProjectScriptLoaderService)
+  private readonly projectScriptLoader!: ProjectScriptLoaderService;
+
   @inject(ScriptRegistry)
   private readonly scriptRegistry!: ScriptRegistry;
 
@@ -253,7 +262,10 @@ export class AgentToolRegistry {
           },
           additionalProperties: false,
         },
-        handler: args => this.sceneTree(asInt(args.maxDepth, 3)),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.sceneTree(asInt(args.maxDepth, 3));
+        },
       },
       {
         name: 'node_inspect',
@@ -264,7 +276,10 @@ export class AgentToolRegistry {
           required: ['nodeId'],
           additionalProperties: false,
         },
-        handler: args => this.nodeInspect(asString(args.nodeId)),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.nodeInspect(asString(args.nodeId));
+        },
       },
       {
         name: 'find_nodes',
@@ -275,7 +290,10 @@ export class AgentToolRegistry {
           required: ['text'],
           additionalProperties: false,
         },
-        handler: args => this.findNodes(asString(args.text)),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.findNodes(asString(args.text));
+        },
       },
       {
         name: 'get_selection',
@@ -297,8 +315,10 @@ export class AgentToolRegistry {
           required: ['nodeId', 'propertyPath'],
           additionalProperties: false,
         },
-        handler: args =>
-          this.setProperty(asString(args.nodeId), asString(args.propertyPath), args.value),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.setProperty(asString(args.nodeId), asString(args.propertyPath), args.value);
+        },
       },
       {
         name: 'list_component_types',
@@ -329,7 +349,10 @@ export class AgentToolRegistry {
           required: ['nodeId', 'componentType'],
           additionalProperties: false,
         },
-        handler: args => this.addComponent(args),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.addComponent(args);
+        },
       },
       {
         name: 'set_component_property',
@@ -346,13 +369,15 @@ export class AgentToolRegistry {
           required: ['nodeId', 'componentId', 'propertyName'],
           additionalProperties: false,
         },
-        handler: args =>
-          this.setComponentProperty(
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.setComponentProperty(
             asString(args.nodeId),
             asString(args.componentId),
             asString(args.propertyName),
             args.value
-          ),
+          );
+        },
       },
       {
         name: 'remove_component',
@@ -367,8 +392,10 @@ export class AgentToolRegistry {
           required: ['nodeId', 'componentId'],
           additionalProperties: false,
         },
-        handler: args =>
-          this.removeComponent(asString(args.nodeId), asString(args.componentId)),
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.removeComponent(asString(args.nodeId), asString(args.componentId));
+        },
       },
       {
         name: 'list_commands',
@@ -380,7 +407,7 @@ export class AgentToolRegistry {
       {
         name: 'run_command',
         description:
-          'Run a registered command by id. Only scene/properties/selection/alignment/history/viewport/game.* commands are permitted (no dialogs/pickers).',
+          'Run a registered command by id (use list_commands for the catalog; do not invent ids — there is no "scene.reload", edited scene files auto-reload). Only scene/properties/selection/alignment/history/viewport/game.* commands are permitted (no dialogs/pickers).',
         inputSchema: {
           type: 'object',
           properties: { commandId: { type: 'string' } },
@@ -413,7 +440,8 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_write',
-        description: 'Write (create or overwrite) a project text file. Creates parent directories.',
+        description:
+          'Write (create or overwrite) a project text file. Creates parent directories. Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.',
         inputSchema: {
           type: 'object',
           properties: { path: { type: 'string' }, content: { type: 'string' } },
@@ -449,7 +477,8 @@ export class AgentToolRegistry {
       },
       {
         name: 'play_start',
-        description: 'Enter play mode (start the game).',
+        description:
+          'Enter play mode (start the game). Opens the project scene automatically if none is active.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.playCommand('game.start'),
       },
@@ -517,7 +546,7 @@ export class AgentToolRegistry {
             question: {
               type: 'string',
               description:
-                'What to ask about the image (e.g. "list the style tokens for an image prompt"). Defaults to a general description.',
+                'What to ask about the image. For verification, ask a yes/no checklist ("(1) exactly ONE subject, not a whole scene? (2) centered, not cut off?") — an open "describe it" answer reads as success even when the content is wrong. Defaults to a general description.',
             },
           },
           required: ['source'],
@@ -528,7 +557,7 @@ export class AgentToolRegistry {
       {
         name: 'generate_asset',
         description:
-          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background. Pass design reference image paths so the style matches. Returns the saved path, original vs saved size, and a small preview you can see.",
+          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -558,7 +587,7 @@ export class AgentToolRegistry {
               type: 'array',
               items: { type: 'string' },
               description:
-                'Project image paths used as style references — pass the design reference(s) so generated art matches the game.',
+                'Project image paths used as style references. WARNING: the generator copies composition, not just style — a full gameplay screenshot as reference for a single-object sprite tends to reproduce the whole scene. For single-object sprites/icons prefer style keywords in the prompt and omit this; pass references when you want a scene-like result (backgrounds, mockups).',
             },
           },
           required: ['prompt', 'name'],
@@ -611,10 +640,15 @@ export class AgentToolRegistry {
         .list()
         .map(skill => skill.id)
         .join(', ');
+      // A section miss must show what actually exists — otherwise models retry the same
+      // invented heading verbatim, forever (observed in eval runs).
+      const sections = section ? this.skills.sections(id) : [];
       return {
         ok: false,
         error: section
-          ? `No section matching "${section}" in skill "${id}" (or unknown skill). Skills: ${available}.`
+          ? sections.length > 0
+            ? `No section matching "${section}" in skill "${id}". Do NOT retry this name. Existing sections: ${sections.map(s => `"${s}"`).join(', ')} — pick one of these, or omit section to read the whole skill.`
+            : `Unknown skill "${id}". Available skills: ${available}.`
           : `Unknown skill "${id}". Available: ${available}.`,
       };
     }
@@ -648,6 +682,34 @@ export class AgentToolRegistry {
   }
 
   // -- introspection ---------------------------------------------------------
+
+  /**
+   * Scene-dependent tools auto-open the project scene when none is active. The editor can end up
+   * scene-less mid-session (e.g. a failed reload of an externally rewritten scene file closes the
+   * tab), and the agent has no tool to open scenes — models then flail with fs_write rewrites and
+   * forbidden commands (observed in eval runs). Resolution mirrors StartMainSceneGameCommand:
+   * configured main scene → first known scene descriptor → the template default path.
+   */
+  private async ensureActiveScene(): Promise<void> {
+    if (this.sceneManager.getActiveSceneGraph()) {
+      return;
+    }
+    const configured = appState.project.manifest?.defaultExportScenePath?.trim() ?? '';
+    const firstDescriptor = Object.values(appState.scenes.descriptors)[0]?.filePath ?? '';
+    const raw = configured || firstDescriptor || 'src/assets/scenes/main.pix3scene';
+    const path = raw.startsWith('res://') ? raw : `res://${raw.replace(/^res:\/\//i, '')}`;
+    await this.editorTabs.focusOrOpenScene(path);
+    // The scene loads asynchronously behind the tab activation; give it a few seconds.
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if (this.sceneManager.getActiveSceneGraph()) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `No scene is open and auto-opening "${path}" did not load one. The scene file is probably invalid — fs_read it and check the YAML.`
+    );
+  }
 
   private sceneTree(maxDepth: number): (NodeDTO & { sceneVersion: string }) | null {
     const graph = this.sceneManager.getActiveSceneGraph();
@@ -717,7 +779,25 @@ export class AgentToolRegistry {
     const ok = await this.dispatcher.execute(
       new UpdateObjectPropertyCommand({ nodeId, propertyPath, value })
     );
+    if (ok) {
+      await this.saveActiveSceneBestEffort();
+    }
     return { ok };
+  }
+
+  /**
+   * Persist the active scene after an agent mutation. Agent edits must be durable: components and
+   * properties changed via tools live only in the loaded scene until a save, so any scene reload
+   * (an external fs_write of the file, a page reload) silently discards them — models then
+   * re-attach the same components turn after turn without understanding why. Best-effort: a failed
+   * save must never fail the mutation that succeeded.
+   */
+  private async saveActiveSceneBestEffort(): Promise<void> {
+    try {
+      await this.dispatcher.execute(new SaveSceneCommand());
+    } catch (error) {
+      console.warn('[AgentToolRegistry] Scene save after agent mutation failed:', error);
+    }
   }
 
   private listComponentTypes(): Array<{
@@ -774,6 +854,9 @@ export class AgentToolRegistry {
     const ok = await this.dispatcher.execute(
       new AddComponentCommand({ nodeId, componentType, componentId, config, enabled })
     );
+    if (ok) {
+      await this.saveActiveSceneBestEffort();
+    }
     return ok
       ? { ok: true, componentId }
       : {
@@ -792,6 +875,9 @@ export class AgentToolRegistry {
     const ok = await this.dispatcher.execute(
       new UpdateComponentPropertyCommand({ nodeId, componentId, propertyName, value })
     );
+    if (ok) {
+      await this.saveActiveSceneBestEffort();
+    }
     return ok
       ? { ok: true }
       : {
@@ -806,6 +892,9 @@ export class AgentToolRegistry {
     componentId: string
   ): Promise<{ ok: boolean; error?: string }> {
     const ok = await this.dispatcher.execute(new RemoveComponentCommand({ nodeId, componentId }));
+    if (ok) {
+      await this.saveActiveSceneBestEffort();
+    }
     return ok
       ? { ok: true }
       : {
@@ -936,11 +1025,18 @@ export class AgentToolRegistry {
           return null;
         }
       });
+      // A successful bundle alone does NOT update the live ScriptRegistry — without this
+      // rebuild the game keeps running the previously registered classes and the model's
+      // "fixed" scripts change nothing (it then reports "the old code is still executing").
+      // force: the agent's automation window is typically unfocused, which would defer the build.
+      await this.projectScriptLoader.syncAndBuild({ force: true });
+      await this.projectScriptLoader.ensureReady();
       return {
         ok: true,
         fileCount: files.size,
         bytes: result.code.length,
         warnings: result.warnings,
+        registered: true,
       };
     } catch (error) {
       const compileError = error as CompilationError;
@@ -1167,6 +1263,10 @@ export class AgentToolRegistry {
   // -- play mode / logs / errors --------------------------------------------
 
   private async playCommand(commandId: string): Promise<{ ok: boolean }> {
+    // Starting/restarting needs an active scene; auto-open it (stop must keep working regardless).
+    if (commandId !== 'game.stop') {
+      await this.ensureActiveScene();
+    }
     return { ok: await this.dispatcher.executeById(commandId) };
   }
 

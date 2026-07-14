@@ -38,7 +38,7 @@ describe('AgentSettingsService', () => {
   it('defaults to the first provider and a sane loop cap', () => {
     const prefs = buildService().getPreferences();
     expect(prefs.selectedProviderId).toBe('gemini');
-    expect(prefs.maxToolIterations).toBe(25);
+    expect(prefs.maxToolIterations).toBe(40);
     expect(prefs.customBaseUrl).toBe('');
     expect(prefs.modelByProvider).toEqual({});
     expect(prefs.debugMode).toBe(false);
@@ -120,9 +120,9 @@ describe('AgentSettingsService', () => {
       return buildService().getPreferences().maxToolIterations;
     };
     expect(read(500)).toBe(100); // clamped to the ceiling
-    expect(read(-3)).toBe(25); // non-positive → default
-    expect(read(0)).toBe(25); // zero → default
-    expect(read('lots')).toBe(25); // non-number → default
+    expect(read(-3)).toBe(40); // non-positive → default
+    expect(read(0)).toBe(40); // zero → default
+    expect(read('lots')).toBe(40); // non-number → default
   });
 
   it('delegates API keys to secret storage keyed by the provider secret id', async () => {

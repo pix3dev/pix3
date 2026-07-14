@@ -162,6 +162,86 @@ describe('AgentChatService', () => {
     });
   });
 
+  it('nudges the model to continue when a reply is cut off by max_tokens with no tool call', async () => {
+    const truncated: LlmResult = {
+      content: [{ type: 'text', text: 'Now RaceManager —' }],
+      stopReason: 'max_tokens',
+    };
+    const chat = vi.fn().mockResolvedValueOnce(truncated).mockResolvedValueOnce(textResult('done'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('build it');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    // user, assistant(truncated), user(nudge), assistant(done)
+    expect(state.messages).toHaveLength(4);
+    const nudge = state.messages[2];
+    expect(nudge.role).toBe('user');
+    expect(JSON.stringify(nudge.content)).toMatch(/cut off/);
+  });
+
+  it('does not nudge past the iteration cap on repeated max_tokens replies', async () => {
+    const truncated: LlmResult = {
+      content: [{ type: 'text', text: '…' }],
+      stopReason: 'max_tokens',
+    };
+    const chat = vi.fn(async () => truncated);
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 3,
+    });
+
+    await service.send('build it');
+
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(service.getState().status).toBe('idle');
+  });
+
+  it('warns the model to wrap up when 2 or fewer tool iterations remain', async () => {
+    let n = 0;
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('scene_tree', `c${n++}`))
+      .mockResolvedValueOnce(toolCallResult('scene_tree', `c${n++}`))
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async () => ({}));
+    const service = buildService({
+      chat,
+      execute,
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 3,
+    });
+
+    await service.send('go');
+
+    const state = service.getState();
+    // Tool-result message after iteration 0 (2 remaining) carries the wrap-up warning…
+    expect(JSON.stringify(state.messages[2].content)).toMatch(/force-stopped/);
+    // …and so does the one after iteration 1 (1 remaining).
+    expect(JSON.stringify(state.messages[4].content)).toMatch(/force-stopped/);
+  });
+
+  it('flags a repeated identical tool call that returns the identical result', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c1', { id: 'nope' }))
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c2', { id: 'nope' }))
+      .mockResolvedValueOnce(textResult('ok, moving on'));
+    const execute = vi.fn(async () => ({ ok: false, error: 'unknown skill' }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('go');
+
+    const state = service.getState();
+    // First result message carries no warning; the repeat does.
+    expect(JSON.stringify(state.messages[2].content)).not.toMatch(/repeated an identical/);
+    expect(JSON.stringify(state.messages[4].content)).toMatch(/repeated an identical read_skill/);
+  });
+
   it('stops at the tool-iteration cap with a notice (not an error)', async () => {
     let n = 0;
     const chat = vi.fn(async () => toolCallResult('scene_tree', `call-${n++}`));

@@ -35,7 +35,9 @@ export interface AgentPreferences {
 }
 
 const STORAGE_KEY = 'pix3.agentSettings:v1';
-const DEFAULT_MAX_TOOL_ITERATIONS = 25;
+// 25 proved too tight for build-scale tasks: cheap models spend ~15 iterations exploring and then
+// hit the cap right after play_start, before reading errors (see .plans/agent-eval-results.md).
+const DEFAULT_MAX_TOOL_ITERATIONS = 40;
 
 /**
  * Non-secret preferences for the in-editor LLM agent (selected provider/model, custom base URL, loop

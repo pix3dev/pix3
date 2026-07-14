@@ -17,6 +17,11 @@ project. Do the small, safe thing first; verify; then continue.
   you may skip analyze_image, but doing it still gives you reusable style tokens.)
 - `scene_tree` to see what the project template already gives you (screens, buttons,
   placeholder nodes). **Build on it — do not recreate what is already there.**
+- **Budget your exploration.** Do not `fs_read` large reference docs (e.g.
+  `nodes-and-systems.md`, `node-types-reference.md`) in full — everything you read is re-sent
+  on every following step and starves the build phase. Use `read_skill` with its `section`
+  parameter, or read only the doc section for the node types you actually plan to use.
+  Aim to start building after ~6–8 exploration calls.
 
 ## 2. Restate the plan (one short message to the user)
 
@@ -47,9 +52,33 @@ moving on. Stop play mode (`play_stop`) before large edits.
   type. See the `pix3-game-dev` skill / the project `AGENTS.md` for the Script shape and the
   engine API (`this.scene`, `this.input`, `this.node`, `this.findNode(...)`).
 - **New scene structure** (nodes that don't exist yet) → edit the `.pix3scene` YAML with
-  `fs_write`, then `run_command scene.reload` to load it into the editor. Prefer this only
-  when you truly need new nodes; editing existing nodes via set_property/components is safer
-  (it keeps undo history).
+  `fs_write`; the editor watches the active scene file and reloads it automatically (there is
+  **no** `scene.reload` command). Prefer this only when you truly need new nodes; editing
+  existing nodes via set_property/components is safer (it keeps undo history).
+  **Warning:** writing the scene YAML replaces the scene wholesale. Components you previously
+  attached with `add_component` exist only in the loaded scene — include them in the YAML you
+  write (a `components:` block on the node), or they are silently lost. After a scene
+  `fs_write`, `node_inspect` your key nodes to confirm their components survived.
+
+## 4½. Engine API traps (these compile clean and then break at runtime)
+
+Every one of these passes `compile_scripts` and, if you cast to `any`, `check_scripts` too —
+then throws or silently does nothing on the first frame:
+
+- **`position` / `rotation` / `scale` are read-only references** (three.js). Never assign
+  them: `node.position = {x, y}` and `node.rotation = angle` throw
+  `Cannot assign to read only property`. Mutate instead: `node.position.set(x, y, 0)`,
+  `node.rotation.z = radians` (or the 2D helpers if the node exposes them).
+- **A component that throws in `onStart`/`onUpdate` is auto-disabled by the engine** — the
+  game keeps running errorless-looking while your car/enemy is frozen. `read_errors` right
+  after `play_start` is the only way to catch it.
+- **Keyboard events are case-sensitive**: `event.key` is `'ArrowUp'`, `'w'` — checking
+  `keys['arrowup']` never matches. Prefer `event.code` (`'KeyW'`, `'ArrowUp'`, layout-independent).
+- **Never cast `this.node as any`** — it disables exactly the type-checking that would have
+  caught the read-only assignment above. If a property seems missing from the type, look up
+  the real API (`read_skill`, `node_inspect`) instead of casting.
+- **Write each script once.** Think the design through, then write the file and immediately
+  `compile_scripts`. Rewriting the same file 3–4 times burns your iteration budget.
 
 ## 5. Art comes last, and placeholders come first
 

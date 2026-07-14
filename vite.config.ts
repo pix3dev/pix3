@@ -102,6 +102,10 @@ export default defineConfig(async ({ mode }) => {
     },
     server: {
       port: 8123,
+      // PIX3_NO_HMR=1 disables HMR (no websocket). Without the socket the Vite client can never
+      // force a full page reload on ws reconnect — a network flap or system suspend would
+      // otherwise kill long-running in-editor agent sessions driven through the debug bridge.
+      hmr: env.PIX3_NO_HMR ? false : undefined,
       fs: {
         allow: ['..'],
       },

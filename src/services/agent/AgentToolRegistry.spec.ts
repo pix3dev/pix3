@@ -4,6 +4,7 @@ import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
 import { AgentToolRegistry } from './AgentToolRegistry';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
@@ -20,6 +21,9 @@ const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegist
   }
   return registry;
 };
+
+/** A sceneManager stub with an active graph, for tools gated by ensureActiveScene(). */
+const activeSceneManager = () => ({ getActiveSceneGraph: () => ({ nodeMap: new Map() }) });
 
 const makeNode = (over: Record<string, unknown> = {}): NodeBase => {
   const node = Object.create(NodeBase.prototype) as Record<string, unknown>;
@@ -561,15 +565,17 @@ describe('AgentToolRegistry', () => {
 
   it('set_property routes through UpdateObjectPropertyCommand on the dispatcher', async () => {
     const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
-    const registry = buildRegistry({ dispatcher });
+    const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
     const result = await registry.execute('set_property', {
       nodeId: 'n1',
       propertyPath: 'position.x',
       value: 5,
     });
     expect(result).toEqual({ ok: true });
-    expect(dispatcher.execute).toHaveBeenCalledTimes(1);
+    // The mutation, then the durability save (agent edits must survive scene reloads).
+    expect(dispatcher.execute).toHaveBeenCalledTimes(2);
     expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(UpdateObjectPropertyCommand);
+    expect(dispatcher.execute.mock.calls[1][0]).toBeInstanceOf(SaveSceneCommand);
   });
 
   describe('component tools', () => {
@@ -608,7 +614,11 @@ describe('AgentToolRegistry', () => {
 
     it('add_component routes through AddComponentCommand and returns a componentId', async () => {
       const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
-      const registry = buildRegistry({ dispatcher, scriptRegistry: makeScriptRegistry() });
+      const registry = buildRegistry({
+        dispatcher,
+        scriptRegistry: makeScriptRegistry(),
+        sceneManager: activeSceneManager(),
+      });
       const result = (await registry.execute('add_component', {
         nodeId: 'n1',
         componentType: 'core:Rotate',
@@ -621,7 +631,11 @@ describe('AgentToolRegistry', () => {
 
     it('add_component rejects an unknown component type without dispatching', async () => {
       const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
-      const registry = buildRegistry({ dispatcher, scriptRegistry: makeScriptRegistry() });
+      const registry = buildRegistry({
+        dispatcher,
+        scriptRegistry: makeScriptRegistry(),
+        sceneManager: activeSceneManager(),
+      });
       const result = (await registry.execute('add_component', {
         nodeId: 'n1',
         componentType: 'core:Nope',
@@ -633,7 +647,7 @@ describe('AgentToolRegistry', () => {
 
     it('set_component_property routes through UpdateComponentPropertyCommand', async () => {
       const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
-      const registry = buildRegistry({ dispatcher });
+      const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
       const result = await registry.execute('set_component_property', {
         nodeId: 'n1',
         componentId: 'c1',
@@ -646,7 +660,7 @@ describe('AgentToolRegistry', () => {
 
     it('remove_component routes through RemoveComponentCommand', async () => {
       const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
-      const registry = buildRegistry({ dispatcher });
+      const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
       const result = await registry.execute('remove_component', {
         nodeId: 'n1',
         componentId: 'c1',
@@ -674,9 +688,23 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  it('auto-opens the project scene when a scene-dependent tool runs with no active scene', async () => {
+    const dispatcher = { executeById: vi.fn(async () => true), execute: vi.fn() };
+    let graph: unknown = null;
+    const sceneManager = { getActiveSceneGraph: () => graph };
+    const focusOrOpenScene = vi.fn(async () => {
+      graph = { nodeMap: new Map(), rootNodes: [], version: 'v1' };
+    });
+    const registry = buildRegistry({ dispatcher, sceneManager, editorTabs: { focusOrOpenScene } });
+
+    expect(await registry.execute('play_start')).toEqual({ ok: true });
+    expect(focusOrOpenScene).toHaveBeenCalledWith('res://src/assets/scenes/main.pix3scene');
+    expect(dispatcher.executeById).toHaveBeenCalledWith('game.start');
+  });
+
   it('play tools drive the game.* commands and report status', async () => {
     const dispatcher = { executeById: vi.fn(async () => true), execute: vi.fn() };
-    const registry = buildRegistry({ dispatcher });
+    const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
     expect(await registry.execute('play_start')).toEqual({ ok: true });
     expect(dispatcher.executeById).toHaveBeenCalledWith('game.start');
 
@@ -738,6 +766,31 @@ describe('AgentToolRegistry', () => {
     const result = (await registry.execute('compile_scripts')) as { ok: boolean; message?: string };
     expect(result.ok).toBe(true);
     expect(result.message).toMatch(/No Script subclasses/);
+  });
+
+  it('compile_scripts re-registers scripts through the project script loader after a bundle', async () => {
+    const storage = {
+      listDirectory: vi.fn(async (dir: string) =>
+        dir === 'scripts'
+          ? [{ name: 'Car.ts', kind: 'file' as const, path: 'scripts/Car.ts', size: 1 }]
+          : []
+      ),
+      readTextFile: vi.fn(async () => 'export class Car extends Script {}'),
+    };
+    const compiler = { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) };
+    const projectScriptLoader = {
+      syncAndBuild: vi.fn(async () => undefined),
+      ensureReady: vi.fn(async () => undefined),
+    };
+    const registry = buildRegistry({ storage, compiler, projectScriptLoader });
+    const result = (await registry.execute('compile_scripts')) as {
+      ok: boolean;
+      registered?: boolean;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.registered).toBe(true);
+    expect(projectScriptLoader.syncAndBuild).toHaveBeenCalledTimes(1);
+    expect(projectScriptLoader.ensureReady).toHaveBeenCalledTimes(1);
   });
 
   it('read_errors returns the captured ring buffer', async () => {
