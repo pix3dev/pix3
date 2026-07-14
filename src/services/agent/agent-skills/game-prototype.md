@@ -102,6 +102,12 @@ then throws or silently does nothing on the first frame:
   after `play_start` is the only way to catch it.
 - **Keyboard events are case-sensitive**: `event.key` is `'ArrowUp'`, `'w'` — checking
   `keys['arrowup']` never matches. Prefer `event.code` (`'KeyW'`, `'ArrowUp'`, layout-independent).
+- **`getComponent` takes the component *class*, never a string.** `node.getComponent('user:CarController')`
+  does not type-check and returns garbage/`null` at runtime (it does `components.find(c => c instanceof type)`).
+  To reach another script, import its class with a relative path — all `scripts/` files bundle together, so
+  `import { CarController } from './CarController'; const car = this.node.getComponent(CarController);` works.
+  The `user:CarController` string is the registry ID for `add_component`/scene YAML only — there is no
+  `user:`-style code import and no string-based `getComponent`.
 - **Never cast `this.node as any`** — it disables exactly the type-checking that would have
   caught the read-only assignment above. If a property seems missing from the type, look up
   the real API (`read_skill`, `node_inspect`) instead of casting.
