@@ -191,6 +191,20 @@ describe('GameInputService', () => {
     expect(result.movement?.Rock.moved).toBe(false);
   });
 
+  it('observe() explains a null snapshot: wrong name vs still warming up', async () => {
+    // Live nodes exist, but the queried name is wrong → point at scene_tree.
+    const present = buildService(makeRuntime([makeLiveNode()])).service;
+    const wrongName = await present.observe(['Ghost'], 0);
+    expect(wrongName.nodes?.Ghost).toBeNull();
+    expect(wrongName.hint).toMatch(/scene_tree/);
+
+    // No live nodes yet (play mode just started) → tell it to wait and retry.
+    const empty = buildService(makeRuntime([])).service;
+    const warming = await empty.observe(['Player'], 0);
+    expect(warming.nodes?.Player).toBeNull();
+    expect(warming.hint).toMatch(/warming up/i);
+  });
+
   it('observe() without playing directs to play_start', async () => {
     appState.ui.isPlaying = false;
     const { service } = buildService(null);

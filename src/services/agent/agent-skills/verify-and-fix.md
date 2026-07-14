@@ -8,7 +8,11 @@ declare a feature done without running it.
 
 ## The loop
 
-1. **Compile scripts** after any `fs_write` to `scripts/`: `compile_scripts` (fast syntax
+0. **Edit with `str_replace`, not a full `fs_write`.** To change existing code, replace the exact
+   lines you mean to change with `str_replace` (fails loudly if the anchor isn't unique). A full
+   `fs_write` rewrite risks silently dropping or reverting the rest of the file — reserve it for
+   creating a file. Never re-emit a whole script to flip one sign or constant.
+1. **Compile scripts** after editing anything under `scripts/`: `compile_scripts` (fast syntax
    check). If it reports an error, fix that file and repeat. Then `check_scripts` for
    TypeScript type errors (things esbuild misses — e.g. assigning to the read-only
    `position`/`rotation`/`scale`, wrong argument types, bad imports).

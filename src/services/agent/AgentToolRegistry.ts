@@ -461,6 +461,35 @@ export class AgentToolRegistry {
         handler: args => this.fsWrite(asString(args.path), asString(args.content)),
       },
       {
+        name: 'str_replace',
+        description:
+          'Make a TARGETED edit to an existing project text file: replace an exact `old_string` with `new_string`, leaving everything else byte-for-byte. PREFER THIS over fs_write for changing existing code — a full rewrite can silently drop or revert other parts of the file (a real session regressed a working fix that way). `old_string` must match the file EXACTLY (indentation and whitespace included) and be UNIQUE — include a few surrounding lines to pin it down. It makes NO change and returns an error if `old_string` is not found or matches more than once; read the error, widen the context, and retry. Pass replace_all:true to replace every occurrence. Use fs_write only to CREATE a file or rewrite it wholesale. Editing the active .pix3scene reloads it (same as fs_write).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            old_string: {
+              type: 'string',
+              description: 'Exact text to find, verbatim (including indentation/newlines).',
+            },
+            new_string: { type: 'string', description: 'Text to replace it with (may be empty to delete).' },
+            replace_all: {
+              type: 'boolean',
+              description: 'Replace every occurrence. Default false = require exactly one match.',
+            },
+          },
+          required: ['path', 'old_string', 'new_string'],
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.strReplace(
+            asString(args.path),
+            asString(args.old_string),
+            asString(args.new_string),
+            args.replace_all === true
+          ),
+      },
+      {
         name: 'fs_delete',
         description: 'Delete a project file or directory.',
         inputSchema: {
@@ -585,7 +614,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + `moved`, plus `alignForward`/`alignRight` (travel direction vs the node's nose: ~0 forward-alignment = moving sideways) — e.g. verify an AI car is driving around, and driving in the direction it faces, WITHOUT sending input.",
+          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + `moved`, plus `alignForward`/`alignRight` (travel direction vs the node's nose: ~0 forward-alignment = moving sideways) — e.g. verify an AI car is driving around, and driving in the direction it faces, WITHOUT sending input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
         inputSchema: {
           type: 'object',
           properties: {
@@ -1147,6 +1176,70 @@ export class AgentToolRegistry {
   }
 
   /**
+   * Targeted edit: swap an exact, unique `oldString` for `newString`. Refuses (no write) when the
+   * anchor is absent or ambiguous, so a mismatched edit fails loudly instead of corrupting the
+   * file — the reason blind full-file rewrites reverted a good fix in the wild. Splicing avoids
+   * String.replace's `$`-pattern interpretation in the replacement text.
+   */
+  private async strReplace(
+    path: string,
+    oldString: string,
+    newString: string,
+    replaceAll: boolean
+  ): Promise<
+    | { ok: true; path: string; replacements: number; reloadedScene?: string }
+    | { ok: false; error: string }
+  > {
+    const safe = this.safePath(path);
+    if (!isTextPath(safe)) {
+      return { ok: false, error: `str_replace edits text files only; "${safe}" is binary.` };
+    }
+    if (oldString.length === 0) {
+      return {
+        ok: false,
+        error: 'old_string must not be empty. Use fs_write to create a file; to insert text, anchor old_string on nearby existing lines.',
+      };
+    }
+    if (oldString === newString) {
+      return { ok: false, error: 'old_string and new_string are identical — nothing to change.' };
+    }
+    let content: string;
+    try {
+      content = await this.storage.readTextFile(safe);
+    } catch {
+      return { ok: false, error: `File not found: ${safe}. Use fs_write to create it.` };
+    }
+    const count = countOccurrences(content, oldString);
+    if (count === 0) {
+      return {
+        ok: false,
+        error: `old_string was not found in ${safe}. It must match exactly, including whitespace and indentation. fs_read the file and copy the target text verbatim.`,
+      };
+    }
+    if (count > 1 && !replaceAll) {
+      return {
+        ok: false,
+        error: `old_string matches ${count} places in ${safe}. Include surrounding lines to make it unique, or pass replace_all:true to change all ${count}.`,
+      };
+    }
+    let updated: string;
+    if (replaceAll) {
+      updated = content.split(oldString).join(newString);
+    } else {
+      const at = content.indexOf(oldString);
+      updated = content.slice(0, at) + newString + content.slice(at + oldString.length);
+    }
+    await this.storage.writeTextFile(safe, updated);
+    const reloadedScene = await this.reloadSceneIfOpen(safe);
+    return {
+      ok: true,
+      path: safe,
+      replacements: replaceAll ? count : 1,
+      ...(reloadedScene ? { reloadedScene } : {}),
+    };
+  }
+
+  /**
    * Deterministically reload an OPEN scene the agent just overwrote. The file watcher cannot be
    * relied on here: browser-OPFS scene descriptors carry no usable fileHandle and a blurred
    * automation window pauses polling — observed in eval: the agent rewrote the active scene,
@@ -1506,6 +1599,18 @@ const isCommandAllowed = (commandId: string): boolean =>
 const isTextPath = (path: string): boolean => {
   const ext = path.toLowerCase().split('.').pop() ?? '';
   return TEXT_EXTENSIONS.has(ext);
+};
+
+/** Count non-overlapping occurrences of `needle` in `haystack` (matches split/join semantics). */
+const countOccurrences = (haystack: string, needle: string): number => {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let index = haystack.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = haystack.indexOf(needle, index + needle.length);
+  }
+  return count;
 };
 
 const asString = (value: unknown): string => {

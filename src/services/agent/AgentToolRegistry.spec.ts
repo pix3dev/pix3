@@ -72,6 +72,7 @@ describe('AgentToolRegistry', () => {
         'fs_list',
         'fs_read',
         'fs_write',
+        'str_replace',
         'fs_delete',
         'compile_scripts',
         'check_scripts',
@@ -501,6 +502,83 @@ describe('AgentToolRegistry', () => {
       })) as Record<string, unknown>;
       expect(result.reloadedScene).toBeUndefined();
       expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('str_replace swaps a unique match and leaves the rest intact', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/car.ts', 'const vx = Math.sin(a);\nconst vy = Math.cos(a);\n');
+      const registry = buildRegistry({ storage });
+
+      const result = await registry.execute('str_replace', {
+        path: 'scripts/car.ts',
+        old_string: 'const vx = Math.sin(a);',
+        new_string: 'const vx = -Math.sin(a);',
+      });
+
+      expect(result).toMatchObject({ ok: true, path: 'scripts/car.ts', replacements: 1 });
+      expect(storage.files.get('scripts/car.ts')).toBe(
+        'const vx = -Math.sin(a);\nconst vy = Math.cos(a);\n'
+      );
+    });
+
+    it('str_replace refuses (no write) when old_string is not found', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+      const result = (await registry.execute('str_replace', {
+        path: 'scripts/a.ts',
+        old_string: 'export const y = 2;',
+        new_string: 'whatever',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/not found/i);
+      expect(storage.writeTextFile).not.toHaveBeenCalled();
+    });
+
+    it('str_replace requires uniqueness unless replace_all is set', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/dup.ts', 'a;\na;\n');
+      const registry = buildRegistry({ storage });
+
+      const ambiguous = (await registry.execute('str_replace', {
+        path: 'scripts/dup.ts',
+        old_string: 'a;',
+        new_string: 'b;',
+      })) as Record<string, unknown>;
+      expect(ambiguous.ok).toBe(false);
+      expect(String(ambiguous.error)).toMatch(/matches 2/);
+      expect(storage.writeTextFile).not.toHaveBeenCalled();
+
+      const all = await registry.execute('str_replace', {
+        path: 'scripts/dup.ts',
+        old_string: 'a;',
+        new_string: 'b;',
+        replace_all: true,
+      });
+      expect(all).toMatchObject({ ok: true, replacements: 2 });
+      expect(storage.files.get('scripts/dup.ts')).toBe('b;\nb;\n');
+    });
+
+    it('str_replace inserts $-patterns in new_string literally (no regex substitution)', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/p.ts', 'const price = 1;');
+      const registry = buildRegistry({ storage });
+      await registry.execute('str_replace', {
+        path: 'scripts/p.ts',
+        old_string: 'const price = 1;',
+        new_string: 'const label = "$&$1";',
+      });
+      expect(storage.files.get('scripts/p.ts')).toBe('const label = "$&$1";');
+    });
+
+    it('str_replace rejects a binary path', async () => {
+      const registry = buildRegistry({ storage: makeStorage() });
+      const result = (await registry.execute('str_replace', {
+        path: 'art/icon.png',
+        old_string: 'a',
+        new_string: 'b',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/binary/i);
     });
 
     it('fs_delete delegates and bumps fileRefreshSignal', async () => {

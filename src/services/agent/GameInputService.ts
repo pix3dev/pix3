@@ -92,6 +92,11 @@ export interface GameObserveResult {
   /** Present when sampleMs > 0: per-node movement over the sample window. */
   movement?: Record<string, ObservedNodeDelta>;
   sampleMs?: number;
+  /**
+   * Explains any `null` snapshot: whether play mode is still warming up (retry) or the
+   * name/id was wrong (a bare null left the model unable to tell those apart).
+   */
+  hint?: string;
 }
 
 const MAX_TOTAL_MS = 15_000;
@@ -250,8 +255,18 @@ export class GameInputService {
     }
 
     const first = this.snapshotMany(runtime.runner, targets);
+    // A `null` snapshot has two very different causes; tell them apart so the model doesn't read
+    // "warming up" as "no such node" and rename things that were fine (or vice-versa).
+    const hasLiveNodes = runtime.runner.getLiveRootNodes().length > 0;
+    const hintFor = (unresolved: string[]): string | undefined => {
+      if (unresolved.length === 0) return undefined;
+      return hasLiveNodes
+        ? `Not resolved by name/id: ${unresolved.join(', ')}. Check exact names with scene_tree.`
+        : 'Play mode is still warming up (no live nodes yet) — wait ~300ms and retry.';
+    };
     if (!(sampleMs > 0)) {
-      return { ok: true, nodes: Object.fromEntries(first) };
+      const hint = hintFor(first.filter(([, snap]) => snap === null).map(([query]) => query));
+      return { ok: true, nodes: Object.fromEntries(first), ...(hint ? { hint } : {}) };
     }
 
     const clampedMs = Math.min(sampleMs, MAX_SAMPLE_MS);
@@ -262,11 +277,17 @@ export class GameInputService {
       for (const [query, beforeSnap] of first) {
         movement[query] = this.describeDelta(beforeSnap, this.snapshotOne(runtime.runner, query));
       }
+      const hint = hintFor(
+        Object.entries(movement)
+          .filter(([, delta]) => delta.after === null)
+          .map(([query]) => query)
+      );
       return {
         ok: true,
         nodes: Object.fromEntries(first),
         movement,
         sampleMs: clampedMs,
+        ...(hint ? { hint } : {}),
       };
     } finally {
       this.playSession.setFocusPauseSuppressed(false);
