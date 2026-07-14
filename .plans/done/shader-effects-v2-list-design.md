@@ -2,6 +2,8 @@
 
 # Design spec: Registry-backed attached-effect list on GeometryMesh (replaces the flat `fx*` checkbox set)
 
+**Статус:** реализовано (registry `packages/pix3-runtime/src/shader-effects/` + attached effects на GeometryMesh, коммит `5123ec0` и далее) — перенесён в done/ 2026-07-14. Follow-up для PostProcess — [postprocess-effects-list-design.md](../postprocess-effects-list-design.md) (ещё не реализован).
+
 All claims verified against the working tree on disk (including the uncommitted flat-fx implementation: `git status` shows `M GeometryMesh.ts`, `M SceneLoader.ts`, `M ViewportRenderService.ts`, `M docs/node-types-reference.md`, `?? GeometryMeshEffectsPersistence.spec.ts` — nothing committed, nothing persisted in any scene). three r183 inspected in `node_modules`.
 
 Engine-level change (runtime + serialization + editor ops/UI + docs) — per CLAUDE.md **requires user confirmation before implementation**, then `cd packages/pix3-runtime && npm run yalc:publish` + `yalc update` in DeepCore, and a `docs/node-types-reference.md` update.
