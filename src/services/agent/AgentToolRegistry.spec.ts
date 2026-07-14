@@ -473,7 +473,7 @@ describe('AgentToolRegistry', () => {
 
     it('fs_write to an OPEN scene file force-reloads that scene', async () => {
       const storage = makeStorage();
-      const dispatcher = { execute: vi.fn(async () => true), executeById: vi.fn() };
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
       const registry = buildRegistry({ storage, dispatcher });
       appState.scenes.descriptors['scene-main'] = {
         filePath: 'res://src/assets/scenes/main.pix3scene',
@@ -493,7 +493,7 @@ describe('AgentToolRegistry', () => {
 
     it('fs_write to a non-open file does not dispatch a reload', async () => {
       const storage = makeStorage();
-      const dispatcher = { execute: vi.fn(async () => true), executeById: vi.fn() };
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
       const registry = buildRegistry({ storage, dispatcher });
       const result = (await registry.execute('fs_write', {
         path: 'scripts/spin.ts',
