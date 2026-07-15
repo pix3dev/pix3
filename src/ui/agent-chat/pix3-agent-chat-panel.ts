@@ -220,6 +220,103 @@ const formatToolPayload = (value: unknown): string => {
   return JSON.stringify(value, null, 2) ?? '';
 };
 
+/** Non-empty string field, or undefined — for pulling primary args out of a tool's input. */
+const asArgString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined;
+
+/** Drop the `res://` scheme so a path reads compactly in a one-line descriptor. */
+const stripRes = (path: string): string => path.replace(/^res:\/\//i, '');
+
+/** Compact summary of a `game_input` step list, e.g. "key ArrowUp, tap PlayButton". */
+const describeGameSteps = (steps: unknown): string => {
+  if (!Array.isArray(steps)) return '';
+  const parts = steps
+    .map(raw => {
+      if (!raw || typeof raw !== 'object') return '';
+      const step = raw as Record<string, unknown>;
+      switch (asArgString(step.type)) {
+        case 'key':
+          return `key ${asArgString(step.code) ?? '?'}`;
+        case 'keys':
+          return `keys ${Array.isArray(step.codes) ? step.codes.join('+') : '?'}`;
+        case 'tap':
+          return `tap ${asArgString(step.target) ?? `${step.x ?? '?'},${step.y ?? '?'}`}`;
+        case 'drag':
+          return 'drag';
+        case 'wait':
+          return `wait ${step.ms ?? '?'}ms`;
+        default:
+          return asArgString(step.type) ?? '';
+      }
+    })
+    .filter(Boolean);
+  return parts.slice(0, 3).join(', ') + (parts.length > 3 ? ` +${parts.length - 3}` : '');
+};
+
+/**
+ * A short, human-readable descriptor of a tool call's *primary* argument — the file being edited,
+ * the node/property being changed, the command being run — so a collapsed tool row (and the running
+ * indicator) says WHAT it is acting on, not just the tool name. Returns '' when there's nothing
+ * useful to show (the tool takes no meaningful args). Overflow is clamped with CSS ellipsis; the
+ * full value rides in the row's `title`.
+ */
+const describeToolCall = (call: LlmToolUseBlock): string => {
+  const input = (call.input ?? {}) as Record<string, unknown>;
+  const path = asArgString(input.path);
+  switch (call.name) {
+    case 'fs_read':
+    case 'fs_write':
+    case 'fs_delete':
+    case 'fs_list':
+    case 'str_replace':
+      return path ? stripRes(path) : '';
+    case 'generate_asset':
+      return asArgString(input.name) ?? '';
+    case 'process_asset':
+      return stripRes(asArgString(input.name) ?? path ?? '');
+    case 'node_inspect':
+      return asArgString(input.nodeId) ?? '';
+    case 'find_nodes':
+      return asArgString(input.text) ?? '';
+    case 'set_property': {
+      const node = asArgString(input.nodeId);
+      const prop = asArgString(input.propertyPath);
+      return node && prop ? `${node}.${prop}` : (prop ?? node ?? '');
+    }
+    case 'create_node': {
+      const type = asArgString(input.nodeType);
+      const name = asArgString(input.name);
+      return type && name ? `${type} “${name}”` : (type ?? name ?? '');
+    }
+    case 'convert_node_type': {
+      const node = asArgString(input.nodeId);
+      const to = asArgString(input.toType);
+      return node && to ? `${node} → ${to}` : (to ?? node ?? '');
+    }
+    case 'add_component':
+    case 'remove_component':
+      return asArgString(input.componentType) ?? asArgString(input.componentId) ?? '';
+    case 'set_component_property':
+      return asArgString(input.propertyName) ?? asArgString(input.componentId) ?? '';
+    case 'run_command':
+      return asArgString(input.commandId) ?? '';
+    case 'read_skill':
+      return asArgString(input.section)
+        ? `${asArgString(input.id)} · ${asArgString(input.section)}`
+        : (asArgString(input.id) ?? '');
+    case 'analyze_image':
+      return asArgString(input.source) ?? '';
+    case 'ask_advisor':
+      return asArgString(input.question) ?? '';
+    case 'game_input':
+      return describeGameSteps(input.steps);
+    case 'game_observe':
+      return Array.isArray(input.nodes) ? input.nodes.map(String).join(', ') : '';
+    default:
+      return '';
+  }
+};
+
 /**
  * The in-editor agent chat (opened as an editor tab, like the Asset Generator). Renders the
  * conversation from {@link AgentChatService}, provider/model/key configuration from
@@ -592,9 +689,10 @@ export class AgentChatPanel extends ComponentBase {
 
     const { call, result } = item;
     const status = result ? (result.isError ? 'error' : 'ok') : 'pending';
+    const descriptor = describeToolCall(call);
     return html`
       <details class="agent-tool-call ${result?.isError ? 'is-error' : ''}">
-        <summary>
+        <summary title=${descriptor || call.name}>
           <span class="agent-tool-status is-${status}">
             ${status === 'ok'
               ? this.icons.getIcon('check', IconSize.SMALL)
@@ -603,6 +701,7 @@ export class AgentChatPanel extends ComponentBase {
                 : html`<span class="agent-inline-spinner"></span>`}
           </span>
           <code>${call.name}</code>
+          ${descriptor ? html`<span class="agent-tool-arg">${descriptor}</span>` : null}
         </summary>
         <div class="agent-tool-detail">
           <div class="agent-tool-section">args</div>
@@ -618,12 +717,45 @@ export class AgentChatPanel extends ComponentBase {
 
   private renderRunningIndicator() {
     const activeTool = this.chatState?.activeTool;
+    // Show what the running tool is acting on (file/node/command), pulled from the pending call.
+    const descriptor = activeTool ? this.activeToolDescriptor(activeTool) : '';
     return html`
       <div class="agent-running">
         <span class="agent-running-spinner"></span>
-        ${activeTool ? html`Running <code>${activeTool}</code>…` : 'Thinking…'}
+        ${activeTool
+          ? html`Running <code>${activeTool}</code>${descriptor
+                ? html` <span class="agent-tool-arg">${descriptor}</span>`
+                : null}…`
+          : 'Thinking…'}
       </div>
     `;
+  }
+
+  /**
+   * The primary-argument descriptor of the currently-running tool. `activeTool` carries only the
+   * name; the args live in the pending tool-use block (the last one without a result), so we match
+   * on name there to recover "which file / node / command".
+   */
+  private activeToolDescriptor(activeTool: string): string {
+    const messages = this.chatState?.messages ?? [];
+    const resolvedIds = new Set<string>();
+    for (const message of messages) {
+      if (typeof message.content === 'string') continue;
+      for (const block of message.content) {
+        if (block.type === 'tool-result') resolvedIds.add(block.toolUseId);
+      }
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (typeof message.content === 'string') continue;
+      for (let j = message.content.length - 1; j >= 0; j--) {
+        const block = message.content[j];
+        if (block.type === 'tool-use' && block.name === activeTool && !resolvedIds.has(block.id)) {
+          return describeToolCall(block);
+        }
+      }
+    }
+    return '';
   }
 
   // ── Banners / composer ──────────────────────────────────────────────────────
@@ -669,7 +801,7 @@ export class AgentChatPanel extends ComponentBase {
         ${this.dragActive
           ? html`<div class="agent-drop-hint">Drop images or text files to attach</div>`
           : null}
-        ${this.renderAttachments()}
+        ${this.renderContextMeter()} ${this.renderAttachments()}
         <textarea
           class="agent-input"
           aria-label="Message the agent"
@@ -721,7 +853,6 @@ export class AgentChatPanel extends ComponentBase {
                   Sys
                 </button>`
             : null}
-          ${this.renderContextMeter()}
           <div class="agent-history-wrap">
             <button
               type="button"
@@ -765,11 +896,11 @@ export class AgentChatPanel extends ComponentBase {
   }
 
   /**
-   * Context-fill indicator: how full the selected model's context window is, based on the token
-   * count sent on the last turn. A mini bar + "used / limit · %" when the window size is known;
-   * a bare "used ctx" count for models that don't report a window (local / custom endpoints).
-   * Renders nothing until the first turn reports usage. Cumulative session tokens ride in the
-   * tooltip so the old total is still one hover away.
+   * Context-fill indicator: a full-width progress bar showing how full the selected model's context
+   * window is, based on the token count sent on the last turn. Shows the percentage prominently
+   * plus "used / limit" when the window size is known; falls back to a bare token count (no bar)
+   * for models that don't report a window (local / custom endpoints). Renders nothing until the
+   * first turn reports usage. Cumulative session tokens ride in the tooltip.
    */
   private renderContextMeter() {
     const chatState = this.chatState;
@@ -786,28 +917,38 @@ export class AgentChatPanel extends ComponentBase {
         : '';
 
     if (!contextWindow) {
-      return html`<span
-        class="agent-context"
+      return html`<div
+        class="agent-context is-unbounded"
         title="Context used on the last request: ${used.toLocaleString()} tokens${sessionTip}"
-        >${formatTokenCount(used)} ctx</span
-      >`;
+      >
+        <span class="agent-context-label">Context</span>
+        <span class="agent-context-value">${formatTokenCount(used)} tokens</span>
+      </div>`;
     }
 
     const ratio = Math.min(1, used / contextWindow);
     const pct = Math.round(ratio * 100);
     const level = ratio >= 0.9 ? 'is-high' : ratio >= 0.7 ? 'is-mid' : '';
     return html`
-      <span
+      <div
         class="agent-context ${level}"
         title="Context: ${used.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)${sessionTip}"
       >
-        <span class="agent-context-bar">
+        <span class="agent-context-label">Context</span>
+        <span
+          class="agent-context-bar"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${pct}
+          aria-label="Context window usage"
+        >
           <span class="agent-context-fill" style=${`width: ${pct}%`}></span>
         </span>
-        <span class="agent-context-text"
-          >${formatTokenCount(used)} / ${formatTokenCount(contextWindow)} · ${pct}%</span
+        <span class="agent-context-value"
+          >${pct}% · ${formatTokenCount(used)} / ${formatTokenCount(contextWindow)}</span
         >
-      </span>
+      </div>
     `;
   }
 

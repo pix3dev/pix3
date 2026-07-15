@@ -487,6 +487,21 @@ pix3-agent-chat-panel .agent-tool-call summary::-webkit-details-marker {
   display: none;
 }
 
+pix3-agent-chat-panel .agent-tool-call summary code {
+  flex: 0 0 auto;
+}
+
+/* The primary-argument descriptor (file / node / command) beside the tool name. */
+pix3-agent-chat-panel .agent-tool-arg {
+  min-width: 0;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(245, 247, 250, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
 pix3-agent-chat-panel .agent-tool-call[open] summary {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -648,23 +663,30 @@ pix3-agent-chat-panel .agent-stop {
   color: #e08c8c;
 }
 
+/* Full-width context-usage progress bar at the top of the composer. */
 pix3-agent-chat-panel .agent-context {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.3rem;
-  font-size: 0.62rem;
-  color: rgba(245, 247, 250, 0.5);
-  white-space: nowrap;
+  gap: 0.4rem;
+  font-size: 0.64rem;
+  color: rgba(245, 247, 250, 0.55);
   font-variant-numeric: tabular-nums;
   cursor: default;
 }
 
+pix3-agent-chat-panel .agent-context-label {
+  flex: 0 0 auto;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(245, 247, 250, 0.4);
+}
+
 pix3-agent-chat-panel .agent-context-bar {
   position: relative;
-  width: 2.75rem;
-  height: 0.32rem;
+  flex: 1 1 auto;
+  height: 0.35rem;
   border-radius: 0.2rem;
-  background: rgba(245, 247, 250, 0.12);
+  background: rgba(245, 247, 250, 0.1);
   overflow: hidden;
 }
 
@@ -678,16 +700,30 @@ pix3-agent-chat-panel .agent-context-fill {
   transition: width 0.25s ease;
 }
 
+pix3-agent-chat-panel .agent-context-value {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.65);
+}
+
+pix3-agent-chat-panel .agent-context.is-mid .agent-context-value {
+  color: #f5c877;
+}
+
 pix3-agent-chat-panel .agent-context.is-mid .agent-context-fill {
   background: #f5a623;
 }
 
-pix3-agent-chat-panel .agent-context.is-high {
+pix3-agent-chat-panel .agent-context.is-high .agent-context-value {
   color: #ff9a8a;
 }
 
 pix3-agent-chat-panel .agent-context.is-high .agent-context-fill {
   background: #ff5a4d;
+}
+
+/* Fallback (no known context window): just a right-aligned token count, no bar. */
+pix3-agent-chat-panel .agent-context.is-unbounded {
+  justify-content: space-between;
 }
 
 pix3-agent-chat-panel .agent-attach {
