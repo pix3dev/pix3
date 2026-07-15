@@ -72,11 +72,6 @@ pix3-agent-chat-panel .agent-send,
 pix3-agent-chat-panel .agent-stop,
 pix3-agent-chat-panel .agent-key-save,
 pix3-agent-chat-panel .agent-key-clear,
-pix3-agent-chat-panel .agent-banner-text {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 pix3-agent-chat-panel .agent-banner-action {
   display: inline-flex;
   align-items: center;
@@ -92,6 +87,11 @@ pix3-agent-chat-panel .agent-banner-action {
   font-size: 0.72rem;
   cursor: pointer;
   white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* ── Icons (vector, from IconService — never emoji) ──────────────────────── */
