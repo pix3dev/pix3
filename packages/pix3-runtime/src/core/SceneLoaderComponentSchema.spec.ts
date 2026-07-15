@@ -6,7 +6,7 @@ import { ResourceManager } from './ResourceManager';
 import { SceneLoader } from './SceneLoader';
 import { ScriptRegistry } from './ScriptRegistry';
 import { Script } from './ScriptComponent';
-import type { PropertySchema } from '../fw/property-schema';
+import type { PropertyDefinition, PropertySchema } from '../fw/property-schema';
 
 /**
  * A user-authored component whose static getPropertySchema() forgets the
@@ -17,6 +17,34 @@ class MalformedSchemaComponent extends Script {
   static override getPropertySchema(): PropertySchema {
     // Intentionally missing `properties: []`.
     return { nodeType: 'MalformedSchemaComponent' } as unknown as PropertySchema;
+  }
+}
+
+/**
+ * A component whose schema has one well-formed property and one malformed entry
+ * that forgets its `getValue`/`setValue` closures — a common AI/hand-authoring
+ * mistake (returning bare `{ name, type }` objects). The good property must still
+ * apply; only the bad one is skipped, and the load must not throw.
+ */
+class PartlyMalformedPropertyComponent extends Script {
+  speed = 0;
+
+  static override getPropertySchema(): PropertySchema {
+    return {
+      nodeType: 'PartlyMalformedPropertyComponent',
+      properties: [
+        {
+          name: 'speed',
+          type: 'number',
+          getValue: (node: unknown) => (node as PartlyMalformedPropertyComponent).speed,
+          setValue: (node: unknown, value: unknown) => {
+            (node as PartlyMalformedPropertyComponent).speed = value as number;
+          },
+        },
+        // Malformed: no getValue/setValue closures.
+        { name: 'brokenProp', type: 'number' } as unknown as PropertyDefinition,
+      ],
+    };
   }
 }
 
@@ -78,6 +106,51 @@ describe('SceneLoader component schema robustness', () => {
           typeof message === 'string' &&
           message.includes('MalformedSchemaComponent') &&
           message.includes('malformed property schema')
+      )
+    ).toBe(true);
+  });
+
+  it('applies well-formed properties and skips a property definition missing setValue', async () => {
+    const { loader, registry } = makeLoader();
+    registry.registerComponent({
+      id: 'user:PartlyMalformedPropertyComponent',
+      displayName: 'PartlyMalformedPropertyComponent',
+      description: 'test',
+      category: 'Project',
+      componentClass: PartlyMalformedPropertyComponent,
+      keywords: [],
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const yaml = `version: '1.0.0'
+root:
+  - id: panel
+    type: ColorRect2D
+    name: Panel
+    components:
+      - id: comp-1
+        type: 'user:PartlyMalformedPropertyComponent'
+        enabled: true
+        config:
+          speed: 7
+          brokenProp: 42
+`;
+
+    const graph = await loader.parseScene(yaml, { filePath: 'res://scenes/main.pix3scene' });
+
+    // The scene loads and the well-formed property was applied from config.
+    expect(graph.rootNodes).toHaveLength(1);
+    const component = graph.rootNodes[0].components[0] as PartlyMalformedPropertyComponent;
+    expect(component.speed).toBe(7);
+
+    // The malformed property is reported (naming it) rather than thrown.
+    expect(
+      warnSpy.mock.calls.some(
+        ([message]) =>
+          typeof message === 'string' &&
+          message.includes('brokenProp') &&
+          message.includes('malformed property definition')
       )
     ).toBe(true);
   });

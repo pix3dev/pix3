@@ -112,6 +112,23 @@ pix3-editor-settings-dialog {
   color: var(--pix3-text-primary, #fff);
 }
 
+/* A nested option group inside a section (e.g. Advisor / Vision helper under the Agent provider). */
+.settings-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--pix3-border, #444);
+}
+
+.subsection-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--pix3-text-primary, #fff);
+}
+
 .slider-row {
   display: flex;
   flex-direction: column;

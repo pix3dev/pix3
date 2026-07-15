@@ -683,7 +683,27 @@ export class SceneLoader {
       return null;
     }
 
-    return schema.properties;
+    // Each entry must expose a callable setValue(node, value) closure — that is what config
+    // application uses. Hand- or AI-authored project scripts sometimes return bare
+    // `{ name, type, defaultValue }` entries (no closures); a single malformed entry must not
+    // abort the whole scene load, so skip it with a warning and keep the well-formed properties.
+    const rawProperties = schema.properties as ReadonlyArray<
+      { name?: unknown; getValue?: unknown; setValue?: unknown } | null | undefined
+    >;
+    const usable: PropertyDefinition[] = [];
+    for (const prop of rawProperties) {
+      if (prop && typeof prop.setValue === 'function' && typeof prop.name === 'string') {
+        usable.push(prop as unknown as PropertyDefinition);
+        continue;
+      }
+      const label = prop && typeof prop.name === 'string' ? `"${prop.name}"` : '(unnamed)';
+      console.warn(
+        `[SceneLoader] Component "${componentType}" has a malformed property definition ${label}: ` +
+          `each property must expose a setValue(node, value) function. Skipping this property.`
+      );
+    }
+
+    return usable;
   }
 
   private generateUniqueRuntimeNodeId(

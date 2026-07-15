@@ -6,9 +6,11 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { AiImageSettingsService } from '@/services/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
+import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
-import { formatPricingHint } from '@/services/llm/LlmTypes';
+import { formatPricingHint, type LlmModel } from '@/services/llm/LlmTypes';
 import { IconService, IconSize } from '@/services/IconService';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
@@ -30,6 +32,12 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(AgentSettingsService)
   private readonly agentSettings!: AgentSettingsService;
+
+  @inject(AgentAdvisorService)
+  private readonly agentAdvisor!: AgentAdvisorService;
+
+  @inject(AgentVisionService)
+  private readonly agentVision!: AgentVisionService;
 
   @inject(LlmProviderRegistry)
   private readonly llmProviders!: LlmProviderRegistry;
@@ -107,6 +115,47 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private llmDebugMode = false;
 
+  // Advisor: a deliberately stronger model the agent consults via `ask_advisor`. Empty provider = off.
+  @state()
+  private advisorProviderId = '';
+
+  @state()
+  private advisorModelId = '';
+
+  @state()
+  private advisorKeyConfigured = false;
+
+  @state()
+  private advisorKeyInput = '';
+
+  @state()
+  private advisorKeyBusy = false;
+
+  /** Human-readable line describing what the advisor currently resolves to (null = off/unusable). */
+  @state()
+  private advisorStatus: string | null = null;
+
+  // Vision helper: a vision-capable model used by `analyze_image` for text-only main models.
+  // Empty provider = auto (first provider with a key + a vision model).
+  @state()
+  private visionProviderId = '';
+
+  @state()
+  private visionModelId = '';
+
+  @state()
+  private visionKeyConfigured = false;
+
+  @state()
+  private visionKeyInput = '';
+
+  @state()
+  private visionKeyBusy = false;
+
+  /** Human-readable line describing what the vision helper currently resolves to (null = none). */
+  @state()
+  private visionStatus: string | null = null;
+
   @state()
   private bgEngine: BgRemovalEngine = 'imgly';
 
@@ -142,6 +191,14 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
     this.llmDebugMode = agentPrefs.debugMode;
     void this.refreshLlmKeyStatus();
+
+    this.advisorProviderId = agentPrefs.advisorProviderId;
+    this.advisorModelId = agentPrefs.advisorModelId;
+    this.visionProviderId = agentPrefs.visionProviderId;
+    this.visionModelId = agentPrefs.visionModelId;
+    void this.refreshAdvisorKeyStatus();
+    void this.refreshVisionKeyStatus();
+    void this.refreshAssistantStatus();
 
     // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
     this.disposeCatalogSubscription = this.llmModelCatalog.subscribe(() => {
@@ -421,6 +478,8 @@ export class EditorSettingsDialog extends ComponentBase {
           </div>
         </div>
 
+        ${this.renderAdvisorField()} ${this.renderVisionField()}
+
         <div class="settings-field">
           <label class="toggle-row">
             <input
@@ -438,6 +497,338 @@ export class EditorSettingsDialog extends ComponentBase {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Shared renderer for a *secondary* LLM picker (advisor / vision helper): a provider select whose
+   * first entry disables/auto-resolves the feature, a model select (only meaningful once a provider
+   * is chosen), a compact per-provider API-key row, and a resolved-status line. Both features reuse
+   * the same encrypted per-provider key as the main Agent provider, so picking a provider that is
+   * already keyed needs no extra input.
+   */
+  private renderSecondaryLlm(config: {
+    title: string;
+    hint: string;
+    providerId: string;
+    modelId: string;
+    /** Label of the first provider option (value=''): 'Off' for advisor, 'Auto' for vision. */
+    providerNoneLabel: string;
+    /** Label of the first model option (value=''): the default/auto model. */
+    modelDefaultLabel: string;
+    /** When true, the model list is limited to vision-capable models. */
+    visionOnly: boolean;
+    keyConfigured: boolean;
+    keyInput: string;
+    keyBusy: boolean;
+    status: string | null;
+    onProviderChange: (id: string) => void;
+    onModelChange: (id: string) => void;
+    onKeyInput: (value: string) => void;
+    onSaveKey: () => void;
+    onClearKey: () => void;
+  }) {
+    const provider = config.providerId ? this.llmProviders.get(config.providerId) : undefined;
+    const allModels = provider ? this.llmModelCatalog.getModels(provider.id) : [];
+    const models: readonly LlmModel[] = (() => {
+      if (!config.visionOnly) return allModels;
+      const visionModels = allModels.filter(m => m.capabilities.supportsImages);
+      return visionModels.length > 0 ? visionModels : allModels;
+    })();
+
+    return html`
+      <div class="settings-subsection">
+        <h4 class="subsection-title">${config.title}</h4>
+        <div class="hint">${config.hint}</div>
+
+        <div class="settings-field">
+          <label class="select-row">
+            <span>Provider</span>
+            <select
+              @change=${(e: Event) =>
+                config.onProviderChange((e.target as HTMLSelectElement).value)}
+            >
+              <option value="" ?selected=${config.providerId === ''}>
+                ${config.providerNoneLabel}
+              </option>
+              ${this.llmProviders
+                .list()
+                .map(
+                  item =>
+                    html`<option value=${item.id} ?selected=${item.id === config.providerId}>
+                      ${item.label}
+                    </option>`
+                )}
+            </select>
+          </label>
+        </div>
+
+        ${provider
+          ? html`
+              <div class="settings-field">
+                <label class="select-row">
+                  <span>Model</span>
+                  <select
+                    @change=${(e: Event) =>
+                      config.onModelChange((e.target as HTMLSelectElement).value)}
+                  >
+                    <option value="" ?selected=${config.modelId === ''}>
+                      ${config.modelDefaultLabel}
+                    </option>
+                    ${models.map(model => {
+                      const hint = formatPricingHint(model.pricing);
+                      return html`<option
+                        value=${model.id}
+                        ?selected=${model.id === config.modelId}
+                      >
+                        ${model.label}${hint ? ` · ${hint}` : ''}
+                      </option>`;
+                    })}
+                  </select>
+                </label>
+              </div>
+
+              <div class="settings-field">
+                <span class="key-label">
+                  ${provider.label} API Key
+                  <span class="key-status ${config.keyConfigured ? 'is-set' : 'is-unset'}">
+                    ${config.keyConfigured ? 'Configured' : 'Not set'}
+                  </span>
+                </span>
+                <div class="key-row">
+                  <input
+                    type="password"
+                    autocomplete="off"
+                    placeholder=${config.keyConfigured ? '•••••••• stored' : 'Paste API key'}
+                    .value=${config.keyInput}
+                    @input=${(e: Event) => config.onKeyInput((e.target as HTMLInputElement).value)}
+                  />
+                  <button
+                    class="btn-key-save"
+                    @click=${config.onSaveKey}
+                    ?disabled=${!config.keyInput.trim() || config.keyBusy}
+                  >
+                    Save
+                  </button>
+                  ${config.keyConfigured
+                    ? html`<button
+                        class="btn-key-clear"
+                        @click=${config.onClearKey}
+                        ?disabled=${config.keyBusy}
+                      >
+                        Clear
+                      </button>`
+                    : null}
+                </div>
+                <div class="hint">
+                  Shares the encrypted key with this provider everywhere in the app.
+                </div>
+              </div>
+            `
+          : null}
+        ${config.status ? html`<div class="hint">Currently resolved: ${config.status}</div>` : null}
+      </div>
+    `;
+  }
+
+  private renderAdvisorField() {
+    return this.renderSecondaryLlm({
+      title: 'Advisor model (optional)',
+      hint: 'A deliberately stronger model the agent can consult via the ask_advisor tool when it is stuck or facing a design decision. Off by default — never auto-picked.',
+      providerId: this.advisorProviderId,
+      modelId: this.advisorModelId,
+      providerNoneLabel: 'Off',
+      modelDefaultLabel: "Provider's selected model",
+      visionOnly: false,
+      keyConfigured: this.advisorKeyConfigured,
+      keyInput: this.advisorKeyInput,
+      keyBusy: this.advisorKeyBusy,
+      status: this.advisorStatus,
+      onProviderChange: id => this.onAdvisorProviderChange(id),
+      onModelChange: id => this.onAdvisorModelChange(id),
+      onKeyInput: value => {
+        this.advisorKeyInput = value;
+      },
+      onSaveKey: () => void this.onSaveAdvisorKey(),
+      onClearKey: () => void this.onClearAdvisorKey(),
+    });
+  }
+
+  private renderVisionField() {
+    return this.renderSecondaryLlm({
+      title: 'Vision helper (optional)',
+      hint: 'Lets a text-only main model "see" images (analyze_image) by delegating to a vision-capable model. Auto = the first provider with a key and a vision model — which lands on your main model when it already supports images.',
+      providerId: this.visionProviderId,
+      modelId: this.visionModelId,
+      providerNoneLabel: 'Auto',
+      modelDefaultLabel: 'Auto (first vision-capable model)',
+      visionOnly: true,
+      keyConfigured: this.visionKeyConfigured,
+      keyInput: this.visionKeyInput,
+      keyBusy: this.visionKeyBusy,
+      status: this.visionStatus,
+      onProviderChange: id => this.onVisionProviderChange(id),
+      onModelChange: id => this.onVisionModelChange(id),
+      onKeyInput: value => {
+        this.visionKeyInput = value;
+      },
+      onSaveKey: () => void this.onSaveVisionKey(),
+      onClearKey: () => void this.onClearVisionKey(),
+    });
+  }
+
+  // ── Advisor handlers ──────────────────────────────────────────────────────
+
+  private onAdvisorProviderChange(providerId: string): void {
+    this.advisorProviderId = providerId;
+    // Changing the provider invalidates a model id from the previous provider.
+    this.advisorModelId = '';
+    this.advisorKeyInput = '';
+    this.agentSettings.updatePreferences({
+      advisorProviderId: providerId,
+      advisorModelId: '',
+    });
+    void this.refreshAdvisorKeyStatus();
+    void this.refreshAssistantStatus();
+  }
+
+  private onAdvisorModelChange(modelId: string): void {
+    this.advisorModelId = modelId;
+    this.agentSettings.updatePreferences({ advisorModelId: modelId });
+    void this.refreshAssistantStatus();
+  }
+
+  private async onSaveAdvisorKey(): Promise<void> {
+    const key = this.advisorKeyInput.trim();
+    if (!key || !this.advisorProviderId) {
+      return;
+    }
+    this.advisorKeyBusy = true;
+    try {
+      await this.agentSettings.setApiKey(this.advisorProviderId, key);
+      this.advisorKeyConfigured = true;
+      this.advisorKeyInput = '';
+    } finally {
+      this.advisorKeyBusy = false;
+    }
+    void this.refreshAssistantStatus();
+  }
+
+  private async onClearAdvisorKey(): Promise<void> {
+    if (!this.advisorProviderId) {
+      return;
+    }
+    this.advisorKeyBusy = true;
+    try {
+      await this.agentSettings.clearApiKey(this.advisorProviderId);
+      this.advisorKeyConfigured = false;
+      this.advisorKeyInput = '';
+    } finally {
+      this.advisorKeyBusy = false;
+    }
+    void this.refreshAssistantStatus();
+  }
+
+  private async refreshAdvisorKeyStatus(): Promise<void> {
+    const providerId = this.advisorProviderId;
+    if (!providerId) {
+      this.advisorKeyConfigured = false;
+      return;
+    }
+    try {
+      const configured = await this.agentSettings.hasApiKey(providerId);
+      if (providerId === this.advisorProviderId) {
+        this.advisorKeyConfigured = configured;
+      }
+    } catch {
+      this.advisorKeyConfigured = false;
+    }
+  }
+
+  // ── Vision handlers ───────────────────────────────────────────────────────
+
+  private onVisionProviderChange(providerId: string): void {
+    this.visionProviderId = providerId;
+    this.visionModelId = '';
+    this.visionKeyInput = '';
+    this.agentSettings.updatePreferences({
+      visionProviderId: providerId,
+      visionModelId: '',
+    });
+    void this.refreshVisionKeyStatus();
+    void this.refreshAssistantStatus();
+  }
+
+  private onVisionModelChange(modelId: string): void {
+    this.visionModelId = modelId;
+    this.agentSettings.updatePreferences({ visionModelId: modelId });
+    void this.refreshAssistantStatus();
+  }
+
+  private async onSaveVisionKey(): Promise<void> {
+    const key = this.visionKeyInput.trim();
+    if (!key || !this.visionProviderId) {
+      return;
+    }
+    this.visionKeyBusy = true;
+    try {
+      await this.agentSettings.setApiKey(this.visionProviderId, key);
+      this.visionKeyConfigured = true;
+      this.visionKeyInput = '';
+    } finally {
+      this.visionKeyBusy = false;
+    }
+    void this.refreshAssistantStatus();
+  }
+
+  private async onClearVisionKey(): Promise<void> {
+    if (!this.visionProviderId) {
+      return;
+    }
+    this.visionKeyBusy = true;
+    try {
+      await this.agentSettings.clearApiKey(this.visionProviderId);
+      this.visionKeyConfigured = false;
+      this.visionKeyInput = '';
+    } finally {
+      this.visionKeyBusy = false;
+    }
+    void this.refreshAssistantStatus();
+  }
+
+  private async refreshVisionKeyStatus(): Promise<void> {
+    const providerId = this.visionProviderId;
+    if (!providerId) {
+      this.visionKeyConfigured = false;
+      return;
+    }
+    try {
+      const configured = await this.agentSettings.hasApiKey(providerId);
+      if (providerId === this.visionProviderId) {
+        this.visionKeyConfigured = configured;
+      }
+    } catch {
+      this.visionKeyConfigured = false;
+    }
+  }
+
+  /** Recompute the "Currently resolved" lines for both the advisor and the vision helper. */
+  private async refreshAssistantStatus(): Promise<void> {
+    try {
+      const advisor = await this.agentAdvisor.describeAdvisor();
+      this.advisorStatus = advisor
+        ? `${advisor.providerLabel} · ${advisor.modelLabel ?? advisor.modelId}`
+        : null;
+    } catch {
+      this.advisorStatus = null;
+    }
+    try {
+      const vision = await this.agentVision.describeHelper();
+      this.visionStatus = vision
+        ? `${vision.providerLabel} · ${vision.modelLabel ?? vision.modelId}${vision.auto ? ' (auto)' : ''}`
+        : null;
+    } catch {
+      this.visionStatus = null;
+    }
   }
 
   private onLlmDebugModeChange(e: Event): void {
