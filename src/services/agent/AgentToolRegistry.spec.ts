@@ -759,6 +759,33 @@ describe('AgentToolRegistry', () => {
       expect(result.error).toMatch(/vector2/);
       expect(dispatcher.execute).not.toHaveBeenCalled();
     });
+
+    it('parses a stringified JSON object value for a vector2 property (provider quirk)', async () => {
+      // Some OpenAI-compatible providers deliver the untyped `value` argument as a JSON string;
+      // without parsing it, this exact shape failed 6× in a real session and the model gave up on
+      // set_property to hand-edit the scene file.
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager: vectorSceneManager() });
+      const result = await registry.execute('set_property', {
+        nodeId: 'v1',
+        propertyPath: 'position',
+        value: '{"x":-300,"y":-259.8}',
+      });
+      expect(result).toEqual({ ok: true });
+      expect(readValue(dispatcher.execute.mock.calls[0][0])).toEqual({ x: -300, y: -259.8 });
+    });
+
+    it('parses a stringified JSON array value for a vector2 property', async () => {
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager: vectorSceneManager() });
+      const result = await registry.execute('set_property', {
+        nodeId: 'v1',
+        propertyPath: 'position',
+        value: '[10, 350]',
+      });
+      expect(result).toEqual({ ok: true });
+      expect(readValue(dispatcher.execute.mock.calls[0][0])).toEqual({ x: 10, y: 350 });
+    });
   });
 
   describe('game input tools', () => {

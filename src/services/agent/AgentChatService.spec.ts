@@ -392,6 +392,90 @@ describe('AgentChatService', () => {
     expect(state.errorMessage).toMatch(/No API key/);
   });
 
+  it('retries once on a transient empty response, then recovers the turn', async () => {
+    const chat = vi
+      .fn()
+      .mockRejectedValueOnce(new LlmError('empty', 'empty response'))
+      .mockResolvedValueOnce(textResult('recovered'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    expect(state.messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'recovered' }],
+    });
+  });
+
+  it('surfaces an "empty" error only after the single retry also comes back empty', async () => {
+    const chat = vi
+      .fn()
+      .mockRejectedValueOnce(new LlmError('empty', 'empty response'))
+      .mockRejectedValueOnce(new LlmError('empty', 'still empty'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    const state = service.getState();
+    expect(state.status).toBe('error');
+    expect(state.errorKind).toBe('empty');
+  });
+
+  it('auto-retries a transient http gateway error (502 / upstream failed), then recovers', async () => {
+    const chat = vi
+      .fn()
+      .mockRejectedValueOnce(new LlmError('http', 'Upstream request failed', 502))
+      .mockResolvedValueOnce(textResult('ok now'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(service.getState().status).toBe('idle');
+  });
+
+  it('does NOT retry a client http error (404) — surfaces it immediately', async () => {
+    const chat = vi.fn(async () => {
+      throw new LlmError('http', 'not found', 404);
+    });
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    const state = service.getState();
+    expect(state.status).toBe('error');
+    expect(state.errorKind).toBe('http');
+  });
+
+  it('resume re-runs the loop on the existing history without appending a user message', async () => {
+    const chat = vi
+      .fn()
+      .mockRejectedValueOnce(new LlmError('unknown', 'boom')) // send fails (not auto-retried)
+      .mockResolvedValueOnce(textResult('recovered')); // resume succeeds
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+    expect(service.getState().status).toBe('error');
+    const afterSend = service.getState().messages.length; // user message only
+
+    await service.resume();
+
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    expect(chat).toHaveBeenCalledTimes(2);
+    // resume adds ONLY the assistant reply — no extra user turn.
+    expect(state.messages).toHaveLength(afterSend + 1);
+    expect(state.messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'recovered' }],
+    });
+  });
+
   it('lifts tool-emitted __images out of the JSON result into image blocks', async () => {
     const chat = vi
       .fn()

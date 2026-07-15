@@ -15,10 +15,14 @@ import {
 import {
   LlmError,
   isRecord,
+  type ChatParams,
   type LlmContentBlock,
   type LlmErrorKind,
   type LlmImageBlock,
   type LlmMessage,
+  type LlmProvider,
+  type LlmRequestContext,
+  type LlmResult,
   type LlmTextBlock,
   type LlmToolResultBlock,
   type LlmToolUseBlock,
@@ -130,6 +134,30 @@ const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
   if (toolName === 'fs_write') {
     const path = (input as { path?: unknown } | null | undefined)?.path;
     return typeof path === 'string' && /\.(ts|pix3scene)$/i.test(path);
+  }
+  return false;
+};
+
+/** HTTP statuses worth ONE automatic retry — transient server/gateway hiccups, not client errors. */
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+/** Message fragments that mark a transient upstream/gateway failure even without a clean status. */
+const TRANSIENT_ERROR_PATTERN =
+  /upstream|timeout|timed out|temporar|overload|unavailable|reset|try again/i;
+
+/**
+ * Whether a failed provider round-trip is worth ONE automatic retry: an empty completion (free
+ * models blip → LlmError 'empty') or a transient HTTP gateway failure (5xx / 408 / 429, or an
+ * opaque "upstream request failed"). Client errors (400/401/404), aborts, missing keys, and
+ * CORS/network misconfig are NEVER retried — a retry there just repeats a certain failure.
+ */
+const isTransientLlmError = (error: unknown): error is LlmError => {
+  if (!(error instanceof LlmError)) return false;
+  if (error.kind === 'empty') return true;
+  if (error.kind === 'http') {
+    return (
+      (typeof error.status === 'number' && RETRYABLE_HTTP_STATUSES.has(error.status)) ||
+      TRANSIENT_ERROR_PATTERN.test(error.message)
+    );
   }
   return false;
 };
@@ -271,10 +299,33 @@ export class AgentChatService {
       this.activeCreatedAt = Date.now();
     }
 
-    this.abortController = new AbortController();
     this.appendMessage({ role: 'user', content: buildUserContent(trimmed, images, texts) });
-    this.setState({ status: 'running', errorMessage: null, errorKind: null, notice: null });
+    await this.runToSettled();
+  }
 
+  /**
+   * Re-run the agentic loop on the CURRENT history WITHOUT appending a new user message. Powers the
+   * chat's "Try again" (after a failed turn) and "Continue" (after the tool-iteration cap or a
+   * manual stop) affordances — both just resume the model on whatever the history already ends with
+   * (an unanswered user prompt, or the previous turn's tool results). No-op while running or with an
+   * empty history.
+   */
+  async resume(): Promise<void> {
+    if (this.isRunning() || this.state.messages.length === 0) {
+      return;
+    }
+    await this.ensureLoaded();
+    await this.runToSettled();
+  }
+
+  /**
+   * Drive {@link runLoop} to a terminal state and fold the outcome into `status` (idle / error)
+   * plus any banner. Shared by {@link send} and {@link resume}; persists the (partial) history
+   * either way.
+   */
+  private async runToSettled(): Promise<void> {
+    this.abortController = new AbortController();
+    this.setState({ status: 'running', errorMessage: null, errorKind: null, notice: null });
     try {
       await this.runLoop(this.abortController.signal);
       this.setState({ status: 'idle', activeTool: null });
@@ -473,7 +524,8 @@ export class AgentChatService {
       });
 
       const startedAt = performance.now();
-      const result = await provider.chat(
+      const result = await this.chatWithRetry(
+        provider,
         {
           messages: outboundMessages,
           tools,
@@ -482,7 +534,8 @@ export class AgentChatService {
           maxTokens: model?.capabilities.maxOutputTokens,
           signal,
         },
-        { apiKey, modelId, baseUrl }
+        { apiKey, modelId, baseUrl },
+        signal
       );
       const elapsedMs = performance.now() - startedAt;
 
@@ -624,6 +677,34 @@ export class AgentChatService {
   }
 
   /**
+   * One provider round-trip with a single retry for a TRANSIENT failure — an empty completion
+   * (free models blip) or a transient HTTP gateway error (5xx / 408 / 429, or an opaque "upstream
+   * request failed"), both common on OpenCode Zen's free tier. A lone retry recovers the turn
+   * instead of ending it with a cryptic error. Client errors, aborts, missing keys and CORS/network
+   * misconfig propagate immediately — see {@link isTransientLlmError}.
+   */
+  private async chatWithRetry(
+    provider: LlmProvider,
+    params: ChatParams,
+    ctx: LlmRequestContext,
+    signal: AbortSignal
+  ): Promise<LlmResult> {
+    try {
+      return await provider.chat(params, ctx);
+    } catch (error) {
+      if (!isTransientLlmError(error) || signal.aborted) {
+        throw error;
+      }
+      this.debugLog('retry', { kind: error.kind, status: error.status });
+      await new Promise(resolve => setTimeout(resolve, 600));
+      if (signal.aborted) {
+        throw new LlmError('aborted', 'The request was cancelled.');
+      }
+      return provider.chat(params, ctx);
+    }
+  }
+
+  /**
    * Execute one tool call; failures become `isError` results for the model, never loop aborts.
    * Images a handler returns under {@link AGENT_TOOL_IMAGES_KEY} are lifted out of the JSON and
    * handed back as real image blocks (so the model sees pixels, not base64 text).
@@ -698,7 +779,9 @@ export class AgentChatService {
       '',
       'Rules:',
       '- Use the provided tools to inspect and change the project; never guess scene or file contents you can read.',
-      '- Scene changes go through set_property / run_command — they are undoable, so prefer them over rewriting scene files.',
+      '- Scene changes go through set_property / create_node / convert_node_type / run_command — they are undoable, so ALWAYS prefer them over hand-editing .pix3scene files. If set_property fails, fix the CALL (pass value as a real JSON object/number/array — {"x":10,"y":-20}, 90, [1,1] — never a quoted string); do NOT fall back to str_replace / fs_write on the scene file to work around it.',
+      '- Rotation units differ by surface: set_property and the runtime (rotationZ) use RADIANS, but the .pix3scene `transform.rotation` field is DEGREES. If you ever do edit the scene YAML by hand, write degrees (90), not radians (1.5708).',
+      '- If a node property is recomputed every frame by a script/component (e.g. a controller that drives position along a path), a one-off scene/property edit will NOT hold at runtime — configure the script instead (set_component_property on its exposed fields). If the behaviour genuinely needs a script code change, make it and say so in your reply.',
       '- To give a node behaviour, attach a component: call list_component_types, then add_component (built-in "core:*" behaviours or a project "user:*" script), then configure it with set_component_property. Never hand-edit scene files to add a component.',
       '- For custom logic, write a Script subclass with fs_write under scripts/, run compile_scripts, then attach it with add_component using its "user:<ExportName>" type.',
       '- After editing scripts with fs_write, run compile_scripts to check they build.',

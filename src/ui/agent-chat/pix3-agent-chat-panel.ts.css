@@ -72,6 +72,11 @@ pix3-agent-chat-panel .agent-send,
 pix3-agent-chat-panel .agent-stop,
 pix3-agent-chat-panel .agent-key-save,
 pix3-agent-chat-panel .agent-key-clear,
+pix3-agent-chat-panel .agent-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 pix3-agent-chat-panel .agent-banner-action {
   display: inline-flex;
   align-items: center;

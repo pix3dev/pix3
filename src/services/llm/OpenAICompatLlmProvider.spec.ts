@@ -211,4 +211,30 @@ describe('OpenAICompatLlmProvider', () => {
     expect(error).toBeInstanceOf(LlmError);
     expect(error).toMatchObject({ kind: 'http', status: 404 });
   });
+
+  it('flags a 200 with no usable choice as a retryable "empty" error', async () => {
+    // Free / rate-limited models occasionally return a 200 whose body has no choices[0].message.
+    const fetchImpl = vi.fn(async () => okJson({ choices: [] }));
+    const error = await provider
+      .chat(
+        { messages: [{ role: 'user', content: 'x' }] },
+        { apiKey: 'sk', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl }
+      )
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmError);
+    expect(error).toMatchObject({ kind: 'empty' });
+  });
+
+  it('surfaces a provider error wrapped in a 200 body instead of a generic message', async () => {
+    // Some gateways return {error:{message}} with HTTP 200 rather than an error status.
+    const fetchImpl = vi.fn(async () => okJson({ error: { message: 'no capacity right now' } }));
+    const error = await provider
+      .chat(
+        { messages: [{ role: 'user', content: 'x' }] },
+        { apiKey: 'sk', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl }
+      )
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmError);
+    expect(error).toMatchObject({ kind: 'http', message: 'no capacity right now' });
+  });
 });

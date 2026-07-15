@@ -123,6 +123,14 @@ const TEXT_EXTENSIONS = new Set([
 const MAX_LOG_ENTRIES = 200;
 
 /**
+ * Property types whose value is a genuine string — never JSON-parse an agent-supplied string for
+ * these (a color "#ff0000", an enum "idle", or a node reference must stay a string). Every OTHER
+ * type — numbers, booleans, vectors, objects — may arrive stringified from some providers (see
+ * coercePropertyValue) and is parsed back.
+ */
+const STRINGLIKE_PROPERTY_TYPES = new Set(['string', 'color', 'enum', 'select', 'node']);
+
+/**
  * Registry of tools the in-editor AI agent can call. Each tool is a
  * `{ name, description, inputSchema (JSON Schema), handler }` and every handler returns JSON-safe
  * data. Scene reads reuse `agent-introspection`; mutations flow through the command gateway
@@ -1149,6 +1157,24 @@ export class AgentToolRegistry {
     if (!propDef) {
       return { value };
     }
+
+    // Some OpenAI-compatible providers (observed with OpenCode Zen free models) serialize a
+    // structured or scalar tool argument as a JSON *string* — e.g. value: "{\"x\":-300,\"y\":-259.8}",
+    // "[-300,-259.8]", "90" or "true" — because the tool's `value` schema is untyped. Parse it back
+    // for every property type EXCEPT the genuinely string-valued ones (a color "#ff0000" or an enum
+    // "idle" must stay a string). A non-JSON string is left untouched. Without this a stringified
+    // vector slips through as a silent shape mismatch and the model abandons set_property to
+    // hand-edit the scene file (a real session then tripped over the degrees-vs-radians rotation
+    // format that way).
+    let current = value;
+    if (typeof current === 'string' && !STRINGLIKE_PROPERTY_TYPES.has(propDef.type)) {
+      try {
+        current = JSON.parse(current);
+      } catch {
+        // Not JSON — keep the raw string for the downstream setter / the error below.
+      }
+    }
+
     const arity =
       propDef.type === 'vector2'
         ? 2
@@ -1158,21 +1184,21 @@ export class AgentToolRegistry {
             ? 4
             : 0;
     if (arity === 0) {
-      return { value };
+      return { value: current };
     }
     const keys = ['x', 'y', 'z', 'w'].slice(0, arity);
     const isFiniteNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
     if (
-      typeof value === 'object' &&
-      value !== null &&
-      !Array.isArray(value) &&
-      keys.every(k => isFiniteNumber((value as Record<string, unknown>)[k]))
+      typeof current === 'object' &&
+      current !== null &&
+      !Array.isArray(current) &&
+      keys.every(k => isFiniteNumber((current as Record<string, unknown>)[k]))
     ) {
-      return { value };
+      return { value: current };
     }
-    if (Array.isArray(value) && value.length === arity && value.every(isFiniteNumber)) {
+    if (Array.isArray(current) && current.length === arity && current.every(isFiniteNumber)) {
       const obj: Record<string, number> = {};
-      keys.forEach((k, i) => (obj[k] = value[i] as number));
+      keys.forEach((k, i) => (obj[k] = current[i] as number));
       return { value: obj };
     }
     return {

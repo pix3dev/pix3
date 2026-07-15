@@ -323,7 +323,19 @@ const parseResponse = (payload: unknown): LlmResult => {
       : null;
   const messageObj = choice && isRecord(choice.message) ? choice.message : null;
   if (!messageObj) {
-    throw new LlmError('unknown', 'Malformed response (no choices/message).');
+    // A 200 with no usable choice is either a provider error wrapped in a 200 body (some gateways
+    // return {error:{message}} instead of an HTTP error status) or a transient empty completion —
+    // common on free / rate-limited models. Surface the real error when present; otherwise flag it
+    // 'empty' so the agent loop can retry once before ending the turn with a cryptic message.
+    const providerError = extractErrorMessage(payload);
+    if (providerError) {
+      throw new LlmError('http', providerError);
+    }
+    throw new LlmError(
+      'empty',
+      'The provider returned an empty response (no choices/message). This is common with free or ' +
+        'rate-limited models — retrying or switching to a more reliable model usually fixes it.'
+    );
   }
 
   const content: LlmContentBlock[] = [];

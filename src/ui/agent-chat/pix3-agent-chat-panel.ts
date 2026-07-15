@@ -802,11 +802,14 @@ export class AgentChatPanel extends ComponentBase {
   private renderBanners() {
     const chatState = this.chatState;
     if (!chatState) return null;
+    // "Try again" / "Continue" re-run the loop on the existing history (no new user message). Only
+    // when the turn is settled and there is something to resume.
+    const canResume = chatState.status !== 'running' && chatState.messages.length > 0;
 
     return html`
       ${chatState.errorMessage
         ? html`<div class="agent-banner is-error">
-            ${chatState.errorMessage}
+            <span class="agent-banner-text">${chatState.errorMessage}</span>
             ${chatState.errorKind === 'missing-key'
               ? html`<button
                   type="button"
@@ -817,11 +820,36 @@ export class AgentChatPanel extends ComponentBase {
                 >
                   Set key
                 </button>`
-              : null}
+              : canResume
+                ? html`<button
+                    type="button"
+                    class="agent-banner-action"
+                    title="Re-run the last turn on the same conversation"
+                    @click=${() => void this.chat.resume()}
+                  >
+                    <span class="agent-btn-icon"
+                      >${this.icons.getIcon('refresh-cw', IconSize.SMALL)}</span
+                    >
+                    Try again
+                  </button>`
+                : null}
           </div>`
         : null}
       ${chatState.notice
-        ? html`<div class="agent-banner is-notice">${chatState.notice}</div>`
+        ? html`<div class="agent-banner is-notice">
+            <span class="agent-banner-text">${chatState.notice}</span>
+            ${canResume
+              ? html`<button
+                  type="button"
+                  class="agent-banner-action"
+                  title="Keep going from where the agent stopped"
+                  @click=${() => void this.chat.resume()}
+                >
+                  <span class="agent-btn-icon">${this.icons.getIcon('play', IconSize.SMALL)}</span>
+                  Continue
+                </button>`
+              : null}
+          </div>`
         : null}
     `;
   }

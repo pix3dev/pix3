@@ -240,7 +240,14 @@ export interface LlmProvider {
   listModels?(ctx: LlmListModelsContext): Promise<LlmModel[]>;
 }
 
-export type LlmErrorKind = 'missing-key' | 'network' | 'http' | 'blocked' | 'aborted' | 'unknown';
+export type LlmErrorKind =
+  | 'missing-key'
+  | 'network'
+  | 'http'
+  | 'blocked'
+  | 'aborted'
+  | 'empty'
+  | 'unknown';
 
 /** User-facing LLM error carrying a machine-readable kind (mirrors `ImageGenError`). */
 export class LlmError extends Error {
