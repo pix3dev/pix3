@@ -16,6 +16,50 @@ import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/ty
 import type { Navigation2DSettings } from '@/state/AppState';
 import './pix3-editor-settings-dialog.ts.css';
 
+interface SettingsSubtab {
+  id: string;
+  label: string;
+}
+
+interface SettingsSectionDef {
+  id: EditorSettingsTab;
+  label: string;
+  /** Feather / custom IconService id shown in the sidebar. */
+  icon: string;
+  /** Optional one-line description shown under the pane title. */
+  description?: string;
+  /** Sub-tabs rendered at the top of the pane; omit for single-view sections. */
+  subtabs?: readonly SettingsSubtab[];
+}
+
+/**
+ * Godot-style layout: the sidebar lists the main sections; a section with a lot
+ * of content splits into sub-tabs rendered at the top of the content pane.
+ */
+const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
+  { id: 'general', label: 'General', icon: 'sliders' },
+  {
+    id: 'agent',
+    label: 'Agent (LLM)',
+    icon: 'message-square',
+    description: 'Powers the in-editor Agent chat (Tools → Agent Chat).',
+    subtabs: [
+      { id: 'model', label: 'Model & Key' },
+      { id: 'assistants', label: 'Assistants' },
+    ],
+  },
+  {
+    id: 'images',
+    label: 'AI Images',
+    icon: 'image',
+    description: 'Image generation and background removal used by the Asset Generator.',
+    subtabs: [
+      { id: 'generation', label: 'Generation' },
+      { id: 'background', label: 'Background Removal' },
+    ],
+  },
+];
+
 @customElement('pix3-editor-settings-dialog')
 export class EditorSettingsDialog extends ComponentBase {
   @inject(EditorSettingsService)
@@ -49,7 +93,11 @@ export class EditorSettingsDialog extends ComponentBase {
   private readonly icons!: IconService;
 
   @state()
-  private activeTab: EditorSettingsTab = 'general';
+  private activeSection: EditorSettingsTab = 'general';
+
+  /** Active sub-tab id within the current section (empty when the section has none). */
+  @state()
+  private activeSubtab = '';
 
   @state()
   private warnOnUnsavedUnload = true;
@@ -170,7 +218,8 @@ export class EditorSettingsDialog extends ComponentBase {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.activeTab = this.editorSettingsService.getInitialTab();
+    this.activeSection = this.editorSettingsService.getInitialTab();
+    this.activeSubtab = this.defaultSubtab(this.activeSection);
     this.warnOnUnsavedUnload = appState.ui.warnOnUnsavedUnload;
     this.pauseRenderingOnUnfocus = appState.ui.pauseRenderingOnUnfocus;
     this.navigation2D = { ...appState.ui.navigation2D };
@@ -223,32 +272,40 @@ export class EditorSettingsDialog extends ComponentBase {
   }
 
   protected render() {
+    const section =
+      SETTINGS_SECTIONS.find(s => s.id === this.activeSection) ?? SETTINGS_SECTIONS[0];
     return html`
       <div class="dialog-backdrop" @click=${this.onCancel}>
         <div class="dialog-content" @click=${(e: Event) => e.stopPropagation()}>
           <h2 class="dialog-title">Editor Settings</h2>
 
-          <div class="settings-tabs" role="tablist">
-            <button
-              class="settings-tab ${this.activeTab === 'general' ? 'is-active' : ''}"
-              role="tab"
-              aria-selected=${this.activeTab === 'general'}
-              @click=${() => this.selectTab('general')}
-            >
-              General
-            </button>
-            <button
-              class="settings-tab ${this.activeTab === 'ai' ? 'is-active' : ''}"
-              role="tab"
-              aria-selected=${this.activeTab === 'ai'}
-              @click=${() => this.selectTab('ai')}
-            >
-              AI Generation
-            </button>
-          </div>
+          <div class="settings-body">
+            <nav class="settings-sidebar" role="tablist" aria-orientation="vertical">
+              ${SETTINGS_SECTIONS.map(
+                item => html`
+                  <button
+                    class="settings-nav-item ${item.id === this.activeSection ? 'is-active' : ''}"
+                    role="tab"
+                    aria-selected=${item.id === this.activeSection}
+                    @click=${() => this.selectSection(item.id)}
+                  >
+                    <span class="nav-icon">${this.icons.getIcon(item.icon, IconSize.SMALL)}</span>
+                    <span class="nav-label">${item.label}</span>
+                  </button>
+                `
+              )}
+            </nav>
 
-          <div class="settings-form">
-            ${this.activeTab === 'general' ? this.renderGeneralTab() : this.renderAiTab()}
+            <div class="settings-pane">
+              <div class="pane-header">
+                <h3 class="pane-title">${section.label}</h3>
+                ${section.description
+                  ? html`<p class="pane-description">${section.description}</p>`
+                  : null}
+              </div>
+              ${section.subtabs ? this.renderSubtabs(section.subtabs) : null}
+              <div class="settings-form">${this.renderSectionContent(section)}</div>
+            </div>
           </div>
 
           <div class="dialog-actions">
@@ -260,8 +317,53 @@ export class EditorSettingsDialog extends ComponentBase {
     `;
   }
 
-  private selectTab(tab: EditorSettingsTab): void {
-    this.activeTab = tab;
+  private renderSubtabs(subtabs: readonly SettingsSubtab[]) {
+    return html`
+      <div class="settings-subtabs" role="tablist">
+        ${subtabs.map(
+          tab => html`
+            <button
+              class="settings-subtab ${tab.id === this.activeSubtab ? 'is-active' : ''}"
+              role="tab"
+              aria-selected=${tab.id === this.activeSubtab}
+              @click=${() => this.selectSubtab(tab.id)}
+            >
+              ${tab.label}
+            </button>
+          `
+        )}
+      </div>
+    `;
+  }
+
+  private renderSectionContent(section: SettingsSectionDef) {
+    switch (section.id) {
+      case 'general':
+        return this.renderGeneralTab();
+      case 'agent':
+        return this.activeSubtab === 'assistants'
+          ? this.renderAgentAssistantsTab()
+          : this.renderAgentModelTab();
+      case 'images':
+        return this.activeSubtab === 'background'
+          ? this.renderImagesBackgroundTab()
+          : this.renderImagesGenerationTab();
+    }
+  }
+
+  /** First sub-tab id of a section, or '' when the section has none. */
+  private defaultSubtab(sectionId: EditorSettingsTab): string {
+    const section = SETTINGS_SECTIONS.find(s => s.id === sectionId);
+    return section?.subtabs?.[0]?.id ?? '';
+  }
+
+  private selectSection(sectionId: EditorSettingsTab): void {
+    this.activeSection = sectionId;
+    this.activeSubtab = this.defaultSubtab(sectionId);
+  }
+
+  private selectSubtab(subtabId: string): void {
+    this.activeSubtab = subtabId;
   }
 
   private renderGeneralTab() {
@@ -334,19 +436,10 @@ export class EditorSettingsDialog extends ComponentBase {
     `;
   }
 
-  private renderAiTab() {
-    const imageSection = this.renderAiProvidersSection();
-    const llmSection = this.renderLlmProvidersSection();
-    if (!imageSection && !llmSection) {
-      return html`<div class="hint">No AI providers are registered.</div>`;
-    }
-    return html`${llmSection}${imageSection}`;
-  }
-
-  private renderLlmProvidersSection() {
+  private renderAgentModelTab() {
     const providers = this.llmProviders.list();
     if (providers.length === 0) {
-      return null;
+      return html`<div class="hint">No LLM providers are registered.</div>`;
     }
     const provider = this.llmProviders.get(this.llmProviderId) ?? providers[0];
     const models = provider ? this.llmModelCatalog.getModels(provider.id) : [];
@@ -354,149 +447,149 @@ export class EditorSettingsDialog extends ComponentBase {
     const helpUrl = provider?.apiKeyHelpUrl;
 
     return html`
-      <div class="settings-section">
-        <h3 class="section-title">Agent (LLM) Provider</h3>
-        <div class="hint">Powers the in-editor Agent chat (Tools → Agent Chat).</div>
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Provider</span>
+          <select @change=${this.onLlmProviderChange}>
+            ${providers.map(
+              item =>
+                html`<option value=${item.id} ?selected=${item.id === this.llmProviderId}>
+                  ${item.label}
+                </option>`
+            )}
+          </select>
+        </label>
+      </div>
 
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Provider</span>
-            <select @change=${this.onLlmProviderChange}>
-              ${providers.map(
-                item =>
-                  html`<option value=${item.id} ?selected=${item.id === this.llmProviderId}>
-                    ${item.label}
-                  </option>`
-              )}
-            </select>
-          </label>
-        </div>
-
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Model</span>
-            <select @change=${this.onLlmModelSelectChange}>
-              ${models.map(model => {
-                const hint = formatPricingHint(model.pricing);
-                return html`<option
-                  value=${model.id}
-                  ?selected=${!this.llmModelCustomMode && model.id === this.llmModelId}
-                >
-                  ${model.label}${hint ? ` · ${hint}` : ''}
-                </option>`;
-              })}
-              ${provider?.requiresBaseUrl
-                ? html`<option value="__custom__" ?selected=${this.llmModelCustomMode}>
-                    Custom…
-                  </option>`
-                : null}
-            </select>
-            ${canRefreshModels
-              ? html`<button
-                  class="btn-key-save llm-models-refresh ${this.llmModelsBusy ? 'is-busy' : ''}"
-                  title="Fetch the provider's current model list"
-                  aria-label="Refresh model list"
-                  @click=${this.onRefreshLlmModels}
-                  ?disabled=${this.llmModelsBusy}
-                >
-                  ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
-                </button>`
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Model</span>
+          <select @change=${this.onLlmModelSelectChange}>
+            ${models.map(model => {
+              const hint = formatPricingHint(model.pricing);
+              return html`<option
+                value=${model.id}
+                ?selected=${!this.llmModelCustomMode && model.id === this.llmModelId}
+              >
+                ${model.label}${hint ? ` · ${hint}` : ''}
+              </option>`;
+            })}
+            ${provider?.requiresBaseUrl
+              ? html`<option value="__custom__" ?selected=${this.llmModelCustomMode}>
+                  Custom…
+                </option>`
               : null}
-          </label>
-          ${this.llmModelsMessage ? html`<div class="hint">${this.llmModelsMessage}</div>` : null}
-          ${this.llmModelCustomMode
-            ? html`<input
+          </select>
+          ${canRefreshModels
+            ? html`<button
+                class="btn-key-save llm-models-refresh ${this.llmModelsBusy ? 'is-busy' : ''}"
+                title="Fetch the provider's current model list"
+                aria-label="Refresh model list"
+                @click=${this.onRefreshLlmModels}
+                ?disabled=${this.llmModelsBusy}
+              >
+                ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
+              </button>`
+            : null}
+        </label>
+        ${this.llmModelsMessage ? html`<div class="hint">${this.llmModelsMessage}</div>` : null}
+        ${this.llmModelCustomMode
+          ? html`<input
+              type="text"
+              class="llm-custom-model"
+              .value=${this.llmModelId}
+              @change=${this.onLlmModelChange}
+              placeholder="custom model id (e.g. a local model name)"
+            />`
+          : null}
+      </div>
+
+      ${provider?.requiresBaseUrl
+        ? html`<div class="settings-field">
+            <label class="select-row">
+              <span>Base URL</span>
+              <input
                 type="text"
-                class="llm-custom-model"
-                .value=${this.llmModelId}
-                @change=${this.onLlmModelChange}
-                placeholder="custom model id (e.g. a local model name)"
-              />`
+                .value=${this.llmBaseUrl}
+                @change=${this.onLlmBaseUrlChange}
+                placeholder=${provider.defaultBaseUrl ?? 'https://…'}
+              />
+            </label>
+            <div class="hint">
+              Hosted OpenAI by default; point it at Ollama / LM Studio for local models (enable CORS
+              there, e.g. <code>OLLAMA_ORIGINS</code>).
+            </div>
+          </div>`
+        : null}
+
+      <div class="settings-field">
+        <span class="key-label">
+          API Key
+          <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
+            ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
+          </span>
+        </span>
+        <div class="key-row">
+          <input
+            type="password"
+            autocomplete="off"
+            placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+            .value=${this.llmKeyInput}
+            @input=${this.onLlmKeyInput}
+          />
+          <button
+            class="btn-key-save"
+            @click=${this.onSaveLlmKey}
+            ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
+          >
+            Save
+          </button>
+          ${this.llmKeyConfigured
+            ? html`<button
+                class="btn-key-clear"
+                @click=${this.onClearLlmKey}
+                ?disabled=${this.llmKeyBusy}
+              >
+                Clear
+              </button>`
             : null}
         </div>
-
-        ${provider?.requiresBaseUrl
-          ? html`<div class="settings-field">
-              <label class="select-row">
-                <span>Base URL</span>
-                <input
-                  type="text"
-                  .value=${this.llmBaseUrl}
-                  @change=${this.onLlmBaseUrlChange}
-                  placeholder=${provider.defaultBaseUrl ?? 'https://…'}
-                />
-              </label>
-              <div class="hint">
-                Hosted OpenAI by default; point it at Ollama / LM Studio for local models (enable
-                CORS there, e.g. <code>OLLAMA_ORIGINS</code>).
-              </div>
-            </div>`
-          : null}
-
-        <div class="settings-field">
-          <span class="key-label">
-            API Key
-            <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
-              ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
-            </span>
-          </span>
-          <div class="key-row">
-            <input
-              type="password"
-              autocomplete="off"
-              placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
-              .value=${this.llmKeyInput}
-              @input=${this.onLlmKeyInput}
-            />
-            <button
-              class="btn-key-save"
-              @click=${this.onSaveLlmKey}
-              ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
-            >
-              Save
-            </button>
-            ${this.llmKeyConfigured
-              ? html`<button
-                  class="btn-key-clear"
-                  @click=${this.onClearLlmKey}
-                  ?disabled=${this.llmKeyBusy}
-                >
-                  Clear
-                </button>`
-              : null}
-          </div>
-          <div class="hint">
-            ${this.llmKeyMessage
-              ? html`<span>${this.llmKeyMessage}</span>`
-              : html`Paste your provider API
-                key${helpUrl
-                  ? html` (get one from
-                      <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
-                  : ''}.
-                Stored encrypted in this browser only — never synced, and only sent to the selected
-                provider.`}
-          </div>
+        <div class="hint">
+          ${this.llmKeyMessage
+            ? html`<span>${this.llmKeyMessage}</span>`
+            : html`Paste your provider API
+              key${helpUrl
+                ? html` (get one from
+                    <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+                : ''}.
+              Stored encrypted in this browser only — never synced, and only sent to the selected
+              provider.`}
         </div>
+      </div>
 
-        ${this.renderAdvisorField()} ${this.renderVisionField()}
-
-        <div class="settings-field">
-          <label class="toggle-row">
-            <input
-              type="checkbox"
-              .checked=${this.llmDebugMode}
-              @change=${this.onLlmDebugModeChange}
-            />
-            <span>Debug mode</span>
-          </label>
-          <div class="hint">
-            Reveals the raw wire-format conversation log, the resolved system prompt, and
-            per-response timing / tokens-per-second in the Agent panel, and logs every request and
-            response to the browser devtools console.
-          </div>
+      <div class="settings-field">
+        <label class="toggle-row">
+          <input
+            type="checkbox"
+            .checked=${this.llmDebugMode}
+            @change=${this.onLlmDebugModeChange}
+          />
+          <span>Debug mode</span>
+        </label>
+        <div class="hint">
+          Reveals the raw wire-format conversation log, the resolved system prompt, and per-response
+          timing / tokens-per-second in the Agent panel, and logs every request and response to the
+          browser devtools console.
         </div>
       </div>
     `;
+  }
+
+  private renderAgentAssistantsTab() {
+    if (this.llmProviders.list().length === 0) {
+      return html`<div class="hint">No LLM providers are registered.</div>`;
+    }
+    return html`${this.renderAdvisorField()} ${this.renderVisionField()}`;
   }
 
   /**
@@ -836,10 +929,10 @@ export class EditorSettingsDialog extends ComponentBase {
     this.agentSettings.updatePreferences({ debugMode: this.llmDebugMode });
   }
 
-  private renderAiProvidersSection() {
+  private renderImagesGenerationTab() {
     const providers = this.imageProviders.list();
     if (providers.length === 0) {
-      return null;
+      return html`<div class="hint">No image providers are registered.</div>`;
     }
     const provider = this.imageProviders.get(this.aiProviderId) ?? providers[0];
     const models = provider?.models ?? [];
@@ -847,143 +940,139 @@ export class EditorSettingsDialog extends ComponentBase {
     const helpUrl = provider?.apiKeyHelpUrl;
 
     return html`
-      <div class="settings-section">
-        <h3 class="section-title">AI Image Providers</h3>
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Provider</span>
+          <select @change=${this.onAiProviderChange}>
+            ${providers.map(
+              item =>
+                html`<option value=${item.id} ?selected=${item.id === this.aiProviderId}>
+                  ${item.label}
+                </option>`
+            )}
+          </select>
+        </label>
+      </div>
 
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Provider</span>
-            <select @change=${this.onAiProviderChange}>
-              ${providers.map(
-                item =>
-                  html`<option value=${item.id} ?selected=${item.id === this.aiProviderId}>
-                    ${item.label}
-                  </option>`
-              )}
-            </select>
-          </label>
-        </div>
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Model</span>
+          <select @change=${this.onAiModelChange}>
+            ${models.map(
+              model =>
+                html`<option value=${model.id} ?selected=${model.id === this.aiModelId}>
+                  ${model.label}
+                </option>`
+            )}
+          </select>
+        </label>
+        ${activeModel?.description
+          ? html`<div class="hint">${activeModel.description}</div>`
+          : null}
+      </div>
 
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Model</span>
-            <select @change=${this.onAiModelChange}>
-              ${models.map(
-                model =>
-                  html`<option value=${model.id} ?selected=${model.id === this.aiModelId}>
-                    ${model.label}
-                  </option>`
-              )}
-            </select>
-          </label>
-          ${activeModel?.description
-            ? html`<div class="hint">${activeModel.description}</div>`
-            : null}
-        </div>
-
-        <div class="settings-field">
-          <span class="key-label">
-            API Key
-            <span class="key-status ${this.aiKeyConfigured ? 'is-set' : 'is-unset'}">
-              ${this.aiKeyConfigured ? 'Configured' : 'Not set'}
-            </span>
+      <div class="settings-field">
+        <span class="key-label">
+          API Key
+          <span class="key-status ${this.aiKeyConfigured ? 'is-set' : 'is-unset'}">
+            ${this.aiKeyConfigured ? 'Configured' : 'Not set'}
           </span>
-          <div class="key-row">
-            <input
-              type="password"
-              autocomplete="off"
-              placeholder=${this.aiKeyConfigured ? '•••••••• stored' : 'Paste API key'}
-              .value=${this.aiKeyInput}
-              @input=${this.onAiKeyInput}
-            />
-            <button
-              class="btn-key-save"
-              @click=${this.onSaveAiKey}
-              ?disabled=${!this.aiKeyInput.trim() || this.aiKeyBusy}
-            >
-              Save
-            </button>
-            ${this.aiKeyConfigured
-              ? html`<button
-                  class="btn-key-clear"
-                  @click=${this.onClearAiKey}
-                  ?disabled=${this.aiKeyBusy}
-                >
-                  Clear
-                </button>`
-              : null}
-          </div>
-          <div class="hint">
-            ${this.aiKeyMessage
-              ? html`<span>${this.aiKeyMessage}</span>`
-              : html`Paste your provider API
-                key${helpUrl
-                  ? html` (get one from
-                      <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
-                  : ''}.
-                Stored encrypted in this browser only — never synced, and only sent to the selected
-                provider.`}
-          </div>
-        </div>
-
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Default save size (downscale)</span>
-            <select @change=${this.onDefaultSaveSizeChange}>
-              <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
-              <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
-              <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
-              <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
-              <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
-              <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
-            </select>
-          </label>
-          <div class="hint">
-            Downscales the longest edge when saving a generated image into the project (never
-            upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
-            the Asset Generator.
-          </div>
-        </div>
-
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Background removal engine</span>
-            <select @change=${this.onBgEngineChange}>
-              <option value="imgly" ?selected=${this.bgEngine === 'imgly'}>
-                imgly · ISNet (reliable)
-              </option>
-              <option value="birefnet" ?selected=${this.bgEngine === 'birefnet'}>
-                BiRefNet (MIT, heavier)
-              </option>
-            </select>
-          </label>
-          ${this.bgEngine === 'birefnet'
-            ? html`<label class="select-row">
-                <span>BiRefNet quality</span>
-                <select @change=${this.onBgQualityChange}>
-                  <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
-                    Balanced (lite)
-                  </option>
-                  <option value="max" ?selected=${this.bgQuality === 'max'}>
-                    Max (full, large download)
-                  </option>
-                </select>
-              </label>`
+        </span>
+        <div class="key-row">
+          <input
+            type="password"
+            autocomplete="off"
+            placeholder=${this.aiKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+            .value=${this.aiKeyInput}
+            @input=${this.onAiKeyInput}
+          />
+          <button
+            class="btn-key-save"
+            @click=${this.onSaveAiKey}
+            ?disabled=${!this.aiKeyInput.trim() || this.aiKeyBusy}
+          >
+            Save
+          </button>
+          ${this.aiKeyConfigured
+            ? html`<button
+                class="btn-key-clear"
+                @click=${this.onClearAiKey}
+                ?disabled=${this.aiKeyBusy}
+              >
+                Clear
+              </button>`
             : null}
-          <label class="toggle-row">
-            <input
-              type="checkbox"
-              .checked=${this.bgFillHoles}
-              @change=${this.onBgFillHolesChange}
-            />
-            <span>Fill interior holes (solid cutout)</span>
-          </label>
-          <div class="hint">
-            Runs on-device (no API key).
-            ${this.bgEngine === 'imgly'
-              ? 'imgly uses the ISNet model (AGPL-3.0 — commercial use needs an IMG.LY license). Runs on CPU or WebGPU.'
-              : 'BiRefNet is MIT-licensed (commercial-safe) and higher quality, but its model runs at a fixed 1024² and REQUIRES a WebGPU browser (Chrome/Edge). Without WebGPU use imgly.'}
-          </div>
+        </div>
+        <div class="hint">
+          ${this.aiKeyMessage
+            ? html`<span>${this.aiKeyMessage}</span>`
+            : html`Paste your provider API
+              key${helpUrl
+                ? html` (get one from
+                    <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+                : ''}.
+              Stored encrypted in this browser only — never synced, and only sent to the selected
+              provider.`}
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Default save size (downscale)</span>
+          <select @change=${this.onDefaultSaveSizeChange}>
+            <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
+            <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
+            <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
+            <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
+            <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
+            <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
+          </select>
+        </label>
+        <div class="hint">
+          Downscales the longest edge when saving a generated image into the project (never
+          upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
+          the Asset Generator.
+        </div>
+      </div>
+    `;
+  }
+
+  private renderImagesBackgroundTab() {
+    return html`
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Background removal engine</span>
+          <select @change=${this.onBgEngineChange}>
+            <option value="imgly" ?selected=${this.bgEngine === 'imgly'}>
+              imgly · ISNet (reliable)
+            </option>
+            <option value="birefnet" ?selected=${this.bgEngine === 'birefnet'}>
+              BiRefNet (MIT, heavier)
+            </option>
+          </select>
+        </label>
+        ${this.bgEngine === 'birefnet'
+          ? html`<label class="select-row">
+              <span>BiRefNet quality</span>
+              <select @change=${this.onBgQualityChange}>
+                <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
+                  Balanced (lite)
+                </option>
+                <option value="max" ?selected=${this.bgQuality === 'max'}>
+                  Max (full, large download)
+                </option>
+              </select>
+            </label>`
+          : null}
+        <label class="toggle-row">
+          <input type="checkbox" .checked=${this.bgFillHoles} @change=${this.onBgFillHolesChange} />
+          <span>Fill interior holes (solid cutout)</span>
+        </label>
+        <div class="hint">
+          Runs on-device (no API key).
+          ${this.bgEngine === 'imgly'
+            ? 'imgly uses the ISNet model (AGPL-3.0 — commercial use needs an IMG.LY license). Runs on CPU or WebGPU.'
+            : 'BiRefNet is MIT-licensed (commercial-safe) and higher quality, but its model runs at a fixed 1024² and REQUIRES a WebGPU browser (Chrome/Edge). Without WebGPU use imgly.'}
         </div>
       </div>
     `;

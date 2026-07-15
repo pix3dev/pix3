@@ -915,7 +915,7 @@ export class AssetGeneratorPanel extends ComponentBase {
 
   private openFullSettings(): void {
     this.apiKeyPopoverOpen = false;
-    void this.editorSettings.showSettings('ai');
+    void this.editorSettings.showSettings('images');
   }
 
   private onPanelProviderChange(event: Event): void {
@@ -1055,7 +1055,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   }
 
   private openSettings(): void {
-    void this.editorSettings.showSettings('ai');
+    void this.editorSettings.showSettings('images');
   }
 
   // -- references ------------------------------------------------------------

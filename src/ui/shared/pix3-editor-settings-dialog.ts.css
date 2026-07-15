@@ -16,48 +16,140 @@ pix3-editor-settings-dialog {
 }
 
 .dialog-content {
+  display: flex;
+  flex-direction: column;
   background: var(--pix3-bg-secondary, #2a2a2a);
   border: 1px solid var(--pix3-border, #444);
   border-radius: 8px;
   padding: 1.5rem;
-  width: 520px;
-  max-width: 90vw;
+  width: 760px;
+  max-width: 92vw;
+  height: 640px;
   max-height: 85vh;
-  overflow-y: auto;
+  overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 .dialog-title {
-  margin: 0 0 1.5rem 0;
+  margin: 0 0 1.25rem 0;
   font-size: 1.4rem;
   font-weight: 500;
   color: var(--pix3-text-primary, #fff);
 }
 
-.settings-tabs {
+/* Godot-style body: fixed sidebar + scrolling content pane. */
+.settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 1.25rem;
+}
+
+.settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 0 0 172px;
+  padding-right: 1.25rem;
+  border-right: 1px solid var(--pix3-border, #444);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--pix3-text-secondary, #ccc);
+  cursor: pointer;
+  font-size: 0.92rem;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.settings-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.settings-nav-item.is-active {
+  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
+  color: var(--pix3-accent-color, #ffcf33);
+}
+
+.settings-nav-item .nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.settings-nav-item .nav-icon svg {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+}
+
+.settings-nav-item .nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding-right: 0.5rem;
+  overflow-y: auto;
+}
+
+.pane-header {
+  margin-bottom: 1rem;
+}
+
+.pane-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--pix3-text-primary, #fff);
+}
+
+.pane-description {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--pix3-text-muted, #888);
+}
+
+.settings-subtabs {
   display: flex;
   gap: 0.25rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.1rem;
   border-bottom: 1px solid var(--pix3-border, #444);
 }
 
-.settings-tab {
-  padding: 0.5rem 0.9rem;
+.settings-subtab {
+  padding: 0.4rem 0.8rem;
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--pix3-text-secondary, #ccc);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   margin-bottom: -1px;
   transition: all 0.15s;
 }
 
-.settings-tab:hover {
+.settings-subtab:hover {
   color: #fff;
 }
 
-.settings-tab.is-active {
+.settings-subtab.is-active {
   color: var(--pix3-accent-color, #ffcf33);
   border-bottom-color: var(--pix3-accent-color, #ffcf33);
 }
@@ -278,7 +370,9 @@ pix3-editor-settings-dialog {
   display: flex;
   gap: 0.75rem;
   justify-content: flex-end;
-  margin-top: 2rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--pix3-border, #444);
 }
 
 .dialog-actions button {
