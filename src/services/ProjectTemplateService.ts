@@ -101,6 +101,13 @@ export interface ProjectTemplate {
   readonly viewport: { readonly width: number; readonly height: number };
   readonly coverUrl: string | null;
   readonly order: number;
+  /**
+   * Project-relative path (no `res://`) of the scene a build / "Start Game"
+   * boots into — becomes the manifest's `defaultExportScenePath`. Undefined
+   * falls back to `main.pix3scene`. Used by templates whose entry scene (e.g. a
+   * menu) differs from the editor startup scene.
+   */
+  readonly entryScenePath?: string;
   /** Extra empty directories to create (bundles cannot carry empty folders). */
   readonly directories: readonly string[];
   /** Project-relative path → file contents. */
@@ -192,6 +199,10 @@ export class ProjectTemplateService {
       const directories = Array.isArray(meta.directories)
         ? meta.directories.filter((dir): dir is string => typeof dir === 'string' && dir.length > 0)
         : [];
+      const entrySceneRaw = typeof meta.entryScene === 'string' ? meta.entryScene.trim() : '';
+      const entryScenePath = entrySceneRaw
+        ? entrySceneRaw.replace(/^res:\/\//i, '')
+        : undefined;
 
       templates.push({
         id,
@@ -209,6 +220,7 @@ export class ProjectTemplateService {
         },
         coverUrl: coversByTemplate.get(id) ?? null,
         order: asPositiveInt(meta.order, 1000),
+        entryScenePath,
         directories,
         textFiles: textByTemplate.get(id) ?? new Map(),
         binaryFiles: binaryByTemplate.get(id) ?? new Map(),

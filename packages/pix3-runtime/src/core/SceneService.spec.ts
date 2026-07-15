@@ -108,6 +108,7 @@ describe('SceneService viewport API', () => {
       getGameTime: () => new GameTime(),
       raycastViewport: () => null,
       reportFrameProfilerActivities: () => undefined,
+      loadAndStartScene: () => Promise.resolve(),
     });
 
     expect(service.getResourceManager()).toBe(resources);
@@ -141,6 +142,7 @@ describe('SceneService viewport API', () => {
       getGameTime: () => new GameTime(),
       raycastViewport: () => hit as never,
       reportFrameProfilerActivities: () => undefined,
+      loadAndStartScene: () => Promise.resolve(),
     });
 
     expect(service.getECSService()).toBe(ecsService);
@@ -170,10 +172,146 @@ describe('SceneService viewport API', () => {
       getGameTime: () => new GameTime(),
       raycastViewport: () => null,
       reportFrameProfilerActivities,
+      loadAndStartScene: () => Promise.resolve(),
     });
 
     service.reportFrameProfilerActivities(activities);
 
     expect(reportFrameProfilerActivities).toHaveBeenCalledWith(activities);
+  });
+});
+
+describe('SceneService.changeScene', () => {
+  const makeDelegate = (
+    overrides: Partial<Parameters<SceneService['setDelegate']>[0] & object> = {}
+  ): Parameters<SceneService['setDelegate']>[0] => ({
+    getActiveCameraNode: () => null,
+    getActiveCamera2DNode: () => null,
+    getInputService: () => new InputService(),
+    getUICamera: () => null,
+    getLogicalCameraSize: () => ({ width: 0, height: 0 }),
+    setActiveCameraNode: () => undefined,
+    findNodeById: () => null,
+    getRootNodes: () => [],
+    getAudioService: () => new AudioService(),
+    getAssetLoader: () => new AssetLoader(new ResourceManager('/'), new AudioService()),
+    getResourceManager: () => new ResourceManager('/'),
+    getECSService: () => null,
+    getGameTime: () => new GameTime(),
+    raycastViewport: () => null,
+    reportFrameProfilerActivities: () => undefined,
+    loadAndStartScene: () => Promise.resolve(),
+    ...overrides,
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects when no scene is running (no delegate)', async () => {
+    const service = new SceneService();
+    await expect(service.changeScene('res://x.pix3scene')).rejects.toThrow(/no scene is running/);
+  });
+
+  it("transition 'none' swaps via the delegate, fires onLoaded, and never fades", async () => {
+    const service = new SceneService();
+    const loadAndStartScene = vi.fn(async () => undefined);
+    const onLoaded = vi.fn();
+    service.setDelegate(makeDelegate({ loadAndStartScene }));
+    const fadeToBlack = vi.spyOn(service, 'fadeToBlack');
+    const fadeFromBlack = vi.spyOn(service, 'fadeFromBlack');
+
+    await service.changeScene('res://level.pix3scene', { transition: 'none', onLoaded });
+
+    expect(loadAndStartScene).toHaveBeenCalledWith('res://level.pix3scene');
+    expect(onLoaded).toHaveBeenCalledTimes(1);
+    expect(fadeToBlack).not.toHaveBeenCalled();
+    expect(fadeFromBlack).not.toHaveBeenCalled();
+  });
+
+  it('fades out, swaps at black, fires onLoaded, then fades in — in that order', async () => {
+    const service = new SceneService();
+    const order: string[] = [];
+    vi.spyOn(service, 'fadeToBlack').mockImplementation((_d, cb) => {
+      order.push('fadeOut');
+      cb?.();
+    });
+    vi.spyOn(service, 'fadeFromBlack').mockImplementation((_d, cb) => {
+      order.push('fadeIn');
+      cb?.();
+    });
+    const loadAndStartScene = vi.fn(async () => {
+      order.push('load');
+    });
+    service.setDelegate(makeDelegate({ loadAndStartScene }));
+
+    await service.changeScene('res://level.pix3scene', {
+      transition: 'fade',
+      durationSec: 0.1,
+      onLoaded: () => order.push('onLoaded'),
+    });
+
+    expect(order).toEqual(['fadeOut', 'load', 'onLoaded', 'fadeIn']);
+  });
+
+  it('ignores a concurrent call and returns the in-flight transition', async () => {
+    const service = new SceneService();
+    let resolveLoad!: () => void;
+    const pending = new Promise<void>(resolve => {
+      resolveLoad = resolve;
+    });
+    const loadAndStartScene = vi.fn(() => pending);
+    service.setDelegate(makeDelegate({ loadAndStartScene }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const first = service.changeScene('res://a.pix3scene', { transition: 'none' });
+    const second = service.changeScene('res://b.pix3scene', { transition: 'none' });
+
+    // The guard drops the second call: only the first target is ever loaded.
+    expect(loadAndStartScene).toHaveBeenCalledTimes(1);
+    expect(loadAndStartScene).toHaveBeenCalledWith('res://a.pix3scene');
+    expect(warn).toHaveBeenCalled();
+
+    resolveLoad();
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it('fades back in and rejects when the load fails', async () => {
+    const service = new SceneService();
+    const fadeFromBlack = vi.spyOn(service, 'fadeFromBlack').mockImplementation((_d, cb) => cb?.());
+    vi.spyOn(service, 'fadeToBlack').mockImplementation((_d, cb) => cb?.());
+    const onLoaded = vi.fn();
+    service.setDelegate(
+      makeDelegate({ loadAndStartScene: () => Promise.reject(new Error('missing scene')) })
+    );
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(
+      service.changeScene('res://gone.pix3scene', { transition: 'fade', durationSec: 0.1, onLoaded })
+    ).rejects.toThrow(/missing scene/);
+    expect(onLoaded).not.toHaveBeenCalled();
+    // Reveal the still-running old scene rather than stranding a black screen.
+    expect(fadeFromBlack).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not deadlock when a competing fade drops the fade callback', async () => {
+    vi.useFakeTimers();
+    const service = new SceneService();
+    // Simulate cancelFade(): the fade never fires its onComplete.
+    vi.spyOn(service, 'fadeToBlack').mockImplementation(() => undefined);
+    vi.spyOn(service, 'fadeFromBlack').mockImplementation(() => undefined);
+    const loadAndStartScene = vi.fn(async () => undefined);
+    service.setDelegate(makeDelegate({ loadAndStartScene }));
+
+    const promise = service.changeScene('res://level.pix3scene', {
+      transition: 'fade',
+      durationSec: 0.05,
+    });
+    await vi.runAllTimersAsync();
+
+    await expect(promise).resolves.toBeUndefined();
+    expect(loadAndStartScene).toHaveBeenCalledTimes(1);
   });
 });

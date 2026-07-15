@@ -32,6 +32,7 @@ to **reach for them** and wire them correctly, not to reimplement them.
    - Cinematic (letterbox + input-lock + skip) → `scene.cutscene.playCinematic`.
    - Sound, music, mixing → `scene.audio` (buses: master/music/sfx) / `AudioPlayer` / `core:PlaySound`.
    - Store CTA / game end (playables) → `playable.openStore(url)` / `playable.gameEnd()` from `@pix3/runtime`.
+   - Switch scenes (menu → game → results) → `await scene.changeScene('res://src/assets/scenes/main.pix3scene', { transition: 'fade' })`.
    - Cross-node events → `node.connect('signal', target, handler)` / `node.emit('signal')`.
      Buttons emit `pressed` / `released` / `click`.
    - Fixed-step logic (physics/AI/spawning) → an ECS system.
@@ -88,4 +89,8 @@ to **reach for them** and wire them correctly, not to reimplement them.
 - Audio is unlocked by the first user gesture automatically (engine handles it) —
   playables should still show a tap-to-start overlay so music starts after a tap.
 - 2D textures must not use mipmaps — the engine handles this for `res://` loads.
-- Keep `main.pix3scene` as the startup scene; the editor opens it by default.
+- `main.pix3scene` is the editor's startup scene (opened by default; the one to
+  iterate on and play directly). A build boots the project's entry scene
+  (Project Settings → Default Export Scene Path) — which may be a separate menu
+  scene that `scene.changeScene`s into `main`. Iterate in `main`, keep the entry
+  scene wired.

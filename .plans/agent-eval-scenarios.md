@@ -8,7 +8,11 @@ in-editor agent (a cheap model like DeepSeek v4 on Zen).
 ## Setup
 
 1. Dev server running, editor open in the MCP-attachable Chrome, a project loaded from the
-   `minigame-2d` (or similar) template with a GDD + reference image in `design/`.
+   `minigame-2d` (or similar) template with a GDD + reference image in `design/`. Note the
+   template now ships **separate scenes**: `main.pix3scene` is the gameplay scene (the editor's
+   startup scene — what opens first and what `play_start` runs), and `menu.pix3scene` is the
+   build entry (PLAY transitions to the game via `scene.changeScene`). So the agent builds the
+   game in `main` and plays it directly, without a menu in the way.
 2. An image-generation key configured (Asset Generator) and an LLM key for the model under test.
 3. Everything is driven through `window.__PIX3_DEBUG__.agent` (see `debug-bridge.ts`, version ≥ 3)
    via the MCP `evaluate_script` tool.

@@ -10,6 +10,7 @@ import { LayoutManagerService } from '@/core/LayoutManager';
 import { appState } from '@/state';
 import { ref } from 'valtio/vanilla';
 import { ProjectService } from './ProjectService';
+import { ProjectTemplateService } from './ProjectTemplateService';
 import { CloudProjectService } from './CloudProjectService';
 import { BrowserProjectStorageService } from './BrowserProjectStorageService';
 import { FileSystemAPIService } from './FileSystemAPIService';
@@ -45,6 +46,9 @@ export class ProjectAuthRequiredError extends Error {
 export class ProjectLifecycleService {
   @inject(ProjectService)
   private readonly projectService!: ProjectService;
+
+  @inject(ProjectTemplateService)
+  private readonly projectTemplateService!: ProjectTemplateService;
 
   @inject(CloudProjectService)
   private readonly cloudProjectService!: CloudProjectService;
@@ -349,6 +353,13 @@ export class ProjectLifecycleService {
   private createManifest(params: CreateProjectParams): ProjectManifest {
     const manifest = createDefaultProjectManifest();
     const targetPlatform = params.targetPlatform ?? manifest.targetPlatform;
+    // A template whose entry (build/full-run) scene differs from the editor
+    // startup scene (e.g. Minigame 2D boots a separate menu scene) declares it
+    // via `entryScene` in template.yaml; it becomes the manifest default export
+    // scene so builds and "Start Game" boot the whole flow.
+    const entryScenePath = params.templateId
+      ? this.projectTemplateService.getTemplate(params.templateId)?.entryScenePath
+      : undefined;
     return {
       ...manifest,
       viewportBaseSize: {
@@ -358,6 +369,7 @@ export class ProjectLifecycleService {
       projectType: params.projectType ?? manifest.projectType,
       targetPlatform,
       quality: createDefaultQualitySettings(targetPlatform),
+      ...(entryScenePath ? { defaultExportScenePath: entryScenePath } : {}),
       metadata: {
         ...(manifest.metadata ?? {}),
         projectName: params.name,

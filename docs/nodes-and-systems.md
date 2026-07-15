@@ -197,6 +197,16 @@ connections where the script is the target).
 `scene.fadeToBlack(sec)` / `fadeFromBlack(sec)` / `switchCameraWithFade(id, out, in)`
 / `flash(opts)`. Real-time overlays (survive hitstop).
 
+### Scene transitions (change the running scene)
+`await scene.changeScene('res://src/assets/scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
+— Godot's `change_scene_to_file`. Loads the *saved* target file, tears down the
+current scene and starts the new one at full black, then fades in. Works
+identically in play-mode and exports (all scenes ship in the build). The old
+scene keeps running until the new one parses, so a missing/invalid target fades
+back and rejects instead of stranding a black screen; overlapping calls are
+ignored. Use it to wire menu → game → results flows across separate scene files
+(each scene runs standalone in the editor). `transition: 'none'` swaps instantly.
+
 ### Playable SDK (store CTA / game end / viewport)
 `import { playable } from '@pix3/runtime'` — `playable.openStore(url?)` opens the
 app-store page (delivery order: installed adapter → `dapi.openStoreUrl()`

@@ -3,7 +3,11 @@ import { Scene as ThreeScene } from 'three';
 
 import { AudioService } from './AudioService';
 import type { RuntimeRenderer } from './RuntimeRenderer';
-import type { SceneGraph, SceneManager } from './SceneManager';
+import type { SceneGraph } from './SceneManager';
+import { SceneManager } from './SceneManager';
+import { SceneLoader } from './SceneLoader';
+import { SceneSaver } from './SceneSaver';
+import { ScriptRegistry } from './ScriptRegistry';
 import { SceneRunner } from './SceneRunner';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
@@ -527,5 +531,179 @@ describe('SceneRunner camera projection updates', () => {
     expect(script._started).toBe(false);
     expect(vi.mocked(audioService.stopAll)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(audioService.resetBuses)).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets the AO-suppression memo on stop so the next scene re-applies it', () => {
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    (runner as unknown as { lastAOSuppress: boolean | null }).lastAOSuppress = true;
+
+    runner.stop();
+
+    expect((runner as unknown as { lastAOSuppress: boolean | null }).lastAOSuppress).toBeNull();
+  });
+});
+
+const CAMERA_SCENE_YAML = `version: 1.0.0
+root:
+  - id: cam-a
+    type: Camera3D
+    name: Scene A Camera
+`;
+
+const SCENE_B_YAML = `version: 1.0.0
+root:
+  - id: b-root
+    type: Group2D
+    name: SceneB Root
+    properties:
+      width: 100
+      height: 100
+`;
+
+/** ResourceManager that serves scene text from an in-memory map (no network). */
+class InMemoryResourceManager extends ResourceManager {
+  constructor(private readonly files: Record<string, string>) {
+    super('/');
+  }
+
+  override async readText(resource: string): Promise<string> {
+    const key = resource.replace(/^res:\/\//i, '');
+    const text = this.files[key];
+    if (text === undefined) {
+      throw new Error(`InMemoryResourceManager: no file at ${resource}`);
+    }
+    return text;
+  }
+}
+
+function createRealSceneManager(
+  resourceManager: ResourceManager,
+  audioService: AudioService
+): { sceneManager: SceneManager; assetLoader: AssetLoader } {
+  const assetLoader = new AssetLoader(resourceManager, audioService);
+  const sceneLoader = new SceneLoader(assetLoader, new ScriptRegistry(), resourceManager);
+  return { sceneManager: new SceneManager(sceneLoader, new SceneSaver()), assetLoader };
+}
+
+describe('SceneRunner scene transitions (loadAndStartScene)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('runs a scene through the extracted runGraph path via startScene', async () => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1 as unknown as number);
+    const audioService = new AudioService();
+    const resourceManager = new InMemoryResourceManager({});
+    const { sceneManager, assetLoader } = createRealSceneManager(resourceManager, audioService);
+    const runner = new SceneRunner(
+      sceneManager,
+      createRendererStub(320, 160),
+      audioService,
+      assetLoader
+    );
+
+    const graph = await sceneManager.parseScene(CAMERA_SCENE_YAML, { filePath: 'a.pix3scene' });
+    sceneManager.setActiveSceneGraph('a.pix3scene', graph);
+
+    await runner.startScene('a.pix3scene');
+
+    expect(runner.running).toBe(true);
+    expect(runner.getLiveRootNodes()).toHaveLength(1);
+    runner.stop();
+  });
+
+  it('reads + parses the target and hands it to runGraph WITHOUT registering it in the SceneManager', async () => {
+    const audioService = new AudioService();
+    const resourceManager = new InMemoryResourceManager({
+      'scenes/b.pix3scene': SCENE_B_YAML,
+    });
+    const { sceneManager, assetLoader } = createRealSceneManager(resourceManager, audioService);
+    const runner = new SceneRunner(
+      sceneManager,
+      createRendererStub(320, 160),
+      audioService,
+      assetLoader
+    );
+    // Isolate the read/parse contract from the heavy run path.
+    const runGraphSpy = vi
+      .spyOn(runner as unknown as { runGraph: (g: SceneGraph) => void }, 'runGraph')
+      .mockImplementation(() => undefined);
+
+    await runner.loadAndStartScene('res://scenes/b.pix3scene');
+
+    expect(runGraphSpy).toHaveBeenCalledTimes(1);
+    const passedGraph = runGraphSpy.mock.calls[0]?.[0] as SceneGraph;
+    expect(passedGraph.rootNodes[0]?.name).toBe('SceneB Root');
+    // The transient target must never pollute the shared SceneManager.
+    expect(sceneManager.getSceneGraph('scenes/b.pix3scene')).toBeNull();
+    expect(sceneManager.getActiveSceneGraph()).toBeNull();
+  });
+
+  it('accepts the target path with and without the res:// prefix', async () => {
+    const audioService = new AudioService();
+    const resourceManager = new InMemoryResourceManager({
+      'scenes/b.pix3scene': SCENE_B_YAML,
+    });
+    const { sceneManager, assetLoader } = createRealSceneManager(resourceManager, audioService);
+    const runner = new SceneRunner(
+      sceneManager,
+      createRendererStub(320, 160),
+      audioService,
+      assetLoader
+    );
+    vi.spyOn(
+      runner as unknown as { runGraph: (g: SceneGraph) => void },
+      'runGraph'
+    ).mockImplementation(() => undefined);
+    const readText = vi.spyOn(resourceManager, 'readText');
+
+    await runner.loadAndStartScene('scenes/b.pix3scene');
+    await runner.loadAndStartScene('res://scenes/b.pix3scene');
+
+    expect(readText).toHaveBeenNthCalledWith(1, 'res://scenes/b.pix3scene');
+    expect(readText).toHaveBeenNthCalledWith(2, 'res://scenes/b.pix3scene');
+  });
+
+  it('rejects and never touches runGraph when the target file is missing', async () => {
+    const audioService = new AudioService();
+    const resourceManager = new InMemoryResourceManager({});
+    const { sceneManager, assetLoader } = createRealSceneManager(resourceManager, audioService);
+    const runner = new SceneRunner(
+      sceneManager,
+      createRendererStub(320, 160),
+      audioService,
+      assetLoader
+    );
+    const runGraphSpy = vi
+      .spyOn(runner as unknown as { runGraph: (g: SceneGraph) => void }, 'runGraph')
+      .mockImplementation(() => undefined);
+
+    await expect(runner.loadAndStartScene('scenes/missing.pix3scene')).rejects.toThrow();
+    expect(runGraphSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects and never touches runGraph when the target YAML is invalid', async () => {
+    const audioService = new AudioService();
+    const resourceManager = new InMemoryResourceManager({
+      'scenes/bad.pix3scene': 'root:\n  - : : not valid yaml : :\n',
+    });
+    const { sceneManager, assetLoader } = createRealSceneManager(resourceManager, audioService);
+    const runner = new SceneRunner(
+      sceneManager,
+      createRendererStub(320, 160),
+      audioService,
+      assetLoader
+    );
+    const runGraphSpy = vi
+      .spyOn(runner as unknown as { runGraph: (g: SceneGraph) => void }, 'runGraph')
+      .mockImplementation(() => undefined);
+
+    await expect(runner.loadAndStartScene('scenes/bad.pix3scene')).rejects.toThrow();
+    expect(runGraphSpy).not.toHaveBeenCalled();
   });
 });

@@ -60,6 +60,22 @@ export interface SceneServiceDelegate {
   getGameTime(): GameTime;
   raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null;
   reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void;
+  /**
+   * Read a `.pix3scene` by res:// path, parse it, and swap the running scene to
+   * it. Resolves once the new scene's loop is ticking. Must NOT register the
+   * graph in the shared SceneManager — the runner owns it exclusively.
+   */
+  loadAndStartScene(path: string): Promise<void>;
+}
+
+/** Options for {@link SceneService.changeScene}. */
+export interface ChangeSceneOptions {
+  /** Visual transition. Default `'fade'`. */
+  transition?: 'fade' | 'none';
+  /** Fade-out and fade-in duration, EACH, in seconds. Default `0.3`. Ignored for `'none'`. */
+  durationSec?: number;
+  /** Fired at full black, after the new scene's loop has started, before the fade-in. */
+  onLoaded?: () => void;
 }
 
 /**
@@ -84,6 +100,12 @@ export interface SceneServiceDelegate {
  *   // do stuff at black screen
  *   this.scene?.fadeFromBlack(0.5);
  * });
+ *
+ * // Switch to another scene file with a fade transition
+ * await this.scene?.changeScene('res://src/assets/scenes/main.pix3scene', {
+ *   transition: 'fade',
+ *   durationSec: 0.3,
+ * });
  * ```
  */
 export class SceneService {
@@ -95,6 +117,8 @@ export class SceneService {
   private juiceApi: JuiceApi | null = null;
   private audioApi: AudioApi | null = null;
   private cutsceneApi: CutsceneApi | null = null;
+  /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
+  private changeScenePromise: Promise<void> | null = null;
   /** Inert fallback used when no scene is running (editor previews, etc.). */
   private fallbackGameTime: GameTime | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -122,6 +146,7 @@ export class SceneService {
   dispose(): void {
     this.cancelFade();
     this.cancelFlash();
+    this.changeScenePromise = null;
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
     this.fadeOverlay?.remove();
@@ -425,6 +450,91 @@ export class SceneService {
     this.fadeToBlack(fadeOutDuration, () => {
       this.setActiveCamera(nodeId);
       this.fadeFromBlack(fadeInDuration, onComplete);
+    });
+  }
+
+  // ── Scene transitions ─────────────────────────────────────────────────────
+
+  /**
+   * Swap the running scene to a different `.pix3scene` file, with an optional
+   * fade transition. Godot analogue: `get_tree().change_scene_to_file()`.
+   *
+   * The target file is read fresh from disk/bundle, so it works identically in
+   * the editor's play-mode and in exported builds. The old scene keeps running
+   * (under the black overlay) until the new scene parses successfully — a
+   * missing or invalid file fades back in and rejects instead of stranding a
+   * dead black screen. Loading the *saved* file means unsaved edits to the
+   * target scene in an open editor tab won't appear until saved.
+   *
+   * Overlapping calls are ignored (a warning names it) and return the in-flight
+   * transition's promise, so a double-clicked PLAY button is harmless.
+   *
+   * @param path       Target scene path; the `res://` prefix is optional.
+   * @param options    {@link ChangeSceneOptions}.
+   */
+  async changeScene(path: string, options: ChangeSceneOptions = {}): Promise<void> {
+    const delegate = this.delegate;
+    if (!delegate) {
+      throw new Error('[SceneService] changeScene: no scene is running.');
+    }
+    if (this.changeScenePromise) {
+      console.warn('[SceneService] changeScene ignored: a scene change is already in progress.');
+      return this.changeScenePromise;
+    }
+
+    const transition = options.transition ?? 'fade';
+    const durationSec = Math.max(0, options.durationSec ?? 0.3);
+
+    const run = async (): Promise<void> => {
+      if (transition === 'fade') {
+        await this.awaitFade('out', durationSec);
+      }
+      try {
+        // Old scene keeps ticking under the overlay; it stops only once the new
+        // graph has parsed and the runner swaps to it inside loadAndStartScene.
+        await delegate.loadAndStartScene(path);
+      } catch (error) {
+        console.error('[SceneService] changeScene failed:', error);
+        if (transition === 'fade') {
+          // Reveal the still-running old scene rather than leaving a black screen.
+          this.fadeFromBlack(durationSec);
+        }
+        throw error;
+      }
+      options.onLoaded?.();
+      if (transition === 'fade') {
+        await this.awaitFade('in', durationSec);
+      }
+    };
+
+    this.changeScenePromise = run().finally(() => {
+      this.changeScenePromise = null;
+    });
+    return this.changeScenePromise;
+  }
+
+  /**
+   * Await a fade in one direction. `cancelFade()` (fired when a competing fade
+   * starts) drops the pending `onComplete` silently, so a wall-clock fallback
+   * guarantees the returned promise still settles — otherwise the
+   * {@link changeScene} re-entrancy guard could wedge forever.
+   */
+  private awaitFade(direction: 'out' | 'in', durationSec: number): Promise<void> {
+    return new Promise<void>(resolve => {
+      let settled = false;
+      const settleOnce = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve();
+      };
+      if (direction === 'out') {
+        this.fadeToBlack(durationSec, settleOnce);
+      } else {
+        this.fadeFromBlack(durationSec, settleOnce);
+      }
+      setTimeout(settleOnce, durationSec * 1000 + 100);
     });
   }
 

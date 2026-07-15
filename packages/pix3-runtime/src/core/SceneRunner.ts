@@ -71,6 +71,19 @@ export interface SceneRunnerFrameSample {
 
 type SceneRunnerFrameListener = (sample: SceneRunnerFrameSample) => void;
 
+/**
+ * Normalize a scene path to the res://-relative form used as a resource key:
+ * back-slashes → forward, a leading `res://` stripped, leading slashes trimmed.
+ * No extension is appended — callers pass the full `.pix3scene` path.
+ */
+function normalizeScenePath(path: string): string {
+  return path
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^res:\/\//i, '')
+    .replace(/^\/+/, '');
+}
+
 export class SceneRunner {
   private readonly sceneManager: SceneManager;
   private readonly renderer: RuntimeRenderer;
@@ -174,6 +187,46 @@ export class SceneRunner {
       return;
     }
 
+    // CLONE: Serialize and parse to create an isolated runtime graph. Done
+    // BEFORE stopping (runGraph stops) so a clone failure never kills a running
+    // scene — matters for changeScene(), harmless for the initial start.
+    let clone: import('./SceneManager').SceneGraph;
+    try {
+      const serialized = this.sceneManager.serializeScene(sourceGraph);
+      clone = await this.sceneManager.parseScene(serialized);
+    } catch (err) {
+      console.error('[SceneRunner] Failed to clone scene for runtime:', err);
+      // Surface to the caller (the editor's GamePlaySessionService wraps this in
+      // a try/catch that reports the failure); previously this returned silently,
+      // leaving the Game tab stuck on "Preparing runtime preview".
+      throw err;
+    }
+
+    this.runGraph(clone);
+  }
+
+  /**
+   * Read a `.pix3scene` by path (res:// prefix optional), parse it, and swap the
+   * running scene to it. Used by `SceneService.changeScene`. Parsing goes
+   * through `sceneManager.parseScene`, which is a pure passthrough — it does NOT
+   * register the graph in the (editor-shared) SceneManager, so the target lives
+   * only in this runner's `runtimeGraph`. Throws (leaving the old scene running)
+   * if the file is missing or the YAML is invalid.
+   */
+  async loadAndStartScene(path: string): Promise<void> {
+    const filePath = normalizeScenePath(path);
+    const text = await this.resourceManager.readText(`res://${filePath}`);
+    const graph = await this.sceneManager.parseScene(text, { filePath });
+    this.runGraph(graph);
+  }
+
+  /**
+   * Take exclusive ownership of `graph` and run it, stopping whatever ran
+   * before. The graph MUST be runner-private (a fresh clone or a fresh parse) —
+   * it is disposed on the next `stop()`, so never pass a graph still registered
+   * in the SceneManager or referenced by the editor.
+   */
+  private runGraph(graph: import('./SceneManager').SceneGraph): void {
     this.stop();
     this.bindSceneServiceDelegate();
     playable.reset();
@@ -185,18 +238,11 @@ export class SceneRunner {
     this.scene.clear();
     this.activeCamera = null;
     this.activeCamera2D = null;
+    // Fresh error de-dup per scene so an identical message from the previous
+    // scene doesn't suppress the first occurrence here.
+    this.lastTickErrorMessage = null;
 
-    // CLONE: Serialize and parse to create an isolated runtime graph
-    try {
-      const serialized = this.sceneManager.serializeScene(sourceGraph);
-      this.runtimeGraph = await this.sceneManager.parseScene(serialized);
-    } catch (err) {
-      console.error('[SceneRunner] Failed to clone scene for runtime:', err);
-      // Surface to the caller (the editor's GamePlaySessionService wraps this in
-      // a try/catch that reports the failure); previously this returned silently,
-      // leaving the Game tab stuck on "Preparing runtime preview".
-      throw err;
-    }
+    this.runtimeGraph = graph;
 
     // Add root nodes to the THREE.Scene
     for (const node of this.runtimeGraph.rootNodes) {
@@ -290,6 +336,12 @@ export class SceneRunner {
     this.isPaused = false;
     this.gameTime.reset();
     this.currentFrameProfilerActivities = [];
+    // Reset the AO-suppression memo so the NEXT scene always re-applies its
+    // resolved suppression to its GeometryMesh nodes. Without this, a scene that
+    // resolves the same suppress value as the previous one would skip the walk
+    // (applyAOModeSuppression short-circuits on an unchanged value) and its
+    // meshes would never get setAOSuppressed — baked AO + SSAO would stack.
+    this.lastAOSuppress = null;
 
     // Clear the runtime scene to release resources
     if (this.runtimeGraph) {
@@ -1053,6 +1105,9 @@ export class SceneRunner {
       },
       reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void {
         runner.reportFrameProfilerActivities(activities);
+      },
+      loadAndStartScene(path: string): Promise<void> {
+        return runner.loadAndStartScene(path);
       },
     });
   }

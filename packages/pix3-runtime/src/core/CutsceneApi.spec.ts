@@ -96,6 +96,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     getGameTime: () => new GameTime(),
     raycastViewport: () => null,
     reportFrameProfilerActivities: () => undefined,
+    loadAndStartScene: () => Promise.resolve(),
   };
   service.setDelegate(delegate);
 

@@ -21,7 +21,7 @@ as an exported single-file HTML.
 |---|---|
 | `design/` | The game design document and visual references — **read these first** |
 | `pix3project.yaml` | Project manifest (viewport size, platform, quality, autoloads) — don't edit unless asked |
-| `src/assets/scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the startup scene |
+| `src/assets/scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the editor's startup scene (opened first, and what you iterate on). A build boots the **entry scene** = Project Settings → Default Export Scene Path, which may be a separate menu scene |
 | `scripts/*.ts` | Game scripts: `export class X extends Script` → referenced in scenes as `type: user:X` |
 | `src/assets/textures/`, `src/assets/models/` | Art assets, referenced as `res://src/assets/...` |
 | `.claude/skills/` | Your skills: `pix3-game-dev` (engine capabilities, how to write scenes/scripts), `pix3-remote-preview` (running and debugging the game) |
@@ -40,7 +40,9 @@ as an exported single-file HTML.
 3. **Scripts** live in `scripts/`, extend `Script` from `@pix3/runtime`, expose
    config via `static getPropertySchema()`, and reach the engine through
    `this.scene` / `this.input` / `this.node`. Attach them in scene YAML under
-   `components:` as `type: user:<ClassName>`.
+   `components:` as `type: user:<ClassName>`. To move between scenes at runtime
+   (menu → game → results), call
+   `this.scene.changeScene('res://src/assets/scenes/<name>.pix3scene', { transition: 'fade' })`.
 4. **Asset paths** always use the `res://` scheme relative to the project root.
 5. **Missing art?** Use colored primitives (`ColorRect2D`, `GeometryMesh` with a
    material color) or the bundled logo as placeholders the user can swap later;
@@ -53,6 +55,8 @@ as an exported single-file HTML.
 
 1. Read everything in `design/`.
 2. Map GDD features onto engine capabilities via the pix3-game-dev skill references.
-3. Author/extend scenes and scripts; keep `main.pix3scene` as the entry point.
+3. Author/extend scenes and scripts. Iterate in `main.pix3scene` (the scene the
+   editor opens and you can play directly); keep the project's entry scene
+   (Project Settings → Default Export Scene Path) wired into the flow.
 4. Verify (remote preview or ask the user), iterate.
 5. Summarize: what was built, placeholders left, and what to test.

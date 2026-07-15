@@ -38,6 +38,7 @@ function makeHarness(): Harness {
     getGameTime: () => gameTime,
     raycastViewport: () => null,
     reportFrameProfilerActivities: () => undefined,
+    loadAndStartScene: () => Promise.resolve(),
   };
   service.setDelegate(delegate);
 
@@ -116,6 +117,7 @@ describe('JuiceApi / 2D camera shake targets', () => {
       getGameTime: () => gameTime,
       raycastViewport: () => null,
       reportFrameProfilerActivities: () => undefined,
+      loadAndStartScene: () => Promise.resolve(),
     };
     service.setDelegate(delegate);
     return service;

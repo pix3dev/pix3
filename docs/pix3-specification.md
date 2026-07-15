@@ -1,8 +1,8 @@
 # Pix3 — Technical Specification
 
-Version: 1.19
+Version: 1.20
 
-Date: 2026-07-12
+Date: 2026-07-15
 
 ## 1. Introduction
 
@@ -480,6 +480,40 @@ await done; // 'finished' | 'skipped' | 'stopped'
   (cancels rAF, removes bars, detaches listeners, releases the lock) before the
   runtime graph is disposed, so nothing leaks across play/stop. Starting a new
   cutscene while one is active hard-stops the current one first.
+
+### 6.14 Scene transitions (`scene.changeScene`)
+
+A scripts-facing runtime API — `this.scene.changeScene(path, options)` — that swaps
+the running scene to a different `.pix3scene` file, the analogue of Godot's
+`get_tree().change_scene_to_file()`. It lets a project split its flow across
+separate scene files (menu → game → results) instead of toggling everything inside
+one scene, so each scene runs standalone in the editor and the exported build boots
+the entry scene (Project Settings → Default Export Scene Path).
+
+```typescript
+await this.scene.changeScene('res://src/assets/scenes/main.pix3scene', {
+  transition: 'fade',   // 'fade' (default) | 'none'
+  durationSec: 0.3,     // each of fade-out and fade-in
+  onLoaded: () => {},   // fires at full black, after the new scene starts
+});
+```
+
+- **Loading** reads the *saved* file through the runtime `ResourceManager` (project
+  files in the editor, embedded/fetched assets in a build) and parses it with
+  `SceneManager.parseScene` — a pure parse that never registers the graph in the
+  (editor-shared) `SceneManager`, so an in-editor play-mode transition can't corrupt
+  editor tab/scene state. The target lives only in `SceneRunner`'s private runtime
+  graph and is disposed on the next swap or stop.
+- **Timeline:** fade-out → (the old scene keeps ticking under the black overlay) →
+  `SceneRunner` tears down the old scene and starts the new one at full black →
+  `onLoaded` → fade-in. Because the old scene isn't stopped until the new one parses,
+  a missing/invalid target fades back in and the promise rejects instead of stranding
+  a black screen.
+- **Re-entrancy:** an overlapping call is ignored (warns) and returns the in-flight
+  transition, so a double-clicked button is harmless. `transition: 'none'` swaps
+  without touching the fade overlay.
+- Works identically in play-mode and exports; additive to the runtime contract
+  (consumed by DeepCore via yalc).
 
 ## 6.5 Layout2D Node
 

@@ -915,16 +915,20 @@ export class AgentToolRegistry {
    * Scene-dependent tools auto-open the project scene when none is active. The editor can end up
    * scene-less mid-session (e.g. a failed reload of an externally rewritten scene file closes the
    * tab), and the agent has no tool to open scenes — models then flail with fs_write rewrites and
-   * forbidden commands (observed in eval runs). Resolution mirrors StartMainSceneGameCommand:
-   * configured main scene → first known scene descriptor → the template default path.
+   * forbidden commands (observed in eval runs). Prefer the editor startup scene (`main.pix3scene`,
+   * the gameplay scene the agent iterates on) so recovery never lands the agent on a menu/entry
+   * scene; fall back to the configured entry scene, then any known scene.
    */
   private async ensureActiveScene(): Promise<void> {
     if (this.sceneManager.getActiveSceneGraph()) {
       return;
     }
+    const startupPath = 'src/assets/scenes/main.pix3scene';
+    const stripPrefix = (p: string): string => p.replace(/^res:\/\//i, '').replace(/^\/+/, '');
+    const descriptorPaths = Object.values(appState.scenes.descriptors).map(d => d.filePath ?? '');
+    const startupDescriptor = descriptorPaths.find(p => stripPrefix(p) === startupPath);
     const configured = appState.project.manifest?.defaultExportScenePath?.trim() ?? '';
-    const firstDescriptor = Object.values(appState.scenes.descriptors)[0]?.filePath ?? '';
-    const raw = configured || firstDescriptor || 'src/assets/scenes/main.pix3scene';
+    const raw = startupDescriptor || configured || descriptorPaths[0] || startupPath;
     const path = raw.startsWith('res://') ? raw : `res://${raw.replace(/^res:\/\//i, '')}`;
     await this.editorTabs.focusOrOpenScene(path);
     // The scene loads asynchronously behind the tab activation; give it a few seconds.
