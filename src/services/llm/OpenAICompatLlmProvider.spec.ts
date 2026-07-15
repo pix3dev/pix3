@@ -52,6 +52,31 @@ describe('OpenAICompatLlmProvider', () => {
     expect(result.stopReason).toBe('end_turn');
   });
 
+  it('surfaces cached prompt tokens from prompt_tokens_details', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+        usage: {
+          prompt_tokens: 7000,
+          completion_tokens: 12,
+          prompt_tokens_details: { cached_tokens: 6144 },
+        },
+      })
+    );
+
+    const result = await provider.chat(
+      { messages: [{ role: 'user', content: 'x' }] },
+      { apiKey: 'sk', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl }
+    );
+
+    // prompt_tokens is already cache-inclusive here; cached_tokens is the subset served from cache.
+    expect(result.usage).toEqual({
+      inputTokens: 7000,
+      outputTokens: 12,
+      cacheReadTokens: 6144,
+    });
+  });
+
   it('flattens assistant tool_calls and a following tool-result into role:"tool" messages', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({ choices: [{ message: { content: 'done' }, finish_reason: 'stop' }] })

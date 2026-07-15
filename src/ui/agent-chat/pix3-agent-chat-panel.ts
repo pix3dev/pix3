@@ -92,7 +92,44 @@ const formatMetric = (metric: AgentTurnMetric): string => {
   if (metric.inputTokens || metric.outputTokens) {
     parts.push(`${metric.inputTokens ?? 0}↑ ${metric.outputTokens ?? 0}↓`);
   }
+  // A compact "cached" hint on the line itself when the provider served a cache read; full detail
+  // (writes + the local prefix prediction) lives in the tooltip.
+  if (metric.cacheReadTokens) {
+    parts.push(`${formatTokenCount(metric.cacheReadTokens)} cached`);
+  }
   return parts.join(' · ');
+};
+
+/**
+ * Detailed tooltip for the metrics line: both cache readings. "reported" is what the provider
+ * actually cached (read / written); "unchanged prefix" is the local estimate of how much of the
+ * request's leading bytes matched the previous one (the theoretically cacheable span, computed
+ * before sending — present even for providers that report nothing).
+ */
+const formatMetricTooltip = (metric: AgentTurnMetric): string => {
+  const lines = [`Time: ${(metric.elapsedMs / 1000).toFixed(1)} s`];
+  if (metric.inputTokens !== undefined) {
+    lines.push(`Prompt (input): ${metric.inputTokens.toLocaleString()} tok`);
+  }
+  if (metric.outputTokens !== undefined) {
+    lines.push(`Output: ${metric.outputTokens.toLocaleString()} tok`);
+  }
+  if (metric.cacheReadTokens || metric.cacheCreationTokens) {
+    const bits: string[] = [];
+    if (metric.cacheReadTokens) bits.push(`${metric.cacheReadTokens.toLocaleString()} read`);
+    if (metric.cacheCreationTokens) {
+      bits.push(`${metric.cacheCreationTokens.toLocaleString()} written`);
+    }
+    lines.push(`Cache (reported by provider): ${bits.join(', ')}`);
+  } else {
+    lines.push('Cache (reported by provider): none');
+  }
+  if (metric.predictedCacheTokens) {
+    lines.push(
+      `Unchanged prefix vs previous request: ~${metric.predictedCacheTokens.toLocaleString()} tok (cacheable)`
+    );
+  }
+  return lines.join('\n');
 };
 
 /** Compact token count for the context meter: 980, 24K, 1.2M. */
@@ -107,24 +144,24 @@ const formatTokenCount = (tokens: number): string => {
 };
 
 /**
- * Tokens the model received on the most recent turn — i.e. the current context size (system prompt
- * + full history + tool specs). Read from the highest-indexed turn metric that carries an input
- * count; `undefined` until a provider reports usage. This tracks context *fill*, unlike
- * {@link AgentChatState.totalUsage} which sums input across every turn (double-counting history).
+ * The most recent turn metric that carries an input count — i.e. the current context state (system
+ * prompt + full history + tool specs, and how much of it was cached). `undefined` until a provider
+ * reports usage. This tracks context *fill*, unlike {@link AgentChatState.totalUsage} which sums
+ * input across every turn (double-counting history).
  */
-const latestContextTokens = (
+const latestContextMetric = (
   turnMetrics: Readonly<Record<number, AgentTurnMetric>>
-): number | undefined => {
+): AgentTurnMetric | undefined => {
   let bestIndex = -1;
-  let tokens: number | undefined;
+  let best: AgentTurnMetric | undefined;
   for (const [key, metric] of Object.entries(turnMetrics)) {
     const index = Number(key);
     if (index > bestIndex && metric.inputTokens !== undefined) {
       bestIndex = index;
-      tokens = metric.inputTokens;
+      best = metric;
     }
   }
-  return tokens;
+  return best;
 };
 
 /** File extensions treated as attachable text (mirrors the agent's fs_read text set, loosely). */
@@ -684,7 +721,9 @@ export class AgentChatPanel extends ComponentBase {
     }
 
     if (item.kind === 'metrics') {
-      return html`<div class="agent-metrics">${formatMetric(item.metric)}</div>`;
+      return html`<div class="agent-metrics" title=${formatMetricTooltip(item.metric)}>
+        ${formatMetric(item.metric)}
+      </div>`;
     }
 
     const { call, result } = item;
@@ -905,8 +944,10 @@ export class AgentChatPanel extends ComponentBase {
   private renderContextMeter() {
     const chatState = this.chatState;
     if (!chatState) return null;
-    const used = latestContextTokens(chatState.turnMetrics);
-    if (used === undefined) return null;
+    const metric = latestContextMetric(chatState.turnMetrics);
+    if (metric?.inputTokens === undefined) return null;
+    const used = metric.inputTokens;
+    const cached = Math.min(metric.cacheReadTokens ?? 0, used);
 
     const contextWindow = this.modelCatalog.getModel(this.providerId, this.modelId)?.capabilities
       .contextWindow;
@@ -915,11 +956,18 @@ export class AgentChatPanel extends ComponentBase {
       usage.inputTokens || usage.outputTokens
         ? ` · session ${usage.inputTokens ?? 0}↑ ${usage.outputTokens ?? 0}↓`
         : '';
+    // Cache detail folded into the meter tooltip: what the provider served from cache this turn,
+    // plus the local prediction of the unchanged (cacheable) prefix.
+    const cacheTip = cached
+      ? `\n${cached.toLocaleString()} tok served from cache this turn`
+      : metric.predictedCacheTokens
+        ? `\n~${metric.predictedCacheTokens.toLocaleString()} tok of leading prefix unchanged (cacheable)`
+        : '';
 
     if (!contextWindow) {
       return html`<div
         class="agent-context is-unbounded"
-        title="Context used on the last request: ${used.toLocaleString()} tokens${sessionTip}"
+        title="Context used on the last request: ${used.toLocaleString()} tokens${sessionTip}${cacheTip}"
       >
         <span class="agent-context-label">Context</span>
         <span class="agent-context-value">${formatTokenCount(used)} tokens</span>
@@ -928,11 +976,12 @@ export class AgentChatPanel extends ComponentBase {
 
     const ratio = Math.min(1, used / contextWindow);
     const pct = Math.round(ratio * 100);
+    const cachedPct = Math.round(Math.min(1, cached / contextWindow) * 100);
     const level = ratio >= 0.9 ? 'is-high' : ratio >= 0.7 ? 'is-mid' : '';
     return html`
       <div
         class="agent-context ${level}"
-        title="Context: ${used.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)${sessionTip}"
+        title="Context: ${used.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)${sessionTip}${cacheTip}"
       >
         <span class="agent-context-label">Context</span>
         <span
@@ -944,6 +993,9 @@ export class AgentChatPanel extends ComponentBase {
           aria-label="Context window usage"
         >
           <span class="agent-context-fill" style=${`width: ${pct}%`}></span>
+          ${cachedPct > 0
+            ? html`<span class="agent-context-cache" style=${`width: ${cachedPct}%`}></span>`
+            : null}
         </span>
         <span class="agent-context-value"
           >${pct}% · ${formatTokenCount(used)} / ${formatTokenCount(contextWindow)}</span

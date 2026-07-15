@@ -671,7 +671,7 @@ pix3-agent-chat-panel .agent-context {
   font-size: 0.64rem;
   color: rgba(245, 247, 250, 0.55);
   font-variant-numeric: tabular-nums;
-  cursor: default;
+  cursor: help;
 }
 
 pix3-agent-chat-panel .agent-context-label {
@@ -697,6 +697,21 @@ pix3-agent-chat-panel .agent-context-fill {
   min-width: 0.15rem;
   border-radius: inherit;
   background: var(--pix3-accent-color, #ffcf33);
+  transition: width 0.25s ease;
+}
+
+/*
+ * Cached slice of the used context, painted from the same left origin on top of the fill in a cool
+ * "cheap/reused" green so the bar reads [cached][fresh][empty]. Sits above the fill (later in the
+ * DOM) and stays green even when the fill turns amber/red at high fill.
+ */
+pix3-agent-chat-panel .agent-context-cache {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  min-width: 0.15rem;
+  border-radius: inherit;
+  background: #4fb477;
   transition: width 0.25s ease;
 }
 
@@ -781,6 +796,7 @@ pix3-agent-chat-panel .agent-metrics {
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
   color: rgba(245, 247, 250, 0.4);
+  cursor: help;
 }
 
 pix3-agent-chat-panel .agent-debug-drawer {

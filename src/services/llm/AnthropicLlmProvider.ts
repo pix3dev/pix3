@@ -145,24 +145,79 @@ export class AnthropicLlmProvider implements LlmProvider {
   private buildBody(params: ChatParams, modelId: string): Record<string, unknown> {
     const model = this.getModel(modelId);
     const maxTokens = params.maxTokens ?? model?.capabilities.maxOutputTokens ?? DEFAULT_MAX_TOKENS;
+    const cache = params.cache;
     const body: Record<string, unknown> = {
       model: modelId,
       max_tokens: maxTokens,
-      messages: params.messages.map(toAnthropicMessage),
+      messages: toAnthropicMessages(params.messages, cache?.conversation ?? false),
     };
     if (params.system) {
-      body.system = params.system;
+      // Only split/mark the prompt when caching is requested — a one-off call keeps the plain
+      // string (a cache write it never reads back would just cost the 1.25× write premium).
+      body.system = cache
+        ? buildSystemBlocks(params.system, cache.systemStableChars)
+        : params.system;
     }
     if (params.tools && params.tools.length > 0) {
-      body.tools = params.tools.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        input_schema: tool.inputSchema,
-      }));
+      const lastIndex = params.tools.length - 1;
+      body.tools = params.tools.map((tool, index) => {
+        const spec: Record<string, unknown> = {
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.inputSchema,
+        };
+        // A `cache_control` breakpoint on the LAST tool caches the whole (request-stable) tool
+        // list as one prefix — the single biggest static chunk of an agent request.
+        if (cache && index === lastIndex) {
+          spec.cache_control = EPHEMERAL;
+        }
+        return spec;
+      });
     }
     return body;
   }
 }
+
+/** Anthropic's ephemeral (5-minute) cache marker; shared by reference — it is serialized, not mutated. */
+const EPHEMERAL = { type: 'ephemeral' } as const;
+
+const toAnthropicMessages = (
+  messages: readonly LlmMessage[],
+  cacheConversation: boolean
+): Array<Record<string, unknown>> => {
+  const mapped = messages.map(toAnthropicMessage);
+  // Cache the conversation prefix: a breakpoint on the last block of the last message makes
+  // Anthropic serve the longest matching message prefix from cache, so each agentic-loop iteration
+  // re-reads the prior turns cheaply instead of re-billing the whole growing history.
+  if (cacheConversation && mapped.length > 0) {
+    const lastContent = mapped[mapped.length - 1].content;
+    if (Array.isArray(lastContent) && lastContent.length > 0) {
+      (lastContent[lastContent.length - 1] as Record<string, unknown>).cache_control = EPHEMERAL;
+    }
+  }
+  return mapped;
+};
+
+/**
+ * Build the Anthropic `system` field with a cache breakpoint. The prompt is split into a cached head
+ * (the first `stableChars` characters — rules + project instructions, byte-identical across
+ * requests) and an uncached tail (live scene context). A hit requires the head to match exactly.
+ */
+const buildSystemBlocks = (
+  system: string,
+  stableChars: number | undefined
+): Array<Record<string, unknown>> => {
+  if (stableChars === undefined || stableChars >= system.length) {
+    return [{ type: 'text', text: system, cache_control: EPHEMERAL }];
+  }
+  if (stableChars <= 0) {
+    return [{ type: 'text', text: system }];
+  }
+  return [
+    { type: 'text', text: system.slice(0, stableChars), cache_control: EPHEMERAL },
+    { type: 'text', text: system.slice(stableChars) },
+  ];
+};
 
 const toAnthropicMessage = (message: LlmMessage): Record<string, unknown> => ({
   role: message.role,
@@ -259,9 +314,20 @@ const mapStopReason = (stopReason: string): LlmStopReason => {
 const extractUsage = (payload: unknown): LlmUsage | undefined => {
   if (!isRecord(payload) || !isRecord(payload.usage)) return undefined;
   const usage = payload.usage;
+  const num = (value: unknown): number => (typeof value === 'number' ? value : 0);
+  const cacheRead = num(usage.cache_read_input_tokens);
+  const cacheCreation = num(usage.cache_creation_input_tokens);
+  // Anthropic's `input_tokens` counts only the fresh (non-cached) prompt; the cached portions are
+  // reported separately. Sum them so `inputTokens` stays the full, cache-inclusive context size.
   return {
-    inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined,
+    inputTokens:
+      typeof usage.input_tokens === 'number'
+        ? usage.input_tokens + cacheRead + cacheCreation
+        : undefined,
     outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined,
+    cacheReadTokens: typeof usage.cache_read_input_tokens === 'number' ? cacheRead : undefined,
+    cacheCreationTokens:
+      typeof usage.cache_creation_input_tokens === 'number' ? cacheCreation : undefined,
   };
 };
 

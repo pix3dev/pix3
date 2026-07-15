@@ -55,6 +55,91 @@ describe('AnthropicLlmProvider', () => {
     expect(result.stopReason).toBe('end_turn');
   });
 
+  it('places cache_control breakpoints when a cache hint is supplied', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })
+    );
+
+    await provider.chat(
+      {
+        system: 'STABLE-HEAD|volatile-tail',
+        cache: { systemStableChars: 'STABLE-HEAD'.length, conversation: true },
+        messages: [
+          { role: 'user', content: 'a' },
+          { role: 'user', content: [{ type: 'text', text: 'b' }] },
+        ],
+        tools: [
+          { name: 'first', description: 'd1', inputSchema: { type: 'object' } },
+          { name: 'last', description: 'd2', inputSchema: { type: 'object' } },
+        ],
+      },
+      { apiKey: 'sk', modelId: 'claude-opus-4-8', baseUrl: BASE, fetchImpl }
+    );
+
+    const body = bodyOf(fetchImpl);
+    // System split into a cached head + uncached tail; the two concatenate back to the original.
+    const system = body.system as Array<Record<string, unknown>>;
+    expect(system).toEqual([
+      { type: 'text', text: 'STABLE-HEAD', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: '|volatile-tail' },
+    ]);
+    // Only the LAST tool carries the breakpoint (it caches the whole preceding tool list).
+    const tools = body.tools as Array<Record<string, unknown>>;
+    expect(tools[0].cache_control).toBeUndefined();
+    expect(tools[1].cache_control).toEqual({ type: 'ephemeral' });
+    // Conversation caching marks the last block of the last message.
+    const messages = body.messages as Array<{ content: Array<Record<string, unknown>> }>;
+    expect(messages[0].content[0].cache_control).toBeUndefined();
+    expect(messages[1].content[0].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('reports cache read/creation tokens and folds them into the total input count', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        content: [{ type: 'text', text: 'hi' }],
+        stop_reason: 'end_turn',
+        usage: {
+          input_tokens: 120,
+          output_tokens: 14,
+          cache_read_input_tokens: 6000,
+          cache_creation_input_tokens: 400,
+        },
+      })
+    );
+
+    const result = await provider.chat(
+      { messages: [{ role: 'user', content: 'x' }] },
+      { apiKey: 'sk', modelId: 'claude-opus-4-8', baseUrl: BASE, fetchImpl }
+    );
+
+    // inputTokens is cache-inclusive: 120 fresh + 6000 read + 400 written.
+    expect(result.usage).toEqual({
+      inputTokens: 6520,
+      outputTokens: 14,
+      cacheReadTokens: 6000,
+      cacheCreationTokens: 400,
+    });
+  });
+
+  it('sends the plain system string and uncached tools without a cache hint', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })
+    );
+
+    await provider.chat(
+      {
+        system: 'plain',
+        messages: [{ role: 'user', content: 'x' }],
+        tools: [{ name: 't', description: 'd', inputSchema: { type: 'object' } }],
+      },
+      { apiKey: 'sk', modelId: 'claude-opus-4-8', baseUrl: BASE, fetchImpl }
+    );
+
+    const body = bodyOf(fetchImpl);
+    expect(body.system).toBe('plain');
+    expect((body.tools as Array<Record<string, unknown>>)[0].cache_control).toBeUndefined();
+  });
+
   it('round-trips tool_use / tool_result blocks by id', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({

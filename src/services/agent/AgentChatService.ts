@@ -43,8 +43,19 @@ export interface AgentAttachments {
 export interface AgentTurnMetric {
   /** Wall-clock time for the provider request (ms). */
   readonly elapsedMs: number;
+  /** Full (cache-inclusive) prompt size the model read this turn. */
   readonly inputTokens?: number;
   readonly outputTokens?: number;
+  /** Prompt tokens the provider actually served from cache (reported after the fact). */
+  readonly cacheReadTokens?: number;
+  /** Prompt tokens written to cache this turn (Anthropic only). */
+  readonly cacheCreationTokens?: number;
+  /**
+   * Estimated tokens of this request whose leading bytes were unchanged from the previous request —
+   * i.e. the theoretically cacheable prefix, computed locally *before* sending. A prediction, so it
+   * exists even for providers that don't report cache usage; ~chars/4, so approximate.
+   */
+  readonly predictedCacheTokens?: number;
 }
 
 export interface AgentChatState {
@@ -184,6 +195,13 @@ export class AgentChatService {
   private readonly composeListeners = new Set<(text: string) => void>();
   /** Prefill queued before the panel mounted; delivered on the next subscribe. */
   private pendingCompose: string | null = null;
+  /**
+   * Serialized (tools + system + messages) of the last request sent, in wire order — used to
+   * estimate how much of the next request's leading prefix is unchanged (the predicted cacheable
+   * span). Reset whenever the active conversation changes, since a cross-conversation diff is
+   * meaningless.
+   */
+  private previousRequestSignature: string | null = null;
 
   getState(): AgentChatState {
     return this.state;
@@ -210,6 +228,7 @@ export class AgentChatService {
       return;
     }
     this.loadedProjectId = projectId;
+    this.previousRequestSignature = null;
     try {
       const conversations = await this.historyStore.list(projectId);
       if (conversations.length > 0) {
@@ -296,6 +315,7 @@ export class AgentChatService {
       activeConversationId: null,
     });
     this.activeCreatedAt = 0;
+    this.previousRequestSignature = null;
   }
 
   /** Open a stored conversation by id (no-op while a turn is running). */
@@ -304,6 +324,7 @@ export class AgentChatService {
       return;
     }
     await this.ensureLoaded();
+    this.previousRequestSignature = null;
     try {
       const record = await this.historyStore.get(id);
       if (!record) {
@@ -426,11 +447,27 @@ export class AgentChatService {
       const outboundMessages = modelSupportsImages
         ? this.state.messages
         : stripImagesForModel(this.state.messages);
+
+      // Predict the cacheable span: how much of this request's leading bytes are unchanged from the
+      // previous one (tools are always identical, then the stable system head, then any unchanged
+      // history). Provider-agnostic and computed before sending, so it exists even when the provider
+      // reports no cache usage. Wire order (tools → system → messages) mirrors the real prefix.
+      const requestSignature = serializeForCacheDiff(tools, system.text, outboundMessages);
+      const predictedCacheTokens =
+        this.previousRequestSignature !== null
+          ? Math.round(
+              commonPrefixLength(this.previousRequestSignature, requestSignature) / CHARS_PER_TOKEN
+            )
+          : 0;
+      this.previousRequestSignature = requestSignature;
+
       this.debugLog('request', {
         provider: provider.id,
         modelId,
         iteration,
-        system,
+        system: system.text,
+        systemStableChars: system.stableChars,
+        predictedCacheTokens,
         tools: tools?.map(tool => tool.name),
         messages: outboundMessages,
       });
@@ -440,7 +477,8 @@ export class AgentChatService {
         {
           messages: outboundMessages,
           tools,
-          system,
+          system: system.text,
+          cache: { systemStableChars: system.stableChars, conversation: true },
           maxTokens: model?.capabilities.maxOutputTokens,
           signal,
         },
@@ -463,6 +501,9 @@ export class AgentChatService {
         elapsedMs,
         inputTokens: result.usage?.inputTokens,
         outputTokens: result.usage?.outputTokens,
+        cacheReadTokens: result.usage?.cacheReadTokens,
+        cacheCreationTokens: result.usage?.cacheCreationTokens,
+        predictedCacheTokens,
       });
 
       const calls = result.content.filter(
@@ -629,7 +670,7 @@ export class AgentChatService {
       await this.loadAgentsMd(),
       await this.isAdvisorAvailable(),
       await this.loadScriptInventory()
-    );
+    ).text;
   }
 
   /** Whether ask_advisor can actually reach a model (configured + keyed). Never throws. */
@@ -641,12 +682,17 @@ export class AgentChatService {
     }
   }
 
-  /** Rebuilt per request — the scene outline and active scene change as the agent works. */
+  /**
+   * Rebuilt per request. Returns the full prompt plus `stableChars`: the length of the leading,
+   * request-stable slice (rules + skills + AGENTS.md) that is safe to cache. Everything after it —
+   * the "Project context" block: active scene, selection, scene outline — changes as the agent works
+   * and must stay out of the cached prefix, so it is appended last and excluded from `stableChars`.
+   */
   private buildSystemPrompt(
     agentsMd: string | null,
     advisorAvailable = false,
     scripts: readonly ScriptInventoryEntry[] = []
-  ): string {
+  ): { text: string; stableChars: number } {
     const lines: string[] = [
       'You are Pix3 Agent, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).',
       '',
@@ -690,6 +736,11 @@ export class AgentChatService {
         '"""'
       );
     }
+
+    // Everything above is request-stable and forms the cached prefix; everything below is live
+    // scene context that changes turn-to-turn. Record the boundary (the join of the stable lines,
+    // before the '\n' that precedes "Project context:") so the provider can place its breakpoint.
+    const stableChars = lines.join('\n').length;
 
     lines.push('', 'Project context:');
 
@@ -739,7 +790,7 @@ export class AgentChatService {
       lines.push(...outline);
     }
 
-    return lines.join('\n');
+    return { text: lines.join('\n'), stableChars };
   }
 
   private buildSceneOutline(): string[] {
@@ -866,10 +917,13 @@ export class AgentChatService {
       return;
     }
     const total = this.state.totalUsage;
+    const sum = (a: number | undefined, b: number | undefined): number | undefined =>
+      a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
     this.setState({
       totalUsage: {
         inputTokens: (total.inputTokens ?? 0) + (usage.inputTokens ?? 0),
         outputTokens: (total.outputTokens ?? 0) + (usage.outputTokens ?? 0),
+        cacheReadTokens: sum(total.cacheReadTokens, usage.cacheReadTokens),
       },
     });
   }
@@ -916,6 +970,37 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+/** Rough tokens-per-character ratio for estimating the cacheable prefix (English/JSON ≈ 4). */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * Serialize a request's cache-relevant parts in wire order (tools → system → messages) into a
+ * single string, so two consecutive requests can be compared by common leading bytes. Long `data`
+ * fields (image base64) are replaced with a length marker — this agent carries screenshots every
+ * turn, and copying megabytes of base64 into the comparison string each iteration would be wasteful;
+ * a differing image still changes its length, which is enough to break the prefix.
+ */
+const serializeForCacheDiff = (
+  tools: unknown,
+  system: string,
+  messages: readonly LlmMessage[]
+): string =>
+  JSON.stringify([tools ?? null, system, messages], (key, value) =>
+    key === 'data' && typeof value === 'string' && value.length > 64
+      ? `«img:${value.length}»`
+      : value
+  );
+
+/** Length (in chars) of the longest common leading run of two strings. */
+const commonPrefixLength = (a: string, b: string): number => {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) {
+    i += 1;
+  }
+  return i;
+};
 
 const IMAGE_PLACEHOLDER =
   '[image not shown — this model cannot see images; call analyze_image with the image source ' +

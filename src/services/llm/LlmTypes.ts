@@ -76,8 +76,45 @@ export type LlmStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'blocked' |
 
 /** Token accounting, when the provider reports it. */
 export interface LlmUsage {
+  /**
+   * Total prompt tokens for this request, **cache-inclusive** — the full context the model read
+   * (system + tools + history), whether or not parts of it were served from cache. Providers whose
+   * native counter splits cached tokens out (Anthropic) sum them back in so this stays comparable
+   * across providers and matches the pre-caching meaning of "context size".
+   */
   readonly inputTokens?: number;
   readonly outputTokens?: number;
+  /**
+   * Subset of {@link inputTokens} served from cache instead of re-processed (billed cheaply). Maps
+   * to Anthropic `cache_read_input_tokens`, OpenAI `prompt_tokens_details.cached_tokens`, Gemini
+   * `cachedContentTokenCount`. Undefined when the provider doesn't report it.
+   */
+  readonly cacheReadTokens?: number;
+  /**
+   * Prompt tokens written to the cache on this request (billed at a premium; read back cheaply on
+   * later requests within the cache TTL). Anthropic-only (`cache_creation_input_tokens`).
+   */
+  readonly cacheCreationTokens?: number;
+}
+
+/**
+ * Opt-in prompt-caching hint. Providers with server-side automatic caching (OpenAI, Gemini) ignore
+ * it and still report cache reads via {@link LlmUsage}; Anthropic uses it to place `cache_control`
+ * breakpoints so the request-stable prefix is reused from cache across calls.
+ */
+export interface LlmCacheHint {
+  /**
+   * Number of leading characters of {@link ChatParams.system} that are request-stable (rules,
+   * project instructions, tool list) and safe to cache as a prefix. The rest (live scene context)
+   * stays uncached. Omit to cache the whole system prompt. A cache hit requires this head to be
+   * byte-identical between requests, so the caller must keep every volatile line after it.
+   */
+  readonly systemStableChars?: number;
+  /**
+   * Also cache the conversation prefix — a breakpoint on the last message, so a multi-step agentic
+   * loop re-reads its history from cache each iteration instead of re-billing it.
+   */
+  readonly conversation?: boolean;
 }
 
 /**
@@ -95,6 +132,8 @@ export interface ChatParams {
   readonly tools?: readonly LlmToolDefinition[];
   /** System prompt / instructions. */
   readonly system?: string;
+  /** Opt into explicit prompt caching. Ignored by providers without a `cache_control` mechanism. */
+  readonly cache?: LlmCacheHint;
   /** Cap on generated tokens. Providers clamp to their model's ceiling. */
   readonly maxTokens?: number;
   /** Cancellation. Forwarded to `fetch`; an abort surfaces as an `aborted` {@link LlmError}. */

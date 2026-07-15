@@ -323,10 +323,14 @@ const mapStopReason = (finishReason: string, hasToolUse: boolean): LlmStopReason
 const extractUsage = (payload: unknown): LlmUsage | undefined => {
   if (!isRecord(payload) || !isRecord(payload.usageMetadata)) return undefined;
   const meta = payload.usageMetadata;
+  // `promptTokenCount` is cache-inclusive; `cachedContentTokenCount` is the cached subset (implicit
+  // caching is automatic on recent Gemini models — no request-side opt-in).
   return {
     inputTokens: typeof meta.promptTokenCount === 'number' ? meta.promptTokenCount : undefined,
     outputTokens:
       typeof meta.candidatesTokenCount === 'number' ? meta.candidatesTokenCount : undefined,
+    cacheReadTokens:
+      typeof meta.cachedContentTokenCount === 'number' ? meta.cachedContentTokenCount : undefined,
   };
 };
 

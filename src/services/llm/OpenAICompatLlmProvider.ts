@@ -405,9 +405,14 @@ const mapStopReason = (finishReason: string, hasToolUse: boolean): LlmStopReason
 const extractUsage = (payload: unknown): LlmUsage | undefined => {
   if (!isRecord(payload) || !isRecord(payload.usage)) return undefined;
   const usage = payload.usage;
+  // `prompt_tokens` already includes any cached tokens; `prompt_tokens_details.cached_tokens` is the
+  // cached subset (OpenAI caches ≥1024-token prefixes server-side, no request-side opt-in needed).
+  const details = isRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : undefined;
   return {
     inputTokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : undefined,
     outputTokens: typeof usage.completion_tokens === 'number' ? usage.completion_tokens : undefined,
+    cacheReadTokens:
+      details && typeof details.cached_tokens === 'number' ? details.cached_tokens : undefined,
   };
 };
 
