@@ -1876,8 +1876,16 @@ const asString = (value: unknown): string => {
   return value;
 };
 
-const asInt = (value: unknown, fallback: number): number =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+const asInt = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
+  // Gemini returns enum-constrained numeric params as strings (its schema enum is string-only), so
+  // a `rotate: "90"` must still parse back to 90 rather than falling through to the default.
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
 
 /** Parse an agent-supplied 2D position ({x,y} object or [x,y] array) into a Vector2, or undefined. */
 const parseVector2 = (value: unknown): Vector2 | undefined => {
