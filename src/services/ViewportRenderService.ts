@@ -103,6 +103,21 @@ const IDLE_RENDER_INTERVAL_MS = 500;
 // heartbeat gap doesn't fast-forward mixers/particles in one jump.
 const MAX_PREVIEW_DELTA_S = 0.1;
 
+/**
+ * A screen-space anchor for a 2D selection HUD badge: the projected edge
+ * position, the outward/tangent directions used to push the badge clear of the
+ * selection, and the badge's on-screen rotation.
+ */
+interface Selection2DOverlayHudAnchor {
+  x: number;
+  y: number;
+  directionX: number;
+  directionY: number;
+  tangentX: number;
+  tangentY: number;
+  rotationDeg: number;
+}
+
 @injectable()
 export class ViewportRendererService {
   @inject(SceneManager)
@@ -1792,6 +1807,14 @@ export class ViewportRendererService {
     }
 
     this.renderer.autoClear = true;
+
+    // Keep the 2D selection HUD badges glued to the object as the camera moves.
+    // Runs after controls.update() + the render passes so it reads the current
+    // camera. On-demand only: no repaint (idle) means no reposition, and the
+    // guards inside skip it whenever no 2D selection badge is shown.
+    if (appState.ui.navigationMode === '2d' && this.selection2DOverlay) {
+      this.repositionSelection2DOverlayHud();
+    }
   }
 
   private getPreviewInsetAspect(camera: THREE.Camera): number {
@@ -6280,26 +6303,68 @@ export class ViewportRendererService {
       bottomBadgeText.text
     );
 
+    this.applySelection2DOverlayHudBadgePositions(topAnchor, bottomAnchor);
+  }
+
+  /**
+   * Reproject the HUD badge anchors against the current camera and lay the
+   * badges out, without rebuilding their content. Called every painted frame
+   * while a 2D selection is shown so the badges stay glued to the object as the
+   * camera pans/zooms: the WebGL selection frame and transform handles are
+   * world-space meshes that follow the camera on their own, but these DOM badges
+   * are positioned in screen space and would otherwise stay put during a pan.
+   */
+  private repositionSelection2DOverlayHud(): void {
+    const hud = this.selection2DOverlayHud;
+    if (
+      !this.selection2DOverlay ||
+      !hud ||
+      !this.orthographicCamera ||
+      this.viewportSize.width <= 0 ||
+      this.viewportSize.height <= 0
+    ) {
+      return;
+    }
+
+    // Nothing is currently shown (no selection, or hidden mid-move):
+    // updateSelection2DOverlayHud() owns the show/hide decision, so bail here.
+    if (hud.top.style.display === 'none' && hud.bottom.style.display === 'none') {
+      return;
+    }
+
+    const anchors = this.getSelection2DOverlayHudAnchors();
+    if (!anchors) {
+      return;
+    }
+
+    this.applySelection2DOverlayHudBadgePositions(anchors.top, anchors.bottom);
+  }
+
+  private applySelection2DOverlayHudBadgePositions(
+    topAnchor: Selection2DOverlayHudAnchor,
+    bottomAnchor: Selection2DOverlayHudAnchor
+  ): void {
+    const hud = this.selection2DOverlayHud;
+    if (!hud) {
+      return;
+    }
+
     const rotateHandleScreen = this.getSelection2DOverlayRotateHandleScreenPosition();
     const topOffset = this.getSelection2DOverlayHudBadgeOffset(
-      this.selection2DOverlayHud.top,
+      hud.top,
       topAnchor,
       rotateHandleScreen,
       18
     );
     const bottomOffset = this.getSelection2DOverlayHudBadgeOffset(
-      this.selection2DOverlayHud.bottom,
+      hud.bottom,
       bottomAnchor,
       rotateHandleScreen,
       18
     );
 
-    this.positionSelection2DOverlayHudBadge(this.selection2DOverlayHud.top, topAnchor, topOffset);
-    this.positionSelection2DOverlayHudBadge(
-      this.selection2DOverlayHud.bottom,
-      bottomAnchor,
-      bottomOffset
-    );
+    this.positionSelection2DOverlayHudBadge(hud.top, topAnchor, topOffset);
+    this.positionSelection2DOverlayHudBadge(hud.bottom, bottomAnchor, bottomOffset);
   }
 
   private hideSelection2DOverlayHud(): void {

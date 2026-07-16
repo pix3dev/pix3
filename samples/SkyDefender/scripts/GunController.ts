@@ -44,7 +44,7 @@ const WEAPONS: WeaponDef[] = [
   {
     key: 'gun', displayName: 'GUN',
     damage: 50, magSize: 3, reserve: -1, reloadSec: 0.9, cooldownSec: 0.35,
-    auto: false, pellets: 1, spreadDeg: 0,
+    auto: true, pellets: 1, spreadDeg: 0,
     muzzleSpeed: 700, gravity: 640, ballRadius: 6, ballScale: 1, hitscan: false,
     sound: 'res://src/assets/audio/guns/main/main_tg.mp3',
     barrelNode: 'barrel-gun', muzzle: 34,
@@ -390,13 +390,17 @@ export class GunController extends Script {
         // Aim once more so a touch tap (down with no prior move) shoots at the tap point.
         this.aim();
         this.autoHeld = true;
-        this.tryFire();
+        // Semi-auto weapons fire once on pointer-down; auto weapons rely on the
+        // held-repeat block below so they never double-fire on the same frame.
+        if (!this.currentWeapon.auto) {
+          this.tryFire();
+        }
       } else if (event.type === 'up') {
         this.autoHeld = false;
       }
     }
 
-    // Minigun: keep firing while the pointer stays held (mouse button or touch).
+    // Auto-fire: keep firing while the pointer stays held (mouse button or touch).
     if (this.currentWeapon.auto && this.autoHeld && this.input.isPointerDown) {
       this.tryFire();
     }
@@ -465,6 +469,7 @@ export class GunController extends Script {
 
     state.mag -= 1;
     this.cooldownLeft = def.cooldownSec;
+    console.log(`[GunController] FIRED ${def.key} | mag=${state.mag} | cooldown=${this.cooldownLeft.toFixed(3)} | auto=${def.auto}`);
     if (def.key === 'minigun') {
       this.minigunSpin = 0.25;
     }

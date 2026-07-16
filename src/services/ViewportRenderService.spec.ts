@@ -859,6 +859,90 @@ describe('ViewportRendererService', () => {
     expect(hud?.top.textContent).toContain('Player');
   });
 
+  it('repositions the 2D overlay HUD badges when the camera pans (no content rebuild)', () => {
+    const service = new ViewportRendererService();
+    const sprite = new Sprite2D({
+      id: 'sprite-hud-pan',
+      name: 'Player',
+      width: 100,
+      height: 50,
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+
+    Object.defineProperty(service, 'canvasHost', {
+      value: host,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'iconService', {
+      value: { getIconSvg: vi.fn(() => '<svg viewBox="0 0 12 12"></svg>') },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'sceneManager', {
+      value: {
+        getSceneGraph: () => ({
+          nodeMap: new Map([[sprite.nodeId, sprite]]),
+        }),
+      },
+      configurable: true,
+    });
+    const camera = new THREE.OrthographicCamera(-200, 200, 150, -150, 0.1, 1000);
+    Object.defineProperty(service, 'orthographicCamera', { value: camera, configurable: true });
+    Object.defineProperty(service, 'viewportSize', {
+      value: { width: 400, height: 300 },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(service, 'selection2DOverlay', {
+      value: {
+        group: new THREE.Group(),
+        handles: [],
+        frame: new THREE.Group(),
+        nodeIds: [sprite.nodeId],
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        centerWorld: new THREE.Vector3(0, 0, 0),
+        localBounds: new THREE.Box3(new THREE.Vector3(-50, -25, 0), new THREE.Vector3(50, 25, 0)),
+        worldRotationZ: 0,
+      },
+      configurable: true,
+      writable: true,
+    });
+    appState.scenes.activeSceneId = 'scene-1';
+
+    const api = service as unknown as {
+      updateSelection2DOverlayHud: () => void;
+      repositionSelection2DOverlayHud: () => void;
+      selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+    };
+
+    api.updateSelection2DOverlayHud();
+    const hud = api.selection2DOverlayHud;
+    const topLeftBefore = Number.parseFloat(hud?.top.style.left ?? '0');
+    const bottomLeftBefore = Number.parseFloat(hud?.bottom.style.left ?? '0');
+    const labelBefore = hud?.top.textContent;
+
+    // At 1 world unit per screen pixel the object center sits at the screen center.
+    expect(topLeftBefore).toBeCloseTo(200, 0);
+    expect(bottomLeftBefore).toBeCloseTo(200, 0);
+
+    // Pan the camera right by 100 world units: the object shifts 100px left on
+    // screen, and the reposition pass must carry the badges along with it.
+    camera.position.x += 100;
+    camera.updateMatrixWorld(true);
+    api.repositionSelection2DOverlayHud();
+
+    expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(topLeftBefore - 100, 0);
+    expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(bottomLeftBefore - 100, 0);
+    // Repositioning must not rebuild badge content or toggle visibility.
+    expect(hud?.top.textContent).toBe(labelBefore);
+    expect(hud?.top.style.display).toBe('inline-flex');
+    expect(hud?.bottom.style.display).toBe('inline-flex');
+  });
+
   it('refreshes existing node visuals when node data changes', () => {
     const service = new ViewportRendererService();
     const sprite = new Sprite2D({ id: 'sprite-refresh-test', width: 64, height: 64 });
