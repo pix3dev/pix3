@@ -29,7 +29,7 @@ root:
           stopX: 0
           score: 20
           gondolaScore: 8
-          castleDamage: 0.12
+          castleDamage: 90
     children:
       - id: unik-ropes
         type: Sprite2D

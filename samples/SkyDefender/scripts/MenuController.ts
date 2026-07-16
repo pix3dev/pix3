@@ -1,11 +1,10 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
+import { session, type GameMode } from './SdSession';
 
 const CLICK_SOUND = 'res://src/assets/audio/gui/mm/wind_button_press.mp3';
 
-type GameMode = 'campaign' | 'survival';
-
-/** Menu → battle mode hand-off (until the M4 save/session service lands). */
+/** Menu → battle mode hand-off (SdSession owns the run's gold/purchases). */
 declare global {
   // eslint-disable-next-line no-var
   var __SD_MODE: GameMode | undefined;
@@ -61,6 +60,7 @@ export class MenuController extends Script {
   private async enterBattle(mode: GameMode): Promise<void> {
     if (!this.scene) return;
     globalThis.__SD_MODE = mode;
+    session.resetRun(mode); // fresh wallet + starting loadout for the new run
     this.scene.audio.play(CLICK_SOUND, { bus: 'sfx' });
     await this.scene.changeScene(String(this.config.battleScene), { transition: 'fade' });
   }

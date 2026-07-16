@@ -37,6 +37,6 @@ root:
           hp: 100
           speed: 55
           score: 8
-          castleDamage: 0.08
+          castleDamage: 60
           stopX: 0
     children: []

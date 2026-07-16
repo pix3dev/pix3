@@ -88,6 +88,12 @@ export class HudController extends Script {
     if (!gun) return;
     this.buttons.forEach((button, index) => {
       if (!button) return;
+      // Weapons the shop hasn't sold yet sit dark in the wheel (M4).
+      if (!gun.isUnlocked(index)) {
+        button.scale.set(1, 1, 1);
+        (button as NodeBase & { opacity?: number }).opacity = 0.18;
+        return;
+      }
       const ammo = gun.getAmmo(index);
       const empty = ammo.mag <= 0 && ammo.reserve === 0;
       const selected = index === gun.currentIndex;
@@ -122,9 +128,8 @@ export class HudController extends Script {
   private updateHp(): void {
     const flow = this.flow;
     if (!flow) return;
-    const fraction = flow.castleHpFraction;
-    this.hpFill?.setValue(fraction);
-    const text = `${Math.max(0, Math.round(fraction * 250))}/250`;
+    this.hpFill?.setValue(flow.castleHpFraction);
+    const text = `${Math.max(0, Math.round(flow.castleHpValue))}/${Math.round(flow.castleMaxHp)}`;
     if (text !== this.lastHpText && this.hpLabel) {
       this.lastHpText = text;
       this.hpLabel.label = text;

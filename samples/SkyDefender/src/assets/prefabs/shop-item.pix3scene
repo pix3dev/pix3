@@ -1,0 +1,38 @@
+# One shop cell — instantiated 24× by ShopController over the baked
+# shop_bg.png grid. Textures (dark icon / golden _buy icon) are assigned at
+# runtime per item; the noway badge marks a missing prerequisite.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Shop item button (prefab)
+root:
+  - id: shop-item
+    type: Button2D
+    name: Shop Item
+    properties:
+      label: ""
+      width: 85
+      height: 85
+      enabled: false
+      backgroundColor: "#00000000"
+      hoverColor: "#00000000"
+      pressedColor: "#00000000"
+      buttonAction: shop-item
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: noway-mark
+        type: Sprite2D
+        name: No Way
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/gui/shop/noway.png' }
+          width: 34
+          height: 34
+          initiallyVisible: false
+          transform:
+            position: [26, -26]
+            scale: [1, 1]
+            rotation: 0
+        children: []

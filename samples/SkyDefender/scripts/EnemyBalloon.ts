@@ -9,6 +9,11 @@ const HIT_SOUNDS = [
 const DEATH_SOUND = 'res://src/assets/audio/explosions/explosion.mp3';
 const CRASH_SOUND = 'res://src/assets/audio/explosions/medium_explosion.mp3';
 const EXPLOSION_PREFAB = 'res://src/assets/prefabs/explosion.pix3scene';
+const DROP_SOUNDS = [
+  'res://src/assets/audio/guns/enemy/edrop1.mp3',
+  'res://src/assets/audio/guns/enemy/edrop2.mp3',
+  'res://src/assets/audio/guns/enemy/edrop3.mp3',
+];
 
 /**
  * EnemyBalloon — a typical aerostat (GDD "S" class). Flies right→left with a
@@ -25,6 +30,7 @@ export class EnemyBalloon extends Script {
   private baseY: number | null = null;
   private shoveVx = 0;
   private shoveVy = 0;
+  private attackTimer = 0;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -32,10 +38,13 @@ export class EnemyBalloon extends Script {
       hp: 100,
       speed: 55,
       score: 8,
-      // Fraction of the castle HP bar one breakthrough costs (M2 scale: 0..1).
-      castleDamage: 0.08,
+      // Absolute castle HP one breakthrough costs (M4 scale: floors are 700..1600).
+      castleDamage: 60,
       // Stage-local x where this unit stops and holds position (0 = fly to the castle).
       stopX: 0,
+      // Bombers: while holding at stopX, shell the castle every attackPeriod s.
+      attackDamage: 0,
+      attackPeriod: 4,
     };
   }
 
@@ -55,8 +64,10 @@ export class EnemyBalloon extends Script {
         num('hp', 'HP'),
         num('speed', 'Speed (px/s)'),
         num('score', 'Score'),
-        num('castleDamage', 'Castle Damage (0..1)', 0.01),
+        num('castleDamage', 'Castle Damage (HP)'),
         num('stopX', 'Stop X (0 = none)'),
+        num('attackDamage', 'Attack Damage (HP)'),
+        num('attackPeriod', 'Attack Period (s)', 0.1),
       ],
       groups: { Enemy: { label: 'Enemy Balloon', expanded: true } },
     };
@@ -101,6 +112,8 @@ export class EnemyBalloon extends Script {
     const holding = stopX !== 0 && this.node.position.x <= stopX;
     if (!holding) {
       this.node.position.x -= Number(this.config.speed) * dt;
+    } else {
+      this.updateAttack(dt);
     }
     this.node.position.y = this.baseY + Math.sin(this.bobTime * 1.7) * 4;
 
@@ -108,6 +121,20 @@ export class EnemyBalloon extends Script {
     if (this.node.position.x <= -180) {
       this.crashIntoCastle();
     }
+  }
+
+  /** Bombers (original `a` position): shell the castle from their perch. */
+  private updateAttack(dt: number): void {
+    const damage = Number(this.config.attackDamage);
+    if (damage <= 0) return;
+    this.attackTimer += dt;
+    const period = Math.max(0.5, Number(this.config.attackPeriod));
+    if (this.attackTimer < period) return;
+    this.attackTimer = 0;
+    const sound = DROP_SOUNDS[Math.floor(Math.random() * DROP_SOUNDS.length)];
+    this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.1 });
+    this.scene?.juice.shake('camera2d', { amplitude: 4, duration: 0.15 });
+    this.emitToGameRoot('castle-damaged', damage);
   }
 
   private onDamaged(amount: number): void {

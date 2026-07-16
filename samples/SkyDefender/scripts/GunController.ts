@@ -1,6 +1,7 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
 import { Vector3 } from 'three';
+import { session } from './SdSession';
 
 const CANNONBALL_PREFAB = 'res://src/assets/prefabs/cannonball.pix3scene';
 const SFX_SELECT = 'res://src/assets/audio/gui/ingame/ing_select_weapon.mp3';
@@ -196,7 +197,7 @@ export class GunController extends Script {
   }
 
   get reloadProgress(): number {
-    const total = this.currentWeapon.reloadSec;
+    const total = this.effectiveReload(this.currentWeapon);
     return total > 0 ? 1 - this.reloadLeft / total : 1;
   }
 
@@ -204,9 +205,29 @@ export class GunController extends Script {
     return this.ammo[index] ?? { mag: 0, reserve: 0 };
   }
 
+  /** M4 shop: only purchased weapons can be selected (the Gun is free). */
+  isUnlocked(index: number): boolean {
+    const def = WEAPONS[index];
+    return !!def && session.weaponUnlocked(def.key);
+  }
+
+  /** Per-hit damage with the shop's power/special upgrades applied. */
+  private effectiveDamage(def: WeaponDef): number {
+    return session.weaponDamage(def.key) || def.damage;
+  }
+
+  /** Reload time with the shop's Reload Speed upgrades applied. */
+  private effectiveReload(def: WeaponDef): number {
+    return def.reloadSec * session.weaponReloadFactor(def.key);
+  }
+
   selectWeapon(index: number): void {
     const next = Math.min(WEAPONS.length - 1, Math.max(0, Math.floor(index)));
     if (next === this.weaponIndex || this.gameOver) return;
+    if (!this.isUnlocked(next)) {
+      this.scene?.audio.play(SFX_DRY, { bus: 'sfx' });
+      return;
+    }
     this.weaponIndex = next;
     this.reloadLeft = 0;
     this.cooldownLeft = Math.max(this.cooldownLeft, 0.12);
@@ -446,7 +467,7 @@ export class GunController extends Script {
   private maybeAutoReload(): void {
     const state = this.ammo[this.weaponIndex];
     if (state.mag <= 0 && state.reserve !== 0 && this.reloadLeft <= 0) {
-      this.reloadLeft = this.currentWeapon.reloadSec;
+      this.reloadLeft = this.effectiveReload(this.currentWeapon);
     }
   }
 
@@ -459,7 +480,7 @@ export class GunController extends Script {
 
     if (state.mag <= 0) {
       if (state.reserve !== 0) {
-        this.reloadLeft = def.reloadSec;
+        this.reloadLeft = this.effectiveReload(def);
       } else if (this.dryLeft <= 0) {
         this.dryLeft = 0.6;
         this.scene?.audio.play(SFX_DRY, { bus: 'sfx' });
@@ -469,7 +490,6 @@ export class GunController extends Script {
 
     state.mag -= 1;
     this.cooldownLeft = def.cooldownSec;
-    console.log(`[GunController] FIRED ${def.key} | mag=${state.mag} | cooldown=${this.cooldownLeft.toFixed(3)} | auto=${def.auto}`);
     if (def.key === 'minigun') {
       this.minigunSpin = 0.25;
     }
@@ -518,7 +538,7 @@ export class GunController extends Script {
       ball.node.visible = true;
       ball.active = true;
       ball.age = 0;
-      ball.damage = def.damage;
+      ball.damage = this.effectiveDamage(def);
       ball.radius = def.ballRadius;
       ball.vx = cos * def.muzzleSpeed;
       ball.vy = sin * def.muzzleSpeed;
@@ -543,7 +563,7 @@ export class GunController extends Script {
     const hit = this.scene.collision2d.raycast(x1, y1, x2, y2, String(this.config.targetGroup));
     let beamLocalLength = BEAM_RECT_LENGTH;
     if (hit) {
-      hit.node.emit('damaged', def.damage);
+      hit.node.emit('damaged', this.effectiveDamage(def));
       beamLocalLength = (hit.distance ?? rayLength) / worldScale;
     }
 

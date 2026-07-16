@@ -53,7 +53,8 @@ export class CompoundBalloon extends Script {
       stopX: 0,
       score: 20,
       gondolaScore: 8,
-      castleDamage: 0.12,
+      // Absolute castle HP a breakthrough costs (M4 scale: floors are 700..1600).
+      castleDamage: 90,
     };
   }
 
@@ -76,7 +77,7 @@ export class CompoundBalloon extends Script {
         num('speed', 'Speed (px/s)'),
         num('score', 'Score (full kill)'),
         num('gondolaScore', 'Score (gondola only)'),
-        num('castleDamage', 'Castle Damage (0..1)', 0.01),
+        num('castleDamage', 'Castle Damage (HP)'),
       ],
       groups: { Compound: { label: 'Compound Balloon', expanded: true } },
     };
