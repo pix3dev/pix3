@@ -264,7 +264,7 @@ describe('EditorTabComponent', () => {
     expect(params.position?.y).toBeCloseTo(160);
   });
 
-  it('toggles viewport selection on ctrl click', async () => {
+  it('adds to viewport selection on shift click (Figma additive)', async () => {
     appState.tabs.activeTabId = 'tab-1';
 
     const panel = new EditorTabComponent();
@@ -283,10 +283,10 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
 
     panel.dispatchEvent(
-      createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1, ctrlKey: true })
+      createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1, shiftKey: true })
     );
     panel.dispatchEvent(
-      createPointerEvent('pointerup', { clientX: 120, clientY: 90, ctrlKey: true })
+      createPointerEvent('pointerup', { clientX: 120, clientY: 90, shiftKey: true })
     );
 
     expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
@@ -299,7 +299,7 @@ describe('EditorTabComponent', () => {
     expect(command.params).toEqual({ nodeId: 'sprite-toggle', additive: true });
   });
 
-  it('toggles a selected 2d node on ctrl click instead of starting move transform', async () => {
+  it('deep-selects on ctrl click over the selection body without starting a move transform', async () => {
     appState.tabs.activeTabId = 'tab-1';
     appState.ui.navigationMode = '2d';
 
@@ -326,6 +326,8 @@ describe('EditorTabComponent', () => {
       createPointerEvent('pointerup', { clientX: 120, clientY: 90, ctrlKey: true })
     );
 
+    // Ctrl = deep select (Figma). A press on the frame body no longer starts a
+    // move, and Ctrl selects the raw leaf rather than toggling it.
     expect(services.viewportRenderer.start2DTransform).not.toHaveBeenCalled();
     expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
     const command = services.commandDispatcher.execute.mock.calls[0]?.[0] as {
@@ -334,10 +336,10 @@ describe('EditorTabComponent', () => {
         additive?: boolean;
       };
     };
-    expect(command.params).toEqual({ nodeId: 'sprite-selected-toggle', additive: true });
+    expect(command.params).toEqual({ nodeId: 'sprite-selected-toggle' });
   });
 
-  it('keeps selection unchanged on ctrl click in empty viewport space', async () => {
+  it('keeps selection unchanged on shift click in empty viewport space', async () => {
     appState.tabs.activeTabId = 'tab-1';
     appState.selection.nodeIds = ['selected-node'];
     appState.selection.primaryNodeId = 'selected-node';
@@ -349,16 +351,128 @@ describe('EditorTabComponent', () => {
     document.body.appendChild(panel);
     await panel.updateComplete;
 
+    // Shift = additive (Figma): shift-clicking empty space must not clear.
     panel.dispatchEvent(
-      createPointerEvent('pointerdown', { clientX: 80, clientY: 60, buttons: 1, metaKey: true })
+      createPointerEvent('pointerdown', { clientX: 80, clientY: 60, buttons: 1, shiftKey: true })
     );
     panel.dispatchEvent(
-      createPointerEvent('pointerup', { clientX: 80, clientY: 60, metaKey: true })
+      createPointerEvent('pointerup', { clientX: 80, clientY: 60, shiftKey: true })
     );
 
     expect(services.commandDispatcher.execute).not.toHaveBeenCalled();
     expect(appState.selection.nodeIds).toEqual(['selected-node']);
     expect(appState.selection.primaryNodeId).toBe('selected-node');
+  });
+
+  it('defers a body-drag into a move transform from the original down point', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.ui.navigationMode = '2d';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    services.viewportRenderer.get2DHandleAt.mockReturnValue('move');
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    // Press on the frame body: no transform starts yet (deferred).
+    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1 }));
+    expect(services.viewportRenderer.start2DTransform).not.toHaveBeenCalled();
+
+    // Drag past the threshold: the move starts from the ORIGINAL down point so
+    // the delta does not jump.
+    panel.dispatchEvent(createPointerEvent('pointermove', { clientX: 140, clientY: 90, buttons: 1 }));
+    expect(services.viewportRenderer.start2DTransform).toHaveBeenCalledWith(120, 90, 'move');
+  });
+
+  it('single click selects the top-level container in 2d (Figma scope)', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.scenes.activeSceneId = 'scene-1';
+    appState.ui.navigationMode = '2d';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    const container = new Group2D({ id: 'container-node', name: 'Group' });
+    const child = new Sprite2D({
+      id: 'child-node',
+      name: 'Child',
+      texturePath: 'res://assets/child.png',
+      width: 16,
+      height: 16,
+    });
+    container.add(child);
+    services.viewportRenderer.raycastObject.mockReturnValue(child as NodeBase);
+    services.sceneManager.getSceneGraph.mockReturnValue({
+      rootNodes: [container],
+      nodeMap: new Map<string, NodeBase>([
+        [container.nodeId, container],
+        [child.nodeId, child],
+      ]),
+    } as unknown as SceneGraph);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
+
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
+    const command = services.commandDispatcher.execute.mock.calls[0]?.[0] as {
+      params?: { nodeId?: string | null; focusNodeId?: string | null; additive?: boolean };
+    };
+    expect(command.params).toEqual({
+      nodeId: 'container-node',
+      focusNodeId: null,
+      additive: false,
+    });
+  });
+
+  it('double click drills into the container and selects the child (Figma scope)', async () => {
+    appState.tabs.activeTabId = 'tab-1';
+    appState.scenes.activeSceneId = 'scene-1';
+    appState.ui.navigationMode = '2d';
+
+    const panel = new EditorTabComponent();
+    panel.tabId = 'tab-1';
+    const services = stubPanelServices(panel);
+    const container = new Group2D({ id: 'container-node', name: 'Group' });
+    const child = new Sprite2D({
+      id: 'child-node',
+      name: 'Child',
+      texturePath: 'res://assets/child.png',
+      width: 16,
+      height: 16,
+    });
+    container.add(child);
+    services.viewportRenderer.raycastObject.mockReturnValue(child as NodeBase);
+    services.sceneManager.getSceneGraph.mockReturnValue({
+      rootNodes: [container],
+      nodeMap: new Map<string, NodeBase>([
+        [container.nodeId, container],
+        [child.nodeId, child],
+      ]),
+    } as unknown as SceneGraph);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    // First click selects the container; second (double) click drills in.
+    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
+    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
+
+    expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(2);
+    const drill = services.commandDispatcher.execute.mock.calls[1]?.[0] as {
+      params?: { nodeId?: string | null; focusNodeId?: string | null; additive?: boolean };
+    };
+    expect(drill.params).toEqual({
+      nodeId: 'child-node',
+      focusNodeId: 'container-node',
+      additive: false,
+    });
   });
 
   it('selects intersecting 2D nodes with a marquee drag in 2d navigation mode', async () => {
@@ -587,6 +701,7 @@ function createPointerEvent(
     buttons?: number;
     ctrlKey?: boolean;
     metaKey?: boolean;
+    shiftKey?: boolean;
   }
 ): PointerEvent {
   const event = new Event(type, {
@@ -602,6 +717,7 @@ function createPointerEvent(
     buttons: { value: init.buttons ?? 0, configurable: true },
     ctrlKey: { value: init.ctrlKey ?? false, configurable: true },
     metaKey: { value: init.metaKey ?? false, configurable: true },
+    shiftKey: { value: init.shiftKey ?? false, configurable: true },
     pointerType: { value: 'mouse', configurable: true },
     pointerId: { value: 1, configurable: true },
   });

@@ -48,3 +48,16 @@ export const toggleObjectSelection = (nodeId: string) =>
   new SelectObjectCommand({ nodeId, additive: true });
 export const selectObjectRange = (nodeId: string) =>
   new SelectObjectCommand({ nodeId, range: true });
+
+/**
+ * Viewport Figma-style selection: select `nodeId` and set the isolation scope
+ * (`focusNodeId`) in the same undoable step. Pass `nodeId: null` with
+ * `focusNodeId: null` to clear the selection and pop the scope back to the
+ * scene root (e.g. clicking empty canvas). `additive` toggles the node in/out
+ * of the current selection while keeping the scope.
+ */
+export const selectObjectInScope = (
+  nodeId: string | null,
+  focusNodeId: string | null,
+  additive = false
+) => new SelectObjectCommand({ nodeId, focusNodeId, additive });

@@ -53,6 +53,7 @@ import {
   deriveAnimationDocumentId,
   parseAnimationResourceText,
 } from '@/features/scene/animation-asset-utils';
+import { resolveViewportClick } from '@/features/selection/SelectionScopeResolver';
 import {
   TransformCompleteOperation,
   type TransformState,
@@ -2884,37 +2885,6 @@ export class ViewportRendererService {
       return null;
     }
 
-    // In orthographic 2D, all objects share the same Z so raycaster distance is
-    // meaningless for depth ordering. Pick the topmost node by choosing the one
-    // whose visual appears last in the flat candidates list (later = drawn on top).
-    // Build an index map for O(1) order lookup.
-    const orderMap = new Map<string, number>();
-    let order = 0;
-    for (const c of candidates) {
-      const nid = c.userData?.nodeId as string | undefined;
-      if (nid) {
-        orderMap.set(nid, order++);
-      }
-    }
-
-    let bestIntersect = intersects[0];
-    let bestOrder =
-      orderMap.get((bestIntersect.object.userData?.nodeId as string | undefined) ?? '') ?? -1;
-
-    for (let i = 1; i < intersects.length; i++) {
-      const nid = (intersects[i].object.userData?.nodeId as string | undefined) ?? '';
-      const o = orderMap.get(nid) ?? -1;
-      if (o > bestOrder) {
-        bestOrder = o;
-        bestIntersect = intersects[i];
-      }
-    }
-
-    const nodeId = (bestIntersect.object.userData?.nodeId as string | undefined) ?? null;
-    if (!nodeId) {
-      return null;
-    }
-
     const activeSceneId = appState.scenes.activeSceneId;
     if (!activeSceneId) {
       return null;
@@ -2925,17 +2895,56 @@ export class ViewportRendererService {
       return null;
     }
 
-    const node = sceneGraph.nodeMap.get(nodeId);
-    if (node instanceof NodeBase) {
-      const isLocked = Boolean((node as NodeBase).properties.locked);
-      if (isLocked) {
-        console.debug('[ViewportRenderer] 2D hit on locked node', nodeId);
-        return null;
+    // In orthographic 2D all visuals share Z, so raycaster distance cannot order
+    // them. Paint order (hence "closest to the camera") is scene-tree DFS order —
+    // the exact walk `assign2DVisualRenderOrder` uses to rebase renderOrder — so a
+    // node visited later in DFS is drawn on top. Rank each hit by its owning
+    // node's DFS index and return the frontmost selectable one. Locked nodes are
+    // click-through, so we fall past them to the next-frontmost hit.
+    const paintOrder = this.build2DPaintOrderIndex(sceneGraph.rootNodes);
+    const ranked = intersects
+      .map(intersection => {
+        const nid = intersection.object.userData?.nodeId as string | undefined;
+        return nid ? { nodeId: nid, order: paintOrder.get(nid) ?? -1 } : null;
+      })
+      .filter((entry): entry is { nodeId: string; order: number } => entry !== null)
+      .sort((a, b) => b.order - a.order);
+
+    for (const entry of ranked) {
+      const node = sceneGraph.nodeMap.get(entry.nodeId);
+      if (!(node instanceof NodeBase)) {
+        continue;
+      }
+      if (Boolean(node.properties.locked)) {
+        continue;
       }
       return node;
     }
 
     return null;
+  }
+
+  /**
+   * Build a `nodeId → paint-order index` map using the same scene-tree DFS walk
+   * as {@link assign2DVisualRenderOrder}. A higher index means the node is
+   * painted later, i.e. closer to the camera in the 2D overlay — used to resolve
+   * the frontmost node under the pointer during 2D hit-testing.
+   */
+  private build2DPaintOrderIndex(rootNodes: readonly NodeBase[]): Map<string, number> {
+    const index = new Map<string, number>();
+    let next = 0;
+    const visit = (node: NodeBase): void => {
+      index.set(node.nodeId, next++);
+      for (const child of node.children) {
+        if (child instanceof NodeBase) {
+          visit(child);
+        }
+      }
+    };
+    for (const node of rootNodes) {
+      visit(node);
+    }
+    return index;
   }
 
   private normalizeScreenRect(
@@ -6598,27 +6607,66 @@ export class ViewportRendererService {
   }
 
   /**
+   * Resolve the node a click/hover should target from a raw hit leaf, applying
+   * the Figma-style isolation scope (`appState.selection.focusNodeId`). Shared
+   * with the click path (editor-tab) via {@link resolveViewportClick} so hover
+   * highlights exactly what a click would select. Returns `null` if nothing
+   * resolves or the candidate is not a live node.
+   */
+  private resolveScoped2DCandidateNode(leafId: string, deep: boolean): NodeBase | null {
+    const activeSceneId = appState.scenes.activeSceneId;
+    if (!activeSceneId) {
+      return null;
+    }
+    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+    if (!sceneGraph) {
+      return null;
+    }
+    const { candidateId } = resolveViewportClick(
+      id => sceneGraph.nodeMap.get(id) ?? null,
+      appState.selection.focusNodeId,
+      leafId,
+      { deep }
+    );
+    if (!candidateId) {
+      return null;
+    }
+    const node = sceneGraph.nodeMap.get(candidateId);
+    return node instanceof NodeBase ? node : null;
+  }
+
+  /**
    * Update 2D hover preview frame based on pointer position.
    * Shows a preview frame around the 2D node under the cursor.
    * Group2D nodes show in a different color.
    * Returns true if the hover state changed.
    */
-  update2DHoverPreview(screenX: number, screenY: number): boolean {
+  update2DHoverPreview(
+    screenX: number,
+    screenY: number,
+    options: { deep?: boolean } = {}
+  ): boolean {
     // Don't show hover preview during active transform or if selection overlay is being interacted with
     if (this.active2DTransform) {
       return this.clear2DHoverPreview();
     }
 
-    // Don't show preview if pointer is over selection handles
+    // Only real resize/rotate handles suppress hover. The 'move' body zone no
+    // longer does, so nodes painted in front of the current selection stay
+    // hoverable (and clickable) even inside its manipulator frame.
     const handleType = this.get2DHandleAt(screenX, screenY);
-    if (handleType !== 'idle') {
+    if (handleType !== 'idle' && handleType !== 'move') {
       return this.clear2DHoverPreview();
     }
 
-    // Raycast to find 2D node under pointer
-    const hit = this.raycast2D(screenX, screenY);
+    // Raycast to the raw frontmost leaf, then resolve what a click would select
+    // (given the isolation scope + deep modifier) so hover matches the click.
+    const leaf = this.raycast2D(screenX, screenY);
+    if (!leaf) {
+      return this.clear2DHoverPreview();
+    }
 
-    // If no hit or same node, check if we should clear
+    const hit = this.resolveScoped2DCandidateNode(leaf.nodeId, Boolean(options.deep));
     if (!hit) {
       return this.clear2DHoverPreview();
     }

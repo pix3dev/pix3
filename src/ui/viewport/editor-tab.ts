@@ -12,9 +12,16 @@ import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { Vector2, Vector3 } from 'three';
 import {
   selectObject,
+  selectObjectInScope,
   selectObjects,
   toggleObjectSelection,
 } from '@/features/selection/SelectObjectCommand';
+import {
+  resolveViewportClick,
+  resolveViewportDoubleClick,
+  resolveViewportPopOut,
+  type ScopeNodeLookup,
+} from '@/features/selection/SelectionScopeResolver';
 import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
@@ -48,6 +55,9 @@ import {
 } from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
+
+/** Max gap (ms) between two clicks on the same node to count as a double-click. */
+const DOUBLE_CLICK_MS = 300;
 
 @customElement('pix3-editor-tab')
 export class EditorTabComponent extends ComponentBase {
@@ -112,6 +122,22 @@ export class EditorTabComponent extends ComponentBase {
   private singleTouchPanPointerId: number | null = null;
   private readonly dragThreshold = 5;
   private wheelCanvas?: HTMLCanvasElement;
+  /**
+   * Figma-style body-move deferral: a press on the selection frame's body zone
+   * ('move' handle) does NOT immediately start a transform — it is recorded here
+   * so a drag past the threshold moves the selection while a click (no movement)
+   * falls through to pointer-up and re-picks the frontmost node under the
+   * cursor. This is what lets the manipulator frame stop blocking selection of
+   * nodes painted in front of it.
+   */
+  private pendingBodyMove?: { screenX: number; screenY: number };
+  /** Manual double-click tracking (no native `dblclick` — pointer handlers own
+   * click semantics, and the first click of a pair must still select). */
+  private lastClickTime = 0;
+  private lastClickNodeId: string | null = null;
+  /** Last hover position, so a Ctrl/Cmd press can re-run hover in place (flip
+   * the highlight between container and leaf without moving the mouse). */
+  private lastHoverScreen?: { x: number; y: number };
 
   @state()
   private marqueeSelectionRect?: { left: number; top: number; width: number; height: number };
@@ -198,6 +224,8 @@ export class EditorTabComponent extends ComponentBase {
     this.addEventListener('pointermove', this.handleCanvasPointerMove);
     this.addEventListener('pointerup', this.handleCanvasPointerUp);
     this.addEventListener('pointercancel', this.handleCanvasPointerCancel);
+    this.addEventListener('keydown', this.handleCanvasKeyDown);
+    this.addEventListener('keyup', this.handleCanvasKeyUp);
 
     // Re-observe canvas host if it exists (handles reconnection/reparenting by Golden Layout)
     if (this.canvasHost) {
@@ -230,6 +258,8 @@ export class EditorTabComponent extends ComponentBase {
     this.removeEventListener('pointermove', this.handleCanvasPointerMove);
     this.removeEventListener('pointerup', this.handleCanvasPointerUp);
     this.removeEventListener('pointercancel', this.handleCanvasPointerCancel);
+    this.removeEventListener('keydown', this.handleCanvasKeyDown);
+    this.removeEventListener('keyup', this.handleCanvasKeyUp);
     this.navigation2D.clearTouchState();
     this.singleTouchPanPointerId = null;
     super.disconnectedCallback();
@@ -857,13 +887,27 @@ export class EditorTabComponent extends ComponentBase {
       return;
     }
 
-    if (handleType && handleType !== 'idle' && !isSelectionModifier) {
+    // Real resize/rotate handles start a transform immediately. The 'move' body
+    // zone does NOT — it is deferred (see `pendingBodyMove`) so a plain click
+    // over the selection frame can re-pick a node painted in front of it.
+    if (
+      handleType &&
+      handleType !== 'idle' &&
+      handleType !== 'move' &&
+      !isSelectionModifier
+    ) {
       this.viewportRenderer.start2DTransform?.(screenX, screenY, handleType);
       this.pointerDownPos = { x: event.clientX, y: event.clientY };
       this.pointerDownTime = Date.now();
       this.isDragging = true;
       return;
     }
+
+    // Body ('move') press without a selection modifier: defer to pointer-move
+    // (drag => move) / pointer-up (click => re-pick). With Ctrl/Cmd held we skip
+    // deferral so the click resolves as a deep select.
+    this.pendingBodyMove =
+      handleType === 'move' && !isSelectionModifier ? { screenX, screenY } : undefined;
 
     if (shouldStartSingleTouchPan) {
       this.navigation2D.startPan(event.pointerId, screenX, screenY);
@@ -945,9 +989,29 @@ export class EditorTabComponent extends ComponentBase {
     }
 
     if (!this.pointerDownPos || !this.pointerDownTime) {
+      this.lastHoverScreen = { x: screenX, y: screenY };
       this.viewportRenderer.updateHandleHover?.(screenX, screenY);
-      this.viewportRenderer.update2DHoverPreview?.(screenX, screenY);
+      this.viewportRenderer.update2DHoverPreview?.(screenX, screenY, {
+        deep: event.ctrlKey || event.metaKey,
+      });
       return;
+    }
+
+    // Promote a deferred body press into a move once the pointer crosses the
+    // drag threshold. Start the transform from the ORIGINAL down coordinates so
+    // the move delta does not jump when the drag begins.
+    if (this.pendingBodyMove && !this.viewportRenderer.has2DTransform?.()) {
+      const mdx = event.clientX - this.pointerDownPos.x;
+      const mdy = event.clientY - this.pointerDownPos.y;
+      if (Math.sqrt(mdx * mdx + mdy * mdy) > this.dragThreshold) {
+        this.viewportRenderer.start2DTransform?.(
+          this.pendingBodyMove.screenX,
+          this.pendingBodyMove.screenY,
+          'move'
+        );
+        this.pendingBodyMove = undefined;
+        this.isDragging = true;
+      }
     }
 
     const has2DTransform = this.viewportRenderer.has2DTransform?.();
@@ -1068,17 +1132,23 @@ export class EditorTabComponent extends ComponentBase {
       const normalizedX = pointerX / canvasWidth;
       const normalizedY = pointerY / canvasHeight;
 
+      // Raw frontmost leaf under the pointer (paint-order-correct for 2D).
       const hitNode = this.viewportRenderer.raycastObject(normalizedX, normalizedY);
-      if (hitNode) {
-        const command =
-          event.ctrlKey || event.metaKey
-            ? toggleObjectSelection(hitNode.nodeId)
-            : selectObject(hitNode.nodeId);
-        void this.commandDispatcher.execute(command);
-      } else if (!(event.ctrlKey || event.metaKey)) {
-        const command = selectObject(null);
-        void this.commandDispatcher.execute(command);
-      }
+      const deep = event.ctrlKey || event.metaKey;
+      const additive = event.shiftKey;
+
+      const now = Date.now();
+      const isDoubleClick =
+        !deep &&
+        !additive &&
+        hitNode != null &&
+        this.lastClickNodeId === hitNode.nodeId &&
+        now - this.lastClickTime < DOUBLE_CLICK_MS;
+
+      void this.dispatchViewportSelection(hitNode, { deep, additive, doubleClick: isDoubleClick });
+
+      this.lastClickTime = now;
+      this.lastClickNodeId = hitNode?.nodeId ?? null;
     }
 
     this.clearPointerInteraction();
@@ -1107,8 +1177,97 @@ export class EditorTabComponent extends ComponentBase {
   private clearPointerInteraction(): void {
     this.pointerDownPos = undefined;
     this.pointerDownTime = undefined;
+    this.pendingBodyMove = undefined;
     this.isDragging = false;
     this.clearMarqueeSelection();
+  }
+
+  private getActiveSceneGraph() {
+    const activeSceneId = appState.scenes.activeSceneId;
+    return activeSceneId ? (this.sceneManager.getSceneGraph(activeSceneId) ?? null) : null;
+  }
+
+  /**
+   * Resolve and dispatch a viewport selection from a raw hit leaf, applying the
+   * Figma-style isolation-scope model for 2D nodes (single/double click, deep
+   * select, pop-out) and plain leaf selection for 3D / non-scoped hits.
+   */
+  private async dispatchViewportSelection(
+    leaf: NodeBase | null,
+    modifiers: { deep: boolean; additive: boolean; doubleClick: boolean }
+  ): Promise<void> {
+    const sceneGraph = this.getActiveSceneGraph();
+    const use2DScope =
+      appState.ui.navigationMode === '2d' && leaf instanceof Node2D && sceneGraph != null;
+
+    if (use2DScope && sceneGraph && leaf) {
+      const getNode: ScopeNodeLookup = id => sceneGraph.nodeMap.get(id) ?? null;
+      const focusId = appState.selection.focusNodeId;
+      const resolution = modifiers.doubleClick
+        ? resolveViewportDoubleClick(getNode, focusId, leaf.nodeId)
+        : resolveViewportClick(getNode, focusId, leaf.nodeId, { deep: modifiers.deep });
+
+      await this.commandDispatcher.execute(
+        selectObjectInScope(resolution.candidateId, resolution.nextFocusId, modifiers.additive)
+      );
+      return;
+    }
+
+    // 3D / non-scoped: select the raw leaf. Empty click clears and resets scope.
+    if (leaf) {
+      await this.commandDispatcher.execute(
+        modifiers.additive ? toggleObjectSelection(leaf.nodeId) : selectObject(leaf.nodeId)
+      );
+    } else if (!modifiers.additive) {
+      await this.commandDispatcher.execute(selectObjectInScope(null, null));
+    }
+  }
+
+  private handleCanvasKeyDown = (event: KeyboardEvent): void => {
+    if (appState.tabs.activeTabId !== this.tabId) return;
+
+    // Escape pops the isolation scope out one level (Figma), selecting the
+    // former container. Only handled while a scope is active, so global Escape
+    // behaviour is untouched at the scene root.
+    if (event.key === 'Escape' && appState.selection.focusNodeId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const sceneGraph = this.getActiveSceneGraph();
+      if (!sceneGraph) return;
+      const getNode: ScopeNodeLookup = id => sceneGraph.nodeMap.get(id) ?? null;
+      const resolution = resolveViewportPopOut(getNode, appState.selection.focusNodeId);
+      void this.commandDispatcher.execute(
+        selectObjectInScope(resolution.candidateId, resolution.nextFocusId)
+      );
+      return;
+    }
+
+    // Ctrl/Cmd toggles deep-select; re-run hover in place so the highlight flips
+    // between the scoped container and the raw leaf without moving the pointer.
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.rerunHover(true);
+    }
+  };
+
+  private handleCanvasKeyUp = (event: KeyboardEvent): void => {
+    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (event.key === 'Control' || event.key === 'Meta') {
+      this.rerunHover(false);
+    }
+  };
+
+  private rerunHover(deep: boolean): void {
+    if (!this.lastHoverScreen || this.pointerDownPos) return;
+    const changed = this.viewportRenderer.update2DHoverPreview?.(
+      this.lastHoverScreen.x,
+      this.lastHoverScreen.y,
+      { deep }
+    );
+    // Key events aren't a viewport dirty trigger, so repaint explicitly —
+    // otherwise the flipped highlight only appears on the next idle heartbeat.
+    if (changed) {
+      this.viewportRenderer.requestRender();
+    }
   }
 
   private clearMarqueeSelection(): void {

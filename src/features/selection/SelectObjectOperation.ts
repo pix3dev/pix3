@@ -13,6 +13,13 @@ export interface SelectObjectParams {
   additive?: boolean;
   range?: boolean;
   makePrimary?: boolean;
+  /**
+   * Figma-style isolation scope to set alongside the selection. Omit to leave
+   * the current scope unchanged; pass `null` to pop back to the scene root; pass
+   * a container nodeId to drill into it. Folded into the same undoable commit as
+   * the selection so undo/redo restores selection and scope atomically.
+   */
+  focusNodeId?: string | null;
 }
 
 export class SelectObjectOperation implements Operation<OperationInvokeResult> {
@@ -43,6 +50,7 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
 
     const prevNodeIds = [...snapshot.selection.nodeIds];
     const prevPrimaryId = snapshot.selection.primaryNodeId;
+    const prevFocusId = snapshot.selection.focusNodeId;
 
     const { newNodeIds, newPrimaryNodeId } = this.computeSelection(snapshot, {
       nodeId,
@@ -53,16 +61,23 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
       makePrimary,
     });
 
-    if (
+    // `focusNodeId` is optional in params: `undefined` leaves the current scope
+    // untouched, an explicit value (including `null` = scene root) replaces it.
+    const focusProvided = this.params.focusNodeId !== undefined;
+    const newFocusId = focusProvided ? (this.params.focusNodeId ?? null) : prevFocusId;
+
+    const selectionUnchanged =
       prevPrimaryId === newPrimaryNodeId &&
       prevNodeIds.length === newNodeIds.length &&
-      prevNodeIds.every((id, i) => id === newNodeIds[i])
-    ) {
+      prevNodeIds.every((id, i) => id === newNodeIds[i]);
+
+    if (selectionUnchanged && prevFocusId === newFocusId) {
       return { didMutate: false };
     }
 
     state.selection.nodeIds = newNodeIds;
     state.selection.primaryNodeId = newPrimaryNodeId;
+    state.selection.focusNodeId = newFocusId;
 
     return {
       didMutate: true,
@@ -72,10 +87,12 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
         undo: async () => {
           state.selection.nodeIds = [...prevNodeIds];
           state.selection.primaryNodeId = prevPrimaryId;
+          state.selection.focusNodeId = prevFocusId;
         },
         redo: async () => {
           state.selection.nodeIds = [...newNodeIds];
           state.selection.primaryNodeId = newPrimaryNodeId;
+          state.selection.focusNodeId = newFocusId;
         },
       },
     };
@@ -83,7 +100,9 @@ export class SelectObjectOperation implements Operation<OperationInvokeResult> {
 
   private computeSelection(
     snapshot: AppStateSnapshot,
-    opts: Required<Omit<SelectObjectParams, 'nodeId' | 'nodeIds' | 'primaryNodeId'>> & {
+    opts: Required<
+      Omit<SelectObjectParams, 'nodeId' | 'nodeIds' | 'primaryNodeId' | 'focusNodeId'>
+    > & {
       nodeId: string | null;
       nodeIds?: string[];
       primaryNodeId: string | null;

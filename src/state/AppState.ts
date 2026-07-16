@@ -236,6 +236,13 @@ export interface SelectionState {
   primaryNodeId: string | null;
   /** Node hovered by cursor-driven affordances. */
   hoveredNodeId: string | null;
+  /**
+   * Figma-style selection isolation scope: the container node whose direct
+   * children are the click/hover-selectable set in the viewport. `null` means
+   * the scene root (top-level nodes are selectable). Double-click drills in
+   * (sets this to the entered container); Escape / empty click pops out.
+   */
+  focusNodeId: string | null;
 }
 
 export type FocusedArea = 'viewport' | 'scene-tree' | 'inspector' | 'assets' | null;
@@ -532,6 +539,7 @@ export const createInitialAppState = (): AppState => ({
     nodeIds: [],
     primaryNodeId: null,
     hoveredNodeId: null,
+    focusNodeId: null,
   },
   editorContext: {
     focusedArea: null,
