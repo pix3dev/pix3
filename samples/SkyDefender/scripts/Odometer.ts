@@ -1,5 +1,6 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
+import { RepeatWrapping } from 'three';
 import type { Mesh, MeshBasicMaterial, Texture } from 'three';
 
 const DIGIT_COUNT = 10;
@@ -11,11 +12,13 @@ interface DigitSlot {
 
 /**
  * Odometer component — handles a rolling mechanical counter made of digit strips.
- * Rotates each digit's texture UV offsets top-to-bottom (0..9) to simulate a drum roll.
+ * Rotates each digit's texture UV offsets top-to-bottom to simulate a drum roll.
+ * Uses a mapping for the texture ordering: top-to-bottom 0, 9, 8, 7, 6, 5, 4, 3, 2, 1.
+ * It always rolls the shortest circular path (seamless transition at boundaries).
  */
 export class Odometer extends Script {
   private digits: DigitSlot[] = [];
-  private shown: number[] = [];
+  private shown: number[] = []; // Stores the current physical strip positions (0..9)
   private targetValue = 0;
 
   constructor(id: string, type: string) {
@@ -43,6 +46,11 @@ export class Odometer extends Script {
     };
   }
 
+  /** Helper to map a digit (0..9) to its physical row index (0..9) on the strip. */
+  private getStripPosition(digit: number): number {
+    return (10 - digit) % 10;
+  }
+
   onStart(): void {
     // Find all children nodes that represent the digit slots (most significant first).
     this.digits = this.node.children
@@ -57,7 +65,7 @@ export class Odometer extends Script {
       const clamped = Math.max(0, Math.min(Math.pow(10, count) - 1, Math.floor(this.targetValue)));
       for (let i = 0; i < count; i++) {
         const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
-        this.shown[i] = digit;
+        this.shown[i] = this.getStripPosition(digit);
       }
     }
   }
@@ -74,7 +82,8 @@ export class Odometer extends Script {
     if (count > 0) {
       const clamped = Math.max(0, Math.min(Math.pow(10, count) - 1, Math.floor(value)));
       for (let i = 0; i < count; i++) {
-        this.shown[i] = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
+        const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
+        this.shown[i] = this.getStripPosition(digit);
       }
     }
   }
@@ -87,23 +96,33 @@ export class Odometer extends Script {
 
     for (let i = 0; i < count; i++) {
       const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
+      const targetPos = this.getStripPosition(digit); // Target physical row on the strip
+      
       const slot = this.digits[i];
       if (!slot.material) {
         slot.material = this.resolveStripMaterial(slot.node);
         if (!slot.material) continue;
       }
       
-      const target = digit;
-      let shown = this.shown[i];
-      const diff = target - shown;
-      shown = Math.abs(diff) < 0.02 ? target : shown + diff * Math.min(1, dt * 14);
-      this.shown[i] = shown;
+      let shownPos = this.shown[i];
+      
+      // Calculate circular difference in physical strip coordinates (returns value in range [-5, 5))
+      let diff = targetPos - shownPos;
+      diff = ((diff + 5) % 10 + 10) % 10 - 5;
+      
+      if (Math.abs(diff) < 0.02) {
+        shownPos = targetPos;
+      } else {
+        shownPos = (shownPos + diff * Math.min(1, dt * 14)) % 10;
+        if (shownPos < 0) shownPos += 10;
+      }
+      this.shown[i] = shownPos;
       
       // Strip rows are top→bottom 0..9; UV origin is bottom-left.
       const map = slot.material.map;
       if (map) {
         map.repeat.y = 1 / DIGIT_COUNT;
-        map.offset.y = 1 - (shown + 1) / DIGIT_COUNT;
+        map.offset.y = 1 - (shownPos + 1) / DIGIT_COUNT;
       }
     }
   }
@@ -117,6 +136,8 @@ export class Odometer extends Script {
         const mat = mesh.material as MeshBasicMaterial;
         if (mat.map) {
           const clone: Texture = mat.map.clone();
+          clone.wrapS = RepeatWrapping;
+          clone.wrapT = RepeatWrapping;
           clone.needsUpdate = true;
           mat.map = clone;
           material = mat;

@@ -405,6 +405,20 @@ root:
                         scale: [1, 1]
                         rotation: 0
                     children: []
+                  - id: sprite2d-1784217824701-al9nhlu
+                    type: Sprite2D
+                    name: Gun Base
+                    properties:
+                      transform:
+                        position: [0, 20]
+                        scale: [1, 1]
+                        rotation: 0
+                      texture:
+                        type: texture
+                        url: res://src/assets/textures/maingun/gunplace.png
+                      width: 50
+                      height: 41
+                    children: []
           - id: cannonballs
             type: Group2D
             name: Cannonballs

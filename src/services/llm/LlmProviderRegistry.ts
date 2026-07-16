@@ -4,12 +4,14 @@ import { AnthropicLlmProvider } from './AnthropicLlmProvider';
 import { OpenAICompatLlmProvider } from './OpenAICompatLlmProvider';
 import { CerebrasLlmProvider } from './CerebrasLlmProvider';
 import { OpenCodeZenLlmProvider } from './OpenCodeZenLlmProvider';
+import { ClaudeBridgeLlmProvider } from './ClaudeBridgeLlmProvider';
 import type { LlmProvider } from './LlmTypes';
 
 /**
  * Registry of available LLM providers for the in-editor agent. Ships with Gemini, Anthropic, Cerebras,
- * OpenCode Zen, and an OpenAI-compatible provider (covering hosted OpenAI plus local Ollama / LM Studio
- * endpoints). Mirrors `ImageGenProviderRegistry`: the default provider is the first registered one.
+ * OpenCode Zen, an OpenAI-compatible provider (covering hosted OpenAI plus local Ollama / LM Studio
+ * endpoints), and the local Claude Code bridge (personal/dev use — see `tools/claude-bridge`).
+ * Mirrors `ImageGenProviderRegistry`: the default provider is the first registered one.
  */
 @injectable()
 export class LlmProviderRegistry {
@@ -22,6 +24,7 @@ export class LlmProviderRegistry {
     this.register(new CerebrasLlmProvider());
     this.register(new OpenCodeZenLlmProvider());
     this.register(new OpenAICompatLlmProvider());
+    this.register(new ClaudeBridgeLlmProvider());
   }
 
   register(provider: LlmProvider): void {
