@@ -1,7 +1,10 @@
 # Enemy balloon prefab — typical aerostat (GDD "S" class, unit id 33).
 # Spawned at runtime by WaveSpawner via scene.instantiate(); the spawner
-# overrides speed/hp/score per wave entry. Compound (multi-part) units in M3
-# follow this same prefab pattern with extra child parts + hitboxes.
+# overrides speed/hp/score/livery per wave entry. Three-part destruction
+# (original scenario, handled by user:EnemyBalloon):
+# - body hit    → burns and falls as a wreck, the mine detaches in free fall;
+# - link hit    → rig snaps: the bomb drops, the freed balloon escapes upward;
+# - mine hit    → detonates instantly and takes the balloon with it.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
@@ -39,4 +42,58 @@ root:
           score: 8
           castleDamage: 60
           stopX: 0
-    children: []
+          linkHp: 25
+          mineHp: 25
+    children:
+      # Hanging weapon rig — the typical "S" aerostat carries a naval mine.
+      # The mount is the "перемычка" (link) — its own target: shoot it off and
+      # the bomb falls while the balloon flies away. WaveSpawner hides the rig
+      # (and disables both hitboxes) on units that don't carry it.
+      - id: weapon-mount
+        type: Sprite2D
+        name: Weapon Mount
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/typical_weapon_support.png' }
+          width: 20
+          height: 13
+          transform:
+            position: [0, -24]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: mount-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 18
+              height: 12
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: carried-mine
+        type: Sprite2D
+        name: Carried Mine
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/mine.png' }
+          width: 19
+          height: 21
+          transform:
+            position: [0, -40]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: mine-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 18
+              height: 20
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []

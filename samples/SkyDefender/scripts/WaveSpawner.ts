@@ -2,10 +2,12 @@ import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
 import type { Texture } from 'three';
 import { EnemyBalloon } from './EnemyBalloon';
-import { MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBalance';
+import { GroundVehicle } from './GroundVehicle';
+import { BRIDGE, MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBalance';
 
 const BALLOON_PREFAB = 'res://src/assets/prefabs/balloon.pix3scene';
 const UNIK_PREFAB = 'res://src/assets/prefabs/unik.pix3scene';
+const TRUCK_PREFAB = 'res://src/assets/prefabs/ground-truck.pix3scene';
 
 /** Original 640×480 top-left y → stage-local center-origin Y-up. */
 const toStageY = (origY: number): number => 240 - origY;
@@ -36,10 +38,15 @@ export class WaveSpawner extends Script {
   private running = false;
   private aliveCount = 0;
   private missionName = '';
-  /** Per-unit sprite cache, preloaded in onStart to avoid texture pop-in. */
-  private unitTextures = new Map<number, Texture>();
+  /** Sprite cache keyed by texture path, preloaded in onStart to avoid pop-in. */
+  private unitTextures = new Map<string, Texture>();
   /** Survival-only stat overrides for the typical balloon. */
   private survivalStats: { hp: number; speed: number; score: number } | null = null;
+  /** Ground assault: waits for the bridge, then runs its own clock. */
+  private groundEntries: MissionEntry[] = [];
+  private groundFlags: boolean[] = [];
+  private groundElapsed = 0;
+  private bridgeReady = false;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -79,6 +86,9 @@ export class WaveSpawner extends Script {
       alive: this.aliveCount,
       entries: this.entries.length,
       spawned: this.spawnedFlags.filter(Boolean).length,
+      ground: this.groundEntries.length,
+      groundSpawned: this.groundFlags.filter(Boolean).length,
+      bridgeReady: this.bridgeReady,
       survival: this.survivalStats,
     };
   }
@@ -88,15 +98,22 @@ export class WaveSpawner extends Script {
     this.findNode('game-root')?.connect('enemy-gone', this, () => {
       this.aliveCount = Math.max(0, this.aliveCount - 1);
     });
+    // Ground waves hold until the transporters finish the bridge (mission 1);
+    // once built it stays up for the rest of the run.
+    this.findNode('game-root')?.connect('bridge-ready', this, () => {
+      this.bridgeReady = true;
+    });
     // Warm the sprite cache for every unit in the roster.
     const loader = this.scene?.getAssetLoader();
     if (loader) {
       for (const [id, unit] of Object.entries(UNITS)) {
-        if (!unit.sprite) continue;
-        void loader
-          .loadTexture(unit.sprite)
-          .then(tex => this.unitTextures.set(Number(id), tex))
-          .catch(() => console.warn(`[WaveSpawner] missing sprite for unit ${id}`));
+        const paths = [unit.sprite, ...(unit.spriteVariants ?? [])].filter(Boolean);
+        for (const path of paths) {
+          void loader
+            .loadTexture(path)
+            .then(tex => this.unitTextures.set(path, tex))
+            .catch(() => console.warn(`[WaveSpawner] missing sprite ${path} (unit ${id})`));
+        }
       }
     }
   }
@@ -106,6 +123,7 @@ export class WaveSpawner extends Script {
     const index = Math.min(Math.max(1, waveNumber), MISSIONS.length) - 1;
     const mission = MISSIONS[index];
     this.entries = mission.entries;
+    this.groundEntries = mission.ground ?? [];
     this.missionName = mission.name;
     this.survivalStats = null;
     this.beginRun();
@@ -139,13 +157,16 @@ export class WaveSpawner extends Script {
       score: 4 + n,
     };
     this.entries = entries;
+    this.groundEntries = [];
     this.missionName = `Survival ${n}`;
     this.beginRun();
   }
 
   private beginRun(): void {
     this.spawnedFlags = this.entries.map(() => false);
+    this.groundFlags = this.groundEntries.map(() => false);
     this.elapsed = 0;
+    this.groundElapsed = 0;
     this.aliveCount = 0;
     this.running = true;
   }
@@ -157,6 +178,7 @@ export class WaveSpawner extends Script {
   /** Dev-only: mark the current wave finished so GameFlow advances (debug action). */
   forceClear(): void {
     this.spawnedFlags = this.spawnedFlags.map(() => true);
+    this.groundFlags = this.groundFlags.map(() => true);
     // Despawn the survivors too — otherwise they keep flying and shell the
     // castle while the debug-driven shop is open.
     const enemies = this.findNode(String(this.config.enemiesNode));
@@ -170,7 +192,12 @@ export class WaveSpawner extends Script {
 
   /** True when every entry has spawned and every spawned enemy is gone. */
   isWaveClear(): boolean {
-    return this.running && this.spawnedFlags.every(Boolean) && this.aliveCount === 0;
+    return (
+      this.running &&
+      this.spawnedFlags.every(Boolean) &&
+      this.groundFlags.every(Boolean) &&
+      this.aliveCount === 0
+    );
   }
 
   onUpdate(dt: number): void {
@@ -183,6 +210,17 @@ export class WaveSpawner extends Script {
       this.aliveCount += 1;
       this.spawn(this.entries[i]);
     }
+
+    // Ground assault clock only ticks once the bridge is standing.
+    if (this.bridgeReady && this.groundEntries.length > 0) {
+      this.groundElapsed += dt;
+      for (let i = 0; i < this.groundEntries.length; i++) {
+        if (this.groundFlags[i] || this.groundEntries[i].t > this.groundElapsed) continue;
+        this.groundFlags[i] = true;
+        this.aliveCount += 1;
+        this.spawn(this.groundEntries[i]);
+      }
+    }
   }
 
   private spawn(entry: MissionEntry): void {
@@ -193,13 +231,18 @@ export class WaveSpawner extends Script {
       this.aliveCount = Math.max(0, this.aliveCount - 1);
       return;
     }
-    const prefab = unit.compound ? UNIK_PREFAB : BALLOON_PREFAB;
+    const prefab = unit.compound ? UNIK_PREFAB : unit.ground ? TRUCK_PREFAB : BALLOON_PREFAB;
     void scene
       .instantiate(prefab, { parent: String(this.config.enemiesNode) })
       .then(node => {
-        node.position.set(SPAWN_X, toStageY(entry.y), 0);
-        if (!unit.compound) {
-          this.applyUnit(node, entry, unit);
+        if (unit.ground) {
+          node.position.set(SPAWN_X, BRIDGE.truckY, 0);
+          this.applyGroundUnit(node, entry, unit);
+        } else {
+          node.position.set(SPAWN_X, toStageY(entry.y), 0);
+          if (!unit.compound) {
+            this.applyUnit(node, entry, unit);
+          }
         }
       })
       .catch(err => {
@@ -210,9 +253,15 @@ export class WaveSpawner extends Script {
 
   /** Dress a typical-balloon prefab up as the mission's actual unit. */
   private applyUnit(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
-    // Sprite: the prefab root IS the Sprite2D.
+    // Sprite: the prefab root IS the Sprite2D. Typical balloons come in
+    // several liveries (spriteVariants) so a wave doesn't look uniform.
     const sprite = node as SpriteNode;
-    const texture = this.unitTextures.get(entry.id);
+    const variants = unit.spriteVariants;
+    const spritePath =
+      variants && variants.length > 0
+        ? variants[Math.floor(Math.random() * variants.length)]
+        : unit.sprite;
+    const texture = this.unitTextures.get(spritePath);
     if (texture && sprite.setTexture) {
       sprite.setTexture(texture);
       sprite.updateSize?.(unit.width, unit.height);
@@ -227,6 +276,24 @@ export class WaveSpawner extends Script {
       hitbox.config.height = Math.max(8, unit.height - 4);
     }
 
+    // Hanging mine rig: only the typical "S" aerostats fly with one. Units
+    // without the rig also lose its hitboxes (link + mine are targets too).
+    const carries = unit.carriesMine === true;
+    const mount = node.getChildByName('Weapon Mount');
+    const mine = node.getChildByName('Carried Mine');
+    if (mount) mount.visible = carries;
+    if (mine) mine.visible = carries;
+    for (const part of [mount, mine]) {
+      if (!part) continue;
+      for (const comp of part.components) {
+        if ((comp as { type?: string }).type === 'core:Hitbox2D') {
+          (comp as { config: Record<string, unknown> }).config.group = carries
+            ? 'enemy'
+            : 'disabled';
+        }
+      }
+    }
+
     // Behavior stats (survival waves override the typical balloon's numbers).
     const logic = node.components.find((c): c is EnemyBalloon => c instanceof EnemyBalloon);
     if (logic) {
@@ -238,6 +305,36 @@ export class WaveSpawner extends Script {
       logic.config.stopX = toStopX(entry.a);
       logic.config.attackDamage = unit.attackDamage ?? 0;
       logic.config.attackPeriod = unit.attackPeriod ?? 4;
+      // The burning wreck reuses the livery this balloon was dressed with.
+      logic.config.spritePath = spritePath;
+    }
+  }
+
+  /** Dress the truck prefab up as the mission's ground unit. */
+  private applyGroundUnit(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
+    const sprite = node as SpriteNode;
+    const texture = this.unitTextures.get(unit.sprite);
+    if (texture && sprite.setTexture) {
+      sprite.setTexture(texture);
+      sprite.updateSize?.(unit.width, unit.height);
+    }
+
+    const hitbox = node.components.find(
+      c => (c as { type?: string }).type === 'core:Hitbox2D'
+    ) as { config?: Record<string, unknown> } | undefined;
+    if (hitbox?.config) {
+      hitbox.config.width = Math.max(10, unit.width - 6);
+      hitbox.config.height = Math.max(8, unit.height - 4);
+    }
+
+    const logic = node.components.find((c): c is GroundVehicle => c instanceof GroundVehicle);
+    if (logic) {
+      logic.config.hp = unit.hp;
+      logic.config.speed = unit.speed;
+      logic.config.score = unit.score;
+      logic.config.stopX = toStopX(entry.a);
+      logic.config.attackDamage = unit.attackDamage ?? 0;
+      logic.config.attackPeriod = unit.attackPeriod ?? 5;
     }
   }
 }

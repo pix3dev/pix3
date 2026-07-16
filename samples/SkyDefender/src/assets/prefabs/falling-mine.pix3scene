@@ -1,0 +1,27 @@
+# Naval mine prefab — two roles (see FallingMine): free-falling when dropped
+# by a shot-down aerostat, or planted on the bridge deck by the Crazy Mineman.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Falling / planted naval mine (prefab)
+root:
+  - id: falling-mine
+    type: Sprite2D
+    name: Falling Mine
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/mine_free.png' }
+      width: 19
+      height: 18
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: falling-mine-logic
+        type: user:FallingMine
+        enabled: true
+        config:
+          planted: false
+          damage: 60
+          radius: 45
+    children: []

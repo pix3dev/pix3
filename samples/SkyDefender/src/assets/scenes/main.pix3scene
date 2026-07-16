@@ -171,6 +171,27 @@ root:
                     scale: [1, 1]
                     rotation: 0
                 children: []
+          # Enemy bridge: transporter carriers park here at mission start and
+          # hold the truss deck (drawn behind the castle rock; vehicles in the
+          # Enemies group drive over it). BridgeController also runs the Crazy
+          # Mineman deck mine.
+          - id: bridge
+            type: Group2D
+            name: Bridge
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: bridge-controller
+                type: user:BridgeController
+                enabled: true
+                config:
+                  mineX: -20
+            children: []
           - id: castle
             type: Group2D
             name: Castle

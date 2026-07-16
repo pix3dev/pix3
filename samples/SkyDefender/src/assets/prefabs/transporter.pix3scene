@@ -1,0 +1,51 @@
+# Bridge carrier prefab — a transporter aerostat holding a truss segment on
+# its back (decompiled v10.18 class_72). BridgeController spawns four of these
+# at mission start; each parks at its segment slot and stays, forming the
+# bridge. Not a combat unit: no hitbox, can't be shot (original hp 0).
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Bridge transporter + truss segment (prefab)
+root:
+  - id: carrier
+    type: Group2D
+    name: Bridge Carrier
+    properties:
+      width: 151
+      height: 64
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: carrier-logic
+        type: user:BridgeTransporter
+        enabled: true
+        config:
+          targetX: 0
+          speed: 120
+    children:
+      - id: carrier-balloon
+        type: Sprite2D
+        name: Carrier Balloon
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/transporter/00000.png' }
+          width: 55
+          height: 29
+          transform:
+            position: [0, -25]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: carrier-segment
+        type: Sprite2D
+        name: Carrier Segment
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/ground/bridge1/00000.png' }
+          width: 151
+          height: 20
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []

@@ -195,6 +195,28 @@ export const TURRETS: TurretDef[] = [
   { tier: 3, damage: 14, periodSec: 1.4, range: 620, position: [-128, 208] },
 ];
 
+// ── Bridge (decompiled v10.18: 4 transporters per level, x=750→282/427/572/717,
+//    y=412, 4 px/frame @30fps, one spawn every ~50 ticks) ─────────────────────
+
+export const BRIDGE = {
+  /** Segment centers, stage-local (original stop x − 320). */
+  segmentX: [-38, 107, 252, 397],
+  /** Segment center height (original y≈404; transporter hull hangs below). */
+  deckY: -164,
+  /** Deck surface (segment top edge) — trucks and mines sit on this. */
+  deckTopY: -154,
+  /** Ground vehicles ride with their wheels on the deck (half truck height). */
+  truckY: -137,
+  spawnX: 470,
+  /** 4 px/frame at 30 fps. */
+  speed: 120,
+  /** ~50 ticks between transporter launches. */
+  stagger: 1.7,
+};
+
+/** Crazy Mineman (shop): numbers from the original shop text (v10.18). */
+export const DECK_MINE = { damage: 555, respawnSec: 10, radius: 60, x: -20 };
+
 // ── Units (units.txt registry + conf.xml <Mob> stats) ───────────────────────
 
 export interface UnitDef {
@@ -214,9 +236,16 @@ export interface UnitDef {
   /** Bombers: castle damage per attack while holding at their `a` position. */
   attackDamage?: number;
   attackPeriod?: number;
+  /** Typical aerostats carry a naval mine on a rig (dropped when shot down). */
+  carriesMine?: boolean;
+  /** Alternate liveries — the spawner picks one at random per spawn. */
+  spriteVariants?: string[];
+  /** Ground vehicle: drives the bridge deck instead of flying. */
+  ground?: boolean;
 }
 
 const AIR = 'res://src/assets/textures/enemy/air';
+const GROUND = 'res://src/assets/textures/enemy/ground';
 
 /** Only the ids used by the surviving mobs.xml (Lvl 1–3) + survival. */
 export const UNITS: Record<number, UnitDef> = {
@@ -243,19 +272,44 @@ export const UNITS: Record<number, UnitDef> = {
     name: 'Avalon 2-2', sprite: `${AIR}/avalon2/avalon2.png`, width: 167, height: 46,
     hp: 200, speed: 58, score: 30, castleDamage: 100, attackDamage: 8, attackPeriod: 4,
   },
-  // Typical aerostat "S" (the Lvl 1 rank and file).
+  // Typical aerostat "S" (the Lvl 1 rank and file) — carries a hanging naval
+  // mine on its weapon rig (GDD "миноносец"); the mine falls when the balloon
+  // is shot down and detonates if it lands on the bridge.
   33: {
     name: 'S', sprite: `${AIR}/typical_bloon/SU_typical.png`, width: 66, height: 38,
-    hp: 100, speed: 50, score: 8, castleDamage: 60,
+    hp: 100, speed: 50, score: 8, castleDamage: 60, carriesMine: true,
+    spriteVariants: [
+      `${AIR}/typical_bloon/SU_typical.png`,
+      `${AIR}/typical_bloon/Nazi_typical.png`,
+      `${AIR}/typical_bloon/Nevada_typical.png`,
+    ],
   },
   34: {
     name: 'S Nut', sprite: `${AIR}/typical_bloon/Nazi_typical.png`, width: 66, height: 38,
-    hp: 100, speed: 50, score: 8, castleDamage: 60,
+    hp: 100, speed: 50, score: 8, castleDamage: 60, carriesMine: true,
   },
   // Unik — compound aerostat (body/ropes/gondola prefab).
   39: {
     name: 'Unik 2-1', sprite: '', width: 0, height: 0,
     hp: 0, speed: 0, score: 0, castleDamage: 0, compound: true,
+  },
+  // Ground vehicles (drive the assembled bridge; ram the gate until killed).
+  // Stats are remaster v1 tuning — the surviving dev mobs.xml has no ground
+  // waves, but the original demo opens mission 1 with a truck on the bridge.
+  50: {
+    name: 'Attaban', sprite: `${GROUND}/attaban/attaban.png`, width: 75, height: 33,
+    hp: 300, speed: 35, score: 25, castleDamage: 0, ground: true,
+    attackDamage: 25, attackPeriod: 5,
+  },
+  51: {
+    name: 'Garbag', sprite: `${GROUND}/garbag/garbag.png`, width: 80, height: 38,
+    hp: 340, speed: 32, score: 30, castleDamage: 0, ground: true,
+    attackDamage: 30, attackPeriod: 6,
+  },
+  52: {
+    name: 'Baka', sprite: `${GROUND}/baka/baka.png`, width: 83, height: 33,
+    hp: 380, speed: 30, score: 30, castleDamage: 0, ground: true,
+    attackDamage: 30, attackPeriod: 5,
   },
 };
 
@@ -272,6 +326,11 @@ export interface MissionEntry {
 export interface MissionDef {
   name: string;
   entries: MissionEntry[];
+  /**
+   * Ground assault (drives the bridge deck): `t` counts from the moment the
+   * bridge finishes assembling, `a` is the original hold x (→ stop position).
+   */
+  ground?: MissionEntry[];
 }
 
 /** mobs.xml `<Lvl n="1">` — 27 typical "S" balloons, exact times and heights. */
@@ -302,7 +361,16 @@ const MISSION_2: MissionEntry[] = [
 const MISSION_3: MissionEntry[] = [{ t: 5, id: 39, y: 240, a: 320 }];
 
 export const MISSIONS: MissionDef[] = [
-  { name: 'First Blood', entries: MISSION_1 },
-  { name: 'Heavy Weather', entries: MISSION_2 },
-  { name: 'The Uninvited', entries: MISSION_3 },
+  // The original demo opens with the bridge assembling and a lone truck
+  // driving up while the S wave flies in.
+  { name: 'First Blood', entries: MISSION_1, ground: [{ t: 2, id: 50, y: 0, a: 250 }] },
+  {
+    name: 'Heavy Weather',
+    entries: MISSION_2,
+    ground: [
+      { t: 2, id: 50, y: 0, a: 250 },
+      { t: 14, id: 51, y: 0, a: 330 },
+    ],
+  },
+  { name: 'The Uninvited', entries: MISSION_3, ground: [{ t: 3, id: 52, y: 0, a: 250 }] },
 ];
