@@ -405,6 +405,20 @@ root:
                         scale: [1, 1]
                         rotation: 0
                     children: []
+                  - id: sprite2d-1784217824701-al9nhlu
+                    type: Sprite2D
+                    name: Gun Base
+                    properties:
+                      transform:
+                        position: [0, 20]
+                        scale: [1, 1]
+                        rotation: 0
+                      texture:
+                        type: texture
+                        url: res://src/assets/textures/maingun/gunplace.png
+                      width: 50
+                      height: 41
+                    children: []
           - id: cannonballs
             type: Group2D
             name: Cannonballs
@@ -640,12 +654,12 @@ root:
                   backBackgroundColor: "#2a1414"
                   barColor: "#d43333"
                   showBorder: false
+                  borderColor: "#000000"
+                  borderWidth: 2
                   transform:
                     position: [-26, 0]
                     scale: [1, 1]
                     rotation: 0
-                  borderColor: "#000000"
-                  borderWidth: 2
                 children: []
               - id: hp-frame
                 type: Sprite2D
@@ -751,13 +765,13 @@ root:
                     type: texture
                     url: res://src/assets/textures/gui/ingame/tgunico2.png
                   buttonAction: weapon-1
+                  backgroundColor: "#4a4a4a"
+                  hoverColor: "#5a5a5a"
+                  pressedColor: "#3a3a3a"
                   transform:
                     position: [-70, 87]
                     scale: [1, 1]
                     rotation: 0
-                  backgroundColor: "#4a4a4a"
-                  hoverColor: "#5a5a5a"
-                  pressedColor: "#3a3a3a"
                 children: []
               - id: weapon-btn-2
                 type: Button2D
@@ -776,13 +790,13 @@ root:
                     type: texture
                     url: res://src/assets/textures/gui/ingame/shotgunico2.png
                   buttonAction: weapon-2
+                  backgroundColor: "#4a4a4a"
+                  hoverColor: "#5a5a5a"
+                  pressedColor: "#3a3a3a"
                   transform:
                     position: [27, 73]
                     scale: [1, 1]
                     rotation: 0
-                  backgroundColor: "#4a4a4a"
-                  hoverColor: "#5a5a5a"
-                  pressedColor: "#3a3a3a"
                 children: []
               - id: weapon-btn-3
                 type: Button2D
@@ -801,13 +815,13 @@ root:
                     type: texture
                     url: res://src/assets/textures/gui/ingame/minigunico2.png
                   buttonAction: weapon-3
+                  backgroundColor: "#4a4a4a"
+                  hoverColor: "#5a5a5a"
+                  pressedColor: "#3a3a3a"
                   transform:
                     position: [92, 17]
                     scale: [1, 1]
                     rotation: 0
-                  backgroundColor: "#4a4a4a"
-                  hoverColor: "#5a5a5a"
-                  pressedColor: "#3a3a3a"
                 children: []
               - id: weapon-btn-4
                 type: Button2D
@@ -826,13 +840,13 @@ root:
                     type: texture
                     url: res://src/assets/textures/gui/ingame/sniperico2.png
                   buttonAction: weapon-4
+                  backgroundColor: "#4a4a4a"
+                  hoverColor: "#5a5a5a"
+                  pressedColor: "#3a3a3a"
                   transform:
                     position: [97, -73]
                     scale: [1, 1]
                     rotation: 0
-                  backgroundColor: "#4a4a4a"
-                  hoverColor: "#5a5a5a"
-                  pressedColor: "#3a3a3a"
                 children: []
           - id: counters-panel
             type: Group2D
@@ -876,6 +890,12 @@ root:
                     position: [-75, 26]
                     scale: [1, 1]
                     rotation: 0
+                components:
+                  - id: odo-clip-user:Odometer-mrnmkv11h9n0
+                    type: user:Odometer
+                    enabled: true
+                    config:
+                      initialValue: 0
                 children:
                   - id: odo-clip-0
                     type: Sprite2D
@@ -915,6 +935,12 @@ root:
                     position: [44, 26]
                     scale: [1, 1]
                     rotation: 0
+                components:
+                  - id: odo-ammo-user:Odometer-mrnmkwewc35g
+                    type: user:Odometer
+                    enabled: true
+                    config:
+                      initialValue: 0
                 children:
                   - id: odo-ammo-0
                     type: Sprite2D
@@ -982,6 +1008,12 @@ root:
                     position: [-192, -28]
                     scale: [1, 1]
                     rotation: 0
+                components:
+                  - id: odo-score-user:Odometer-mrnmkxso436v
+                    type: user:Odometer
+                    enabled: true
+                    config:
+                      initialValue: 0
                 children:
                   - id: odo-score-0
                     type: Sprite2D
@@ -1063,6 +1095,12 @@ root:
                     position: [-1, -28]
                     scale: [1, 1]
                     rotation: 0
+                components:
+                  - id: odo-time-user:Odometer-mrnmkzp95q8d
+                    type: user:Odometer
+                    enabled: true
+                    config:
+                      initialValue: 0
                 children:
                   - id: odo-time-0
                     type: Sprite2D
@@ -1130,6 +1168,12 @@ root:
                     position: [168, -28]
                     scale: [1, 1]
                     rotation: 0
+                components:
+                  - id: odo-kills-user:Odometer-mrnml16q8745
+                    type: user:Odometer
+                    enabled: true
+                    config:
+                      initialValue: 0
                 children:
                   - id: odo-kills-0
                     type: Sprite2D
@@ -1218,13 +1262,13 @@ root:
                 type: texture
                 url: res://src/assets/textures/gui/ingame/ingmain1.png
               buttonAction: options
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
               transform:
                 position: [842, -482]
                 scale: [1, 1]
                 rotation: 0
-              backgroundColor: "#4a4a4a"
-              hoverColor: "#5a5a5a"
-              pressedColor: "#3a3a3a"
             children: []
           - id: center-label
             type: Label2D
@@ -1299,13 +1343,13 @@ root:
                 type: texture
                 url: res://src/assets/textures/gui/unibut/fight_o.png
               buttonAction: fight
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
               transform:
                 position: [0, -440]
                 scale: [1, 1]
                 rotation: 0
-              backgroundColor: "#4a4a4a"
-              hoverColor: "#5a5a5a"
-              pressedColor: "#3a3a3a"
             children: []
       - id: result-overlay
         type: Group2D
@@ -1393,13 +1437,13 @@ root:
                 type: texture
                 url: res://src/assets/textures/gui/unibut/back_o.png
               buttonAction: to-menu
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
               transform:
                 position: [0, -120]
                 scale: [1, 1]
                 rotation: 0
-              backgroundColor: "#4a4a4a"
-              hoverColor: "#5a5a5a"
-              pressedColor: "#3a3a3a"
             children: []
   - id: camera2d
     type: Camera2D
@@ -1407,10 +1451,6 @@ root:
     properties:
       priority: 10
       zoom: 1
-      transform:
-        position: [0, 0]
-        scale: [1, 1]
-        rotation: 0
       offset:
         - 0
         - 0
@@ -1433,6 +1473,10 @@ root:
       shakeFrequency: 24
       shakeDuration: 0.35
       shakeDecay: 1.5
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
   - id: battle-music
     type: AudioPlayer
     name: Battle Music

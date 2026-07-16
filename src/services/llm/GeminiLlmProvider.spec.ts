@@ -101,6 +101,43 @@ describe('GeminiLlmProvider', () => {
     });
   });
 
+  it('stringifies numeric enums and coerces their type to string (Gemini enum is string-only)', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] })
+    );
+
+    await provider.chat(
+      {
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [
+          {
+            name: 'process_asset',
+            description: 'Process an asset.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                rotate: { type: 'integer', enum: [90, 180, 270], description: 'Rotate.' },
+                flip: { type: 'string', enum: ['horizontal', 'vertical'] },
+              },
+              required: [],
+            },
+          },
+        ],
+      },
+      { apiKey: 'k', modelId: 'gemini-2.5-flash', baseUrl: BASE, fetchImpl }
+    );
+
+    const body = bodyOf(fetchImpl);
+    const params = (
+      body.tools as Array<{ functionDeclarations: Array<{ parameters: Record<string, unknown> }> }>
+    )[0].functionDeclarations[0].parameters;
+    const props = params.properties as Record<string, { type: string; enum: unknown[] }>;
+    // Numeric enum → string entries + string type (what Gemini's Schema.enum accepts).
+    expect(props.rotate).toMatchObject({ type: 'string', enum: ['90', '180', '270'] });
+    // A string enum is already valid and is left untouched.
+    expect(props.flip).toMatchObject({ type: 'string', enum: ['horizontal', 'vertical'] });
+  });
+
   it('round-trips the functionCall thought signature (captured on parse, echoed on replay)', async () => {
     const provider2 = new GeminiLlmProvider();
     const fetchImpl = vi.fn(async () =>

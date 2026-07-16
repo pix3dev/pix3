@@ -243,6 +243,17 @@ const sanitizeGeminiSchema = (value: unknown): unknown => {
     }
     out[key] = sanitizeGeminiSchema(val);
   }
+  // Gemini's protobuf `Schema.enum` is `repeated string`, and enum is only valid on a STRING-typed
+  // property. A numeric enum (e.g. rotate: [90, 180, 270] on an integer) is rejected with a hard
+  // 400 ("Invalid value ... (TYPE_STRING), 90"). Stringify the entries and coerce the type to
+  // string; the tool handlers parse the value back to a number (asInt accepts numeric strings), so
+  // the same schema keeps working for Anthropic/OpenAI (which accept integer enums) and Gemini.
+  if (Array.isArray(out.enum)) {
+    out.enum = out.enum.map(entry => (typeof entry === 'string' ? entry : String(entry)));
+    if ('type' in out && out.type !== 'string') {
+      out.type = 'string';
+    }
+  }
   return out;
 };
 

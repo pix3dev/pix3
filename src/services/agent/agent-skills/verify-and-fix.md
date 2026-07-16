@@ -19,15 +19,28 @@ declare a feature done without running it.
 2. **Run it**: `play_start`, then `play_status`. Give it a moment, then `read_errors` (runtime
    errors: thrown exceptions, rejections) and `read_logs` (log output). A clean run has no
    captured errors.
-2b. **Prove the behaviour** — a clean compile is NOT proof the change works. For anything that
-   moves or responds to input, drive it: `game_input` with `expect` (e.g.
-   `{steps:[{type:'key',code:'KeyW',ms:800}],expect:{PlayerCar:'forward'}}` → read
-   `observed.PlayerCar.directionOk`), or `game_observe` with `sampleMs` for self-movers (AI).
-   Do NOT trust `moved:true` alone — a car driving sideways or backwards is still `moved:true`;
-   check `alignForward` (≈1 forward, ≈0 sideways, ≈−1 backward) / `directionOk`.
-3. **Look at it** (optional but valuable): `viewport_screenshot` to see edit-mode layout, or
-   `analyze_image` with `source:"viewport"` if your model can't see images — ask e.g. "are the
-   menu buttons visible and inside the screen?".
+2b. **Prove the behaviour** — a clean compile is NOT proof the change works. Drive it with
+   `game_input` (or `game_observe` + `sampleMs` for self-movers), then **read `verdict` first** —
+   it fuses every signal into one line. `moved:false` does NOT mean the game is dead: a spawner,
+   projectile pool, or HUD reacts without its container ever moving.
+   - **Movers** (car, player): `{steps:[{type:'key',code:'KeyW',ms:800}],expect:{PlayerCar:'forward'}}`
+     → read `observed.PlayerCar.directionOk`. Do NOT trust `moved:true` alone — a car driving
+     sideways/backwards is still `moved:true`; check `alignForward` (≈1 forward, ≈0 sideways, ≈−1 back).
+   - **Spawners / shooters / pools / HUD** (a container that fires or holds a score, e.g.
+     `Cannonballs`): its position never changes, so `moved:false` is normal and meaningless.
+     Watch it and assert `expect:{Cannonballs:'activity'}`, then read `observed.Cannonballs.activity`:
+     `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility —
+     count of shots in flight, not position), `maxChildDistance` (a projectile flew while the
+     spawner sat at 0,0). Transients that spawn AND die inside the window are caught by the window
+     recorder — endpoints alone would miss them.
+   - **Game state**: when a GameDebugProvider is registered the result carries `game.changed`
+     (ammo/score/wave diff) — often the clearest proof of all. If your game has none, register one
+     (see the game-prototype skill) so gameplay is legible to state, not screenshots.
+3. **Look at it** (optional but valuable): `viewport_screenshot` — while the game is running it
+   captures the RUNNING GAME, otherwise the edit-mode viewport (check `view` in the result;
+   `source:"game"|"editor"` forces one). If your model can't see images, use `analyze_image` with
+   `source:"viewport"` (same auto-routing) — ask e.g. "are the menu buttons visible and inside
+   the screen?".
 4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.
 
 ## Common runtime problems and fixes
@@ -38,12 +51,16 @@ declare a feature done without running it.
 - **A component threw and got auto-disabled** — the engine disables a component that throws in
   `onStart`/`onUpdate` and logs it. `read_errors` shows the throw; fix the script, re-enable
   via `set_component_property` `enabled: true` (or re-add), and replay.
-- **Nothing moves / input dead** — first `read_errors`: a component that threw was
-  auto-disabled and will not tick again until fixed and re-enabled. Then check the script is
-  actually attached (`node_inspect` the node → look at `components`) and `enabled`. For taps
-  use `this.input?.pointerEvents.some(e => e.type === 'down')`. For keyboard, match on
-  `event.code` (`'KeyW'`, `'ArrowUp'`) — `event.key` is case-sensitive (`'ArrowUp'`, never
-  `'arrowup'`).
+- **"Nothing happened" after input** — before concluding the input was dead, re-read the
+  `verdict` and `activity`/`game.changed` in the result. The classic false negative: you tapped
+  fire, watched the shot *container* (which never moves), saw `moved:false`, and assumed the tap
+  missed — but `activity.visibleChildPeak`/`spawned` or `game.changed` shows the shots really
+  fired. Only if `verdict` says NO ACTIVITY is the input actually not reaching gameplay.
+- **Genuinely dead input** — `read_errors` first: a component that threw was auto-disabled and
+  will not tick again until fixed and re-enabled. Then check the script is actually attached
+  (`node_inspect` the node → look at `components`) and `enabled`. For taps use
+  `this.input?.pointerEvents.some(e => e.type === 'down')`. For keyboard, match on `event.code`
+  (`'KeyW'`, `'ArrowUp'`) — `event.key` is case-sensitive (`'ArrowUp'`, never `'arrowup'`).
 - **`Cannot assign to read only property 'position'/'rotation'`** — three.js transforms are
   read-only references; use `node.position.set(x, y, z)` / `node.rotation.z = radians`. Never
   hide this with `as any` — that's what `check_scripts` exists to catch.

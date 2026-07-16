@@ -3,7 +3,7 @@ import { LlmProviderRegistry } from './LlmProviderRegistry';
 import type { LlmProvider } from './LlmTypes';
 
 describe('LlmProviderRegistry', () => {
-  it('ships gemini, anthropic, cerebras, opencode-zen and openai-compat with gemini as the default', () => {
+  it('ships gemini, anthropic, cerebras, opencode-zen, openai-compat and claude-bridge with gemini as the default', () => {
     const registry = new LlmProviderRegistry();
     expect(registry.list().map(p => p.id)).toEqual([
       'gemini',
@@ -11,11 +11,13 @@ describe('LlmProviderRegistry', () => {
       'cerebras',
       'opencode-zen',
       'openai-compat',
+      'claude-bridge',
     ]);
     expect(registry.getDefault()?.id).toBe('gemini');
     expect(registry.get('anthropic')?.label).toContain('Claude');
     expect(registry.get('cerebras')?.label).toBe('Cerebras');
     expect(registry.get('opencode-zen')?.label).toBe('OpenCode Zen');
+    expect(registry.get('claude-bridge')?.label).toBe('Claude Code (local bridge)');
     expect(registry.get('nope')).toBeUndefined();
   });
 
@@ -36,6 +38,7 @@ describe('LlmProviderRegistry', () => {
       'cerebras',
       'opencode-zen',
       'openai-compat',
+      'claude-bridge',
       'custom',
     ]);
 
@@ -53,5 +56,8 @@ describe('LlmProviderRegistry', () => {
     // Cerebras is a fixed hosted endpoint: no user-typed base URL, but a default (proxy) host is set.
     expect(registry.get('cerebras')?.requiresBaseUrl).toBe(false);
     expect(registry.get('cerebras')?.defaultBaseUrl).toBe('/cerebras-proxy/v1');
+    // The Claude bridge is a fixed local endpoint: no user-typed base URL either.
+    expect(registry.get('claude-bridge')?.requiresBaseUrl).toBe(false);
+    expect(registry.get('claude-bridge')?.defaultBaseUrl).toBe('http://127.0.0.1:8484/v1');
   });
 });

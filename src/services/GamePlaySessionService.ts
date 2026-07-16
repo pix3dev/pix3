@@ -11,6 +11,11 @@ import {
 } from '@pix3/runtime';
 import { appState } from '@/state';
 import type { GameAspectRatio } from '@/state/AppState';
+import {
+  encodeCanvasScreenshot,
+  type CanvasScreenshot,
+  type CanvasScreenshotOptions,
+} from '@/core/canvas-screenshot';
 import { createDefaultQualitySettings, DEFAULT_TARGET_PLATFORM } from '@/core/ProjectManifest';
 import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
@@ -203,6 +208,23 @@ export class GamePlaySessionService {
       canvas: this.renderer.domElement,
       windowRef: host?.windowRef ?? window,
     };
+  }
+
+  /**
+   * Capture the RUNNING game's canvas as an encoded image, or null when no
+   * runtime is attached. Renders one frame synchronously first — the WebGL
+   * buffer does not survive compositing, and a focus-paused or background-tab
+   * runner may not have painted for a while. Works for both the Game-tab host
+   * and the popout window (same-origin canvases are drawable across windows).
+   */
+  captureScreenshot(options: CanvasScreenshotOptions = {}): CanvasScreenshot | null {
+    if (!this.runner || !this.renderer) {
+      return null;
+    }
+    if (!this.runner.renderOnce()) {
+      return null;
+    }
+    return encodeCanvasScreenshot(this.renderer.domElement, options);
   }
 
   /**

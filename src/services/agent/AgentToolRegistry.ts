@@ -25,6 +25,8 @@ import {
   type GameInputStep,
   type GameInputExpectation,
 } from '@/services/agent/GameInputService';
+import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import type { CanvasScreenshot } from '@/core/canvas-screenshot';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
@@ -169,6 +171,9 @@ export class AgentToolRegistry {
 
   @inject(GameInputService)
   private readonly gameInput!: GameInputService;
+
+  @inject(GamePlaySessionService)
+  private readonly playSession!: GamePlaySessionService;
 
   @inject(AgentAdvisorService)
   private readonly advisor!: AgentAdvisorService;
@@ -624,7 +629,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the result in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Pass observe:['Player'] to get each node's live position before/after. Each observed delta reports `moved`, plus `alignForward`/`alignRight` — the travel direction vs the node's facing (+1 forward along its nose, ~0 = sliding SIDEWAYS, −1 backward). `moved` alone does NOT prove correctness: a car driving sideways is still `moved:true`. To assert direction, pass expect:{'PlayerCar':'forward'} and read observed.PlayerCar.directionOk (values: forward | backward | sideways | moving | still). Example: {steps:[{type:'key',code:'ArrowUp',ms:800}],expect:{PlayerCar:'forward'}} → directionOk===true means the car really drives along its nose.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -664,15 +669,15 @@ export class AgentToolRegistry {
               type: 'array',
               items: { type: 'string' },
               description:
-                'Node names/ids to snapshot before and after (position, moved, alignForward/alignRight).',
+                'Node names/ids to watch over the window: transform (moved, alignForward/alignRight), children (childCount/visibleChildCount), and `activity` (spawned/removed, visibleChildPeak, maxChildDistance, stateChanges). Watch the container of a spawner/pool (e.g. "Cannonballs"), not just the player. Max 8 tracked.',
             },
             expect: {
               type: 'object',
               description:
-                "Per-node motion assertion, e.g. {'PlayerCar':'forward'}. Each named node is auto-observed and gets a directionOk verdict. Values: forward | backward | sideways | moving | still.",
+                "Per-node assertion, e.g. {'PlayerCar':'forward'} or {'Cannonballs':'activity'}. Each named node is auto-observed and gets a directionOk verdict. Use 'activity' for spawners/shooters/pools/HUD that react without moving. Values: forward | backward | sideways | moving | still | activity.",
               additionalProperties: {
                 type: 'string',
-                enum: ['forward', 'backward', 'sideways', 'moving', 'still'],
+                enum: ['forward', 'backward', 'sideways', 'moving', 'still', 'activity'],
               },
             },
             settleMs: {
@@ -696,7 +701,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + `moved`, plus `alignForward`/`alignRight` (travel direction vs the node's nose: ~0 forward-alignment = moving sideways) — e.g. verify an AI car is driving around, and driving in the direction it faces, WITHOUT sending input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
         inputSchema: {
           type: 'object',
           properties: {
@@ -733,7 +738,7 @@ export class AgentToolRegistry {
       {
         name: 'viewport_screenshot',
         description:
-          'Capture the editor viewport as an image the model can see (edit-mode scene view; the running game canvas is not captured). Use it to visually check layout, colors, and placement.',
+          'Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The result says which view was captured (`view`).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -741,21 +746,29 @@ export class AgentToolRegistry {
               type: 'integer',
               description: 'Longest-edge cap in px (default 1024).',
             },
+            source: {
+              type: 'string',
+              enum: ['auto', 'game', 'editor'],
+              description:
+                'What to capture: "auto" (default) = the running game when play mode is active, else the editor viewport; "game" = the running game only (errors when not playing); "editor" = the edit-mode viewport even while playing.',
+            },
           },
           additionalProperties: false,
         },
-        handler: args => this.viewportScreenshot(asInt(args.maxSize, 1024)),
+        handler: args =>
+          this.viewportScreenshot(asInt(args.maxSize, 1024), asCaptureSource(args.source)),
       },
       {
         name: 'analyze_image',
         description:
-          'Ask a vision-capable helper model to look at an image and answer a question — use this when YOUR model cannot see images (no vision). source is a project image path (res:// or relative), "viewport" (a fresh editor screenshot), or a generated-image handle id. Ideal for extracting style tokens from a design reference before generating art, or QC-ing a generated sprite / the scene layout.',
+          'Ask a vision-capable helper model to look at an image and answer a question — use this when YOUR model cannot see images (no vision). source is a project image path (res:// or relative), "viewport" (a fresh screenshot: the RUNNING GAME while play mode is active, else the editor viewport; "game"/"editor" force one), or a generated-image handle id. Ideal for extracting style tokens from a design reference before generating art, or QC-ing a generated sprite / the scene layout / the running game.',
         inputSchema: {
           type: 'object',
           properties: {
             source: {
               type: 'string',
-              description: 'A project image path, "viewport", or a generation handle id.',
+              description:
+                'A project image path, "viewport" (game when playing, else editor), "game", "editor", or a generation handle id.',
             },
             question: {
               type: 'string',
@@ -1625,20 +1638,65 @@ export class AgentToolRegistry {
 
   // -- screenshot / asset generation -----------------------------------------
 
-  private viewportScreenshot(maxSize: number): Record<string, unknown> {
-    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
-    if (!shot) {
+  /**
+   * Capture pixels for the model: the running game when play mode is active
+   * ('auto'), or explicitly the game / editor viewport. The game path renders a
+   * frame on the live runtime canvas via {@link GamePlaySessionService}; the
+   * editor path uses the edit-mode viewport (proxy visuals, gizmos and all).
+   */
+  private captureView(
+    source: AgentCaptureSource,
+    maxSize: number
+  ): { shot: CanvasScreenshot; view: 'game' | 'editor'; note?: string } | { error: string } {
+    if (source !== 'editor' && appState.ui.isPlaying) {
+      const shot = this.playSession.captureScreenshot({ maxSize });
+      if (shot) {
+        return { shot, view: 'game' };
+      }
+      if (source === 'game') {
+        return {
+          error:
+            'Play mode is starting but the game canvas is not attached yet; retry in a moment.',
+        };
+      }
+    } else if (source === 'game') {
       return {
-        ok: false,
-        error: 'The viewport is not initialized yet (open a project with a scene first).',
+        error:
+          'The game is not running — call play_start first (or use source "editor" for the edit-mode viewport).',
       };
     }
+    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
+    if (!shot) {
+      return { error: 'The viewport is not initialized yet (open a project with a scene first).' };
+    }
+    return {
+      shot,
+      view: 'editor',
+      // 'auto' while isPlaying only lands here when the game canvas was not ready — say so,
+      // or the model reads the edit-mode frame as the running game.
+      ...(appState.ui.isPlaying
+        ? { note: 'The game canvas was not ready; this is the EDIT-MODE viewport instead.' }
+        : {}),
+    };
+  }
+
+  private viewportScreenshot(maxSize: number, source: AgentCaptureSource): Record<string, unknown> {
+    const capture = this.captureView(source, maxSize);
+    if ('error' in capture) {
+      return { ok: false, error: capture.error };
+    }
+    const { shot, view } = capture;
     return {
       ok: true,
+      view,
       width: shot.width,
       height: shot.height,
       mimeType: shot.mimeType,
-      note: 'The screenshot is attached as an image.',
+      note:
+        capture.note ??
+        (view === 'game'
+          ? 'The screenshot of the RUNNING GAME is attached as an image.'
+          : 'The screenshot of the edit-mode editor viewport is attached as an image.'),
       [AGENT_TOOL_IMAGES_KEY]: [
         { mimeType: shot.mimeType, data: shot.dataBase64 },
       ] satisfies AgentToolImage[],
@@ -1667,14 +1725,14 @@ export class AgentToolRegistry {
     }
   }
 
-  /** Turn an `analyze_image` source (viewport / handle / project path) into an inline image block. */
+  /** Turn an `analyze_image` source (viewport / game / handle / project path) into an inline image block. */
   private async resolveImageForAnalysis(source: string): Promise<LlmImageBlock> {
-    if (source === 'viewport') {
-      const shot = this.viewportRenderer.captureScreenshot({ maxSize: 1024 });
-      if (!shot) {
-        throw new Error('The viewport is not initialized yet (open a project with a scene first).');
+    if (source === 'viewport' || source === 'game' || source === 'editor') {
+      const capture = this.captureView(source === 'viewport' ? 'auto' : source, 1024);
+      if ('error' in capture) {
+        throw new Error(capture.error);
       }
-      return { type: 'image', mimeType: shot.mimeType, data: shot.dataBase64 };
+      return { type: 'image', mimeType: capture.shot.mimeType, data: capture.shot.dataBase64 };
     }
     // A live generation handle from generate_asset?
     if (this.assetGen.get(source)) {
@@ -1876,8 +1934,23 @@ const asString = (value: unknown): string => {
   return value;
 };
 
-const asInt = (value: unknown, fallback: number): number =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+/** Which surface a screenshot tool captures. */
+type AgentCaptureSource = 'auto' | 'game' | 'editor';
+
+// Lenient on junk values (providers do send them for enum params): fall back to 'auto'.
+const asCaptureSource = (value: unknown): AgentCaptureSource =>
+  value === 'game' || value === 'editor' ? value : 'auto';
+
+const asInt = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);
+  // Gemini returns enum-constrained numeric params as strings (its schema enum is string-only), so
+  // a `rotate: "90"` must still parse back to 90 rather than falling through to the default.
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+};
 
 /** Parse an agent-supplied 2D position ({x,y} object or [x,y] array) into a Vector2, or undefined. */
 const parseVector2 = (value: unknown): Vector2 | undefined => {

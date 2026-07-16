@@ -445,6 +445,21 @@ export class SceneRunner {
   }
 
   /**
+   * Paint one frame synchronously without advancing game time. For screenshot
+   * capture: the WebGL drawing buffer is cleared after compositing
+   * (`preserveDrawingBuffer` is off), so pixels must be read in the same task as
+   * a render — and a paused / hidden runner has no rAF loop painting at all.
+   * Returns false when nothing is running (nothing to paint).
+   */
+  renderOnce(): boolean {
+    if (!this.isRunning) {
+      return false;
+    }
+    this.render();
+    return true;
+  }
+
+  /**
    * Look up a node of the *running clone* by its authored nodeId (ids survive the
    * serialize→parse clone one-to-one). For automation/inspection tooling — the
    * returned node is live; do not mutate it outside the property-sink path.

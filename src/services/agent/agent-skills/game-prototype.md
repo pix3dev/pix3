@@ -52,15 +52,24 @@ moving on. Stop play mode (`play_stop`) before large edits. When an increment is
 mark it `[x]` in `design/progress.md` — and add a Notes line for anything you tried that did
 NOT work (wrong property shape, a trap from §4½), so a resumed session does not repeat it.
 
-**Prove gameplay with `game_input` — do not assume controls work.** While the game is
-playing, send real input and check that the right node actually moved:
-`game_input {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['Player']}` — the result's
-`observed.Player.moved` / `delta` tells you whether movement really happened. Tap UI buttons
-by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long press — don't
-shorten `holdMs`). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`). For
-self-moving things (an AI car, a spawner) use `game_observe {nodes:['AICar'],sampleMs:1000}` —
-`movement.AICar.moving` shows whether it drives on its own. A movement increment is DONE only
-when `game_input`/`game_observe` confirms it, not when the code compiles.
+**Prove gameplay with `game_input` — do not assume controls work, and read `verdict` FIRST.**
+While the game is playing, send real input and let the tool tell you what reacted:
+`game_input {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['Player']}`. The one-line
+`verdict` fuses every signal — **`moved:false` does NOT mean nothing happened.** Match the
+signal to the mechanic:
+- **Movement** (player, car): `observed.Player.moved`/`delta`, and `alignForward` for direction.
+- **Spawning / shooting / pools / HUD**: the container (e.g. `Cannonballs`) never moves — watch
+  it and read `observed.Cannonballs.activity` (`spawned`/`visibleChildPeak`/`maxChildDistance`),
+  or assert `expect:{Cannonballs:'activity'}`. A shot that spawns and dies inside the window is
+  still caught. Do NOT decide "the tap did nothing" from the container's `moved:false`.
+- **Game state**: register a `GameDebugProvider` (`registerGameDebug({name, snapshot})` exposing
+  ammo/score/wave/health) — then every `game_input`/`game_observe` result carries `game.changed`,
+  the clearest proof of all and the way to verify by state instead of screenshots.
+Tap UI buttons by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long
+press — don't shorten `holdMs`). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
+For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to read baseline
+`activity` before attributing anything to your input. A gameplay increment is DONE only when
+`game_input`/`game_observe` confirms it, not when the code compiles.
 
 ## 4. How to make changes (use tools, not hand-edited files)
 
