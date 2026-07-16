@@ -1,0 +1,372 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Config>
+<DMG>
+	<Gun1_1>50</Gun1_1>	
+	<Gun1_2>70</Gun1_2>
+	<ShotGun1_1>25</ShotGun1_1>
+	<ShotGun1_2>30</ShotGun1_2>
+	<ShotGun2_1>40</ShotGun2_1>
+	<ShotGun2_2>80</ShotGun2_2>
+	<MiniGun1_1>50</MiniGun1_1>
+	<MiniGun1_2>70</MiniGun1_2>
+	<Rifle1_1>100</Rifle1_1>
+	<Rifle1_2>150</Rifle1_2>
+	<Rifle2_1>200</Rifle2_1>
+	<Rifle2_2>400</Rifle2_2>
+</DMG>
+
+<AMMO>
+	<Gun_M>3</Gun_M>
+	<Gun_A>70</Gun_A>
+	<ShotGun1_M>5</ShotGun1_M>
+	<ShotGun1_A>14</ShotGun1_A>
+	<ShotGun2_M>5</ShotGun2_M>
+	<ShotGun2_A>14</ShotGun2_A>
+	<MiniGun_M>2</MiniGun_M>
+	<MiniGun_A>100</MiniGun_A>
+	<Rifle1_M>4</Rifle1_M>
+	<Rifle1_A>50</Rifle1_A>	
+	<Rifle2_M>4</Rifle2_M>
+	<Rifle2_A>2</Rifle2_A>	
+</AMMO>
+
+<TRS>
+	<TR1_DMG>10</TR1_DMG>	
+	<TR1_FRQ>30</TR1_FRQ>
+	<TR1_ATX>500</TR1_ATX>
+	<TR2_DMG>10</TR2_DMG>	
+	<TR2_FRQ>80</TR2_FRQ>
+	<TR2_ATX>500</TR2_ATX>
+</TRS>
+
+<Shop>
+	<t d="1_1__ ">0</t>
+	<t d="2_           ">100</t>
+	<t d="3_           ">100</t>
+	<t d="4__  ">0</t>
+	<t d="5__  ">100</t>
+	<t d="6__   ">100</t>
+	<t d="7_2_        ">100</t>
+	<t d="8_2__  ">100</t>
+	<t d="9_       ">100</t>
+	<t d="10_        ">100</t>
+	<t d="11__   ">100</t>
+	<t d="12__ ">100</t>
+	<t d="13_3_       ">100</t>
+	<t d="14_3__ ">100</t>
+	<t d="15_          ">100</t>
+	<t d="16_     ">100</t>
+	<t d="17_   ">2000</t>
+	<t d="18__">150</t>
+	<t d="19_4_       ">100</t>
+	<t d="20_4__ ">100</t>
+	<t d="21_       ">100</t>
+	<t d="22_       ">100</t>
+	<t d="23__">200</t>
+	<t d="24__">1000</t>
+</Shop>
+
+<TIMELEVEL>
+	<t d="1">80</t>
+	<t d="2">120</t>	
+	<t d="3">120</t>
+</TIMELEVEL>
+
+<ZHILKI>
+	<hp>200</hp>
+	<hp>400</hp>
+	<hp>700</hp>
+	<hp>1000</hp>
+</ZHILKI>
+
+<Mob id="1">
+	<hp>270</hp>
+	<speed>1</speed>
+	<dmg>10</dmg>
+	<score>8</score>
+</Mob>
+<Mob id="2">
+	<hp>270</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>8</score>
+</Mob>
+<Mob id="3">
+	<hp>370</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>8</score>
+</Mob>
+<Mob id="4">
+	<hp>370</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>8</score>
+</Mob>
+<Mob id="5">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="6">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="7">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="8">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="9">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="10">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="11">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="12">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="13">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="14">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="15">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="16">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="17">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="18">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="19">
+	<hp>100</hp>
+	<speed>3</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="20">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="21">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="22">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="23">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="24">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="25">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="26">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="27">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="28">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="29">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="30">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="31">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="32">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="33">
+	<hp>100</hp>
+	<speed>2</speed>
+	<dmg>1</dmg>
+	<score>4</score>
+</Mob>
+<Mob id="34">
+	<hp>100</hp>
+	<speed>2</speed>
+	<dmg>1</dmg>
+	<score>4</score>
+</Mob>
+<Mob id="35">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="36">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="37">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="38">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="39">
+	<hp>100</hp>
+	<speed>4</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="40">
+	<hp>100</hp>
+	<speed>4</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="41">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="42">
+	<hp>100</hp>
+	<speed>3</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="43">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="44">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="45">
+	<hp>100</hp>
+	<speed>1</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="46">
+	<hp>100</hp>
+	<speed>3</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="47">
+	<hp>100</hp>
+	<speed>3</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+<Mob id="48">
+	<hp>100</hp>
+	<speed>5</speed>
+	<dmg>1</dmg>
+	<score>100</score>
+</Mob>
+
+
+</Config>

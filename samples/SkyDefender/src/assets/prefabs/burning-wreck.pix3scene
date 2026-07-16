@@ -1,0 +1,69 @@
+# Burning wreck (prefab) — a falling, flaming hull (GDD "падение с горением").
+# The wreck sprite has no authored texture: the spawner passes the dead unit's
+# texture path via BurningWreck.configure() and the script shows it on load.
+# Two flame foci per the GDD: 100% and 57% alpha, oriented against the motion.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Falling burning wreck effect (prefab)
+root:
+  - id: wreck
+    type: Group2D
+    name: Burning Wreck
+    properties:
+      width: 64
+      height: 48
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: wreck-logic
+        type: user:BurningWreck
+        enabled: true
+        config:
+          texturePath: ''
+          startVx: -20
+          startVy: 0
+          gravity: 260
+          spinDegPerSec: 35
+          impactY: -195
+          fireFps: 20
+          explosionScale: 1
+    children:
+      - id: wreck-sprite
+        type: Sprite2D
+        name: Wreck Sprite
+        properties:
+          initiallyVisible: false
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: wreck-fire-1
+        type: Sprite2D
+        name: Fire 1
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/fire/burn0058.png' }
+          width: 26
+          height: 44
+          opacity: 1
+          transform:
+            position: [2, 8]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: wreck-fire-2
+        type: Sprite2D
+        name: Fire 2
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/fire/burn0058.png' }
+          width: 20
+          height: 34
+          opacity: 0.57
+          transform:
+            position: [-12, -2]
+            scale: [1, 1]
+            rotation: 0
+        children: []

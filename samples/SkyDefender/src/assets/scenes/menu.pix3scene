@@ -1,0 +1,217 @@
+# Sky Defender — Main Menu (M0)
+# Floating-islands sky (recovered from the original SWF), drifting clouds,
+# Campaign / Survival selectors. Entry scene of the game flow.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Main menu — campaign / survival selection
+root:
+  - id: ui-root
+    type: Group2D
+    name: Menu Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: menu-controller
+        type: user:MenuController
+        enabled: true
+        config:
+          battleScene: res://src/assets/scenes/main.pix3scene
+    children:
+      - id: menu-bg
+        type: Sprite2D
+        name: Sky Background
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/menu_bg.jpg' }
+          width: 1920
+          height: 1440
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: clouds-back
+        type: Group2D
+        name: Clouds Back
+        properties:
+          width: 1920
+          height: 1080
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: parallax-back
+            type: user:ParallaxClouds
+            enabled: true
+            config:
+              speed: 14
+              wrapWidth: 2600
+              jitter: 0.3
+        children:
+          - id: cloud-b1
+            type: Sprite2D
+            name: Cloud B1
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud3.png' }
+              width: 620
+              height: 280
+              opacity: 0.9
+              transform:
+                position: [-680, 300]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: cloud-b2
+            type: Sprite2D
+            name: Cloud B2
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud5.png' }
+              width: 500
+              height: 230
+              opacity: 0.85
+              transform:
+                position: [240, 380]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: cloud-b3
+            type: Sprite2D
+            name: Cloud B3
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud7.png' }
+              width: 660
+              height: 300
+              opacity: 0.9
+              transform:
+                position: [820, 200]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: clouds-front
+        type: Group2D
+        name: Clouds Front
+        properties:
+          width: 1920
+          height: 1080
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: parallax-front
+            type: user:ParallaxClouds
+            enabled: true
+            config:
+              speed: 48
+              wrapWidth: 3000
+              jitter: 0.2
+        children:
+          - id: cloud-f1
+            type: Sprite2D
+            name: Cloud F1
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/clouds_firstplane.png' }
+              width: 1150
+              height: 560
+              opacity: 0.75
+              transform:
+                position: [-350, 430]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: cloud-f2
+            type: Sprite2D
+            name: Cloud F2
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud1.png' }
+              width: 780
+              height: 380
+              opacity: 0.6
+              transform:
+                position: [950, -430]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: menu-logo
+        type: Sprite2D
+        name: Logo
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/logo.png' }
+          width: 630
+          height: 84
+          transform:
+            position: [0, 340]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: campaign-button
+        type: Button2D
+        name: Campaign Button
+        properties:
+          label: ''
+          width: 376
+          height: 310
+          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
+          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaignblure.png' }
+          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
+          buttonAction: campaign
+          transform:
+            position: [-270, -120]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: survival-button
+        type: Button2D
+        name: Survival Button
+        properties:
+          label: ''
+          width: 376
+          height: 310
+          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
+          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survivalblure.png' }
+          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
+          buttonAction: survival
+          transform:
+            position: [270, -120]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: version-label
+        type: Label2D
+        name: Version Label
+        properties:
+          label: 'Sky Defender Remaster — M0 flow skeleton'
+          labelFontSize: 20
+          labelColor: '#9aa7bd'
+          labelAlign: center
+          transform:
+            position: [0, -500]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+  - id: menu-music
+    type: AudioPlayer
+    name: Menu Music
+    properties:
+      audioTrack: res://src/assets/audio/theme/SkyDefender_MenuTheme.mp3
+      autoplay: true
+      loop: true
+      volume: 0.8
+      bus: music
+    children: []
+  - id: menu-wind
+    type: AudioPlayer
+    name: Menu Wind
+    properties:
+      audioTrack: res://src/assets/audio/gui/mm/wind_loop.mp3
+      autoplay: true
+      loop: true
+      volume: 0.5
+      bus: sfx
+    children: []

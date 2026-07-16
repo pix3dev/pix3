@@ -82,6 +82,8 @@ export * from './behaviors/ShakeBehavior';
 export * from './behaviors/PunchScaleBehavior';
 export * from './behaviors/PopInBehavior';
 export * from './behaviors/CameraBrainBehavior';
+export * from './behaviors/Hitbox2DBehavior';
+export * from './core/Collision2DService';
 
 // Keyframe animation
 export * from './animation/easing';

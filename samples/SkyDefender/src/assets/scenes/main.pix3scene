@@ -1,0 +1,1161 @@
+# Sky Defender — Battle Scene (M0 skeleton)
+# The "stage" group holds the game world in ORIGINAL 640x480 coordinates
+# (converted to center-origin, Y-up) and scales it x2.25 to fill 1080p height.
+# Conversion from original top-left coords: local = (ox + w/2 - 320, 240 - (oy + h/2)).
+# Castle sprite coordinates follow the GDD table (floor_gate @ y=317, gun floor
+# sitting on the gate at the floor-1 slot until upgrades move it up).
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Battle scene — castle, parallax sky, HUD, shop/result overlays
+root:
+  - id: game-root
+    type: Group2D
+    name: Game Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: game-flow
+        type: user:GameFlow
+        enabled: true
+        config:
+          countdownSeconds: 3
+          menuScene: res://src/assets/scenes/menu.pix3scene
+      - id: wave-spawner
+        type: user:WaveSpawner
+        enabled: true
+        config:
+          enemiesNode: enemies
+          hp: 100
+          speed: 55
+          score: 8
+    children:
+      - id: stage
+        type: Group2D
+        name: Stage
+        properties:
+          width: 854
+          height: 480
+          transform:
+            position: [0, 0]
+            scale: [2.25, 2.25]
+            rotation: 0
+        children:
+          - id: sky-bg
+            type: Sprite2D
+            name: Sky Background
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/sky1.jpg' }
+              width: 854
+              height: 641
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: clouds-far
+            type: Group2D
+            name: Clouds Far
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-far
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 6
+                  wrapWidth: 1150
+                  jitter: 0.3
+            children:
+              - id: cloud-far-1
+                type: Sprite2D
+                name: Cloud Far 1
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud4.png' }
+                  width: 320
+                  height: 150
+                  opacity: 0.9
+                  transform:
+                    position: [-300, 130]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-far-2
+                type: Sprite2D
+                name: Cloud Far 2
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud6.png' }
+                  width: 280
+                  height: 130
+                  opacity: 0.85
+                  transform:
+                    position: [220, 165]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-far-3
+                type: Sprite2D
+                name: Cloud Far 3
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud2.png' }
+                  width: 300
+                  height: 140
+                  opacity: 0.9
+                  transform:
+                    position: [520, 95]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: clouds-near
+            type: Group2D
+            name: Clouds Near
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-near
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 14
+                  wrapWidth: 1200
+                  jitter: 0.25
+            children:
+              - id: cloud-near-1
+                type: Sprite2D
+                name: Cloud Near 1
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud1.png' }
+                  width: 400
+                  height: 190
+                  opacity: 0.95
+                  transform:
+                    position: [-500, 60]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-near-2
+                type: Sprite2D
+                name: Cloud Near 2
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud5.png' }
+                  width: 330
+                  height: 150
+                  opacity: 0.9
+                  transform:
+                    position: [360, 25]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: castle
+            type: Group2D
+            name: Castle
+            properties:
+              width: 220
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: floor-gate
+                type: Sprite2D
+                name: Floor Gate
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/castle/floor_gate.png' }
+                  width: 210
+                  height: 163
+                  transform:
+                    position: [-215, -158.5]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: floor-gun
+                type: Sprite2D
+                name: Gun Floor
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/castle/floor_2.png' }
+                  width: 210
+                  height: 55
+                  transform:
+                    position: [-215, -55.5]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: maingun
+                type: Group2D
+                name: Main Gun
+                properties:
+                  width: 80
+                  height: 60
+                  transform:
+                    position: [-214, -23]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: gun-controller
+                    type: user:GunController
+                    enabled: true
+                    config:
+                      pivotNode: barrel-pivot
+                      ballsGroup: cannonballs
+                      targetGroup: enemy
+                      uiGuardNode: portrait-cluster,counters-panel,options-button
+                      minAngleDeg: -65
+                      maxAngleDeg: 65
+                      muzzleDistance: 52
+                      poolSize: 36
+                children:
+                  # The WHOLE carriage rotates (original: the wooden mount, the
+                  # gunner and the barrel aim as one unit around the wheel axis).
+                  - id: barrel-pivot
+                    type: Group2D
+                    name: Barrel Pivot
+                    properties:
+                      width: 80
+                      height: 60
+                      transform:
+                        # Rotation centre = the frame apex / barrel trunnion, so
+                        # the whole mount elevates about the point the barrel
+                        # rests on (not the carriage centre — that swung the
+                        # barrel out in a wide arc).
+                        position: [10, 20]
+                        scale: [1, 1]
+                        rotation: 0
+                    children:
+                      # Paint order (back → front): carriage, gunner, flash-under,
+                      # barrel, flash-over, laser, beam. Offsets are pivot-local
+                      # (Y-up); the carriage/gunner hang down-left of the trunnion.
+                      - id: mount-carriage
+                        type: Sprite2D
+                        name: Mount Carriage
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/gunplace.png' }
+                          width: 50
+                          height: 41
+                          transform:
+                            position: [-17, -17.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: mount-pilot
+                        type: Sprite2D
+                        name: Mount Pilot
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/pplace.png' }
+                          width: 49
+                          height: 37
+                          transform:
+                            position: [-16.5, -14.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: muzzle-flash-under
+                        type: Sprite2D
+                        name: Muzzle Flash Under
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/gun/fx.png' }
+                          width: 32
+                          height: 36
+                          initiallyVisible: false
+                          transform:
+                            position: [34, -3]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: barrel-gun
+                        type: Sprite2D
+                        name: Barrel Gun
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/gun/00000.png' }
+                          width: 54
+                          height: 29
+                          transform:
+                            position: [8, -3.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: barrel-shotgun
+                        type: Sprite2D
+                        name: Barrel Shotgun
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/shotgun/shotgun.png' }
+                          width: 31
+                          height: 13
+                          initiallyVisible: false
+                          transform:
+                            position: [2, -3.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: barrel-minigun
+                        type: Sprite2D
+                        name: Barrel Minigun
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/minigun/frames/mg0001.png' }
+                          width: 37
+                          height: 25
+                          initiallyVisible: false
+                          transform:
+                            position: [2, -3.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: barrel-rifle
+                        type: Sprite2D
+                        name: Barrel Rifle
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/rifle/rifle.png' }
+                          width: 55
+                          height: 10
+                          initiallyVisible: false
+                          transform:
+                            position: [11, -3.5]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: muzzle-flash-over
+                        type: Sprite2D
+                        name: Muzzle Flash Over
+                        properties:
+                          texture: { type: 'texture', url: 'res://src/assets/textures/maingun/gun/fx.png' }
+                          width: 26
+                          height: 30
+                          initiallyVisible: false
+                          transform:
+                            position: [34, -3]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: rifle-laser
+                        type: ColorRect2D
+                        name: Rifle Laser Sight
+                        properties:
+                          width: 1000
+                          height: 1.4
+                          color: '#ff4040'
+                          opacity: 0.32
+                          initiallyVisible: false
+                          transform:
+                            position: [538, -3]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                      - id: rifle-beam
+                        type: ColorRect2D
+                        name: Rifle Beam
+                        properties:
+                          width: 1000
+                          height: 3
+                          color: '#ffefc0'
+                          opacity: 0.9
+                          initiallyVisible: false
+                          transform:
+                            position: [538, -3]
+                            scale: [1, 1]
+                            rotation: 0
+                        children: []
+                  - id: gun-dead
+                    type: Sprite2D
+                    name: Dead Gun
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/maingun/deadgun.png' }
+                      width: 103
+                      height: 99
+                      initiallyVisible: false
+                      transform:
+                        position: [-4, 18]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
+          - id: cannonballs
+            type: Group2D
+            name: Cannonballs
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: ball-0
+                type: Sprite2D
+                name: Ball 0
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-1
+                type: Sprite2D
+                name: Ball 1
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-2
+                type: Sprite2D
+                name: Ball 2
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-3
+                type: Sprite2D
+                name: Ball 3
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-4
+                type: Sprite2D
+                name: Ball 4
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-5
+                type: Sprite2D
+                name: Ball 5
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-6
+                type: Sprite2D
+                name: Ball 6
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+              - id: ball-7
+                type: Sprite2D
+                name: Ball 7
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+                children: []
+          - id: enemies
+            type: Group2D
+            name: Enemies
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: effects
+            type: Group2D
+            name: Effects
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: clouds-front
+            type: Group2D
+            name: Clouds Front
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-front
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 26
+                  wrapWidth: 1250
+                  jitter: 0.2
+            children:
+              - id: cloud-front-1
+                type: Sprite2D
+                name: Cloud Front 1
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/clouds_firstplane.png' }
+                  width: 574
+                  height: 278
+                  opacity: 0.7
+                  transform:
+                    position: [-120, 205]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-front-2
+                type: Sprite2D
+                name: Cloud Front 2
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud3.png' }
+                  width: 360
+                  height: 170
+                  opacity: 0.55
+                  transform:
+                    position: [460, 228]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+      - id: hud
+        type: CanvasLayer2D
+        name: HUD
+        properties:
+          width: 1920
+          height: 1080
+        children:
+          # ── top: castle HP in the original frame (heart on the right) ──
+          - id: top-hp
+            type: Group2D
+            name: Top HP
+            properties:
+              width: 524
+              height: 56
+              transform:
+                position: [0, 505]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: hp-fill
+                type: Bar2D
+                name: HP Fill
+                properties:
+                  label: ''
+                  width: 452
+                  height: 30
+                  minValue: 0
+                  maxValue: 1
+                  value: 1
+                  backBackgroundColor: '#2a1414'
+                  barColor: '#d43333'
+                  showBorder: false
+                  transform:
+                    position: [-26, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: hp-frame
+                type: Sprite2D
+                name: HP Frame
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/health.png' }
+                  width: 524
+                  height: 56
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: hp-label
+                type: Label2D
+                name: HP Label
+                properties:
+                  label: '250/250'
+                  labelFontSize: 24
+                  labelColor: '#f5e6c8'
+                  labelAlign: center
+                  transform:
+                    position: [-26, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          # ── bottom-left: Joe portrait cluster with round weapon buttons ──
+          - id: portrait-cluster
+            type: Group2D
+            name: Portrait Cluster
+            properties:
+              width: 292
+              height: 295
+              transform:
+                position: [-808, -388]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              # Frame paints first (opaque) so the portrait + icons layer on top.
+              - id: cluster-frame
+                type: Sprite2D
+                name: Cluster Frame
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/ingmain2.png' }
+                  width: 292
+                  height: 295
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: joe-portrait
+                type: Sprite2D
+                name: Joe Portrait
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/npc/joe/main.png' }
+                  width: 150
+                  height: 150
+                  transform:
+                    position: [-54, -53]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: joe-avatar
+                    type: user:JoeAvatar
+                    enabled: true
+                    config:
+                      gunNode: maingun
+                children:
+                  - id: joe-eye
+                    type: Sprite2D
+                    name: Joe Eye
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/npc/joe/eye.png' }
+                      width: 150
+                      height: 150
+                      initiallyVisible: false
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
+              - id: weapon-btn-1
+                type: Button2D
+                name: Weapon 1 Gun
+                properties:
+                  label: ''
+                  width: 62
+                  height: 62
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/tgunico.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/tgunico2.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/tgunico2.png' }
+                  buttonAction: weapon-1
+                  transform:
+                    position: [-70, 87]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: weapon-btn-2
+                type: Button2D
+                name: Weapon 2 Shotgun
+                properties:
+                  label: ''
+                  width: 62
+                  height: 62
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/shotgunico.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/shotgunico2.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/shotgunico2.png' }
+                  buttonAction: weapon-2
+                  transform:
+                    position: [27, 73]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: weapon-btn-3
+                type: Button2D
+                name: Weapon 3 Minigun
+                properties:
+                  label: ''
+                  width: 62
+                  height: 62
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/minigunico.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/minigunico2.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/minigunico2.png' }
+                  buttonAction: weapon-3
+                  transform:
+                    position: [92, 17]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: weapon-btn-4
+                type: Button2D
+                name: Weapon 4 Rifle
+                properties:
+                  label: ''
+                  width: 62
+                  height: 62
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/sniperico.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/sniperico2.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/sniperico2.png' }
+                  buttonAction: weapon-4
+                  transform:
+                    position: [97, -73]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          # ── bottom-center: Clip/Ammo + Score/Time/Kills odometer panel ──
+          - id: counters-panel
+            type: Group2D
+            name: Counters Panel
+            properties:
+              width: 893
+              height: 146
+              transform:
+                position: [40, -467]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: hud-controller
+                type: user:HudController
+                enabled: true
+                config:
+                  gunNode: maingun
+                  buttonPrefix: weapon-btn-
+            children:
+              - id: counters-bg
+                type: Sprite2D
+                name: Counters Background
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/ingmain3.png' }
+                  width: 893
+                  height: 146
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: odo-clip
+                type: Group2D
+                name: Clip Odometer
+                properties:
+                  width: 60
+                  height: 32
+                  transform: { position: [-75, 26], scale: [1, 1], rotation: 0 }
+                children:
+                  - id: odo-clip-0
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-12, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-clip-1
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [12, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+              - id: odo-ammo
+                type: Group2D
+                name: Ammo Odometer
+                properties:
+                  width: 100
+                  height: 32
+                  transform: { position: [44, 26], scale: [1, 1], rotation: 0 }
+                children:
+                  - id: odo-ammo-0
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-34, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-ammo-1
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-11, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-ammo-2
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [12, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-ammo-3
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [35, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+              - id: odo-score
+                type: Group2D
+                name: Score Odometer
+                properties:
+                  width: 130
+                  height: 32
+                  transform: { position: [-192, -28], scale: [1, 1], rotation: 0 }
+                children:
+                  - id: odo-score-0
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-46, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-score-1
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-23, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-score-2
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [0, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-score-3
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [23, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-score-4
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [46, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+              - id: odo-time
+                type: Group2D
+                name: Time Odometer
+                properties:
+                  width: 104
+                  height: 32
+                  transform: { position: [-1, -28], scale: [1, 1], rotation: 0 }
+                children:
+                  - id: odo-time-0
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-34, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-time-1
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-11, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-time-2
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [12, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-time-3
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [35, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+              - id: odo-kills
+                type: Group2D
+                name: Kills Odometer
+                properties:
+                  width: 130
+                  height: 32
+                  transform: { position: [168, -28], scale: [1, 1], rotation: 0 }
+                children:
+                  - id: odo-kills-0
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-46, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-kills-1
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [-23, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-kills-2
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [0, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-kills-3
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [23, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+                  - id: odo-kills-4
+                    type: Sprite2D
+                    name: Digit
+                    properties:
+                      texture: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/number_indicator.png' }
+                      width: 22
+                      height: 31
+                      transform: { position: [46, 0], scale: [1, 1], rotation: 0 }
+                    children: []
+          # ── bottom-right: Options ──
+          - id: options-button
+            type: Button2D
+            name: Options Button
+            properties:
+              label: ''
+              width: 212
+              height: 106
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/ingmain1.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/ingmain1.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/ingame/ingmain1.png' }
+              buttonAction: options
+              transform:
+                position: [842, -482]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: center-label
+            type: Label2D
+            name: Center Label
+            properties:
+              label: ''
+              labelFontSize: 96
+              labelColor: '#ffcf33'
+              labelAlign: center
+              transform:
+                position: [0, 150]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: shop-overlay
+        type: Group2D
+        name: Shop Overlay
+        properties:
+          width: 1920
+          height: 1080
+          initiallyVisible: false
+        children:
+          - id: shop-dim
+            type: ColorRect2D
+            name: Shop Dim
+            properties:
+              width: 1920
+              height: 1080
+              color: '#000000'
+              opacity: 0.55
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: shop-bg
+            type: Sprite2D
+            name: Shop Panel
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/shop/shop_bg.png' }
+              width: 1003
+              height: 816
+              transform:
+                position: [0, 60]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: shop-fight-button
+            type: Button2D
+            name: Fight Button
+            properties:
+              label: ''
+              width: 244
+              height: 100
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight_o.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight_o.png' }
+              buttonAction: fight
+              transform:
+                position: [0, -440]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: result-overlay
+        type: Group2D
+        name: Result Overlay
+        properties:
+          width: 1920
+          height: 1080
+          initiallyVisible: false
+        children:
+          - id: result-dim
+            type: ColorRect2D
+            name: Result Dim
+            properties:
+              width: 1920
+              height: 1080
+              color: '#000000'
+              opacity: 0.65
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: result-panel
+            type: ColorRect2D
+            name: Result Panel
+            properties:
+              width: 760
+              height: 420
+              color: '#1a1a2e'
+              opacity: 0.92
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: result-title
+            type: Label2D
+            name: Result Title
+            properties:
+              label: 'VICTORY!'
+              labelFontSize: 72
+              labelColor: '#ffcf33'
+              labelAlign: center
+              transform:
+                position: [0, 90]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: result-stats
+            type: Label2D
+            name: Result Stats
+            properties:
+              label: 'The province is safe… for now.'
+              labelFontSize: 28
+              labelColor: '#e6ebf5'
+              labelAlign: center
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: result-menu-button
+            type: Button2D
+            name: To Menu Button
+            properties:
+              label: ''
+              width: 244
+              height: 100
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back_o.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back_o.png' }
+              buttonAction: to-menu
+              transform:
+                position: [0, -120]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+  - id: camera2d
+    type: Camera2D
+    name: Game Camera
+    properties:
+      priority: 10
+      zoom: 1
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children: []
+  - id: battle-music
+    type: AudioPlayer
+    name: Battle Music
+    properties:
+      audioTrack: res://src/assets/audio/theme/SkyDefender_Theme1.mp3
+      autoplay: true
+      loop: true
+      volume: 0.7
+      bus: music
+    children: []
+  - id: war-ambient
+    type: AudioPlayer
+    name: War Ambient
+    properties:
+      audioTrack: res://src/assets/audio/ambient/war_amb.mp3
+      autoplay: true
+      loop: true
+      volume: 0.35
+      bus: sfx
+    children: []

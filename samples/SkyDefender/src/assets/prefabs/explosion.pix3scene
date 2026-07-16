@@ -1,0 +1,91 @@
+# Typical explosion prefab (GDD "Типичный взрыв"): three boom1 sequences at
+# random angles (A over the unit, B/C behind) + a BlowGlow halo that grows and
+# fades. Spawned via scene.instantiate(); self-destroys (queueFree) when done.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Typical explosion effect (prefab)
+root:
+  - id: explosion
+    type: Group2D
+    name: Explosion
+    properties:
+      width: 64
+      height: 64
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: explosion-fx
+        type: user:ExplosionEffect
+        enabled: true
+        config:
+          fps: 26
+          glowMaxScale: 2.4
+          waveRadius: 85
+          wavePush: 170
+          waveEnabled: true
+    children:
+      - id: shock-wave
+        type: Sprite2D
+        name: Shock Wave
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/explosion_wave.png' }
+          width: 60
+          height: 60
+          opacity: 0
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: boom-b
+        type: Sprite2D
+        name: Boom B
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          width: 56
+          height: 56
+          transform:
+            position: [-8, 6]
+            scale: [1, 1]
+            rotation: 115
+        children: []
+      - id: boom-c
+        type: Sprite2D
+        name: Boom C
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          width: 48
+          height: 48
+          transform:
+            position: [10, -6]
+            scale: [1, 1]
+            rotation: 230
+        children: []
+      - id: glow
+        type: Sprite2D
+        name: Blow Glow
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+          width: 58
+          height: 58
+          opacity: 0.9
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: boom-a
+        type: Sprite2D
+        name: Boom A
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          width: 64
+          height: 64
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []

@@ -408,6 +408,26 @@ export class SceneLoader {
     return node;
   }
 
+  /**
+   * Instantiate a prefab scene (`.pix3scene` with exactly one root node) as a
+   * fresh subtree with unique runtime ids derived from `instanceId`. This is
+   * the runtime-spawn entry point (Godot `PackedScene.instantiate()`); the
+   * caller owns attaching the returned root to a live parent.
+   */
+  async instantiatePrefab(instancePath: string, instanceId: string): Promise<NodeBase> {
+    const definition: SceneNodeDefinition = {
+      id: instanceId,
+      instance: instancePath,
+    } as SceneNodeDefinition;
+    return await this.instantiateInstanceNode(
+      definition,
+      null,
+      new Map<string, NodeBase>(),
+      `runtime-instantiate:${instancePath}`,
+      []
+    );
+  }
+
   private async instantiateInstanceNode(
     definition: SceneNodeDefinition,
     parent: NodeBase | null,

@@ -1,0 +1,18 @@
+# Pooled player projectile (prefab). GunController instantiates a batch of
+# these into the `cannonballs` group at start and recycles them forever —
+# Gun/Shotgun/Minigun all share the pool (per-shot damage/radius/scale).
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Player cannonball projectile (pooled prefab)
+root:
+  - id: cannonball
+    type: Sprite2D
+    name: Cannonball
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+      width: 11
+      height: 11
+      initiallyVisible: false
+      transform: { position: [-600, -400], scale: [1, 1], rotation: 0 }
+    children: []

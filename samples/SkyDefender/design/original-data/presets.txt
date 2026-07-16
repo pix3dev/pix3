@@ -1,0 +1,357 @@
+œÂÒÂÚ˚:
+
+ŒÂ¯ÍË. 3 Á‚ÂÌ‡ ÔÓ 3 ÍÓ‡·Îˇ
+
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start1</com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>270</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>330</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end1</com>
+</Mob>
+
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start2</com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>90</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>150</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end2</com>
+</Mob>
+
+<Mob>
+	<t>4</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start3</com>
+</Mob>
+<Mob>
+	<t>5</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>5</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end3</com>
+</Mob>
+
+
+¡¿ ”œ¿ À≈¬≈À”œ¿!1
+
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start1</com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>270</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>330</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end1</com>
+</Mob>
+
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start2</com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>90</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>33</id>
+	<y>150</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end2</com>
+</Mob>
+
+<Mob>
+	<t>4</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start3</com>
+</Mob>
+<Mob>
+	<t>5</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>5</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end3</com>
+</Mob>
+
+<Mob>
+	<t>1</t>
+	<id>1</id>
+	<y>120</y>
+	<a>200</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky1</com>
+</Mob>
+
+<Mob>
+	<t>1</t>
+	<id>1</id>
+	<y>300</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky2</com>
+</Mob>
+
+<Mob>
+	<t>2</t>
+	<id>1</id>
+	<y>210</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky3</com>
+</Mob>
+
+<Mob>
+	<t>5</t>
+	<id>1</id>
+	<y>120</y>
+	<a>200</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky4</com>
+</Mob>
+
+<Mob>
+	<t>5</t>
+	<id>1</id>
+	<y>300</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky5</com>
+</Mob>
+
+<Mob>
+	<t>6</t>
+	<id>1</id>
+	<y>210</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky6</com>
+</Mob>
+
+
+
+
+
+
+
+<Mob>
+	<t>9</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start1</com>
+</Mob>
+<Mob>
+	<t>10</t>
+	<id>33</id>
+	<y>270</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>10</t>
+	<id>33</id>
+	<y>330</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end1</com>
+</Mob>
+
+<Mob>
+	<t>9</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start2</com>
+</Mob>
+<Mob>
+	<t>10</t>
+	<id>33</id>
+	<y>90</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>10</t>
+	<id>33</id>
+	<y>150</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end2</com>
+</Mob>
+
+<Mob>
+	<t>12</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_start3</com>
+</Mob>
+<Mob>
+	<t>13</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>13</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>S-wing_end3</com>
+</Mob>
+
+
+<Mob>
+	<t>10</t>
+	<id>3</id>
+	<y>120</y>
+	<a>200</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky7</com>
+</Mob>
+
+<Mob>
+	<t>10</t>
+	<id>3</id>
+	<y>300</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky8</com>
+</Mob>
+
+<Mob>
+	<t>11</t>
+	<id>3</id>
+	<y>210</y>
+	<a>150</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>Lucky9</com>
+</Mob>
+
+¡¿ ”œ¿ À≈¬≈À”œ¿!2

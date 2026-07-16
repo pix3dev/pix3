@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Game>
+<Flag>0</Flag>
+<Test>2</Test>
+<Lvl n="1">
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>1</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>4</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>7</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>7</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>10</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+
+
+<Mob>
+	<t>13</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>14</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>14</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>15</t>
+	<id>33</id>
+	<y>150</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>15</t>
+	<id>33</id>
+	<y>270</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>16</t>
+	<id>33</id>
+	<y>120</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>16</t>
+	<id>33</id>
+	<y>300</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>17</t>
+	<id>33</id>
+	<y>90</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>17</t>
+	<id>33</id>
+	<y>330</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>18</t>
+	<id>33</id>
+	<y>60</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>18</t>
+	<id>33</id>
+	<y>360</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+
+
+<Mob>
+	<t>21</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>22</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>23</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>22</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>22</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+
+<Mob>
+	<t>27</t>
+	<id>33</id>
+	<y>210</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>26</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>28</t>
+	<id>33</id>
+	<y>180</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>26</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+<Mob>
+	<t>28</t>
+	<id>33</id>
+	<y>240</y>
+	<a>0</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+
+
+
+</Lvl>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<Lvl n="2">
+<Mob>
+	<t>1.1</t>
+	<id>1</id>
+	<y>150</y>
+	<a>230</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>zxc</com>
+</Mob>
+<Mob>
+	<t>1</t>
+	<id>10</id>
+	<y>200</y>
+	<a>150</a>
+	<tip>1</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>2</t>
+	<id>2</id>
+	<y>100</y>
+	<a>300</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com>zxc</com>
+</Mob>
+<Mob>
+	<t>5</t>
+	<id>39</id>
+	<y>240</y>
+	<a>320</a>
+	<tip>1</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>1</t>
+	<id>3</id>
+	<y>250</y>
+	<a>110</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>1</t>
+	<id>3</id>
+	<y>300</y>
+	<a>110</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+<Mob>
+	<t>1</t>
+	<id>3</id>
+	<y>350</y>
+	<a>110</a>
+	<tip>0</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+</Lvl>
+<Lvl n="3">
+<Mob>
+	<t>5</t>
+	<id>39</id>
+	<y>240</y>
+	<a>320</a>
+	<tip>1</tip>
+	<dop>0</dop>
+	<com></com>
+</Mob>
+</Lvl>
+</Game>

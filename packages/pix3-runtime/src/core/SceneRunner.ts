@@ -220,6 +220,34 @@ export class SceneRunner {
     this.runGraph(graph);
   }
 
+  /** Monotonic id source for runtime-spawned prefab instances. */
+  private spawnCounter = 0;
+
+  /**
+   * Spawn a prefab scene into the RUNNING graph (Godot `instantiate()` +
+   * `add_child()` in one call). The subtree gets unique runtime ids, inherits
+   * `input`/`scene` from the parent (so component `onStart` fires on the next
+   * tick), and honors `initiallyVisible`. Default parent is the first scene
+   * root node; despawn with `node.dispose()`.
+   */
+  async instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
+    if (!this.isRunning || !this.runtimeGraph) {
+      throw new Error('[SceneRunner] instantiatePrefab requires a running scene.');
+    }
+    this.spawnCounter += 1;
+    const instanceId = `spawn-${this.spawnCounter}`;
+    const node = await this.sceneManager.instantiatePrefab(path, instanceId);
+
+    const target = parent ?? this.runtimeGraph.rootNodes[0] ?? null;
+    if (!target) {
+      node.dispose();
+      throw new Error('[SceneRunner] instantiatePrefab: no parent node available.');
+    }
+    target.adoptChild(node);
+    this.applyInitialVisibility([node]);
+    return node;
+  }
+
   /**
    * Take exclusive ownership of `graph` and run it, stopping whatever ran
    * before. The graph MUST be runner-private (a fresh clone or a fresh parse) —
@@ -342,6 +370,10 @@ export class SceneRunner {
     // (applyAOModeSuppression short-circuits on an unchanged value) and its
     // meshes would never get setAOSuppressed — baked AO + SSAO would stack.
     this.lastAOSuppress = null;
+
+    // Drain any pending queue_free requests so the static queue never carries
+    // node references across play sessions.
+    NodeBase.flushFreeQueue();
 
     // Clear the runtime scene to release resources
     if (this.runtimeGraph) {
@@ -613,6 +645,9 @@ export class SceneRunner {
         node.tick(dt);
       }
     }
+    // Safe deferred removal (Godot queue_free): dispose nodes queued during the
+    // tick pass now that tree iteration is over, before this frame renders.
+    NodeBase.flushFreeQueue();
   }
 
   private render(): void {
@@ -1108,6 +1143,9 @@ export class SceneRunner {
       },
       loadAndStartScene(path: string): Promise<void> {
         return runner.loadAndStartScene(path);
+      },
+      instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
+        return runner.instantiatePrefab(path, parent);
       },
     });
   }

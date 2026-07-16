@@ -1,0 +1,68 @@
+SHOP OBJECTS
+
+CASTLE
+Castle Floor 1
+ “Everything starts here. This is your humble hut. In future, you will add more floors to increase the Castle HP and enable additional upgrades”
+
+Castle Floor 2
+ “The second floor of your castle. Increases your Health stats by *** and gives a chance to obtain something better than just concrete and bricks”.
+
+Castle Floor 3
+ “More money allows better accommodation. The third floor increases your HP by *** and adds one more gun slot.” 
+
+Castle Floor 4
+ “If it were not for the war times, we could use the fourth floor for the conservatory or observatory… But instead we’ll have to install autonomous anti-aircraft weapon here. Now, your castle has reached *** HP”.
+
+Flag
+ “The flag of your Fatherland insures fortitude of the Castle dwellers, and adds *** Health Points”. 
+
+Turret 1
+ “Now you can miss more targets, as this automatic turret will compensate your fluffs. Hits all types of targets from 25 metres. Causes  *** damage”.
+
+Turret 2
+ “Perhaps, in future you won’t have to shoot at all. The second gun adds to the Castle’s defense, and increases damage by ***”.
+
+
+Anti-aircraft weapon 
+ “It’s so nice to relax while someone else does your job for you! Anti-aircraft weapon fires over the sights and causes  *** damage”.
+
+SUPPORT:
+
+Umbrella
+ “This is an invisible shield. Who knows whether it works at all? They say it blacks out *** percent of the damage dealt if the Castle’s HP is under 75%”.
+
+Fire support
+“The company that sent Fargo promised to secure supporting fires. When the Castle’s HP falls to 50% and less, the Royal Air Cavalry will make surgical strikes on the enemy targets each 30 seconds.”
+
+Crazy mineman
+You can pay Joe’s brother to lay automatic mines in the bridge. The new mine respawns in 5 seconds after the previous explosion. The bad guys won’t reach the Castle by land. 
+
+
+WEAPONS:
+Typical Gun
+ “The Royal Armory doesn’t look promising. But it’s better than nothing.  Clean and oil this gun, buy some ammunition, and it will serve well to the King. Meanwhile, it can hardly scare a crow.”
+
+Shotgun
+ “This gun looks more solid. It strikes with cannon balls and shoots dead. A Royal shotgun… No kidding! Royal guard motorboats are equipped with those ones.”
+
+Fire Shotgun
+ “One can call Fargo a scrooge but he’s a smooth operator. I have no idea where he found this gun, but I want it! Shoots fire balls. Has high detonation chance and increased damage. What else can a simple Gardener dream about?
+
+Note: To select this weapon in the game press button “2” twice, or click twice on the corresponding Weapon Selection section. 
+
+Minigun:
+ “My dreams have come true! Four shells in four barrels, 100 bullets in the clip. I cannot believe this till I purchase and see it in action. I just cannot believe this…”
+Recharge Rate: *** shells per second
+
+Sniper Rifle
+“One shot – one corpse. How do I, plain Gardener, know this? I’ve no idea. Perhaps, from my past life. And in this life, we have a powerful and accurate weapon with high damage points, and low recharge rate.”
+Note: To select this weapon in the game press button “4” twice, or click twice on the corresponding Weapon Selection section. 
+
+Fire Rifle
+ “If only I could have had this gun from the beginning… This war would have been over long ago! What else can I say?”
+
+Уровень повреждения - Damage
+Жизнь HP - Health Points
+Скорость выстрелов в секунду - Shot Rate
+Цена - Price
+Доступные апгрейды - Available Upgrades

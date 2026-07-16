@@ -18,6 +18,7 @@ import { ShakeBehavior } from './ShakeBehavior';
 import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
 import { CameraBrainBehavior } from './CameraBrainBehavior';
+import { Hitbox2DBehavior } from './Hitbox2DBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
 
 /**
@@ -140,6 +141,16 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Camera',
     componentClass: CameraBrainBehavior,
     keywords: ['camera', 'brain', 'cinemachine', 'virtual', 'blend', 'priority', 'follow'],
+  });
+
+  registry.registerComponent({
+    id: 'core:Hitbox2D',
+    displayName: 'Hitbox 2D',
+    description:
+      'Queryable 2D collision shape (rect/circle) with group filtering — hit-test via scene.collision2d',
+    category: 'Physics',
+    componentClass: Hitbox2DBehavior,
+    keywords: ['hitbox', 'collision', 'collider', 'area', '2d', 'overlap', 'raycast', 'hit'],
   });
 
   console.log('[ScriptRegistry] Registered built-in script components');

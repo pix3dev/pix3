@@ -24,6 +24,11 @@ export class SceneManager {
     this.sceneSaver = sceneSaver;
   }
 
+  /** Runtime prefab spawn — see {@link SceneLoader.instantiatePrefab}. */
+  async instantiatePrefab(instancePath: string, instanceId: string) {
+    return await this.sceneLoader.instantiatePrefab(instancePath, instanceId);
+  }
+
   async parseScene(sceneText: string, options: ParseSceneOptions = {}): Promise<SceneGraph> {
     return await this.sceneLoader.parseScene(sceneText, options);
   }

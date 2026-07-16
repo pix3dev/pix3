@@ -1,7 +1,9 @@
+import { Vector2, Vector3 } from 'three';
 import { Camera3D } from '../nodes/3D/Camera3D';
 import type { Camera2D } from '../nodes/2D/Camera2D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
+import { Collision2DService } from './Collision2DService';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
@@ -66,6 +68,8 @@ export interface SceneServiceDelegate {
    * graph in the shared SceneManager — the runner owns it exclusively.
    */
   loadAndStartScene(path: string): Promise<void>;
+  /** Spawn a prefab scene into the running graph (see SceneService.instantiate). */
+  instantiatePrefab?(path: string, parent?: NodeBase | null): Promise<NodeBase>;
 }
 
 /** Options for {@link SceneService.changeScene}. */
@@ -117,6 +121,8 @@ export class SceneService {
   private juiceApi: JuiceApi | null = null;
   private audioApi: AudioApi | null = null;
   private cutsceneApi: CutsceneApi | null = null;
+  private collision2dService: Collision2DService | null = null;
+  private readonly scratchPointerUnproject = new Vector3();
   /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
   private changeScenePromise: Promise<void> | null = null;
   /** Inert fallback used when no scene is running (editor previews, etc.). */
@@ -149,6 +155,7 @@ export class SceneService {
     this.changeScenePromise = null;
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
+    this.collision2dService = null;
     this.fadeOverlay?.remove();
     this.fadeOverlay = null;
     this.flashOverlay?.remove();
@@ -221,6 +228,92 @@ export class SceneService {
    */
   cancelActiveCutscene(): void {
     this.cutsceneApi?.stopAll('stopped');
+  }
+
+  /**
+   * 2D collision queries — `core:Hitbox2D` components register here; gameplay
+   * scripts hit-test via `this.scene.collision2d.overlapCircle(x, y, r, 'enemy')`,
+   * `overlapPoint`, `overlapRect`, or `raycast(x1, y1, x2, y2, group?)`.
+   */
+  get collision2d(): Collision2DService {
+    if (!this.collision2dService) {
+      this.collision2dService = new Collision2DService();
+    }
+    return this.collision2dService;
+  }
+
+  /**
+   * Current pointer position (mouse or touch — unified by InputService) in 2D
+   * world/design coordinates (origin center, Y up), or `null` when no scene is
+   * running. Unprojects through the live 2D camera, so it stays correct while a
+   * `Camera2D` pans/zooms. Godot's `get_global_mouse_position()` equivalent.
+   */
+  getPointer2DWorldPosition(target: Vector2 = new Vector2()): Vector2 | null {
+    const input = this.delegate?.getInputService();
+    if (!input) {
+      return null;
+    }
+    const inputWidth = Math.max(1, input.width);
+    const inputHeight = Math.max(1, input.height);
+
+    const uiCamera = this.delegate?.getUICamera();
+    if (uiCamera) {
+      const ndcX = (input.pointerPosition.x / inputWidth) * 2 - 1;
+      const ndcY = -((input.pointerPosition.y / inputHeight) * 2 - 1);
+      this.scratchPointerUnproject.set(ndcX, ndcY, 0).unproject(uiCamera);
+      target.set(this.scratchPointerUnproject.x, this.scratchPointerUnproject.y);
+      return target;
+    }
+
+    const logical = this.delegate?.getLogicalCameraSize();
+    const worldWidth =
+      logical && Number.isFinite(logical.width) && logical.width > 0 ? logical.width : inputWidth;
+    const worldHeight =
+      logical && Number.isFinite(logical.height) && logical.height > 0
+        ? logical.height
+        : inputHeight;
+    target.set(
+      (input.pointerPosition.x / inputWidth) * worldWidth - worldWidth / 2,
+      worldHeight / 2 - (input.pointerPosition.y / inputHeight) * worldHeight
+    );
+    return target;
+  }
+
+  /**
+   * Spawn a prefab `.pix3scene` (exactly one root node) into the running scene
+   * — Godot's `instantiate()` + `add_child()`. The subtree gets unique runtime
+   * ids, inherits services, and its components `onStart` on the next tick.
+   *
+   * `parent` may be a node or a node query (id / name / slash-path); default is
+   * the first scene root. In 2D the parent decides draw order (tree order).
+   * Despawn with `node.dispose()` — it detaches components (firing `onDetach`)
+   * and releases resources.
+   *
+   * ```ts
+   * const enemy = await this.scene.instantiate(
+   *   'res://src/assets/prefabs/balloon.pix3scene',
+   *   { parent: 'enemies' }
+   * );
+   * enemy.position.set(320, 120, 0);
+   * ```
+   */
+  async instantiate(
+    path: string,
+    options: { parent?: NodeBase | string | null } = {}
+  ): Promise<NodeBase> {
+    if (!this.delegate?.instantiatePrefab) {
+      throw new Error('[SceneService] instantiate requires a running scene.');
+    }
+    let parent: NodeBase | null = null;
+    if (typeof options.parent === 'string') {
+      parent = this.findNode(options.parent);
+      if (!parent) {
+        throw new Error(`[SceneService] instantiate: parent "${options.parent}" not found.`);
+      }
+    } else {
+      parent = options.parent ?? null;
+    }
+    return this.delegate.instantiatePrefab(path, parent);
   }
 
   /** The live InputService for the running scene, or null (editor previews). */

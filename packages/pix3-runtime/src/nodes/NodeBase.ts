@@ -483,6 +483,58 @@ export class NodeBase extends Object3D {
     return this.groups.has(group.trim());
   }
 
+  /** Nodes queued by {@link queueFree}, drained by the runtime each frame. */
+  private static readonly freeQueue: NodeBase[] = [];
+  private _freeQueued = false;
+
+  /**
+   * Queue this node (and its subtree) for safe removal at the end of the
+   * current frame — Godot's `queue_free()`. Safe to call from a component's
+   * own `onUpdate` (immediate `dispose()` there would mutate the tree while
+   * the runtime is still iterating it). Components across the subtree get a
+   * proper `onDetach` (unregistering hitboxes, signal cleanup) before the
+   * resources are released.
+   */
+  queueFree(): void {
+    if (this._disposed || this._freeQueued) {
+      return;
+    }
+    this._freeQueued = true;
+    NodeBase.freeQueue.push(this);
+  }
+
+  /**
+   * Drain the {@link queueFree} queue: detach components subtree-deep (firing
+   * `onDetach`), then dispose each queued node. Called by the SceneRunner after
+   * the frame's node ticks; tests may call it manually.
+   */
+  static flushFreeQueue(): void {
+    if (NodeBase.freeQueue.length === 0) {
+      return;
+    }
+    const queued = NodeBase.freeQueue.splice(0, NodeBase.freeQueue.length);
+    for (const node of queued) {
+      node._freeQueued = false;
+      if (node._disposed) {
+        continue;
+      }
+      node.detachComponentsDeep();
+      node.dispose();
+    }
+  }
+
+  /** Detach every component in this subtree, firing their `onDetach`. */
+  private detachComponentsDeep(): void {
+    while (this.components.length > 0) {
+      this.removeComponent(this.components[this.components.length - 1]);
+    }
+    for (const child of [...this.children]) {
+      if (child instanceof NodeBase) {
+        child.detachComponentsDeep();
+      }
+    }
+  }
+
   /**
    * Free all GPU/runtime resources owned by this node and its entire subtree.
    *

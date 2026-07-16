@@ -1,0 +1,42 @@
+# Enemy balloon prefab — typical aerostat (GDD "S" class, unit id 33).
+# Spawned at runtime by WaveSpawner via scene.instantiate(); the spawner
+# overrides speed/hp/score per wave entry. Compound (multi-part) units in M3
+# follow this same prefab pattern with extra child parts + hitboxes.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Typical enemy balloon (prefab)
+root:
+  - id: balloon
+    type: Sprite2D
+    name: Enemy Balloon
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/SU_typical.png' }
+      width: 66
+      height: 38
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: balloon-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 60
+          height: 34
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: balloon-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 55
+          score: 8
+          castleDamage: 0.08
+          stopX: 0
+    children: []

@@ -1,0 +1,53 @@
+[1] // Lucky_1
+[2] // Lucky_2
+[3] // Slevin_1
+[4] // Slevin_2
+[5] // Avalon1_1
+[6] // Avalon1_2
+[7] // Avalon1_3
+[8] // Avalon1_4
+[9] // Avalon2_1
+[10] // Avalon2_2
+[11] // Avalon2_3
+[12] // Avalon2_4
+[13] // Lavalon1_1
+[14] // Lavalon1_2
+[15] // Lavalon1_3
+[16] // Lavalon1_4
+[17] // Lavalon2_1
+[18] // Lavalon2_2
+[19] // Lavalon2_3
+[20] // Lavalon2_4
+[21] // NZ_1 *(tip=0|1)+dop_x
+[22] // NZ_2 *(tip=0|1)+dop_x
+[23] // NZ_3
+[24] // NZ_4
+[25] // NZ_5
+[26] // SUC_1 *(tip=0|1)+dop_x
+[27] // SUC_2 *(tip=0|1)+dop_x
+[28] // SUC_3
+[29] // SUC_4
+[30] // Fatty
+[31] // Fish
+[32] // Splash
+[33] // S
+[34] // S_Nut
+[35] // Unik_1_1
+[36] // Unik_1_2
+[37] // Unik_1_3
+[38] // Unik_1_4
+[39] // Unik_2_1 *(tip=1|2|3)
+[40] // Unik_2_2 *(tip=1|2|3)
+[41] // Unik_2_3
+[42] // Unik_3_1
+[43] // Urik_1_1 
+[44] // Urik_1_2
+[45] // Urik_1_3
+[46] // Urik_2_1*(tip=1|2|3)
+[47] // Urik_2_2 *(tip=1|2|3)
+[48] // Urik_3_1
+
+
+
+
+

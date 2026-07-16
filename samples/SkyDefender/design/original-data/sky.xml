@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Start>
+<SPEED num="1">0.57</SPEED>
+<SPEED num="2">0.27</SPEED>
+<SPEED num="3">0.17</SPEED>
+<SPEED num="4">0.7</SPEED>
+<DLINA num="0">2560</DLINA>
+<SKY num="1">
+	<tip>1</tip>
+	<alpha>1</alpha>
+	<x>0</x>
+	<y>-100</y>
+	<front>1</front>
+</SKY>
+<SKY num="2">
+	<tip>1</tip>
+	<alpha>1</alpha>
+	<x>47</x>
+	<y>388</y>
+	<front>1</front>
+</SKY>
+<SKY num="3">
+	<tip>1</tip>
+	<alpha>1</alpha>
+	<x>500</x>
+	<y>300</y>
+	<front>1</front>
+</SKY>
+<SKY num="4">
+	<tip>1</tip>
+	<alpha>1</alpha>
+	<x>1600</x>
+	<y>200</y>
+	<front>1</front>
+</SKY>
+<SKY num="5">
+	<tip>2</tip>
+	<alpha>1</alpha>
+	<x>1500</x>
+	<y>200</y>
+	<front>1</front>
+</SKY>
+<SKY num="6">
+	<tip>3</tip>
+	<alpha>1</alpha>
+	<x>1200</x>
+	<y>200</y>
+	<front>1</front>
+</SKY>
+<SKY num="7">
+	<tip>4</tip>
+	<alpha>1</alpha>
+	<x>1100</x>
+	<y>300</y>
+	<front>1</front>
+</SKY>
+<SKY num="8">
+	<tip>4</tip>
+	<alpha>1</alpha>
+	<x>0</x>
+	<y>200</y>
+	<front>1</front>
+</SKY>
+<SKY num="9">
+	<tip>4</tip>
+	<alpha>1</alpha>
+	<x>100</x>
+	<y>-200</y>
+	<front>1</front>
+</SKY>
+<SKY num="10">
+	<tip>7</tip>
+	<alpha>1</alpha>
+	<x>2000</x>
+	<y>200</y>
+	<front>1</front>
+</SKY>
+<SKY num="11">
+	<tip>7</tip>
+	<alpha>1</alpha>
+	<x>1800</x>
+	<y>-300</y>
+	<front>1</front>
+</SKY>
+<SKY num="12">
+	<tip>7</tip>
+	<alpha>0.7</alpha>
+	<x>300</x>
+	<y>-250</y>
+	<front>2</front>
+</SKY>
+<SKY num="13">
+	<tip>6</tip>
+	<alpha>0.7</alpha>
+	<x>-100</x>
+	<y>-100</y>
+	<front>2</front>
+</SKY>
+<SKY num="14">
+	<tip>4</tip>
+	<alpha>0.7</alpha>
+	<x>400</x>
+	<y>-100</y>
+	<front>2</front>
+</SKY>
+<SKY num="15">
+	<tip>4</tip>
+	<alpha>0.7</alpha>
+	<x>700</x>
+	<y>-200</y>
+	<front>2</front>
+</SKY>
+<SKY num="16">
+	<tip>3</tip>
+	<alpha>0.7</alpha>
+	<x>1400</x>
+	<y>-100</y>
+	<front>2</front>
+</SKY>
+<SKY num="17">
+	<tip>2</tip>
+	<alpha>0.7</alpha>
+	<x>1800</x>
+	<y>0</y>
+	<front>2</front>
+</SKY>
+<SKY num="18">
+	<tip>1</tip>
+	<alpha>0.7</alpha>
+	<x>600</x>
+	<y>250</y>
+	<front>2</front>
+</SKY>
+<SKY num="19">
+	<tip>6</tip>
+	<alpha>0.7</alpha>
+	<x>0</x>
+	<y>200</y>
+	<front>2</front>
+</SKY>
+<SKY num="20">
+	<tip>4</tip>
+	<alpha>0.7</alpha>
+	<x>370</x>
+	<y>250</y>
+	<front>2</front>
+</SKY>
+<SKY num="21">
+	<tip>4</tip>
+	<alpha>0.7</alpha>
+	<x>1100</x>
+	<y>200</y>
+	<front>2</front>
+</SKY>
+<SKY num="22">
+	<tip>3</tip>
+	<alpha>0.7</alpha>
+	<x>1400</x>
+	<y>200</y>
+	<front>2</front>
+</SKY>
+<SKY num="23">
+	<tip>2</tip>
+	<alpha>0.7</alpha>
+	<x>2100</x>
+	<y>300</y>
+	<front>2</front>
+</SKY>
+<SKY num="24">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>0</x>
+	<y>-100</y>
+	<front>3</front>
+</SKY>
+<SKY num="25">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>250</x>
+	<y>-50</y>
+	<front>3</front>
+</SKY>
+<SKY num="26">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>550</x>
+	<y>-100</y>
+	<front>3</front>
+</SKY>
+<SKY num="27">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>750</x>
+	<y>300</y>
+	<front>3</front>
+</SKY>
+<SKY num="28">
+	<tip>2</tip>
+	<alpha>0.47</alpha>
+	<x>450</x>
+	<y>350</y>
+	<front>3</front>
+</SKY>
+<SKY num="29">
+	<tip>2</tip>
+	<alpha>0.47</alpha>
+	<x>1000</x>
+	<y>0</y>
+	<front>3</front>
+</SKY>
+<SKY num="30">
+	<tip>2</tip>
+	<alpha>0.47</alpha>
+	<x>1400</x>
+	<y>-50</y>
+	<front>3</front>
+</SKY>
+<SKY num="31">
+	<tip>3</tip>
+	<alpha>0.47</alpha>
+	<x>1700</x>
+	<y>150</y>
+	<front>3</front>
+</SKY>
+<SKY num="32">
+	<tip>4</tip>
+	<alpha>0.47</alpha>
+	<x>2000</x>
+	<y>250</y>
+	<front>3</front>
+</SKY>
+<SKY num="33">
+	<tip>6</tip>
+	<alpha>0.47</alpha>
+	<x>2100</x>
+	<y>150</y>
+	<front>3</front>
+</SKY>
+<SKY num="34">
+	<tip>6</tip>
+	<alpha>0.47</alpha>
+	<x>1100</x>
+	<y>250</y>
+	<front>3</front>
+</SKY>
+<SKY num="35">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>1100</x>
+	<y>250</y>
+	<front>3</front>
+</SKY>
+<SKY num="36">
+	<tip>1</tip>
+	<alpha>0.47</alpha>
+	<x>900</x>
+	<y>200</y>
+	<front>3</front>
+</SKY>
+
+
+<SKY num="37">
+	<tip>1</tip>
+	<alpha>0.27</alpha>
+	<x>900</x>
+	<y>300</y>
+	<front>4</front>
+</SKY>
+<SKY num="38">
+	<tip>1</tip>
+	<alpha>0.27</alpha>
+	<x>1300</x>
+	<y>-100</y>
+	<front>4</front>
+</SKY>
+<SKY num="39">
+	<tip>2</tip>
+	<alpha>0.27</alpha>
+	<x>1600</x>
+	<y>-100</y>
+	<front>4</front>
+</SKY>
+<SKY num="40">
+	<tip>2</tip>
+	<alpha>0.27</alpha>
+	<x>1900</x>
+	<y>-50</y>
+	<front>4</front>
+</SKY>
+<SKY num="41">
+	<tip>3</tip>
+	<alpha>0.27</alpha>
+	<x>2200</x>
+	<y>-50</y>
+	<front>4</front>
+</SKY>
+<SKY num="42">
+	<tip>3</tip>
+	<alpha>0.27</alpha>
+	<x>-600</x>
+	<y>150</y>
+	<front>4</front>
+</SKY>
+<SKY num="43">
+	<tip>3</tip>
+	<alpha>0.7</alpha>
+	<x>-300</x>
+	<y>-250</y>
+	<front>2</front>
+</SKY>
+<SKY num="44">
+	<tip>4</tip>
+	<alpha>0.7</alpha>
+	<x>-700</x>
+	<y>-250</y>
+	<front>2</front>
+</SKY>
+
+</Start>

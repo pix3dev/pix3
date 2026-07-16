@@ -1,0 +1,15 @@
+version: 1.0.0
+viewportBaseSize:
+  width: 1920
+  height: 1080
+ambientOcclusion: baked
+projectType: 2d
+targetPlatform: desktop
+quality:
+  antialias: true
+  shadows: true
+  maxPixelRatio: 3
+metadata:
+  projectName: SkyDefender
+  templateId: empty-2d
+autoloads: []

@@ -1,0 +1,168 @@
+<font color='#FFCC00'>Castle Floor 1</font>\n
+Everything starts here. This is your humble hut. In future, you will add more\n 
+floors to increase the Castle HP and enable additional upgrades.\n
+\n
+<font color='#FFCC00'>Price: </font>10.000       <font color='#FFCC00'>Upgrade: </font>+200HP
+
+
+
+<font color='#FFCC00'>Castle Floor 2</font>\n
+The second floor of your castle. Increases your Health stats by <font color='#FFCC00'>+450</font> and gives\n
+ a chance to obtain something better than just concrete and bricks.\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Upgrade: </font>+450HP
+
+
+
+<font color='#FFCC00'>Castle Floor 3</font>\n
+More money allows better accommodation. The third floor increases your HP by\n 
+<font color='#FFCC00'>750</font> and adds one more gun slot.\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Upgrade: </font>+750HP
+
+
+
+<font color='#FFCC00'>Castle Floor 4</font>\n
+If it were not for the war times, we could use the fourth floor for the conservatory or observatory…\n 
+But instead we’ll have to install autonomous anti-aircraft weapon here.\n 
+Now, your castle has reached <font color='#FFCC00'>1000</font> HP\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Upgrade: </font>+1.000HP
+
+
+
+<font color='#FFCC00'>Flag</font>\n
+The flag of your Fatherland insures fortitude of the Castle dwellers, and adds\n 
+<font color='#FFCC00'>70</font> Health Points.\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Upgrade: </font>+70HP
+
+
+
+<font color='#FFCC00'>Turret 1</font>\n
+Now you can miss more targets, as this automatic turret will compensate your\n
+ fluffs. Hits all types of targets from 25 metres. Causes  <font color='#FFCC00'>DMG</font> damage\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1s
+
+
+
+<font color='#FFCC00'>Turret 2</font>\n
+Perhaps, in future you won’t have to shoot at all. The second gun adds to the\n 
+Castle’s defense, and increases damage by <font color='#FFCC00'>DMG</font>.\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1s
+
+
+
+<font color='#FFCC00'>Anti-aircraft weapon</font>\n
+It’s so nice to relax while someone else does your job for you!\n 
+Anti-aircraft weapon fires over the sights and causes  <font color='#FFCC00'>DMG</font> damage\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>2.6s
+
+
+
+<font color='#FFCC00'>Repair Man</font>\n
+Brother Joe promises to repair Castle from time to time. If Castle HP drops below\n
+ 25% then HE COMES. Neverhteless due to low repair knowledge the outcome\n
+ will be around ~10-70 HP at once.\n
+<font color='#FFCC00'>Price: </font>PRICE       
+
+
+
+
+<font color='#FFCC00'>Crazy mineman</font>\n
+You can pay Joe’s brother to lay automatic mines in the bridge. The new mine\n 
+respawns in 10 seconds after the previous explosion.\n 
+The bad guys won’t reach the Castle by land.\n 
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>10s
+
+
+
+<font color='#FFCC00'>Fire support</font>\n
+The company that sent Fargo promised to secure supporting fires. When the\n 
+Castle’s HP falls to 50% and less, the Royal Air Cavalry will make\n 
+surgical strikes on the enemy targets each 30 seconds.\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>30s
+
+
+
+
+<font color='#FFCC00'>Typical Gun</font>\n
+The Royal Armory doesn’t look promising. But it’s better than nothing. Clean\n 
+and oil this gun, buy some ammunition, and it  will serve well to the King.\n
+Meanwhile, it can hardly scare a crow.\n
+<font color='#FFCC00'>Price: </font>7.000       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1s
+
+
+
+
+<font color='#FFCC00'>Royal Gun</font>\n
+The Royal Armory doesn’t look promising. But it’s better than nothing. Clean\n 
+and oil this gun, buy some ammunition, and it  will serve well to the King.\n 
+Meanwhile, it can hardly scare a crow.\n
+<font color='#FFCC00'>Price: </font>7.000       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>0.5s
+
+
+
+
+<font color='#FFCC00'>Shotgun</font>\n
+This gun looks more solid. It strikes with cannon balls and shoots dead. A Royal shotgun…\n
+ No kidding! Royal guard motorboats are equipped with those ones.\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1.5s
+
+
+
+
+<font color='#FFCC00'>Royal Fire Shotgun</font>\n
+One can call Fargo a scrooge but he’s a smooth operator. I have no idea where\n
+ he found this gun, but I want it! Shoots fire balls. Has high detonation chance\n 
+and increased damage. What else can a simple Gardener dream about?\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1.5s
+
+
+
+
+<font color='#FFCC00'>Minigun</font>\n
+My dreams have come true! Four shells in four barrels, 100 bullets in the clip.\n 
+I cannot believe this till I purchase and see it in action.\n 
+I just cannot believe this…”\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>0.25s
+
+
+
+
+<font color='#FFCC00'>Royal Minigun</font>\n
+My dreams have come true! Four shells in four barrels, 100 bullets in the clip.\n 
+I cannot believe this till I purchase and see it in action.\n 
+I just cannot believe this…”\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>0.12s
+
+
+
+
+<font color='#FFCC00'>Sniper Rifle</font>\n
+One shot – one corpse. How do I, plain Gardener, know this? I’ve no idea.\n 
+Perhaps, from my past life. And in this life, we have a powerful and accurate\n
+ weapon with high damage points, and low recharge rate.\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1s
+
+
+
+
+<font color='#FFCC00'>Fire Rifle</font>\n
+If only I could have had this gun from the beginning…\n 
+This war would have been over long ago! What else can I say?\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG       <font color='#FFCC00'>Shot Rate: </font>1s
+
+
+
+
+<font color='#FFCC00'>Increase Damage</font>\n
+\n
+Your gun damage Increased\n
+\n
+<font color='#FFCC00'>Price: </font>PRICE       <font color='#FFCC00'>Damage: </font>DMG      

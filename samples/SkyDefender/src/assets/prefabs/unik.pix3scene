@@ -1,0 +1,105 @@
+# Unik — compound aerostat prefab (GDD "Multi Unit", unit id 39/40): carrier
+# balloon + ropes + armed gondola. Every part carries its own core:Hitbox2D so
+# the player can shoot the unit apart (see CompoundBalloon for the scenarios).
+# Draw order: ropes behind, then body, gondola in front.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Compound enemy balloon Unik (prefab)
+root:
+  - id: unik
+    type: Group2D
+    name: Unik
+    properties:
+      width: 70
+      height: 92
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unik-logic
+        type: user:CompoundBalloon
+        enabled: true
+        config:
+          bodyHp: 100
+          ropesHp: 30
+          gondolaHp: 60
+          speed: 40
+          stopX: 0
+          score: 20
+          gondolaScore: 8
+          castleDamage: 0.12
+    children:
+      - id: unik-ropes
+        type: Sprite2D
+        name: Unik Ropes
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_ropes.png' }
+          width: 52
+          height: 33
+          transform:
+            position: [0, -2]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: unik-ropes-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 36
+              height: 26
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: unik-body
+        type: Sprite2D
+        name: Unik Body
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_body.png' }
+          width: 61
+          height: 33
+          transform:
+            position: [0, 27]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: unik-body-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 56
+              height: 28
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: unik-gondola
+        type: Sprite2D
+        name: Unik Gondola
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_nd.png' }
+          width: 56
+          height: 23
+          transform:
+            position: [0, -28]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: unik-gondola-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 50
+              height: 18
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
