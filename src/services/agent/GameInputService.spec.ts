@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerGameDebug } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
 import { GameInputService, type GameInputStep } from './GameInputService';
+
+interface FakeChild {
+  uuid: string;
+  visible: boolean;
+  getWorldPosition(target: { set(x: number, y: number, z: number): unknown }): {
+    x: number;
+    y: number;
+    z: number;
+  };
+}
 
 interface FakeLiveNode {
   nodeId: string;
@@ -10,13 +21,24 @@ interface FakeLiveNode {
   visible: boolean;
   position: { x: number; y: number; z: number };
   rotation: { z: number };
-  children: unknown[];
+  children: FakeChild[];
   getWorldPosition(target: { set(x: number, y: number, z: number): unknown }): {
     x: number;
     y: number;
     z: number;
   };
 }
+
+let childSeq = 0;
+const makeChild = (over: Partial<FakeChild> = {}): FakeChild => ({
+  uuid: `child-${++childSeq}`,
+  visible: true,
+  getWorldPosition(target) {
+    target.set(0, 0, 0);
+    return { x: 0, y: 0, z: 0 };
+  },
+  ...over,
+});
 
 const makeLiveNode = (over: Partial<FakeLiveNode> = {}): FakeLiveNode => {
   const node: FakeLiveNode = {
@@ -269,5 +291,60 @@ describe('GameInputService', () => {
     clearInterval(moverB);
     expect(failed.observed?.Player.directionOk).toBe(false);
     expect(failed.observed?.Player.directionNote).toMatch(/forward alignment/);
+  });
+
+  it('recognises a spawner reacting even though its container never moves', async () => {
+    // The motivating failure: a shot container stays at (0,0) — moved:false — but children spawn.
+    const spawner = makeLiveNode({ nodeId: 'pool-1', name: 'Cannonballs', children: [] });
+    const runtime = makeRuntime([spawner]);
+    const { service } = buildService(runtime);
+
+    // A cannonball appears while the input window is open, and stays.
+    setTimeout(() => spawner.children.push(makeChild({ uuid: 'ball-1', visible: true })), 20);
+
+    const result = await service.run([{ type: 'wait', ms: 60 }], {
+      expect: { Cannonballs: 'activity' },
+      settleMs: 20,
+    });
+
+    expect(result.observed?.Cannonballs.moved).toBe(false);
+    expect(result.observed?.Cannonballs.childrenChanged).toBe(true);
+    expect(result.observed?.Cannonballs.directionOk).toBe(true);
+    expect(result.verdict).toMatch(/GAMEPLAY REACTED/);
+  });
+
+  it('auto-includes the game debug provider snapshot and diffs its state', async () => {
+    let score = 0;
+    const dispose = registerGameDebug({
+      name: 'testgame',
+      snapshot: () => ({ score: (score += 10), wave: 1 }),
+    });
+    try {
+      const runtime = makeRuntime([makeLiveNode()]);
+      const { service } = buildService(runtime);
+      const result = await service.run([{ type: 'wait', ms: 10 }], { settleMs: 0 });
+
+      expect(result.game?.provider).toBe('testgame');
+      expect(result.game?.changed?.score).toEqual([10, 20]);
+      expect(result.game?.changed?.wave).toBeUndefined(); // unchanged fields are omitted
+      expect(result.verdict).toMatch(/GAMEPLAY REACTED/);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('verdict says NO ACTIVITY when a watched node does nothing', async () => {
+    const idle = makeLiveNode({ name: 'Idle' });
+    const runtime = makeRuntime([idle]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'wait', ms: 20 }], {
+      observe: ['Idle'],
+      settleMs: 0,
+    });
+
+    expect(result.observed?.Idle.moved).toBe(false);
+    expect(result.observed?.Idle.after?.childCount).toBe(0);
+    expect(result.verdict).toMatch(/NO ACTIVITY/);
   });
 });

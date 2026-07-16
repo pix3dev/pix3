@@ -624,7 +624,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the result in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Pass observe:['Player'] to get each node's live position before/after. Each observed delta reports `moved`, plus `alignForward`/`alignRight` — the travel direction vs the node's facing (+1 forward along its nose, ~0 = sliding SIDEWAYS, −1 backward). `moved` alone does NOT prove correctness: a car driving sideways is still `moved:true`. To assert direction, pass expect:{'PlayerCar':'forward'} and read observed.PlayerCar.directionOk (values: forward | backward | sideways | moving | still). Example: {steps:[{type:'key',code:'ArrowUp',ms:800}],expect:{PlayerCar:'forward'}} → directionOk===true means the car really drives along its nose.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -664,15 +664,15 @@ export class AgentToolRegistry {
               type: 'array',
               items: { type: 'string' },
               description:
-                'Node names/ids to snapshot before and after (position, moved, alignForward/alignRight).',
+                'Node names/ids to watch over the window: transform (moved, alignForward/alignRight), children (childCount/visibleChildCount), and `activity` (spawned/removed, visibleChildPeak, maxChildDistance, stateChanges). Watch the container of a spawner/pool (e.g. "Cannonballs"), not just the player. Max 8 tracked.',
             },
             expect: {
               type: 'object',
               description:
-                "Per-node motion assertion, e.g. {'PlayerCar':'forward'}. Each named node is auto-observed and gets a directionOk verdict. Values: forward | backward | sideways | moving | still.",
+                "Per-node assertion, e.g. {'PlayerCar':'forward'} or {'Cannonballs':'activity'}. Each named node is auto-observed and gets a directionOk verdict. Use 'activity' for spawners/shooters/pools/HUD that react without moving. Values: forward | backward | sideways | moving | still | activity.",
               additionalProperties: {
                 type: 'string',
-                enum: ['forward', 'backward', 'sideways', 'moving', 'still'],
+                enum: ['forward', 'backward', 'sideways', 'moving', 'still', 'activity'],
               },
             },
             settleMs: {
@@ -696,7 +696,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live positions of nodes in the RUNNING game (requires play mode). Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000) it samples twice and reports per-node movement deltas + `moved`, plus `alignForward`/`alignRight` (travel direction vs the node's nose: ~0 forward-alignment = moving sideways) — e.g. verify an AI car is driving around, and driving in the direction it faces, WITHOUT sending input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
         inputSchema: {
           type: 'object',
           properties: {

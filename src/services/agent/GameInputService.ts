@@ -1,9 +1,16 @@
 import { Vector3 } from 'three';
 import { injectable, inject } from '@/fw/di';
 import { appState } from '@/state';
-import { errors as capturedErrors } from '@/core/agent-introspection';
+import { errors as capturedErrors, safeSerialize, type Json } from '@/core/agent-introspection';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
-import { NodeBase, type SceneRunner } from '@pix3/runtime';
+import { NodeBase, getGameDebug, type SceneRunner } from '@pix3/runtime';
+import {
+  NodeWatchRecorder,
+  type NodeActivity,
+  type WatchNodeLike,
+} from '@/services/agent/NodeWatchRecorder';
+
+export type { NodeActivity, WatchLogEntry } from '@/services/agent/NodeWatchRecorder';
 
 /**
  * One scripted input step for {@link GameInputService.run}. Coordinates are in
@@ -40,6 +47,17 @@ export interface LiveNodeSnapshot {
   /** World position — what actually moved on screen. */
   worldPosition: { x: number; y: number; z: number };
   rotationZ: number;
+  /**
+   * Direct child count. A spawner/pool container never MOVES — this (and
+   * `visibleChildCount`) is how you tell it "did something".
+   */
+  childCount: number;
+  /**
+   * Direct children currently visible. Object pools recycle by toggling
+   * `visible`, not by adding/removing — so ammo in flight shows up here, not in
+   * `childCount`.
+   */
+  visibleChildCount: number;
 }
 
 /**
@@ -48,7 +66,13 @@ export interface LiveNodeSnapshot {
  * verifiable claim, not an eyeball call). 'sideways' is the classic controller
  * bug — moving across the body instead of along the nose.
  */
-export type GameInputExpectation = 'forward' | 'backward' | 'sideways' | 'moving' | 'still';
+export type GameInputExpectation =
+  | 'forward'
+  | 'backward'
+  | 'sideways'
+  | 'moving'
+  | 'still'
+  | 'activity';
 
 export interface ObservedNodeDelta {
   before: LiveNodeSnapshot | null;
@@ -72,6 +96,32 @@ export interface ObservedNodeDelta {
   directionOk?: boolean;
   /** Human-readable reason behind `directionOk`. */
   directionNote?: string;
+  /** True when childCount or visibleChildCount differs between endpoints. */
+  childrenChanged?: boolean;
+  /**
+   * What the node did DURING the window — spawns, visible-child bursts, child
+   * motion, state changes — captured by sampling, not just the endpoints. This
+   * is what proves a spawner/shooter/pool worked even when its own transform
+   * never moved. Present whenever a watch window ran.
+   */
+  activity?: NodeActivity;
+}
+
+/**
+ * The running game's own debug snapshot (from a registered `GameDebugProvider`),
+ * auto-included when one exists. This is the richest gameplay signal — a game
+ * can expose ammo/score/wave/health directly — so verifying "shooting works"
+ * can be a state diff (`game.changed['gun.ammo']`) instead of an eyeball call.
+ */
+export interface GameStateDelta {
+  /** Provider name, e.g. 'skydefender'. */
+  provider: string;
+  /** The snapshot taken AFTER the window (or before, for single-shot observe). */
+  snapshot: Json;
+  /** Scalar fields that changed over the window: 'gun.ammo.mag' -> [3, 0]. */
+  changed?: Record<string, [Json, Json]>;
+  /** Set instead of a diff when the provider's snapshot() threw. */
+  error?: string;
 }
 
 export interface GameInputResult {
@@ -83,6 +133,13 @@ export interface GameInputResult {
   observed?: Record<string, ObservedNodeDelta>;
   /** Runtime errors captured while the input script ran. */
   newErrors: Array<{ source: string; message: string }>;
+  /** The running game's own debug snapshot + diff, when a GameDebugProvider is registered. */
+  game?: GameStateDelta;
+  /**
+   * One-line fused summary of every channel. READ THIS FIRST: `moved:false` does
+   * NOT mean the game is dead — a spawner/pool/HUD reacts without moving.
+   */
+  verdict?: string;
 }
 
 export interface GameObserveResult {
@@ -97,6 +154,10 @@ export interface GameObserveResult {
    * name/id was wrong (a bare null left the model unable to tell those apart).
    */
   hint?: string;
+  /** The running game's own debug snapshot (+ diff when sampled), when a provider is registered. */
+  game?: GameStateDelta;
+  /** One-line fused summary — present when sampleMs > 0 (a window was recorded). */
+  verdict?: string;
 }
 
 const MAX_TOTAL_MS = 15_000;
@@ -114,6 +175,39 @@ const SYNTHETIC_POINTER_ID = 31337;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/** Max scalar paths reported by a game-snapshot diff (payload discipline). */
+const MAX_GAME_DIFF_PATHS = 20;
+
+const isPlainObject = (value: Json): value is { [key: string]: Json } =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Short display form of a Json scalar for one-line verdicts. */
+const fmtScalar = (value: Json): string =>
+  typeof value === 'string' ? value : JSON.stringify(value);
+
+/**
+ * Dot-path diff between two Json snapshots down to `depth` object levels; scalar
+ * (and array) leaves that differ become `path -> [before, after]`. Capped so a
+ * big game snapshot can't blow up the tool payload.
+ */
+function diffJsonPaths(before: Json, after: Json, depth = 2): Record<string, [Json, Json]> {
+  const out: Record<string, [Json, Json]> = {};
+  const walk = (a: Json, b: Json, path: string, d: number): void => {
+    if (Object.keys(out).length >= MAX_GAME_DIFF_PATHS) return;
+    if (d > 0 && isPlainObject(a) && isPlainObject(b)) {
+      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        walk(a[key] ?? null, b[key] ?? null, path ? `${path}.${key}` : key, d - 1);
+      }
+      return;
+    }
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      out[path || '(root)'] = [a, b];
+    }
+  };
+  walk(before, after, '', depth);
+  return out;
+}
 
 /** Best-effort `key` value for a `code` (InputService latches both, scripts poll `code`). */
 const keyForCode = (code: string): string => {
@@ -187,12 +281,16 @@ export class GameInputService {
       new Set([...(options?.observe ?? []), ...Object.keys(options?.expect ?? {})])
     );
     let stepsRun = 0;
+    const recorder = observeQueries.length ? this.makeRecorder(runner, observeQueries) : null;
     try {
       const before = this.snapshotMany(runner, observeQueries);
+      const gameBefore = this.snapshotGame();
+      recorder?.start();
 
       for (const step of steps) {
         const stepError = await this.runStep(runtime, step);
         if (stepError) {
+          recorder?.stop();
           return {
             ...failure(stepError),
             stepsRun,
@@ -205,10 +303,17 @@ export class GameInputService {
 
       await sleep(Math.max(0, options?.settleMs ?? DEFAULT_SETTLE_MS));
 
+      const activities = recorder ? recorder.stop() : new Map<string, NodeActivity>();
+      const gameAfter = this.snapshotGame();
+      const game = this.describeGameDelta(gameBefore, gameAfter);
+
       const observed: Record<string, ObservedNodeDelta> = {};
       for (const [query, beforeSnap] of before) {
         const afterSnap = this.snapshotOne(runner, query);
-        observed[query] = this.describeDelta(beforeSnap, afterSnap);
+        const delta = this.describeDelta(beforeSnap, afterSnap);
+        const activity = activities.get(query);
+        if (activity) delta.activity = activity;
+        observed[query] = delta;
       }
       if (options?.expect) {
         for (const [query, expectation] of Object.entries(options.expect)) {
@@ -221,12 +326,24 @@ export class GameInputService {
         }
       }
 
+      const newErrors = this.newErrorsSince(errorsBefore);
       return {
         ok: true,
         stepsRun,
         resumedFromFocusPause: wasPaused,
         ...(observeQueries.length ? { observed } : {}),
-        newErrors: this.newErrorsSince(errorsBefore),
+        ...(game ? { game } : {}),
+        ...(observeQueries.length || game
+          ? {
+              verdict: this.buildVerdict(
+                observed,
+                game,
+                newErrors.length,
+                recorder?.droppedWatchCount ?? 0
+              ),
+            }
+          : {}),
+        newErrors,
       };
     } finally {
       this.playSession.setFocusPauseSuppressed(false);
@@ -266,16 +383,32 @@ export class GameInputService {
     };
     if (!(sampleMs > 0)) {
       const hint = hintFor(first.filter(([, snap]) => snap === null).map(([query]) => query));
-      return { ok: true, nodes: Object.fromEntries(first), ...(hint ? { hint } : {}) };
+      const game = this.describeGameDelta(null, this.snapshotGame());
+      return {
+        ok: true,
+        nodes: Object.fromEntries(first),
+        ...(game ? { game } : {}),
+        ...(hint ? { hint } : {}),
+      };
     }
 
     const clampedMs = Math.min(sampleMs, MAX_SAMPLE_MS);
+    const recorder = this.makeRecorder(runtime.runner, targets);
     this.playSession.setFocusPauseSuppressed(true);
     try {
+      const gameBefore = this.snapshotGame();
+      recorder.start();
       await sleep(clampedMs);
+      const activities = recorder.stop();
+      const gameAfter = this.snapshotGame();
+      const game = this.describeGameDelta(gameBefore, gameAfter);
+
       const movement: Record<string, ObservedNodeDelta> = {};
       for (const [query, beforeSnap] of first) {
-        movement[query] = this.describeDelta(beforeSnap, this.snapshotOne(runtime.runner, query));
+        const delta = this.describeDelta(beforeSnap, this.snapshotOne(runtime.runner, query));
+        const activity = activities.get(query);
+        if (activity) delta.activity = activity;
+        movement[query] = delta;
       }
       const hint = hintFor(
         Object.entries(movement)
@@ -287,6 +420,8 @@ export class GameInputService {
         nodes: Object.fromEntries(first),
         movement,
         sampleMs: clampedMs,
+        ...(game ? { game } : {}),
+        verdict: this.buildVerdict(movement, game, 0, recorder.droppedWatchCount),
         ...(hint ? { hint } : {}),
       };
     } finally {
@@ -474,6 +609,7 @@ export class GameInputService {
       return null;
     }
     const world = node.getWorldPosition(GameInputService.scratchWorld);
+    const children = node.children ?? [];
     return {
       nodeId: node.nodeId,
       name: node.name,
@@ -482,6 +618,8 @@ export class GameInputService {
       position: { x: node.position.x, y: node.position.y, z: node.position.z },
       worldPosition: { x: world.x, y: world.y, z: world.z },
       rotationZ: node.rotation.z,
+      childCount: children.length,
+      visibleChildCount: children.reduce((n, child) => n + (child.visible !== false ? 1 : 0), 0),
     };
   }
 
@@ -510,6 +648,9 @@ export class GameInputService {
       after,
       delta: { x: dx, y: dy, z: dz, distance },
       moved: distance > MOVED_THRESHOLD,
+      childrenChanged:
+        before.childCount !== after.childCount ||
+        before.visibleChildCount !== after.visibleChildCount,
     };
     // Direction-of-travel relative to the node's facing. three.js rotates the
     // local +Y ("nose") axis by rotation.z to world (-sin, cos) and +X ("right")
@@ -560,9 +701,130 @@ export class GameInputService {
           ok: moved && right !== undefined && Math.abs(right) >= DIRECTION_ALIGN_MIN,
           note: !moved ? 'did not move' : `sideways alignment ${right}${facing}`,
         };
+      case 'activity': {
+        // For spawners/shooters/pools/HUD: reacting means ANY channel fired, not motion.
+        const act = d.activity;
+        const reacted = act?.active === true || moved || d.childrenChanged === true;
+        return { ok: reacted, note: reacted ? this.describeActivity(d) : 'no activity detected' };
+      }
       default:
         return { ok: false, note: `unknown expectation "${String(expectation)}"` };
     }
+  }
+
+  /** Compact per-node activity phrase for verdicts and `directionNote`. */
+  private describeActivity(d: ObservedNodeDelta): string {
+    const bits: string[] = [];
+    if (d.moved) bits.push(`moved ${Math.round(d.delta?.distance ?? 0)}u`);
+    const act = d.activity;
+    if (act) {
+      if (act.spawned || act.removed) bits.push(`${act.spawned} spawned / ${act.removed} removed`);
+      const startVisible = d.before?.visibleChildCount ?? 0;
+      if (act.visibleChildPeak > startVisible) {
+        bits.push(`${act.visibleChildPeak} children shown (peak)`);
+      }
+      if (act.maxChildDistance > MOVED_THRESHOLD) {
+        bits.push(`child moved ${Math.round(act.maxChildDistance)}u`);
+      }
+      if (act.stateChanges) {
+        const keys = Object.keys(act.stateChanges).slice(0, 3);
+        bits.push(`state ${keys.join(', ')}`);
+      }
+    } else if (d.childrenChanged) {
+      bits.push('children changed');
+    }
+    return bits.length ? bits.join(', ') : 'reacted';
+  }
+
+  // -- game debug provider + verdict -------------------------------------------------
+
+  /** Build a watch recorder over the observed queries (null-safe resolver bound to `runner`). */
+  private makeRecorder(runner: SceneRunner, queries: string[]): NodeWatchRecorder {
+    return new NodeWatchRecorder(
+      query => this.findLiveNode(runner, query) as WatchNodeLike | null,
+      queries
+    );
+  }
+
+  /** One snapshot from the running game's GameDebugProvider, if one is registered. */
+  private snapshotGame(): { name: string; snapshot?: Json; error?: string } | null {
+    const provider = getGameDebug();
+    if (!provider?.snapshot) return null;
+    try {
+      return { name: provider.name, snapshot: safeSerialize(provider.snapshot(), 5) };
+    } catch (err) {
+      return { name: provider.name, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** Combine the before/after game snapshots into a `GameStateDelta` (+ scalar diff). */
+  private describeGameDelta(
+    before: { name: string; snapshot?: Json; error?: string } | null,
+    after: { name: string; snapshot?: Json; error?: string } | null
+  ): GameStateDelta | undefined {
+    if (!after) return undefined;
+    const delta: GameStateDelta = { provider: after.name, snapshot: after.snapshot ?? null };
+    if (after.error) {
+      delta.error = after.error;
+      return delta;
+    }
+    if (before && !before.error && before.snapshot !== undefined && after.snapshot !== undefined) {
+      const changed = diffJsonPaths(before.snapshot, after.snapshot);
+      if (Object.keys(changed).length) delta.changed = changed;
+    }
+    return delta;
+  }
+
+  /**
+   * Fuse every channel into one line the model reads FIRST. The whole point is
+   * that `moved:false` must not read as "the game is dead" — a spawner, pool, or
+   * HUD reacts without its own transform ever moving.
+   */
+  private buildVerdict(
+    observed: Record<string, ObservedNodeDelta>,
+    game: GameStateDelta | undefined,
+    newErrorCount: number,
+    droppedWatchCount: number
+  ): string {
+    const parts: string[] = [];
+    const staticContainers: string[] = [];
+    let anyActivity = false;
+
+    for (const [query, delta] of Object.entries(observed)) {
+      const reacted =
+        delta.moved === true || delta.childrenChanged === true || delta.activity?.active === true;
+      if (reacted) {
+        anyActivity = true;
+        parts.push(`${query}: ${this.describeActivity(delta)}`);
+      } else if ((delta.before?.childCount ?? 0) > 0) {
+        staticContainers.push(query);
+      }
+    }
+
+    if (game?.changed && Object.keys(game.changed).length) {
+      anyActivity = true;
+      const summary = Object.entries(game.changed)
+        .slice(0, 4)
+        .map(([key, [a, b]]) => `${key} ${fmtScalar(a)}->${fmtScalar(b)}`)
+        .join('; ');
+      parts.push(`game ${summary}`);
+    }
+    if (game?.error) parts.push(`game snapshot threw: ${game.error}`);
+    if (newErrorCount > 0) parts.push(`${newErrorCount} new runtime error(s)`);
+
+    const dropped =
+      droppedWatchCount > 0
+        ? ` (${droppedWatchCount} extra watched node(s) not tracked — cap is 8)`
+        : '';
+
+    if (anyActivity) {
+      const tail = staticContainers.length
+        ? ` Own positions of ${staticContainers.join(', ')} did not move — normal for spawners/pools/HUD.`
+        : '';
+      return `GAMEPLAY REACTED: ${parts.join('; ')}.${tail}${dropped}`;
+    }
+    const errs = newErrorCount > 0 ? `${newErrorCount} new error(s)` : 'no new errors';
+    return `NO ACTIVITY: no watched node moved, no children spawned/shown, no component or game state changed, ${errs}. If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */
