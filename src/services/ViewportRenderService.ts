@@ -55,6 +55,11 @@ import {
 } from '@/features/scene/animation-asset-utils';
 import { resolveViewportClick } from '@/features/selection/SelectionScopeResolver';
 import {
+  encodeCanvasScreenshot,
+  type CanvasScreenshot,
+  type CanvasScreenshotOptions,
+} from '@/core/canvas-screenshot';
+import {
   TransformCompleteOperation,
   type TransformState,
 } from '@/features/properties/TransformCompleteOperation';
@@ -532,42 +537,13 @@ export class ViewportRendererService {
    * compositing (`preserveDrawingBuffer` is off), so reading the canvas later yields blank pixels.
    * Returns null when the viewport is not initialized (no project / canvas yet).
    */
-  captureScreenshot(
-    options: { maxSize?: number; mimeType?: 'image/png' | 'image/jpeg' | 'image/webp' } = {}
-  ): { dataBase64: string; mimeType: string; width: number; height: number } | null {
+  captureScreenshot(options: CanvasScreenshotOptions = {}): CanvasScreenshot | null {
     if (!this.renderer || !this.canvas || !this.scene || !this.camera) {
       return null;
     }
 
     this.renderFrame();
-
-    const source = this.canvas;
-    if (source.width === 0 || source.height === 0) {
-      return null;
-    }
-    const maxSize = options.maxSize && options.maxSize > 0 ? options.maxSize : 1024;
-    const scale = Math.min(1, maxSize / Math.max(source.width, source.height));
-    const width = Math.max(1, Math.round(source.width * scale));
-    const height = Math.max(1, Math.round(source.height * scale));
-
-    const copy = document.createElement('canvas');
-    copy.width = width;
-    copy.height = height;
-    const ctx = copy.getContext('2d');
-    if (!ctx) {
-      return null;
-    }
-    ctx.drawImage(source, 0, 0, width, height);
-
-    const requestedMime = options.mimeType ?? 'image/jpeg';
-    const dataUrl = copy.toDataURL(requestedMime, 0.85);
-    const mimeType = dataUrl.slice(5, dataUrl.indexOf(';'));
-    return {
-      dataBase64: dataUrl.slice(dataUrl.indexOf(',') + 1),
-      mimeType,
-      width,
-      height,
-    };
+    return encodeCanvasScreenshot(this.canvas, options);
   }
 
   /**

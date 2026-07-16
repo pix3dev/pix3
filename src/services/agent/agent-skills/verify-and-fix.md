@@ -36,9 +36,11 @@ declare a feature done without running it.
    - **Game state**: when a GameDebugProvider is registered the result carries `game.changed`
      (ammo/score/wave diff) — often the clearest proof of all. If your game has none, register one
      (see the game-prototype skill) so gameplay is legible to state, not screenshots.
-3. **Look at it** (optional but valuable): `viewport_screenshot` to see edit-mode layout, or
-   `analyze_image` with `source:"viewport"` if your model can't see images — ask e.g. "are the
-   menu buttons visible and inside the screen?".
+3. **Look at it** (optional but valuable): `viewport_screenshot` — while the game is running it
+   captures the RUNNING GAME, otherwise the edit-mode viewport (check `view` in the result;
+   `source:"game"|"editor"` forces one). If your model can't see images, use `analyze_image` with
+   `source:"viewport"` (same auto-routing) — ask e.g. "are the menu buttons visible and inside
+   the screen?".
 4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.
 
 ## Common runtime problems and fixes

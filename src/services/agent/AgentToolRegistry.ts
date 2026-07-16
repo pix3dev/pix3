@@ -25,6 +25,8 @@ import {
   type GameInputStep,
   type GameInputExpectation,
 } from '@/services/agent/GameInputService';
+import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import type { CanvasScreenshot } from '@/core/canvas-screenshot';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
@@ -169,6 +171,9 @@ export class AgentToolRegistry {
 
   @inject(GameInputService)
   private readonly gameInput!: GameInputService;
+
+  @inject(GamePlaySessionService)
+  private readonly playSession!: GamePlaySessionService;
 
   @inject(AgentAdvisorService)
   private readonly advisor!: AgentAdvisorService;
@@ -733,7 +738,7 @@ export class AgentToolRegistry {
       {
         name: 'viewport_screenshot',
         description:
-          'Capture the editor viewport as an image the model can see (edit-mode scene view; the running game canvas is not captured). Use it to visually check layout, colors, and placement.',
+          'Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The result says which view was captured (`view`).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -741,21 +746,29 @@ export class AgentToolRegistry {
               type: 'integer',
               description: 'Longest-edge cap in px (default 1024).',
             },
+            source: {
+              type: 'string',
+              enum: ['auto', 'game', 'editor'],
+              description:
+                'What to capture: "auto" (default) = the running game when play mode is active, else the editor viewport; "game" = the running game only (errors when not playing); "editor" = the edit-mode viewport even while playing.',
+            },
           },
           additionalProperties: false,
         },
-        handler: args => this.viewportScreenshot(asInt(args.maxSize, 1024)),
+        handler: args =>
+          this.viewportScreenshot(asInt(args.maxSize, 1024), asCaptureSource(args.source)),
       },
       {
         name: 'analyze_image',
         description:
-          'Ask a vision-capable helper model to look at an image and answer a question — use this when YOUR model cannot see images (no vision). source is a project image path (res:// or relative), "viewport" (a fresh editor screenshot), or a generated-image handle id. Ideal for extracting style tokens from a design reference before generating art, or QC-ing a generated sprite / the scene layout.',
+          'Ask a vision-capable helper model to look at an image and answer a question — use this when YOUR model cannot see images (no vision). source is a project image path (res:// or relative), "viewport" (a fresh screenshot: the RUNNING GAME while play mode is active, else the editor viewport; "game"/"editor" force one), or a generated-image handle id. Ideal for extracting style tokens from a design reference before generating art, or QC-ing a generated sprite / the scene layout / the running game.',
         inputSchema: {
           type: 'object',
           properties: {
             source: {
               type: 'string',
-              description: 'A project image path, "viewport", or a generation handle id.',
+              description:
+                'A project image path, "viewport" (game when playing, else editor), "game", "editor", or a generation handle id.',
             },
             question: {
               type: 'string',
@@ -1625,20 +1638,65 @@ export class AgentToolRegistry {
 
   // -- screenshot / asset generation -----------------------------------------
 
-  private viewportScreenshot(maxSize: number): Record<string, unknown> {
-    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
-    if (!shot) {
+  /**
+   * Capture pixels for the model: the running game when play mode is active
+   * ('auto'), or explicitly the game / editor viewport. The game path renders a
+   * frame on the live runtime canvas via {@link GamePlaySessionService}; the
+   * editor path uses the edit-mode viewport (proxy visuals, gizmos and all).
+   */
+  private captureView(
+    source: AgentCaptureSource,
+    maxSize: number
+  ): { shot: CanvasScreenshot; view: 'game' | 'editor'; note?: string } | { error: string } {
+    if (source !== 'editor' && appState.ui.isPlaying) {
+      const shot = this.playSession.captureScreenshot({ maxSize });
+      if (shot) {
+        return { shot, view: 'game' };
+      }
+      if (source === 'game') {
+        return {
+          error:
+            'Play mode is starting but the game canvas is not attached yet; retry in a moment.',
+        };
+      }
+    } else if (source === 'game') {
       return {
-        ok: false,
-        error: 'The viewport is not initialized yet (open a project with a scene first).',
+        error:
+          'The game is not running — call play_start first (or use source "editor" for the edit-mode viewport).',
       };
     }
+    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
+    if (!shot) {
+      return { error: 'The viewport is not initialized yet (open a project with a scene first).' };
+    }
+    return {
+      shot,
+      view: 'editor',
+      // 'auto' while isPlaying only lands here when the game canvas was not ready — say so,
+      // or the model reads the edit-mode frame as the running game.
+      ...(appState.ui.isPlaying
+        ? { note: 'The game canvas was not ready; this is the EDIT-MODE viewport instead.' }
+        : {}),
+    };
+  }
+
+  private viewportScreenshot(maxSize: number, source: AgentCaptureSource): Record<string, unknown> {
+    const capture = this.captureView(source, maxSize);
+    if ('error' in capture) {
+      return { ok: false, error: capture.error };
+    }
+    const { shot, view } = capture;
     return {
       ok: true,
+      view,
       width: shot.width,
       height: shot.height,
       mimeType: shot.mimeType,
-      note: 'The screenshot is attached as an image.',
+      note:
+        capture.note ??
+        (view === 'game'
+          ? 'The screenshot of the RUNNING GAME is attached as an image.'
+          : 'The screenshot of the edit-mode editor viewport is attached as an image.'),
       [AGENT_TOOL_IMAGES_KEY]: [
         { mimeType: shot.mimeType, data: shot.dataBase64 },
       ] satisfies AgentToolImage[],
@@ -1667,14 +1725,14 @@ export class AgentToolRegistry {
     }
   }
 
-  /** Turn an `analyze_image` source (viewport / handle / project path) into an inline image block. */
+  /** Turn an `analyze_image` source (viewport / game / handle / project path) into an inline image block. */
   private async resolveImageForAnalysis(source: string): Promise<LlmImageBlock> {
-    if (source === 'viewport') {
-      const shot = this.viewportRenderer.captureScreenshot({ maxSize: 1024 });
-      if (!shot) {
-        throw new Error('The viewport is not initialized yet (open a project with a scene first).');
+    if (source === 'viewport' || source === 'game' || source === 'editor') {
+      const capture = this.captureView(source === 'viewport' ? 'auto' : source, 1024);
+      if ('error' in capture) {
+        throw new Error(capture.error);
       }
-      return { type: 'image', mimeType: shot.mimeType, data: shot.dataBase64 };
+      return { type: 'image', mimeType: capture.shot.mimeType, data: capture.shot.dataBase64 };
     }
     // A live generation handle from generate_asset?
     if (this.assetGen.get(source)) {
@@ -1875,6 +1933,13 @@ const asString = (value: unknown): string => {
   }
   return value;
 };
+
+/** Which surface a screenshot tool captures. */
+type AgentCaptureSource = 'auto' | 'game' | 'editor';
+
+// Lenient on junk values (providers do send them for enum params): fall back to 'auto'.
+const asCaptureSource = (value: unknown): AgentCaptureSource =>
+  value === 'game' || value === 'editor' ? value : 'auto';
 
 const asInt = (value: unknown, fallback: number): number => {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value);

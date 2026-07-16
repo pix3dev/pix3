@@ -129,6 +129,89 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(false);
       expect(String(result.error)).toMatch(/not initialized/);
     });
+
+    it('captures the RUNNING GAME instead of the editor while play mode is active', async () => {
+      const gameCapture = vi.fn(() => ({
+        dataBase64: 'R0FNRQ',
+        mimeType: 'image/jpeg',
+        width: 320,
+        height: 180,
+      }));
+      const editorCapture = vi.fn(() => null);
+      const registry = buildRegistry({
+        playSession: { captureScreenshot: gameCapture },
+        viewportRenderer: { captureScreenshot: editorCapture },
+      });
+      appState.ui.isPlaying = true;
+      try {
+        const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+        expect(result.ok).toBe(true);
+        expect(result.view).toBe('game');
+        expect(result.__images).toEqual([{ mimeType: 'image/jpeg', data: 'R0FNRQ' }]);
+        expect(gameCapture).toHaveBeenCalledWith({ maxSize: 1024 });
+        expect(editorCapture).not.toHaveBeenCalled();
+      } finally {
+        appState.ui.isPlaying = false;
+      }
+    });
+
+    it('source "editor" still captures the edit-mode viewport while playing, with a note', async () => {
+      const editorCapture = vi.fn(() => ({
+        dataBase64: 'RURJVA',
+        mimeType: 'image/jpeg',
+        width: 640,
+        height: 360,
+      }));
+      const gameCapture = vi.fn();
+      const registry = buildRegistry({
+        playSession: { captureScreenshot: gameCapture },
+        viewportRenderer: { captureScreenshot: editorCapture },
+      });
+      appState.ui.isPlaying = true;
+      try {
+        const result = (await registry.execute('viewport_screenshot', {
+          source: 'editor',
+        })) as Record<string, unknown>;
+        expect(result.ok).toBe(true);
+        expect(result.view).toBe('editor');
+        expect(gameCapture).not.toHaveBeenCalled();
+        expect(String(result.note)).toMatch(/EDIT-MODE/);
+      } finally {
+        appState.ui.isPlaying = false;
+      }
+    });
+
+    it('source "game" errors when the game is not running', async () => {
+      const registry = buildRegistry({ viewportRenderer: { captureScreenshot: () => null } });
+      const result = (await registry.execute('viewport_screenshot', { source: 'game' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/not running/);
+    });
+
+    it('falls back to the editor viewport (with a note) when the game canvas is not ready', async () => {
+      const editorCapture = vi.fn(() => ({
+        dataBase64: 'RURJVA',
+        mimeType: 'image/jpeg',
+        width: 640,
+        height: 360,
+      }));
+      const registry = buildRegistry({
+        playSession: { captureScreenshot: () => null },
+        viewportRenderer: { captureScreenshot: editorCapture },
+      });
+      appState.ui.isPlaying = true;
+      try {
+        const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+        expect(result.ok).toBe(true);
+        expect(result.view).toBe('editor');
+        expect(String(result.note)).toMatch(/not ready/);
+      } finally {
+        appState.ui.isPlaying = false;
+      }
+    });
   });
 
   describe('read_skill', () => {
@@ -232,6 +315,35 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(true);
       expect(result.answer).toMatch(/red car/);
       expect(result.model).toContain('Gemini');
+    });
+
+    it('source "viewport" routes to the running game while play mode is active', async () => {
+      const gameCapture = vi.fn(() => ({
+        dataBase64: 'R0FNRQ',
+        mimeType: 'image/jpeg',
+        width: 320,
+        height: 180,
+      }));
+      const analyze = vi.fn(async () => 'the game is running');
+      const registry = buildRegistry({
+        playSession: { captureScreenshot: gameCapture },
+        viewportRenderer: { captureScreenshot: vi.fn(() => null) },
+        vision: { analyze, describeHelper: async () => null },
+      });
+      appState.ui.isPlaying = true;
+      try {
+        const result = (await registry.execute('analyze_image', {
+          source: 'viewport',
+        })) as Record<string, unknown>;
+        expect(gameCapture).toHaveBeenCalledWith({ maxSize: 1024 });
+        expect(analyze).toHaveBeenCalledWith(
+          { type: 'image', mimeType: 'image/jpeg', data: 'R0FNRQ' },
+          ''
+        );
+        expect(result.ok).toBe(true);
+      } finally {
+        appState.ui.isPlaying = false;
+      }
     });
 
     it('opens a project path, previews it, and frees the handle', async () => {
