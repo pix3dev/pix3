@@ -254,6 +254,8 @@ export interface UnitDef {
   spriteVariants?: string[];
   /** Ground vehicle: drives the bridge deck instead of flying. */
   ground?: boolean;
+  /** Enemy transporter airship (S_SS): animated brown body + static red overlay. */
+  transporter?: boolean;
   /** True until the prefab/behaviour is wired — spawner skips these gracefully. */
   unsupported?: boolean;
 }
@@ -387,6 +389,7 @@ function buildUnit(id: number): UnitDef {
     category: v.cat,
     compound: compound || undefined,
     ground: ground || undefined,
+    transporter: id === 33 ? true : undefined,
     bomber: id >= 1 && id <= 4 ? true : undefined,
     fireBomb: id === 4 ? true : undefined,
     // v15 fodder (S_SS transporter airships) carry no bomb — only Lucky/Slevin do.

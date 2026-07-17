@@ -1,0 +1,89 @@
+# Enemy transporter airship (SWF class S_SS, symbol `SS`, id 33). The numerous
+# fodder dirigible: it carries no bomb and just clutters the sky. Always RED —
+# rendered as an animated BROWN body (transporter/00000..00006, spinning
+# propeller via user:PropellerAnim) with a static red `over` overlay drawn on
+# top (the overlay leaves the propeller visible). WaveSpawner routes id 33 here;
+# it sets the EnemyBalloon stats but does NOT re-skin the art (fixed livery).
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Enemy transporter airship (prefab)
+root:
+  - id: transporter-enemy
+    type: Group2D
+    name: Enemy Transporter
+    properties:
+      width: 55
+      height: 29
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: transporter-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 50
+          height: 26
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: transporter-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 50
+          speed: 60
+          score: 4
+          castleDamage: 0
+          stopX: 0
+          attackDamage: 0
+          attackPeriod: 4
+          bomber: false
+          linkHp: 25
+          mineHp: 25
+          spritePath: 'res://src/assets/textures/enemy/air/transporter/over.png'
+    children:
+      # Brown body with the spinning propeller (numeric frames are the animation).
+      - id: transporter-body
+        type: Sprite2D
+        name: Body
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/transporter/00000.png' }
+          width: 55
+          height: 29
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: transporter-prop
+            type: user:PropellerAnim
+            enabled: true
+            config:
+              fps: 14
+              frames:
+                - 'res://src/assets/textures/enemy/air/transporter/00000.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00001.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00002.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00003.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00004.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00005.png'
+                - 'res://src/assets/textures/enemy/air/transporter/00006.png'
+        children: []
+      # Static red skin drawn on top — leaves the propeller showing.
+      - id: transporter-over
+        type: Sprite2D
+        name: Red Skin
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/transporter/over.png' }
+          width: 55
+          height: 29
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []

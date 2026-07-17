@@ -9,6 +9,8 @@ import { V15_SURVIVAL } from './SdV15';
 const BALLOON_PREFAB = 'res://src/assets/prefabs/balloon.pix3scene';
 const UNIK_PREFAB = 'res://src/assets/prefabs/unik.pix3scene';
 const TRUCK_PREFAB = 'res://src/assets/prefabs/ground-truck.pix3scene';
+/** Enemy transporter airship (S_SS) — self-contained animated+overlay prefab. */
+const TRANSPORTER_ENEMY_PREFAB = 'res://src/assets/prefabs/transporter-enemy.pix3scene';
 /** Joe's alarm cry — the original plays it on every ground-unit spawn. */
 const GROUND_ALARM_SOUND = 'res://src/assets/audio/other/warning_scream.mp3';
 
@@ -227,7 +229,13 @@ export class WaveSpawner extends Script {
       this.aliveCount = Math.max(0, this.aliveCount - 1);
       return;
     }
-    const prefab = unit.compound ? UNIK_PREFAB : unit.ground ? TRUCK_PREFAB : BALLOON_PREFAB;
+    const prefab = unit.transporter
+      ? TRANSPORTER_ENEMY_PREFAB
+      : unit.compound
+        ? UNIK_PREFAB
+        : unit.ground
+          ? TRUCK_PREFAB
+          : BALLOON_PREFAB;
     void scene
       .instantiate(prefab, { parent: String(this.config.enemiesNode) })
       .then(node => {

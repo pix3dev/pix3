@@ -206,9 +206,14 @@ export class EnemyBalloon extends Script {
     }
     node.position.y = this.baseY + Math.sin(this.bobTime * 1.7) * 4;
 
-    // Breakthrough: reached the castle column.
-    if (node.position.x <= -180) {
-      this.crashIntoCastle();
+    // Air units never ram the castle (original: they fly through and despawn
+    // off the left edge). Only units with a breakthrough cost (castleDamage > 0)
+    // detonate on the castle column; everyone else — transporters and the rest
+    // of the fly-through fodder — just sails past and leaves the field.
+    if (Number(this.config.castleDamage) > 0) {
+      if (node.position.x <= -180) this.crashIntoCastle();
+    } else if (node.position.x < -430) {
+      this.despawn();
     }
   }
 
