@@ -172,10 +172,6 @@ root:
                     scale: [1, 1]
                     rotation: 0
                 children: []
-          # Enemy bridge: transporter carriers park here at mission start and
-          # hold the truss deck (drawn behind the castle rock; vehicles in the
-          # Enemies group drive over it). BridgeController also runs the Crazy
-          # Mineman deck mine.
           - id: bridge
             type: Group2D
             name: Bridge
@@ -192,7 +188,6 @@ root:
                 enabled: true
                 config:
                   mineX: -20
-            children: []
           - id: castle
             type: Group2D
             name: Castle
@@ -305,7 +300,7 @@ root:
                   width: 80
                   height: 60
                   transform:
-                    position: [-214, -23]
+                    position: [-273.08105432486315, -26.883387397760128]
                     scale: [1, 1]
                     rotation: 0
                 components:
@@ -497,15 +492,15 @@ root:
                     type: Sprite2D
                     name: Gun Base
                     properties:
-                      transform:
-                        position: [0, 20]
-                        scale: [1, 1]
-                        rotation: 0
                       texture:
                         type: texture
                         url: res://src/assets/textures/maingun/gunplace.png
                       width: 50
                       height: 41
+                      transform:
+                        position: [0, 20]
+                        scale: [1, 1]
+                        rotation: 0
                     children: []
               - id: turret-tr1
                 type: Group2D
@@ -1625,7 +1620,6 @@ root:
                 position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
-            children: []
           - id: shop-gold-label
             type: Label2D
             name: Shop Gold

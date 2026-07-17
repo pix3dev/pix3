@@ -35,6 +35,7 @@ import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectP
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
+import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { SceneManager, NodeBase, ScriptRegistry, getNodePropertySchema } from '@pix3/runtime';
@@ -604,9 +605,26 @@ export class AgentToolRegistry {
       {
         name: 'play_start',
         description:
-          'Enter play mode (start the game). Opens the project scene automatically if none is active.',
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        handler: () => this.playCommand('game.start'),
+          'Enter play mode (start the game). Without `scene` plays the active scene (auto-opens the project scene if none). Pass `scene` (res:// or project-relative .pix3scene path) to play that exact scene regardless of which tab is active; `reload: true` additionally re-reads it from disk first — use after compiling scripts when the scene was opened before the compile (stale graph drops user:* components).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scene: {
+              type: 'string',
+              description: 'Scene to play (.pix3scene, res:// or project-relative). Optional.',
+            },
+            reload: {
+              type: 'boolean',
+              description: 'Re-read the scene from disk before playing (only with `scene`).',
+            },
+          },
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.playStart(
+            typeof args.scene === 'string' ? args.scene : undefined,
+            args.reload === true
+          ),
       },
       {
         name: 'play_stop',
@@ -1877,6 +1895,36 @@ export class AgentToolRegistry {
       await this.ensureActiveScene();
     }
     return { ok: await this.dispatcher.executeById(commandId) };
+  }
+
+  /**
+   * play_start: no `scene` → legacy behavior (active scene via game.start);
+   * with `scene` → play exactly that scene (game.start-scene), optionally
+   * re-reading it from disk first so a graph opened before a script compile
+   * (which silently drops user:* components) doesn't get cloned stale.
+   */
+  private async playStart(
+    scene: string | undefined,
+    reload: boolean
+  ): Promise<{ ok: boolean; scene?: string; reloaded?: boolean; error?: string }> {
+    if (!scene) {
+      return this.playCommand('game.start');
+    }
+    let safe: string;
+    try {
+      safe = this.safePath(scene);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (!safe.toLowerCase().endsWith('.pix3scene')) {
+      return { ok: false, error: `Not a scene path: "${scene}" (expected a .pix3scene file)` };
+    }
+    let reloaded = false;
+    if (reload) {
+      reloaded = (await this.reloadSceneIfOpen(safe)) !== null;
+    }
+    const ok = await this.dispatcher.execute(new StartSceneGameCommand({ scenePath: safe }));
+    return { ok, scene: safe, reloaded };
   }
 
   private playStatus(): { isPlaying: boolean; playModeStatus: string } {

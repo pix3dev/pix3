@@ -22,6 +22,8 @@ interface SessionState {
   mission: number;
   gold: number;
   owned: string[];
+  /** Missions whose post-victory epilogue dialog has already played. */
+  epiloguesSeen: number[];
 }
 
 const SAVE_KEY = 'skydefender.run.v1';
@@ -33,6 +35,7 @@ let state: SessionState = {
   mission: 1,
   gold: 0,
   owned: startingOwned(),
+  epiloguesSeen: [],
 };
 
 function persist(): void {
@@ -56,7 +59,7 @@ export const session = {
 
   /** Fresh run (menu "Campaign"/"Survival" button). */
   resetRun(mode: GameMode): void {
-    state = { mode, mission: 1, gold: 0, owned: startingOwned() };
+    state = { mode, mission: 1, gold: 0, owned: startingOwned(), epiloguesSeen: [] };
     persist();
   },
 
@@ -72,6 +75,10 @@ export const session = {
         mission: Math.max(1, Number(parsed.mission) || 1),
         gold: Math.max(0, parsed.gold),
         owned: parsed.owned.filter((id): id is string => typeof id === 'string'),
+        // Older saves predate epilogues — treat them all as unseen.
+        epiloguesSeen: Array.isArray(parsed.epiloguesSeen)
+          ? parsed.epiloguesSeen.filter((n): n is number => typeof n === 'number')
+          : [],
       };
       return true;
     } catch {
@@ -107,6 +114,18 @@ export const session = {
   unlockMission(n: number): void {
     if (n > state.mission) {
       state.mission = n;
+      persist();
+    }
+  },
+
+  /** Post-victory dialogs play once per run (see MapController). */
+  isEpilogueSeen(mission: number): boolean {
+    return state.epiloguesSeen.includes(mission);
+  },
+
+  markEpilogueSeen(mission: number): void {
+    if (!state.epiloguesSeen.includes(mission)) {
+      state.epiloguesSeen.push(mission);
       persist();
     }
   },

@@ -61,7 +61,7 @@ for the live list. Summary:
 | `liveFind(query,limit=50)` | Search live objects by type/name, or `'droppable'` for items tagged `droppableItemRef`. Returns DTOs w/ `worldPos`, `instances`, `flags`. |
 | `selection()` | `{nodeIds, primaryNodeId, hoveredNodeId}`. |
 | `play.status()` | `{isPlaying, playModeStatus}`. |
-| `play.start()` / `play.stop()` / `play.restart()` | Drive play mode via the `game.*` commands. |
+| `play.start(scenePath?)` / `play.stop()` / `play.restart()` | Drive play mode via the `game.*` commands. `start()` without args plays the **active** scene; pass a `.pix3scene` path (res:// or project-relative) to play that exact scene (`game.start-scene`). |
 | `setProperty({nodeId, propertyPath, value})` | Edit a property — **undoable**. |
 | `command(id)` | Run any registered command by id (e.g. `edit.undo`). |
 | `components(id)` | Script components on a node (`className`, `scriptId`, `state`). |
@@ -77,6 +77,12 @@ for the live list. Summary:
 > wireframes over the 3D pass with the active camera. Confirm it's live with
 > `physicsDebug().enabled === true` and `segments > 0`.
 
+> **Stale graph after a late compile:** a scene opened in the editor BEFORE the
+> first `compile_scripts` silently drops its `user:*` components, and play then
+> clones that empty graph. Fix without the old touch-the-file hack:
+> `agentTools.execute('play_start', { scene: 'src/assets/scenes/x.pix3scene', reload: true })`
+> — `reload: true` re-reads the scene from disk (registry now warm) before playing.
+>
 > **`scene()` vs `liveScene()` (critical):** play mode runs the game on an
 > isolated **clone** in `SceneRunner`'s own THREE.Scene. `scene()`/`node()`/the
 > Scene-Tree show the **authored** graph and never contain spawned runtime

@@ -236,6 +236,12 @@ export interface UnitDef {
   /** Bombers: castle damage per attack while holding at their `a` position. */
   attackDamage?: number;
   attackPeriod?: number;
+  /**
+   * Original class_108 bombing run (decompiled v10.18): the unit carries ONE
+   * bomb, accelerates on approach, releases it at its `a` position and climbs
+   * away instead of holding/ramming. `attackDamage` is the bomb's castle hit.
+   */
+  bomber?: boolean;
   /** Typical aerostats carry a naval mine on a rig (dropped when shot down). */
   carriesMine?: boolean;
   /** Alternate liveries — the spawner picks one at random per spawn. */
@@ -249,28 +255,33 @@ const GROUND = 'res://src/assets/textures/enemy/ground';
 
 /** Only the ids used by the surviving mobs.xml (Lvl 1–3) + survival. */
 export const UNITS: Record<number, UnitDef> = {
-  // Lucky bombers (conf: hp 270) — hold position and shell the castle.
+  // Lucky bombers (conf: hp 270, dmg 10) — original class_108 bombing run:
+  // one carried bomb released at the `a` mark, then the freed ship climbs away.
   1: {
     name: 'Lucky 1', sprite: `${AIR}/bomber_lucky/bl.png`, width: 40, height: 45,
-    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, attackPeriod: 5,
+    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, bomber: true,
   },
   2: {
     name: 'Lucky 2', sprite: `${AIR}/bomber_lucky/slpd.png`, width: 40, height: 45,
-    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, attackPeriod: 5,
+    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, bomber: true,
   },
-  // Slevin bombers (conf: hp 370).
+  // Slevin bombers (conf: hp 370; dev conf dmg is a placeholder 1 — bomb kept
+  // at the remaster's tuned 12).
   3: {
     name: 'Slevin 1', sprite: `${AIR}/bomber_slevin/bslevin.png`, width: 40, height: 45,
-    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, attackPeriod: 6,
+    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, bomber: true,
   },
   4: {
     name: 'Slevin 2', sprite: `${AIR}/bomber_slevin/bslevin.png`, width: 40, height: 45,
-    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, attackPeriod: 6,
+    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, bomber: true,
   },
-  // Avalon fighter wing (big zeppelin).
+  // Avalon fighter wing (big zeppelin) — a gun platform, not a bomber: holds
+  // at `a` and shells the castle. Cadence per the original mounted weapon
+  // (class_63 default rld_max 50 ticks ≈ 1.7 s), damage rescaled to keep the
+  // tuned pressure (dev conf <Mob> dmg is a placeholder 1).
   10: {
     name: 'Avalon 2-2', sprite: `${AIR}/avalon2/avalon2.png`, width: 167, height: 46,
-    hp: 200, speed: 58, score: 30, castleDamage: 100, attackDamage: 8, attackPeriod: 4,
+    hp: 200, speed: 58, score: 30, castleDamage: 100, attackDamage: 4, attackPeriod: 1.7,
   },
   // Typical aerostat "S" (the Lvl 1 rank and file) — carries a hanging naval
   // mine on its weapon rig (GDD "миноносец"); the mine falls when the balloon
@@ -400,13 +411,34 @@ export interface MissionMeta {
   briefing: BriefingLine[];
   /** One-line objective shown after the dialog, before FIGHT. */
   goal: string;
+  /**
+   * Post-victory dialog (GDD missions-dialogues epilogues), played on the map
+   * once per run after the mission first clears. The GDD numbers epilogues
+   * one off — they are matched here by content (the payout follows the
+   * mission that promised it).
+   */
+  epilogue?: BriefingLine[];
 }
 
-/** Indexed as MISSIONS (mission 1 = [0]). The dev build's missions all defend Grekon. */
+/**
+ * All 30 original mission markers in conquest-map pixels (decompiled v10.18
+ * `var_260`/`var_262` — selector centers on the 497×325 map). The campaign
+ * opens bottom-left in Montarg and sweeps the Old World from there; M5 gets
+ * the rest of the table.
+ */
+export const MISSION_SPOTS: [number, number][] = [
+  [14, 297], [94, 291], [31, 239], [96, 219], [28, 180], [129, 196], [184, 195],
+  [181, 265], [250, 224], [266, 288], [94, 146], [25, 123], [127, 105], [77, 39],
+  [177, 39], [201, 133], [288, 154], [267, 84], [271, 22], [352, 62], [372, 157],
+  [397, 106], [453, 112], [458, 36], [401, 25], [344, 288], [354, 234], [314, 202],
+  [459, 191], [436, 282],
+];
+
+/** Indexed as MISSIONS (mission 1 = [0]). Missions 1–3 defend Montarg. */
 export const MISSION_META: MissionMeta[] = [
   {
-    spot: [330, 295],
-    region: 'Grekon',
+    spot: MISSION_SPOTS[0],
+    region: 'Montarg',
     briefing: [
       {
         speaker: 'King',
@@ -422,8 +454,8 @@ export const MISSION_META: MissionMeta[] = [
     goal: 'Destroy all enemy forces.',
   },
   {
-    spot: [396, 238],
-    region: 'Grekon',
+    spot: MISSION_SPOTS[1],
+    region: 'Montarg',
     briefing: [
       {
         speaker: 'Fargo',
@@ -440,10 +472,29 @@ export const MISSION_META: MissionMeta[] = [
       { speaker: 'Joe', text: "I'll do my best." },
     ],
     goal: 'Destroy all enemy forces. (Bonus: 100 gold)',
+    // GDD "Mission 1: Epilogue" — the payout for On Guard's 100-gold promise.
+    epilogue: [
+      { speaker: 'Fargo', text: "Well, Joe, here's your hard-earned 70 Gold." },
+      { speaker: 'Joe', text: 'Actually, we agreed on 100 Gold.' },
+      {
+        speaker: 'Fargo',
+        text: 'Joe, are you a law-abiding citizen? Have you heard about taxes?',
+      },
+      {
+        speaker: 'Joe',
+        text: 'Yes, Fargo, I know what taxes are: I work — you screw around, and the treasury grows. Have I got it right?',
+      },
+      {
+        speaker: 'Fargo',
+        text: "I bet you haven't heard about the impudence tax yet, my dear old Joe. I've just invented it, by the way.",
+      },
+      { speaker: 'Joe', text: 'Moron.' },
+      { speaker: 'Fargo', text: "You are welcome, Joe. Ok, let's turn to our muttons." },
+    ],
   },
   {
-    spot: [458, 288],
-    region: 'Grekon',
+    spot: MISSION_SPOTS[2],
+    region: 'Montarg',
     briefing: [
       {
         speaker: 'Fargo',
@@ -459,5 +510,11 @@ export const MISSION_META: MissionMeta[] = [
       { speaker: 'Fargo', text: 'Depends on your behavior, my dear Joe.' },
     ],
     goal: "Defend the Royal gold mine — don't let them steal the gold.",
+    // GDD "Mission 2: Epilogue" — the payout for Royal Treasury's repair promise.
+    epilogue: [
+      { speaker: 'Fargo', text: "Well done, Joe. I've given an order to repair your tower." },
+      { speaker: 'Joe', text: 'How many percent will they repair?' },
+      { speaker: 'Fargo', text: 'Depends on your deeds, Joe. Depends on your deeds...' },
+    ],
   },
 ];

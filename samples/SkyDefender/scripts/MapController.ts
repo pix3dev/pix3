@@ -1,7 +1,7 @@
 import { Script } from '@pix3/runtime';
 import type { Label2D, NodeBase, PropertySchema } from '@pix3/runtime';
 import type { Texture } from 'three';
-import { MISSIONS, MISSION_META, PORTRAITS, type Speaker } from './SdBalance';
+import { MISSIONS, MISSION_META, PORTRAITS, type BriefingLine, type Speaker } from './SdBalance';
 import { session, type GameMode } from './SdSession';
 
 /** Map → battle hand-off (SdSession owns the run; GameFlow reads these). */
@@ -23,7 +23,7 @@ const mapToLocal = (mx: number, my: number): [number, number] => [mx - 249.5, 16
 
 /**
  * MapController — the conquest map (Old World room) between battles.
- * Mission markers sit on the Grekon region; picking an unlocked one opens the
+ * Mission markers sit on the frontier region; picking an unlocked one opens the
  * GDD briefing dialog (portrait + typewriter text), FIGHT hands the mission to
  * GameFlow via `__SD_MISSION`. Locked missions only tease. BACK returns to the
  * main menu; campaign progress (SdSession.mission) gates the markers.
@@ -50,6 +50,9 @@ export class MapController extends Script {
   private briefingMission = 0;
   private lineIndex = 0;
   private dialogDone = false;
+  /** The overlay doubles as the post-victory debriefing (no FIGHT at the end). */
+  private overlayMode: 'briefing' | 'epilogue' = 'briefing';
+  private dialogLines: BriefingLine[] = [];
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -113,16 +116,24 @@ export class MapController extends Script {
     }
     this.refreshMarkers();
 
-    // The frontier ring sits on the next mission to beat.
+    // The frontier ring sits on the next mission to beat; the region overlay
+    // highlights that mission's theater (original: per-region multiply tint).
+    const frontier = Math.min(session.mission, MISSIONS.length);
+    const frontierMeta = MISSION_META[frontier - 1];
     const ring = this.findNode('current-ring');
-    if (ring) {
-      const frontier = Math.min(session.mission, MISSIONS.length);
-      const meta = MISSION_META[frontier - 1];
-      if (meta) {
-        const [x, y] = mapToLocal(meta.spot[0], meta.spot[1]);
-        ring.position.set(x, y, 0);
-        ring.visible = true;
-      }
+    if (ring && frontierMeta) {
+      const [x, y] = mapToLocal(frontierMeta.spot[0], frontierMeta.spot[1]);
+      ring.position.set(x, y, 0);
+      ring.visible = true;
+    }
+    const highlight = this.findNode('region-highlight') as SpriteNode | null;
+    const loader = this.scene?.getAssetLoader();
+    if (highlight?.setTexture && loader && frontierMeta) {
+      const url = `res://src/assets/textures/gui/maproom/regions/${frontierMeta.region.toLowerCase()}.png`;
+      void loader
+        .loadTexture(url)
+        .then(tex => highlight.setTexture?.(tex))
+        .catch(() => console.warn(`[MapController] missing region overlay ${url}`));
     }
 
     this.backButton = this.findNode('map-back-button') as ControlNode | null;
@@ -137,7 +148,6 @@ export class MapController extends Script {
     this.cancelButton = this.wirePanelButton('briefing-cancel-button', () => this.closeBriefing());
 
     // Portraits swap per speaker; warm them up front.
-    const loader = this.scene?.getAssetLoader();
     if (loader) {
       for (const [speaker, path] of Object.entries(PORTRAITS) as [Speaker, string][]) {
         void loader
@@ -154,6 +164,25 @@ export class MapController extends Script {
         ? 'The province is safe — replay any mission.'
         : 'Select a mission to defend.'
     );
+
+    // Returning victorious: play the cleared missions' debriefings (GDD
+    // epilogues) once per run, oldest first.
+    this.openNextEpilogue();
+  }
+
+  /** First cleared mission with an unseen epilogue, or 0. */
+  private nextPendingEpilogue(): number {
+    for (let n = 1; n < session.mission && n <= MISSION_META.length; n++) {
+      if ((MISSION_META[n - 1]?.epilogue?.length ?? 0) === 0) continue;
+      if (!session.isEpilogueSeen(n)) return n;
+    }
+    return 0;
+  }
+
+  private openNextEpilogue(): void {
+    const n = this.nextPendingEpilogue();
+    if (n === 0 || this.briefingMission !== 0) return;
+    this.openDialog(n, 'epilogue');
   }
 
   // ── map interactions ────────────────────────────────────────────────────────
@@ -169,7 +198,16 @@ export class MapController extends Script {
   }
 
   private openBriefing(n: number): void {
+    this.openDialog(n, 'briefing');
+  }
+
+  private openDialog(n: number, mode: 'briefing' | 'epilogue'): void {
+    const meta = MISSION_META[n - 1];
+    const lines = (mode === 'epilogue' ? meta?.epilogue : meta?.briefing) ?? [];
+    if (lines.length === 0) return;
     this.briefingMission = n;
+    this.overlayMode = mode;
+    this.dialogLines = lines;
     this.lineIndex = 0;
     this.dialogDone = false;
 
@@ -181,14 +219,23 @@ export class MapController extends Script {
     this.setButton(this.cancelButton, true);
     this.setButton(this.fightButton, false);
 
-    this.setLabel(this.briefingTitle, `Mission ${n} — ${MISSIONS[n - 1]?.name ?? ''}`);
+    const name = MISSIONS[n - 1]?.name ?? '';
+    this.setLabel(
+      this.briefingTitle,
+      mode === 'epilogue' ? `Mission ${n} — ${name} cleared` : `Mission ${n} — ${name}`
+    );
     this.setLabel(this.goalLabel, '');
     this.showCurrentLine();
     this.scene?.audio.play(PAGE_SOUND, { bus: 'sfx' });
   }
 
   private closeBriefing(): void {
+    const wasEpilogue = this.overlayMode === 'epilogue';
+    if (wasEpilogue && this.briefingMission > 0) {
+      session.markEpilogueSeen(this.briefingMission);
+    }
     this.briefingMission = 0;
+    this.overlayMode = 'briefing';
     if (this.overlay) this.overlay.visible = false;
     this.setButton(this.nextButton, false);
     this.setButton(this.skipButton, false);
@@ -197,13 +244,14 @@ export class MapController extends Script {
     if (this.backButton) this.backButton.enabled = true;
     this.refreshMarkers();
     this.scene?.audio.play(CLICK_SOUND, { bus: 'sfx' });
+    // Several missions may have cleared in one battle chain — debrief them all.
+    if (wasEpilogue) this.openNextEpilogue();
   }
 
   // ── briefing dialog ─────────────────────────────────────────────────────────
 
   private showCurrentLine(): void {
-    const meta = MISSION_META[this.briefingMission - 1];
-    const line = meta?.briefing[this.lineIndex];
+    const line = this.dialogLines[this.lineIndex];
     if (!line) {
       this.finishDialog();
       return;
@@ -226,8 +274,7 @@ export class MapController extends Script {
       return;
     }
     this.lineIndex += 1;
-    const meta = MISSION_META[this.briefingMission - 1];
-    if (!meta || this.lineIndex >= meta.briefing.length) {
+    if (this.lineIndex >= this.dialogLines.length) {
       this.finishDialog();
     } else {
       this.showCurrentLine();
@@ -236,22 +283,29 @@ export class MapController extends Script {
 
   private skipDialog(): void {
     if (this.dialogDone) return;
-    const meta = MISSION_META[this.briefingMission - 1];
-    if (meta && meta.briefing.length > 0) {
-      this.lineIndex = meta.briefing.length - 1;
+    if (this.dialogLines.length > 0) {
+      this.lineIndex = this.dialogLines.length - 1;
       this.showCurrentLine();
       this.briefingText?.skipTypewriter();
     }
     this.finishDialog();
   }
 
-  /** Dialog exhausted: show the objective and swap NEXT for FIGHT. */
+  /**
+   * Dialog exhausted. Briefing: show the objective and swap NEXT for FIGHT.
+   * Epilogue: nothing left to start — CANCEL (already visible) closes it.
+   */
   private finishDialog(): void {
     this.dialogDone = true;
-    const meta = MISSION_META[this.briefingMission - 1];
-    this.setLabel(this.goalLabel, meta ? `Objective: ${meta.goal}` : '');
     this.setButton(this.nextButton, false);
     this.setButton(this.skipButton, false);
+    if (this.overlayMode === 'epilogue') {
+      this.setLabel(this.goalLabel, '');
+      this.setButton(this.fightButton, false);
+      return;
+    }
+    const meta = MISSION_META[this.briefingMission - 1];
+    this.setLabel(this.goalLabel, meta ? `Objective: ${meta.goal}` : '');
     this.setButton(this.fightButton, true);
   }
 

@@ -8,6 +8,8 @@ import { BRIDGE, MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBa
 const BALLOON_PREFAB = 'res://src/assets/prefabs/balloon.pix3scene';
 const UNIK_PREFAB = 'res://src/assets/prefabs/unik.pix3scene';
 const TRUCK_PREFAB = 'res://src/assets/prefabs/ground-truck.pix3scene';
+/** Joe's alarm cry — the original plays it on every ground-unit spawn. */
+const GROUND_ALARM_SOUND = 'res://src/assets/audio/other/warning_scream.mp3';
 
 /** Original 640×480 top-left y → stage-local center-origin Y-up. */
 const toStageY = (origY: number): number => 240 - origY;
@@ -238,6 +240,9 @@ export class WaveSpawner extends Script {
         if (unit.ground) {
           node.position.set(SPAWN_X, BRIDGE.truckY, 0);
           this.applyGroundUnit(node, entry, unit);
+          // The ground-assault alarm (original FN_addMob: warning_scream +
+          // Joe's scream animation for every unit rolling onto the bridge).
+          scene.audio.play(GROUND_ALARM_SOUND, { bus: 'sfx' });
         } else {
           node.position.set(SPAWN_X, toStageY(entry.y), 0);
           if (!unit.compound) {
@@ -276,9 +281,10 @@ export class WaveSpawner extends Script {
       hitbox.config.height = Math.max(8, unit.height - 4);
     }
 
-    // Hanging mine rig: only the typical "S" aerostats fly with one. Units
-    // without the rig also lose its hitboxes (link + mine are targets too).
-    const carries = unit.carriesMine === true;
+    // Hanging rig: the typical "S" carries a naval mine, bombers carry their
+    // bomb on the same mount (both shootable). Units without the rig also
+    // lose its hitboxes (link + mine are targets too).
+    const carries = unit.carriesMine === true || unit.bomber === true;
     const mount = node.getChildByName('Weapon Mount');
     const mine = node.getChildByName('Carried Mine');
     if (mount) mount.visible = carries;
@@ -305,6 +311,7 @@ export class WaveSpawner extends Script {
       logic.config.stopX = toStopX(entry.a);
       logic.config.attackDamage = unit.attackDamage ?? 0;
       logic.config.attackPeriod = unit.attackPeriod ?? 4;
+      logic.config.bomber = unit.bomber === true;
       // The burning wreck reuses the livery this balloon was dressed with.
       logic.config.spritePath = spritePath;
     }

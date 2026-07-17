@@ -1,5 +1,5 @@
 # Sky Defender — Campaign Map (M4 meta)
-# The "Old World" conquest room: mission markers on the Grekon region,
+# The "Old World" conquest room: mission markers on the current region,
 # GDD briefing dialog with portraits, FIGHT hands the mission to GameFlow.
 version: 1.0.0
 metadata:
@@ -118,9 +118,9 @@ root:
             children: []
           - id: region-highlight
             type: Sprite2D
-            name: Grekon Highlight
+            name: Region Highlight
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/regions/grekon.png' }
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/regions/montarg.png' }
               width: 497
               height: 325
               opacity: 0.22

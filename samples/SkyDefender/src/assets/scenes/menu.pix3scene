@@ -158,8 +158,8 @@ root:
           label: ''
           width: 376
           height: 310
-          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
-          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaignblure.png' }
+          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign_dark.png' }
+          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
           texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
           buttonAction: campaign
           transform:
@@ -174,8 +174,8 @@ root:
           label: ''
           width: 376
           height: 310
-          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
-          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survivalblure.png' }
+          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival_dark.png' }
+          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
           texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
           buttonAction: survival
           transform:

@@ -39,13 +39,15 @@ export class EnemyBalloon extends Script {
   private hp = 0;
   private linkHp = 0;
   private mineHp = 0;
-  private state: 'intact' | 'flyaway' | 'gone' = 'intact';
+  private state: 'intact' | 'flyaway' | 'climb' | 'gone' = 'intact';
   private flyawaySpeed = 0;
   private bobTime = 0;
   private baseY: number | null = null;
   private shoveVx = 0;
   private shoveVy = 0;
   private attackTimer = 0;
+  /** Bombing-run acceleration on top of config speed (original +0.05 px/f²). */
+  private speedBoost = 0;
   private linkNode: NodeBase | null = null;
   private mineNode: NodeBase | null = null;
 
@@ -59,9 +61,12 @@ export class EnemyBalloon extends Script {
       castleDamage: 60,
       // Stage-local x where this unit stops and holds position (0 = fly to the castle).
       stopX: 0,
-      // Bombers: while holding at stopX, shell the castle every attackPeriod s.
+      // Gun platforms: while holding at stopX, shell the castle every attackPeriod s.
       attackDamage: 0,
       attackPeriod: 4,
+      // Bombers (original class_108): carry ONE bomb, release it at stopX and
+      // climb away; attackDamage is the bomb's castle hit on landing.
+      bomber: false,
       // Weapon rig parts (only active on units that carry the mine).
       linkHp: 25,
       mineHp: 25,
@@ -90,6 +95,15 @@ export class EnemyBalloon extends Script {
         num('stopX', 'Stop X (0 = none)'),
         num('attackDamage', 'Attack Damage (HP)'),
         num('attackPeriod', 'Attack Period (s)', 0.1),
+        {
+          name: 'bomber',
+          type: 'boolean',
+          ui: { label: 'Bomber (single drop)', group: 'Enemy' },
+          getValue: (c: unknown) => (c as EnemyBalloon).config.bomber,
+          setValue: (c: unknown, v: unknown) => {
+            (c as EnemyBalloon).config.bomber = Boolean(v);
+          },
+        },
         num('linkHp', 'Link HP'),
         num('mineHp', 'Mine HP'),
       ],
@@ -155,14 +169,40 @@ export class EnemyBalloon extends Script {
       }
     }
 
-    // Drift left + a light bob so the balloon feels buoyant.
     this.bobTime += dt;
     const stopX = Number(this.config.stopX);
-    const holding = stopX !== 0 && node.position.x <= stopX;
-    if (!holding) {
-      node.position.x -= Number(this.config.speed) * dt;
+    const speed = Number(this.config.speed) + this.speedBoost;
+
+    if (this.state === 'climb') {
+      // Bomb away: the lightened ship climbs out over the castle (original
+      // class_108: y -0.5/frame) and leaves the field.
+      node.position.x -= speed * dt;
+      this.baseY += 15 * dt;
+      node.position.y = this.baseY + Math.sin(this.bobTime * 1.7) * 4;
+      if (node.position.x < -520 || node.position.y > 330) {
+        this.despawn();
+      }
+      return;
+    }
+
+    // Drift left + a light bob so the balloon feels buoyant.
+    if (this.isBomber()) {
+      // Bombing run: speed up on final approach (original: +0.05 px/frame²
+      // once past x 340 ≈ stage 20), release at the `a` mark, then climb.
+      if (node.position.x < 20) {
+        this.speedBoost = Math.min(80, this.speedBoost + 45 * dt);
+      }
+      node.position.x -= speed * dt;
+      if (stopX !== 0 && node.position.x <= stopX) {
+        this.releaseBomb();
+      }
     } else {
-      this.updateAttack(dt);
+      const holding = stopX !== 0 && node.position.x <= stopX;
+      if (!holding) {
+        node.position.x -= speed * dt;
+      } else {
+        this.updateAttack(dt);
+      }
     }
     node.position.y = this.baseY + Math.sin(this.bobTime * 1.7) * 4;
 
@@ -172,7 +212,30 @@ export class EnemyBalloon extends Script {
     }
   }
 
-  /** Bombers (original `a` position): shell the castle from their perch. */
+  private isBomber(): boolean {
+    return this.config.bomber === true && Number(this.config.attackDamage) > 0;
+  }
+
+  /** Bomber at the release mark: one bomb toward the castle, then climb away. */
+  private releaseBomb(): void {
+    if (this.state !== 'intact' || !this.node) return;
+    this.dropCarriedMine(
+      Number(this.config.attackDamage),
+      -(Number(this.config.speed) + this.speedBoost)
+    );
+    // The empty rig is no longer worth shooting.
+    if (this.linkNode) {
+      this.linkNode.visible = false;
+      this.disableHitboxes(this.linkNode);
+    }
+    if (this.mineNode) {
+      this.mineNode.visible = false;
+      this.disableHitboxes(this.mineNode);
+    }
+    this.state = 'climb';
+  }
+
+  /** Gun platforms (original `a` position): shell the castle from their perch. */
   private updateAttack(dt: number): void {
     const damage = Number(this.config.attackDamage);
     if (damage <= 0) return;
@@ -189,7 +252,8 @@ export class EnemyBalloon extends Script {
   // ── destruction scenarios ─────────────────────────────────────────────────
 
   private onBodyDamaged(amount: number): void {
-    if (this.state !== 'intact' || !this.node) return;
+    // Bombers stay legitimate targets while climbing out after the drop.
+    if ((this.state !== 'intact' && this.state !== 'climb') || !this.node) return;
     this.hp -= amount;
     if (this.hp <= 0) {
       this.shotDown();
@@ -232,7 +296,11 @@ export class EnemyBalloon extends Script {
     if (!node || this.state === 'gone') return;
     this.scene?.audio.play(DEATH_SOUND, { bus: 'sfx', volumeVariation: 0.15 });
     this.emitToGameRoot('unit-killed', Number(this.config.score));
-    this.dropCarriedMine();
+    // A downed bomber loses its bomb mid-air (original kill(): half momentum).
+    this.dropCarriedMine(
+      this.isBomber() ? Number(this.config.attackDamage) : 0,
+      this.isBomber() ? -(Number(this.config.speed) + this.speedBoost) * 0.5 : 0
+    );
     this.spawnExplosion(node.position.x, node.position.y, 0.7);
     this.spawnWreck(node.position.x, node.position.y, -Number(this.config.speed) * 0.5, 10, 1);
     this.despawn();
@@ -257,7 +325,10 @@ export class EnemyBalloon extends Script {
     const node = this.node;
     if (!node || this.state !== 'intact') return;
     this.scene?.audio.play(LINK_SNAP_SOUND, { bus: 'sfx', volumeVariation: 0.15 });
-    this.dropCarriedMine();
+    this.dropCarriedMine(
+      this.isBomber() ? Number(this.config.attackDamage) : 0,
+      this.isBomber() ? -(Number(this.config.speed) + this.speedBoost) * 0.5 : 0
+    );
     if (this.linkNode) {
       this.linkNode.visible = false;
       this.disableHitboxes(this.linkNode);
@@ -291,8 +362,12 @@ export class EnemyBalloon extends Script {
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
-  /** Release the hanging mine (visible only on units dressed with one). */
-  private dropCarriedMine(): void {
+  /**
+   * Release the hanging mine/bomb (visible only on units dressed with one).
+   * Bombers pass their bomb's castle damage and momentum (`vx`); the plain
+   * S-mine falls straight down and only threatens the bridge.
+   */
+  private dropCarriedMine(castleDamage = 0, vx = 0): void {
     const scene = this.scene;
     const node = this.node;
     const carried = this.mineNode;
@@ -305,6 +380,13 @@ export class EnemyBalloon extends Script {
       .instantiate(FALLING_MINE_PREFAB, { parent: 'effects' })
       .then(mine => {
         mine.position.set(x, y, 0);
+        const logic = mine.components.find(
+          c => (c as { type?: string }).type === 'user:FallingMine'
+        ) as { config?: Record<string, unknown> } | undefined;
+        if (logic?.config) {
+          if (castleDamage > 0) logic.config.castleDamage = castleDamage;
+          if (vx !== 0) logic.config.vx = vx;
+        }
       })
       .catch(err => console.warn('[EnemyBalloon] mine drop failed', err));
   }

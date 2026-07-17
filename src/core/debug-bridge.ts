@@ -24,6 +24,7 @@ import { ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
 import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
 import { AssetGenService } from '@/services/AssetGenService';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
@@ -330,7 +331,12 @@ export interface Pix3DebugBridge {
   // --- play mode (through commands → keeps appState.ui in sync + undoable) ---
   readonly play: {
     status(): { isPlaying: boolean; playModeStatus: string };
-    start(): Promise<boolean>;
+    /**
+     * Start play mode. Without an argument plays the active scene
+     * (`game.start`); with a scene path (`res://` or project-relative
+     * `.pix3scene`) plays exactly that scene (`game.start-scene`).
+     */
+    start(scenePath?: string): Promise<boolean>;
     stop(): Promise<boolean>;
     restart(): Promise<boolean>;
   };
@@ -493,7 +499,8 @@ function createBridge(): Pix3DebugBridge {
           "Search live objects by name/type, or 'droppable' for tagged items.",
         'physicsDebug()':
           'Summary of collider wireframe buffers exposed by the running game (counts only).',
-        'play.status() / play.start() / play.stop() / play.restart()': 'Play-mode control.',
+        'play.status() / play.start(scenePath?) / play.stop() / play.restart()':
+          'Play-mode control; start() takes an optional .pix3scene path to play that exact scene.',
         'setProperty({nodeId,propertyPath,value})':
           'Edit a property (undoable); hot-reloads onto the running scene while playing.',
         'command(id)': "Run a command by id, e.g. 'edit.undo'.",
@@ -618,7 +625,10 @@ function createBridge(): Pix3DebugBridge {
           playModeStatus: appState.ui.playModeStatus,
         };
       },
-      start() {
+      start(scenePath?: string) {
+        if (scenePath) {
+          return resolveCommandDispatcher().execute(new StartSceneGameCommand({ scenePath }));
+        }
         return resolveCommandDispatcher().executeById('game.start');
       },
       stop() {
