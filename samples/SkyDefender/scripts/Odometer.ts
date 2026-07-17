@@ -1,24 +1,25 @@
-import { Script } from '@pix3/runtime';
-import type { NodeBase, PropertySchema } from '@pix3/runtime';
-import { RepeatWrapping } from 'three';
-import type { Mesh, MeshBasicMaterial, Texture } from 'three';
-
-const DIGIT_COUNT = 10;
+import { Script, Sprite2D } from '@pix3/runtime';
+import type { PropertySchema } from '@pix3/runtime';
+import { DIGIT_ROWS, digitForSlot, digitStripRegion, stripPositionForDigit } from './odometerRegion';
 
 interface DigitSlot {
-  node: NodeBase;
-  material: MeshBasicMaterial | null;
+  sprite: Sprite2D;
 }
 
 /**
- * Odometer component — handles a rolling mechanical counter made of digit strips.
- * Rotates each digit's texture UV offsets top-to-bottom to simulate a drum roll.
- * Uses a mapping for the texture ordering: top-to-bottom 0, 9, 8, 7, 6, 5, 4, 3, 2, 1.
- * It always rolls the shortest circular path (seamless transition at boundaries).
+ * Odometer component — a rolling mechanical counter made of digit strips.
+ * Each digit is a Sprite2D showing `number_indicator.png` (a vertical strip of
+ * ten cells). We crop the strip to one cell with `Sprite2D.setTextureRegion`,
+ * scrolling the crop top-to-bottom to simulate a drum roll (shortest circular
+ * path, seamless at the boundary).
+ *
+ * Play mode drives the crop here in `onUpdate`; the editor preview is handled
+ * per-digit by `OdometerDigit.tickEditorPreview`. Both build the crop through
+ * the shared `digitStripRegion` helper so edit and play modes match exactly.
  */
 export class Odometer extends Script {
   private digits: DigitSlot[] = [];
-  private shown: number[] = []; // Stores the current physical strip positions (0..9)
+  private shown: number[] = []; // current physical strip positions (0..9, fractional while rolling)
   private targetValue = 0;
 
   constructor(id: string, type: string) {
@@ -46,28 +47,37 @@ export class Odometer extends Script {
     };
   }
 
-  /** Helper to map a digit (0..9) to its physical row index (0..9) on the strip. */
-  private getStripPosition(digit: number): number {
-    return (10 - digit) % 10;
-  }
-
   onStart(): void {
-    // Find all children nodes that represent the digit slots (most significant first).
+    // Digit slots = the child Sprite2D nodes, most significant first.
     this.digits = this.node.children
-      .filter((c): c is NodeBase => !!(c as NodeBase).nodeId)
-      .map(node => ({ node, material: null }));
+      .filter((c): c is Sprite2D => c instanceof Sprite2D)
+      .map(sprite => ({ sprite }));
     this.shown = this.digits.map(() => 0);
     this.targetValue = Number(this.config.initialValue ?? 0);
 
-    // Sync shown state instantly with initial value so it doesn't roll from 0 on load
-    const count = this.digits.length;
-    if (count > 0) {
-      const clamped = Math.max(0, Math.min(Math.pow(10, count) - 1, Math.floor(this.targetValue)));
-      for (let i = 0; i < count; i++) {
-        const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
-        this.shown[i] = this.getStripPosition(digit);
-      }
-    }
+    // Sync shown state instantly with the initial value so it doesn't roll from 0.
+    this.snapTo(this.targetValue);
+
+    // Every digit shares `number_indicator.png`. `setTextureRegion` mutates the
+    // texture's own offset/repeat, so a SHARED cached texture would make all
+    // digits show the last-applied crop. Give each sprite its own texture clone
+    // (shares the GPU image, independent crop) before we start cropping.
+    const loader = this.scene?.getAssetLoader();
+    this.digits.forEach((slot, index) => {
+      const url = slot.sprite.texture?.url;
+      if (!url || !loader) return;
+      void loader
+        .loadTexture(url)
+        .then(tex => {
+          const clone = tex.clone();
+          clone.needsUpdate = true;
+          slot.sprite.setTexture(clone);
+          slot.sprite.setTextureRegion(digitStripRegion(this.shown[index]));
+        })
+        .catch(() => undefined);
+    });
+
+    this.applyCrops();
   }
 
   /** Sets the new value to roll towards. */
@@ -78,72 +88,46 @@ export class Odometer extends Script {
   /** Instantly sets the value without animation. */
   public setValueInstant(value: number): void {
     this.targetValue = value;
+    this.snapTo(value);
+    this.applyCrops();
+  }
+
+  private snapTo(value: number): void {
     const count = this.digits.length;
-    if (count > 0) {
-      const clamped = Math.max(0, Math.min(Math.pow(10, count) - 1, Math.floor(value)));
-      for (let i = 0; i < count; i++) {
-        const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
-        this.shown[i] = this.getStripPosition(digit);
-      }
+    for (let i = 0; i < count; i++) {
+      this.shown[i] = stripPositionForDigit(digitForSlot(value, i, count));
+    }
+  }
+
+  private applyCrops(): void {
+    for (let i = 0; i < this.digits.length; i++) {
+      this.digits[i].sprite.setTextureRegion(digitStripRegion(this.shown[i]));
     }
   }
 
   onUpdate(dt: number): void {
-    if (this.digits.length === 0) return;
-
     const count = this.digits.length;
-    const clamped = Math.max(0, Math.min(Math.pow(10, count) - 1, Math.floor(this.targetValue)));
+    if (count === 0) return;
 
     for (let i = 0; i < count; i++) {
-      const digit = Math.floor(clamped / Math.pow(10, count - 1 - i)) % 10;
-      const targetPos = this.getStripPosition(digit); // Target physical row on the strip
-      
-      const slot = this.digits[i];
-      if (!slot.material) {
-        slot.material = this.resolveStripMaterial(slot.node);
-        if (!slot.material) continue;
-      }
-      
+      const digit = digitForSlot(this.targetValue, i, count);
+      const targetPos = stripPositionForDigit(digit); // target physical row on the strip
+
       let shownPos = this.shown[i];
-      
-      // Calculate circular difference in physical strip coordinates (returns value in range [-5, 5))
+
+      // Circular difference in strip coordinates, in range [-5, 5).
       let diff = targetPos - shownPos;
-      diff = ((diff + 5) % 10 + 10) % 10 - 5;
-      
+      diff = ((diff + 5) % DIGIT_ROWS + DIGIT_ROWS) % DIGIT_ROWS - 5;
+
       if (Math.abs(diff) < 0.02) {
         shownPos = targetPos;
       } else {
-        shownPos = (shownPos + diff * Math.min(1, dt * 14)) % 10;
-        if (shownPos < 0) shownPos += 10;
+        shownPos = (shownPos + diff * Math.min(1, dt * 14)) % DIGIT_ROWS;
+        if (shownPos < 0) shownPos += DIGIT_ROWS;
       }
       this.shown[i] = shownPos;
-      
-      // Strip rows are top→bottom 0..9; UV origin is bottom-left.
-      const map = slot.material.map;
-      if (map) {
-        map.repeat.y = 1 / DIGIT_COUNT;
-        map.offset.y = 1 - (shownPos + 1) / DIGIT_COUNT;
-      }
-    }
-  }
 
-  /** Clone the digit-strip texture per window so each digit scrolls independently. */
-  private resolveStripMaterial(node: NodeBase): MeshBasicMaterial | null {
-    let material: MeshBasicMaterial | null = null;
-    node.traverse(obj => {
-      const mesh = obj as Mesh;
-      if (!material && mesh.isMesh) {
-        const mat = mesh.material as MeshBasicMaterial;
-        if (mat.map) {
-          const clone: Texture = mat.map.clone();
-          clone.wrapS = RepeatWrapping;
-          clone.wrapT = RepeatWrapping;
-          clone.needsUpdate = true;
-          mat.map = clone;
-          material = mat;
-        }
-      }
-    });
-    return material;
+      this.digits[i].sprite.setTextureRegion(digitStripRegion(shownPos));
+    }
   }
 }

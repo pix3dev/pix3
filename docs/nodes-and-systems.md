@@ -292,6 +292,20 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 > `dt` (frozen by hitstop). Anything that must ignore hitstop/slow-mo (screen
 > chrome, timers) uses `performance.now()` — mirror how `flash()`/letterbox work.
 
+**Editor preview (draw the node your way without play mode):** implement
+`tickEditorPreview(dt, ctx)` — the editor calls it every non-play frame for each
+enabled component. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
+visible? })` to change how *this component's node* draws in the editor viewport;
+it is immediate-mode (stop pushing → the proxy reverts) and never mutates or
+serializes the node. `ctx.assetLoader` / `ctx.requestRender()` are also provided;
+call `requestRender()` for continuous animation. For UV cropping specifically,
+`Sprite2D.setTextureRegion({ x, y, width, height } | null)` shows a normalized
+sub-rect of the texture (e.g. one digit of an odometer strip) — a transient,
+non-serialized crop. Author the region once and drive it from **both**
+`onUpdate` (play) and `tickEditorPreview` (edit) so the two modes match. A
+throwing `tickEditorPreview` disables the component and surfaces the error like a
+play-mode hook, so the editor keeps running.
+
 ---
 
 ## 6. Editor-side rules (when an agent edits scenes/state)
@@ -299,6 +313,7 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 - **Mutation gateway:** every state change flows UI → `CommandDispatcher.execute(CommandClass, args)` → Command → Operation → history. **Never mutate `appState` or node properties directly.** A feature = a `Command` + an `Operation` under `src/features/<area>/`. (See CLAUDE.md + AGENTS.md — binding.)
 - **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-quick-reference.md](property-schema-quick-reference.md).
 - **Serialization:** scenes are `.pix3scene` YAML (`root:` tree of nodes with `properties`, `components`, `children`). Copy a known-good demo in `samples/HelloWorld/` as a template.
+- **2D texture filtering (project setting):** Project Settings → *2D Texture Filtering* is `linear` (default, smoothed) or `nearest` (crisp pixel-art). It lives on the `ProjectManifest` and is pushed to the runtime global via `setProjectTextureFiltering`; `configure2DTexture` (runtime) and the editor's sprite-texture setup both read it, so 2D sprite/UI textures pick up the mode in edit mode, play mode, and export. 3D textures are unaffected (they keep mipmapped linear sampling).
 - **Debug bridge (dev):** `window.__PIX3_DEBUG__` exposes scene/liveScene/play/setProperty/errors for driving the running editor (see the `debug-running-game` skill). Consumer games can register `registerGameDebug({name, snapshot, inspect, action})` from `@pix3/runtime` for a game-specific surface.
 
 ---

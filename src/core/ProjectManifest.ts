@@ -14,6 +14,14 @@ export type ProjectType = (typeof PROJECT_TYPES)[number];
 export const TARGET_PLATFORMS = ['mobile', 'desktop', 'universal'] as const;
 export type TargetPlatform = (typeof TARGET_PLATFORMS)[number];
 
+/**
+ * How 2D graphics are sampled. `linear` smooths on scale (default); `nearest`
+ * disables smoothing for crisp pixel-art rendering. Applies to 2D sprite/UI
+ * textures only — 3D textures keep their mipmapped linear sampling.
+ */
+export const TEXTURE_FILTERING_MODES = ['linear', 'nearest'] as const;
+export type TextureFiltering = (typeof TEXTURE_FILTERING_MODES)[number];
+
 /** Renderer quality preset applied in play mode and exported builds. */
 export interface QualitySettings {
   antialias: boolean;
@@ -32,6 +40,8 @@ export interface ProjectManifest {
   };
   /** Default AO mode scenes inherit when their PostProcess is set to `inherit`. */
   ambientOcclusion: ProjectAODefault;
+  /** 2D texture sampling: `linear` (smoothed) or `nearest` (crisp pixel-art). */
+  textureFiltering: TextureFiltering;
   projectType: ProjectType;
   targetPlatform: TargetPlatform;
   quality: QualitySettings;
@@ -40,6 +50,7 @@ export interface ProjectManifest {
 
 export const DEFAULT_PROJECT_MANIFEST_VERSION = '1.0.0';
 export const DEFAULT_AMBIENT_OCCLUSION: ProjectAODefault = 'baked';
+export const DEFAULT_TEXTURE_FILTERING: TextureFiltering = 'linear';
 export const DEFAULT_VIEWPORT_BASE_WIDTH = 1920;
 export const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
 export const DEFAULT_PROJECT_TYPE: ProjectType = '3d';
@@ -83,6 +94,13 @@ const normalizeAmbientOcclusion = (input: unknown): ProjectAODefault => {
   return (PROJECT_AO_MODES as readonly string[]).includes(mode)
     ? (mode as ProjectAODefault)
     : DEFAULT_AMBIENT_OCCLUSION;
+};
+
+const normalizeTextureFiltering = (input: unknown): TextureFiltering => {
+  const mode = typeof input === 'string' ? input.toLowerCase() : '';
+  return (TEXTURE_FILTERING_MODES as readonly string[]).includes(mode)
+    ? (mode as TextureFiltering)
+    : DEFAULT_TEXTURE_FILTERING;
 };
 
 const normalizeProjectType = (input: unknown): ProjectType => {
@@ -139,6 +157,7 @@ export const createDefaultProjectManifest = (): ProjectManifest => ({
     height: DEFAULT_VIEWPORT_BASE_HEIGHT,
   },
   ambientOcclusion: DEFAULT_AMBIENT_OCCLUSION,
+  textureFiltering: DEFAULT_TEXTURE_FILTERING,
   projectType: DEFAULT_PROJECT_TYPE,
   targetPlatform: DEFAULT_TARGET_PLATFORM,
   quality: createDefaultQualitySettings(DEFAULT_TARGET_PLATFORM),
@@ -184,6 +203,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     defaultExportScenePath: normalizeDefaultExportScenePath(record.defaultExportScenePath),
     viewportBaseSize: normalizeViewportBaseSize(record.viewportBaseSize),
     ambientOcclusion: normalizeAmbientOcclusion(record.ambientOcclusion),
+    textureFiltering: normalizeTextureFiltering(record.textureFiltering),
     projectType: normalizeProjectType(record.projectType),
     targetPlatform,
     quality: normalizeQualitySettings(record.quality, targetPlatform),

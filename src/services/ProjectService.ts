@@ -22,7 +22,12 @@ import {
   normalizeProjectManifest,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
-import { SceneManager, setProjectAODefault, type SceneGraph } from '@pix3/runtime';
+import {
+  SceneManager,
+  setProjectAODefault,
+  setProjectTextureFiltering,
+  type SceneGraph,
+} from '@pix3/runtime';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import type * as Y from 'yjs';
 import { EditorTabService } from './EditorTabService';
@@ -827,10 +832,13 @@ export class ProjectService {
       const manifest = normalizeProjectManifest(parsed);
       // Push the project-tier AO default so scenes set to `inherit` resolve it.
       setProjectAODefault(manifest.ambientOcclusion);
+      // Push the 2D texture filtering mode so texture loads pick it up.
+      setProjectTextureFiltering(manifest.textureFiltering);
       return manifest;
     } catch {
       const fallback = createDefaultProjectManifest();
       setProjectAODefault(fallback.ambientOcclusion);
+      setProjectTextureFiltering(fallback.textureFiltering);
       return fallback;
     }
   }

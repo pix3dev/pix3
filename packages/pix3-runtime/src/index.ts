@@ -24,6 +24,8 @@ export * from './core/CutsceneApi';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
+export * from './core/project-texture-filtering';
+export * from './core/texture-region';
 export * from './core/label-text-layout';
 export * from './core/tiled-sprite-geometry';
 export * from './core/game-debug';

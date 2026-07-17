@@ -65,4 +65,12 @@ describe('ProjectManifest', () => {
     expect(manifest.projectType).toBe('3d');
     expect(manifest.targetPlatform).toBe('universal');
   });
+
+  it('defaults textureFiltering to linear and accepts nearest', () => {
+    expect(normalizeProjectManifest({}).textureFiltering).toBe('linear');
+    expect(normalizeProjectManifest({ textureFiltering: 'NEAREST' }).textureFiltering).toBe(
+      'nearest'
+    );
+    expect(normalizeProjectManifest({ textureFiltering: 'bogus' }).textureFiltering).toBe('linear');
+  });
 });

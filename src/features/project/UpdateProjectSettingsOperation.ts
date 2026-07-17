@@ -4,12 +4,13 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { Node2D, SceneManager, setProjectAODefault } from '@pix3/runtime';
+import { Node2D, SceneManager, setProjectAODefault, setProjectTextureFiltering } from '@pix3/runtime';
 import {
   createDefaultProjectManifest,
   normalizeProjectManifest,
   type ProjectManifest,
   type ProjectAODefault,
+  type TextureFiltering,
 } from '@/core/ProjectManifest';
 import { ProjectService } from '@/services/ProjectService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
@@ -21,6 +22,7 @@ export interface UpdateProjectSettingsParams {
   viewportBaseWidth?: number;
   viewportBaseHeight?: number;
   ambientOcclusion?: ProjectAODefault;
+  textureFiltering?: TextureFiltering;
 }
 
 interface ProjectManifestSnapshotLike {
@@ -112,6 +114,10 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       this.params.ambientOcclusion !== undefined
         ? this.params.ambientOcclusion
         : prevManifest.ambientOcclusion;
+    const nextTextureFiltering =
+      this.params.textureFiltering !== undefined
+        ? this.params.textureFiltering
+        : prevManifest.textureFiltering;
     const nextManifest = normalizeProjectManifest({
       ...prevManifest,
       defaultExportScenePath: nextDefaultExportScenePath,
@@ -120,6 +126,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
         height: nextViewportBaseHeight,
       },
       ambientOcclusion: nextAmbientOcclusion,
+      textureFiltering: nextTextureFiltering,
     });
 
     if (
@@ -128,7 +135,8 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       prevManifest.defaultExportScenePath === nextManifest.defaultExportScenePath &&
       prevManifest.viewportBaseSize.width === nextManifest.viewportBaseSize.width &&
       prevManifest.viewportBaseSize.height === nextManifest.viewportBaseSize.height &&
-      prevManifest.ambientOcclusion === nextManifest.ambientOcclusion
+      prevManifest.ambientOcclusion === nextManifest.ambientOcclusion &&
+      prevManifest.textureFiltering === nextManifest.textureFiltering
     ) {
       return { didMutate: false };
     }
@@ -139,6 +147,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
       state.project.localAbsolutePath = newPath;
       state.project.manifest = nextManifest;
       setProjectAODefault(nextManifest.ambientOcclusion);
+      this.applyTextureFiltering(context, nextManifest.textureFiltering);
       this.rebakeRootAnchors(context, prevManifest.viewportBaseSize, nextManifest.viewportBaseSize);
     } catch {
       return { didMutate: false };
@@ -167,6 +176,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
           state.project.localAbsolutePath = prevPath;
           state.project.manifest = prevManifest;
           setProjectAODefault(prevManifest.ambientOcclusion);
+          this.applyTextureFiltering(context, prevManifest.textureFiltering);
           this.rebakeRootAnchors(
             context,
             nextManifest.viewportBaseSize,
@@ -190,6 +200,7 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
           state.project.localAbsolutePath = newPath;
           state.project.manifest = nextManifest;
           setProjectAODefault(nextManifest.ambientOcclusion);
+          this.applyTextureFiltering(context, nextManifest.textureFiltering);
           this.rebakeRootAnchors(
             context,
             prevManifest.viewportBaseSize,
@@ -209,6 +220,20 @@ export class UpdateProjectSettingsOperation implements Operation<OperationInvoke
         },
       },
     };
+  }
+
+  /**
+   * Push the 2D texture filtering mode to the runtime global (so future texture
+   * loads and play mode pick it up) and re-apply it to the editor's live 2D
+   * proxy textures for immediate visual feedback.
+   */
+  private applyTextureFiltering(context: OperationContext, filtering: TextureFiltering): void {
+    setProjectTextureFiltering(filtering);
+    const viewportService = this.tryGetService<ViewportRendererService>(
+      context,
+      ViewportRendererService
+    );
+    viewportService?.reapply2DTextureFiltering();
   }
 
   private rebakeRootAnchors(

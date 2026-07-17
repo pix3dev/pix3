@@ -3,7 +3,12 @@ import { appState } from '@/state';
 import { ProjectSettingsService } from '@/services/ProjectSettingsService';
 import { OperationService } from '@/services/OperationService';
 import { UpdateProjectSettingsOperation } from '@/features/project/UpdateProjectSettingsOperation';
-import { PROJECT_AO_MODES, type ProjectAODefault } from '@/core/ProjectManifest';
+import {
+  PROJECT_AO_MODES,
+  TEXTURE_FILTERING_MODES,
+  type ProjectAODefault,
+  type TextureFiltering,
+} from '@/core/ProjectManifest';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { AddAutoloadCommand } from '@/features/project/AddAutoloadCommand';
 import { RemoveAutoloadCommand } from '@/features/project/RemoveAutoloadCommand';
@@ -41,6 +46,9 @@ export class ProjectSettingsDialog extends ComponentBase {
 
   @state()
   private ambientOcclusion: ProjectAODefault = 'baked';
+
+  @state()
+  private textureFiltering: TextureFiltering = 'linear';
 
   private defaultExportScenePathDirty = false;
   private viewportBaseWidthDirty = false;
@@ -209,6 +217,26 @@ export class ProjectSettingsDialog extends ComponentBase {
                       Adaptive = pick by device.
                     </div>
                   </div>
+
+                  <div class="settings-field">
+                    <label for="textureFiltering">2D Texture Filtering</label>
+                    <select
+                      id="textureFiltering"
+                      .value=${this.textureFiltering}
+                      @change=${(e: Event) => {
+                        this.textureFiltering = (e.target as HTMLSelectElement)
+                          .value as TextureFiltering;
+                      }}
+                    >
+                      ${TEXTURE_FILTERING_MODES.map(
+                        mode => html`<option value=${mode}>${mode}</option>`
+                      )}
+                    </select>
+                    <div class="hint">
+                      How 2D sprite/UI textures are sampled. Linear smooths on scale; Nearest
+                      disables smoothing for crisp pixel-art rendering. 3D textures are unaffected.
+                    </div>
+                  </div>
                 </div>
               `
             : html`
@@ -333,6 +361,7 @@ export class ProjectSettingsDialog extends ComponentBase {
         ? Math.max(64, Math.round(parsedViewportBaseHeight))
         : 1080,
       ambientOcclusion: this.ambientOcclusion,
+      textureFiltering: this.textureFiltering,
     });
 
     await this.operationService.invokeAndPush(operation);
@@ -361,6 +390,7 @@ export class ProjectSettingsDialog extends ComponentBase {
     }
 
     this.ambientOcclusion = manifest.ambientOcclusion;
+    this.textureFiltering = manifest.textureFiltering;
   }
 
   private async onAddAutoload(): Promise<void> {

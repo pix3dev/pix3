@@ -12,13 +12,12 @@ const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 's
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
 const SCENE_EXTENSIONS = new Set(['pix3scene']);
+// Script/source files render as a plain file-type icon instead of a code
+// preview: a shrunk-down slice of source is unreadable and reads as visual
+// noise ("a bunch of compressed strips"). Data/prose text formats below keep
+// their preview, where a few lines are actually legible and useful.
+const CODE_SCRIPT_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
 const TEXT_PREVIEW_EXTENSIONS = new Set([
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
   'json',
   'md',
   'markdown',
@@ -753,7 +752,11 @@ export class AssetsPreviewService {
       return 'file';
     }
 
-    if (['ts', 'js', 'json', 'css', 'html', 'md', 'txt', 'yml', 'yaml'].includes(extension)) {
+    if (CODE_SCRIPT_EXTENSIONS.has(extension)) {
+      return 'code';
+    }
+
+    if (['json', 'css', 'html', 'md', 'txt', 'yml', 'yaml'].includes(extension)) {
       return 'file-text';
     }
 

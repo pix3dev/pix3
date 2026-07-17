@@ -9,10 +9,35 @@ import type { PropertySchema } from '../fw/property-schema';
 import type { NodeBase } from '../nodes/NodeBase';
 import type { AssetLoader } from './AssetLoader';
 import type { SceneService } from './SceneService';
+import type { TextureRegion } from './texture-region';
+
+/**
+ * Declarative, editor-only appearance override a script can push each preview
+ * frame to change how its node draws in the editor viewport — without entering
+ * play mode. Pure data (no Three.js / editor types) so it stays runtime-safe.
+ * Immediate-mode: whatever a component passes to
+ * {@link EditorPreviewContext.setAppearanceOverride} applies for that frame; if
+ * it stops pushing, the proxy reverts to the node's document state.
+ */
+export interface EditorAppearanceOverride {
+  /** Crop the previewed texture to a UV sub-rect (Sprite2D proxies in v1). */
+  textureRegion?: TextureRegion;
+  /** Multiply-tint the proxy material (CSS color string, e.g. '#ff8800'). */
+  tint?: string;
+  /** Show/hide the proxy without touching the node's own `visible`. */
+  visible?: boolean;
+}
 
 export interface EditorPreviewContext {
   assetLoader: AssetLoader;
   requestRender: () => void;
+  /**
+   * Declare how this component's node should look in the editor viewport for the
+   * current preview frame. Immediate-mode: not calling it again on the next tick
+   * reverts the proxy to the node's document state. Never mutates the node and is
+   * never serialized — it is transient presentation state, not document state.
+   */
+  setAppearanceOverride(override: EditorAppearanceOverride): void;
 }
 
 /**

@@ -196,6 +196,7 @@ function createManifest(metadata: Record<string, unknown> = {}): ProjectManifest
     version: '1.0.0',
     autoloads: [],
     ambientOcclusion: 'baked',
+    textureFiltering: 'linear',
     viewportBaseSize: {
       width: 1920,
       height: 1080,

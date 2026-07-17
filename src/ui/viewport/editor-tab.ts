@@ -120,6 +120,10 @@ export class EditorTabComponent extends ComponentBase {
   private isDragging = false;
   private touchGestureInProgress = false;
   private singleTouchPanPointerId: number | null = null;
+  /** Space-bar "grab tool": while space is held, a left-drag pans the 2D camera
+   * (Figma/Photoshop convention). `spacePanPointerId` owns the active pan drag. */
+  private spaceHeld = false;
+  private spacePanPointerId: number | null = null;
   private readonly dragThreshold = 5;
   private wheelCanvas?: HTMLCanvasElement;
   /**
@@ -175,6 +179,17 @@ export class EditorTabComponent extends ComponentBase {
     appState.editorContext.focusedArea = 'viewport';
   };
 
+  private readonly handleViewportFocusOut = (): void => {
+    // Losing focus (alt-tab, clicking another panel) means we'll miss the space
+    // keyup, so clear the grab-tool state to avoid a "stuck space" that would
+    // turn ordinary left-drags into pans. An in-flight pan keeps its pointer
+    // capture and is cleaned up by pointer-up/cancel instead.
+    if (this.spaceHeld && this.spacePanPointerId === null) {
+      this.spaceHeld = false;
+      this.setViewportCursor('');
+    }
+  };
+
   connectedCallback(): void {
     super.connectedCallback();
 
@@ -220,6 +235,7 @@ export class EditorTabComponent extends ComponentBase {
       capture: true,
     });
     this.addEventListener('focusin', this.handleViewportFocusIn);
+    this.addEventListener('focusout', this.handleViewportFocusOut);
     this.addEventListener('pointerdown', this.handleCanvasPointerDown);
     this.addEventListener('pointermove', this.handleCanvasPointerMove);
     this.addEventListener('pointerup', this.handleCanvasPointerUp);
@@ -254,6 +270,7 @@ export class EditorTabComponent extends ComponentBase {
     this.wheelCanvas?.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.wheelCanvas = undefined;
     this.removeEventListener('focusin', this.handleViewportFocusIn);
+    this.removeEventListener('focusout', this.handleViewportFocusOut);
     this.removeEventListener('pointerdown', this.handleCanvasPointerDown);
     this.removeEventListener('pointermove', this.handleCanvasPointerMove);
     this.removeEventListener('pointerup', this.handleCanvasPointerUp);
@@ -262,6 +279,8 @@ export class EditorTabComponent extends ComponentBase {
     this.removeEventListener('keyup', this.handleCanvasKeyUp);
     this.navigation2D.clearTouchState();
     this.singleTouchPanPointerId = null;
+    this.spaceHeld = false;
+    this.spacePanPointerId = null;
     super.disconnectedCallback();
   }
 
@@ -887,6 +906,18 @@ export class EditorTabComponent extends ComponentBase {
       return;
     }
 
+    // Space + left-drag pans the 2D camera (grab tool). It takes precedence over
+    // selection, marquee and transform handles so the user can reposition the
+    // view without disturbing what is selected.
+    if (this.spaceHeld && event.button === 0 && appState.ui.navigationMode === '2d') {
+      this.capturePointerSafely(event.pointerId);
+      this.navigation2D.startPan(event.pointerId, screenX, screenY);
+      this.spacePanPointerId = event.pointerId;
+      this.isDragging = true;
+      this.setViewportCursor('grabbing');
+      return;
+    }
+
     // Real resize/rotate handles start a transform immediately. The 'move' body
     // zone does NOT — it is deferred (see `pendingBodyMove`) so a plain click
     // over the selection frame can re-pick a node painted in front of it.
@@ -942,6 +973,27 @@ export class EditorTabComponent extends ComponentBase {
     const rect = canvas?.getBoundingClientRect() ?? this.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
+
+    // Space+drag pan (grab tool): an active pan follows the pointer; space held
+    // without a pressed button (and no other drag in progress) just keeps the
+    // grab affordance and suppresses the hover/handle preview.
+    if (this.spacePanPointerId === event.pointerId) {
+      this.navigation2D.updatePan(screenX, screenY);
+      this.isDragging = true;
+      // Pointer capture retargets moves to this host, so the canvas's own
+      // "invalidate on interaction" listener never fires. Repaint explicitly,
+      // otherwise the pan only updates on the idle heartbeat (visible lag).
+      this.viewportRenderer.requestRender();
+      return;
+    }
+    if (
+      this.spaceHeld &&
+      this.spacePanPointerId === null &&
+      !this.pointerDownPos &&
+      appState.ui.navigationMode === '2d'
+    ) {
+      return;
+    }
 
     if (
       event.pointerType === 'touch' &&
@@ -1088,6 +1140,16 @@ export class EditorTabComponent extends ComponentBase {
       }
     }
 
+    // End space+drag pan if active
+    if (this.spacePanPointerId === event.pointerId) {
+      this.navigation2D.endPan();
+      this.releasePointerSafely(event.pointerId);
+      this.spacePanPointerId = null;
+      this.setViewportCursor(this.spaceHeld ? 'grab' : '');
+      this.clearPointerInteraction();
+      return;
+    }
+
     // End right-click pan if active
     if (event.button === 2 && appState.ui.navigationMode === '2d') {
       this.navigation2D.endPan();
@@ -1167,6 +1229,13 @@ export class EditorTabComponent extends ComponentBase {
       this.touchGestureInProgress = this.navigation2D.isTouchGestureActive();
     }
 
+    if (this.spacePanPointerId === event.pointerId) {
+      this.navigation2D.endPan();
+      this.releasePointerSafely(event.pointerId);
+      this.spacePanPointerId = null;
+      this.setViewportCursor(this.spaceHeld ? 'grab' : '');
+    }
+
     if (event.button === 2 && appState.ui.navigationMode === '2d') {
       this.navigation2D.endPan();
     }
@@ -1226,6 +1295,24 @@ export class EditorTabComponent extends ComponentBase {
   private handleCanvasKeyDown = (event: KeyboardEvent): void => {
     if (appState.tabs.activeTabId !== this.tabId) return;
 
+    // Space enables the "grab tool": while held, a left-drag pans the 2D camera.
+    // Only in 2D nav mode, and never while typing into a field. preventDefault
+    // stops the page from scrolling and stops a focused button from activating.
+    if (
+      event.code === 'Space' &&
+      appState.ui.navigationMode === '2d' &&
+      !this.isTypingTarget(event)
+    ) {
+      event.preventDefault();
+      if (!this.spaceHeld) {
+        this.spaceHeld = true;
+        if (this.spacePanPointerId === null) {
+          this.setViewportCursor('grab');
+        }
+      }
+      return;
+    }
+
     // Escape pops the isolation scope out one level (Figma), selecting the
     // former container. Only handled while a scope is active, so global Escape
     // behaviour is untouched at the scene root.
@@ -1251,10 +1338,43 @@ export class EditorTabComponent extends ComponentBase {
 
   private handleCanvasKeyUp = (event: KeyboardEvent): void => {
     if (appState.tabs.activeTabId !== this.tabId) return;
+    if (event.code === 'Space') {
+      this.spaceHeld = false;
+      // If a pan drag is still in flight, leave the grabbing cursor until
+      // pointer-up ends it; otherwise drop the grab affordance now.
+      if (this.spacePanPointerId === null) {
+        this.setViewportCursor('');
+      }
+      return;
+    }
     if (event.key === 'Control' || event.key === 'Meta') {
       this.rerunHover(false);
     }
   };
+
+  /** True when the event targets a text-entry surface, so viewport keyboard
+   * shortcuts (e.g. the space grab-tool) don't hijack typing. */
+  private isTypingTarget(event: Event): boolean {
+    return event
+      .composedPath()
+      .some(
+        el =>
+          el instanceof HTMLElement &&
+          (el.tagName === 'INPUT' ||
+            el.tagName === 'TEXTAREA' ||
+            el.tagName === 'SELECT' ||
+            el.isContentEditable)
+      );
+  }
+
+  /** Set the viewport cursor (grab / grabbing during space-pan). Applied to the
+   * `.panel` container so it cascades to the canvas, which has no cursor of its own. */
+  private setViewportCursor(cursor: string): void {
+    const panel = this.renderRoot.querySelector<HTMLElement>('.panel');
+    if (panel) {
+      panel.style.cursor = cursor;
+    }
+  }
 
   private rerunHover(deep: boolean): void {
     if (!this.lastHoverScreen || this.pointerDownPos) return;

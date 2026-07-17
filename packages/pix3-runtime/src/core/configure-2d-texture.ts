@@ -1,8 +1,10 @@
-import { LinearFilter, SRGBColorSpace, type Texture } from 'three';
+import { LinearFilter, NearestFilter, SRGBColorSpace, type Texture } from 'three';
+import { getProjectTextureFiltering } from './project-texture-filtering';
 
 /**
  * Configures a texture for crisp, correct 2D display in the orthographic overlay:
- * sRGB color space, mipmaps OFF, linear minification.
+ * sRGB color space, mipmaps OFF, and min/mag filtering per the project's texture
+ * filtering setting (linear = smoothed, the default; nearest = crisp pixel-art).
  *
  * Mipmaps MUST be disabled. On some ANGLE/D3D11 backends (notably Qualcomm Adreno
  * on Windows on ARM), mipmap generation for the frequently non-power-of-two 2D
@@ -18,6 +20,8 @@ import { LinearFilter, SRGBColorSpace, type Texture } from 'three';
 export function configure2DTexture(texture: Texture): void {
   texture.colorSpace = SRGBColorSpace;
   texture.generateMipmaps = false;
-  texture.minFilter = LinearFilter;
+  const filter = getProjectTextureFiltering() === 'nearest' ? NearestFilter : LinearFilter;
+  texture.minFilter = filter;
+  texture.magFilter = filter;
   texture.needsUpdate = true;
 }

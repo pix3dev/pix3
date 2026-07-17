@@ -19,6 +19,25 @@ export interface Vector3Value {
   z: number;
 }
 
+/**
+ * Emit a bubbling, composed `locate-resource` event so the Inspector can reveal
+ * the given resource in the Asset Browser / Assets Preview. Shared by every
+ * resource editor below (texture / audio / model / animation).
+ */
+function dispatchLocate(source: HTMLElement, url: string): void {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return;
+  }
+  source.dispatchEvent(
+    new CustomEvent('locate-resource', {
+      detail: { url: trimmed },
+      bubbles: true,
+      composed: true,
+    })
+  );
+}
+
 function formatBytes(size: number): string {
   if (size < 1024) {
     return `${size} B`;
@@ -705,6 +724,14 @@ export class TextureResourceEditor extends ComponentBase {
           placeholder="res://path/to/texture.png"
           @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
         />
+        <button
+          type="button"
+          ?disabled=${!this.resourceUrl.trim()}
+          title="Show this file in the Asset Browser"
+          @click=${() => dispatchLocate(this, this.resourceUrl)}
+        >
+          Locate
+        </button>
         <button type="button" ?disabled=${this.disabled} @click=${() => this.emitChange('')}>
           Clear
         </button>
@@ -1021,6 +1048,14 @@ export class AudioResourceEditor extends ComponentBase {
                 placeholder="res://path/to/sound.wav"
                 @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
               />
+              <button
+                type="button"
+                ?disabled=${!this.resourceUrl.trim()}
+                title="Show this file in the Asset Browser"
+                @click=${() => dispatchLocate(this, this.resourceUrl)}
+              >
+                Locate
+              </button>
               <button type="button" ?disabled=${this.disabled} @click=${() => this.emitChange('')}>
                 Clear
               </button>
@@ -1105,6 +1140,14 @@ export class ModelResourceEditor extends ComponentBase {
           placeholder="res://path/to/model.glb"
           @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
         />
+        <button
+          type="button"
+          ?disabled=${!this.resourceUrl.trim()}
+          title="Show this file in the Asset Browser"
+          @click=${() => dispatchLocate(this, this.resourceUrl)}
+        >
+          Locate
+        </button>
         <button type="button" ?disabled=${this.disabled} @click=${() => this.emitChange('')}>
           Clear
         </button>
@@ -1236,6 +1279,14 @@ export class AnimationResourceEditor extends ComponentBase {
               </button>
             `
           : html`
+              <button
+                type="button"
+                ?disabled=${!hasResource}
+                title="Show this file in the Asset Browser"
+                @click=${() => dispatchLocate(this, this.resourceUrl)}
+              >
+                Locate
+              </button>
               <button
                 type="button"
                 ?disabled=${this.isCreating || !hasResource}

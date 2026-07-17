@@ -46,7 +46,18 @@ import { Particles3D } from '@pix3/runtime';
 import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
-import type { EditorPreviewContext, SceneGraph, ScriptComponent } from '@pix3/runtime';
+import type {
+  EditorAppearanceOverride,
+  EditorPreviewContext,
+  SceneGraph,
+  ScriptComponent,
+} from '@pix3/runtime';
+import {
+  applyTextureRegionToTexture,
+  describeThrown,
+  getProjectTextureFiltering,
+  reportScriptError,
+} from '@pix3/runtime';
 import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
 import { SceneManager, InputService } from '@pix3/runtime';
@@ -238,6 +249,17 @@ export class ViewportRendererService {
   private lastRenderedAt = 0;
   private activeParticlePreviewCount = 0;
   private activeComponentPreviewCount = 0;
+  /**
+   * Editor appearance overrides a script pushed via `setAppearanceOverride`,
+   * keyed by nodeId. `stamp` is the preview frame it was last pushed on;
+   * anything not re-pushed on the current frame is reverted and dropped. This is
+   * transient editor-only presentation state — never serialized, never in undo.
+   */
+  private readonly componentAppearanceOverrides = new Map<
+    string,
+    { override: EditorAppearanceOverride; stamp: number }
+  >();
+  private previewFrameStamp = 0;
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
   };
@@ -3109,6 +3131,10 @@ export class ViewportRendererService {
         const anchorMarker = visualRoot.userData.anchorMarker as THREE.Group | undefined;
         if (anchorMarker) {
           anchorMarker.position.set(0, 0, 0.01);
+          // Keep the pivot marker in sync with selection here too, so a freshly
+          // (re)built visual for an already-selected node shows its marker
+          // without waiting for the next selection change.
+          anchorMarker.visible = appState.selection.nodeIds.includes(node.nodeId);
 
           if (sizeGroup) {
             this.updateSprite2DAnchorMarker(
@@ -3128,6 +3154,13 @@ export class ViewportRendererService {
             mesh.material.needsUpdate = true;
             this.applyTextureToSprite2DMaterial(node, mesh.material);
             visualRoot.userData.texturePath = currentTexturePath;
+          }
+          // Honor a programmatic UV crop (node.textureRegion). A live script
+          // appearance override, when active, is re-applied on top each preview
+          // frame (flushComponentAppearanceOverrides), so skip here to avoid
+          // fighting it.
+          if (mesh.material.map && !this.componentAppearanceOverrides.has(node.nodeId)) {
+            applyTextureRegionToTexture(mesh.material.map, node.textureRegion ?? null);
           }
         }
 
@@ -3390,8 +3423,24 @@ export class ViewportRendererService {
       this.clear2DSelectionOverlay();
     }
     this.updateNodeIconVisibility();
+    this.updateSprite2DAnchorMarkerVisibility();
 
     this.attachTransformControlsForSelection(firstSelectedNode);
+  }
+
+  /**
+   * Show a Sprite2D's anchor/pivot marker only while its node is selected. The
+   * marker is created hidden and only meaningful for the node being edited, so
+   * this keeps the pivot cross off every other sprite in the scene.
+   */
+  private updateSprite2DAnchorMarkerVisibility(): void {
+    const selectedIds = new Set(appState.selection.nodeIds);
+    for (const [nodeId, visualRoot] of this.sprite2DVisuals) {
+      const anchorMarker = visualRoot.userData.anchorMarker as THREE.Group | undefined;
+      if (anchorMarker) {
+        anchorMarker.visible = selectedIds.has(nodeId);
+      }
+    }
   }
 
   private attachTransformControlsForSelection(firstSelectedNode?: Node3D | null): void {
@@ -3478,6 +3527,10 @@ export class ViewportRendererService {
       if (!sceneGraph) {
         return;
       }
+
+      // Proxies are about to be rebuilt with default (un-cropped) materials, and
+      // nodeIds may be recycled — drop any stale editor appearance overrides.
+      this.componentAppearanceOverrides.clear();
 
       // Stop all preview animations and clean up mixers before rebuilding
       for (const action of this.previewAnimationActions.values()) {
@@ -4365,6 +4418,11 @@ export class ViewportRendererService {
     marker.layers.set(LAYER_2D);
     marker.renderOrder = 420;
     marker.userData.isSprite2DAnchorMarker = true;
+    // Anchor/pivot markers are only meaningful for the node the user is editing,
+    // so they stay hidden until selection turns them on (see
+    // updateSprite2DAnchorMarkerVisibility). Otherwise every sprite in the scene
+    // shows a pivot cross, which is visual noise.
+    marker.visible = false;
 
     const horizontal = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
@@ -4485,7 +4543,48 @@ export class ViewportRendererService {
   private configureSpriteTexture(texture: THREE.Texture): void {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.generateMipmaps = false;
-    texture.minFilter = THREE.LinearFilter;
+    const filter =
+      getProjectTextureFiltering() === 'nearest' ? THREE.NearestFilter : THREE.LinearFilter;
+    texture.minFilter = filter;
+    texture.magFilter = filter;
+  }
+
+  /**
+   * Re-apply the project's 2D texture filtering mode to every live 2D proxy
+   * texture. Called when the project setting changes so the crisp/smoothed look
+   * updates immediately without reloading textures. 3D textures are untouched.
+   */
+  reapply2DTextureFiltering(): void {
+    const filter =
+      getProjectTextureFiltering() === 'nearest' ? THREE.NearestFilter : THREE.LinearFilter;
+    const applyToRoot = (root: THREE.Object3D): void => {
+      root.traverse(child => {
+        if (!(child instanceof THREE.Mesh)) {
+          return;
+        }
+        const material = child.material;
+        const map = material instanceof THREE.MeshBasicMaterial ? material.map : null;
+        if (map) {
+          map.minFilter = filter;
+          map.magFilter = filter;
+          map.needsUpdate = true;
+        }
+      });
+    };
+
+    const registries = [
+      this.sprite2DVisuals,
+      this.animatedSprite2DVisuals,
+      this.tiledSprite2DVisuals,
+      this.uiControl2DVisuals,
+    ];
+    for (const registry of registries) {
+      for (const root of registry.values()) {
+        applyToRoot(root);
+      }
+    }
+
+    this.requestRender();
   }
 
   private applyTextureToSprite2DMaterial(node: Sprite2D, material: THREE.MeshBasicMaterial): void {
@@ -5073,6 +5172,9 @@ export class ViewportRendererService {
   private tickComponentPreview(dt: number): void {
     if (appState.ui.isPlaying) {
       this.activeComponentPreviewCount = 0;
+      // Play mode owns rendering; drop any editor-preview overrides so the
+      // proxies (if still around) revert, and re-apply cleanly on return.
+      this.clearComponentAppearanceOverrides();
       return;
     }
 
@@ -5083,25 +5185,33 @@ export class ViewportRendererService {
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
       this.activeComponentPreviewCount = 0;
+      this.clearComponentAppearanceOverrides();
       return;
     }
 
-    const previewContext: EditorPreviewContext = {
-      assetLoader: this.assetLoader,
-      requestRender: () => {
-        queueMicrotask(() => this.requestRender());
-      },
-    };
+    this.previewFrameStamp += 1;
+    const frameStamp = this.previewFrameStamp;
 
     let active = 0;
     const visit = (nodes: NodeBase[]) => {
       for (const node of nodes) {
-        if (node.components && Array.isArray(node.components)) {
+        if (node.components && Array.isArray(node.components) && node.components.length > 0) {
+          // Per-node context: setAppearanceOverride records against this nodeId,
+          // last writer per frame wins.
+          const context: EditorPreviewContext = {
+            assetLoader: this.assetLoader,
+            requestRender: () => {
+              queueMicrotask(() => this.requestRender());
+            },
+            setAppearanceOverride: (override: EditorAppearanceOverride) => {
+              this.componentAppearanceOverrides.set(node.nodeId, { override, stamp: frameStamp });
+            },
+          };
           for (const component of node.components) {
             if (component.enabled && typeof component.tickEditorPreview === 'function') {
               active += 1;
             }
-            this.tickPreviewComponent(component, dt, previewContext);
+            this.tickPreviewComponent(node, component, dt, context);
           }
         }
 
@@ -5113,9 +5223,11 @@ export class ViewportRendererService {
 
     visit(sceneGraph.rootNodes);
     this.activeComponentPreviewCount = active;
+    this.flushComponentAppearanceOverrides(sceneGraph, frameStamp);
   }
 
   private tickPreviewComponent(
+    node: NodeBase,
     component: ScriptComponent,
     dt: number,
     context: EditorPreviewContext
@@ -5124,7 +5236,106 @@ export class ViewportRendererService {
       return;
     }
 
-    component.tickEditorPreview(dt, context);
+    // Error isolation: a throwing tickEditorPreview must not kill the frame or
+    // the editor. Disable the component and surface the failure the same way the
+    // runtime does for play-mode hooks (Logs panel / Game tab).
+    try {
+      component.tickEditorPreview(dt, context);
+    } catch (thrown) {
+      component.enabled = false;
+      const { message, stack } = describeThrown(thrown);
+      console.error(
+        `[ViewportRenderService] Script "${component.type}" threw in editor-preview on node "${node.name}" (disabled):`,
+        thrown
+      );
+      reportScriptError({
+        phase: 'update',
+        message,
+        stack,
+        nodeId: node.nodeId,
+        nodeName: node.name,
+        componentType: component.type,
+        componentId: component.id,
+      });
+    }
+  }
+
+  /**
+   * Apply the appearance overrides pushed this preview frame to their proxies,
+   * and revert + drop any that were not re-pushed (immediate-mode lifecycle).
+   */
+  private flushComponentAppearanceOverrides(sceneGraph: SceneGraph, frameStamp: number): void {
+    if (this.componentAppearanceOverrides.size === 0) {
+      return;
+    }
+
+    for (const [nodeId, entry] of this.componentAppearanceOverrides) {
+      const node = this.findNodeById(nodeId, sceneGraph.rootNodes);
+      if (entry.stamp === frameStamp) {
+        if (node) {
+          this.applyAppearanceOverrideToProxy(node, entry.override);
+        }
+      } else {
+        if (node) {
+          this.applyAppearanceOverrideToProxy(node, null);
+        }
+        this.componentAppearanceOverrides.delete(nodeId);
+      }
+    }
+  }
+
+  /** Revert every active appearance override and clear the map. */
+  private clearComponentAppearanceOverrides(): void {
+    if (this.componentAppearanceOverrides.size === 0) {
+      return;
+    }
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    for (const [nodeId] of this.componentAppearanceOverrides) {
+      const node = sceneGraph ? this.findNodeById(nodeId, sceneGraph.rootNodes) : null;
+      if (node) {
+        this.applyAppearanceOverrideToProxy(node, null);
+      }
+    }
+    this.componentAppearanceOverrides.clear();
+  }
+
+  /**
+   * Apply (or, when `override` is null, revert) a script-driven editor
+   * appearance override on a node's proxy visual. v1 supports Sprite2D proxies;
+   * `tint`/`visible` apply to any proxy with a root group and MeshBasicMaterial.
+   */
+  private applyAppearanceOverrideToProxy(node: NodeBase, override: EditorAppearanceOverride | null): void {
+    const visualRoot = this.get2DVisualRoot(node.nodeId);
+    if (!visualRoot) {
+      return;
+    }
+
+    // Visibility: fall back to the node's own visibility when not overridden.
+    const nodeVisible = node instanceof Node2D ? node.visible : true;
+    visualRoot.visible = override?.visible ?? nodeVisible;
+
+    const mesh = visualRoot.userData.spriteMesh as THREE.Mesh | undefined;
+    const material =
+      mesh && mesh.material instanceof THREE.MeshBasicMaterial ? mesh.material : undefined;
+    if (!material) {
+      return;
+    }
+
+    // Texture region (Sprite2D): override wins, else the node's own transient
+    // region, else the full texture.
+    if (material.map) {
+      const nodeRegion =
+        node instanceof Sprite2D ? (node.textureRegion ?? null) : null;
+      applyTextureRegionToTexture(material.map, override?.textureRegion ?? nodeRegion);
+    }
+
+    // Tint: override color, else restore the material's authored base color
+    // (white when a texture is present, the placeholder grey otherwise).
+    if (override?.tint) {
+      material.color.set(override.tint);
+    } else {
+      material.color.set(material.map ? 0xffffff : 0xcccccc);
+    }
   }
 
   private syncSprite3DTexture(node: Sprite3D): void {
@@ -7362,6 +7573,8 @@ export class ViewportRendererService {
 
     // Cancel pan momentum animation
     this.cancelPanMomentum();
+
+    this.componentAppearanceOverrides.clear();
 
     // Stop and dispose animation mixers
     for (const action of this.previewAnimationActions.values()) {

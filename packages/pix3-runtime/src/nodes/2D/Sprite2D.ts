@@ -3,6 +3,11 @@ import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { configure2DTexture } from '../../core/configure-2d-texture';
+import {
+  applyTextureRegionToTexture,
+  sanitizeTextureRegion,
+  type TextureRegion,
+} from '../../core/texture-region';
 
 export interface SpriteAnchor2D {
   x: number;
@@ -35,6 +40,14 @@ export class Sprite2D extends Node2D {
   originalHeight: number | null;
   /** Normalized anchor point in local sprite space: (0,0)=bottom-left, (0.5,0.5)=center, (1,1)=top-right. */
   anchor: SpriteAnchor2D;
+  /**
+   * Transient UV crop applied to the current texture (e.g. an odometer showing
+   * one digit of a strip). Presentation state only — NOT serialized and NOT in
+   * the property schema; scripts set it via {@link setTextureRegion} in play
+   * mode (and push the same region as an editor appearance override in edit
+   * mode). `null` = full texture.
+   */
+  textureRegion: TextureRegion | null = null;
 
   private mesh: Mesh;
   private geometry: PlaneGeometry;
@@ -102,6 +115,18 @@ export class Sprite2D extends Node2D {
     this.applyAnchorOffset();
   }
 
+  /**
+   * Crop the sprite to a normalized UV sub-rect, or `null` to show the full
+   * texture. Transient presentation state (never serialized). Used by scripts to
+   * show one cell of a sprite strip (e.g. an odometer digit) at runtime.
+   */
+  setTextureRegion(region: TextureRegion | null): void {
+    this.textureRegion = sanitizeTextureRegion(region);
+    if (this.material.map) {
+      applyTextureRegionToTexture(this.material.map, this.textureRegion);
+    }
+  }
+
   get texturePath(): string | null {
     return this.texture?.url ?? null;
   }
@@ -125,6 +150,10 @@ export class Sprite2D extends Node2D {
     this.material.map = texture;
     this.material.color.set('#ffffff'); // Reset to white once texture is loaded
     this.material.needsUpdate = true;
+
+    // Re-apply any active UV crop: a freshly loaded texture defaults to the full
+    // (0,0)/(1,1) region, so the crop must be restored after the swap.
+    applyTextureRegionToTexture(texture, this.textureRegion);
 
     // Capture the texture aspect ratio and original dimensions
     if (texture.image) {

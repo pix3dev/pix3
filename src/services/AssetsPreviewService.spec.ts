@@ -261,6 +261,27 @@ describe('AssetsPreviewService', () => {
       service.dispose();
     }
   });
+
+  it('shows a code icon instead of a code preview for script files', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'GameManager.ts', path: 'scripts/GameManager.ts', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile('GameManager.ts', 'export class GameManager {}', 'text/plain', 27)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('icon');
+      expect(item.iconName).toBe('code');
+      expect(item.previewText).toBeNull();
+    } finally {
+      service.dispose();
+    }
+  });
 });
 
 function createFile(name: string, content: string, type: string, lastModified: number): File {

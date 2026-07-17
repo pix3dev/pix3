@@ -323,6 +323,11 @@ export class InspectorPanel extends ComponentBase {
       appState.editorContext.focusedArea = 'inspector';
     });
 
+    // Resource editors (texture/audio/model/animation) emit `locate-resource`
+    // when the user clicks "Locate"; reveal the file in the Asset Browser and
+    // Assets Preview.
+    this.addEventListener('locate-resource', this.onLocateResource as EventListener);
+
     // Listen for script creator requested event from editor shell
     this.scriptCreatorRequestedHandler = (_e: Event) => {
       void this.handleScriptCreatorRequested();
@@ -333,6 +338,27 @@ export class InspectorPanel extends ComponentBase {
     );
     document.addEventListener('pointerdown', this.onDocumentPointerDown);
   }
+
+  /**
+   * Reveal the resource behind a `locate-resource` event in the Asset Browser
+   * (expand + select the file, which also drives the Assets Preview). Works from
+   * any resource editor (texture / audio / model / animation).
+   */
+  private readonly onLocateResource = (event: Event): void => {
+    const detail = (event as CustomEvent<{ url?: string }>).detail;
+    const url = detail?.url?.trim();
+    if (!url) {
+      return;
+    }
+    // res:// resource URL → project-relative path (matches Asset Browser paths).
+    const path = this.fileSystemAPI.normalizeResourcePath(url);
+    // syncFromAssetSelection updates the Assets Preview even when the Asset
+    // Browser panel is not mounted; the reveal-path event drives the Asset
+    // Browser tree (expand + select) when it is — the same channel the Assets
+    // Preview uses to reveal a folder in the tree.
+    void this.assetsPreviewService.syncFromAssetSelection(path, 'file');
+    window.dispatchEvent(new CustomEvent('assets-preview:reveal-path', { detail: { path } }));
+  };
 
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -359,6 +385,7 @@ export class InspectorPanel extends ComponentBase {
       );
       this.scriptCreatorRequestedHandler = undefined;
     }
+    this.removeEventListener('locate-resource', this.onLocateResource as EventListener);
     document.removeEventListener('pointerdown', this.onDocumentPointerDown);
 
     for (const previewUrl of this.texturePreviewUrls.values()) {
