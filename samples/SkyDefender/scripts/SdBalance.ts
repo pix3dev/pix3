@@ -170,7 +170,9 @@ export const RELOAD_SPECIAL_FACTOR = 0.55;
 
 // ── Castle (conf.xml: floors 700/1000/1300/1600, flag +100) ─────────────────
 
-export const CASTLE_FLOOR_HP: Record<number, number> = { 1: 700, 2: 1000, 3: 1300, 4: 1600 };
+// Real release values = conf.xml <ZHILKI> (hp_dom_max = HP_zh1..4). The remaster
+// previously used a guessed 700/1000/1300/1600; the original is 250/500/800/1100.
+export const CASTLE_FLOOR_HP: Record<number, number> = { 1: 250, 2: 500, 3: 800, 4: 1100 };
 export const FLAG_HP_BONUS = 100;
 export const REPAIR_AMOUNT = 400;
 export const UMBRELLA_FACTOR = 0.7; // damage multiplier while HP < 75%
@@ -296,7 +298,13 @@ const ART: Record<number, Art> = {
   30: { sprite: `${AIR}/support/fatty.png`, w: 66, h: 136 },
   31: { sprite: `${AIR}/support/fish.png`, w: 106, h: 31 },
   32: { sprite: `${AIR}/support/splash.png`, w: 74, h: 32 },
-  33: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  // S_SS (SWF class uses symbol `SS`) = the propeller TRANSPORTER airship, not a
+  // zeppelin. Numerous fodder, no bomb — it just clutters. Brown `00000` skin +
+  // red `over` livery variant (numeric frames are the propeller animation).
+  33: {
+    sprite: `${AIR}/transporter/00000.png`, w: 55, h: 29,
+    variants: [`${AIR}/transporter/00000.png`, `${AIR}/transporter/over.png`],
+  },
   34: { sprite: `${AIR}/support/nut.png`, w: 51, h: 29 },
   35: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
   36: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
@@ -381,7 +389,8 @@ function buildUnit(id: number): UnitDef {
     ground: ground || undefined,
     bomber: id >= 1 && id <= 4 ? true : undefined,
     fireBomb: id === 4 ? true : undefined,
-    carriesMine: id === 33 ? true : undefined,
+    // v15 fodder (S_SS transporter airships) carry no bomb — only Lucky/Slevin do.
+    carriesMine: undefined,
     attackDamage: v.dmg,
     attackPeriod: ground ? 5 : 1.7,
     spriteVariants: a?.variants,

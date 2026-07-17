@@ -468,10 +468,12 @@ export class GameFlow extends Script {
           this.spawner?.startSurvivalWave(this.wave);
         } else {
           this.spawner?.startWave(this.wave);
-          // The bridge crew hears this and starts hauling segments in
-          // (campaign only; once built it stays for the rest of the run).
-          this.node?.emit('mission-started', this.wave);
         }
+        // The bridge crew hears this and hauls segments in — in BOTH modes:
+        // the original sets c_enTP = 4 (four transporters) for survival too,
+        // so they fly in and build the bridge at the start of the run. The
+        // BridgeController is idempotent, so once built it stays for the run.
+        this.node?.emit('mission-started', this.wave);
         break;
       case 'intermission':
         this.setLabel(this.centerLabel, `WAVE ${this.wave} CLEARED`);
