@@ -1,0 +1,394 @@
+<?xml version="1.0" ?>
+<Start>
+  <Lvl n="1">
+    <text>In all this commotion, I forgot to introduce myself. My name is Fargo.  Mr. Fargo for you. The Royal governor. While the King is away, I am in charge here. I don't know when His Majesty is going to return. He has some business in the neighboring Empire.  So, I suggest that you act like a good boy.</text>
+    <text>Hmm...</text>
+    <text>Very good. I'm glad we're on the same page. Let's not waste our time, though. There's lots of work to be done thoroughly here. Well, perhaps I'll have a thorough breakfast  while you're doing all the thorough work. That's how it is. </text>
+    <text>Hmm...</text>
+  </Lvl>
+  <Lvl n="2">
+    <text> Well, Joe... We have a little problem. The enemy scouts have run into us. There's just a handful of them, but soon the hordes will follow.  I know you are fresh from battle, but that's how it goes: if we don't hammer them, they will. Destroy everything that can be destroyed. Hope that you can cope with it.  Oh, yes! If you do well, you will be generously rewarded by the company. </text>
+    <text> How generously?</text>
+    <text> One hundred Gold.</text>
+    <text> I'll do my best.</text>
+  </Lvl>
+  <Lvl n="3">
+    <text> Well, Joe, here's your hard-earned 70 Gold.</text>
+    <text> Actually, we agreed on 100 Gold.</text>
+    <text> Joe, are you a law-abiding citizen?</text>
+    <text> So what?</text>
+    <text> Have you heard about taxes?</text>
+    <text> Yes, Fargo...</text>
+    <text> It's Mister Fargo.</text>
+    <text> Yes, Fargo, I know what taxes are: I work – you screw around, and the treasury grows. Have I got it right?</text>
+    <text> I bet you haven't heard about the impudence tax yet, my dear old Joe. I've just invented it, by the way.</text>
+    <text> Moron.</text>
+    <text> You are welcome, Joe. Ok, let's turn to our muttons. </text>
+  </Lvl>
+  <Lvl n="4">
+    <text> Joe, you may have  already noticed that I turn to you only with problems. Such is life: I find problems – you solve them. We both do what we must, don't we? If only I didn't have to rule the country, waste... guard the treasury, and make important decisions – I'd take your place on the watch tower. But... I simply can't! I'd like to, but cannot do it. Damned invaders continue their wicked work. This time, their main target is the Royal gold mine. Joe, I'm begging you. Don't let them rob me... ahem, rob the King. If everything goes smoothly I promise to repair your tower.</text>
+    <text> Are you going to deduct the impudence tax, again?</text>
+    <text> Depends on your behavior, my dear Joe.</text>
+  </Lvl>
+  <Lvl n="5">
+    <text> Well done, Joe. I've given an order to repair your tower.</text>
+    <text> How many percent will they repair?</text>
+    <text> Depends on your deeds, Joe. Depends on your deeds...</text>
+  </Lvl>
+  <Lvl n="6">
+    <text> Dammit, Joe, where have you been? Look at the skyline – it's black with enemies! Go! Save me... us! The King! Save us all, Joe! And don't you dare even mention the reward... You are guarding the sacred! You are defending your country!</text>
+    <text> “I wonder why the country is always represented by big fat blood-sucking toads? Who won't even spare a coin in their Fatherland's name...”</text>
+  </Lvl>
+  <Lvl n="7">
+    <text> I've always known, you are a true patriot, Joe. And what's money for a true patriot like you? Nothing but filthy lucre.</text>
+    <text> “The longer I'm watching your patriotic mug, the more I think about revolution...”</text>
+    <text> Courage and fury burning in your eyes speak louder than words. Let's be silent. I admire the likes of you. I bow to your virility.</text>
+    <text> “Time will come, and you'll really have to bow. When the King will send you to the scaffold for all your deeds.”</text>
+  </Lvl>
+  <Lvl n="8">
+    <text> Hey, who is it? Oh, that's you, Joe. I'm packing here. Urgent business calls me to the neighborhood province. I need to flee... fly. By the way, people say, that some “Baby” is approaching our province. Yes, yes, this giant bulk obstructing the sunlight. Could you do me a favour and see what it's all about while  I'm away? I am very busy!</text>
+    <text>  “Things started looking nasty... and he vanished into thin air. So, what am I supposed to do?”</text>
+  </Lvl>
+  <Lvl n="9">
+    <text> We've knocked them into fits! Can you believe that, Joe? We've thrown the despicable enemy from our region. We've kicked them away! Ha-ha-ha!  That's what makes a macho! Take this (passes us 50 Gold), and indulge yourself. No-no, don't mention it. I'm just doing my duties – rewarding my subjects.</text>
+    <text> Subjects?! Since when have you become a King?</text>
+    <text> I'm just the viceroy, Joe, just a simple servant of His Majesty, as you are.</text>
+  </Lvl>
+  <Lvl n="10">
+    <text> Listen, Joe... There's an issue that requires some delicacy. I need to meet with one... ahem... partner. To discuss business. And I would like no one to disturb us while we... while we are negotiating. I want you to be my body-guard for a while. I'm sure you'll cope. Go, Joe. I need to get ready for... negotiations.</text>
+    <text> Sorry, Mr Fargo, it's not quite clear.</text>
+    <text> Don't play possum, Joe. You need to protect me, and no one may disturb me. </text>
+    <text> The thing is, Mr Fargo, the mercenaries are not cheap nowadays...</text>
+    <text> Joe!</text>
+    <text> 200 Gold.</text>
+    <text> What?!</text>
+    <text> And don't forget to pay in advance. That is now. I have no doubts that the long term public investments will pay out in the end. I have already started investing in my Kingdom and it is safe to say that a certain progress occurs. However, due to financial difficulties...</text>
+    <text> Ok, ok, I see what you are talking about, we are on the same wave now. </text>
+    <text> Happy to serve my country, Mr Fargo!</text>
+  </Lvl>
+  <Lvl n="11">
+    <text> Thank you for a nice day, Joe. You've done everything I asked for. Though you could have made less noise. It was very hard to concentrate on our... business. In future, please, try to do without fire, noise, and explosions. Sooner or later, you must learn to establish diplomatic relations. D-I-P-L-O-M-A-C-Y. Understand? Diplomacy!</text>
+    <text> Yes, that's perfectly clear to me, Mr Fargo. However, I'll have to report to the King about your small expedition, as we had to use certain equipment. The risks of this operation came up to 300%, and that means that the flying fleet was exposed to a significant threat. Everything will be included in my daily report.</text>
+    <text> (weary) Ok, Joe. How much do you want to keep this information from our precious King? He has so much to do, so why  disturb him with extra paperwork?</text>
+    <text> Repair works for the airship, overhead charges, inflation, leisure tax...</text>
+    <text> Dang it! How much do you want?</text>
+    <text> 200.</text>
+    <text> (hands Joe a well-lined money bag) </text>
+  </Lvl>
+  <Lvl n="12">
+    <text> My dear Joe, I cannot help being happy for you. You are the only one who always does well. Whenever I send you – all problems are gone. I want to thank you properly, Joe... Hey! What the hell is going on? Some culprits are stealing our sheep!</text>
+    <text> Sheep?!</text>
+  </Lvl>
+  <Lvl n="13">
+    <text> Good job, Joe. Our meat is safe.</text>
+    <text> If I remember it right, you said something about thanking me...</text>
+    <text> Don't you count today's steak as a thank you gift?</text>
+    <text> Well...</text>
+    <text> You're so finicky, Joe! We've just saved the whole city from hunger!</text>
+    <text> But I have steak for dinner every day.</text>
+    <text> Do you?</text>
+    <text> Yup.</text>
+    <text> Every day?</text>
+    <text> Every day.</text>
+    <text> So, why do you complain?</text>
+    <text> But you said...</text>
+    <text> What have I said? I promise that today I'll eat a steak in your honor, Joe. Personally. Are you satisfied?</text>
+    <text> (Looks shocked)</text>
+  </Lvl>
+  <Lvl n="14">
+    <text> You are a good guy, Joe, and I want to make you a present. I have given some money to your wife and she went shopping. And for you, the best reward is rest. Am I right? I am a wise King... that is, viceroy, and I know what my subjects need the most.</text>
+    <text> What have I done to you that you hate me so much? If you wanted to do me harm – well, you are successful!</text>
+    <text> I take care of the welfare of the subjects' families.</text>
+    <text> “You take care of my misery, sly dog!”</text>
+  </Lvl>
+  <Lvl n="15">
+    <text> How are you, Joe?</text>
+    <text> (angrily) I need a new assignment. Thanks to your efforts and my wife's spending skill our pockets are empty again, and even the cockroaches are starving in the kitchen. </text>
+    <text>  What's a cockroach?</text>
+    <text> There used to be a monster like this on the Earth long ago. Before the Great Exodus. </text>
+  </Lvl>
+  <Lvl n="16">
+    <text> This is unbearable! I just hate these filthy robbers! He that abuses me, abuses the King. Who robs me, robs not just me, but the King and the Kingdom. Joe, you must stop this pillage, immediately!</text>
+    <text> “It's a well-known fact that when the robber gets robbed it is twice as much vexing. And leads to twice as much complains.”</text>
+    <text> This sneer is out of place, Joe. Stop them!</text>
+  </Lvl>
+  <Lvl n="17">
+    <text> Thanks God, Joe, our money stayed with us.</text>
+    <text> (sullenly) Our?</text>
+    <text> Yes, of course, ours – mine, and the King's. Royal money. Do you get it?</text>
+    <text>  All I want to get is my reward.</text>
+    <text> O tempora! O mores! How much do you want, Joe? Though, I shouldn't ask after your wife's shopping. Here's your hundred Gold. Buy yourself a treat.</text>
+    <text> Good bye, “Majesty”.</text>
+  </Lvl>
+  <Lvl n="18">
+    <text> Jeez, Joe. The true slaughter has just begun, and I need to leave again. I'd be happy to support you in any way, even in battle, but...</text>
+    <text> Yes, I know, urgent matters call you to another province...</text>
+    <text> My boy, you are so quick-witted!</text>
+  </Lvl>
+  <Lvl n="19">
+    <text> I congratulate you on your victory. I learnt that the enemy forces were defeated on my way back. And these news should be prized with....</text>
+    <text> ...a generous gift?</text>
+    <text> ...a personal gratitude from the King himself! Yes, I've seen the King. He sends you his thanks and...</text>
+    <text> ...money compliment?</text>
+    <text> sincere compliments and regards.</text>
+    <text> No luck today.</text>
+  </Lvl>
+  <Lvl n="20">
+    <text> Joe, what the f...k is going on? Our citizens are walking towards their death, like lemmings. Just look. And do something about it. It's up to you, I don't have time for this. See, my desk is piled with papers! Gosh... Where am I going, Joe? My feet are dragging me somewhere...</text>
+    <text> I have a headache as if I'm hungover. What the ….?</text>
+  </Lvl>
+  <Lvl n="21">
+    <text> Joe, what was it all about?</text>
+    <text>  Television!</text>
+    <text> Jeez, what is it?</text>
+    <text> Another monster from the pre-war Earth.</text>
+    <text> Joe, I'll always be grateful to you. Here, take 200 coins.</text>
+    <text> “Wow. His life has its price.” </text>
+  </Lvl>
+  <Lvl n="22">
+    <text> It seems that they have tackled us at last. And don't tell me, you haven't been waiting for it. You were nagging at me that you do nothing but patrol, and escort transport. Now, you have a big chance to prove your military skills in action. We need to rebuff at least 3 attacks. Three attacks – three provinces. Large enemy forces are staging in this region.</text>
+    <text> Finally...</text>
+    <text> And don't think about reward yet. We'll pay off when we conquer the region. Just the repair works for your tower will stand me high. </text>
+  </Lvl>
+  <Lvl n="23">
+    <text> Not bad, not bad all, Joe. But that's just the prelude.</text>
+    <text> Whatever... Now what?</text>
+  </Lvl>
+  <Lvl n="24">
+    <text> Not bad, Joe, not bad at all. Alas, that was just the beginning of the big battle. If you don't believe it – just look out of the window. As you remember, a successful mission in this region will bring you a reward. But only a successful one, and only when the region is ours!</text>
+    <text> I remember, Fargo. I'm not amnesic yet.</text>
+  </Lvl>
+  <Lvl n="25">
+    <text> Joe, juice up, please. Show what you are capable of!</text>
+    <text> You will see what I'm capable of soon. </text>
+  </Lvl>
+  <Lvl n="26">
+    <text> I know, you are tired, but Joe, give it another try. Yes, the battles would fag anyone out. Yes, it is not easy. But who will do this if not you? We cannot step back. As soon as we conquer the third region, the situation will steady, and the enemy won't outnumber us anymore. Go, my son. Go. And remember: your reward is close.</text>
+    <text> “Drop down, you, loudmouth.”</text>
+  </Lvl>
+  <Lvl n="27">
+    <text> One province to go, Joe. And we'll take control over the three regions. Do you understand how cool is that?</text>
+    <text> (sarcastically) Yes, of course, you'll be able to soak even more money from provinces. This is worth fighting.</text>
+    <text> (reproachfully) Joe, Joe, Joe...</text>
+  </Lvl>
+  <Lvl n="28">
+    <text> Things are going awry. Xenon is at the gates of the Castle. And I don't know what to do. I even don't have urgent business in other provinces. I have nowhere to flee. Joe, I'm scared. Make the bad guy go away. I'll pray for you.</text>
+    <text> “Well, you told the truth for the first time. Probably, you are not as hopeless, as I thought.”</text>
+  </Lvl>
+  <Lvl n="29">
+    <text> Joe, I'm so proud of you. Whatever you do – you succeed. You solve all the problems.</text>
+    <text> (sarcastically) Wish I were as successful in making money.</text>
+    <text> Joe, I was unfair with you. Hope that these 300 coins will make up for my injustice.</text>
+    <text> (shocked)</text>
+    <text> “Ha, he cannot guess, that the three new regions will bring me twice as much over the first week.”</text>
+    <text> “Judging from his mug this old stinker has conceived something. And he has hardly gone bankrupt by giving me that money. I say, there's something mischievous about him.”</text>
+  </Lvl>
+  <Lvl n="30">
+    <text> So, Joe, there's a task for you. This province hosts an extraordinary miracle – the trees which yield wonderful fruit. People say they either make your life eternal, or at least make it much longer. Well, you must understand that to rule long and fair – for the King, I mean – he needs to live long and happily. Try to get at least 10 of these fruit. And remember, they are extremely fragile. One wrong move, and the barbarians will make a feast of them on the bloody Earth, under the clouds.</text>
+    <text> So, you are hiring me again, right?</text>
+    <text> (with a sigh)Yes, yes, I see what you mean. How much?</text>
+    <text> 500</text>
+    <text> (clanking with the money bag) “A leech.”</text>
+    <text> “Sometimes I feel I like him.”</text>
+  </Lvl>
+  <Lvl n="31">
+    <text> Got them?</text>
+    <text> Yup.</text>
+    <text> Take one – for your wife.</text>
+    <text> Thank you, Mr Fargo</text>
+    <text> “Sometimes my own kindness makes me sick.”</text>
+    <text> (with a sigh) “Sometimes one's kindness make me disquiet.”</text>
+  </Lvl>
+  <Lvl n="32">
+    <text> Joe, we have problems with energy in this province. The windmills don't work. I've hired several workers to repair them. But as ill luck would have it, enemies are marauding here. I want you to protect the workers while they are repairing the windmills. I'm sure, you'll cope with that.</text>
+    <text> No problem, cap. How much?</text>
+    <text> Nothing. Sometimes good deeds should be done for free.</text>
+    <text> I have to agree with you, Fargo.</text>
+  </Lvl>
+  <Lvl n="33">
+    <text> Done?</text>
+    <text> Yes, mission complete.</text>
+    <text> Thanks. Now, I can send the reports. Don't go far away, I'll need you soon.</text>
+    <text> Yes, cap.</text>
+  </Lvl>
+  <Lvl n="34">
+    <text> Let's go straight to business. The territories of the country I'm in charge of... You know, why I'm in charge of it? Because the king is away, and only my tactical abilities helped us to escape the terrible threat. So, the country I'm in charge of is invaded by enemies. Eliminate them. Destroy. Wipe them out. Don't let anyone flee. And believe me, I'll make you a rich man.</text>
+    <text> “How can I believe this scrooge? Absolutely impossible. But I have my duties, I need to go on with campaign, or collapse may happen... A pause in spatiotemporal continuum.”</text>
+  </Lvl>
+  <Lvl n="35">
+    <text> Great job, Joe. It's just great. So, here's the new mission...</text>
+    <text>  Haven't you forgot about something, Fargo?</text>
+    <text> Our new mission....</text>
+    <text> Fargo! You talked about making me a rich man!</text>
+    <text> Did I? Gosh, what was I thinking about?! Here's your 25 Gold, Joe.</text>
+    <text> What?!</text>
+    <text> Not enough? I can give you another 15.</text>
+    <text> I think my gun will get stuck in the next battle. That's just an anticipation. Especially, if I'll have to save you.</text>
+    <text> Today's youths are so mercantile...</text>
+    <text> Do I look like a youth?</text>
+    <text> I'm surrounded by robbers. Take your 75 Gold, Joe. And I don't want to see you anymore. At least, today! Though... wait, there's one more task.</text>
+  </Lvl>
+  <Lvl n="36">
+    <text> The old defense system is located in this region. It needs to be launched. You will be covering the repair workers. Only this will help us to stop their wave. There are too much of them, way too much...</text>
+    <text> Ok, Fargo. Let's discuss our profits.</text>
+    <text> Later, Joe. If you don't succeed money won't help you. They won't be enough for your grave.</text>
+    <text> “What a tightwad. Have I ever failed any tasks before?”</text>
+  </Lvl>
+  <Lvl n="37">
+    <text> Excellent, Joe. You proved to be a hero again. I'll write you recommendations for...</text>
+    <text> I don't need recommendations, Fargo. Just give me a couple hundred gold, and I'll leave you alone.</text>
+    <text> 130</text>
+    <text> 170</text>
+    <text> 140</text>
+    <text> 150</text>
+    <text> You should have asked for 150 right away. I'd give you!</text>
+    <text> If I had asked you for 150, you'd have paid me 100. You are such a meany.</text>
+    <text> You are too unfair. I'm only economical.</text>
+  </Lvl>
+  <Lvl n="38">
+    <text> Joe, the crucial moment has come – if we overcome the enemy now, the outcome of war will be favorable for us. Each free province will work for us, after that, each region. They will believe in my... in our victory, Joe. Go and return with the victory.</text>
+    <text> And I will be working on more important matters. That is, on politics. If you win each region controlled by us will bring us profit, at least 50 Gold per province. Not bad at all, don't you think?</text>
+    <text> “I wonder how much I will have from it.”</text>
+    <text> “I wonder, how much he can have from it. Hm, 15 – 10 – no, 5 Gold!”</text>
+    <text> “Old meany, stop watching me with your greedy eyes.”</text>
+    <text> “Old panhandler, stop watching me like a hungry dog and start working.”</text>
+  </Lvl>
+  <Lvl n="39">
+    <text> Joe, take this 5 Gold as a token of my appreciation. These are the first money that came from our provinces, and I decided to give it straight to you.</text>
+    <text> … and to take the rest yourself.</text>
+    <text> Joe, be reasonable. 5 Gold for each province we conquer – isn't it a true Klondike?</text>
+    <text> Klondike?! It wouldn't be a Klondike even if I got 25 Gold per province, and you talked about 50.</text>
+    <text> Ok, ok, not Klondike, just Alaska outskirts... which will bring you 10 Gold. What would you say?</text>
+    <text> 10 Gold (sighs). Well, let it be 10. Better something than nothing.</text>
+    <text> You have a heart of gold, Joe, pure gold! </text>
+  </Lvl>
+  <Lvl n="40">
+    <text> You must have a look at this, Joe. Do you see the whole sky shining with gold... Gold?! Joe, it's a train of gold moving along! They must have looted much in another province. Do what you can – save the gold bars! I'm sending boats that will be catching the gold.</text>
+    <text> What's my share?</text>
+    <text>  A half! Don't stand still! They will escape!</text>
+    <text> (running towards the gun) Happy to serve!</text>
+    <text> “No wonder you are happy – half of the gold reserve of the whole province. I'd serve myself.”</text>
+  </Lvl>
+  <Lvl n="41">
+    <text> Well, we are lucky this time. Though, obviously I got driven away to promise one half... But one needs to keep one's word, right? Furthermore, you are the one who still has this gold. Can I have my half, please?</text>
+    <text> (grinning happily)</text>
+  </Lvl>
+  <Lvl n="42">
+    <text> Bloody hell! Joe, the king suspects me in abuse of power and corruption!</text>
+    <text> Oh... What?</text>
+    <text> He thinks, I'm a thief!</text>
+    <text> (sarcastically) Oh, my God. How could he even think such a thing about you, Fargo?</text>
+    <text> Joe, I'm begging you, no time for joking. We need to shoot down all the ships with evidence that the enemies have sent to the King. Not the ships, of course. The evidence. As my enemies had thought about it they sent the ships to prevent the evidence from elimination. Gosh, Joe. What am I supposed to do?</text>
+    <text> Take money out of your pocket and give it to me. I am the one who will solve all your problems.</text>
+    <text> Oh, Joe, I beg for your mercy.</text>
+    <text> Ask God for mercy, and my service costs 1,000 Gold today...</text>
+    <text> Oh, God...</text>
+    <text> If you are too greedy, you'll have a chance to meet him soon.</text>
+    <text> Take it, Joe. Here's your money (hands a packed purse). Save me!</text>
+    <text> “What a beautiful sound – it's as good as Mozart for me.”</text>
+  </Lvl>
+  <Lvl n="43">
+    <text> Joe, I owe you...</text>
+    <text> (grinning happily)</text>
+  </Lvl>
+  <Lvl n="44">
+    <text>  Pull devil, Joe! Rumour has it that the King is going to come back. And it would be great to take complete control of the Kingdom by his return.</text>
+    <text> What are your suggestions?</text>
+    <text> Destroy the enemy. Teach them a lesson. And kick the Dragon's ass!</text>
+    <text> What d-d-dragon?!</text>
+    <text> The local boss, not an easy target. I had a narrow escape from the neighboring province when he attacked it. It's not some monster – it's a first-class killer. No one survived!</text>
+    <text> It seems we have a problem here...</text>
+    <text>  It “seems”?! It is perfectly obvious we have problems! Go, destroy the advance guard of his blast wave. Afterward act as conditions will demand.</text>
+  </Lvl>
+  <Lvl n="45">
+    <text> Well done, Joe. But it's too early to relax. Look out of the window.</text>
+    <text> (shocked)</text>
+  </Lvl>
+  <Lvl n="46">
+    <text> Joe, I'm sure you know what to do.</text>
+    <text> Yes, cap.</text>
+  </Lvl>
+  <Lvl n="47">
+    <text> Oh, Joe... I anticipate a damned hot battle. I will help you out myself, on my own motor-boat. And keep your eyes peeled – don't let anyone kill me!</text>
+    <text> (shocked)</text>
+  </Lvl>
+  <Lvl n="48">
+    <text> Do you know any prayers, Joe?</text>
+    <text> Yes.</text>
+    <text> Then, start praying.</text>
+  </Lvl>
+  <Lvl n="49">
+    <text> Joe, we won! Holy dragon! We did it! This is the victory!!!</text>
+    <text> (laughs)</text>
+    <text> Accept this gift from me, my humble friend. (hands 500 Gold to Joe)</text>
+    <text> (laughs)</text>
+  </Lvl>
+  <Lvl n="50">
+    <text> This region is our last battle, Joe. If we win, we will retrieve the Kingdom.</text>
+    <text> No problem, Fargo. After all we've been through, this will be an easy task.</text>
+    <text> I wouldn't be so sure. People say that Earl Furious is raising from the Earth to find us. </text>
+    <text> Who's this “Pearl Curious”?</text>
+    <text> The enemy's heavy cruiser, the invaders' flagship.</text>
+    <text> (whistles)</text>
+    <text> Joe, we need to make a probing action. We'll see what it's all about when we are on the spot.</text>
+    <text> Yes, cap.</text>
+  </Lvl>
+  <Lvl n="51">
+    <text> Have you seen it?</text>
+    <text> I wish I haven't...</text>
+    <text> I wonder why it didn't kill us.</text>
+    <text> It plays with us like a cat with a mouse. My cats chase mice around the flat in this way. First  suffocate them a bit, and then wait till they try to flee.</text>
+    <text> Oh, my God. Where's this damned King?</text>
+  </Lvl>
+  <Lvl n="52">
+    <text> A message has just arrived: The King is coming back urgently. He says we will hardly be able to cope with Earl Furious without him.</text>
+    <text> I wonder where he's been all that time.</text>
+    <text> Do you remember some urgent matters that called me to other provinces from time to time?</text>
+    <text> What?! He had escaped, hadn't he?</text>
+    <text> Well, he had left... on a very important business, Joe.</text>
+    <text> Oh, yes. Yes, of course...</text>
+    <text> If he's coming back, something must have changed. I think, there's hope to survive. </text>
+    <text> Let's hope.</text>
+  </Lvl>
+  <Lvl n="53">
+    <text> That was hot...</text>
+    <text> Very hot...  But there's worse to come.</text>
+  </Lvl>
+  <Lvl n="54">
+    <text> Joe, we are being attacked by a violent crowd of mobs. I'm not sure we even have time to say good bye. </text>
+    <text> I don't know, Fargo. Now, let's bite the bullet and continue fighting. </text>
+  </Lvl>
+  <Lvl n="55">
+    <text> (wipes of sweat from his forehead)</text>
+    <text> (sighs)</text>
+  </Lvl>
+  <Lvl n="56">
+    <text> Joe, you are a great guy. And I'd like to...</text>
+    <text> Stop saying your farewells, Fargo. I have a hunch that we won't lose this war.</text>
+    <text> You think so?</text>
+    <text> The King is near. I feel it. He would hardly approach these lands if our situation were hopeless.</text>
+    <text> You are so right, sergeant! Dammit, you are right, old man!</text>
+  </Lvl>
+  <Lvl n="57">
+    <text> They say, the King was spotted in the neighborhood province.</text>
+    <text> What should it mean? (thoughtfully)</text>
+  </Lvl>
+  <Lvl n="58">
+    <text> So... For the King and the Kingdom! For our native land!</text>
+    <text> For the King!</text>
+  </Lvl>
+  <Lvl n="59">
+    <text> I think that's... gross!</text>
+    <text> I can't but agree.</text>
+    <text> So, how have you been all that time without me, my minions?</text>
+    <text> Your Majesty. Please, take back the reins of Your government.</text>
+    <text> We've done a good job here with Fargo.</text>
+    <text> Yes, a good job, indeed... And I had to correct your blunders, guys.</text>
+    <text> (shocked) “What a bastard! We had to spill our blood, and he shows up when all the hard work is done.”</text>
+    <text> (shocked) “I'm with you on that one, Fargo. He's a bastard!”</text>
+    <text> Stop sulking, my darlings. Now we are ready to fight with enemy on their territory!</text>
+    <text> (shocked)</text>
+    <text> (shocked)</text>
+    <text> The war has just begun, Joe. Yes, this is just the beginning (sighs). Get ready, Joe. Fargo, you too. Here's 10,000 Gold, prepare Joe's Castle. And off we go, to the vicious Earth. Let's teach those invaders a lesson!</text>
+  </Lvl>
+</Start>

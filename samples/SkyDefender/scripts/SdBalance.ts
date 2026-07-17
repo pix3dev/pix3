@@ -1,3 +1,4 @@
+import { V15_UNITS, V15_CAMPAIGN, type V15Category } from './SdV15';
 /**
  * SdBalance — the remaster's balance/data tables, converted from the original
  * game data (design/original-data/conf.xml, mobs.xml, units.txt) and the shop
@@ -158,10 +159,10 @@ export const SHOP_BG_NATIVE = { width: 590, height: 480 };
 
 /** damage[special?][power?] — special = fire shells / rail gun variant. */
 export const WEAPON_DAMAGE: Record<string, { base: [number, number]; special?: [number, number] }> = {
-  gun: { base: [50, 70] },
-  shotgun: { base: [25, 30], special: [40, 80] },
-  minigun: { base: [50, 70] },
-  rifle: { base: [100, 150], special: [200, 400] },
+  gun: { base: [60, 70] },
+  shotgun: { base: [20, 30], special: [40, 60] },
+  minigun: { base: [60, 90] },
+  rifle: { base: [200, 250], special: [300, 400] },
 };
 
 /** Reload-speed special (gun/minigun): reload time multiplier. */
@@ -190,9 +191,9 @@ export interface TurretDef {
 }
 
 export const TURRETS: TurretDef[] = [
-  { tier: 1, damage: 10, periodSec: 1.0, range: 500, position: [-116, 22] },
-  { tier: 2, damage: 10, periodSec: 2.7, range: 500, position: [-116, 108] },
-  { tier: 3, damage: 14, periodSec: 1.4, range: 620, position: [-128, 208] },
+  { tier: 1, damage: 30, periodSec: 1.0, range: 640, position: [-116, 22] },
+  { tier: 2, damage: 40, periodSec: 2.67, range: 640, position: [-116, 108] },
+  { tier: 3, damage: 40, periodSec: 1.4, range: 640, position: [-128, 208] },
 ];
 
 // ── Bridge (decompiled v10.18: 4 transporters per level, x=750→282/427/572/717,
@@ -217,7 +218,10 @@ export const BRIDGE = {
 /** Crazy Mineman (shop): numbers from the original shop text (v10.18). */
 export const DECK_MINE = { damage: 555, respawnSec: 10, radius: 60, x: -20 };
 
-// ── Units (units.txt registry + conf.xml <Mob> stats) ───────────────────────
+// ── Units (v15 release registry: FN_addMob id scheme 1-84) ─────────────
+// Stats from SdV15 (conf.xml <Mob>); speed = original px/frame @30fps x30. Air
+// units do NOT ram (castleDamage 0) — they park at their `a` and shell, or
+// (bombers) drop and climb away. Ground truth: design/original-data/release-v15/.
 
 export interface UnitDef {
   name: string;
@@ -229,163 +233,198 @@ export interface UnitDef {
   /** Flight speed, stage px/s. */
   speed: number;
   score: number;
-  /** Absolute castle HP a breakthrough costs. */
+  /** Absolute castle HP a breakthrough costs (0 for air — no ram). */
   castleDamage: number;
-  /** Compound unit spawned from the unik prefab instead. */
+  /** v15 category (air/compound/ground/npc/boss). */
+  category: V15Category;
+  /** Compound unit spawned from the unik/urik prefab instead. */
   compound?: boolean;
-  /** Bombers: castle damage per attack while holding at their `a` position. */
+  /** Gun platforms: castle damage per attack while holding at `a`. */
   attackDamage?: number;
   attackPeriod?: number;
-  /**
-   * Original class_108 bombing run (decompiled v10.18): the unit carries ONE
-   * bomb, accelerates on approach, releases it at its `a` position and climbs
-   * away instead of holding/ramming. `attackDamage` is the bomb's castle hit.
-   */
+  /** Bombers (Lucky/Slevin): carry ONE bomb, drop at `a`, then climb away. */
   bomber?: boolean;
+  /** tpb 3 fire bomb (Stone + Burn1 flame) vs plain mine/stone. */
+  fireBomb?: boolean;
   /** Typical aerostats carry a naval mine on a rig (dropped when shot down). */
   carriesMine?: boolean;
   /** Alternate liveries — the spawner picks one at random per spawn. */
   spriteVariants?: string[];
   /** Ground vehicle: drives the bridge deck instead of flying. */
   ground?: boolean;
+  /** True until the prefab/behaviour is wired — spawner skips these gracefully. */
+  unsupported?: boolean;
 }
 
 const AIR = 'res://src/assets/textures/enemy/air';
 const GROUND = 'res://src/assets/textures/enemy/ground';
+const TB = `${AIR}/typical_bloon`;
+const TYP_VARIANTS = [`${TB}/SU_typical.png`, `${TB}/Nazi_typical.png`, `${TB}/Nevada_typical.png`];
 
-/** Only the ids used by the surviving mobs.xml (Lvl 1–3) + survival. */
-export const UNITS: Record<number, UnitDef> = {
-  // Lucky bombers (conf: hp 270, dmg 10) — original class_108 bombing run:
-  // one carried bomb released at the `a` mark, then the freed ship climbs away.
-  1: {
-    name: 'Lucky 1', sprite: `${AIR}/bomber_lucky/bl.png`, width: 40, height: 45,
-    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, bomber: true,
-  },
-  2: {
-    name: 'Lucky 2', sprite: `${AIR}/bomber_lucky/slpd.png`, width: 40, height: 45,
-    hp: 270, speed: 42, score: 20, castleDamage: 80, attackDamage: 10, bomber: true,
-  },
-  // Slevin bombers (conf: hp 370; dev conf dmg is a placeholder 1 — bomb kept
-  // at the remaster's tuned 12).
-  3: {
-    name: 'Slevin 1', sprite: `${AIR}/bomber_slevin/bslevin.png`, width: 40, height: 45,
-    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, bomber: true,
-  },
-  4: {
-    name: 'Slevin 2', sprite: `${AIR}/bomber_slevin/bslevin.png`, width: 40, height: 45,
-    hp: 370, speed: 38, score: 25, castleDamage: 90, attackDamage: 12, bomber: true,
-  },
-  // Avalon fighter wing (big zeppelin) — a gun platform, not a bomber: holds
-  // at `a` and shells the castle. Cadence per the original mounted weapon
-  // (class_63 default rld_max 50 ticks ≈ 1.7 s), damage rescaled to keep the
-  // tuned pressure (dev conf <Mob> dmg is a placeholder 1).
-  10: {
-    name: 'Avalon 2-2', sprite: `${AIR}/avalon2/avalon2.png`, width: 167, height: 46,
-    hp: 200, speed: 58, score: 30, castleDamage: 100, attackDamage: 4, attackPeriod: 1.7,
-  },
-  // Typical aerostat "S" (the Lvl 1 rank and file) — carries a hanging naval
-  // mine on its weapon rig (GDD "миноносец"); the mine falls when the balloon
-  // is shot down and detonates if it lands on the bridge.
-  33: {
-    name: 'S', sprite: `${AIR}/typical_bloon/SU_typical.png`, width: 66, height: 38,
-    hp: 100, speed: 50, score: 8, castleDamage: 60, carriesMine: true,
-    spriteVariants: [
-      `${AIR}/typical_bloon/SU_typical.png`,
-      `${AIR}/typical_bloon/Nazi_typical.png`,
-      `${AIR}/typical_bloon/Nevada_typical.png`,
-    ],
-  },
-  34: {
-    name: 'S Nut', sprite: `${AIR}/typical_bloon/Nazi_typical.png`, width: 66, height: 38,
-    hp: 100, speed: 50, score: 8, castleDamage: 60, carriesMine: true,
-  },
-  // Unik — compound aerostat (body/ropes/gondola prefab).
-  39: {
-    name: 'Unik 2-1', sprite: '', width: 0, height: 0,
-    hp: 0, speed: 0, score: 0, castleDamage: 0, compound: true,
-  },
-  // Ground vehicles (drive the assembled bridge; ram the gate until killed).
-  // Stats are remaster v1 tuning — the surviving dev mobs.xml has no ground
-  // waves, but the original demo opens mission 1 with a truck on the bridge.
-  50: {
-    name: 'Attaban', sprite: `${GROUND}/attaban/attaban.png`, width: 75, height: 33,
-    hp: 300, speed: 35, score: 25, castleDamage: 0, ground: true,
-    attackDamage: 25, attackPeriod: 5,
-  },
-  51: {
-    name: 'Garbag', sprite: `${GROUND}/garbag/garbag.png`, width: 80, height: 38,
-    hp: 340, speed: 32, score: 30, castleDamage: 0, ground: true,
-    attackDamage: 30, attackPeriod: 6,
-  },
-  52: {
-    name: 'Baka', sprite: `${GROUND}/baka/baka.png`, width: 83, height: 33,
-    hp: 380, speed: 30, score: 30, castleDamage: 0, ground: true,
-    attackDamage: 30, attackPeriod: 5,
-  },
+/** Per-id art + display size (visuals not derivable from stats). */
+interface Art { sprite: string; w: number; h: number; variants?: string[] }
+const ART: Record<number, Art> = {
+  1: { sprite: `${AIR}/bomber_lucky/bl.png`, w: 40, h: 45 },
+  2: { sprite: `${AIR}/bomber_lucky/slpd.png`, w: 40, h: 45 },
+  3: { sprite: `${AIR}/bomber_slevin/bslevin.png`, w: 40, h: 45 },
+  4: { sprite: `${AIR}/bomber_slevin/bslevin.png`, w: 40, h: 45 },
+  5: { sprite: `${AIR}/avalon1/avalon1.png`, w: 167, h: 46 },
+  6: { sprite: `${AIR}/avalon1/avalon1.png`, w: 167, h: 46 },
+  7: { sprite: `${AIR}/avalon1/avalon1.png`, w: 167, h: 46 },
+  8: { sprite: `${AIR}/avalon1/avalon1.png`, w: 167, h: 46 },
+  9: { sprite: `${AIR}/avalon2/avalon2.png`, w: 167, h: 46 },
+  10: { sprite: `${AIR}/avalon2/avalon2.png`, w: 167, h: 46 },
+  11: { sprite: `${AIR}/avalon2/avalon2.png`, w: 167, h: 46 },
+  12: { sprite: `${AIR}/avalon2/avalon2.png`, w: 167, h: 46 },
+  13: { sprite: `${AIR}/lavalon1/lavalon1.png`, w: 107, h: 30 },
+  14: { sprite: `${AIR}/lavalon1/lavalon1.png`, w: 107, h: 30 },
+  15: { sprite: `${AIR}/lavalon1/lavalon1.png`, w: 107, h: 30 },
+  16: { sprite: `${AIR}/lavalon1/lavalon1.png`, w: 107, h: 30 },
+  17: { sprite: `${AIR}/lavalon2/lavalon2.png`, w: 107, h: 30 },
+  18: { sprite: `${AIR}/lavalon2/lavalon2.png`, w: 107, h: 30 },
+  19: { sprite: `${AIR}/lavalon2/lavalon2.png`, w: 107, h: 30 },
+  20: { sprite: `${AIR}/lavalon2/lavalon2.png`, w: 107, h: 30 },
+  21: { sprite: `${TB}/Nazi_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  22: { sprite: `${TB}/Nazi_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  23: { sprite: `${TB}/Nazi_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  24: { sprite: `${TB}/Nazi_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  25: { sprite: `${TB}/Nazi_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  26: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  27: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  28: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  29: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  30: { sprite: `${AIR}/support/fatty.png`, w: 66, h: 136 },
+  31: { sprite: `${AIR}/support/fish.png`, w: 106, h: 31 },
+  32: { sprite: `${AIR}/support/splash.png`, w: 74, h: 32 },
+  33: { sprite: `${TB}/SU_typical.png`, w: 66, h: 38, variants: TYP_VARIANTS },
+  34: { sprite: `${AIR}/support/nut.png`, w: 51, h: 29 },
+  35: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  36: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  37: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  38: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  39: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  40: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  41: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  42: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  43: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  44: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  45: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  46: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  47: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  48: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
+  49: { sprite: `${GROUND}/atabus/atabus.png`, w: 81, h: 31 },
+  50: { sprite: `${GROUND}/attaban/attaban.png`, w: 75, h: 33 },
+  51: { sprite: `${GROUND}/baka/baka.png`, w: 83, h: 33 },
+  52: { sprite: `${GROUND}/baron/baron.png`, w: 84, h: 38 },
+  53: { sprite: `${GROUND}/bb/bb.png`, w: 80, h: 43 },
+  54: { sprite: `${GROUND}/bus/bus.png`, w: 80, h: 33 },
+  55: { sprite: `${GROUND}/dream/dream.png`, w: 90, h: 23 },
+  56: { sprite: `${GROUND}/dreamer/dreamer.png`, w: 93, h: 24 },
+  57: { sprite: `${GROUND}/fatima/fatima.png`, w: 100, h: 30 },
+  58: { sprite: `${GROUND}/medic/medic.png`, w: 80, h: 32 },
+  59: { sprite: `${GROUND}/rracer/rracer.png`, w: 70, h: 24 },
+  60: { sprite: `${GROUND}/garbag/garbag.png`, w: 80, h: 38 },
+  61: { sprite: `${GROUND}/siege/siege.png`, w: 62, h: 75 },
+  62: { sprite: `${GROUND}/warchild/warchild.png`, w: 80, h: 27 },
 };
 
-// ── Missions (mobs.xml converted verbatim; t seconds, y in 640×480 coords) ──
+/** Official mission names (ar_disc, cannon_game_v15). */
+export const MISSION_NAMES: readonly string[] = [
+  'Prologue',
+  'On Guard',
+  'Royal Treasury',
+  'Enemy At the Gate',
+  'I need to go',
+  'Touchy Issue',
+  'A Steak',
+  'Shopping',
+  'Royal Gold 2',
+  'Another Business Trip',
+  'Lemmings',
+  'Problems Start I',
+  'Problems Start II',
+  'Problems Start III',
+  'The Real Fargo',
+  'Apples of Hesperides',
+  '"Mario"',
+  'I\'ll Make You Rich',
+  'Echo of War',
+  'The Crucial Point',
+  'The Golden Train',
+  '"As good as Mozart"',
+  'Pull Devil!',
+  'Pull Devil! II',
+  'Dragon\'s Rag',
+  'Earl Furious',
+  'That Damned King',
+  'Near Go',
+  'Prelude',
+  'A Quick Mare Is In Time Everywhere',
+];
+
+function buildUnit(id: number): UnitDef {
+  const v = V15_UNITS[id];
+  const a = ART[id];
+  const compound = id >= 35 && id <= 48;
+  const ground = id >= 49 && id <= 62;
+  return {
+    name: v.cls,
+    sprite: a?.sprite ?? '',
+    width: a?.w ?? 40,
+    height: a?.h ?? 40,
+    hp: v.hp,
+    speed: Math.round(v.speed * 30),
+    score: v.score,
+    castleDamage: 0,
+    category: v.cat,
+    compound: compound || undefined,
+    ground: ground || undefined,
+    bomber: id >= 1 && id <= 4 ? true : undefined,
+    fireBomb: id === 4 ? true : undefined,
+    carriesMine: id === 33 ? true : undefined,
+    attackDamage: v.dmg,
+    attackPeriod: ground ? 5 : 1.7,
+    spriteVariants: a?.variants,
+    unsupported: a ? undefined : true,
+  };
+}
+
+/** id (1-84) -> UnitDef, built from the v15 registry + art map. */
+export const UNITS: Record<number, UnitDef> = Object.fromEntries(
+  Array.from({ length: 84 }, (_, i) => i + 1).map(id => [id, buildUnit(id)])
+);
+
+// ── Missions (campaign = V15_CAMPAIGN, 30 levels verbatim) ──────────────
 
 export interface MissionEntry {
   t: number;
   id: number;
   y: number;
-  /** Original attack x (640-wide screen coords); 0 = fly through to the castle. */
+  /** Original attack x (640-wide screen coords); 0 = fly through. */
   a: number;
 }
 
 export interface MissionDef {
   name: string;
   entries: MissionEntry[];
-  /**
-   * Ground assault (drives the bridge deck): `t` counts from the moment the
-   * bridge finishes assembling, `a` is the original hold x (→ stop position).
-   */
+  /** Ground assault (drives the bridge deck): waits for the bridge to build. */
   ground?: MissionEntry[];
 }
 
-/** mobs.xml `<Lvl n="1">` — 27 typical "S" balloons, exact times and heights. */
-const MISSION_1: MissionEntry[] = [
-  { t: 1, id: 33, y: 120, a: 0 }, { t: 1, id: 33, y: 300, a: 0 }, { t: 4, id: 33, y: 210, a: 0 },
-  { t: 7, id: 33, y: 120, a: 0 }, { t: 7, id: 33, y: 300, a: 0 }, { t: 10, id: 33, y: 210, a: 0 },
-  { t: 13, id: 33, y: 210, a: 0 }, { t: 14, id: 33, y: 180, a: 0 }, { t: 14, id: 33, y: 240, a: 0 },
-  { t: 15, id: 33, y: 150, a: 0 }, { t: 15, id: 33, y: 270, a: 0 }, { t: 16, id: 33, y: 120, a: 0 },
-  { t: 16, id: 33, y: 300, a: 0 }, { t: 17, id: 33, y: 90, a: 0 }, { t: 17, id: 33, y: 330, a: 0 },
-  { t: 18, id: 33, y: 60, a: 0 }, { t: 18, id: 33, y: 360, a: 0 }, { t: 21, id: 33, y: 210, a: 0 },
-  { t: 22, id: 33, y: 210, a: 0 }, { t: 23, id: 33, y: 210, a: 0 }, { t: 22, id: 33, y: 180, a: 0 },
-  { t: 22, id: 33, y: 240, a: 0 }, { t: 27, id: 33, y: 210, a: 0 }, { t: 26, id: 33, y: 180, a: 0 },
-  { t: 28, id: 33, y: 180, a: 0 }, { t: 26, id: 33, y: 240, a: 0 }, { t: 28, id: 33, y: 240, a: 0 },
-];
+function buildMission(levelIdx: number): MissionDef {
+  const entries: MissionEntry[] = [];
+  const ground: MissionEntry[] = [];
+  for (const [t, id, y, a] of V15_CAMPAIGN[levelIdx]) {
+    const u = UNITS[id];
+    const e: MissionEntry = { t, id, y, a };
+    if (u?.ground) ground.push(e);
+    else entries.push(e);
+  }
+  return { name: MISSION_NAMES[levelIdx] ?? `Mission ${levelIdx + 1}`, entries, ground };
+}
 
-/** mobs.xml `<Lvl n="2">` — Lucky/Slevin bombers, an Avalon and the first Unik. */
-const MISSION_2: MissionEntry[] = [
-  { t: 1.1, id: 1, y: 150, a: 230 },
-  { t: 1, id: 10, y: 200, a: 150 },
-  { t: 2, id: 2, y: 100, a: 300 },
-  { t: 5, id: 39, y: 240, a: 320 },
-  { t: 1, id: 3, y: 250, a: 110 },
-  { t: 1, id: 3, y: 300, a: 110 },
-  { t: 1, id: 3, y: 350, a: 110 },
-];
-
-/** mobs.xml `<Lvl n="3">` — a lone compound Unik (the dev build's finale). */
-const MISSION_3: MissionEntry[] = [{ t: 5, id: 39, y: 240, a: 320 }];
-
-export const MISSIONS: MissionDef[] = [
-  // Official mission names from the GDD list (mission-names-en.txt).
-  // The original demo opens with the bridge assembling and a lone truck
-  // driving up while the S wave flies in.
-  { name: 'Prologue', entries: MISSION_1, ground: [{ t: 2, id: 50, y: 0, a: 250 }] },
-  {
-    name: 'On Guard',
-    entries: MISSION_2,
-    ground: [
-      { t: 2, id: 50, y: 0, a: 250 },
-      { t: 14, id: 51, y: 0, a: 330 },
-    ],
-  },
-  { name: 'Royal Treasury', entries: MISSION_3, ground: [{ t: 3, id: 52, y: 0, a: 250 }] },
-];
+/** All 30 campaign missions, waves verbatim from the release build. */
+export const MISSIONS: MissionDef[] = V15_CAMPAIGN.map((_, i) => buildMission(i));
 
 // ── Campaign map + briefings (M4 meta) ──────────────────────────────────────
 
@@ -516,5 +555,167 @@ export const MISSION_META: MissionMeta[] = [
       { speaker: 'Joe', text: 'How many percent will they repair?' },
       { speaker: 'Fargo', text: 'Depends on your deeds, Joe. Depends on your deeds...' },
     ],
+  },
+  {
+    spot: MISSION_SPOTS[3],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 4: Enemy At the Gate. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[4],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 5: I need to go. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[5],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 6: Touchy Issue. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[6],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 7: A Steak. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[7],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 8: Shopping. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[8],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 9: Royal Gold 2. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[9],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 10: Another Business Trip. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[10],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 11: Lemmings. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[11],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 12: Problems Start I. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[12],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 13: Problems Start II. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[13],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 14: Problems Start III. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[14],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 15: The Real Fargo. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[15],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 16: Apples of Hesperides. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[16],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 17: "Mario". Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[17],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 18: I\'ll Make You Rich. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[18],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 19: Echo of War. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[19],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 20: The Crucial Point. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[20],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 21: The Golden Train. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[21],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 22: "As good as Mozart". Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[22],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 23: Pull Devil!. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[23],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 24: Pull Devil! II. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[24],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 25: Dragon\'s Rag. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[25],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 26: Earl Furious. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[26],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 27: That Damned King. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[27],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 28: Near Go. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[28],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 29: Prelude. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: MISSION_SPOTS[29],
+    region: 'Montarg',
+    briefing: [{ speaker: 'Fargo', text: 'Mission 30: A Quick Mare Is In Time Everywhere. Hold the line, Joe.' }],
+    goal: 'Destroy all enemy forces.',
   },
 ];

@@ -1,0 +1,614 @@
+<?xml version="1.0" ?>
+<Config>
+  <DMG>
+    <Gun1_1>60</Gun1_1>
+    <Gun1_2>70</Gun1_2>
+    <ShotGun1_1>20</ShotGun1_1>
+    <ShotGun1_2>30</ShotGun1_2>
+    <ShotGun2_1>40</ShotGun2_1>
+    <ShotGun2_2>60</ShotGun2_2>
+    <MiniGun1_1>60</MiniGun1_1>
+    <MiniGun1_2>90</MiniGun1_2>
+    <Rifle1_1>200</Rifle1_1>
+    <Rifle1_2>250</Rifle1_2>
+    <Rifle2_1>300</Rifle2_1>
+    <Rifle2_2>400</Rifle2_2>
+  </DMG>
+  <AMMO>
+    <Gun_M>3</Gun_M>
+    <Gun_A>50</Gun_A>
+    <ShotGun1_M>3</ShotGun1_M>
+    <ShotGun1_A>8</ShotGun1_A>
+    <ShotGun2_M>1</ShotGun2_M>
+    <ShotGun2_A>15</ShotGun2_A>
+    <MiniGun_M>1</MiniGun_M>
+    <MiniGun_A>70</MiniGun_A>
+    <Rifle1_M>3</Rifle1_M>
+    <Rifle1_A>7</Rifle1_A>
+    <Rifle2_M>2</Rifle2_M>
+    <Rifle2_A>3</Rifle2_A>
+  </AMMO>
+  <TRS>
+    <TR1_DMG>30</TR1_DMG>
+    <TR1_FRQ>30</TR1_FRQ>
+    <TR1_ATX>640</TR1_ATX>
+    <TR2_DMG>40</TR2_DMG>
+    <TR2_FRQ>80</TR2_FRQ>
+    <TR2_ATX>640</TR2_ATX>
+  </TRS>
+  <Shop>
+    <t d="1_1__ ">0</t>
+    <t d="2_           ">150</t>
+    <t d="3_           ">275</t>
+    <t d="4__  ">0</t>
+    <t d="5__  ">270</t>
+    <t d="6__   ">1000</t>
+    <t d="7_2_        ">550</t>
+    <t d="8_2__  ">750</t>
+    <t d="9_       ">570</t>
+    <t d="10_        ">750</t>
+    <t d="11__   ">1500</t>
+    <t d="12__ ">3000</t>
+    <t d="13_3_       ">3000</t>
+    <t d="14_3__ ">950</t>
+    <t d="15_          ">1550</t>
+    <t d="16_     ">4000</t>
+    <t d="17_   ">5000</t>
+    <t d="18__">6000</t>
+    <t d="19_4_       ">4500</t>
+    <t d="20_4__ ">1500</t>
+    <t d="21_       ">100</t>
+    <t d="22_       ">3000</t>
+    <t d="23__">4000</t>
+    <t d="24__">5000</t>
+  </Shop>
+  <TIMELEVEL>
+    <t d="1">52</t>
+    <t d="2">37</t>
+    <t d="3">65</t>
+    <t d="4">46</t>
+    <t d="5">300</t>
+    <t d="6">83</t>
+    <t d="7">110</t>
+    <t d="8">110</t>
+    <t d="9">97</t>
+    <t d="10">300</t>
+    <t d="11">70</t>
+    <t d="12">76</t>
+    <t d="13">73</t>
+    <t d="14">81</t>
+    <t d="15">300</t>
+    <t d="16">62</t>
+    <t d="17">127</t>
+    <t d="18">65</t>
+    <t d="19">120</t>
+    <t d="20">300</t>
+    <t d="21">80</t>
+    <t d="22">70</t>
+    <t d="23">57</t>
+    <t d="24">74</t>
+    <t d="25">300</t>
+    <t d="26">122</t>
+    <t d="27">122</t>
+    <t d="28">80</t>
+    <t d="29">120</t>
+    <t d="30">300</t>
+  </TIMELEVEL>
+  <ZHILKI>
+    <hp>250</hp>
+    <hp>500</hp>
+    <hp>800</hp>
+    <hp>1100</hp>
+  </ZHILKI>
+  <EWETEG>
+    <price>1</price>
+    <hpostova>80</hpostova>
+    <tormoz>1</tormoz>
+    <lechilka>50</lechilka>
+    <uron>300</uron>
+  </EWETEG>
+  <Mob id="1">
+    <hp>130</hp>
+    <speed>1</speed>
+    <dmg>5</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="2">
+    <hp>130</hp>
+    <speed>1</speed>
+    <dmg>5</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="3">
+    <hp>70</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>25</score>
+  </Mob>
+  <Mob id="4">
+    <hp>70</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="5">
+    <hp>1000</hp>
+    <speed>2</speed>
+    <dmg>10</dmg>
+    <score>500</score>
+  </Mob>
+  <Mob id="6">
+    <hp>570</hp>
+    <speed>1</speed>
+    <dmg>40</dmg>
+    <score>1000</score>
+  </Mob>
+  <Mob id="7">
+    <hp>100</hp>
+    <speed>1</speed>
+    <dmg>1</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="8">
+    <hp>510</hp>
+    <speed>1</speed>
+    <dmg>50</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="9">
+    <hp>470</hp>
+    <speed>1</speed>
+    <dmg>20</dmg>
+    <score>200</score>
+  </Mob>
+  <Mob id="10">
+    <hp>500</hp>
+    <speed>1</speed>
+    <dmg>30</dmg>
+    <score>150</score>
+  </Mob>
+  <Mob id="11">
+    <hp>1000</hp>
+    <speed>1</speed>
+    <dmg>35</dmg>
+    <score>200</score>
+  </Mob>
+  <Mob id="12">
+    <hp>1000</hp>
+    <speed>1</speed>
+    <dmg>20</dmg>
+    <score>200</score>
+  </Mob>
+  <Mob id="13">
+    <hp>130</hp>
+    <speed>2</speed>
+    <dmg>7</dmg>
+    <score>25</score>
+  </Mob>
+  <Mob id="14">
+    <hp>170</hp>
+    <speed>2</speed>
+    <dmg>40</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="15">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>30</score>
+  </Mob>
+  <Mob id="16">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>30</score>
+  </Mob>
+  <Mob id="17">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>2</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="18">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>10</dmg>
+    <score>55</score>
+  </Mob>
+  <Mob id="19">
+    <hp>170</hp>
+    <speed>2</speed>
+    <dmg>30</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="20">
+    <hp>270</hp>
+    <speed>1</speed>
+    <dmg>10</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="21">
+    <hp>150</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="22">
+    <hp>150</hp>
+    <speed>2</speed>
+    <dmg>8</dmg>
+    <score>45</score>
+  </Mob>
+  <Mob id="23">
+    <hp>150</hp>
+    <speed>2</speed>
+    <dmg>15</dmg>
+    <score>45</score>
+  </Mob>
+  <Mob id="24">
+    <hp>150</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>45</score>
+  </Mob>
+  <Mob id="25">
+    <hp>150</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="26">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>2</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="27">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>4</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="28">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>5</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="29">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>4</dmg>
+    <score>35</score>
+  </Mob>
+  <Mob id="30">
+    <hp>2000</hp>
+    <speed>1</speed>
+    <dmg>1</dmg>
+    <score>130</score>
+  </Mob>
+  <Mob id="31">
+    <hp>100</hp>
+    <speed>1</speed>
+    <dmg>1</dmg>
+    <score>10</score>
+  </Mob>
+  <Mob id="32">
+    <hp>110</hp>
+    <speed>2</speed>
+    <dmg>1</dmg>
+    <score>5</score>
+  </Mob>
+  <Mob id="33">
+    <hp>50</hp>
+    <speed>2</speed>
+    <dmg>1</dmg>
+    <score>4</score>
+  </Mob>
+  <Mob id="34">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>1</dmg>
+    <score>10</score>
+  </Mob>
+  <Mob id="35">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>5</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="36">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>15</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="37">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>20</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="38">
+    <hp>170</hp>
+    <speed>1</speed>
+    <dmg>20</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="39">
+    <hp>110</hp>
+    <speed>3</speed>
+    <dmg>3</dmg>
+    <score>27</score>
+  </Mob>
+  <Mob id="40">
+    <hp>110</hp>
+    <speed>3</speed>
+    <dmg>3</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="41">
+    <hp>110</hp>
+    <speed>3</speed>
+    <dmg>10</dmg>
+    <score>50</score>
+  </Mob>
+  <Mob id="42">
+    <hp>170</hp>
+    <speed>3</speed>
+    <dmg>25</dmg>
+    <score>25</score>
+  </Mob>
+  <Mob id="43">
+    <hp>270</hp>
+    <speed>2</speed>
+    <dmg>50</dmg>
+    <score>70</score>
+  </Mob>
+  <Mob id="44">
+    <hp>170</hp>
+    <speed>2</speed>
+    <dmg>20</dmg>
+    <score>70</score>
+  </Mob>
+  <Mob id="45">
+    <hp>270</hp>
+    <speed>2</speed>
+    <dmg>15</dmg>
+    <score>80</score>
+  </Mob>
+  <Mob id="46">
+    <hp>170</hp>
+    <speed>3</speed>
+    <dmg>2</dmg>
+    <score>40</score>
+  </Mob>
+  <Mob id="47">
+    <hp>170</hp>
+    <speed>3</speed>
+    <dmg>30</dmg>
+    <score>40</score>
+  </Mob>
+  <Mob id="48">
+    <hp>170</hp>
+    <speed>5</speed>
+    <dmg>15</dmg>
+    <score>40</score>
+  </Mob>
+  <Mob id="49">
+    <hp>0</hp>
+    <speed>0</speed>
+    <dmg>0</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="50">
+    <hp>200</hp>
+    <speed>4</speed>
+    <dmg>20</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="51">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="52">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="53">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="54">
+    <hp>200</hp>
+    <speed>4</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="55">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>3</dmg>
+    <score>70</score>
+  </Mob>
+  <Mob id="56">
+    <hp>170</hp>
+    <speed>3</speed>
+    <dmg>5</dmg>
+    <score>40</score>
+  </Mob>
+  <Mob id="57">
+    <hp>170</hp>
+    <speed>3</speed>
+    <dmg>5</dmg>
+    <score>40</score>
+  </Mob>
+  <Mob id="58">
+    <hp>100</hp>
+    <speed>4</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="59">
+    <hp>100</hp>
+    <speed>4</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="60">
+    <hp>120</hp>
+    <speed>4</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="61">
+    <hp>100</hp>
+    <speed>3</speed>
+    <dmg>30</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="62">
+    <hp>100</hp>
+    <speed>4</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="63">
+    <hp>200</hp>
+    <speed>4</speed>
+    <dmg>10</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="64">
+    <hp>110</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="65">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="66">
+    <hp>140</hp>
+    <speed>0.7</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="67">
+    <hp>200</hp>
+    <speed>1</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="68">
+    <hp>10</hp>
+    <speed>2.7</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="69">
+    <hp>100</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="70">
+    <hp>100</hp>
+    <speed>3</speed>
+    <dmg>25</dmg>
+    <score>0</score>
+  </Mob>
+  <Mob id="71">
+    <hp>210</hp>
+    <speed>0.08</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="72">
+    <hp>210</hp>
+    <speed>0.1</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="73">
+    <hp>210</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="74">
+    <hp>210</hp>
+    <speed>2</speed>
+    <dmg>25</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="75">
+    <hp>1200</hp>
+    <speed>2</speed>
+    <dmg>100</dmg>
+    <score>100</score>
+  </Mob>
+  <Mob id="76">
+    <hp>8000</hp>
+    <speed>2</speed>
+    <dmg>7</dmg>
+    <score>1000</score>
+  </Mob>
+  <Mob id="77">
+    <hp>14000</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>700</score>
+  </Mob>
+  <Mob id="78">
+    <hp>14000</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>700</score>
+  </Mob>
+  <Mob id="79">
+    <hp>18000</hp>
+    <speed>2</speed>
+    <dmg>20</dmg>
+    <score>1000</score>
+  </Mob>
+  <Mob id="80">
+    <hp>1100</hp>
+    <speed>2</speed>
+    <dmg>30</dmg>
+    <score>1000</score>
+  </Mob>
+  <Mob id="81">
+    <hp>30000</hp>
+    <speed>4</speed>
+    <dmg>1</dmg>
+    <score>2000</score>
+  </Mob>
+  <Mob id="82">
+    <hp>27000</hp>
+    <speed>2</speed>
+    <dmg>4</dmg>
+    <score>1000</score>
+  </Mob>
+  <Mob id="83">
+    <hp>1000</hp>
+    <speed>2</speed>
+    <dmg>1</dmg>
+    <score>300</score>
+  </Mob>
+  <Mob id="84">
+    <hp>40000</hp>
+    <speed>2</speed>
+    <dmg>2</dmg>
+    <score>3000</score>
+  </Mob>
+</Config>

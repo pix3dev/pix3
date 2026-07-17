@@ -4,6 +4,7 @@ import type { Texture } from 'three';
 import { EnemyBalloon } from './EnemyBalloon';
 import { GroundVehicle } from './GroundVehicle';
 import { BRIDGE, MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBalance';
+import { V15_SURVIVAL } from './SdV15';
 
 const BALLOON_PREFAB = 'res://src/assets/prefabs/balloon.pix3scene';
 const UNIK_PREFAB = 'res://src/assets/prefabs/unik.pix3scene';
@@ -132,34 +133,23 @@ export class WaveSpawner extends Script {
   }
 
   /**
-   * Survival: endless procedurally-escalating waves built from the original
-   * formation heights (presets.txt wedges/crosses). Density, speed, HP and
-   * compound-unit count all grow with the wave number.
+   * Survival: the original PREDEFINED 40-wave set (release build set2), verbatim.
+   * Waves play in order with a lives counter; beyond wave 40 the last wave
+   * repeats. Ground units in a wave route onto the bridge deck like campaign.
    */
   startSurvivalWave(waveNumber: number): void {
     const n = Math.max(1, waveNumber);
-    const heights = [210, 170, 250, 130, 290, 100, 320, 70, 350, 220, 180];
-    const count = Math.min(26, 6 + n * 2);
-    const gap = Math.max(0.9, 2.4 - n * 0.12);
+    const level = V15_SURVIVAL[Math.min(n, V15_SURVIVAL.length) - 1] ?? [];
     const entries: MissionEntry[] = [];
-    for (let i = 0; i < count; i++) {
-      // Wedge pairs: every third unit flies with a ±30 wingman.
-      const y = heights[i % heights.length] + (i % 3 === 0 ? 0 : i % 3 === 1 ? -30 : 30);
-      entries.push({ t: 1 + i * gap, id: 33, y: Math.min(400, Math.max(50, y)), a: 0 });
+    const ground: MissionEntry[] = [];
+    for (const [t, id, y, a] of level) {
+      const e: MissionEntry = { t, id, y, a };
+      if (UNITS[id]?.ground) ground.push(e);
+      else entries.push(e);
     }
-    const uniks = Math.min(5, Math.floor(n / 2));
-    for (let i = 0; i < uniks; i++) {
-      entries.push({ t: 4 + i * 7, id: 39, y: 140 + (i % 3) * 70, a: 0 });
-    }
-
-    // Escalating overrides for the typical balloons of this wave.
-    this.survivalStats = {
-      hp: 90 + n * 12,
-      speed: Math.min(115, 48 + n * 4),
-      score: 4 + n,
-    };
+    this.survivalStats = null;
     this.entries = entries;
-    this.groundEntries = [];
+    this.groundEntries = ground;
     this.missionName = `Survival ${n}`;
     this.beginRun();
   }
@@ -228,8 +218,12 @@ export class WaveSpawner extends Script {
   private spawn(entry: MissionEntry): void {
     const scene = this.scene;
     const unit = UNITS[entry.id];
-    if (!scene || !unit) {
+    if (!scene || !unit || unit.unsupported) {
       if (!unit) console.warn(`[WaveSpawner] unknown unit id ${entry.id}`);
+      else if (unit.unsupported)
+        // npc/boss ids have no prefab wired yet (bosses + quest NPCs are a
+        // later increment) — skip so the wave still clears.
+        console.warn(`[WaveSpawner] skipping unsupported unit ${entry.id} (${unit.name})`);
       this.aliveCount = Math.max(0, this.aliveCount - 1);
       return;
     }

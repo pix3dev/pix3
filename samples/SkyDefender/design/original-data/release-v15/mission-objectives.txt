@@ -1,0 +1,45 @@
+Sky Defender v15 — mission objective texts (arOpiska, MainTimeline)
+
+Pushed in code order (13588+). NOTE: push-order does NOT map 1:1 to <Lvl> numbers —
+see campaign-structure.md for the wave-grounded level pairing. Listed here verbatim.
+
+[1] \n\nHold this position. We lose this ground - we lose all.\n\n\n\n<font color=\'#FFEE8D\'>(No reward - It\'s a million dollar question. Your life.)</font>
+
+[2] \n\nDestroy all enemy forces\n\n\n\n\n<font color=\'#FFEE8D\'>(Sometimes it\'s better to get no rewards at all)</font>
+
+[3] \n\nDefend the gold mine from enemies. Don\'t let them\n steal the gold.\n\n\n<font color=\'#FFEE8D\'>(Fargo promised to repair your house for free if no\n gold bars will leave the mine)</font>
+
+[4] \n\nRebuff enemy at any price\n<font color=\'#FFEE8D\'>\n\n\n\n(Stingy Fargo promised no reward)</font>
+
+[5] \n\nTo survive\n<font color=\'#FFEE8D\'>\n\n\n\n(Fargo could have given you something if he hadn\'t \nfled to another province)</font>
+
+[6] \nProtect the ship during the...\n negotiations.\n<font color=\'#FFEE8D\'>\n\n(It\'s hard to believe, but you made Fargo pay you\n 200 Gold in advance. After the mission, you\'ll take\n 200 more. No doubt)</font>
+
+[7] Save the sheep!\n\nAt least 5 of them need to survive. There is a ship\n under them, so they will not die if they fall into\nit. Shoot off sheep so that they fall in the “cup”.\n\n\n<font color=\'#FFEE8D\'>(Theoretically, Fargo can pay you 75 Gold)</font>
+
+[8] \n\nYour wife have gone shopping.\nYou need to cover her take off and return.\n\n<font color=\'#FFEE8D\'>\n(What\'s the use talking money if they took off with her?)</font>
+
+[9] Enemies are trying to rob you again.\nStop the pillage. If you manage to shoot off the\n stolen gold bars in the boat, they will be yours.\n\n<font color=\'#FFEE8D\'>(In theory, you can talk Fargo into giving you 100\nGold. And that\'s not counting the gold you steal\n from the robbers. Don\'t take more than 3 bars or it\nwill be be too obvious). </font>
+
+[10] \n\nSurvive and destroy the enemy leader\n<font color=\'#FFEE8D\'>\n\n\n(Mingy Fargo has fled again , as soon as problems\n began. No reward to count upon.)</font>
+
+[11] Something lures people from the castle. Something slows down your reaction and prevents you from accurate and quick shooting. Find out what\'s causing it and eliminate the issue.<font color=\'#FFEE8D\'>\n\n(Fargo is hypnotized, and he is one of those who go to their death. Help him, and he will help you, perhaps.)</font>
+
+[12] \n\nKick the enemy out of the province\n\n\n\n\n<font color=\'#FFEE8D\'>(No reward)</font>
+
+[13] \n\nKick the enemy out of the province\n\n\n\n\n<font color=\'#FFEE8D\'>(No reward)</font>
+
+[14] \n\nKick the enemy out of the province\n\n\n\n\n<font color=\'#FFEE8D\'>(No reward)</font>
+
+[15] \n\nDestroy the enemy leader and conquer the region<font color=\'#FFEE8D\'>\n\n\n\n\n(The reward is close. I anticipate at least 300 Gold)</font>
+
+[16] \nShoot the cones off, so that they fall in the trucks. Fargo asks for 10 ones.\n\n\n\n<font color=\'#FFEE8D\'>(Unbelievable! Lo and behold, Fargo payed 500 coins! All in advance! Miracles do happen.)</font>
+
+[17] \n\nProtect the workers while they are repairing the windmills.\n\n\n<font color=\'#FFEE8D\'>\n(It\'s a charity mission, no money to expect)</font>
+
+[18] \n\nBattle, another battle. Destroy them all.\n\n\n\n\n<font color=\'#FFEE8D\'>(Fargo may pay you 75 Gold)</font>
+
+[19] \n\nThe old defense system is out of order. Protect the workers who are repairing it. Repair at least two turrets.\n\n\n<font color=\'#FFEE8D\'>(Fargo may pay you 150 Gold)</font>
+
+[20] \nDestroy the boss. Stop the invasion. Conquer the region and get financial support till the war ends.\n\n\n<font color=\'#FFEE8D\'>(Other regions will bring you 10 Gold for each winning province. Yes, that\'s little money, and you know who is to blame)</font>
+

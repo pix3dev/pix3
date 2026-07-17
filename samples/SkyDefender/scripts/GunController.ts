@@ -44,7 +44,7 @@ export interface WeaponDef {
 const WEAPONS: WeaponDef[] = [
   {
     key: 'gun', displayName: 'GUN',
-    damage: 50, magSize: 3, reserve: -1, reloadSec: 0.9, cooldownSec: 0.35,
+    damage: 50, magSize: 100, reserve: 200, reloadSec: 0.9, cooldownSec: 0.35,
     auto: true, pellets: 1, spreadDeg: 0,
     muzzleSpeed: 700, gravity: 640, ballRadius: 6, ballScale: 1, hitscan: false,
     sound: 'res://src/assets/audio/guns/main/main_tg.mp3',

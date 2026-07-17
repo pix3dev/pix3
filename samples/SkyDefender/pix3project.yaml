@@ -3,6 +3,7 @@ viewportBaseSize:
   width: 1920
   height: 1080
 ambientOcclusion: baked
+textureFiltering: nearest
 projectType: 2d
 targetPlatform: desktop
 quality:

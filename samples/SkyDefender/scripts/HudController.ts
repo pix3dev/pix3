@@ -110,9 +110,13 @@ export class HudController extends Script {
     const flow = this.flow;
     if (gun) {
       const ammo = gun.getAmmo(gun.currentIndex);
-      this.odometers.get('clip')?.setValue(Math.max(0, ammo.mag));
-      // Infinite reserve reads as a full drum (the M4 shop will sell refills).
-      this.odometers.get('ammo')?.setValue(ammo.reserve < 0 ? 9999 : ammo.reserve);
+      const magSize = Math.max(1, gun.currentWeapon.magSize);
+      // Ammo = rounds left in the current magazine (drains as you fire).
+      this.odometers.get('ammo')?.setValue(Math.max(0, ammo.mag));
+      // Clip = full magazines remaining (loaded one + spares); drops on reload.
+      // Clip = number of spare magazines still held; each reload consumes one.
+      const clips = ammo.reserve < 0 ? 99 : Math.ceil((Math.max(0, ammo.mag) + ammo.reserve) / magSize);
+      this.odometers.get('clip')?.setValue(clips);
     }
     if (flow) {
       this.odometers.get('score')?.setValue(flow.scoreValue);
