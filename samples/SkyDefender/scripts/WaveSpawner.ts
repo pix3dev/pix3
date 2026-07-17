@@ -175,6 +175,15 @@ export class WaveSpawner extends Script {
     this.groundFlags = this.groundFlags.map(() => true);
     // Despawn the survivors too — otherwise they keep flying and shell the
     // castle while the debug-driven shop is open.
+    this.despawnAll();
+  }
+
+  /**
+   * Remove every live enemy without advancing the wave — used by the survival
+   * retry (a destroyed castle costs a life and replays the wave from scratch).
+   * The wave is re-armed by the next `startSurvivalWave` → `beginRun`.
+   */
+  despawnAll(): void {
     const enemies = this.findNode(String(this.config.enemiesNode));
     if (enemies) {
       for (const child of [...enemies.children]) {

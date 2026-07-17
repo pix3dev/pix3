@@ -23,6 +23,12 @@ export class HudController extends Script {
   private hpFill: Bar2D | null = null;
   private hpLabel: RuntimeLabel2D | null = null;
   private lastHpText = '';
+  // Survival lives badge (heart on the HP frame): count in survival, covered
+  // by `hp-off` in campaign.
+  private livesLabel: RuntimeLabel2D | null = null;
+  private hpOff: NodeBase | null = null;
+  private lastLivesText = '';
+  private livesModeApplied: boolean | null = null;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -73,12 +79,15 @@ export class HudController extends Script {
 
     this.hpFill = this.findNode('hp-fill') as Bar2D | null;
     this.hpLabel = this.findNode('hp-label') as RuntimeLabel2D | null;
+    this.livesLabel = this.findNode('lives-label') as RuntimeLabel2D | null;
+    this.hpOff = this.findNode('hp-off');
   }
 
   onUpdate(dt: number): void {
     this.updateButtons();
     this.updateOdometers();
     this.updateHp();
+    this.updateLives();
   }
 
   // ── weapon buttons ──────────────────────────────────────────────────────
@@ -138,6 +147,28 @@ export class HudController extends Script {
       this.lastHpText = text;
       this.hpLabel.label = text;
       this.hpLabel.updateLabel();
+    }
+  }
+
+  // ── survival lives ────────────────────────────────────────────────────────
+
+  private updateLives(): void {
+    const flow = this.flow;
+    if (!flow) return;
+    const survival = flow.isSurvival;
+    // Mode is fixed per battle; toggle the badge/cover visibility once it's known.
+    if (this.livesModeApplied !== survival) {
+      this.livesModeApplied = survival;
+      if (this.hpOff) this.hpOff.visible = !survival;
+      if (this.livesLabel) this.livesLabel.visible = survival;
+    }
+    if (survival && this.livesLabel) {
+      const text = String(Math.max(0, flow.livesValue));
+      if (text !== this.lastLivesText) {
+        this.lastLivesText = text;
+        this.livesLabel.label = text;
+        this.livesLabel.updateLabel();
+      }
     }
   }
 }

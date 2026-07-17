@@ -966,6 +966,34 @@ root:
                     scale: [1, 1]
                     rotation: 0
                 children: []
+              - id: hp-off
+                type: Sprite2D
+                name: HP Off Cover
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/health_off.png
+                  width: 524
+                  height: 56
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: lives-label
+                type: Label2D
+                name: Lives Label
+                properties:
+                  label: ""
+                  labelFontSize: 22
+                  labelColor: "#ffe27a"
+                  labelAlign: center
+                  initiallyVisible: false
+                  transform:
+                    position: [152, 9]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
           - id: portrait-cluster
             type: Group2D
             name: Portrait Cluster

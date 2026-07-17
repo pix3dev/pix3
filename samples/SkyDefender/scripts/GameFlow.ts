@@ -23,9 +23,15 @@ interface GunView {
 /** UIControl2D hides its canvas-text refresh behind a protected method. */
 type RuntimeLabel2D = Label2D & { updateLabel(): void };
 
-type FlowState = 'countdown' | 'wave' | 'intermission' | 'shop' | 'result';
+type FlowState = 'countdown' | 'wave' | 'intermission' | 'wave-failed' | 'shop' | 'result';
 
 type GameMode = 'campaign' | 'survival';
+
+/** Survival lives (`surv_zh` in the original): the castle can fall this many
+ *  times — each fall replays the wave — before it is Game Over. */
+const SURVIVAL_LIVES = 5;
+/** How long the "WAVE FAILED" banner lingers before the wave replays. */
+const WAVE_FAILED_SECONDS = 2.5;
 
 /** Menu/map → battle hand-off (SdSession owns the run; this picks mode + mission). */
 declare global {
@@ -67,6 +73,13 @@ export class GameFlow extends Script {
   private victory = true;
   private airSupportTimer = 0;
 
+  // ── survival lives (surv_zh) + per-wave checkpoint ──
+  private lives = 0;
+  private checkpointHp = 0;
+  private checkpointScore = 0;
+  private checkpointKills = 0;
+  private checkpointGold = 0;
+
   // ── read-only state for the HUD ──
   get scoreValue(): number {
     return this.score;
@@ -86,6 +99,13 @@ export class GameFlow extends Script {
   get castleHpFraction(): number {
     const max = this.castleMaxHp;
     return max > 0 ? Math.max(0, this.castleHp / max) : 0;
+  }
+  /** Survival: lives left (heart counter). Campaign returns 0 (no lives). */
+  get livesValue(): number {
+    return this.lives;
+  }
+  get isSurvival(): boolean {
+    return this.mode === 'survival';
   }
 
   private centerLabel: RuntimeLabel2D | null = null;
@@ -146,6 +166,8 @@ export class GameFlow extends Script {
 
   onStart(): void {
     this.mode = globalThis.__SD_MODE === 'survival' ? 'survival' : 'campaign';
+    // Survival grants a fixed pool of lives (surv_zh); campaign has none.
+    this.lives = this.mode === 'survival' ? SURVIVAL_LIVES : 0;
     // Direct editor play (no menu hand-off): every run starts a fresh wallet.
     if (!globalThis.__SD_MODE) {
       session.resetRun(this.mode);
@@ -268,6 +290,7 @@ export class GameFlow extends Script {
       mode: this.mode,
       state: this.state,
       wave: this.wave,
+      lives: this.lives,
       gold: Math.floor(session.gold),
       session: session.debugState(),
       score: this.score,
@@ -319,6 +342,13 @@ export class GameFlow extends Script {
         // Short breather between survival waves; fade the banner out.
         if (this.stateTime >= 4) {
           this.wave += 1;
+          this.enterState('countdown');
+        }
+        break;
+      }
+      case 'wave-failed': {
+        // Lost a life: after the banner, replay the SAME wave (no wave++).
+        if (this.stateTime >= WAVE_FAILED_SECONDS) {
           this.enterState('countdown');
         }
         break;
@@ -402,7 +432,9 @@ export class GameFlow extends Script {
   // ── castle damage ───────────────────────────────────────────────────────────
 
   private onCastleDamaged(amount: number): void {
-    if (this.state === 'result') return;
+    // A destroyed castle in survival takes us to 'wave-failed', where more
+    // damage must not re-trigger the loss (nor while the result is up).
+    if (this.state === 'result' || this.state === 'wave-failed') return;
     // Umbrella (shop device): an invisible shield under 75% HP.
     if (session.isOwned('umbrella') && this.castleHp < this.castleMaxHp * 0.75) {
       amount *= UMBRELLA_FACTOR;
@@ -413,10 +445,30 @@ export class GameFlow extends Script {
       this.scene?.audio.play(SFX.warning, { bus: 'sfx' });
     }
     if (this.castleHp <= 0) {
+      // Survival (surv_zh): spend a life and replay the wave; only when the
+      // pool is empty does the castle falling end the run.
+      if (this.mode === 'survival' && this.lives > 0) {
+        this.lives -= 1;
+        this.restoreCheckpoint();
+        this.spawner?.stopWave();
+        this.spawner?.despawnAll();
+        this.enterState('wave-failed');
+        return;
+      }
       this.victory = false;
       this.spawner?.stopWave();
       this.enterState('result');
     }
+  }
+
+  /** Roll the round back to the current wave's checkpoint (survival retry). */
+  private restoreCheckpoint(): void {
+    this.castleHp = this.checkpointHp;
+    this.score = this.checkpointScore;
+    this.kills = this.checkpointKills;
+    session.setGold(this.checkpointGold);
+    this.hpBar?.setValue(this.castleHpFraction);
+    this.updateGoldLabel();
   }
 
   private onFightPressed(): void {
@@ -465,6 +517,13 @@ export class GameFlow extends Script {
         this.setLabel(this.centerLabel, '');
         this.airSupportTimer = 0;
         if (this.mode === 'survival') {
+          // Checkpoint the wave-start state so a lost life can replay this wave
+          // from exactly here (HP/score/kills/gold roll back on failure). On a
+          // retry these were just restored, so re-snapshotting is idempotent.
+          this.checkpointHp = this.castleHp;
+          this.checkpointScore = this.score;
+          this.checkpointKills = this.kills;
+          this.checkpointGold = session.gold;
           this.spawner?.startSurvivalWave(this.wave);
         } else {
           this.spawner?.startWave(this.wave);
@@ -478,6 +537,13 @@ export class GameFlow extends Script {
       case 'intermission':
         this.setLabel(this.centerLabel, `WAVE ${this.wave} CLEARED`);
         this.scene?.audio.play(SFX.panel, { bus: 'sfx' });
+        break;
+      case 'wave-failed':
+        this.setLabel(
+          this.centerLabel,
+          this.lives === 1 ? 'WAVE FAILED — 1 LIFE LEFT' : `WAVE FAILED — ${this.lives} LIVES LEFT`
+        );
+        this.scene?.audio.play(SFX.warning, { bus: 'sfx' });
         break;
       case 'shop':
         this.setLabel(this.centerLabel, '');

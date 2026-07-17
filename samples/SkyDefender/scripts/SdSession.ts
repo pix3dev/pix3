@@ -99,6 +99,12 @@ export const session = {
     return true;
   },
 
+  /** Overwrite the wallet — checkpoint restore on a survival wave failure. */
+  setGold(amount: number): void {
+    state.gold = Math.max(0, Math.floor(amount));
+    persist();
+  },
+
   isOwned(id: string): boolean {
     return state.owned.includes(id);
   },
