@@ -77,31 +77,85 @@ describe('isSameTextureRegion', () => {
 });
 
 describe('Sprite2D.setTextureRegion', () => {
-  it('crops the current texture and survives a later setTexture', () => {
+  // The material is private; read its map to observe what the sprite renders.
+  const mapOf = (sprite: Sprite2D): Texture | null =>
+    (sprite as unknown as { material: { map: Texture | null } }).material.map;
+
+  it('crops via a private clone, never mutating the shared cached texture', () => {
     const sprite = new Sprite2D({ id: 'odometer', name: 'Digit' });
-    const first = new Texture();
-    sprite.setTexture(first);
+    const shared = new Texture();
+    sprite.setTexture(shared);
 
     // Show the 8th of 10 vertically-stacked glyphs.
     sprite.setTextureRegion({ x: 0, y: 1 - 8 / 10, width: 1, height: 1 / 10 });
-    expect(first.repeat.y).toBeCloseTo(0.1);
-    expect(first.offset.y).toBeCloseTo(0.2);
 
-    // A texture swap must re-apply the stored crop, not reset to the full image.
-    const second = new Texture();
-    sprite.setTexture(second);
-    expect(second.repeat.y).toBeCloseTo(0.1);
-    expect(second.offset.y).toBeCloseTo(0.2);
+    // The shared texture handed to setTexture must stay at the full region so
+    // other sprites reusing it are unaffected (the play-mode bug this fixes).
+    expect(shared.repeat.y).toBe(1);
+    expect(shared.offset.y).toBe(0);
+
+    // The crop lands on a per-sprite clone that the material now renders.
+    const map = mapOf(sprite);
+    expect(map).not.toBe(shared);
+    expect(map).not.toBeNull();
+    expect(map!.repeat.y).toBeCloseTo(0.1);
+    expect(map!.offset.y).toBeCloseTo(0.2);
   });
 
-  it('null restores the full texture UVs', () => {
+  it('lets two sprites sharing one cached texture crop independently', () => {
+    // Simulates the odometer: every digit sprite reuses the same cached strip
+    // texture but must show a different cell.
+    const shared = new Texture();
+    const a = new Sprite2D({ id: 'a', name: 'DigitA' });
+    const b = new Sprite2D({ id: 'b', name: 'DigitB' });
+    a.setTexture(shared);
+    b.setTexture(shared);
+
+    a.setTextureRegion({ x: 0, y: 0.2, width: 1, height: 0.1 });
+    b.setTextureRegion({ x: 0, y: 0.7, width: 1, height: 0.1 });
+
+    const mapA = mapOf(a)!;
+    const mapB = mapOf(b)!;
+    expect(mapA).not.toBe(shared);
+    expect(mapB).not.toBe(shared);
+    expect(mapA).not.toBe(mapB);
+    expect(mapA.offset.y).toBeCloseTo(0.2);
+    expect(mapB.offset.y).toBeCloseTo(0.7);
+    // Shared texture is untouched.
+    expect(shared.offset.y).toBe(0);
+    expect(shared.repeat.y).toBe(1);
+  });
+
+  it('re-applies the crop to a clone of the new texture after a swap', () => {
     const sprite = new Sprite2D({ id: 'odometer', name: 'Digit' });
-    const texture = new Texture();
-    sprite.setTexture(texture);
+    const first = new Texture();
+    sprite.setTexture(first);
+    sprite.setTextureRegion({ x: 0, y: 1 - 8 / 10, width: 1, height: 1 / 10 });
+
+    // A texture swap must re-apply the stored crop to a clone of the NEW image,
+    // never mutate the incoming shared texture.
+    const second = new Texture();
+    sprite.setTexture(second);
+
+    const map = mapOf(sprite)!;
+    expect(map).not.toBe(second);
+    expect(map.repeat.y).toBeCloseTo(0.1);
+    expect(map.offset.y).toBeCloseTo(0.2);
+    expect(second.repeat.y).toBe(1);
+    expect(second.offset.y).toBe(0);
+  });
+
+  it('null reverts to the shared texture and clears the crop', () => {
+    const sprite = new Sprite2D({ id: 'odometer', name: 'Digit' });
+    const shared = new Texture();
+    sprite.setTexture(shared);
     sprite.setTextureRegion({ x: 0, y: 0, width: 1, height: 0.25 });
     sprite.setTextureRegion(null);
-    expect(texture.repeat.x).toBe(1);
-    expect(texture.repeat.y).toBe(1);
+
+    // Back to rendering the shared texture directly at its full region.
+    expect(mapOf(sprite)).toBe(shared);
+    expect(shared.repeat.x).toBe(1);
+    expect(shared.repeat.y).toBe(1);
     expect(sprite.textureRegion).toBeNull();
   });
 });

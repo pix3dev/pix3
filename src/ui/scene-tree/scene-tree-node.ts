@@ -16,6 +16,7 @@ import {
   selectObjectRange,
 } from '@/features/selection/SelectObjectCommand';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { FrameSelectedCommand } from '@/features/viewport/FrameSelectedCommand';
 import {
   classifySceneCreateAssetResource,
   getDroppedAssetResourcePath,
@@ -536,20 +537,25 @@ export class SceneTreeNodeComponent extends ComponentBase {
   }
 
   private onDoubleClick(event: MouseEvent): void {
-    // Double-clicking a prefab instance node (root or child) opens its source
-    // prefab in a dedicated tab. Non-prefab nodes keep their default behavior.
-    if (!this.node.isPrefabNode) {
-      return;
-    }
     event.preventDefault();
     event.stopPropagation();
-    this.dispatchEvent(
-      new CustomEvent('node-open-prefab', {
-        detail: { nodeId: this.node.id },
-        bubbles: true,
-        composed: true,
-      })
-    );
+
+    // Double-clicking a prefab instance node (root or child) opens its source
+    // prefab in a dedicated tab — that context switch takes precedence.
+    if (this.node.isPrefabNode) {
+      this.dispatchEvent(
+        new CustomEvent('node-open-prefab', {
+          detail: { nodeId: this.node.id },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      return;
+    }
+
+    // Any other node: frame it in the viewport (the preceding click already
+    // selected it). Frames the specific node regardless of the selection.
+    void this.commandDispatcher.execute(new FrameSelectedCommand({ nodeId: this.node.id }));
   }
 
   private onToggleNode(event: Event): void {

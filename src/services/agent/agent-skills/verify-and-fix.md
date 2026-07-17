@@ -38,7 +38,10 @@ declare a feature done without running it.
      (see the game-prototype skill) so gameplay is legible to state, not screenshots.
 3. **Look at it** (optional but valuable): `viewport_screenshot` — while the game is running it
    captures the RUNNING GAME, otherwise the edit-mode viewport (check `view` in the result;
-   `source:"game"|"editor"` forces one). If your model can't see images, use `analyze_image` with
+   `source:"game"|"editor"` forces one). In edit mode the user's camera may be zoomed/scrolled
+   anywhere, so pass `frame:"all"` to fit the whole scene, `frame:"selection"`, or `nodeId` to
+   zoom onto one node (add `isolate:true` when other content covers it); framing is temporary and
+   never moves the user's camera. If your model can't see images, use `analyze_image` with
    `source:"viewport"` (same auto-routing) — ask e.g. "are the menu buttons visible and inside
    the screen?".
 4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.

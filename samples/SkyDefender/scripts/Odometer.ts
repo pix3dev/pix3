@@ -58,25 +58,9 @@ export class Odometer extends Script {
     // Sync shown state instantly with the initial value so it doesn't roll from 0.
     this.snapTo(this.targetValue);
 
-    // Every digit shares `number_indicator.png`. `setTextureRegion` mutates the
-    // texture's own offset/repeat, so a SHARED cached texture would make all
-    // digits show the last-applied crop. Give each sprite its own texture clone
-    // (shares the GPU image, independent crop) before we start cropping.
-    const loader = this.scene?.getAssetLoader();
-    this.digits.forEach((slot, index) => {
-      const url = slot.sprite.texture?.url;
-      if (!url || !loader) return;
-      void loader
-        .loadTexture(url)
-        .then(tex => {
-          const clone = tex.clone();
-          clone.needsUpdate = true;
-          slot.sprite.setTexture(clone);
-          slot.sprite.setTextureRegion(digitStripRegion(this.shown[index]));
-        })
-        .catch(() => undefined);
-    });
-
+    // Every digit shares `number_indicator.png`, but `Sprite2D.setTextureRegion`
+    // now crops a per-sprite texture clone in the runtime, so each digit shows
+    // its own cell without any game-level texture cloning.
     this.applyCrops();
   }
 

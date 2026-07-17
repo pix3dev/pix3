@@ -756,7 +756,7 @@ export class AgentToolRegistry {
       {
         name: 'viewport_screenshot',
         description:
-          'Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The result says which view was captured (`view`).',
+          "Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The user's editor camera may be zoomed/scrolled anywhere — pass `frame:\"all\"` to fit the whole scene, `frame:\"selection\"` to fit the current selection, or `nodeId` to zoom onto one node (add `isolate:true` to hide other content that overlaps/covers it). Framing is temporary and captures the EDITOR viewport (never the game) without moving the user's camera. The result reports `view` and, when framed, `framed`.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -768,13 +768,33 @@ export class AgentToolRegistry {
               type: 'string',
               enum: ['auto', 'game', 'editor'],
               description:
-                'What to capture: "auto" (default) = the running game when play mode is active, else the editor viewport; "game" = the running game only (errors when not playing); "editor" = the edit-mode viewport even while playing.',
+                'What to capture when NOT framing: "auto" (default) = the running game when play mode is active, else the editor viewport; "game" = the running game only (errors when not playing); "editor" = the edit-mode viewport even while playing. Any framing param forces the editor viewport.',
+            },
+            frame: {
+              type: 'string',
+              enum: ['current', 'all', 'selection', 'node'],
+              description:
+                'Aim the editor camera before capturing: "current" (default) = capture as-is; "all" = fit all scene content; "selection" = fit the selected node(s); "node" = fit the node given by nodeId. The user\'s camera is restored afterwards.',
+            },
+            nodeId: {
+              type: 'string',
+              description:
+                'Node to frame (from find_nodes / scene tree). Implies frame:"node".',
+            },
+            isolate: {
+              type: 'boolean',
+              description:
+                'With a framed node/selection: hide every OTHER node so the target and its children are captured unobstructed on a clean background. Default false (surrounding context stays visible).',
+            },
+            padding: {
+              type: 'number',
+              description:
+                'Margin around framed content as a fraction of its size, 0–1 (default ~0.15). Smaller = tighter crop.',
             },
           },
           additionalProperties: false,
         },
-        handler: args =>
-          this.viewportScreenshot(asInt(args.maxSize, 1024), asCaptureSource(args.source)),
+        handler: args => this.viewportScreenshot(args),
       },
       {
         name: 'analyze_image',
@@ -1698,7 +1718,26 @@ export class AgentToolRegistry {
     };
   }
 
-  private viewportScreenshot(maxSize: number, source: AgentCaptureSource): Record<string, unknown> {
+  private viewportScreenshot(args: Record<string, unknown>): Record<string, unknown> {
+    const maxSize = asInt(args.maxSize, 1024);
+    const source = asCaptureSource(args.source);
+    const nodeId = typeof args.nodeId === 'string' && args.nodeId ? args.nodeId : undefined;
+    const isolate = args.isolate === true;
+    const padding = typeof args.padding === 'number' ? args.padding : undefined;
+    // A bare nodeId means "frame this node".
+    let frame = typeof args.frame === 'string' ? args.frame : 'current';
+    if (nodeId && frame === 'current') {
+      frame = 'node';
+    }
+
+    if (frame !== 'current') {
+      return this.framedViewportScreenshot(
+        frame as 'all' | 'selection' | 'node',
+        { maxSize, source, nodeId, isolate, padding }
+      );
+    }
+
+    // Unframed: capture as-is (game while playing unless source forces editor).
     const capture = this.captureView(source, maxSize);
     if ('error' in capture) {
       return { ok: false, error: capture.error };
@@ -1717,6 +1756,82 @@ export class AgentToolRegistry {
           : 'The screenshot of the edit-mode editor viewport is attached as an image.'),
       [AGENT_TOOL_IMAGES_KEY]: [
         { mimeType: shot.mimeType, data: shot.dataBase64 },
+      ] satisfies AgentToolImage[],
+    };
+  }
+
+  /**
+   * Editor-viewport screenshot with the camera transiently aimed at scene
+   * content / a selection / a node, optionally isolating the target. Always the
+   * editor (never the game) and always restores the user's camera.
+   */
+  private framedViewportScreenshot(
+    frame: 'all' | 'selection' | 'node',
+    opts: {
+      maxSize: number;
+      source: AgentCaptureSource;
+      nodeId?: string;
+      isolate: boolean;
+      padding?: number;
+    }
+  ): Record<string, unknown> {
+    if (frame === 'node' && !opts.nodeId) {
+      return { ok: false, error: 'frame:"node" requires nodeId.' };
+    }
+    if (opts.isolate && frame === 'all') {
+      return {
+        ok: false,
+        error: 'isolate needs a target — use frame:"node" (with nodeId) or frame:"selection".',
+      };
+    }
+    if (opts.source === 'game') {
+      return {
+        ok: false,
+        error: 'Framing captures the editor viewport — drop source or use source:"editor".',
+      };
+    }
+
+    // padding fraction (0–1) → bounds inflation multiplier, clamped to a sane range.
+    const paddingMultiplier =
+      opts.padding !== undefined
+        ? Math.min(3, Math.max(1, 1 + 2 * opts.padding))
+        : undefined;
+
+    const result = this.viewportRenderer.captureFramedScreenshot({
+      maxSize: opts.maxSize,
+      frame,
+      nodeId: opts.nodeId,
+      isolate: opts.isolate,
+      paddingMultiplier,
+    });
+    if (result === null) {
+      return {
+        ok: false,
+        error: 'The viewport is not initialized yet (open a project with a scene first).',
+      };
+    }
+    if ('error' in result) {
+      return { ok: false, error: result.error };
+    }
+
+    const framedNode = opts.nodeId
+      ? this.sceneManager.getActiveSceneGraph()?.nodeMap.get(opts.nodeId)
+      : undefined;
+    const target =
+      frame === 'node' ? `node "${framedNode?.name ?? opts.nodeId}"` : `the ${frame}`;
+    return {
+      ok: true,
+      view: 'editor',
+      framed: frame,
+      ...(opts.nodeId ? { framedNodeId: opts.nodeId, framedNodeName: framedNode?.name } : {}),
+      width: result.width,
+      height: result.height,
+      mimeType: result.mimeType,
+      note: `Editor viewport framed on ${target}${
+        opts.isolate ? ' with other nodes hidden' : ''
+      }. The user's camera was restored.`,
+      [AGENT_TOOL_IMAGES_KEY]: [
+        { mimeType: result.mimeType, data: result.dataBase64 },
       ] satisfies AgentToolImage[],
     };
   }

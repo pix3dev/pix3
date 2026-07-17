@@ -14,11 +14,11 @@ import { ServiceContainer } from '@/fw/di';
 export class ZoomAllCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.zoom-all',
-    title: 'Zoom All',
+    title: 'Frame All',
     description: 'Zoom viewport to fit all objects',
-    keywords: ['zoom', 'viewport', 'fit', 'all'],
+    keywords: ['zoom', 'viewport', 'fit', 'all', 'frame'],
     menuPath: 'view',
-    keybinding: 'F',
+    keybinding: 'Shift+F',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
     menuOrder: 31,

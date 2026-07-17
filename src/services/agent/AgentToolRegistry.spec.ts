@@ -212,6 +212,88 @@ describe('AgentToolRegistry', () => {
         appState.ui.isPlaying = false;
       }
     });
+
+    it('frames a node: routes to captureFramedScreenshot and reports framed:node', async () => {
+      const captureFramedScreenshot = vi.fn(() => ({
+        dataBase64: 'Rk9P',
+        mimeType: 'image/jpeg',
+        width: 512,
+        height: 512,
+      }));
+      const node = makeNode({ nodeId: 'n42', name: 'Hero' });
+      const registry = buildRegistry({
+        viewportRenderer: { captureFramedScreenshot },
+        sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map([['n42', node]]) }) },
+      });
+
+      const result = (await registry.execute('viewport_screenshot', {
+        nodeId: 'n42',
+        isolate: true,
+        padding: 0.5,
+      })) as Record<string, unknown>;
+
+      expect(captureFramedScreenshot).toHaveBeenCalledWith({
+        maxSize: 1024,
+        frame: 'node',
+        nodeId: 'n42',
+        isolate: true,
+        paddingMultiplier: 2,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.view).toBe('editor');
+      expect(result.framed).toBe('node');
+      expect(result.framedNodeName).toBe('Hero');
+      expect(result.__images).toEqual([{ mimeType: 'image/jpeg', data: 'Rk9P' }]);
+    });
+
+    it('frame:"node" without a nodeId errors', async () => {
+      const captureFramedScreenshot = vi.fn();
+      const registry = buildRegistry({ viewportRenderer: { captureFramedScreenshot } });
+      const result = (await registry.execute('viewport_screenshot', { frame: 'node' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/requires nodeId/);
+      expect(captureFramedScreenshot).not.toHaveBeenCalled();
+    });
+
+    it('isolate without a target errors', async () => {
+      const captureFramedScreenshot = vi.fn();
+      const registry = buildRegistry({ viewportRenderer: { captureFramedScreenshot } });
+      const result = (await registry.execute('viewport_screenshot', {
+        frame: 'all',
+        isolate: true,
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/isolate needs a target/);
+      expect(captureFramedScreenshot).not.toHaveBeenCalled();
+    });
+
+    it('framing with source "game" errors', async () => {
+      const captureFramedScreenshot = vi.fn();
+      const registry = buildRegistry({ viewportRenderer: { captureFramedScreenshot } });
+      const result = (await registry.execute('viewport_screenshot', {
+        frame: 'all',
+        source: 'game',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/editor viewport/);
+      expect(captureFramedScreenshot).not.toHaveBeenCalled();
+    });
+
+    it('propagates a typed error from captureFramedScreenshot (e.g. hidden node)', async () => {
+      const captureFramedScreenshot = vi.fn(() => ({ error: 'The target node is hidden.' }));
+      const registry = buildRegistry({
+        viewportRenderer: { captureFramedScreenshot },
+        sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
+      });
+      const result = (await registry.execute('viewport_screenshot', {
+        frame: 'selection',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/hidden/);
+    });
   });
 
   describe('read_skill', () => {

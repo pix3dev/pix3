@@ -18,6 +18,7 @@ import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { OpenPrefabCommand } from '@/features/scene/OpenPrefabCommand';
 import { UnlinkPrefabInstanceCommand } from '@/features/scene/UnlinkPrefabInstanceCommand';
+import { FrameSelectedCommand } from '@/features/viewport/FrameSelectedCommand';
 import { SceneManager } from '@pix3/runtime';
 import { ServiceContainer } from '@/fw/di';
 import { classifySceneCreateAssetResource, deriveAssetNodeName } from '@/ui/shared/asset-drag-drop';
@@ -273,6 +274,12 @@ export class SceneTreePanel extends ComponentBase {
 
     return html`
       <div class="scene-tree-context-menu" role="menu" @click=${(e: Event) => e.stopPropagation()}>
+        <button type="button" role="menuitem" @click=${() => this.onContextMenuAction('frame')}>
+          <span>Frame in Viewport</span>
+          <span class="context-menu-shortcut"
+            >${this.getCommandShortcut('view.frame-selected')}</span
+          >
+        </button>
         ${isPrefab
           ? html`<button
               type="button"
@@ -828,12 +835,33 @@ export class SceneTreePanel extends ComponentBase {
   }
 
   private async onContextMenuAction(
-    action: 'duplicate' | 'group' | 'delete' | 'saveAsPrefab' | 'openPrefab' | 'unlinkPrefab'
+    action:
+      | 'frame'
+      | 'duplicate'
+      | 'group'
+      | 'delete'
+      | 'saveAsPrefab'
+      | 'openPrefab'
+      | 'unlinkPrefab'
   ): Promise<void> {
     // Resolve the context node before clearing the menu — the node id is needed
     // for the prefab-specific actions.
     const contextNode = this.resolveContextMenuNode();
     this.contextMenu = null;
+
+    if (action === 'frame') {
+      if (!contextNode) {
+        return;
+      }
+      try {
+        await this.commandDispatcher.execute(
+          new FrameSelectedCommand({ nodeId: contextNode.nodeId })
+        );
+      } catch (error) {
+        console.error('[SceneTreePanel] Failed to execute "Frame in Viewport"', error);
+      }
+      return;
+    }
 
     if (action === 'openPrefab') {
       await this.openPrefabForNode(contextNode);

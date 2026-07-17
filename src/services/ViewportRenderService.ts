@@ -117,6 +117,14 @@ const SELECTED_NODE_ICON_OPACITY = 0.38;
 const MIN_WORLD_BOUNDS_SIZE = 0.0001;
 const TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER = 1.25;
 const TWO_D_FIT_PADDING_MULTIPLIER = 1.15;
+// Margin left around framed content (bounds inflation). Frame-selected is snug;
+// frame-all leaves more breathing room around the whole scene.
+const THREE_D_FRAME_SELECTED_PADDING_MULTIPLIER = 1.3;
+const THREE_D_FRAME_ALL_PADDING_MULTIPLIER = 1.5;
+// Fallback framing half-extents for degenerate bounds (empty groups, cameras,
+// lights) so focusing them still produces a sensible view instead of NaN zoom.
+const FRAME_FALLBACK_HALF_EXTENT_2D = 100;
+const FRAME_FALLBACK_HALF_EXTENT_3D = 2.5;
 const MARQUEE_PREVIEW_2D_COLOR = 0xffcf33;
 // While idle (no dirty flag, no animated previews) the render loop still
 // paints one frame this often as a safety net for mutations that bypass
@@ -139,6 +147,36 @@ interface Selection2DOverlayHudAnchor {
   tangentX: number;
   tangentY: number;
   rotationDeg: number;
+}
+
+/** Options for {@link ViewportRendererService.frameNodes}. */
+export interface FrameNodesOptions {
+  /** Bounds inflation (>1 leaves margin). Defaults per dimension when omitted. */
+  paddingMultiplier?: number;
+  /**
+   * Persist the move as a user navigation (cancel fling, save per-scene 2D zoom,
+   * refresh gizmos). Default true. Transient captures pass false so the human's
+   * remembered camera is untouched.
+   */
+  persist?: boolean;
+  /**
+   * When the frameable content's dimensionality differs from the active
+   * navigation mode, switch the mode so the user's controls point at it. Only the
+   * persistent F-key path passes true; transient captures never flip the mode
+   * (both render passes always run, so cross-mode capture works regardless).
+   */
+  switchNavigationMode?: boolean;
+}
+
+/** Saved editor camera state for transient framed captures (see captureFramedScreenshot). */
+interface EditorCameraSnapshot {
+  mainPos: THREE.Vector3;
+  mainQuat: THREE.Quaternion;
+  mainZoom: number;
+  orbitTarget?: THREE.Vector3;
+  orthoPos?: THREE.Vector3;
+  orthoZoom?: number;
+  orthoTarget?: THREE.Vector3;
 }
 
 @injectable()
@@ -246,6 +284,9 @@ export class ViewportRendererService {
   // heartbeat (IDLE_RENDER_INTERVAL_MS) is due.
   private renderRequested = true;
   private isRenderingFrame = false;
+  // When set, renderFrameBody skips the LAYER_GIZMOS pass (transform gizmo,
+  // selection boxes, node icons) so framed agent screenshots come out clean.
+  private suppressGizmosForCapture = false;
   private lastRenderedAt = 0;
   private activeParticlePreviewCount = 0;
   private activeComponentPreviewCount = 0;
@@ -574,6 +615,179 @@ export class ViewportRendererService {
 
     this.renderFrame();
     return encodeCanvasScreenshot(this.canvas, options);
+  }
+
+  /**
+   * Capture the editor viewport with the camera transiently aimed at scene
+   * content, a selection, or a single node — then RESTORE the user's camera so a
+   * watching human's view is never disturbed. Framing, gizmo suppression and
+   * optional occluder isolation all happen inside one synchronous task (before the
+   * browser composites) so there is no visible flicker, even in a background tab.
+   *
+   * Returns a `{ error }` object for actionable failures (node not found /
+   * hidden / no frameable bounds), a `CanvasScreenshot` on success, or null when
+   * the viewport is not initialized.
+   */
+  captureFramedScreenshot(opts: {
+    maxSize?: number;
+    frame: 'all' | 'selection' | 'node';
+    nodeId?: string;
+    isolate?: boolean;
+    paddingMultiplier?: number;
+  }): CanvasScreenshot | { error: string } | null {
+    if (!this.renderer || !this.canvas || !this.scene || !this.camera) {
+      return null;
+    }
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) {
+      return { error: 'No active scene — open a scene first.' };
+    }
+
+    // Resolve the nodes to frame.
+    let targetNodes: NodeBase[];
+    if (opts.frame === 'all') {
+      targetNodes = sceneGraph.rootNodes.filter((n): n is NodeBase => n instanceof NodeBase);
+      if (targetNodes.length === 0) {
+        return { error: 'The scene is empty — nothing to frame.' };
+      }
+    } else if (opts.frame === 'selection') {
+      targetNodes = this.resolveSelectedFrameNodes();
+      if (targetNodes.length === 0) {
+        return { error: 'Nothing is selected — select a node or pass a nodeId.' };
+      }
+    } else {
+      const nodeId = opts.nodeId ?? '';
+      const node = sceneGraph.nodeMap.get(nodeId);
+      if (!(node instanceof NodeBase)) {
+        return { error: `No node with id "${nodeId}" (use find_nodes / scene_tree to get ids).` };
+      }
+      targetNodes = [node];
+    }
+
+    // A framed shot of a fully hidden node is blank pixels — say so instead.
+    if (opts.frame !== 'all' && !targetNodes.some(n => this.isVisibleInHierarchy(n))) {
+      return {
+        error: 'The target node is hidden (visible:false) — nothing would be captured.',
+      };
+    }
+
+    const snapshot = this.snapshotEditorCameras();
+    this.suppressGizmosForCapture = true;
+    try {
+      const framed = this.frameNodes(targetNodes, {
+        persist: false,
+        paddingMultiplier: opts.paddingMultiplier,
+      });
+      if (!framed) {
+        return { error: 'Could not compute bounds for the target(s).' };
+      }
+
+      const renderAndEncode = (): CanvasScreenshot | { error: string } => {
+        this.renderFrame();
+        const shot = encodeCanvasScreenshot(this.canvas!, { maxSize: opts.maxSize });
+        return shot ?? { error: 'Failed to encode the viewport image.' };
+      };
+
+      if (opts.isolate && opts.frame !== 'all') {
+        return this.withNodeIsolation(targetNodes, renderAndEncode);
+      }
+      return renderAndEncode();
+    } finally {
+      this.suppressGizmosForCapture = false;
+      this.restoreEditorCameras(snapshot);
+      // Repaint the restored view now so the framed frame never lingers on screen.
+      this.renderFrame();
+    }
+  }
+
+  private snapshotEditorCameras(): EditorCameraSnapshot {
+    return {
+      mainPos: this.camera!.position.clone(),
+      mainQuat: this.camera!.quaternion.clone(),
+      mainZoom: this.camera!.zoom,
+      orbitTarget: this.orbitControls?.target.clone(),
+      orthoPos: this.orthographicCamera?.position.clone(),
+      orthoZoom: this.orthographicCamera?.zoom,
+      orthoTarget: this.orthographicControls?.target.clone(),
+    };
+  }
+
+  private restoreEditorCameras(s: EditorCameraSnapshot): void {
+    if (this.camera) {
+      this.camera.position.copy(s.mainPos);
+      this.camera.quaternion.copy(s.mainQuat);
+      this.camera.zoom = s.mainZoom;
+      this.camera.updateProjectionMatrix();
+    }
+    if (this.orbitControls && s.orbitTarget) {
+      this.orbitControls.target.copy(s.orbitTarget);
+      this.orbitControls.update();
+    }
+    if (this.orthographicCamera && s.orthoPos && s.orthoZoom !== undefined) {
+      this.orthographicCamera.position.copy(s.orthoPos);
+      this.orthographicCamera.zoom = s.orthoZoom;
+      this.orthographicCamera.updateProjectionMatrix();
+    }
+    if (this.orthographicControls && s.orthoTarget) {
+      this.orthographicControls.target.copy(s.orthoTarget);
+    }
+  }
+
+  /**
+   * Run `fn` with every node OUTSIDE the keep-set (the targets, their descendants
+   * and their ancestors) hidden, then restore original visibility. Used to capture
+   * a node unobstructed by foreground content. 3D nodes are hidden by their own
+   * `visible` flag (hides the subtree); 2D nodes by hiding their proxy visual root
+   * (the editor draws proxies, not the runtime nodes). Ancestors stay visible so
+   * inherited transforms and nested 2D visual roots survive.
+   */
+  private withNodeIsolation<T>(keepNodes: readonly NodeBase[], fn: () => T): T {
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) return fn();
+
+    const keep = new Set<NodeBase>();
+    const addSubtree = (node: NodeBase): void => {
+      keep.add(node);
+      for (const child of node.children) {
+        if (child instanceof NodeBase) addSubtree(child);
+      }
+    };
+    const ancestors = new Set<NodeBase>();
+    for (const node of keepNodes) {
+      addSubtree(node);
+      let parent = node.parent;
+      while (parent instanceof NodeBase) {
+        ancestors.add(parent);
+        parent = parent.parent;
+      }
+    }
+
+    const saved = new Map<THREE.Object3D, boolean>();
+    const hide = (obj: THREE.Object3D): void => {
+      if (!saved.has(obj)) saved.set(obj, obj.visible);
+      obj.visible = false;
+    };
+
+    for (const node of sceneGraph.nodeMap.values()) {
+      if (!(node instanceof NodeBase) || keep.has(node) || ancestors.has(node)) {
+        continue;
+      }
+      // 3D subtree hides via inherited visibility on the node object itself.
+      hide(node);
+      // 2D nodes render as separate proxy visuals — hide the proxy root too.
+      if (node instanceof Node2D) {
+        const visualRoot = this.get2DVisualRoot(node.nodeId);
+        if (visualRoot) hide(visualRoot);
+      }
+    }
+
+    try {
+      return fn();
+    } finally {
+      for (const [obj, visible] of saved) {
+        obj.visible = visible;
+      }
+    }
   }
 
   /**
@@ -1106,30 +1320,54 @@ export class ViewportRendererService {
       return;
     }
 
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
+    this.apply3DFraming(box, THREE_D_FRAME_ALL_PADDING_MULTIPLIER);
+  }
+
+  /**
+   * Position the active 3D camera (perspective or editor-orthographic) so `bounds`
+   * fills the viewport with a margin. The current view DIRECTION is preserved
+   * (Unity/Godot "frame" behavior) — only distance/zoom and the orbit target move —
+   * so framing never disorients the user by snapping to a fixed angle. Use
+   * {@link zoomDefault} to reset to the canonical 3/4 view.
+   */
+  private apply3DFraming(
+    bounds: THREE.Box3,
+    paddingMultiplier = THREE_D_FRAME_SELECTED_PADDING_MULTIPLIER
+  ): void {
+    if (!this.camera || !this.orbitControls) return;
+
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    const sphereRadius = Math.max(size.length() / 2, MIN_WORLD_BOUNDS_SIZE);
+
+    // Preserve the current view direction; fall back to the default diagonal only
+    // when the camera sits exactly on its target.
+    const direction = this.camera.position.clone().sub(this.orbitControls.target);
+    if (direction.lengthSq() < 1e-8) {
+      direction.set(1, 1, 1);
+    }
+    direction.normalize();
 
     if (this.camera instanceof THREE.PerspectiveCamera) {
-      const fov = this.camera.fov * (Math.PI / 180);
-      const cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 2;
-
-      this.camera.position.set(center.x + cameraZ, center.y + cameraZ, center.z + cameraZ);
+      const vFov = (this.camera.fov * Math.PI) / 180;
+      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
+      const fitFov = Math.max(Math.min(vFov, hFov), 1e-3);
+      let distance = (sphereRadius * paddingMultiplier) / Math.sin(fitFov / 2);
+      distance = Math.max(distance, this.camera.near * 2);
+      this.camera.position.copy(center).add(direction.multiplyScalar(distance));
     } else {
-      const direction = this.camera.position.clone().sub(this.orbitControls.target);
-      const distance = Math.max(direction.length(), 10);
-      if (direction.lengthSq() === 0) {
-        direction.set(1, 1, 1);
-      }
-      direction.normalize();
+      const distance = Math.max(
+        this.camera.position.clone().sub(this.orbitControls.target).length(),
+        10
+      );
       this.camera.position.copy(center).add(direction.multiplyScalar(distance));
 
       const viewHeight = EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT;
       const viewWidth =
         viewHeight * Math.max(this.viewportSize.width / this.viewportSize.height, 1);
       const targetZoom =
-        Math.max(0.1, Math.min(viewWidth / Math.max(size.x, 1), viewHeight / Math.max(size.y, 1))) *
-        0.9;
+        Math.max(0.1, Math.min(viewWidth / Math.max(size.x, 1), viewHeight / Math.max(size.y, 1))) /
+        paddingMultiplier;
       this.camera.zoom = targetZoom;
       this.camera.updateProjectionMatrix();
     }
@@ -1169,6 +1407,163 @@ export class ViewportRendererService {
 
     this.orbitControls.update();
     this.requestRender();
+  }
+
+  /**
+   * Frame (fit + center the camera on) the currently selected node(s). With
+   * nothing selected, falls back to {@link zoomAll} so the F key stays useful.
+   * This is the persistent, human-facing "Frame Selected" navigation: it switches
+   * the navigation mode when the selection lives in the other dimension.
+   */
+  frameSelected(): void {
+    const nodes = this.resolveSelectedFrameNodes();
+    if (nodes.length === 0) {
+      this.zoomAll();
+      return;
+    }
+    const framed = this.frameNodes(nodes, { persist: true, switchNavigationMode: true });
+    if (!framed) {
+      this.zoomAll();
+    }
+  }
+
+  /**
+   * Frame a single node addressed by id (scene-tree double-click / context menu).
+   * Returns false when the id resolves to nothing frameable.
+   */
+  frameNodeById(nodeId: string, opts: FrameNodesOptions = {}): boolean {
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    if (!(node instanceof NodeBase)) return false;
+    return this.frameNodes([node], opts);
+  }
+
+  /**
+   * Aim the active camera so `nodes` (and their descendants) fill the viewport.
+   * Handles both 2D (orthographic) and 3D (perspective/ortho) content, choosing
+   * the dimension that matches the current navigation mode when the set is mixed.
+   * Returns false when nothing frameable was resolved (caller may fall back).
+   */
+  frameNodes(nodes: readonly NodeBase[], opts: FrameNodesOptions = {}): boolean {
+    const computed = this.computeFramingBounds(nodes);
+    if (!computed) return false;
+    const { bounds, dim } = computed;
+    const persist = opts.persist ?? true;
+
+    if (opts.switchNavigationMode && appState.ui.navigationMode !== dim) {
+      this.switchNavigationModeSync(dim);
+    }
+
+    if (dim === '2d') {
+      this.apply2DFraming(
+        bounds,
+        opts.paddingMultiplier ?? TWO_D_FIT_PADDING_MULTIPLIER,
+        persist
+      );
+    } else {
+      this.apply3DFraming(
+        bounds,
+        opts.paddingMultiplier ?? THREE_D_FRAME_SELECTED_PADDING_MULTIPLIER
+      );
+    }
+    return true;
+  }
+
+  /** Selected nodes (or the hovered node as a fallback), resolved from the active scene graph. */
+  private resolveSelectedFrameNodes(): NodeBase[] {
+    const sceneGraph = this.sceneManager.getActiveSceneGraph();
+    if (!sceneGraph) return [];
+    const ids = appState.selection.nodeIds.length
+      ? appState.selection.nodeIds
+      : appState.selection.primaryNodeId
+        ? [appState.selection.primaryNodeId]
+        : [];
+    const nodes: NodeBase[] = [];
+    for (const id of ids) {
+      const node = sceneGraph.nodeMap.get(id);
+      if (node instanceof NodeBase) nodes.push(node);
+    }
+    return nodes;
+  }
+
+  /**
+   * Compute the world-space framing box for a set of nodes plus their descendants,
+   * and decide which dimension (2D/3D) to frame. Prefers the set matching the
+   * active navigation mode; falls back to the other when the current mode has no
+   * matching content.
+   *
+   * Visibility rule: the explicitly-passed targets always count (you can navigate
+   * to a hidden node), but HIDDEN DESCENDANTS are excluded — otherwise an unused
+   * alternate skin parked at the origin (a common 2D pattern: several weapon-barrel
+   * variants under one pivot, one visible at a time) inflates the box to span the
+   * whole scene. This matches `collect2DContentBounds` (used by Frame All).
+   *
+   * Degenerate results (empty group / pivot, camera, light) fall back to a fixed
+   * box around the first target's world position.
+   */
+  private computeFramingBounds(
+    nodes: readonly NodeBase[]
+  ): { bounds: THREE.Box3; dim: '2d' | '3d' } | null {
+    // Flatten to (node, isTarget), keeping targets distinct from descendants.
+    const flat: { node: NodeBase; isTarget: boolean }[] = [];
+    const collect = (node: NodeBase, isTarget: boolean): void => {
+      flat.push({ node, isTarget });
+      for (const child of node.children) {
+        if (child instanceof NodeBase) collect(child, false);
+      }
+    };
+    for (const node of nodes) collect(node, true);
+
+    const has2d = flat.some(e => e.node instanceof Node2D);
+    const has3d = flat.some(e => e.node instanceof Node3D);
+    const mode2d = appState.ui.navigationMode === '2d';
+    let dim: '2d' | '3d';
+    if (mode2d && has2d) dim = '2d';
+    else if (!mode2d && has3d) dim = '3d';
+    else if (has2d) dim = '2d';
+    else if (has3d) dim = '3d';
+    else return null;
+
+    // A descendant counts only when visible in the hierarchy; a target always does.
+    const includes = (entry: { node: NodeBase; isTarget: boolean }): boolean =>
+      entry.isTarget || this.isVisibleInHierarchy(entry.node);
+
+    const bounds = new THREE.Box3();
+    if (dim === '2d') {
+      // Per-node world bounds so hidden descendants can be filtered out individually.
+      for (const entry of flat) {
+        if (!(entry.node instanceof Node2D) || !includes(entry)) continue;
+        const nodeBounds = this.getNodeOnlyBounds(entry.node);
+        if (!this.isDegenerateBounds(nodeBounds)) bounds.union(nodeBounds);
+      }
+    } else {
+      // 3D: box each passed target's subtree (setFromObject already spans descendants).
+      for (const node of nodes) {
+        const nodeBounds = new THREE.Box3().setFromObject(node);
+        if (!nodeBounds.isEmpty()) bounds.union(nodeBounds);
+      }
+    }
+
+    if (bounds.isEmpty() || this.isDegenerateBounds(bounds)) {
+      const anchor = new THREE.Vector3();
+      nodes[0].getWorldPosition(anchor);
+      const half = dim === '2d' ? FRAME_FALLBACK_HALF_EXTENT_2D : FRAME_FALLBACK_HALF_EXTENT_3D;
+      bounds.setFromCenterAndSize(anchor, new THREE.Vector3(half * 2, half * 2, half * 2));
+    }
+
+    return { bounds, dim };
+  }
+
+  /**
+   * Switch navigation mode and apply its side effects synchronously. The Valtio
+   * subscription that normally runs {@link syncNavigationMode} fires on a later
+   * microtask — and on entering 2D it calls restoreZoomFromState(), which would
+   * clobber a frame applied in the same tick. Running it now (which advances
+   * `lastNavigationMode`) makes that deferred call a no-op, so the frame survives.
+   */
+  private switchNavigationModeSync(mode: '2d' | '3d'): void {
+    if (appState.ui.navigationMode === mode) return;
+    appState.ui.navigationMode = mode;
+    this.syncNavigationMode();
   }
 
   private getTarget2DZoomForBounds(
@@ -1251,12 +1646,27 @@ export class ViewportRendererService {
       return;
     }
 
-    const center = contentBounds.getCenter(new THREE.Vector3());
-    const targetZoom = this.getTarget2DZoomForBounds(contentBounds);
+    this.apply2DFraming(contentBounds, TWO_D_FIT_PADDING_MULTIPLIER, true);
+  }
 
-    this.cancelPanMomentum();
-    this.panVelocity.x = 0;
-    this.panVelocity.y = 0;
+  /**
+   * Center + zoom the orthographic (2D) camera on `bounds` with a margin. When
+   * `persist` is true this is a user-facing navigation (fling cancelled, per-scene
+   * zoom saved, gizmos refreshed); when false it is a transient move for an
+   * off-screen capture that must NOT touch `saveZoomToState` (which would corrupt
+   * the scene's remembered 2D camera) or momentum.
+   */
+  private apply2DFraming(bounds: THREE.Box3, paddingMultiplier: number, persist: boolean): void {
+    if (!this.orthographicCamera) return;
+
+    const center = bounds.getCenter(new THREE.Vector3());
+    const targetZoom = this.getTarget2DZoomForBounds(bounds, paddingMultiplier);
+
+    if (persist) {
+      this.cancelPanMomentum();
+      this.panVelocity.x = 0;
+      this.panVelocity.y = 0;
+    }
 
     this.orthographicCamera.position.set(center.x, center.y, DEFAULT_2D_CAMERA_Z);
     this.orthographicCamera.zoom = targetZoom;
@@ -1267,11 +1677,13 @@ export class ViewportRendererService {
       this.orthographicControls.update();
     }
 
-    this.sync2DServiceFrameThickness();
-    if (this.selection2DOverlay) {
-      this.refreshGizmoPositions();
+    if (persist) {
+      this.sync2DServiceFrameThickness();
+      if (this.selection2DOverlay) {
+        this.refreshGizmoPositions();
+      }
+      this.saveZoomToState();
     }
-    this.saveZoomToState();
     this.requestRender();
   }
 
@@ -1692,21 +2104,29 @@ export class ViewportRendererService {
       });
 
       // Restore, then draw gizmos (LAYER_GIZMOS only) over the post-processed frame.
-      this.camera.layers.mask = savedMask;
-      this.camera.layers.disableAll();
-      this.camera.layers.enable(LAYER_GIZMOS);
-      // Null the scene background first: three's WebGLBackground force-clears the
-      // framebuffer when scene.background is a Color, even with autoClear=false —
-      // which would wipe the composited frame the composer just drew.
-      const savedGizmoBg = this.scene.background;
-      this.scene.background = null;
-      this.renderer.autoClear = false;
-      this.renderer.render(this.scene, this.camera);
-      this.scene.background = savedGizmoBg;
+      // Skipped entirely for a clean framed capture.
+      if (!this.suppressGizmosForCapture) {
+        this.camera.layers.mask = savedMask;
+        this.camera.layers.disableAll();
+        this.camera.layers.enable(LAYER_GIZMOS);
+        // Null the scene background first: three's WebGLBackground force-clears the
+        // framebuffer when scene.background is a Color, even with autoClear=false —
+        // which would wipe the composited frame the composer just drew.
+        const savedGizmoBg = this.scene.background;
+        this.scene.background = null;
+        this.renderer.autoClear = false;
+        this.renderer.render(this.scene, this.camera);
+        this.scene.background = savedGizmoBg;
+      }
       this.camera.layers.mask = savedMask;
     } else if (this.isLayer3DVisible()) {
       this.renderer.autoClear = true;
+      const savedMask = this.camera.layers.mask;
+      if (this.suppressGizmosForCapture) {
+        this.camera.layers.disable(LAYER_GIZMOS);
+      }
       this.renderer.render(this.scene, this.camera);
+      this.camera.layers.mask = savedMask;
     } else {
       this.renderer.autoClear = true;
       this.renderer.clear();

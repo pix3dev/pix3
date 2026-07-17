@@ -52,6 +52,22 @@ export class Sprite2D extends Node2D {
   private mesh: Mesh;
   private geometry: PlaneGeometry;
   private material: MeshBasicMaterial;
+  /**
+   * The shared, AssetLoader-cached texture last handed to {@link setTexture}.
+   * Multiple sprites reuse the same instance, so this sprite must NEVER mutate
+   * its `offset`/`repeat` — the crop goes on {@link ownedTexture} instead.
+   */
+  private baseTexture: Texture | null = null;
+  /**
+   * Per-sprite clone of {@link baseTexture}, created lazily only while a
+   * {@link textureRegion} crop is active. The crop is applied to this clone's
+   * `offset`/`repeat`, so cropping never leaks onto the shared cached texture
+   * that other sprites reuse (the play-mode bug this fixes). The clone shares
+   * the base texture's GPU source via three.js source refcounting, so it adds
+   * no VRAM; it is disposed in {@link disposeResources}. Mirrors the same
+   * per-instance crop pattern in {@link AnimatedSprite2D}.
+   */
+  private ownedTexture: Texture | null = null;
 
   constructor(props: Sprite2DProps) {
     super(props, 'Sprite2D');
@@ -122,8 +138,42 @@ export class Sprite2D extends Node2D {
    */
   setTextureRegion(region: TextureRegion | null): void {
     this.textureRegion = sanitizeTextureRegion(region);
-    if (this.material.map) {
-      applyTextureRegionToTexture(this.material.map, this.textureRegion);
+    this.applyTexturePresentation();
+  }
+
+  /**
+   * Point the material at the correct texture for the current crop state: the
+   * shared cached {@link baseTexture} when there is no region (zero overhead,
+   * common case), or a private {@link ownedTexture} clone carrying the crop when
+   * a region is active — so the crop never mutates the shared texture that other
+   * sprites reuse.
+   */
+  private applyTexturePresentation(): void {
+    const region = this.textureRegion;
+
+    if (region && this.baseTexture) {
+      if (!this.ownedTexture) {
+        this.ownedTexture = this.baseTexture.clone();
+        // sRGB + mipmaps disabled (see configure2DTexture for the why); also
+        // flags the clone for its own GPU upload.
+        configure2DTexture(this.ownedTexture);
+      }
+      applyTextureRegionToTexture(this.ownedTexture, region);
+      if (this.material.map !== this.ownedTexture) {
+        this.material.map = this.ownedTexture;
+        this.material.needsUpdate = true;
+      }
+      return;
+    }
+
+    // No crop → render the shared texture directly and release any owned clone.
+    if (this.material.map !== this.baseTexture) {
+      this.material.map = this.baseTexture;
+      this.material.needsUpdate = true;
+    }
+    if (this.ownedTexture) {
+      this.ownedTexture.dispose();
+      this.ownedTexture = null;
     }
   }
 
@@ -147,13 +197,19 @@ export class Sprite2D extends Node2D {
     // sRGB + mipmaps disabled (see configure2DTexture for the why).
     configure2DTexture(texture);
 
-    this.material.map = texture;
+    // A new base image invalidates any existing crop clone (it wrapped the old
+    // image), so drop it — applyTexturePresentation re-clones from the new base.
+    if (this.baseTexture !== texture && this.ownedTexture) {
+      this.ownedTexture.dispose();
+      this.ownedTexture = null;
+    }
+    this.baseTexture = texture;
     this.material.color.set('#ffffff'); // Reset to white once texture is loaded
-    this.material.needsUpdate = true;
 
-    // Re-apply any active UV crop: a freshly loaded texture defaults to the full
-    // (0,0)/(1,1) region, so the crop must be restored after the swap.
-    applyTextureRegionToTexture(texture, this.textureRegion);
+    // Point the material at the shared texture, or re-derive a cropped clone: a
+    // freshly loaded texture defaults to the full (0,0)/(1,1) region, so any
+    // active crop must be restored after the swap.
+    this.applyTexturePresentation();
 
     // Capture the texture aspect ratio and original dimensions
     if (texture.image) {
@@ -203,6 +259,20 @@ export class Sprite2D extends Node2D {
     }
 
     this.updateSize(this.originalWidth, this.originalHeight);
+  }
+
+  /**
+   * Release the per-sprite crop clone (if any) before the default cleanup
+   * disposes the geometry/material. The shared cached {@link baseTexture} is
+   * intentionally left intact for other sprites — the default resource disposal
+   * never touches `material.map` for exactly that reason.
+   */
+  protected override disposeResources(): void {
+    if (this.ownedTexture) {
+      this.ownedTexture.dispose();
+      this.ownedTexture = null;
+    }
+    super.disposeResources();
   }
 
   /**

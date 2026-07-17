@@ -301,8 +301,10 @@ serializes the node. `ctx.assetLoader` / `ctx.requestRender()` are also provided
 call `requestRender()` for continuous animation. For UV cropping specifically,
 `Sprite2D.setTextureRegion({ x, y, width, height } | null)` shows a normalized
 sub-rect of the texture (e.g. one digit of an odometer strip) — a transient,
-non-serialized crop. Author the region once and drive it from **both**
-`onUpdate` (play) and `tickEditorPreview` (edit) so the two modes match. A
+non-serialized crop. It is per-sprite even when several sprites reuse the same
+cached texture (the runtime crops a private clone that shares the GPU image), so
+you never clone textures yourself. Author the region once and drive it from
+**both** `onUpdate` (play) and `tickEditorPreview` (edit) so the two modes match. A
 throwing `tickEditorPreview` disables the component and surfaces the error like a
 play-mode hook, so the editor keeps running.
 
