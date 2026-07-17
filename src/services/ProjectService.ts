@@ -853,6 +853,7 @@ export class ProjectService {
         height: normalized.viewportBaseSize.height,
       },
       ambientOcclusion: normalized.ambientOcclusion,
+      textureFiltering: normalized.textureFiltering,
       projectType: normalized.projectType,
       targetPlatform: normalized.targetPlatform,
       quality: {
