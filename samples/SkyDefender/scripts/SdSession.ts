@@ -103,9 +103,12 @@ export const session = {
     }
   },
 
-  advanceMission(): void {
-    state.mission += 1;
-    persist();
+  /** Raise campaign progress to `n` (replays never move the frontier back). */
+  unlockMission(n: number): void {
+    if (n > state.mission) {
+      state.mission = n;
+      persist();
+    }
   },
 
   // ── derived game rules ─────────────────────────────────────────────────────

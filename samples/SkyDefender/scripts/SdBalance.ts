@@ -361,16 +361,103 @@ const MISSION_2: MissionEntry[] = [
 const MISSION_3: MissionEntry[] = [{ t: 5, id: 39, y: 240, a: 320 }];
 
 export const MISSIONS: MissionDef[] = [
+  // Official mission names from the GDD list (mission-names-en.txt).
   // The original demo opens with the bridge assembling and a lone truck
   // driving up while the S wave flies in.
-  { name: 'First Blood', entries: MISSION_1, ground: [{ t: 2, id: 50, y: 0, a: 250 }] },
+  { name: 'Prologue', entries: MISSION_1, ground: [{ t: 2, id: 50, y: 0, a: 250 }] },
   {
-    name: 'Heavy Weather',
+    name: 'On Guard',
     entries: MISSION_2,
     ground: [
       { t: 2, id: 50, y: 0, a: 250 },
       { t: 14, id: 51, y: 0, a: 330 },
     ],
   },
-  { name: 'The Uninvited', entries: MISSION_3, ground: [{ t: 3, id: 52, y: 0, a: 250 }] },
+  { name: 'Royal Treasury', entries: MISSION_3, ground: [{ t: 3, id: 52, y: 0, a: 250 }] },
+];
+
+// ── Campaign map + briefings (M4 meta) ──────────────────────────────────────
+
+export type Speaker = 'King' | 'Fargo' | 'Joe';
+
+/** Round dialog portraits (128×128, transparent corners) for the briefing panel. */
+export const PORTRAITS: Record<Speaker, string> = {
+  King: 'res://src/assets/textures/npc/king/talk1.png',
+  Fargo: 'res://src/assets/textures/npc/fargo/fmain.png',
+  Joe: 'res://src/assets/textures/npc/joe/main.png',
+};
+
+export interface BriefingLine {
+  speaker: Speaker;
+  text: string;
+}
+
+export interface MissionMeta {
+  /** Marker spot in conquest-map pixels (497×325 image, origin top-left). */
+  spot: [number, number];
+  region: string;
+  /** Pre-battle dialog (GDD missions-dialogues; mission 1 uses the intro speech). */
+  briefing: BriefingLine[];
+  /** One-line objective shown after the dialog, before FIGHT. */
+  goal: string;
+}
+
+/** Indexed as MISSIONS (mission 1 = [0]). The dev build's missions all defend Grekon. */
+export const MISSION_META: MissionMeta[] = [
+  {
+    spot: [330, 295],
+    region: 'Grekon',
+    briefing: [
+      {
+        speaker: 'King',
+        text:
+          'Joe, we have little time, so I will be brief. The war has reached our last province — it still stands only thanks to you.',
+      },
+      {
+        speaker: 'King',
+        text:
+          'Your home and your fortress are part of an ancient defence system. Every province we win back will work for you, Joe — so your tower grows stronger. So that WE can win.',
+      },
+    ],
+    goal: 'Destroy all enemy forces.',
+  },
+  {
+    spot: [396, 238],
+    region: 'Grekon',
+    briefing: [
+      {
+        speaker: 'Fargo',
+        text:
+          'Well, Joe... We have a little problem. Enemy scouts have run into us. There is just a handful of them, but soon the hordes will follow.',
+      },
+      {
+        speaker: 'Fargo',
+        text:
+          'Destroy everything that can be destroyed. Oh, yes! If you do well, you will be generously rewarded by the company.',
+      },
+      { speaker: 'Joe', text: 'How generously?' },
+      { speaker: 'Fargo', text: 'One hundred Gold.' },
+      { speaker: 'Joe', text: "I'll do my best." },
+    ],
+    goal: 'Destroy all enemy forces. (Bonus: 100 gold)',
+  },
+  {
+    spot: [458, 288],
+    region: 'Grekon',
+    briefing: [
+      {
+        speaker: 'Fargo',
+        text:
+          'Joe, you may have noticed that I turn to you only with problems. Such is life: I find problems — you solve them.',
+      },
+      {
+        speaker: 'Fargo',
+        text:
+          'Damned invaders continue their wicked work. This time their target is the Royal gold mine. Do not let them rob me... ahem, rob the King. If everything goes smoothly, I promise to repair your tower.',
+      },
+      { speaker: 'Joe', text: 'Are you going to deduct the impudence tax again?' },
+      { speaker: 'Fargo', text: 'Depends on your behavior, my dear Joe.' },
+    ],
+    goal: "Defend the Royal gold mine — don't let them steal the gold.",
+  },
 ];

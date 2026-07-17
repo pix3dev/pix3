@@ -27,10 +27,12 @@ type FlowState = 'countdown' | 'wave' | 'intermission' | 'shop' | 'result';
 
 type GameMode = 'campaign' | 'survival';
 
-/** Menu → battle mode hand-off (SdSession owns the run; this picks the scene mode). */
+/** Menu/map → battle hand-off (SdSession owns the run; this picks mode + mission). */
 declare global {
   // eslint-disable-next-line no-var
   var __SD_MODE: GameMode | undefined;
+  // eslint-disable-next-line no-var
+  var __SD_MISSION: number | undefined;
 }
 
 const SFX = {
@@ -102,6 +104,7 @@ export class GameFlow extends Script {
     this.config = {
       countdownSeconds: 3,
       menuScene: 'res://src/assets/scenes/menu.pix3scene',
+      mapScene: 'res://src/assets/scenes/map.pix3scene',
     };
   }
 
@@ -125,6 +128,15 @@ export class GameFlow extends Script {
           getValue: (c: unknown) => (c as GameFlow).config.menuScene,
           setValue: (c: unknown, v: unknown) => {
             (c as GameFlow).config.menuScene = String(v);
+          },
+        },
+        {
+          name: 'mapScene',
+          type: 'string',
+          ui: { label: 'Map Scene', group: 'Flow' },
+          getValue: (c: unknown) => (c as GameFlow).config.mapScene,
+          setValue: (c: unknown, v: unknown) => {
+            (c as GameFlow).config.mapScene = String(v);
           },
         },
       ],
@@ -172,6 +184,12 @@ export class GameFlow extends Script {
     toMenu?.connect('click', this, () => {
       void this.onMenuPressed();
     });
+
+    // Campaign starts at the mission picked on the map (fallback: run frontier).
+    if (this.mode === 'campaign') {
+      const target = Math.floor(Number(globalThis.__SD_MISSION) || session.mission);
+      this.wave = Math.min(Math.max(1, target), this.spawner?.waveCount ?? 1);
+    }
 
     this.castleHp = this.castleMaxHp;
     this.hpBar?.setValue(1);
@@ -288,8 +306,10 @@ export class GameFlow extends Script {
             this.enterState('intermission');
           } else if (this.wave >= (this.spawner?.waveCount ?? 1)) {
             this.victory = true;
+            session.unlockMission(this.wave + 1); // the map shows the campaign as cleared
             this.enterState('result');
           } else {
+            session.unlockMission(this.wave + 1);
             this.enterState('shop');
           }
         }
@@ -402,15 +422,19 @@ export class GameFlow extends Script {
   private onFightPressed(): void {
     if (this.state !== 'shop') return;
     this.scene?.audio.play(SFX.click, { bus: 'sfx' });
-    this.wave += 1;
-    session.advanceMission();
+    this.wave += 1; // progress was already unlocked when the wave cleared
     this.enterState('countdown');
   }
 
   private async onMenuPressed(): Promise<void> {
     if (this.state !== 'result' || !this.scene) return;
     this.scene.audio.play(SFX.click, { bus: 'sfx' });
-    await this.scene.changeScene(String(this.config.menuScene), { transition: 'fade' });
+    // Campaign returns to the map (retry / next region); survival to the menu.
+    const target =
+      this.mode === 'campaign'
+        ? this.config.mapScene || 'res://src/assets/scenes/map.pix3scene'
+        : this.config.menuScene || 'res://src/assets/scenes/menu.pix3scene';
+    await this.scene.changeScene(String(target), { transition: 'fade' });
   }
 
   private enterState(next: FlowState): void {

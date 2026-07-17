@@ -22,6 +22,7 @@ root:
         enabled: true
         config:
           battleScene: res://src/assets/scenes/main.pix3scene
+          mapScene: res://src/assets/scenes/map.pix3scene
     children:
       - id: menu-bg
         type: Sprite2D
@@ -179,6 +180,22 @@ root:
           buttonAction: survival
           transform:
             position: [270, -120]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: continue-button
+        type: Button2D
+        name: Continue Button
+        properties:
+          label: ''
+          width: 244
+          height: 100
+          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue.png' }
+          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue_o.png' }
+          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue_o.png' }
+          buttonAction: continue
+          transform:
+            position: [0, -350]
             scale: [1, 1]
             rotation: 0
         children: []

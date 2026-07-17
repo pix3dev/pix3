@@ -24,6 +24,7 @@ root:
         config:
           countdownSeconds: 3
           menuScene: res://src/assets/scenes/menu.pix3scene
+          mapScene: res://src/assets/scenes/map.pix3scene
       - id: wave-spawner
         type: user:WaveSpawner
         enabled: true

@@ -1,0 +1,482 @@
+# Sky Defender — Campaign Map (M4 meta)
+# The "Old World" conquest room: mission markers on the Grekon region,
+# GDD briefing dialog with portraits, FIGHT hands the mission to GameFlow.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Campaign map — mission select + briefing dialog
+root:
+  - id: ui-root
+    type: Group2D
+    name: Map Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: map-controller
+        type: user:MapController
+        enabled: true
+        config:
+          battleScene: res://src/assets/scenes/main.pix3scene
+          menuScene: res://src/assets/scenes/menu.pix3scene
+    children:
+      - id: map-bg
+        type: Sprite2D
+        name: Sky Background
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/menu_bg.jpg' }
+          width: 1920
+          height: 1440
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: clouds-back
+        type: Group2D
+        name: Clouds Back
+        properties:
+          width: 1920
+          height: 1080
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: parallax-back
+            type: user:ParallaxClouds
+            enabled: true
+            config:
+              speed: 12
+              wrapWidth: 2600
+              jitter: 0.3
+        children:
+          - id: cloud-m1
+            type: Sprite2D
+            name: Cloud M1
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud4.png' }
+              width: 560
+              height: 260
+              opacity: 0.8
+              transform:
+                position: [-760, 380]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: cloud-m2
+            type: Sprite2D
+            name: Cloud M2
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud6.png' }
+              width: 620
+              height: 280
+              opacity: 0.8
+              transform:
+                position: [820, -420]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: stage
+        type: Group2D
+        name: Stage
+        properties:
+          width: 640
+          height: 480
+          transform:
+            position: [0, 0]
+            scale: [2.25, 2.25]
+            rotation: 0
+        children:
+          - id: map-frame
+            type: Sprite2D
+            name: Old World Frame
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/maproom.png' }
+              width: 640
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: conquest-map
+            type: Sprite2D
+            name: Conquest Map
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/counquestmap.png' }
+              width: 497
+              height: 325
+              transform:
+                position: [-1, -2]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: region-highlight
+            type: Sprite2D
+            name: Grekon Highlight
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/regions/grekon.png' }
+              width: 497
+              height: 325
+              opacity: 0.22
+              transform:
+                position: [-1, -2]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: current-ring
+            type: Sprite2D
+            name: Frontier Ring
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              width: 34
+              height: 34
+              initiallyVisible: false
+              transform:
+                position: [80.5, -134.5]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mission-1
+            type: Button2D
+            name: Mission 1 Marker
+            properties:
+              label: ''
+              width: 26
+              height: 26
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selector.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              buttonAction: mission-1
+              transform:
+                position: [80.5, -134.5]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mission-2
+            type: Button2D
+            name: Mission 2 Marker
+            properties:
+              label: ''
+              width: 26
+              height: 26
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selector.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              buttonAction: mission-2
+              transform:
+                position: [146.5, -77.5]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mission-3
+            type: Button2D
+            name: Mission 3 Marker
+            properties:
+              label: ''
+              width: 26
+              height: 26
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selector.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/selectorhome.png' }
+              buttonAction: mission-3
+              transform:
+                position: [208.5, -127.5]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: gold-label
+            type: Label2D
+            name: Gold Label
+            properties:
+              label: 'Gold: 0'
+              labelFontSize: 14
+              labelColor: '#4a2f16'
+              labelAlign: center
+              transform:
+                position: [170, 132]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mission-title
+            type: Label2D
+            name: Mission Title
+            properties:
+              label: 'Select a mission to defend.'
+              labelFontSize: 14
+              labelColor: '#d9b877'
+              labelAlign: center
+              transform:
+                position: [0, -176]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: map-back-button
+            type: Button2D
+            name: Back Button
+            properties:
+              label: ''
+              width: 98
+              height: 40
+              textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back.png' }
+              textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back_o.png' }
+              texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/back_o.png' }
+              buttonAction: back
+              transform:
+                position: [-258, -196]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: briefing-overlay
+            type: Group2D
+            name: Briefing Overlay
+            properties:
+              width: 640
+              height: 480
+              initiallyVisible: false
+              visible: false
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: briefing-dim
+                type: ColorRect2D
+                name: Briefing Dim
+                properties:
+                  width: 640
+                  height: 480
+                  color: '#000000'
+                  opacity: 0.5
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-panel
+                type: Sprite2D
+                name: Briefing Panel
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/dialog/dialogp.png' }
+                  width: 565
+                  height: 212
+                  transform:
+                    position: [0, -105]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-portrait-plate
+                type: Sprite2D
+                name: Portrait Plate
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/gui/maproom/dialog/hero_place.png' }
+                  width: 91
+                  height: 91
+                  transform:
+                    position: [-215, -95]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-portrait
+                type: Sprite2D
+                name: Portrait
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/npc/fargo/fmain.png' }
+                  width: 76
+                  height: 76
+                  transform:
+                    position: [-215, -95]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-speaker
+                type: Label2D
+                name: Speaker Name
+                properties:
+                  label: ''
+                  labelFontSize: 13
+                  labelColor: '#ffd24a'
+                  labelAlign: center
+                  transform:
+                    position: [-215, -148]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-title
+                type: Label2D
+                name: Briefing Title
+                properties:
+                  label: ''
+                  labelFontSize: 16
+                  labelColor: '#ffd24a'
+                  labelAlign: center
+                  transform:
+                    position: [0, -22]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-line-1
+                type: Label2D
+                name: Briefing Line 1
+                properties:
+                  label: ''
+                  labelFontSize: 15
+                  labelColor: '#e9e2cf'
+                  labelAlign: left
+                  transform:
+                    position: [-90, -55]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-line-2
+                type: Label2D
+                name: Briefing Line 2
+                properties:
+                  label: ''
+                  labelFontSize: 15
+                  labelColor: '#e9e2cf'
+                  labelAlign: left
+                  transform:
+                    position: [-90, -78]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-line-3
+                type: Label2D
+                name: Briefing Line 3
+                properties:
+                  label: ''
+                  labelFontSize: 15
+                  labelColor: '#e9e2cf'
+                  labelAlign: left
+                  transform:
+                    position: [-90, -101]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-line-4
+                type: Label2D
+                name: Briefing Line 4
+                properties:
+                  label: ''
+                  labelFontSize: 15
+                  labelColor: '#e9e2cf'
+                  labelAlign: left
+                  transform:
+                    position: [-90, -124]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-goal
+                type: Label2D
+                name: Briefing Goal
+                properties:
+                  label: ''
+                  labelFontSize: 14
+                  labelColor: '#ffd24a'
+                  labelAlign: center
+                  transform:
+                    position: [30, -152]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-skip-button
+                type: Button2D
+                name: Skip Button
+                properties:
+                  label: ''
+                  width: 98
+                  height: 40
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/skip.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/skip_o.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/skip_o.png' }
+                  buttonAction: skip
+                  transform:
+                    position: [-90, -185]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-next-button
+                type: Button2D
+                name: Next Button
+                properties:
+                  label: ''
+                  width: 98
+                  height: 40
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/next.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/next_o.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/next_o.png' }
+                  buttonAction: next
+                  transform:
+                    position: [90, -185]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-fight-button
+                type: Button2D
+                name: Fight Button
+                properties:
+                  label: ''
+                  width: 98
+                  height: 40
+                  initiallyVisible: false
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight_o.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/fight_o.png' }
+                  buttonAction: fight
+                  transform:
+                    position: [90, -185]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: briefing-cancel-button
+                type: Button2D
+                name: Cancel Button
+                properties:
+                  label: ''
+                  width: 73
+                  height: 30
+                  textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/cancel.png' }
+                  textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/cancel_o.png' }
+                  texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/cancel_o.png' }
+                  buttonAction: cancel
+                  transform:
+                    position: [245, -18]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+  - id: map-music
+    type: AudioPlayer
+    name: Map Music
+    properties:
+      audioTrack: res://src/assets/audio/theme/SkyDefender_MenuTheme.mp3
+      autoplay: true
+      loop: true
+      volume: 0.7
+      bus: music
+    children: []
+  - id: map-wind
+    type: AudioPlayer
+    name: Map Wind
+    properties:
+      audioTrack: res://src/assets/audio/gui/mm/wind_loop.mp3
+      autoplay: true
+      loop: true
+      volume: 0.35
+      bus: sfx
+    children: []
+  - id: camera2d
+    type: Camera2D
+    name: Map Camera
+    properties:
+      priority: 10
+      zoom: 1
+      offset:
+        - 0
+        - 0
+    children: []
