@@ -482,6 +482,10 @@ export class SceneSaver {
       }
     } else if (node instanceof Label2D) {
       this.serializeCommonUIControlProps(node, props);
+      if (node.width > 0) props.width = node.width;
+      if (node.height > 0) props.height = node.height;
+      if (node.labelVAlign !== 'middle') props.labelVAlign = node.labelVAlign;
+      if (node.typewriterSpeed > 0) props.typewriterSpeed = node.typewriterSpeed;
     } else if (node instanceof Slider2D) {
       this.serializeCommonUIControlProps(node, props);
       props.width = node.width;

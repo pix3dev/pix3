@@ -12,8 +12,6 @@ declare global {
   var __SD_MISSION: number | undefined;
 }
 
-/** UIControl2D hides its canvas-text refresh behind a protected method. */
-type RuntimeLabel2D = Label2D & { updateLabel(): void };
 type SpriteNode = NodeBase & { setTexture?: (tex: Texture) => void };
 type ControlNode = NodeBase & { enabled: boolean };
 
@@ -24,41 +22,6 @@ const PAGE_SOUND = 'res://src/assets/audio/gui/ingame/ing_panel_move.mp3';
 const mapToLocal = (mx: number, my: number): [number, number] => [mx - 249.5, 160.5 - my];
 
 /**
- * Mirror of UIControl2D's label-texture sizing formula. The label mesh is a
- * plane of exactly this width centred on the node, with left-aligned glyphs
- * starting 10 px in — so `x = left + width/2 - 10` pins a line's left edge.
- */
-const labelWidth = (text: string, fontSize: number): number =>
-  Math.max(128, Math.ceil(text.length * fontSize * 0.75) + 24);
-
-const TEXT_LEFT = -155; // briefing text column, stage-local
-const TEXT_FONT = 15;
-const LINE_COUNT = 4;
-const WRAP_CHARS = 52;
-const CHARS_PER_SECOND = 55;
-
-/** Greedy word-wrap into at most LINE_COUNT rows (tail merges into the last). */
-function wrapText(text: string): string[] {
-  const lines: string[] = [];
-  let current = '';
-  for (const word of text.split(' ')) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > WRAP_CHARS && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
-    }
-  }
-  if (current) lines.push(current);
-  while (lines.length > LINE_COUNT) {
-    const tail = lines.pop()!;
-    lines[lines.length - 1] = `${lines[lines.length - 1]} ${tail}`;
-  }
-  return lines;
-}
-
-/**
  * MapController — the conquest map (Old World room) between battles.
  * Mission markers sit on the Grekon region; picking an unlocked one opens the
  * GDD briefing dialog (portrait + typewriter text), FIGHT hands the mission to
@@ -67,14 +30,14 @@ function wrapText(text: string): string[] {
  */
 export class MapController extends Script {
   private markers: ControlNode[] = [];
-  private missionTitle: RuntimeLabel2D | null = null;
-  private goldLabel: RuntimeLabel2D | null = null;
+  private missionTitle: Label2D | null = null;
+  private goldLabel: Label2D | null = null;
   private overlay: NodeBase | null = null;
   private portraitSprite: SpriteNode | null = null;
-  private speakerLabel: RuntimeLabel2D | null = null;
-  private briefingTitle: RuntimeLabel2D | null = null;
-  private goalLabel: RuntimeLabel2D | null = null;
-  private lineLabels: RuntimeLabel2D[] = [];
+  private speakerLabel: Label2D | null = null;
+  private briefingTitle: Label2D | null = null;
+  private goalLabel: Label2D | null = null;
+  private briefingText: Label2D | null = null;
   private backButton: ControlNode | null = null;
   private nextButton: ControlNode | null = null;
   private skipButton: ControlNode | null = null;
@@ -86,7 +49,6 @@ export class MapController extends Script {
   /** 1-based mission of the open briefing; 0 = map view. */
   private briefingMission = 0;
   private lineIndex = 0;
-  private charsShown = 0;
   private dialogDone = false;
 
   constructor(id: string, type: string) {
@@ -125,18 +87,16 @@ export class MapController extends Script {
   }
 
   onStart(): void {
-    this.missionTitle = this.findNode('mission-title') as RuntimeLabel2D | null;
-    this.goldLabel = this.findNode('gold-label') as RuntimeLabel2D | null;
+    this.missionTitle = this.findNode('mission-title') as Label2D | null;
+    this.goldLabel = this.findNode('gold-label') as Label2D | null;
     this.overlay = this.findNode('briefing-overlay');
     this.portraitSprite = this.findNode('briefing-portrait') as SpriteNode | null;
-    this.speakerLabel = this.findNode('briefing-speaker') as RuntimeLabel2D | null;
-    this.briefingTitle = this.findNode('briefing-title') as RuntimeLabel2D | null;
-    this.goalLabel = this.findNode('briefing-goal') as RuntimeLabel2D | null;
-    this.lineLabels = [];
-    for (let i = 1; i <= LINE_COUNT; i++) {
-      const line = this.findNode(`briefing-line-${i}`) as RuntimeLabel2D | null;
-      if (line) this.lineLabels.push(line);
-    }
+    this.speakerLabel = this.findNode('briefing-speaker') as Label2D | null;
+    this.briefingTitle = this.findNode('briefing-title') as Label2D | null;
+    this.goalLabel = this.findNode('briefing-goal') as Label2D | null;
+    // Multiline label: wraps to its fixed box and types itself out
+    // (typewriterSpeed is authored on the node in map.pix3scene).
+    this.briefingText = this.findNode('briefing-text') as Label2D | null;
 
     // Mission markers: position from balance data, gate by campaign progress.
     this.markers = [];
@@ -196,17 +156,6 @@ export class MapController extends Script {
     );
   }
 
-  onUpdate(dt: number): void {
-    if (this.briefingMission === 0 || this.dialogDone) return;
-    const meta = MISSION_META[this.briefingMission - 1];
-    const line = meta?.briefing[this.lineIndex];
-    if (!line) return;
-    if (this.charsShown < line.text.length) {
-      this.charsShown = Math.min(line.text.length, this.charsShown + dt * CHARS_PER_SECOND);
-      this.renderTypedText(line.text);
-    }
-  }
-
   // ── map interactions ────────────────────────────────────────────────────────
 
   private onMissionClicked(n: number): void {
@@ -222,7 +171,6 @@ export class MapController extends Script {
   private openBriefing(n: number): void {
     this.briefingMission = n;
     this.lineIndex = 0;
-    this.charsShown = 0;
     this.dialogDone = false;
 
     if (this.overlay) this.overlay.visible = true;
@@ -253,10 +201,6 @@ export class MapController extends Script {
 
   // ── briefing dialog ─────────────────────────────────────────────────────────
 
-  private currentLineText(): string {
-    return MISSION_META[this.briefingMission - 1]?.briefing[this.lineIndex]?.text ?? '';
-  }
-
   private showCurrentLine(): void {
     const meta = MISSION_META[this.briefingMission - 1];
     const line = meta?.briefing[this.lineIndex];
@@ -264,21 +208,21 @@ export class MapController extends Script {
       this.finishDialog();
       return;
     }
-    this.charsShown = 0;
     this.setLabel(this.speakerLabel, line.speaker);
     const portrait = this.portraits.get(line.speaker);
     if (portrait && this.portraitSprite?.setTexture) this.portraitSprite.setTexture(portrait);
-    this.renderTypedText(line.text);
+    this.briefingText?.setText(line.text);
+    // setText only restarts on changed text; replaying the same line
+    // (re-opened briefing) still needs a fresh reveal.
+    this.briefingText?.restartTypewriter();
   }
 
   private advanceLine(): void {
     if (this.dialogDone) return;
-    const text = this.currentLineText();
     this.scene?.audio.play(CLICK_SOUND, { bus: 'sfx' });
-    if (this.charsShown < text.length) {
+    if (this.briefingText?.isTyping) {
       // First click completes the line, the next one turns the page.
-      this.charsShown = text.length;
-      this.renderTypedText(text);
+      this.briefingText.skipTypewriter();
       return;
     }
     this.lineIndex += 1;
@@ -296,8 +240,7 @@ export class MapController extends Script {
     if (meta && meta.briefing.length > 0) {
       this.lineIndex = meta.briefing.length - 1;
       this.showCurrentLine();
-      this.charsShown = this.currentLineText().length;
-      this.renderTypedText(this.currentLineText());
+      this.briefingText?.skipTypewriter();
     }
     this.finishDialog();
   }
@@ -320,21 +263,6 @@ export class MapController extends Script {
   }
 
   // ── plumbing ────────────────────────────────────────────────────────────────
-
-  /** Reveal `charsShown` characters of `text` across the wrapped line labels. */
-  private renderTypedText(text: string): void {
-    const lines = wrapText(text);
-    let budget = Math.floor(this.charsShown);
-    for (let i = 0; i < this.lineLabels.length; i++) {
-      const label = this.lineLabels[i];
-      const full = lines[i] ?? '';
-      const shown = full.slice(0, Math.max(0, budget));
-      budget -= full.length + 1; // the split-off space counts too
-      // Pin the left edge: the mesh is centred, so shift by half its width.
-      label.position.x = TEXT_LEFT + labelWidth(shown, TEXT_FONT) / 2 - 10;
-      this.setLabel(label, shown);
-    }
-  }
 
   private refreshMarkers(): void {
     for (let i = 0; i < this.markers.length; i++) {
@@ -370,10 +298,8 @@ export class MapController extends Script {
     this.setLabel(this.goldLabel, `Gold: ${Math.floor(session.gold)}`);
   }
 
-  private setLabel(label: RuntimeLabel2D | null, text: string): void {
-    if (!label || label.label === text) return;
-    label.label = text;
-    label.updateLabel();
+  private setLabel(label: Label2D | null, text: string): void {
+    label?.setText(text);
   }
 
   private async goTo(scenePath: string): Promise<void> {

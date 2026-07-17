@@ -23,6 +23,12 @@ import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
+import {
+  LABEL_AUTO_SIZE_BLEED,
+  layoutLabelText,
+  paintLabelCanvas,
+  type LabelLayout,
+} from '@pix3/runtime';
 import { Slider2D } from '@pix3/runtime';
 import { Bar2D } from '@pix3/runtime';
 import { Checkbox2D } from '@pix3/runtime';
@@ -175,6 +181,8 @@ export class ViewportRendererService {
   private particles3DTexturePaths = new Map<string, string | null>();
   private geometryMeshMapPaths = new Map<string, string | null>();
   private uiControl2DVisuals = new Map<string, THREE.Group>();
+  // Shared 2D context for Label2D text measurement (layout mirroring the runtime).
+  private labelMeasureCtx: CanvasRenderingContext2D | null = null;
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
   private selection2DOverlayHud?: {
@@ -5345,12 +5353,8 @@ export class ViewportRendererService {
     }
 
     if (node instanceof Label2D) {
-      const fontSize = Math.max(8, node.labelFontSize || 16);
-      const textLength = Math.max(1, node.label.length);
-      return {
-        width: Math.max(48, textLength * fontSize * 0.7),
-        height: Math.max(24, fontSize * 1.8),
-      };
+      const box = this.measureLabel2DBox(node);
+      return { width: box.width, height: box.height };
     }
 
     if (node instanceof Slider2D) {
@@ -5453,7 +5457,86 @@ export class ViewportRendererService {
     })();
   }
 
+  /**
+   * Mirror of the runtime Label2D box sizing: a fixed width wraps the text,
+   * zero sizes auto-fit the laid-out lines. Keeps the editor proxy
+   * pixel-consistent with what play mode renders.
+   */
+  private measureLabel2DBox(node: Label2D): { width: number; height: number; layout: LabelLayout } {
+    const fontSize = Math.max(1, node.labelFontSize || 16);
+    this.labelMeasureCtx ??= document.createElement('canvas').getContext('2d');
+    const measureCtx = this.labelMeasureCtx;
+    if (measureCtx) {
+      measureCtx.font = `${fontSize}px ${node.labelFontFamily}`;
+    }
+    const layout = layoutLabelText(
+      node.label ?? '',
+      line => (measureCtx ? measureCtx.measureText(line).width : line.length * fontSize * 0.6),
+      { fontSize, maxWidth: node.width > 0 ? node.width : 0 }
+    );
+    return {
+      width: node.width > 0 ? node.width : Math.ceil(layout.textWidth) + LABEL_AUTO_SIZE_BLEED,
+      height: node.height > 0 ? node.height : Math.ceil(layout.textHeight) + LABEL_AUTO_SIZE_BLEED,
+      layout,
+    };
+  }
+
+  private createLabel2DLabelMesh(node: Label2D): THREE.Mesh {
+    const dprRaw = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const dpr = Math.max(1, Math.min(3, dprRaw));
+
+    const { width, height, layout } = this.measureLabel2DBox(node);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * dpr));
+    canvas.height = Math.max(1, Math.round(height * dpr));
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      const fallbackGeometry = new THREE.PlaneGeometry(0.1, 0.1);
+      const fallbackMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+      fallbackMaterial.userData.baseOpacity = 0;
+      return new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    paintLabelCanvas(ctx, {
+      layout,
+      fontFamily: node.labelFontFamily,
+      fontSize: Math.max(1, node.labelFontSize || 16),
+      color: node.labelColor,
+      align: node.labelAlign,
+      vAlign: node.labelVAlign,
+      width,
+      height,
+    });
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.configureSpriteTexture(texture);
+    texture.needsUpdate = true;
+
+    const geometry = new THREE.PlaneGeometry(width, height);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+      side: THREE.DoubleSide,
+    });
+    material.userData.baseOpacity = 1;
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.isUIControlLabel = true;
+    mesh.renderOrder = 1002;
+    mesh.position.z = 0.5;
+    mesh.layers.set(LAYER_2D);
+    return mesh;
+  }
+
   private createUIControlLabelMesh(node: UIControl2D): THREE.Mesh {
+    if (node instanceof Label2D) {
+      return this.createLabel2DLabelMesh(node);
+    }
+
     const dprRaw = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const dpr = Math.max(1, Math.min(3, dprRaw));
 

@@ -320,55 +320,20 @@ root:
                     scale: [1, 1]
                     rotation: 0
                 children: []
-              - id: briefing-line-1
+              - id: briefing-text
                 type: Label2D
-                name: Briefing Line 1
+                name: Briefing Text
                 properties:
                   label: ''
                   labelFontSize: 15
                   labelColor: '#e9e2cf'
                   labelAlign: left
+                  labelVAlign: top
+                  width: 400
+                  height: 96
+                  typewriterSpeed: 55
                   transform:
-                    position: [-90, -55]
-                    scale: [1, 1]
-                    rotation: 0
-                children: []
-              - id: briefing-line-2
-                type: Label2D
-                name: Briefing Line 2
-                properties:
-                  label: ''
-                  labelFontSize: 15
-                  labelColor: '#e9e2cf'
-                  labelAlign: left
-                  transform:
-                    position: [-90, -78]
-                    scale: [1, 1]
-                    rotation: 0
-                children: []
-              - id: briefing-line-3
-                type: Label2D
-                name: Briefing Line 3
-                properties:
-                  label: ''
-                  labelFontSize: 15
-                  labelColor: '#e9e2cf'
-                  labelAlign: left
-                  transform:
-                    position: [-90, -101]
-                    scale: [1, 1]
-                    rotation: 0
-                children: []
-              - id: briefing-line-4
-                type: Label2D
-                name: Briefing Line 4
-                properties:
-                  label: ''
-                  labelFontSize: 15
-                  labelColor: '#e9e2cf'
-                  labelAlign: left
-                  transform:
-                    position: [-90, -124]
+                    position: [45, -94]
                     scale: [1, 1]
                     rotation: 0
                 children: []

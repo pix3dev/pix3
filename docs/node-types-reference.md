@@ -134,6 +134,34 @@ An interactive button control for 2D user interfaces. Responds to pointer clicks
 
 ---
 
+### Label2D
+
+A multiline text label for 2D UI. Wraps text to a fixed box, aligns it in both axes, and can reveal it with a typewriter effect.
+
+**Type String:** `Label2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `label` | string | "" | Text to display; `\n` breaks lines |
+| `labelFontFamily` | string | Arial | Font family |
+| `labelFontSize` | number | 16 | Font size in pixels |
+| `labelColor` | color | #ffffff | Text color |
+| `labelAlign` | enum | center | Horizontal alignment: `left`, `center`, `right` |
+| `labelVAlign` | enum | middle | Vertical alignment: `top`, `middle`, `bottom` |
+| `width` | number | 0 | Fixed box width; text word-wraps to it. 0 = auto-size (no wrap) |
+| `height` | number | 0 | Fixed box height for vertical alignment. 0 = auto-size to the lines |
+| `typewriterSpeed` | number | 0 | Characters per second for the typewriter reveal; 0 = off |
+
+**Usage Notes:**
+- The box is centered on the node position (like other UI controls); alignment places the text inside that box.
+- Set `width` manually to get word wrap — there is no auto-grow layout yet.
+- Scripts: `setText(text)` replaces the text and restarts the typewriter; `skipTypewriter()` completes it instantly; `restartTypewriter()` replays it; `isTyping` reports progress; the node emits `'typewriter-complete'` when the reveal finishes.
+- The typewriter runs in play mode only (it advances in `tick`); the editor viewport always shows the full text.
+
+---
+
 ### Slider2D
 
 A horizontal slider control for selecting numeric values. Useful for volume controls, brightness settings, or any continuous value input.

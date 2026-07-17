@@ -1441,6 +1441,10 @@ export class SceneLoader {
           labelFontSize: this.asNumber(props.labelFontSize, undefined),
           labelColor: this.asString(props.labelColor),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
+          labelVAlign: this.asString(props.labelVAlign) as 'top' | 'middle' | 'bottom' | undefined,
+          width: this.asNumber(props.width, undefined),
+          height: this.asNumber(props.height, undefined),
+          typewriterSpeed: this.asNumber(props.typewriterSpeed, undefined),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
         });
       }
