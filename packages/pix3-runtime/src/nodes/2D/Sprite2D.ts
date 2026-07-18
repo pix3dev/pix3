@@ -11,6 +11,7 @@ import {
   type TextureRegion,
 } from '../../core/texture-region';
 import { atlasSizeOf, baseRegionOf } from '../../core/atlas-frame-map';
+import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 
 export interface SpriteAnchor2D {
   x: number;
@@ -95,6 +96,7 @@ export class Sprite2D extends Node2D {
     this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
     this.mesh.scale.set(this.width ?? 64, this.height ?? 64, 1);
+    this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.applyAnchorOffset();
     this.add(this.mesh);
   }

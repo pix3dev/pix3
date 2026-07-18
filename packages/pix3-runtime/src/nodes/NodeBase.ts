@@ -3,6 +3,7 @@ import type { PropertySchema } from '../fw/property-schema';
 import type { ScriptComponent } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
 import { describeThrown, reportScriptError, type ScriptErrorPhase } from '../core/game-debug';
+import { SHARED_UNIT_QUAD_GEOMETRY } from '../core/shared-quad-geometry';
 
 export interface NodeMetadata {
   [key: string]: unknown;
@@ -601,7 +602,11 @@ export class NodeBase extends Object3D {
           return;
         }
         const geometry = (descendant as { geometry?: BufferGeometry }).geometry;
-        geometry?.dispose?.();
+        // Never dispose the shared unit quad — it is referenced by every 2D
+        // sprite mesh and must outlive any single node's teardown.
+        if (geometry && geometry !== SHARED_UNIT_QUAD_GEOMETRY) {
+          geometry.dispose?.();
+        }
         const material = (descendant as { material?: Material | Material[] }).material;
         if (Array.isArray(material)) {
           for (const entry of material) {

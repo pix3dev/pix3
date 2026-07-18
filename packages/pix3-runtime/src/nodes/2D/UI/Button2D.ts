@@ -1,7 +1,6 @@
 import {
     Mesh,
     MeshBasicMaterial,
-    PlaneGeometry,
     type Texture,
     Vector2,
 } from 'three';
@@ -9,6 +8,8 @@ import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { SHARED_UNIT_QUAD_GEOMETRY } from '../../../core/shared-quad-geometry';
+import { BATCHABLE_2D_KEY } from '../../../core/batch-2d';
 
 export type Button2DSpriteState = 'normal' | 'hover' | 'pressed' | 'disabled';
 
@@ -49,7 +50,6 @@ export class Button2D extends UIControl2D {
 
     private buttonMesh: Mesh;
     private buttonMaterial: MeshBasicMaterial;
-    private geometry: PlaneGeometry;
     private readonly stateTextures: Record<Button2DSpriteState, Texture | null> = {
         normal: null,
         hover: null,
@@ -71,8 +71,8 @@ export class Button2D extends UIControl2D {
         this.texturePressed = coerceTextureResource(props.texturePressed ?? null);
         this.textureDisabled = coerceTextureResource(props.textureDisabled ?? null);
 
-        // Create button mesh
-        this.geometry = new PlaneGeometry(this.width, this.height);
+        // Create button mesh. Size lives on mesh.scale over the shared unit quad
+        // so the skin can be quad-batched (see SHARED_UNIT_QUAD_GEOMETRY).
         this.buttonMaterial = new MeshBasicMaterial({
             color: this.backgroundColor,
             transparent: true,
@@ -80,8 +80,10 @@ export class Button2D extends UIControl2D {
             depthTest: false,
         });
         this.registerSkinMaterial(this.buttonMaterial);
-        this.buttonMesh = new Mesh(this.geometry, this.buttonMaterial);
+        this.buttonMesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.buttonMaterial);
+        this.buttonMesh.scale.set(this.width, this.height, 1);
         this.buttonMesh.renderOrder = 999;
+        this.buttonMesh.userData[BATCHABLE_2D_KEY] = true;
         this.add(this.buttonMesh);
 
         this.refreshSkinState();
@@ -237,9 +239,7 @@ export class Button2D extends UIControl2D {
                     setValue: (n, v) => {
                         const btn = n as Button2D;
                         btn.width = Number(v);
-                        btn.geometry.dispose();
-                        btn.geometry = new PlaneGeometry(btn.width, btn.height);
-                        btn.buttonMesh.geometry = btn.geometry;
+                        btn.buttonMesh.scale.set(btn.width, btn.height, 1);
                     },
                 },
                 {
@@ -250,9 +250,7 @@ export class Button2D extends UIControl2D {
                     setValue: (n, v) => {
                         const btn = n as Button2D;
                         btn.height = Number(v);
-                        btn.geometry.dispose();
-                        btn.geometry = new PlaneGeometry(btn.width, btn.height);
-                        btn.buttonMesh.geometry = btn.geometry;
+                        btn.buttonMesh.scale.set(btn.width, btn.height, 1);
                     },
                 },
                 {

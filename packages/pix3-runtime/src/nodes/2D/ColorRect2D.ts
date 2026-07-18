@@ -2,6 +2,7 @@ import { Mesh, MeshBasicMaterial } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
+import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 
 export interface ColorRect2DProps extends Omit<Node2DProps, 'type'> {
   width?: number;
@@ -38,6 +39,7 @@ export class ColorRect2D extends Node2D {
     this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
     this.mesh.scale.set(this.width, this.height, 1);
+    this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.add(this.mesh);
   }
 

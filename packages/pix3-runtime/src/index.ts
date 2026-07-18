@@ -33,6 +33,7 @@ export * from './core/texture-region';
 export * from './core/atlas-frame-map';
 export * from './core/install-atlas-manifest';
 export * from './core/shared-quad-geometry';
+export * from './core/batch-2d';
 export * from './core/label-text-layout';
 export * from './core/tiled-sprite-geometry';
 export * from './core/game-debug';

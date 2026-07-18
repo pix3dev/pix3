@@ -53,6 +53,7 @@ async function bootstrap(): Promise<void> {
   renderer.attach(app);
 
   const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);
+  runner.setBatching2DEnabled(true);
   // Pre-packed atlas (if the export shipped one) → texture views onto sheets.
   await installAtlasFromManifest(assetLoader, resourceManager);
   await runner.startScene(scenePath);

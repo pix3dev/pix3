@@ -843,3 +843,70 @@ input size (still await; just log it).
   The ≤30 mid-wave / ≥70% cut target is comfortable (128 → ≤30 is a floor-6
   problem). AnimatedSprite2D is the single biggest win **and** the biggest
   correctness risk (offset/repeat reset trap + clone re-stamp, §5.3/§7.11).
+
+---
+
+## 12. SHIPPED results (measured, 2026-07-18)
+
+Implemented on `feat/2d-batching` (commits: Phase 1 shared quad, Phase 2 atlas,
+Phase 3 batching). Verified on SkyDefender `main.pix3scene` via chrome-devtools
+MCP. Both features default **on** (`'auto'`); off is byte-identical.
+
+### 12.1 Phase 1 (shared unit quad)
+Rendered-2D geometry count **57–185 → 10** (all sprite meshes share one 1×1
+`PlaneGeometry`, sized via `mesh.scale`). Draw calls unchanged, visual parity,
+zero errors. `NodeBase.disposeResources` guards the shared geometry.
+
+### 12.2 Phase 2 (pre-launch atlas + cache)
+- `[Atlas] packed 276 textures → 2 sheets in ~1.1s (cache=miss)`, then
+  `cache=hit` on the next run. (The scan was widened past the design's
+  static-only §5.4 to also follow **script res:// directory prefixes** —
+  `const AIR='res://…/enemy/air'`, template frame paths `…/bridge1/${i}.png` —
+  because SkyDefender loads enemies/effects via dynamic paths a static scan
+  can't see. Without this, 94 textures packed and ~70 dynamic sprites stayed
+  standalone.)
+- **GPU textures ~152 → 3** (clean state) after fixing a cache-pollution bug:
+  the editor's edit-mode viewport shares the play AssetLoader, so it cached
+  scene textures **raw** before play; `installResolver` now evicts every
+  atlas-frame path (`AssetLoader.evictTexture`) so `startScene` re-resolves them
+  to sheet views. Before the fix, 28 statically-referenced sprites (clouds, sky,
+  gun, HP frame, weapon buttons, explosions) stayed raw.
+- Pixel-perfect parity; cache hit/miss/invalidation confirmed; zero errors.
+
+### 12.3 Phase 3 (paint-order quad batcher)
+Same-mid-wave A/B (atlas on both), ~10 enemies, castle alive:
+
+| | Batch OFF | Batch ON |
+| --- | --- | --- |
+| Draw calls | 79 | ~54–60 |
+| **Render ms** | **5.8** | **2.0** |
+| GPU textures | 17 | 3–27 |
+
+- The batcher is **provably optimal**: `0 atlased passthrough` at every state —
+  every atlas-view sprite gets batched (33–41 sprites → **7 batches**). Prefab
+  spawns join existing runs (draw calls scale sub-linearly with enemies).
+- **Render time cut ~65% (5.8 → 2.0 ms)** — the real GPU win.
+- vs the Phase-0 raw baseline (no atlas, no batch): mid-wave 128 → ~54–60;
+  early wave 31.
+- Batch by **texture source** (extends the design's atlas-views-only v1) so
+  same-sheet atlas views AND repeated same-texture raw instances both merge;
+  null-map (ColorRect) runs batch separately. Per-node opacity/tint ride a
+  4-component vertex color; source meshes hidden via `material.visible=false`.
+
+### 12.4 Remaining draw-call floor = text labels
+After batching, the passthrough count is dominated by **`Label2D`/canvas-text
+meshes** (27–35 on the result screen, ~8 mid-gameplay) — unbatchable per **D7**
+(labels stay per-node `CanvasTexture`). This is why text-heavy states sit above
+the ≤30 target while sprite-heavy states meet it. A runtime glyph/label atlas
+(D7 follow-up) would close the gap; the batch keying already accommodates it.
+
+### 12.5 Follow-ups (deferred, documented)
+1. **Export atlas emission** — `ProjectBuildService` does not yet write
+   `assets/.atlas/` sheets+manifest; the runtime consumer
+   (`installAtlasFromManifest`) and `TextureAtlasService.packForExport()` are
+   ready. Exported/remote games run un-atlased until wired.
+2. **Label/glyph atlas (D7)** — to batch text and reach ≤30 everywhere.
+3. **Worker packing (D9)** — pack time is ~1.1 s for 276 textures (fine), but a
+   Worker keeps huge texture sets off the main thread.
+4. **White-pixel sheet frame (§5.4)** — would let ColorRect batch into sprite
+   runs instead of its own null-map run.

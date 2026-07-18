@@ -32,6 +32,7 @@ import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { LAYER_3D, LAYER_2D, LAYER_2D_OVERLAY } from '../constants';
 import { assign2DRenderOrder } from './render-order-2d';
 import { assign2DLayers } from './assign-2d-layers';
+import { Batch2DSystem, type Batch2DStats, type OrderedMesh2D } from './batch-2d';
 import { ECSService } from './ECSService';
 import type { SceneRaycastHit } from './raycast';
 import type { RuntimeRendererStatsSnapshot } from './RuntimeRenderer';
@@ -131,6 +132,11 @@ export class SceneRunner {
   /** Lazily created post-processing composer (only while a PostProcess node is
    * active). Null when no effects are enabled — then the plain two-pass path runs. */
   private postFx: PostProcessingPipeline | null = null;
+  /** Phase-3 2D quad batcher (only while enabled). Rebuilt from a fresh scene. */
+  private batch2D: Batch2DSystem | null = null;
+  private batch2DEnabled = false;
+  /** Reused per-frame collector for the render-order walk → batcher input. */
+  private readonly ordered2DBuffer: OrderedMesh2D[] = [];
 
   constructor(
     sceneManager: SceneManager,
@@ -172,6 +178,24 @@ export class SceneRunner {
     this.overlayCamera.layers.enable(LAYER_2D_OVERLAY);
 
     this.bindSceneServiceDelegate();
+  }
+
+  /**
+   * Enable/disable the Phase-3 2D quad batcher for this runner. Set before
+   * `startScene`. When off, the 2D pass is byte-identical to the pre-batching
+   * path (source meshes render individually).
+   */
+  setBatching2DEnabled(enabled: boolean): void {
+    this.batch2DEnabled = enabled;
+    if (!enabled && this.batch2D) {
+      this.batch2D.dispose();
+      this.batch2D = null;
+    }
+  }
+
+  /** Current batcher stats for the last frame, or null when batching is off. */
+  getBatch2DStats(): Batch2DStats | null {
+    return this.batch2D ? this.batch2D.stats : null;
   }
 
   /**
@@ -349,6 +373,12 @@ export class SceneRunner {
     if (this.postFx) {
       this.postFx.dispose();
       this.postFx = null;
+    }
+    if (this.batch2D) {
+      // The Group lives in this.scene, which runGraph clears — dispose so the
+      // next scene gets a fresh batcher (no stale pool/suppressed material refs).
+      this.batch2D.dispose();
+      this.batch2D = null;
     }
     this.clock.stop();
     if (this.animationFrameId !== null) {
@@ -1462,7 +1492,25 @@ export class SceneRunner {
     this.overlay2DActive = assign2DLayers(this.runtimeGraph.rootNodes);
 
     // Draw order for the 2D overlay pass follows the scene-graph hierarchy.
-    assign2DRenderOrder(this.runtimeGraph.rootNodes);
+    if (this.batch2DEnabled) {
+      if (!this.batch2D) {
+        this.batch2D = new Batch2DSystem(this.scene);
+      }
+      const ordered = this.ordered2DBuffer;
+      ordered.length = 0;
+      // Single DFS: stamp renderOrder AND collect the ordered mesh list.
+      assign2DRenderOrder(this.runtimeGraph.rootNodes, (mesh, order, overlay, visible) => {
+        if ((mesh as { isMesh?: boolean }).isMesh) {
+          ordered.push({ mesh: mesh as OrderedMesh2D['mesh'], order, overlay, visible });
+        }
+      });
+      // World matrices must be current before the batcher reads matrixWorld to
+      // stamp quad corners (the render pass would otherwise be the first update).
+      this.scene.updateMatrixWorld(true);
+      this.batch2D.update(ordered);
+    } else {
+      assign2DRenderOrder(this.runtimeGraph.rootNodes);
+    }
   }
 
   private stopAudioPlayers(node: NodeBase): void {

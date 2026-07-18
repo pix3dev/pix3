@@ -307,6 +307,7 @@ class PreviewPlayerApp {
     this.stack = { runner, renderer, disposeFrameSubscription };
     this.resetMetricsWindow();
 
+    runner.setBatching2DEnabled(true);
     // Pre-packed atlas (if the session shipped one) → texture views onto sheets.
     await installAtlasFromManifest(assetLoader, resourceManager);
     await runner.startScene(scenePath);

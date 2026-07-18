@@ -8,6 +8,7 @@ import {
   type TextureRegion,
 } from '../../core/texture-region';
 import { baseRegionOf, copyAtlasMetadata } from '../../core/atlas-frame-map';
+import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
 import {
@@ -82,6 +83,7 @@ export class AnimatedSprite2D extends Node2D {
     this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
     this.mesh.scale.set(this.width, this.height, 1);
+    this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.add(this.mesh);
   }
 

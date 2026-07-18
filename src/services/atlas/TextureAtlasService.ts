@@ -23,8 +23,16 @@ const MAX_FRAME_SIZE = 1024;
 
 const IMAGE_REF_PATTERN = /res:\/\/[^\s"'`)\]]+\.(?:png|jpe?g|webp)/gi;
 const ANIM_REF_PATTERN = /res:\/\/[^\s"'`)\]]+\.pix3anim/gi;
+/** res:// reference stopping at a template-literal boundary (`$`) — yields the
+ *  directory prefix of a dynamically-built path like `${DIR}/name.png`. */
+const RES_REF_PATTERN = /res:\/\/[^\s"'`)\]$]+/g;
+const IMAGE_EXT_PATTERN = /\.(?:png|jpe?g|webp)$/i;
 const SCENE_EXTENSIONS = ['.pix3scene', '.pix3prefab'] as const;
 const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+/** Directory name segments never packed even if referenced (reference art, build output). */
+const EXCLUDED_DIR_SEGMENTS = new Set(['design', 'references', 'reference', '.pix3', '.atlas']);
+/** Minimum path depth for a directory-prefix include (avoids broad roots like textures/). */
+const MIN_DIR_PREFIX_SEGMENTS = 4;
 
 /** Node types whose textures are safe to atlas (full-[0,1] UV sprites). */
 const ATLAS_ELIGIBLE_TYPES = new Set(['Sprite2D', 'Button2D', 'AnimatedSprite2D', 'Bar2D']);
@@ -189,7 +197,12 @@ export class TextureAtlasService {
       }
     }
 
-    // Project scripts: res:// image refs are treated as sprite textures → eligible.
+    // Project scripts: literal res:// image refs are sprite textures; res://
+    // directory prefixes (e.g. `const AIR = 'res://…/enemy/air'`) and
+    // template-literal frame paths (`res://…/bridge1/${i}.png`) reveal
+    // dynamically-loaded sprites that static image refs miss — include every
+    // image under those directories so the enemy/effect textures atlas + batch.
+    const dirPrefixes = new Set<string>();
     for (const [path] of sizeMap) {
       if (!path.endsWith('.ts') || path.endsWith('.spec.ts') || path.endsWith('.d.ts')) {
         continue;
@@ -202,8 +215,21 @@ export class TextureAtlasService {
         for (const ref of matchAll(text, IMAGE_REF_PATTERN)) {
           eligible.add(ref);
         }
+        for (const raw of matchAll(text, RES_REF_PATTERN)) {
+          const prefix = this.dirPrefixOf(raw);
+          if (prefix) {
+            dirPrefixes.add(prefix);
+          }
+        }
       } catch {
         // Ignore unreadable scripts.
+      }
+    }
+    for (const prefix of dirPrefixes) {
+      for (const [file] of sizeMap) {
+        if (file.startsWith(prefix) && IMAGE_EXT_PATTERN.test(file)) {
+          eligible.add(`res://${file}`);
+        }
       }
     }
 
@@ -217,6 +243,36 @@ export class TextureAtlasService {
       }
     }
     return { include, excluded, sizeMap };
+  }
+
+  /**
+   * Derive the (project-relative) directory prefix a script res:// reference
+   * points into. A directory constant (`res://…/enemy/air`) → that dir; a
+   * template path truncated at `$` (`res://…/bridge1/`) → that dir; a literal
+   * file (`res://…/x.png`) → its parent dir. Returns null for shallow/broad or
+   * excluded (reference-art) prefixes.
+   */
+  private dirPrefixOf(raw: string): string | null {
+    let path = stripRes(raw);
+    if (!path) {
+      return null;
+    }
+    if (!path.endsWith('/')) {
+      const lastSlash = path.lastIndexOf('/');
+      if (lastSlash < 0) {
+        return null;
+      }
+      const tail = path.slice(lastSlash + 1);
+      path = /\.[a-z0-9]+$/i.test(tail) ? path.slice(0, lastSlash + 1) : `${path}/`;
+    }
+    const segments = path.split('/').filter(Boolean);
+    if (segments.length < MIN_DIR_PREFIX_SEGMENTS) {
+      return null;
+    }
+    if (segments.some(segment => EXCLUDED_DIR_SEGMENTS.has(segment))) {
+      return null;
+    }
+    return path;
   }
 
   private classifyNodes(
@@ -439,6 +495,12 @@ export class TextureAtlasService {
 
   private installResolver(assetLoader: AssetLoader, manifest: AtlasManifest, hash: string): void {
     assetLoader.setAtlasResolver(createAtlasResolver(manifest, id => sheetKey(hash, id)));
+    // Evict any raw textures the shared loader cached before play (the editor's
+    // edit-mode viewport uses the same AssetLoader) so startScene re-resolves
+    // these paths to sheet views instead of reusing the stale raw texture.
+    for (const resourcePath of Object.keys(manifest.frames)) {
+      assetLoader.evictTexture(resourcePath);
+    }
   }
 
   dispose(): void {

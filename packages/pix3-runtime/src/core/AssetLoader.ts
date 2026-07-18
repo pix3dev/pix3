@@ -97,6 +97,17 @@ export class AssetLoader {
     this.textureCache.set(resourcePath, texture);
   }
 
+  /**
+   * Drop a cached texture entry (does NOT dispose it — other holders keep their
+   * ref). Used when installing an atlas resolver: any texture the shared loader
+   * cached raw before play (e.g. by the editor's edit-mode viewport) must be
+   * evicted so the next `loadTexture` re-resolves it to a sheet view instead of
+   * returning the stale raw texture.
+   */
+  evictTexture(resourcePath: string): void {
+    this.textureCache.delete(resourcePath);
+  }
+
   getAudioMetadata(resourcePath: string): LoadedAudioMetadata | null {
     const metadata = this.audioMetadataCache.get(resourcePath);
     return metadata ? { ...metadata } : null;

@@ -21,7 +21,7 @@ import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
 import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
 import { TextureAtlasService } from '@/services/atlas/TextureAtlasService';
-import { isAtlas2DEnabled } from '@/services/atlas/rendering-2d-flags';
+import { isAtlas2DEnabled, isBatch2DEnabled } from '@/services/atlas/rendering-2d-flags';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
@@ -328,6 +328,9 @@ export class GamePlaySessionService {
 
     this.renderer = renderer;
     this.runner = runner;
+    // Phase 3: enable the 2D quad batcher for this run (flag-gated; off is
+    // byte-identical to individual-mesh rendering).
+    runner.setBatching2DEnabled(isBatch2DEnabled());
     this.profilerSessionService.bindRuntime(runner, renderer, host.kind);
 
     this.attachFocusListeners(host.windowRef);

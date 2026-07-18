@@ -1,6 +1,20 @@
 import type { Object3D } from 'three';
 
 import { Node2D } from '../nodes/Node2D';
+import { LAYER_2D_OVERLAY } from '../constants';
+
+/**
+ * Optional per-mesh collector invoked during the render-order walk, in stamped
+ * order. Feeds the Phase-3 quad batcher without a second traversal: `overlay` is
+ * the layer band (LAYER_2D_OVERLAY vs the main band), `visible` is inherited
+ * visibility (all ancestors + self visible).
+ */
+export type RenderOrder2DSink = (
+  mesh: Object3D,
+  order: number,
+  overlay: boolean,
+  visible: boolean
+) => void;
 
 /**
  * Marker flag (set on `object.userData`) for meshes that must render ABOVE the
@@ -62,29 +76,44 @@ function sortByAuthoredOrder(meshes: Object3D[]): Object3D[] {
   return meshes.sort((a, b) => a.renderOrder - b.renderOrder);
 }
 
-function assignMeshSubtree(obj: Object3D, ctx: AssignContext): void {
+function assignMeshSubtree(
+  obj: Object3D,
+  ctx: AssignContext,
+  parentVisible: boolean,
+  sink?: RenderOrder2DSink
+): void {
   obj.renderOrder = ctx.next++;
+  const visible = parentVisible && obj.visible !== false;
+  if (sink) {
+    sink(obj, obj.renderOrder, obj.layers.isEnabled(LAYER_2D_OVERLAY), visible);
+  }
   for (const child of obj.children) {
-    assignMeshSubtree(child, ctx);
+    assignMeshSubtree(child, ctx, visible, sink);
   }
 }
 
-function assignNode(node: Node2D, ctx: AssignContext): void {
+function assignNode(
+  node: Node2D,
+  ctx: AssignContext,
+  parentVisible: boolean,
+  sink?: RenderOrder2DSink
+): void {
   const { childNodes, own, overlay } = collectGroups(node);
+  const nodeVisible = parentVisible && node.visible !== false;
 
   // 1. The node's own meshes render below its children, in authored order.
   for (const mesh of sortByAuthoredOrder(own)) {
-    assignMeshSubtree(mesh, ctx);
+    assignMeshSubtree(mesh, ctx, nodeVisible, sink);
   }
 
   // 2. Child nodes (and their subtrees) render on top, in hierarchy order.
   for (const child of childNodes) {
-    assignNode(child, ctx);
+    assignNode(child, ctx, nodeVisible, sink);
   }
 
   // 3. Flagged overlay meshes render above the whole subtree (e.g. scrollbars).
   for (const mesh of sortByAuthoredOrder(overlay)) {
-    assignMeshSubtree(mesh, ctx);
+    assignMeshSubtree(mesh, ctx, nodeVisible, sink);
   }
 }
 
@@ -100,11 +129,11 @@ function assignNode(node: Node2D, ctx: AssignContext): void {
  * equal-`renderOrder`, equal-depth meshes, which does not match the hierarchy
  * the user authored.
  */
-export function assign2DRenderOrder(roots: readonly Object3D[]): void {
+export function assign2DRenderOrder(roots: readonly Object3D[], sink?: RenderOrder2DSink): void {
   const ctx: AssignContext = { next: 0 };
   for (const root of roots) {
     if (root instanceof Node2D) {
-      assignNode(root, ctx);
+      assignNode(root, ctx, true, sink);
     }
   }
 }
