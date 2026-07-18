@@ -80,10 +80,11 @@ import {
   TransformCompleteOperation,
   type TransformState,
 } from '@/features/properties/TransformCompleteOperation';
-import {
-  Transform2DCompleteOperation,
-  type Transform2DState,
+import type {
+  Transform2DCompleteParams,
+  Transform2DState,
 } from '@/features/properties/Transform2DCompleteOperation';
+import { Transform2DBatchOperation } from '@/features/properties/Transform2DBatchOperation';
 import { Nudge2DNodesOperation } from '@/features/properties/Nudge2DNodesOperation';
 import { TargetTransformOperation } from '@/features/properties/TargetTransformOperation';
 import {
@@ -6392,7 +6393,12 @@ export class ViewportRendererService {
     return this.getNodeOnlyBounds(node);
   }
 
-  private getNodeOnlyLocalCorners(node: Node2D): THREE.Vector3[] {
+  /**
+   * A node's own (node-local, pre-matrixWorld) corner points, anchor-aware per node type. Public so
+   * geometry operations (e.g. Group2D fit-to-contents) can measure nodes without duplicating the
+   * per-type size logic.
+   */
+  getNodeOnlyLocalCorners(node: Node2D): THREE.Vector3[] {
     let corners: THREE.Vector3[];
 
     if (node instanceof Sprite2D || node instanceof TiledSprite2D) {
@@ -7596,23 +7602,16 @@ export class ViewportRendererService {
       const node = sceneGraph.nodeMap.get(nodeId);
       if (node && node instanceof Node2D) {
         this.updateNodeTransform(node);
-        // If resizing a Group2D, update layout for children only (do not recompute node itself)
-        if (
-          node instanceof Group2D &&
-          this.active2DTransform.handle !== 'move' &&
-          this.active2DTransform.handle !== 'rotate'
-        ) {
-          for (const child of node.children) {
-            if (child instanceof Group2D) {
-              const groupChild = child as Group2D & {
-                updateLayout?: (width: number, height: number) => void;
-              };
-              groupChild.updateLayout?.(node.width, node.height);
-            }
-          }
-          this.syncAll2DVisuals();
-        }
       }
+    }
+    // A Group2D resize proportionally scales its descendants (in TransformTool2d) — repaint all 2D
+    // proxies once per frame so the child visuals track the drag.
+    const resizingGroup =
+      this.active2DTransform.handle !== 'move' &&
+      this.active2DTransform.handle !== 'rotate' &&
+      this.active2DTransform.nodeIds.some(id => sceneGraph.nodeMap.get(id) instanceof Group2D);
+    if (resizingGroup) {
+      this.syncAll2DVisuals();
     }
   }
 
@@ -7621,13 +7620,15 @@ export class ViewportRendererService {
       return;
     }
 
-    const { nodeIds, startStates } = this.active2DTransform;
+    const { nodeIds, startStates, childStartStates, handle } = this.active2DTransform;
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
       this.active2DTransform = undefined;
       this.end2DInteraction();
       return;
     }
+
+    const plans: Transform2DCompleteParams[] = [];
 
     for (const nodeId of nodeIds) {
       const node = sceneGraph.nodeMap.get(nodeId);
@@ -7644,25 +7645,51 @@ export class ViewportRendererService {
         ...(typeof startState.height === 'number' ? { height: startState.height } : {}),
       };
 
+      const dims = node as unknown as { width?: number; height?: number };
       const currentState: Transform2DState = {
         position: { x: node.position.x, y: node.position.y },
         rotation: MathUtils.radToDeg(node.rotation.z),
         scale: { x: node.scale.x, y: node.scale.y },
-        ...(typeof (node as unknown as { width?: number }).width === 'number'
-          ? { width: (node as unknown as { width?: number }).width }
-          : {}),
-        ...(typeof (node as unknown as { height?: number }).height === 'number'
-          ? { height: (node as unknown as { height?: number }).height }
-          : {}),
+        ...(typeof dims.width === 'number' ? { width: dims.width } : {}),
+        ...(typeof dims.height === 'number' ? { height: dims.height } : {}),
       };
 
-      const op = new Transform2DCompleteOperation({
-        nodeId,
-        previousState,
-        currentState,
-      });
+      plans.push({ nodeId, previousState, currentState });
+    }
 
-      await this.operationService.invokeAndPush(op);
+    // Descendant plans for Group2D proportional resize — after the group plans so a container's
+    // anchor reflow runs before its explicit child plans on apply/undo/redo.
+    if (childStartStates) {
+      for (const [childId, base] of childStartStates) {
+        const child = sceneGraph.nodeMap.get(childId);
+        if (!(child instanceof Node2D)) continue;
+        const dims = child as Node2D & { width?: number; height?: number };
+        const previousState: Transform2DState = {
+          position: { x: base.position.x, y: base.position.y },
+        };
+        const currentState: Transform2DState = {
+          position: { x: child.position.x, y: child.position.y },
+        };
+        if (base.kind === 'size') {
+          previousState.width = base.width;
+          previousState.height = base.height;
+          currentState.width = dims.width;
+          currentState.height = dims.height;
+        } else {
+          previousState.scale = { x: base.scale.x, y: base.scale.y };
+          currentState.scale = { x: child.scale.x, y: child.scale.y };
+        }
+        plans.push({ nodeId: childId, previousState, currentState });
+      }
+    }
+
+    if (plans.length > 0) {
+      const label = handle.startsWith('scale-')
+        ? 'Resize 2D Nodes'
+        : handle === 'rotate'
+          ? 'Rotate 2D Nodes'
+          : 'Move 2D Nodes';
+      await this.operationService.invokeAndPush(new Transform2DBatchOperation({ plans, label }));
     }
 
     const savedNodeIds = [...nodeIds];
@@ -7671,6 +7698,7 @@ export class ViewportRendererService {
     this.active2DTransform = undefined;
     this.end2DInteraction();
     this.update2DSelectionOverlayForNodes(savedNodeIds);
+    this.requestRender();
     console.debug('[ViewportRenderer] complete 2D transform', { nodeIds });
   }
 

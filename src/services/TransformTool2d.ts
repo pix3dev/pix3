@@ -9,8 +9,14 @@
  */
 
 import * as THREE from 'three';
-import { Node2D } from '@pix3/runtime';
+import { Group2D, Node2D } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
+import {
+  applyProportionalToNode,
+  captureProportionalBase,
+  collectProportionalTargets,
+  type ProportionalBaseState,
+} from '@/features/scene/group2d-resize-utils';
 
 export type TwoDHandle =
   | 'idle'
@@ -59,6 +65,11 @@ export interface Active2DTransform {
   startSize: THREE.Vector2;
   overlayRotationZ?: number;
   moveConstraintAxis?: 'x' | 'y' | null;
+  /**
+   * Base states of every selected Group2D's descendants, captured at drag start, for Figma-style
+   * proportional resize on scale gestures. Keyed by nodeId. Present only for scale handles.
+   */
+  childStartStates?: Map<string, ProportionalBaseState>;
 }
 
 export interface Transform2DUpdateOptions {
@@ -671,6 +682,19 @@ export class TransformTool2d {
       }
     }
 
+    // For a scale gesture, snapshot each selected Group2D's descendants so proportional resize can
+    // reapply from these base states every frame (idempotent, drift-free).
+    let childStartStates: Map<string, ProportionalBaseState> | undefined;
+    if (handle.startsWith('scale-')) {
+      for (const nodeId of nodeIds) {
+        const node = sceneGraph.nodeMap.get(nodeId);
+        if (!(node instanceof Group2D)) continue;
+        for (const target of collectProportionalTargets(node)) {
+          (childStartStates ??= new Map()).set(target.node.nodeId, captureProportionalBase(target));
+        }
+      }
+    }
+
     const overlayBounds = this.getOverlayLocalBounds(overlay);
     const size = overlayBounds.getSize(new THREE.Vector3());
     const startSize = new THREE.Vector2(size.x, size.y);
@@ -690,6 +714,7 @@ export class TransformTool2d {
       startSize,
       overlayRotationZ,
       moveConstraintAxis: null,
+      childStartStates,
     };
   }
 
@@ -924,6 +949,17 @@ export class TransformTool2d {
             node.scale.set(startState.scale.x, startState.scale.y, 1);
           } else {
             node.scale.set(startState.scale.x * scaleFactorX, startState.scale.y * scaleFactorY, 1);
+          }
+        }
+      }
+
+      // Figma-style proportional child resize: scale each selected Group2D's descendants by the same
+      // factors, reapplied from the drag-start base states each frame (idempotent, drift-free).
+      if (transform.childStartStates) {
+        for (const [childId, base] of transform.childStartStates) {
+          const child = sceneGraph.nodeMap.get(childId);
+          if (child instanceof Node2D) {
+            applyProportionalToNode(child, base, scaleFactorX, scaleFactorY, minSize);
           }
         }
       }

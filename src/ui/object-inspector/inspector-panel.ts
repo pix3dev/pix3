@@ -6,6 +6,7 @@ import {
   getRuntimeSceneRoot,
   AnimatedSprite2D,
   GeometryMesh,
+  Group2D,
   MeshInstance,
   NodeBase,
   Node2D,
@@ -17,6 +18,8 @@ import type { ScriptComponent } from '@pix3/runtime';
 import type { PropertySchema, PropertyDefinition } from '@/fw';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { UpdateSprite2DSizeCommand } from '@/features/properties/UpdateSprite2DSizeCommand';
+import { ResizeGroup2DCommand } from '@/features/properties/ResizeGroup2DCommand';
+import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
 import { CreateAndBindAnimationAssetCommand } from '@/features/scene/CreateAndBindAnimationAssetCommand';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { BehaviorPickerService } from '@/services/BehaviorPickerService';
@@ -1391,6 +1394,122 @@ export class InspectorPanel extends ComponentBase {
       console.error('[InspectorPanel] Failed to update Sprite2D size', error);
       this.syncValuesFromNode();
       this.requestUpdate();
+    }
+  }
+
+  private renderGroup2DSizeGroup(
+    label: string,
+    widthProp: PropertyDefinition,
+    heightProp: PropertyDefinition,
+    width: number,
+    height: number,
+    readOnly: boolean
+  ) {
+    const hasChildren = this.group2DHasNode2DChildren();
+    return this.renderPropertySection(
+      label,
+      html`
+        <div class="property-group property-group--size-inline">
+          ${this.renderPropertyLabel(
+            widthProp,
+            'Size',
+            this.isPropertyOverriddenForPrimaryNode(widthProp)
+          )}
+          <div class="size-inline-editor">
+            <label class="size-inline-field">
+              <span class="size-inline-axis">W</span>
+              <input
+                type="number"
+                class="property-input property-input--number size-inline-input"
+                step=${widthProp.ui?.step ?? 1}
+                .value=${width.toFixed(widthProp.ui?.precision ?? 0)}
+                ?disabled=${readOnly}
+                @change=${(e: Event) =>
+                  this.applyGroup2DSizeChange(
+                    parseFloat((e.target as HTMLInputElement).value),
+                    height
+                  )}
+              />
+            </label>
+            <label class="size-inline-field">
+              <span class="size-inline-axis">H</span>
+              <input
+                type="number"
+                class="property-input property-input--number size-inline-input"
+                step=${heightProp.ui?.step ?? 1}
+                .value=${height.toFixed(heightProp.ui?.precision ?? 0)}
+                ?disabled=${readOnly}
+                @change=${(e: Event) =>
+                  this.applyGroup2DSizeChange(
+                    width,
+                    parseFloat((e.target as HTMLInputElement).value)
+                  )}
+              />
+            </label>
+          </div>
+          <button
+            class="group-fit-button"
+            type="button"
+            title="Resize this group to wrap its children (without moving them)"
+            ?disabled=${readOnly || !hasChildren}
+            @click=${() => this.fitGroup2DToContents()}
+          >
+            ${this.iconService.getIcon('minimize-2', 14)}
+            <span>Fit to contents</span>
+          </button>
+        </div>
+      `,
+      {
+        className: 'size-section',
+        hideTitle: true,
+      }
+    );
+  }
+
+  private group2DHasNode2DChildren(): boolean {
+    const node = this.primaryNode;
+    if (!(node instanceof Group2D)) {
+      return false;
+    }
+    return node.children.some(child => child instanceof Node2D);
+  }
+
+  /**
+   * Resize a Group2D from the inspector, proportionally scaling its children (Figma-style). Routed
+   * through a dedicated command so the child-scaling stays an explicit editor gesture.
+   */
+  private async applyGroup2DSizeChange(width: number, height: number): Promise<void> {
+    if (!(this.primaryNode instanceof Group2D)) {
+      return;
+    }
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+      this.syncValuesFromNode();
+      this.requestUpdate();
+      return;
+    }
+    const command = new ResizeGroup2DCommand({
+      nodeId: this.primaryNode.nodeId,
+      width,
+      height,
+    });
+    try {
+      await this.commandDispatcher.execute(command);
+    } catch (error) {
+      console.error('[InspectorPanel] Failed to resize Group2D', error);
+      this.syncValuesFromNode();
+      this.requestUpdate();
+    }
+  }
+
+  private async fitGroup2DToContents(): Promise<void> {
+    if (!(this.primaryNode instanceof Group2D)) {
+      return;
+    }
+    const command = new FitGroup2DToContentsCommand({ nodeId: this.primaryNode.nodeId });
+    try {
+      await this.commandDispatcher.execute(command);
+    } catch (error) {
+      console.error('[InspectorPanel] Failed to fit Group2D to contents', error);
     }
   }
 
@@ -2985,6 +3104,10 @@ ${textPreview?.content || 'Empty file'}</pre
 
     const width = widthState ? parseFloat(widthState.value) : 64;
     const height = heightState ? parseFloat(heightState.value) : 64;
+
+    if (this.primaryNode instanceof Group2D) {
+      return this.renderGroup2DSizeGroup(label, widthProp, heightProp, width, height, readOnly);
+    }
 
     if (!(this.primaryNode instanceof Sprite2D)) {
       return this.renderPropertySection(

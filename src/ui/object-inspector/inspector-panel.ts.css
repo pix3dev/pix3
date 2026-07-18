@@ -413,6 +413,33 @@ pix3-panel {
   cursor: not-allowed;
 }
 
+.group-fit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.32rem 0.55rem;
+  border: 1px solid var(--color-border, #333);
+  border-radius: 0.45rem;
+  background: var(--color-input-bg, #222);
+  color: var(--color-text-secondary, #aaa);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.group-fit-button:hover:not(:disabled) {
+  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.5);
+  color: var(--color-text-primary, #eee);
+}
+
+.group-fit-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .anchor-fields {
   display: flex;
   flex-direction: column;
