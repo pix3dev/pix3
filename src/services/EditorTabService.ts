@@ -103,18 +103,18 @@ export class EditorTabService {
           t =>
             !t.resourceId.startsWith('templ://') &&
             t.type !== 'game' &&
-            t.type !== 'asset-generator'
+            t.type !== 'sprite-editor'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
         const activeTab = appState.tabs.tabs.find(t => t.id === savedActiveTabId);
 
-        // If the active tab is excluded (like game / asset-generator tabs), use a persisted tab
+        // If the active tab is excluded (like game / sprite-editor tabs), use a persisted tab
         if (
           activeTab &&
           (activeTab.resourceId.startsWith('templ://') ||
             activeTab.type === 'game' ||
-            activeTab.type === 'asset-generator')
+            activeTab.type === 'sprite-editor')
         ) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
@@ -250,14 +250,14 @@ export class EditorTabService {
   }
 
   /**
-   * Open the Asset Generator editor. With `imageResourcePath` the generator opens bound to that
-   * image (context menu on an asset); without it, opens an empty generator (main menu). The empty
-   * generator uses a synthetic resource id so repeated opens re-focus the single instance.
+   * Open the Sprite Editor. With `imageResourcePath` it opens bound to that image (double-click an
+   * image asset, or the asset context menu); without it, opens an empty editor (main menu). The
+   * empty editor uses a synthetic resource id so repeated opens re-focus the single instance.
    */
-  async focusOrOpenAssetGenerator(imageResourcePath?: string): Promise<void> {
+  async focusOrOpenSpriteEditor(imageResourcePath?: string): Promise<void> {
     if (imageResourcePath) {
       await this.openResourceTab(
-        'asset-generator',
+        'sprite-editor',
         imageResourcePath,
         {},
         true,
@@ -266,11 +266,11 @@ export class EditorTabService {
       return;
     }
     await this.openResourceTab(
-      'asset-generator',
-      'asset-generator://new',
+      'sprite-editor',
+      'sprite-editor://new',
       {},
       true,
-      'Asset Generator'
+      'Sprite Editor'
     );
   }
 
@@ -368,6 +368,8 @@ export class EditorTabService {
       ).filter((t: { resourceId: string; type: string }) => {
         if (t.resourceId.startsWith('templ://')) return false;
         if (t.type === 'game') return false;
+        if (t.type === 'sprite-editor') return false;
+        // Legacy: pre-rename sessions persisted 'asset-generator' tabs; keep dropping them.
         if (t.type === 'asset-generator') return false;
         return true;
       });

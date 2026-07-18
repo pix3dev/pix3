@@ -4,7 +4,7 @@ export const ASSET_RESOURCE_LIST_MIME = 'application/x-pix3-asset-resource-list'
 export const ASSET_PATH_LIST_MIME = 'application/x-pix3-asset-path-list';
 
 /**
- * Drag payload used when dragging an entry out of the Asset Generator's generation
+ * Drag payload used when dragging an entry out of the Sprite Editor's generation
  * history. The blob itself lives in {@link GenerationHistoryService} (IndexedDB); the
  * drag only carries the record id so a drop target can fetch it and offer to save it.
  */

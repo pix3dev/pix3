@@ -52,7 +52,7 @@ const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: 'images',
     label: 'AI Images',
     icon: 'image',
-    description: 'Image generation and background removal used by the Asset Generator.',
+    description: 'Image generation and background removal used by the Sprite Editor.',
     subtabs: [
       { id: 'generation', label: 'Generation' },
       { id: 'background', label: 'Background Removal' },
@@ -1031,7 +1031,7 @@ export class EditorSettingsDialog extends ComponentBase {
         <div class="hint">
           Downscales the longest edge when saving a generated image into the project (never
           upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
-          the Asset Generator.
+          the Sprite Editor.
         </div>
       </div>
     `;

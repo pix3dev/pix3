@@ -24,7 +24,7 @@ const PANEL_COMPONENT_TYPES = {
   game: 'game',
   code: 'code',
   runtime: 'runtime',
-  assetGenerator: 'asset-generator',
+  spriteEditor: 'sprite-editor',
   agentChat: 'agent-chat',
   library: 'library',
 } as const;
@@ -45,7 +45,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
-  [PANEL_COMPONENT_TYPES.assetGenerator]: 'pix3-asset-generator-panel',
+  [PANEL_COMPONENT_TYPES.spriteEditor]: 'pix3-sprite-editor-panel',
   [PANEL_COMPONENT_TYPES.agentChat]: 'pix3-agent-chat-panel',
   [PANEL_COMPONENT_TYPES.library]: 'pix3-library-panel',
 } as const;
@@ -57,14 +57,14 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.profiler]: 'Profiler',
   [PANEL_COMPONENT_TYPES.assetBrowser]: 'Asset Browser',
   [PANEL_COMPONENT_TYPES.assetsPreview]: 'Assets Preview',
-  [PANEL_COMPONENT_TYPES.animation]: 'Animation',
+  [PANEL_COMPONENT_TYPES.animation]: 'Sprite Animation',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'Animation',
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
   [PANEL_COMPONENT_TYPES.background]: 'Pix3',
   [PANEL_COMPONENT_TYPES.game]: 'Game',
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
-  [PANEL_COMPONENT_TYPES.assetGenerator]: 'Asset Generator',
+  [PANEL_COMPONENT_TYPES.spriteEditor]: 'Sprite Editor',
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
 };
@@ -379,8 +379,8 @@ export class LayoutManagerService {
               ? PANEL_COMPONENT_TYPES.animation
               : tab.type === 'code'
                 ? PANEL_COMPONENT_TYPES.code
-                : tab.type === 'asset-generator'
-                  ? PANEL_COMPONENT_TYPES.assetGenerator
+                : tab.type === 'sprite-editor'
+                  ? PANEL_COMPONENT_TYPES.spriteEditor
                   : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
@@ -652,7 +652,7 @@ export class LayoutManagerService {
       componentType === PANEL_COMPONENT_TYPES.animation ||
       componentType === PANEL_COMPONENT_TYPES.game ||
       componentType === PANEL_COMPONENT_TYPES.code ||
-      componentType === PANEL_COMPONENT_TYPES.assetGenerator
+      componentType === PANEL_COMPONENT_TYPES.spriteEditor
     );
   }
 
@@ -838,8 +838,8 @@ export class LayoutManagerService {
         if (componentType === PANEL_COMPONENT_TYPES.runtime) {
           void import('@/ui/runtime/runtime-panel');
         }
-        if (componentType === PANEL_COMPONENT_TYPES.assetGenerator) {
-          void import('@/ui/asset-generator/asset-generator-panel');
+        if (componentType === PANEL_COMPONENT_TYPES.spriteEditor) {
+          void import('@/ui/sprite-editor/sprite-editor-panel');
         }
         if (componentType === PANEL_COMPONENT_TYPES.agentChat) {
           void import('@/ui/agent-chat/pix3-agent-chat-panel');

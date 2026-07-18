@@ -34,12 +34,12 @@ import {
   scaledDimensions,
   type FlipAxis,
 } from '@/services/image-gen/image-ops';
-import './asset-generator-panel.ts.css';
+import './sprite-editor-panel.ts.css';
 
 /** Longest-edge downscale presets offered in the save popover (px); 0 = keep original size. */
 const SAVE_SIZE_PRESETS: readonly number[] = [1024, 512, 256, 128, 64];
 
-const EMPTY_RESOURCE_ID = 'asset-generator://new';
+const EMPTY_RESOURCE_ID = 'sprite-editor://new';
 
 /** Crop selection rectangle, in overlay (display) pixels relative to the crop overlay's box. */
 interface CropRect {
@@ -100,8 +100,8 @@ interface CurrentImage {
   height?: number;
 }
 
-@customElement('pix3-asset-generator-panel')
-export class AssetGeneratorPanel extends ComponentBase {
+@customElement('pix3-sprite-editor-panel')
+export class SpriteEditorPanel extends ComponentBase {
   @inject(ImageGenProviderRegistry)
   private readonly providers!: ImageGenProviderRegistry;
 
@@ -343,7 +343,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       });
       this.saveName = deriveSaveName(this.prompt, resourceId, blob.type || 'image/png');
     } catch (error) {
-      console.warn('[AssetGenerator] Failed to load bound image', error);
+      console.warn('[SpriteEditor] Failed to load bound image', error);
     }
   }
 
@@ -352,7 +352,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   protected render() {
     return html`
       <section
-        class="asset-generator ${this.isDragActive ? 'is-drag-active' : ''}"
+        class="sprite-editor ${this.isDragActive ? 'is-drag-active' : ''}"
         @dragover=${this.onDragOver}
         @dragleave=${this.onDragLeave}
         @drop=${this.onDrop}
@@ -373,7 +373,7 @@ export class AssetGeneratorPanel extends ComponentBase {
   private renderToolbar() {
     return html`
       <header class="ag-toolbar">
-        <div class="ag-title">Asset Generator</div>
+        <div class="ag-title">Sprite Editor</div>
         <button
           class="ag-icon-button"
           title="AI generation settings"
@@ -1049,7 +1049,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       });
       return { blob: result.blob, mimeType: result.blob.type || current.mimeType };
     } catch (error) {
-      console.warn('[AssetGenerator] Resize on save failed; writing original size', error);
+      console.warn('[SpriteEditor] Resize on save failed; writing original size', error);
       return { blob: current.blob, mimeType: current.mimeType };
     }
   }
@@ -1143,7 +1143,7 @@ export class AssetGeneratorPanel extends ComponentBase {
       const label = resourcePath.split('/').pop() ?? resourcePath;
       this.addReferenceBlob(blob, label);
     } catch (error) {
-      console.warn('[AssetGenerator] Failed to read dropped asset', error);
+      console.warn('[SpriteEditor] Failed to read dropped asset', error);
     }
   }
 
@@ -1606,7 +1606,7 @@ export class AssetGeneratorPanel extends ComponentBase {
         height: sh,
       });
     } catch (error) {
-      console.warn('[AssetGenerator] Failed to add crop to history', error);
+      console.warn('[SpriteEditor] Failed to add crop to history', error);
     }
   }
 
@@ -1769,7 +1769,7 @@ export class AssetGeneratorPanel extends ComponentBase {
     try {
       records = await this.history.list();
     } catch (error) {
-      console.warn('[AssetGenerator] Failed to load history', error);
+      console.warn('[SpriteEditor] Failed to load history', error);
     }
     const nextIds = new Set(records.map(record => record.id));
     for (const [id, url] of this.historyUrls) {
@@ -1987,6 +1987,6 @@ const describeError = (error: unknown): string => {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'pix3-asset-generator-panel': AssetGeneratorPanel;
+    'pix3-sprite-editor-panel': SpriteEditorPanel;
   }
 }

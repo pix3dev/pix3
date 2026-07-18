@@ -355,7 +355,7 @@ const describeToolCall = (call: LlmToolUseBlock): string => {
 };
 
 /**
- * The in-editor agent chat (opened as an editor tab, like the Asset Generator). Renders the
+ * The in-editor agent chat (opened as an editor tab, like the Sprite Editor). Renders the
  * conversation from {@link AgentChatService}, provider/model/key configuration from
  * {@link AgentSettingsService}, and a composer. All agent behaviour lives in the service — this
  * component is a thin view.

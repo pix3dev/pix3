@@ -25,7 +25,7 @@ export interface SaveGeneratedAssetDialogInstance {
 
 /**
  * Tracks the single active "Save generated image" dialog and exposes a Promise-based API,
- * mirroring {@link AssetImportDialogService}. Used when an Asset Generator history entry is
+ * mirroring {@link AssetImportDialogService}. Used when an Sprite Editor history entry is
  * dropped onto the Asset Browser or Asset Preview panel — the drop handler resolves the target
  * folder and this dialog collects the file name before the blob is written to disk.
  */

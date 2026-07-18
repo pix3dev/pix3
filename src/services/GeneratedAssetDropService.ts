@@ -16,7 +16,7 @@ const extForMime = (mimeType: string): string =>
         : 'png';
 
 /**
- * Handles dropping an Asset Generator generation-history entry onto a project location
+ * Handles dropping an Sprite Editor generation-history entry onto a project location
  * (Asset Browser tree or Asset Preview panel). Parses the drag payload, loads the blob from
  * {@link GenerationHistoryService}, prompts for a file name via
  * {@link SaveGeneratedAssetDialogService}, then writes the image into the target folder.

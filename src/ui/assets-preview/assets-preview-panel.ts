@@ -179,8 +179,11 @@ export class AssetsPreviewPanel extends ComponentBase {
         role="menu"
         @click=${(event: Event) => event.stopPropagation()}
       >
-        <button type="button" role="menuitem" @click=${() => this.openInAssetGenerator(item)}>
-          Open in Asset Generator
+        <button type="button" role="menuitem" @click=${() => this.openInSpriteEditor(item)}>
+          Open in Sprite Editor
+        </button>
+        <button type="button" role="menuitem" @click=${() => this.addToSceneAsSprite(item)}>
+          Add to Scene as Sprite2D
         </button>
       </div>
     `;
@@ -204,9 +207,25 @@ export class AssetsPreviewPanel extends ComponentBase {
     }
   }
 
-  private openInAssetGenerator(item: AssetPreviewItem): void {
+  private openInSpriteEditor(item: AssetPreviewItem): void {
     this.closeContextMenu();
-    void this.editorTabService.focusOrOpenAssetGenerator(toProjectResourcePath(item.path));
+    void this.editorTabService.focusOrOpenSpriteEditor(toProjectResourcePath(item.path));
+  }
+
+  /** Explicit "create a node from this image" — the old double-click behavior, now on the menu. */
+  private addToSceneAsSprite(item: AssetPreviewItem): void {
+    this.closeContextMenu();
+    void this.assetFileActivationService.createSpriteFromImage(this.toActivation(item));
+  }
+
+  private toActivation(item: AssetPreviewItem): AssetActivation {
+    return {
+      name: item.name,
+      path: item.path,
+      kind: item.kind,
+      resourcePath: toProjectResourcePath(item.path),
+      extension: item.extension,
+    };
   }
 
   private renderItem(item: AssetPreviewItem) {
@@ -423,15 +442,7 @@ export class AssetsPreviewPanel extends ComponentBase {
       return;
     }
 
-    const activation: AssetActivation = {
-      name: item.name,
-      path: item.path,
-      kind: item.kind,
-      resourcePath: toProjectResourcePath(item.path),
-      extension: item.extension,
-    };
-
-    await this.assetFileActivationService.handleActivation(activation);
+    await this.assetFileActivationService.handleActivation(this.toActivation(item));
   }
 
   private buildTooltip(item: AssetPreviewItem): string {

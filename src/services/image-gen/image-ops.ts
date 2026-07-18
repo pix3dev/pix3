@@ -1,5 +1,5 @@
 /**
- * Pure, browser-side image transforms shared by the Asset Generator panel (interactive UI) and the
+ * Pure, browser-side image transforms shared by the Sprite Editor panel (interactive UI) and the
  * headless {@link AssetGenService} (programmatic / agent-driven). Everything here operates on
  * `Blob`s so it can run without any DOM component mounted — the only DOM dependency is a detached
  * `<canvas>` for re-encoding, which is available in any editor context.

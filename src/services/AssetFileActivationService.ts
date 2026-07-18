@@ -20,7 +20,20 @@ export interface AssetActivation {
  * It dispatches appropriate commands based on file type (e.g., LoadSceneCommand for .pix3scene files).
  */
 export class AssetFileActivationService {
-  static readonly SUPPORTED_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webm', 'aif']);
+  // Raster image formats the Sprite Editor can open/edit. (Previously listed 'webm'/'aif' — a
+  // video and an audio extension — which were bugs; the real intent is the web image set.)
+  static readonly SUPPORTED_IMAGE_EXTENSIONS = new Set([
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp',
+    'bmp',
+    'svg',
+    'tif',
+    'tiff',
+    'avif',
+  ]);
   private static readonly UI_LAYER_NAME = 'UI Layer';
 
   @inject(CommandDispatcher)
@@ -72,7 +85,21 @@ export class AssetFileActivationService {
     console.info('[AssetFileActivationService] No handler for asset type', payload);
   }
 
+  /**
+   * Double-clicking an image asset opens it in the Sprite Editor (edit/generate), matching how
+   * scenes, animations and code files open on activation. Creating a Sprite2D node from an image is
+   * an explicit action instead — drag the asset into the viewport/tree, or the asset context menu's
+   * "Add to Scene as Sprite2D" (see {@link createSpriteFromImage}).
+   */
   private async handleImageAsset(payload: AssetActivation): Promise<void> {
+    await this.editorTabService.focusOrOpenSpriteEditor(payload.resourcePath ?? undefined);
+  }
+
+  /**
+   * Create a Sprite2D node in the active scene from an image asset. This is the explicit
+   * (context-menu / drag) path — it is deliberately no longer the double-click default.
+   */
+  async createSpriteFromImage(payload: AssetActivation): Promise<void> {
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
       console.warn(

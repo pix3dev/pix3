@@ -1887,7 +1887,7 @@ export class AgentToolRegistry {
       return {
         ok: false,
         error:
-          'No image-generation API key is configured. Ask the user to set one (Asset Generator panel or Settings → AI Providers).',
+          'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
       };
     }
 

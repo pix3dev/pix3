@@ -264,7 +264,7 @@ copies the bundle into `res://assets/library/<slug>/` and remaps its paths; it i
 snapshot, so later edits to the library item do not change the project. Publish a
 reusable node with **Publish to Library** (Edit menu, or `library.publish-node`),
 which packs the subtree and its asset dependencies into a personal item. Good results
-from the Asset Generator can be kept with its **Save to Library** action. Programmatic
+from the Sprite Editor can be kept with its **Save to Library** action. Programmatic
 scope (agent HTTP/preview commands) arrives in Phase 2 — see `.plans/asset-library.md`.
 
 ---

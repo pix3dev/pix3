@@ -29,6 +29,33 @@ describe('AssetFileActivationService', () => {
     );
   });
 
+  it('opens image assets in the Sprite Editor instead of creating a node', async () => {
+    const service = new AssetFileActivationService();
+    const editorTabService = {
+      focusOrOpenSpriteEditor: vi.fn().mockResolvedValue(undefined),
+    };
+
+    Object.defineProperty(service, 'editorTabService', {
+      value: editorTabService,
+    });
+
+    for (const extension of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif']) {
+      await service.handleActivation({
+        name: `hero.${extension}`,
+        path: `textures/hero.${extension}`,
+        kind: 'file',
+        resourcePath: `res://textures/hero.${extension}`,
+        extension,
+      });
+    }
+
+    expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledTimes(6);
+    expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledWith('res://textures/hero.png');
+    expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledWith(
+      'res://textures/hero.avif'
+    );
+  });
+
   it('routes .ts, .js, and .json assets to code tabs', async () => {
     const service = new AssetFileActivationService();
     const editorTabService = {

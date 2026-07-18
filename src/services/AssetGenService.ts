@@ -195,7 +195,7 @@ export interface AssetGenStatus {
 /**
  * Headless, DOM-free façade over the AI image pipeline — generation, local transforms (resize,
  * crop, compress, background removal) and saving into the project. It's the engine the interactive
- * {@link AssetGeneratorPanel} conceptually mirrors, and the surface the dev debug bridge exposes as
+ * {@link SpriteEditorPanel} conceptually mirrors, and the surface the dev debug bridge exposes as
  * `window.__PIX3_DEBUG__.assets` so agents can drive image work programmatically **using the user's
  * saved (encrypted) API key** — no panel DOM, no headless-key handling.
  *

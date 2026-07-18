@@ -1,11 +1,11 @@
 ---
 name: generate-sprites-in-editor
-description: Generate image/sprite assets with the Pix3 editor's AI Asset Generator by driving it through the chrome-devtools MCP — using existing project assets as style references — then save them into the project and wire them into scenes (Button2D normal/hover/pressed/disabled state sprites, ScrollContainer2D thumb/track, Sprite2D/panel skins). Use when asked to create game UI graphics, buttons, panels, icons or sprites and apply them to nodes. Requires the dev server + editor open in an MCP-attachable Chrome with a project loaded and a Gemini/OpenAI API key already configured in that browser.
+description: Generate image/sprite assets with the Pix3 editor's AI Sprite Editor by driving it through the chrome-devtools MCP — using existing project assets as style references — then save them into the project and wire them into scenes (Button2D normal/hover/pressed/disabled state sprites, ScrollContainer2D thumb/track, Sprite2D/panel skins). Use when asked to create game UI graphics, buttons, panels, icons or sprites and apply them to nodes. Requires the dev server + editor open in an MCP-attachable Chrome with a project loaded and a Gemini/OpenAI API key already configured in that browser.
 ---
 
 # Generating sprites in the running Pix3 editor and wiring them into a scene
 
-You cannot generate images yourself — the Asset Generator runs **in the browser**
+You cannot generate images yourself — the Sprite Editor runs **in the browser**
 and calls Gemini/OpenAI with the **user's API key** (stored encrypted per-browser
 via `SecretStorageService`, never in any file). You drive it through the
 **chrome-devtools MCP** against the live editor, and only if a key is already
@@ -18,7 +18,7 @@ There are two ways to drive it, and **you should prefer the first**:
   remove-background / preview / save, using the user's saved key. No fragile DOM
   poking; every call returns JSON-safe metadata. This is the right tool for
   agents.
-- **§B — driving the panel DOM** (`pix3-asset-generator-panel`): the older path.
+- **§B — driving the panel DOM** (`pix3-sprite-editor-panel`): the older path.
   Use it only for interactive QC (the crop rubber-band UI, the history strip) or
   if the bridge is somehow unavailable.
 
@@ -145,18 +145,18 @@ below (that part is identical regardless of how the image was produced).
 
 ## §B. Driving the panel DOM (fallback / interactive QC)
 
-The Asset Generator panel is **light DOM**, so `.ag-*` selectors query straight off
+The Sprite Editor panel is **light DOM**, so `.ag-*` selectors query straight off
 `document`. `addReferenceFromProject` / `onSaveToProject` / `aspectRatio` /
 `saveName` / `references` / `generating` / `current` are all real (TS-`private` ≠
 runtime-private) and reachable on the panel element in dev builds.
 
-## B1. Open the Asset Generator panel
+## B1. Open the Sprite Editor panel
 
 ```js
-() => window.__PIX3_DEBUG__.command('editor.open-asset-generator')
+() => window.__PIX3_DEBUG__.command('editor.open-sprite-editor')
 // then read state (returns false if already open — fine):
 () => {
-  const p = document.querySelector('pix3-asset-generator-panel');
+  const p = document.querySelector('pix3-sprite-editor-panel');
   const key = document.querySelector('.ag-key-button');
   return { open: !!p, keyConnected: key?.classList.contains('is-connected'),
            model: document.querySelector('.ag-model-select')?.value };
@@ -172,7 +172,7 @@ game's existing look **without** the native file picker:
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-asset-generator-panel');
+  const p = document.querySelector('pix3-sprite-editor-panel');
   await p.addReferenceFromProject('res://src/assets/textures/ui/shop-ui.png');
   await p.addReferenceFromProject('res://.../an_already_generated_sibling.png'); // for state consistency
   return { refCount: p.references.length }; // model cap is usually 6
@@ -193,7 +193,7 @@ node's width×height, so pick the closest aspect and accept minor stretch. Set
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-asset-generator-panel');
+  const p = document.querySelector('pix3-sprite-editor-panel');
   p.aspectRatio = '1:1'; // '16:9' for wide buttons
   const ta = document.querySelector('.ag-prompt');
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -217,7 +217,7 @@ Poll for completion (generation ~5–20 s; often done by the time you re-check):
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-asset-generator-panel');
+  const p = document.querySelector('pix3-sprite-editor-panel');
   const t0 = Date.now();
   while (Date.now() - t0 < 30000) { if (!p.generating) break; await new Promise(r => setTimeout(r, 1500)); }
   return { done: !p.generating, hasCurrent: !!p.current, error: document.querySelector('.ag-error')?.textContent || null };
@@ -239,7 +239,7 @@ must already be reachable, but it creates missing dirs:
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-asset-generator-panel');
+  const p = document.querySelector('pix3-sprite-editor-panel');
   p.saveName = 'src/assets/textures/ui/btn_close_normal.png'; // project-relative; res:// prefix also accepted
   p.saveMaxSize = 256;  // OPTIONAL: longest-edge downscale on save (0 = keep full 1K/2K size)
   return await p.onSaveToProject();

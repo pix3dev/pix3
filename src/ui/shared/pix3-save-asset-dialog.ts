@@ -4,7 +4,7 @@ import './pix3-save-asset-dialog.ts.css';
 
 /**
  * Modal that lets the user name a generated image before it is written into the project.
- * Shown when an Asset Generator history entry is dropped onto the Asset Browser or Asset
+ * Shown when an Sprite Editor history entry is dropped onto the Asset Browser or Asset
  * Preview panel. The blob write itself is performed by the caller (see
  * {@link GeneratedAssetDropService}); this dialog only collects the file name.
  */

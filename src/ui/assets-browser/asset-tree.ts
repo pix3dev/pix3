@@ -1038,7 +1038,7 @@ export class AssetTree extends ComponentBase {
       return;
     }
 
-    // Dragging an Asset Generator history entry — accept on directories only.
+    // Dragging an Sprite Editor history entry — accept on directories only.
     if (hasGenerationDragData(_e.dataTransfer)) {
       if (node.kind !== 'directory') {
         return;
@@ -1102,7 +1102,7 @@ export class AssetTree extends ComponentBase {
       return;
     }
 
-    // Dragging an Asset Generator history entry — drop into the project root.
+    // Dragging an Sprite Editor history entry — drop into the project root.
     if (hasGenerationDragData(e.dataTransfer)) {
       e.preventDefault();
       if (e.dataTransfer) {
@@ -1168,7 +1168,7 @@ export class AssetTree extends ComponentBase {
 
     this.dragOverPath = null;
 
-    // Dropping an Asset Generator history entry into the project root.
+    // Dropping an Sprite Editor history entry into the project root.
     if (hasGenerationDragData(e.dataTransfer)) {
       await this.generatedAssetDropService.handleDrop(e.dataTransfer, '.');
       return;
@@ -1224,7 +1224,7 @@ export class AssetTree extends ComponentBase {
 
     this.dragOverPath = null;
 
-    // Dropping an Asset Generator history entry — save into the target directory.
+    // Dropping an Sprite Editor history entry — save into the target directory.
     if (hasGenerationDragData(e.dataTransfer)) {
       const targetDirectory =
         targetNode.kind === 'directory' ? targetNode.path : this.getParentPath(targetNode.path);

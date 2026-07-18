@@ -1,10 +1,10 @@
-pix3-asset-generator-panel {
+pix3-sprite-editor-panel {
   display: block;
   height: 100%;
   min-height: 0;
 }
 
-pix3-asset-generator-panel .asset-generator {
+pix3-sprite-editor-panel .sprite-editor {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -16,7 +16,7 @@ pix3-asset-generator-panel .asset-generator {
 }
 
 /* Toolbar --------------------------------------------------------------- */
-pix3-asset-generator-panel .ag-toolbar {
+pix3-sprite-editor-panel .ag-toolbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -26,12 +26,12 @@ pix3-asset-generator-panel .ag-toolbar {
   background: var(--pix3-bg-secondary, #262626);
 }
 
-pix3-asset-generator-panel .ag-title {
+pix3-sprite-editor-panel .ag-title {
   font-weight: 600;
   color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-icon-button {
+pix3-sprite-editor-panel .ag-icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -47,27 +47,27 @@ pix3-asset-generator-panel .ag-icon-button {
   line-height: 1;
 }
 
-pix3-asset-generator-panel .ag-icon-button:hover {
+pix3-sprite-editor-panel .ag-icon-button:hover {
   background: rgba(255, 255, 255, 0.06);
   color: #fff;
 }
 
-pix3-asset-generator-panel .ag-toolbar-spacer {
+pix3-sprite-editor-panel .ag-toolbar-spacer {
   flex: 1 1 auto;
 }
 
 /* Save menu (toolbar) --------------------------------------------------- */
-pix3-asset-generator-panel .ag-save-wrap {
+pix3-sprite-editor-panel .ag-save-wrap {
   position: relative;
   display: inline-flex;
 }
 
-pix3-asset-generator-panel .ag-save-button.is-open {
+pix3-sprite-editor-panel .ag-save-button.is-open {
   border-color: var(--pix3-accent-color, #ffcf33);
   color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-save-popover {
+pix3-sprite-editor-panel .ag-save-popover {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -84,19 +84,19 @@ pix3-asset-generator-panel .ag-save-popover {
   z-index: 20;
 }
 
-pix3-asset-generator-panel .ag-save-actions {
+pix3-sprite-editor-panel .ag-save-actions {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-pix3-asset-generator-panel .ag-save-actions .ag-action-button {
+pix3-sprite-editor-panel .ag-save-actions .ag-action-button {
   width: 100%;
 }
 
-pix3-asset-generator-panel select,
-pix3-asset-generator-panel input[type='text'],
-pix3-asset-generator-panel textarea {
+pix3-sprite-editor-panel select,
+pix3-sprite-editor-panel input[type='text'],
+pix3-sprite-editor-panel textarea {
   background: var(--pix3-bg-primary, #1e1e1e);
   color: var(--pix3-text-primary, #fff);
   border: 1px solid var(--pix3-border, #444);
@@ -105,8 +105,8 @@ pix3-asset-generator-panel textarea {
   font: inherit;
 }
 
-pix3-asset-generator-panel .ag-toolbar-button,
-pix3-asset-generator-panel .ag-action-button {
+pix3-sprite-editor-panel .ag-toolbar-button,
+pix3-sprite-editor-panel .ag-action-button {
   padding: 0.4rem 0.8rem;
   border-radius: 4px;
   border: 1px solid var(--pix3-border, #444);
@@ -117,31 +117,31 @@ pix3-asset-generator-panel .ag-action-button {
   transition: all 0.15s;
 }
 
-pix3-asset-generator-panel .ag-toolbar-button:hover:not(:disabled),
-pix3-asset-generator-panel .ag-action-button:hover:not(:disabled) {
+pix3-sprite-editor-panel .ag-toolbar-button:hover:not(:disabled),
+pix3-sprite-editor-panel .ag-action-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: #fff;
 }
 
-pix3-asset-generator-panel .ag-toolbar-button.is-active {
+pix3-sprite-editor-panel .ag-toolbar-button.is-active {
   border-color: var(--pix3-accent-color, #ffcf33);
   color: var(--pix3-accent-color, #ffcf33);
   background: rgba(255, 207, 51, 0.12);
 }
 
-pix3-asset-generator-panel button:disabled {
+pix3-sprite-editor-panel button:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
 /* Workspace ------------------------------------------------------------- */
-pix3-asset-generator-panel .ag-workspace {
+pix3-sprite-editor-panel .ag-workspace {
   flex: 1 1 auto;
   display: flex;
   min-height: 0;
 }
 
-pix3-asset-generator-panel .ag-sidebar {
+pix3-sprite-editor-panel .ag-sidebar {
   flex: 0 0 148px;
   width: 148px;
   overflow-y: auto;
@@ -152,13 +152,13 @@ pix3-asset-generator-panel .ag-sidebar {
   gap: 0.6rem;
 }
 
-pix3-asset-generator-panel .ag-field {
+pix3-sprite-editor-panel .ag-field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-pix3-asset-generator-panel .ag-field-label {
+pix3-sprite-editor-panel .ag-field-label {
   font-size: 0.78rem;
   color: var(--pix3-text-muted, #999);
   text-transform: uppercase;
@@ -166,7 +166,7 @@ pix3-asset-generator-panel .ag-field-label {
 }
 
 /* Full-width prompt bar pinned to the bottom of the panel. */
-pix3-asset-generator-panel .ag-prompt-bar {
+pix3-sprite-editor-panel .ag-prompt-bar {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -177,7 +177,7 @@ pix3-asset-generator-panel .ag-prompt-bar {
 }
 
 /* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
-pix3-asset-generator-panel .ag-prompt-box {
+pix3-sprite-editor-panel .ag-prompt-box {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--pix3-border, #444);
@@ -186,11 +186,11 @@ pix3-asset-generator-panel .ag-prompt-box {
   overflow: visible;
 }
 
-pix3-asset-generator-panel .ag-prompt-box:focus-within {
+pix3-sprite-editor-panel .ag-prompt-box:focus-within {
   border-color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-prompt {
+pix3-sprite-editor-panel .ag-prompt {
   resize: vertical;
   min-height: 4.5rem;
   max-height: 14rem;
@@ -199,11 +199,11 @@ pix3-asset-generator-panel .ag-prompt {
   border-radius: 8px 8px 0 0;
 }
 
-pix3-asset-generator-panel .ag-prompt:focus {
+pix3-sprite-editor-panel .ag-prompt:focus {
   outline: none;
 }
 
-pix3-asset-generator-panel .ag-prompt-toolbar {
+pix3-sprite-editor-panel .ag-prompt-toolbar {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -211,16 +211,16 @@ pix3-asset-generator-panel .ag-prompt-toolbar {
   border-top: 1px solid var(--pix3-border, #444);
 }
 
-pix3-asset-generator-panel .ag-prompt-spacer {
+pix3-sprite-editor-panel .ag-prompt-spacer {
   flex: 1 1 auto;
 }
 
-pix3-asset-generator-panel .ag-key-wrap {
+pix3-sprite-editor-panel .ag-key-wrap {
   position: relative;
   display: inline-flex;
 }
 
-pix3-asset-generator-panel .ag-key-button {
+pix3-sprite-editor-panel .ag-key-button {
   width: 32px;
   height: 32px;
   padding: 0;
@@ -233,24 +233,24 @@ pix3-asset-generator-panel .ag-key-button {
   line-height: 1;
 }
 
-pix3-asset-generator-panel .ag-key-button.is-connected {
+pix3-sprite-editor-panel .ag-key-button.is-connected {
   border-color: #66d19e;
   background: rgba(80, 200, 120, 0.14);
 }
 
-pix3-asset-generator-panel .ag-model-select {
+pix3-sprite-editor-panel .ag-model-select {
   max-width: 12rem;
   font-size: 0.82rem;
   padding: 0.35rem 0.4rem;
 }
 
-pix3-asset-generator-panel .ag-prompt-toolbar .ag-generate-button {
+pix3-sprite-editor-panel .ag-prompt-toolbar .ag-generate-button {
   flex: 0 0 auto;
   padding: 0.4rem 0.9rem;
 }
 
 /* Quick-settings popover anchored above the key button. */
-pix3-asset-generator-panel .ag-key-popover {
+pix3-sprite-editor-panel .ag-key-popover {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
@@ -267,19 +267,19 @@ pix3-asset-generator-panel .ag-key-popover {
   z-index: 20;
 }
 
-pix3-asset-generator-panel .ag-popover-title {
+pix3-sprite-editor-panel .ag-popover-title {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--pix3-text-primary, #fff);
 }
 
-pix3-asset-generator-panel .ag-key-status-row {
+pix3-sprite-editor-panel .ag-key-status-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-pix3-asset-generator-panel .ag-key-status {
+pix3-sprite-editor-panel .ag-key-status {
   font-size: 0.68rem;
   font-weight: 600;
   padding: 0.08rem 0.45rem;
@@ -288,28 +288,28 @@ pix3-asset-generator-panel .ag-key-status {
   letter-spacing: 0.03em;
 }
 
-pix3-asset-generator-panel .ag-key-status.is-set {
+pix3-sprite-editor-panel .ag-key-status.is-set {
   background: rgba(80, 200, 120, 0.18);
   color: #66d19e;
 }
 
-pix3-asset-generator-panel .ag-key-status.is-unset {
+pix3-sprite-editor-panel .ag-key-status.is-unset {
   background: rgba(255, 255, 255, 0.08);
   color: var(--pix3-text-muted, #888);
 }
 
-pix3-asset-generator-panel .ag-key-row {
+pix3-sprite-editor-panel .ag-key-row {
   display: flex;
   gap: 0.4rem;
   align-items: center;
 }
 
-pix3-asset-generator-panel .ag-key-row input {
+pix3-sprite-editor-panel .ag-key-row input {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-pix3-asset-generator-panel .ag-key-row button {
+pix3-sprite-editor-panel .ag-key-row button {
   padding: 0.4rem 0.7rem;
   border-radius: 4px;
   border: 1px solid var(--pix3-border, #444);
@@ -319,36 +319,36 @@ pix3-asset-generator-panel .ag-key-row button {
   font-size: 0.82rem;
 }
 
-pix3-asset-generator-panel .ag-key-row .ag-key-save {
+pix3-sprite-editor-panel .ag-key-row .ag-key-save {
   border-color: var(--pix3-accent-color, #ffcf33);
   color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-key-row button:disabled {
+pix3-sprite-editor-panel .ag-key-row button:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-pix3-asset-generator-panel .ag-popover-hint {
+pix3-sprite-editor-panel .ag-popover-hint {
   font-size: 0.75rem;
   color: var(--pix3-text-muted, #888);
   line-height: 1.4;
 }
 
-pix3-asset-generator-panel .ag-popover-hint a {
+pix3-sprite-editor-panel .ag-popover-hint a {
   color: var(--pix3-accent-color, #ffcf33);
 }
 
-pix3-asset-generator-panel .ag-field-row {
+pix3-sprite-editor-panel .ag-field-row {
   display: flex;
   gap: 0.6rem;
 }
 
-pix3-asset-generator-panel .ag-field-row .ag-field {
+pix3-sprite-editor-panel .ag-field-row .ag-field {
   flex: 1 1 0;
 }
 
-pix3-asset-generator-panel .ag-toggle-field {
+pix3-sprite-editor-panel .ag-toggle-field {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -357,18 +357,18 @@ pix3-asset-generator-panel .ag-toggle-field {
   cursor: pointer;
 }
 
-pix3-asset-generator-panel .ag-toggle-field input {
+pix3-sprite-editor-panel .ag-toggle-field input {
   flex: 0 0 auto;
 }
 
 /* References ------------------------------------------------------------ */
-pix3-asset-generator-panel .ag-references {
+pix3-sprite-editor-panel .ag-references {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-pix3-asset-generator-panel .ag-references-head {
+pix3-sprite-editor-panel .ag-references-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -377,13 +377,13 @@ pix3-asset-generator-panel .ag-references-head {
 }
 
 /* Single-column reference list in the narrow sidebar. */
-pix3-asset-generator-panel .ag-reference-grid {
+pix3-sprite-editor-panel .ag-reference-grid {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-pix3-asset-generator-panel .ag-reference {
+pix3-sprite-editor-panel .ag-reference {
   position: relative;
   aspect-ratio: 1;
   border: 1px solid var(--pix3-border, #444);
@@ -392,14 +392,14 @@ pix3-asset-generator-panel .ag-reference {
   background: #0000;
 }
 
-pix3-asset-generator-panel .ag-reference img {
+pix3-sprite-editor-panel .ag-reference img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-pix3-asset-generator-panel .ag-reference-remove {
+pix3-sprite-editor-panel .ag-reference-remove {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -414,13 +414,13 @@ pix3-asset-generator-panel .ag-reference-remove {
   cursor: pointer;
 }
 
-pix3-asset-generator-panel .ag-references-hint,
-pix3-asset-generator-panel .ag-hint {
+pix3-sprite-editor-panel .ag-references-hint,
+pix3-sprite-editor-panel .ag-hint {
   font-size: 0.75rem;
   color: var(--pix3-text-muted, #777);
 }
 
-pix3-asset-generator-panel .ag-link-button {
+pix3-sprite-editor-panel .ag-link-button {
   background: none;
   border: none;
   color: var(--pix3-accent-color, #ffcf33);
@@ -430,7 +430,7 @@ pix3-asset-generator-panel .ag-link-button {
 }
 
 /* Generate -------------------------------------------------------------- */
-pix3-asset-generator-panel .ag-warning {
+pix3-sprite-editor-panel .ag-warning {
   padding: 0.5rem 0.6rem;
   border-radius: 4px;
   background: rgba(255, 207, 51, 0.12);
@@ -438,12 +438,12 @@ pix3-asset-generator-panel .ag-warning {
   font-size: 0.8rem;
 }
 
-pix3-asset-generator-panel .ag-generate-row {
+pix3-sprite-editor-panel .ag-generate-row {
   display: flex;
   gap: 0.5rem;
 }
 
-pix3-asset-generator-panel .ag-generate-button {
+pix3-sprite-editor-panel .ag-generate-button {
   flex: 1 1 auto;
   padding: 0.55rem 1rem;
   border-radius: 4px;
@@ -454,12 +454,12 @@ pix3-asset-generator-panel .ag-generate-button {
   cursor: pointer;
 }
 
-pix3-asset-generator-panel .ag-generate-button:disabled {
+pix3-sprite-editor-panel .ag-generate-button:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-pix3-asset-generator-panel .ag-cancel-button {
+pix3-sprite-editor-panel .ag-cancel-button {
   padding: 0.55rem 0.9rem;
   border-radius: 4px;
   border: 1px solid var(--pix3-border, #444);
@@ -468,19 +468,19 @@ pix3-asset-generator-panel .ag-cancel-button {
   cursor: pointer;
 }
 
-pix3-asset-generator-panel .ag-error {
+pix3-sprite-editor-panel .ag-error {
   font-size: 0.8rem;
   color: #ff6b6b;
   white-space: pre-wrap;
 }
 
-pix3-asset-generator-panel .ag-success {
+pix3-sprite-editor-panel .ag-success {
   font-size: 0.8rem;
   color: #66d19e;
 }
 
 /* Main / stage ---------------------------------------------------------- */
-pix3-asset-generator-panel .ag-main {
+pix3-sprite-editor-panel .ag-main {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
@@ -488,7 +488,7 @@ pix3-asset-generator-panel .ag-main {
   min-height: 0;
 }
 
-pix3-asset-generator-panel .ag-stage {
+pix3-sprite-editor-panel .ag-stage {
   flex: 1 1 auto;
   position: relative;
   display: flex;
@@ -510,31 +510,31 @@ pix3-asset-generator-panel .ag-stage {
     -10px 0;
 }
 
-pix3-asset-generator-panel .ag-stage-image {
+pix3-sprite-editor-panel .ag-stage-image {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
-pix3-asset-generator-panel .ag-empty {
+pix3-sprite-editor-panel .ag-empty {
   text-align: center;
   color: var(--pix3-text-muted, #888);
   max-width: 320px;
 }
 
-pix3-asset-generator-panel .ag-empty-title {
+pix3-sprite-editor-panel .ag-empty-title {
   font-size: 1rem;
   margin-bottom: 0.4rem;
   color: var(--pix3-text-secondary, #ccc);
 }
 
-pix3-asset-generator-panel .ag-empty-body {
+pix3-sprite-editor-panel .ag-empty-body {
   font-size: 0.82rem;
   line-height: 1.4;
 }
 
-pix3-asset-generator-panel .ag-progress {
+pix3-sprite-editor-panel .ag-progress {
   position: absolute;
   inset: 0;
   display: flex;
@@ -543,7 +543,7 @@ pix3-asset-generator-panel .ag-progress {
   background: rgba(0, 0, 0, 0.6);
 }
 
-pix3-asset-generator-panel .ag-progress-inner {
+pix3-sprite-editor-panel .ag-progress-inner {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -554,7 +554,7 @@ pix3-asset-generator-panel .ag-progress-inner {
   font-size: 0.85rem;
 }
 
-pix3-asset-generator-panel .ag-spinner {
+pix3-sprite-editor-panel .ag-spinner {
   width: 14px;
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.25);
@@ -569,18 +569,18 @@ pix3-asset-generator-panel .ag-spinner {
   }
 }
 
-pix3-asset-generator-panel .ag-stage-error {
+pix3-sprite-editor-panel .ag-stage-error {
   padding: 0.4rem 1rem;
 }
 
 /* Save popover inputs --------------------------------------------------- */
-pix3-asset-generator-panel .ag-save-name {
+pix3-sprite-editor-panel .ag-save-name {
   width: 100%;
   box-sizing: border-box;
 }
 
-pix3-asset-generator-panel .ag-save-resize select,
-pix3-asset-generator-panel .ag-save-custom-size {
+pix3-sprite-editor-panel .ag-save-resize select,
+pix3-sprite-editor-panel .ag-save-custom-size {
   width: 100%;
   box-sizing: border-box;
   background: var(--pix3-bg-primary, #1e1e1e);
@@ -592,14 +592,14 @@ pix3-asset-generator-panel .ag-save-custom-size {
 }
 
 /* History --------------------------------------------------------------- */
-pix3-asset-generator-panel .ag-history {
+pix3-sprite-editor-panel .ag-history {
   flex: 0 0 auto;
   border-top: 1px solid var(--pix3-border, #333);
   padding: 0.5rem 0.75rem;
   background: var(--pix3-bg-secondary, #262626);
 }
 
-pix3-asset-generator-panel .ag-history-head {
+pix3-sprite-editor-panel .ag-history-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -607,7 +607,7 @@ pix3-asset-generator-panel .ag-history-head {
   margin-bottom: 0.4rem;
 }
 
-pix3-asset-generator-panel .ag-history-hint {
+pix3-sprite-editor-panel .ag-history-hint {
   flex: 1 1 auto;
   font-size: 0.72rem;
   color: var(--pix3-text-muted, #777);
@@ -616,27 +616,27 @@ pix3-asset-generator-panel .ag-history-hint {
   white-space: nowrap;
 }
 
-pix3-asset-generator-panel .ag-history-thumb[draggable='true'] {
+pix3-sprite-editor-panel .ag-history-thumb[draggable='true'] {
   cursor: grab;
 }
 
-pix3-asset-generator-panel .ag-history-thumb[draggable='true']:active {
+pix3-sprite-editor-panel .ag-history-thumb[draggable='true']:active {
   cursor: grabbing;
 }
 
-pix3-asset-generator-panel .ag-history-strip {
+pix3-sprite-editor-panel .ag-history-strip {
   display: flex;
   gap: 0.4rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
 }
 
-pix3-asset-generator-panel .ag-history-card {
+pix3-sprite-editor-panel .ag-history-card {
   position: relative;
   flex: 0 0 auto;
 }
 
-pix3-asset-generator-panel .ag-history-thumb {
+pix3-sprite-editor-panel .ag-history-thumb {
   width: 64px;
   height: 64px;
   padding: 0;
@@ -647,14 +647,14 @@ pix3-asset-generator-panel .ag-history-thumb {
   background: #2b2b2b;
 }
 
-pix3-asset-generator-panel .ag-history-thumb img {
+pix3-sprite-editor-panel .ag-history-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-pix3-asset-generator-panel .ag-history-delete {
+pix3-sprite-editor-panel .ag-history-delete {
   position: absolute;
   top: -6px;
   right: -6px;
@@ -670,12 +670,12 @@ pix3-asset-generator-panel .ag-history-delete {
 }
 
 /* Drag overlay ---------------------------------------------------------- */
-pix3-asset-generator-panel .asset-generator.is-drag-active {
+pix3-sprite-editor-panel .sprite-editor.is-drag-active {
   outline: 2px dashed var(--pix3-accent-color, #ffcf33);
   outline-offset: -4px;
 }
 
-pix3-asset-generator-panel .ag-drop-overlay {
+pix3-sprite-editor-panel .ag-drop-overlay {
   position: absolute;
   inset: 0;
   display: flex;
@@ -689,13 +689,13 @@ pix3-asset-generator-panel .ag-drop-overlay {
 }
 
 /* Crop editor ----------------------------------------------------------- */
-pix3-asset-generator-panel .ag-stage--crop {
+pix3-sprite-editor-panel .ag-stage--crop {
   display: block;
   padding: 0;
   overflow: hidden;
 }
 
-pix3-asset-generator-panel .ag-crop-image {
+pix3-sprite-editor-panel .ag-crop-image {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -707,14 +707,14 @@ pix3-asset-generator-panel .ag-crop-image {
   -webkit-user-drag: none;
 }
 
-pix3-asset-generator-panel .ag-crop-overlay {
+pix3-sprite-editor-panel .ag-crop-overlay {
   position: absolute;
   inset: 0;
   touch-action: none;
   cursor: crosshair;
 }
 
-pix3-asset-generator-panel .ag-crop-rect {
+pix3-sprite-editor-panel .ag-crop-rect {
   position: absolute;
   border: 1px solid var(--pix3-accent-color, #ffcf33);
   box-shadow: 0 0 0 100000px rgba(0, 0, 0, 0.55);
@@ -722,7 +722,7 @@ pix3-asset-generator-panel .ag-crop-rect {
   box-sizing: border-box;
 }
 
-pix3-asset-generator-panel .ag-crop-handle {
+pix3-sprite-editor-panel .ag-crop-handle {
   position: absolute;
   width: 12px;
   height: 12px;
@@ -732,48 +732,48 @@ pix3-asset-generator-panel .ag-crop-handle {
   box-sizing: border-box;
 }
 
-pix3-asset-generator-panel .ag-crop-handle--nw {
+pix3-sprite-editor-panel .ag-crop-handle--nw {
   top: -6px;
   left: -6px;
   cursor: nwse-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--n {
+pix3-sprite-editor-panel .ag-crop-handle--n {
   top: -6px;
   left: calc(50% - 6px);
   cursor: ns-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--ne {
+pix3-sprite-editor-panel .ag-crop-handle--ne {
   top: -6px;
   right: -6px;
   cursor: nesw-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--e {
+pix3-sprite-editor-panel .ag-crop-handle--e {
   top: calc(50% - 6px);
   right: -6px;
   cursor: ew-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--se {
+pix3-sprite-editor-panel .ag-crop-handle--se {
   bottom: -6px;
   right: -6px;
   cursor: nwse-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--s {
+pix3-sprite-editor-panel .ag-crop-handle--s {
   bottom: -6px;
   left: calc(50% - 6px);
   cursor: ns-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--sw {
+pix3-sprite-editor-panel .ag-crop-handle--sw {
   bottom: -6px;
   left: -6px;
   cursor: nesw-resize;
 }
-pix3-asset-generator-panel .ag-crop-handle--w {
+pix3-sprite-editor-panel .ag-crop-handle--w {
   top: calc(50% - 6px);
   left: -6px;
   cursor: ew-resize;
 }
 
-pix3-asset-generator-panel .ag-crop-toolbar {
+pix3-sprite-editor-panel .ag-crop-toolbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -783,12 +783,12 @@ pix3-asset-generator-panel .ag-crop-toolbar {
   background: var(--pix3-bg-secondary, #262626);
 }
 
-pix3-asset-generator-panel .ag-crop-dims {
+pix3-sprite-editor-panel .ag-crop-dims {
   font-size: 0.8rem;
   color: var(--pix3-text-secondary, #ccc);
 }
 
-pix3-asset-generator-panel .ag-crop-apply {
+pix3-sprite-editor-panel .ag-crop-apply {
   flex: 0 0 auto;
   padding: 0.4rem 1rem;
 }
