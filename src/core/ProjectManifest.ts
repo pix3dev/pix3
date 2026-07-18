@@ -30,6 +30,20 @@ export interface QualitySettings {
   maxPixelRatio: number;
 }
 
+/**
+ * Project i18n/l10n settings. Absent ⇒ localization is inert (nodes render their
+ * literal `label`). Structurally a superset-compatible input for the runtime
+ * `LocalizationConfig`. Tables live in `res://locales/<locale>.json`.
+ */
+export interface LocalizationSettings {
+  /** Locale used when none is chosen (also the "POT template" locale). */
+  defaultLocale: string;
+  /** Locale consulted when a key is missing in the current one; defaults to `defaultLocale`. */
+  fallbackLocale?: string;
+  /** Declared locale ids (drives the panel tabs / preview dropdown). */
+  locales: string[];
+}
+
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
@@ -45,6 +59,8 @@ export interface ProjectManifest {
   projectType: ProjectType;
   targetPlatform: TargetPlatform;
   quality: QualitySettings;
+  /** i18n/l10n settings; absent ⇒ localization inert (backward compatible). */
+  localization?: LocalizationSettings;
   metadata?: Record<string, unknown>;
 }
 
@@ -136,6 +152,36 @@ const normalizeQualitySettings = (input: unknown, platform: TargetPlatform): Qua
   };
 };
 
+const normalizeLocalization = (input: unknown): LocalizationSettings | undefined => {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+  const record = input as Record<string, unknown>;
+  const locales = Array.isArray(record.locales)
+    ? [...new Set(record.locales.filter((l): l is string => typeof l === 'string' && l.length > 0))]
+    : [];
+  const defaultLocale =
+    typeof record.defaultLocale === 'string' && record.defaultLocale.length > 0
+      ? record.defaultLocale
+      : (locales[0] ?? '');
+  // A block with neither a default locale nor any declared locale is inert.
+  if (!defaultLocale && locales.length === 0) {
+    return undefined;
+  }
+  const resolvedDefault = defaultLocale || locales[0];
+  // Ensure the default is part of the declared set.
+  const finalLocales = locales.includes(resolvedDefault) ? locales : [resolvedDefault, ...locales];
+  const fallbackLocale =
+    typeof record.fallbackLocale === 'string' && record.fallbackLocale.length > 0
+      ? record.fallbackLocale
+      : undefined;
+  return {
+    defaultLocale: resolvedDefault,
+    ...(fallbackLocale ? { fallbackLocale } : {}),
+    locales: finalLocales,
+  };
+};
+
 const normalizeDefaultExportScenePath = (input: unknown): string | undefined => {
   if (typeof input !== 'string') {
     return undefined;
@@ -207,6 +253,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     projectType: normalizeProjectType(record.projectType),
     targetPlatform,
     quality: normalizeQualitySettings(record.quality, targetPlatform),
+    localization: normalizeLocalization(record.localization),
     metadata:
       record.metadata && typeof record.metadata === 'object'
         ? (record.metadata as Record<string, unknown>)

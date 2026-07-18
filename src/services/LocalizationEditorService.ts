@@ -1,0 +1,371 @@
+import { subscribe } from 'valtio/vanilla';
+import { injectable, inject } from '@/fw/di';
+import { appState } from '@/state';
+import { ProjectStorageService } from './ProjectStorageService';
+import { LocalizationService, setActiveLocalization, type LocaleTable } from '@pix3/runtime';
+import type { LocalizationSettings } from '@/core/ProjectManifest';
+
+const LOCALES_DIR = 'locales';
+
+/** Human-readable default names for common locale ids (used when a table has no `$meta.name`). */
+const LOCALE_DISPLAY_NAMES: Record<string, string> = {
+  en: 'English',
+  ru: 'Русский',
+  de: 'Deutsch',
+  fr: 'Français',
+  es: 'Español',
+  pt: 'Português',
+  it: 'Italiano',
+  ja: '日本語',
+  ko: '한국어',
+  zh: '中文',
+};
+
+/**
+ * Editor-side authoring layer for localization. Owns the **editor-preview**
+ * {@link LocalizationService} (the active-localization pointer while editing, so
+ * viewport label proxies resolve translations), loads `locales/*.json` at project
+ * open, and exposes an authoring API (read/edit/save tables, switch preview
+ * locale, missing-key diff). It mirrors UI-facing counters into
+ * `appState.localization`; the actual tables stay here (state-vs-scene-graph
+ * separation). All *undoable* mutations run through Commands/Operations that call
+ * into this service — the service persists + feeds the preview + bumps `revision`.
+ */
+@injectable()
+export class LocalizationEditorService {
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
+
+  private preview: LocalizationService | null = null;
+  /** In-memory authoring tables keyed by locale id (source of truth while editing). */
+  private readonly tables = new Map<string, LocaleTable>();
+  private settings: LocalizationSettings | null = null;
+  /** Identity of the project whose tables are currently loaded (guards re-loads). */
+  private loadedProjectKey: string | null = null;
+  private previewLocale = '';
+  private disposeProjectSub?: () => void;
+  private initialized = false;
+
+  initialize(): void {
+    if (this.initialized) return;
+    this.initialized = true;
+    this.disposeProjectSub = subscribe(appState.project, () => {
+      void this.syncFromProject();
+    });
+    void this.syncFromProject();
+  }
+
+  dispose(): void {
+    this.disposeProjectSub?.();
+    this.disposeProjectSub = undefined;
+    setActiveLocalization(null);
+    this.preview?.dispose();
+    this.preview = null;
+    this.tables.clear();
+    this.settings = null;
+    this.loadedProjectKey = null;
+    this.previewLocale = '';
+    this.initialized = false;
+  }
+
+  // ---- project lifecycle ---------------------------------------------------
+
+  private projectKey(): string | null {
+    const p = appState.project;
+    return p.id ? `${p.backend}:${p.id}` : null;
+  }
+
+  /** (Re)load tables when a different project opens, or clear on close. */
+  private async syncFromProject(): Promise<void> {
+    const key = this.projectKey();
+    if (key === this.loadedProjectKey) return;
+    this.loadedProjectKey = key;
+
+    // Reset state for the new (or absent) project.
+    setActiveLocalization(null);
+    this.preview?.dispose();
+    this.preview = null;
+    this.tables.clear();
+    this.settings = null;
+    this.previewLocale = '';
+
+    if (!key) {
+      this.mirrorSlice();
+      return;
+    }
+
+    try {
+      await this.loadTables();
+    } catch (error) {
+      console.warn('[Localization] Failed to load project locales', error);
+    }
+    this.mirrorSlice();
+  }
+
+  /** Resolve the effective settings (manifest block, else auto-discovered from `locales/`). */
+  private async resolveSettings(): Promise<LocalizationSettings | null> {
+    const fromManifest = appState.project.manifest?.localization;
+    if (fromManifest && fromManifest.locales.length > 0) {
+      return fromManifest;
+    }
+    // Zero-config: discover `locales/*.json`. Empty ⇒ localization inert.
+    const discovered = await this.discoverLocaleIds();
+    if (discovered.length === 0) return null;
+    const defaultLocale = discovered.includes('en') ? 'en' : discovered[0];
+    return { defaultLocale, locales: discovered };
+  }
+
+  private async discoverLocaleIds(): Promise<string[]> {
+    try {
+      const entries = await this.storage.listDirectory(LOCALES_DIR);
+      return entries
+        .filter(e => e.kind === 'file' && e.name.toLowerCase().endsWith('.json'))
+        .map(e => e.name.slice(0, -'.json'.length))
+        .sort();
+    } catch {
+      return []; // no locales/ directory
+    }
+  }
+
+  private async loadTables(): Promise<void> {
+    const settings = await this.resolveSettings();
+    this.settings = settings;
+    if (!settings) return;
+
+    for (const locale of settings.locales) {
+      const table = await this.readTableFile(locale);
+      this.tables.set(locale, table);
+    }
+
+    // Build the preview instance from the loaded tables.
+    const preview = new LocalizationService();
+    preview.configure({
+      defaultLocale: settings.defaultLocale,
+      fallbackLocale: settings.fallbackLocale,
+      locales: settings.locales,
+    });
+    for (const table of this.tables.values()) {
+      preview.setTable(table);
+    }
+    this.preview = preview;
+    this.previewLocale = settings.defaultLocale;
+    void preview.setLocale(settings.defaultLocale);
+    setActiveLocalization(preview);
+  }
+
+  private async readTableFile(locale: string): Promise<LocaleTable> {
+    try {
+      const text = await this.storage.readTextFile(`${LOCALES_DIR}/${locale}.json`);
+      return parseTableFile(locale, text);
+    } catch {
+      // Missing/broken file ⇒ empty table (still declared; panel can populate it).
+      return { locale, strings: {}, sprites: {} };
+    }
+  }
+
+  // ---- read API (panel / inspector widget) --------------------------------
+
+  isActive(): boolean {
+    return this.settings !== null;
+  }
+
+  getLocales(): string[] {
+    return this.settings ? [...this.settings.locales] : [];
+  }
+
+  getDefaultLocale(): string {
+    return this.settings?.defaultLocale ?? '';
+  }
+
+  getPreviewLocale(): string {
+    return this.previewLocale;
+  }
+
+  /**
+   * Effective runtime localization config (manifest block, else auto-discovered),
+   * for injection into the play-mode SceneRunner. Null ⇒ localization inert.
+   */
+  getRuntimeConfig(): { defaultLocale: string; fallbackLocale?: string; locales: string[] } | null {
+    if (!this.settings) return null;
+    return {
+      defaultLocale: this.settings.defaultLocale,
+      ...(this.settings.fallbackLocale ? { fallbackLocale: this.settings.fallbackLocale } : {}),
+      locales: [...this.settings.locales],
+    };
+  }
+
+  getLocaleDisplayName(locale: string): string {
+    return (
+      this.tables.get(locale)?.meta?.name ?? LOCALE_DISPLAY_NAMES[locale] ?? locale.toUpperCase()
+    );
+  }
+
+  /** Union of string keys across all locales (default locale first), for autocomplete. */
+  getAllKeys(): string[] {
+    const keys = new Set<string>();
+    const def = this.getDefaultLocale();
+    for (const k of Object.keys(this.tables.get(def)?.strings ?? {})) keys.add(k);
+    for (const table of this.tables.values()) {
+      for (const k of Object.keys(table.strings)) keys.add(k);
+    }
+    return [...keys].sort();
+  }
+
+  getEntry(locale: string, key: string): string {
+    return this.tables.get(locale)?.strings[key] ?? '';
+  }
+
+  /** Whether a key resolves (current-or-fallback) in the preview locale. */
+  keyResolvesInPreview(key: string): boolean {
+    return this.preview?.has(key) ?? false;
+  }
+
+  /** The preview-locale translation of `key` (falls back to the key itself). */
+  resolveInPreview(key: string): string {
+    return this.preview?.tr(key) ?? key;
+  }
+
+  /** Keys present (non-empty) in the default locale but missing/empty in `locale`. */
+  getMissing(locale: string): string[] {
+    const def = this.getDefaultLocale();
+    if (!def || locale === def) return [];
+    const defStrings = this.tables.get(def)?.strings ?? {};
+    const locStrings = this.tables.get(locale)?.strings ?? {};
+    return Object.keys(defStrings).filter(k => !(locStrings[k] ?? '').trim());
+  }
+
+  // ---- mutation API (called by Operations; persists + refreshes preview) ---
+
+  /** Switch the editor preview locale. Returns a Promise (may load a table). */
+  async setPreviewLocale(locale: string): Promise<void> {
+    if (!this.preview || !this.settings) return;
+    if (!this.settings.locales.includes(locale)) return;
+    this.previewLocale = locale;
+    await this.preview.setLocale(locale);
+    this.mirrorSlice();
+  }
+
+  /** Set/clear a single translation. Persists the file and re-feeds the preview. */
+  async setEntry(locale: string, key: string, value: string): Promise<void> {
+    if (!key) return;
+    const table = this.ensureTable(locale);
+    if (value) {
+      table.strings[key] = value;
+    } else {
+      delete table.strings[key];
+    }
+    this.preview?.setTable(table);
+    await this.saveLocale(locale);
+    this.mirrorSlice();
+  }
+
+  /** Remove a key from every locale. Returns the removed values for undo. */
+  async removeKey(key: string): Promise<Record<string, string>> {
+    const removed: Record<string, string> = {};
+    for (const [locale, table] of this.tables) {
+      if (key in table.strings) {
+        removed[locale] = table.strings[key];
+        delete table.strings[key];
+        this.preview?.setTable(table);
+        await this.saveLocale(locale);
+      }
+    }
+    this.mirrorSlice();
+    return removed;
+  }
+
+  /** Declare a new locale and write an (empty) table file. */
+  async addLocale(locale: string): Promise<void> {
+    if (!locale || this.tables.has(locale)) return;
+    const table: LocaleTable = { locale, strings: {}, sprites: {} };
+    this.tables.set(locale, table);
+    if (this.settings) {
+      if (!this.settings.locales.includes(locale)) this.settings.locales.push(locale);
+    } else {
+      this.settings = { defaultLocale: locale, locales: [locale] };
+    }
+    this.preview?.setTable(table);
+    await this.saveLocale(locale);
+    this.mirrorSlice();
+  }
+
+  private ensureTable(locale: string): LocaleTable {
+    let table = this.tables.get(locale);
+    if (!table) {
+      table = { locale, strings: {}, sprites: {} };
+      this.tables.set(locale, table);
+    }
+    return table;
+  }
+
+  private async saveLocale(locale: string): Promise<void> {
+    const table = this.tables.get(locale);
+    if (!table) return;
+    try {
+      await this.storage.writeTextFile(`${LOCALES_DIR}/${locale}.json`, serializeTableFile(table));
+    } catch (error) {
+      console.error(`[Localization] Failed to save locale "${locale}"`, error);
+    }
+  }
+
+  private mirrorSlice(): void {
+    const slice = appState.localization;
+    const locales = this.getLocales();
+    const missingCounts: Record<string, number> = {};
+    for (const locale of locales) {
+      missingCounts[locale] = this.getMissing(locale).length;
+    }
+    slice.locales = locales;
+    slice.defaultLocale = this.getDefaultLocale();
+    slice.previewLocale = this.previewLocale;
+    slice.missingCounts = missingCounts;
+    slice.revision += 1;
+  }
+}
+
+// ---- file (de)serialization -------------------------------------------------
+
+/** Parse a `locales/<locale>.json` file into a runtime {@link LocaleTable}. */
+function parseTableFile(locale: string, text: string): LocaleTable {
+  const parsed = JSON.parse(text) as {
+    $meta?: LocaleTable['meta'];
+    meta?: LocaleTable['meta'];
+    strings?: Record<string, unknown>;
+    sprites?: Record<string, unknown>;
+  };
+  return {
+    locale,
+    strings: toStringRecord(parsed.strings),
+    sprites: toStringRecord(parsed.sprites),
+    meta: parsed.$meta ?? parsed.meta,
+  };
+}
+
+/** Serialize a table to the on-disk format: `$meta` + sorted `strings`/`sprites`. */
+function serializeTableFile(table: LocaleTable): string {
+  const payload: Record<string, unknown> = {
+    $meta: {
+      locale: table.locale,
+      name: table.meta?.name ?? LOCALE_DISPLAY_NAMES[table.locale] ?? table.locale.toUpperCase(),
+      ...(table.meta?.direction ? { direction: table.meta.direction } : {}),
+    },
+    strings: sortRecord(table.strings),
+    sprites: sortRecord(table.sprites),
+  };
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v;
+  }
+  return out;
+}
+
+function sortRecord(record: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(record).sort()) out[key] = record[key];
+  return out;
+}

@@ -21,6 +21,7 @@ import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
 import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
 import { TextureAtlasService } from '@/services/atlas/TextureAtlasService';
+import { LocalizationEditorService } from '@/services/LocalizationEditorService';
 import { isAtlas2DEnabled, isBatch2DEnabled } from '@/services/atlas/rendering-2d-flags';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
@@ -67,6 +68,9 @@ export class GamePlaySessionService {
 
   @inject(TextureAtlasService)
   private readonly textureAtlasService!: TextureAtlasService;
+
+  @inject(LocalizationEditorService)
+  private readonly localizationEditorService!: LocalizationEditorService;
 
   private initialized = false;
   private disposeUiSubscription?: () => void;
@@ -355,6 +359,16 @@ export class GamePlaySessionService {
     } else {
       this.assetLoader.setAtlasResolver(null);
     }
+
+    // Localization: hand the play instance the project's locale config and seed
+    // it with the editor's current preview locale (so "preview ru → Play" starts
+    // in ru). Null config ⇒ inert default; the game gets its own instance so a
+    // script `setLocale` never leaks back into the editor preview.
+    const localizationConfig = this.localizationEditorService.getRuntimeConfig();
+    runner.setLocalizationConfig(
+      localizationConfig,
+      localizationConfig ? this.localizationEditorService.getPreviewLocale() : undefined
+    );
 
     try {
       await runner.startScene(activeSceneId);

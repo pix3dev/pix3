@@ -861,6 +861,18 @@ export class ProjectService {
         shadows: normalized.quality.shadows,
         maxPixelRatio: normalized.quality.maxPixelRatio,
       },
+      // Only emit the block when localization is configured (absent ⇒ inert).
+      ...(normalized.localization
+        ? {
+            localization: {
+              defaultLocale: normalized.localization.defaultLocale,
+              ...(normalized.localization.fallbackLocale
+                ? { fallbackLocale: normalized.localization.fallbackLocale }
+                : {}),
+              locales: [...normalized.localization.locales],
+            },
+          }
+        : {}),
       metadata: normalized.metadata ?? {},
       autoloads: normalized.autoloads.map(entry => ({
         scriptPath: entry.scriptPath,

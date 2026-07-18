@@ -407,6 +407,21 @@ export interface TelemetryState {
   unsentEventCount: number;
 }
 
+/**
+ * UI-facing localization state. IDs/counters only — the actual locale tables
+ * live in `LocalizationEditorService` (same state-vs-scene-graph separation).
+ * `previewLocale` is the editor-viewport preview; `revision` bumps on any table
+ * edit so subscribed panels/widgets re-read. Empty `locales` ⇒ inert.
+ */
+export interface LocalizationState {
+  locales: string[];
+  defaultLocale: string;
+  previewLocale: string;
+  /** Per-locale count of keys missing vs. the default locale (panel badges). */
+  missingCounts: Record<string, number>;
+  revision: number;
+}
+
 export type RouterStatus =
   | 'idle'
   | 'authenticating'
@@ -443,6 +458,7 @@ export interface AppState {
   operations: OperationState;
   collaboration: CollaborationState;
   telemetry: TelemetryState;
+  localization: LocalizationState;
 }
 
 export const createInitialHybridSyncState = (): ProjectHybridSyncState => ({
@@ -605,5 +621,12 @@ export const createInitialAppState = (): AppState => ({
   telemetry: {
     lastEventName: null,
     unsentEventCount: 0,
+  },
+  localization: {
+    locales: [],
+    defaultLocale: '',
+    previewLocale: '',
+    missingCounts: {},
+    revision: 0,
   },
 });
