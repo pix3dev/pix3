@@ -377,12 +377,16 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
 
     // Press on the frame body: no transform starts yet (deferred).
-    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1 }));
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 120, clientY: 90, buttons: 1 })
+    );
     expect(services.viewportRenderer.start2DTransform).not.toHaveBeenCalled();
 
     // Drag past the threshold: the move starts from the ORIGINAL down point so
     // the delta does not jump.
-    panel.dispatchEvent(createPointerEvent('pointermove', { clientX: 140, clientY: 90, buttons: 1 }));
+    panel.dispatchEvent(
+      createPointerEvent('pointermove', { clientX: 140, clientY: 90, buttons: 1 })
+    );
     expect(services.viewportRenderer.start2DTransform).toHaveBeenCalledWith(120, 90, 'move');
   });
 
@@ -415,7 +419,9 @@ describe('EditorTabComponent', () => {
     document.body.appendChild(panel);
     await panel.updateComplete;
 
-    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 })
+    );
     panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
 
     expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(1);
@@ -459,9 +465,13 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
 
     // First click selects the container; second (double) click drills in.
-    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 })
+    );
     panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
-    panel.dispatchEvent(createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 }));
+    panel.dispatchEvent(
+      createPointerEvent('pointerdown', { clientX: 40, clientY: 40, buttons: 1 })
+    );
     panel.dispatchEvent(createPointerEvent('pointerup', { clientX: 40, clientY: 40 }));
 
     expect(services.commandDispatcher.execute).toHaveBeenCalledTimes(2);

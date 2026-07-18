@@ -27,9 +27,7 @@ registerBuiltInScripts(registry);
 import { RuntimeErrorBridgeService } from './services/RuntimeErrorBridgeService';
 
 container
-  .getService<RuntimeErrorBridgeService>(
-    container.getOrCreateToken(RuntimeErrorBridgeService)
-  )
+  .getService<RuntimeErrorBridgeService>(container.getOrCreateToken(RuntimeErrorBridgeService))
   .initialize();
 
 // Type-check project scripts and surface errors (with file + line) in the Logs
@@ -38,9 +36,7 @@ container
 import { ProjectDiagnosticsService } from './services/ProjectDiagnosticsService';
 
 container
-  .getService<ProjectDiagnosticsService>(
-    container.getOrCreateToken(ProjectDiagnosticsService)
-  )
+  .getService<ProjectDiagnosticsService>(container.getOrCreateToken(ProjectDiagnosticsService))
   .initialize();
 
 import './ui/scene-tree/scene-tree-panel';

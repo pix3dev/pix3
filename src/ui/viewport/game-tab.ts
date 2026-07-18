@@ -241,7 +241,9 @@ export class GameViewTab extends ComponentBase {
       parts.push(error.phase);
     }
     if (error.nodeName) {
-      parts.push(error.componentType ? `${error.nodeName} · ${error.componentType}` : error.nodeName);
+      parts.push(
+        error.componentType ? `${error.nodeName} · ${error.componentType}` : error.nodeName
+      );
     } else if (error.componentType) {
       parts.push(error.componentType);
     }

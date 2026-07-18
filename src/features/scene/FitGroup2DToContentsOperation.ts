@@ -23,7 +23,7 @@ export class FitGroup2DToContentsOperation implements Operation<OperationInvokeR
   readonly metadata: OperationMetadata = {
     id: 'scene.fit-group2d-to-contents',
     title: 'Fit Group to Contents',
-    description: "Resize a Group2D to wrap its children without moving them in world space",
+    description: 'Resize a Group2D to wrap its children without moving them in world space',
     tags: ['scene', '2d', 'layout', 'group'],
   };
 

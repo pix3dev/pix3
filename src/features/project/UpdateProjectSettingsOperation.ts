@@ -4,7 +4,12 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { Node2D, SceneManager, setProjectAODefault, setProjectTextureFiltering } from '@pix3/runtime';
+import {
+  Node2D,
+  SceneManager,
+  setProjectAODefault,
+  setProjectTextureFiltering,
+} from '@pix3/runtime';
 import {
   createDefaultProjectManifest,
   normalizeProjectManifest,

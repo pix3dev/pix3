@@ -278,7 +278,9 @@ describe('AgentChatService', () => {
   it('gates the turn: nudges once when game logic changed but the game was never run', async () => {
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
       .mockResolvedValueOnce(textResult('Fixed the steering.')) // tries to end without running it
       .mockResolvedValueOnce(toolCallResult('game_input', 'c2', { steps: [] }))
       .mockResolvedValueOnce(textResult('Verified: it drives forward.'));
@@ -299,7 +301,9 @@ describe('AgentChatService', () => {
   it('does not gate when the change was verified with game_input in the same turn', async () => {
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
       .mockResolvedValueOnce(toolCallResult('game_input', 'c2', { steps: [] }))
       .mockResolvedValueOnce(textResult('done and verified'));
     const execute = vi.fn(async () => ({ ok: true }));
@@ -330,7 +334,9 @@ describe('AgentChatService', () => {
   it('gate fires at most once, so an unverified change cannot loop forever', async () => {
     const chat = vi
       .fn()
-      .mockResolvedValueOnce(toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' }))
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
       .mockResolvedValueOnce(textResult('done')) // gate nudge fires here
       .mockResolvedValueOnce(textResult('still done, not running it')); // ignores nudge → ends
     const execute = vi.fn(async () => ({ ok: true }));

@@ -71,7 +71,8 @@ export class GeminiLlmProvider implements LlmProvider {
     {
       id: 'gemini-3.1-flash-lite',
       label: 'Gemini 3.1 Flash-Lite',
-      description: 'Cheapest / fastest tier — most cost-efficient, tuned for high-volume agentic tasks.',
+      description:
+        'Cheapest / fastest tier — most cost-efficient, tuned for high-volume agentic tasks.',
       capabilities: {
         supportsTools: true,
         supportsImages: true,

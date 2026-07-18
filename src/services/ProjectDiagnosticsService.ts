@@ -166,8 +166,7 @@ export class ProjectDiagnosticsService {
     };
 
     const files = [...this.scriptLoader.getCollectedFiles()].filter(
-      ([path]) =>
-        (path.endsWith('.ts') || path.endsWith('.js')) && !path.endsWith('.d.ts')
+      ([path]) => (path.endsWith('.ts') || path.endsWith('.js')) && !path.endsWith('.d.ts')
     );
     if (files.length === 0) {
       this.logger.info('Script check: no scripts to check.');

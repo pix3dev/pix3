@@ -14,7 +14,8 @@ export class CheckScriptsCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'scripts.check',
     title: 'Check Scripts for Errors',
-    description: 'Type-check all project scripts and list any errors (with file and line) in the Logs panel',
+    description:
+      'Type-check all project scripts and list any errors (with file and line) in the Logs panel',
     keywords: ['script', 'check', 'type', 'error', 'diagnostics', 'lint', 'problems'],
     menuPath: 'project',
     addToMenu: true,

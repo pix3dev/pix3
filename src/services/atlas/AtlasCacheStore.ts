@@ -92,7 +92,9 @@ export class AtlasCacheStore {
     if (this.memoryFallback.size <= MAX_ENTRIES) {
       return;
     }
-    const ordered = [...this.memoryFallback.entries()].sort((a, b) => a[1].storedAt - b[1].storedAt);
+    const ordered = [...this.memoryFallback.entries()].sort(
+      (a, b) => a[1].storedAt - b[1].storedAt
+    );
     for (const [key] of ordered.slice(0, ordered.length - MAX_ENTRIES)) {
       this.memoryFallback.delete(key);
     }

@@ -200,9 +200,7 @@ export class ProjectTemplateService {
         ? meta.directories.filter((dir): dir is string => typeof dir === 'string' && dir.length > 0)
         : [];
       const entrySceneRaw = typeof meta.entryScene === 'string' ? meta.entryScene.trim() : '';
-      const entryScenePath = entrySceneRaw
-        ? entrySceneRaw.replace(/^res:\/\//i, '')
-        : undefined;
+      const entryScenePath = entrySceneRaw ? entrySceneRaw.replace(/^res:\/\//i, '') : undefined;
 
       templates.push({
         id,

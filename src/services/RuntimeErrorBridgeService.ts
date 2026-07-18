@@ -99,8 +99,7 @@ export class RuntimeErrorBridgeService {
 
   private readonly handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
     const reason = event.reason;
-    const message =
-      reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+    const message = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
     this.loggingService.error(`Unhandled promise rejection: ${message}`, {
       stack: reason instanceof Error ? reason.stack : undefined,
     });

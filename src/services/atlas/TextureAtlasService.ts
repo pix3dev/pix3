@@ -310,7 +310,12 @@ export class TextureAtlasService {
     directory = '.',
     out = new Map<string, number | null>()
   ): Promise<Map<string, number | null>> {
-    let entries: ReadonlyArray<{ name: string; kind: FileSystemHandleKind; path: string; size?: number | null }>;
+    let entries: ReadonlyArray<{
+      name: string;
+      kind: FileSystemHandleKind;
+      path: string;
+      size?: number | null;
+    }>;
     try {
       entries = await this.fs.listDirectory(directory);
     } catch {
@@ -329,7 +334,9 @@ export class TextureAtlasService {
   // --- Hashing --------------------------------------------------------------
 
   private async hashFast(inputs: ClassifiedInputs, filtering: string): Promise<string> {
-    const files = inputs.include.map(path => `${path}|${inputs.sizeMap.get(stripRes(path)) ?? '?'}`);
+    const files = inputs.include.map(
+      path => `${path}|${inputs.sizeMap.get(stripRes(path)) ?? '?'}`
+    );
     return this.hashPayload(files, filtering);
   }
 

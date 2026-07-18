@@ -353,7 +353,7 @@ export class AgentToolRegistry {
       {
         name: 'create_node',
         description:
-          "Create a new node in the active scene (undoable). Use it to build scenes and — importantly — to turn placeholder art into real graphics, e.g. add a Sprite2D that shows a generated texture. `nodeType` is case-insensitive; creatable types: " +
+          'Create a new node in the active scene (undoable). Use it to build scenes and — importantly — to turn placeholder art into real graphics, e.g. add a Sprite2D that shows a generated texture. `nodeType` is case-insensitive; creatable types: ' +
           CREATABLE_NODE_TYPES.join(', ') +
           ". Pass `texturePath` (res://…) for sprites (it also auto-sizes them), an optional `parentId` (defaults to a sensible root) and `position` {x,y}, and a `properties` object for anything else (color/width/height/label/opacity/…) applied via set_property after creation. Returns the new nodeId. To REPLACE an existing placeholder such as a ColorRect2D with a sprite, prefer convert_node_type — it keeps the node's transform, components and children.",
         inputSchema: {
@@ -394,7 +394,7 @@ export class AgentToolRegistry {
       {
         name: 'convert_node_type',
         description:
-          "Replace an existing node with a new node of a different type IN PLACE, keeping its id, name, transform, size, attached components AND children (undoable). This is the right way to \"skin\" a placeholder: e.g. convert a scaffolding ColorRect2D into a Sprite2D showing a generated texture without losing the script component on it. Pass the new visual bits via `properties` (e.g. {\"texturePath\":\"res://…\"} for a sprite). Common target types: " +
+          'Replace an existing node with a new node of a different type IN PLACE, keeping its id, name, transform, size, attached components AND children (undoable). This is the right way to "skin" a placeholder: e.g. convert a scaffolding ColorRect2D into a Sprite2D showing a generated texture without losing the script component on it. Pass the new visual bits via `properties` (e.g. {"texturePath":"res://…"} for a sprite). Common target types: ' +
           CREATABLE_NODE_TYPES.join(', ') +
           ' (most serializable node types work). Returns the (unchanged) nodeId and its new type.',
         inputSchema: {
@@ -560,7 +560,10 @@ export class AgentToolRegistry {
               type: 'string',
               description: 'Exact text to find, verbatim (including indentation/newlines).',
             },
-            new_string: { type: 'string', description: 'Text to replace it with (may be empty to delete).' },
+            new_string: {
+              type: 'string',
+              description: 'Text to replace it with (may be empty to delete).',
+            },
             replace_all: {
               type: 'boolean',
               description: 'Replace every occurrence. Default false = require exactly one match.',
@@ -756,7 +759,7 @@ export class AgentToolRegistry {
       {
         name: 'viewport_screenshot',
         description:
-          "Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The user's editor camera may be zoomed/scrolled anywhere — pass `frame:\"all\"` to fit the whole scene, `frame:\"selection\"` to fit the current selection, or `nodeId` to zoom onto one node (add `isolate:true` to hide other content that overlaps/covers it). Framing is temporary and captures the EDITOR viewport (never the game) without moving the user's camera. The result reports `view` and, when framed, `framed`.",
+          'Capture what is on screen as an image the model can see. While play mode is active this captures the RUNNING GAME canvas; otherwise the edit-mode editor viewport. Use it to visually check layout, colors, and placement. The user\'s editor camera may be zoomed/scrolled anywhere — pass `frame:"all"` to fit the whole scene, `frame:"selection"` to fit the current selection, or `nodeId` to zoom onto one node (add `isolate:true` to hide other content that overlaps/covers it). Framing is temporary and captures the EDITOR viewport (never the game) without moving the user\'s camera. The result reports `view` and, when framed, `framed`.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -778,8 +781,7 @@ export class AgentToolRegistry {
             },
             nodeId: {
               type: 'string',
-              description:
-                'Node to frame (from find_nodes / scene tree). Implies frame:"node".',
+              description: 'Node to frame (from find_nodes / scene tree). Implies frame:"node".',
             },
             isolate: {
               type: 'boolean',
@@ -1473,7 +1475,8 @@ export class AgentToolRegistry {
     if (oldString.length === 0) {
       return {
         ok: false,
-        error: 'old_string must not be empty. Use fs_write to create a file; to insert text, anchor old_string on nearby existing lines.',
+        error:
+          'old_string must not be empty. Use fs_write to create a file; to insert text, anchor old_string on nearby existing lines.',
       };
     }
     if (oldString === newString) {
@@ -1731,10 +1734,13 @@ export class AgentToolRegistry {
     }
 
     if (frame !== 'current') {
-      return this.framedViewportScreenshot(
-        frame as 'all' | 'selection' | 'node',
-        { maxSize, source, nodeId, isolate, padding }
-      );
+      return this.framedViewportScreenshot(frame as 'all' | 'selection' | 'node', {
+        maxSize,
+        source,
+        nodeId,
+        isolate,
+        padding,
+      });
     }
 
     // Unframed: capture as-is (game while playing unless source forces editor).
@@ -1793,9 +1799,7 @@ export class AgentToolRegistry {
 
     // padding fraction (0–1) → bounds inflation multiplier, clamped to a sane range.
     const paddingMultiplier =
-      opts.padding !== undefined
-        ? Math.min(3, Math.max(1, 1 + 2 * opts.padding))
-        : undefined;
+      opts.padding !== undefined ? Math.min(3, Math.max(1, 1 + 2 * opts.padding)) : undefined;
 
     const result = this.viewportRenderer.captureFramedScreenshot({
       maxSize: opts.maxSize,
@@ -1817,8 +1821,7 @@ export class AgentToolRegistry {
     const framedNode = opts.nodeId
       ? this.sceneManager.getActiveSceneGraph()?.nodeMap.get(opts.nodeId)
       : undefined;
-    const target =
-      frame === 'node' ? `node "${framedNode?.name ?? opts.nodeId}"` : `the ${frame}`;
+    const target = frame === 'node' ? `node "${framedNode?.name ?? opts.nodeId}"` : `the ${frame}`;
     return {
       ok: true,
       view: 'editor',

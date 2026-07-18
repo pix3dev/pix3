@@ -403,7 +403,11 @@ export class SpriteEditorPanel extends ComponentBase {
           title="Rotate 90° clockwise"
           aria-label="Rotate 90° clockwise"
           @click=${this.onRotate}
-          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+          ?disabled=${!this.current ||
+          this.bgBusy ||
+          this.cropMode ||
+          this.generating ||
+          this.transformBusy}
         >
           ${this.icons.getIcon('rotate-cw', IconSize.SMALL)}
         </button>
@@ -412,7 +416,11 @@ export class SpriteEditorPanel extends ComponentBase {
           title="Flip horizontally"
           aria-label="Flip horizontally"
           @click=${this.onFlipHorizontal}
-          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+          ?disabled=${!this.current ||
+          this.bgBusy ||
+          this.cropMode ||
+          this.generating ||
+          this.transformBusy}
         >
           ${this.icons.getIcon('flip-horizontal', IconSize.SMALL)}
         </button>
@@ -421,7 +429,11 @@ export class SpriteEditorPanel extends ComponentBase {
           title="Flip vertically"
           aria-label="Flip vertically"
           @click=${this.onFlipVertical}
-          ?disabled=${!this.current || this.bgBusy || this.cropMode || this.generating || this.transformBusy}
+          ?disabled=${!this.current ||
+          this.bgBusy ||
+          this.cropMode ||
+          this.generating ||
+          this.transformBusy}
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>

@@ -212,8 +212,7 @@ export class AgentSettingsService {
         customBaseUrl:
           typeof parsed.customBaseUrl === 'string' ? parsed.customBaseUrl : defaults.customBaseUrl,
         visionProviderId:
-          typeof parsed.visionProviderId === 'string' &&
-          this.registry.get(parsed.visionProviderId)
+          typeof parsed.visionProviderId === 'string' && this.registry.get(parsed.visionProviderId)
             ? parsed.visionProviderId
             : defaults.visionProviderId,
         visionModelId:

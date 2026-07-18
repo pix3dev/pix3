@@ -50,7 +50,9 @@ describe('AssetFileActivationService', () => {
     }
 
     expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledTimes(6);
-    expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledWith('res://textures/hero.png');
+    expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledWith(
+      'res://textures/hero.png'
+    );
     expect(editorTabService.focusOrOpenSpriteEditor).toHaveBeenCalledWith(
       'res://textures/hero.avif'
     );

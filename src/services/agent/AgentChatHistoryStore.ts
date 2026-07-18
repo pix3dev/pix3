@@ -56,9 +56,9 @@ export class AgentChatHistoryStore {
     try {
       const records = await new Promise<AgentConversationRecord[]>((resolve, reject) => {
         const tx = db.transaction(AgentChatHistoryStore.STORE, 'readonly');
-        const index = tx.objectStore(AgentChatHistoryStore.STORE).index(
-          AgentChatHistoryStore.PROJECT_INDEX
-        );
+        const index = tx
+          .objectStore(AgentChatHistoryStore.STORE)
+          .index(AgentChatHistoryStore.PROJECT_INDEX);
         const req = index.getAll(projectId);
         req.onsuccess = () => resolve((req.result as AgentConversationRecord[]) ?? []);
         req.onerror = () => reject(req.error ?? new Error('IndexedDB getAll error'));

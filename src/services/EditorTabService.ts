@@ -101,9 +101,7 @@ export class EditorTabService {
 
         const filteredTabs = appState.tabs.tabs.filter(
           t =>
-            !t.resourceId.startsWith('templ://') &&
-            t.type !== 'game' &&
-            t.type !== 'sprite-editor'
+            !t.resourceId.startsWith('templ://') && t.type !== 'game' && t.type !== 'sprite-editor'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
@@ -265,13 +263,7 @@ export class EditorTabService {
       );
       return;
     }
-    await this.openResourceTab(
-      'sprite-editor',
-      'sprite-editor://new',
-      {},
-      true,
-      'Sprite Editor'
-    );
+    await this.openResourceTab('sprite-editor', 'sprite-editor://new', {}, true, 'Sprite Editor');
   }
 
   /**

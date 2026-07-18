@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  flattenDiagnosticMessage,
-  mapDiagnosticCategory,
-} from './script-diagnostics-format';
+import { flattenDiagnosticMessage, mapDiagnosticCategory } from './script-diagnostics-format';
 
 describe('flattenDiagnosticMessage', () => {
   it('returns a plain string message unchanged', () => {

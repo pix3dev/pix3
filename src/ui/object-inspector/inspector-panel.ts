@@ -2681,7 +2681,9 @@ ${textPreview?.content || 'Empty file'}</pre
             return html`
               <div class="component-block ${component.enabled ? '' : 'component-block--disabled'}">
                 <div
-                  class="script-item component-item ${isUserScript ? 'component-item--openable' : ''}"
+                  class="script-item component-item ${isUserScript
+                    ? 'component-item--openable'
+                    : ''}"
                   title=${isUserScript ? 'Double-click to open script file' : ''}
                   @dblclick=${isUserScript
                     ? () => this.onOpenComponentScript(component.type)

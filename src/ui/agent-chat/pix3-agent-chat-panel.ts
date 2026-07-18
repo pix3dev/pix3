@@ -1348,8 +1348,8 @@ export class AgentChatPanel extends ComponentBase {
                     <div class="agent-history-item-main">
                       <span class="agent-history-item-title">${conversation.title}</span>
                       <span class="agent-history-item-meta">
-                        ${formatRelativeTime(conversation.updatedAt)} ·
-                        ${conversation.messageCount} msg
+                        ${formatRelativeTime(conversation.updatedAt)} · ${conversation.messageCount}
+                        msg
                       </span>
                     </div>
                     <button

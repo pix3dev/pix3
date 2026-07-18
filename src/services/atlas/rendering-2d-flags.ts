@@ -63,12 +63,17 @@ function resolveManifestFlag(): Rendering2DManifest {
   return manifest?.rendering2D ?? {};
 }
 
-function resolve(paramName: string, overrideKey: keyof Rendering2DOverride, manifestKey: keyof Rendering2DManifest): boolean {
+function resolve(
+  paramName: string,
+  overrideKey: keyof Rendering2DOverride,
+  manifestKey: keyof Rendering2DManifest
+): boolean {
   const fromQuery = normalize(readQueryParam(paramName));
   if (fromQuery) {
     return fromQuery === 'auto';
   }
-  const fromGlobal = typeof window !== 'undefined' ? normalize(window.__PIX3_RENDER2D__?.[overrideKey]) : null;
+  const fromGlobal =
+    typeof window !== 'undefined' ? normalize(window.__PIX3_RENDER2D__?.[overrideKey]) : null;
   if (fromGlobal) {
     return fromGlobal === 'auto';
   }

@@ -921,12 +921,7 @@ export class EditorTabComponent extends ComponentBase {
     // Real resize/rotate handles start a transform immediately. The 'move' body
     // zone does NOT — it is deferred (see `pendingBodyMove`) so a plain click
     // over the selection frame can re-pick a node painted in front of it.
-    if (
-      handleType &&
-      handleType !== 'idle' &&
-      handleType !== 'move' &&
-      !isSelectionModifier
-    ) {
+    if (handleType && handleType !== 'idle' && handleType !== 'move' && !isSelectionModifier) {
       this.viewportRenderer.start2DTransform?.(screenX, screenY, handleType);
       this.pointerDownPos = { x: event.clientX, y: event.clientY };
       this.pointerDownTime = Date.now();

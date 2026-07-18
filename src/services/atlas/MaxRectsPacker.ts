@@ -94,7 +94,13 @@ export function packMaxRects(items: readonly PackItem[], config: MaxRectsConfig)
         continue;
       }
 
-      placements.push({ id: item.id, x: spot.x, y: spot.y, width: item.width, height: item.height });
+      placements.push({
+        id: item.id,
+        x: spot.x,
+        y: spot.y,
+        width: item.width,
+        height: item.height,
+      });
       usedW = Math.max(usedW, spot.x + item.width);
       usedH = Math.max(usedH, spot.y + item.height);
       splitFreeRects(freeRects, { x: spot.x, y: spot.y, w: footprintW, h: footprintH });

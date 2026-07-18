@@ -787,7 +787,7 @@ export class AgentChatService {
       '- After editing scripts with fs_write, run compile_scripts to check they build.',
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
-      '- When a task matches a skill below and you are not already sure of this editor\'s exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.',
+      "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",
       '- Be concise. Reply in the language the user writes in.',
     ];
 
@@ -1129,9 +1129,7 @@ const deriveConversationTitle = (messages: readonly LlmMessage[]): string => {
   const raw =
     typeof firstUser.content === 'string'
       ? firstUser.content
-      : firstUser.content
-          .map(block => (block.type === 'text' ? block.text : ''))
-          .join(' ');
+      : firstUser.content.map(block => (block.type === 'text' ? block.text : '')).join(' ');
   const clean = raw.replace(/\s+/g, ' ').trim();
   if (!clean) {
     return 'New chat';
