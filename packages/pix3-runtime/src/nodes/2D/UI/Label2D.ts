@@ -11,6 +11,8 @@ import {
   type LabelVAlign,
 } from '../../../core/label-text-layout';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { resolveLocalizedText } from '../../../core/localization/active-localization';
+import type { TrParams } from '../../../core/localization/localization-types';
 
 export interface Label2DProps extends UIControl2DProps {
   /** Fixed box width in logical px; 0 = auto-size to the text (no word wrap). */
@@ -49,6 +51,8 @@ export class Label2D extends UIControl2D {
   private renderState: LabelRenderState | null = null;
   private typewriterVisible = 0;
   private typewriterActive = false;
+  /** Interpolation params for `labelKey` (runtime-only, not serialized). */
+  private labelKeyParams: TrParams | null = null;
 
   constructor(props: Label2DProps) {
     super(props, 'Label2D');
@@ -63,12 +67,30 @@ export class Label2D extends UIControl2D {
     this.updateLabel();
   }
 
-  /** Replace the label text; restarts the typewriter reveal when enabled. */
+  protected override getDisplayText(): string {
+    return this.labelKey
+      ? resolveLocalizedText(this.labelKey, this.label, this.labelKeyParams ?? undefined)
+      : this.label;
+  }
+
+  /**
+   * Replace the label with a literal string; restarts the typewriter reveal when enabled. Clears any
+   * bound localization key — an explicit literal overrides localization.
+   */
   setText(text: string): void {
-    if (this.label === text) {
+    if (this.labelKey === '' && this.label === text) {
       return;
     }
+    this.labelKey = '';
+    this.labelKeyParams = null;
     this.label = text;
+    this.updateLabel();
+  }
+
+  /** Bind the label to a translation key; re-resolves on locale change (via the tree walk). */
+  setTextKey(key: string, params?: TrParams): void {
+    this.labelKey = key;
+    this.labelKeyParams = params ?? null;
     this.updateLabel();
   }
 
@@ -131,7 +153,7 @@ export class Label2D extends UIControl2D {
   }
 
   override updateLabel(): void {
-    const text = this.label ?? '';
+    const text = this.getDisplayText();
     if (text.length === 0) {
       this.renderState = null;
       this.typewriterActive = false;

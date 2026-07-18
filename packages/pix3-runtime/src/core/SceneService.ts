@@ -14,6 +14,8 @@ import type { AssetLoader } from './AssetLoader';
 import type { ECSService } from './ECSService';
 import type { ResourceManager } from './ResourceManager';
 import type { SceneRaycastHit } from './raycast';
+import { LocalizationService } from './localization/LocalizationService';
+import { getActiveLocalization } from './localization/active-localization';
 
 /** Options for {@link SceneService.flash}. */
 export interface FlashOptions {
@@ -56,6 +58,7 @@ export interface SceneServiceDelegate {
   findNodeById(id: string): NodeBase | null;
   getRootNodes(): NodeBase[];
   getAudioService(): AudioService;
+  getLocalizationService?(): LocalizationService | null;
   getAssetLoader(): AssetLoader;
   getResourceManager(): ResourceManager;
   getECSService(): ECSService | null;
@@ -120,6 +123,7 @@ export class SceneService {
   private flashAnimationId: number | null = null;
   private juiceApi: JuiceApi | null = null;
   private audioApi: AudioApi | null = null;
+  private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
   private collision2dService: Collision2DService | null = null;
   private readonly scratchPointerUnproject = new Vector3();
@@ -205,6 +209,20 @@ export class SceneService {
       this.audioApi = new AudioApi(this);
     }
     return this.audioApi;
+  }
+
+  /**
+   * Localization service — `tr(key, params)`, `setLocale(locale)`, `trSprite(key)`, `onChange(...)`.
+   * Resolves the play-mode instance when a scene is running, else the editor preview instance
+   * (globalThis sink), else a null-safe inert instance so `tr` echoes keys instead of throwing.
+   * Example: `this.scene.localization.tr('mission.name.2')`.
+   */
+  get localization(): LocalizationService {
+    const fromDelegate = this.delegate?.getLocalizationService?.() ?? null;
+    if (fromDelegate) return fromDelegate;
+    const active = getActiveLocalization();
+    if (active) return active;
+    return (this.inertLocalization ??= new LocalizationService());
   }
 
   /**

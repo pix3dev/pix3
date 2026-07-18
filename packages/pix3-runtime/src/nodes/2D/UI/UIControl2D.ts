@@ -10,12 +10,14 @@ import {
 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { resolveLocalizedText } from '../../../core/localization/active-localization';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { ScrollContainer2D } from './ScrollContainer2D';
 
 export interface UIControl2DProps extends Node2DProps {
   enabled?: boolean;
   label?: string;
+  labelKey?: string;
   labelFontFamily?: string;
   labelFontSize?: number;
   labelColor?: string;
@@ -35,6 +37,8 @@ export abstract class UIControl2D extends Node2D {
   // Control state
   private _enabled: boolean = true;
   label: string;
+  /** Localization key; when non-empty and localization is active, its translation replaces `label`. */
+  labelKey: string;
   labelFontFamily: string;
   labelFontSize: number;
   labelColor: string;
@@ -63,6 +67,7 @@ export abstract class UIControl2D extends Node2D {
 
     this._enabled = props.enabled ?? true;
     this.label = props.label ?? '';
+    this.labelKey = props.labelKey ?? '';
     this.labelFontFamily = props.labelFontFamily ?? 'Arial';
     this.labelFontSize = props.labelFontSize ?? 16;
     this.labelColor = props.labelColor ?? '#ffffff';
@@ -73,7 +78,7 @@ export abstract class UIControl2D extends Node2D {
       this.tryLoadTextureFromPath(this.texturePath);
     }
 
-    if (this.label.trim().length > 0) {
+    if (this.label.trim().length > 0 || this.labelKey.length > 0) {
       this.updateLabel();
     }
   }
@@ -297,10 +302,24 @@ export abstract class UIControl2D extends Node2D {
   }
 
   /**
+   * The text actually rendered: the translation of `labelKey` (falling back to the literal `label`)
+   * when a key is set and localization is active, otherwise the literal `label`.
+   */
+  protected getDisplayText(): string {
+    return this.labelKey ? resolveLocalizedText(this.labelKey, this.label) : this.label;
+  }
+
+  /** Re-render the label after a locale switch (used by the localization tree walk). */
+  refreshLocalizedLabel(): void {
+    this.updateLabel();
+  }
+
+  /**
    * Update the label display
    */
   protected updateLabel(): void {
-    if (!this.label) {
+    const text = this.getDisplayText();
+    if (!text) {
       if (this.labelMesh) {
         this.remove(this.labelMesh);
         this.labelMesh = null;
@@ -317,12 +336,9 @@ export abstract class UIControl2D extends Node2D {
       this.labelTexture.dispose();
       this.labelTexture = null;
     }
-    const textureWidth = Math.max(
-      128,
-      Math.ceil(this.label.length * this.labelFontSize * 0.75) + 24
-    );
+    const textureWidth = Math.max(128, Math.ceil(text.length * this.labelFontSize * 0.75) + 24);
     const textureHeight = Math.max(32, Math.ceil(this.labelFontSize * 2));
-    this.labelTexture = this.createLabelTexture(this.label, textureWidth, textureHeight);
+    this.labelTexture = this.createLabelTexture(text, textureWidth, textureHeight);
 
     if (!this.labelMesh) {
       const material = new MeshBasicMaterial({
@@ -384,6 +400,23 @@ export abstract class UIControl2D extends Node2D {
           setValue: (n, v) => {
             const control = n as UIControl2D;
             control.label = String(v);
+            control.updateLabel();
+          },
+        },
+        {
+          name: 'labelKey',
+          type: 'string',
+          ui: {
+            label: 'Label Key',
+            group: 'Label',
+            editor: 'localization-key',
+            description:
+              'Localization key; when set, its translation is shown instead of the literal label',
+          },
+          getValue: n => (n as UIControl2D).labelKey,
+          setValue: (n, v) => {
+            const control = n as UIControl2D;
+            control.labelKey = String(v);
             control.updateLabel();
           },
         },

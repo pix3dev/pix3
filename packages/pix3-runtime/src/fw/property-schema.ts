@@ -74,7 +74,8 @@ export interface PropertyUIHints {
     | 'audio-resource'
     | 'model-resource'
     | 'animation-resource'
-    | 'sprite-size';
+    | 'sprite-size'
+    | 'localization-key';
 
   /** Optional resource subtype for object-like values */
   resourceType?: 'texture' | 'model';

@@ -761,6 +761,7 @@ export class SceneSaver {
   private serializeCommonUIControlProps(node: UIControl2D, props: Record<string, unknown>): void {
     if (node.enabled !== true) props.enabled = node.enabled;
     if (node.label !== '') props.label = node.label;
+    if (node.labelKey !== '') props.labelKey = node.labelKey;
     if (node.labelFontFamily !== 'Arial') props.labelFontFamily = node.labelFontFamily;
     if (node.labelFontSize !== 16) props.labelFontSize = node.labelFontSize;
     if (node.labelColor !== '#ffffff') props.labelColor = node.labelColor;
