@@ -2,6 +2,12 @@ import { Mesh, MeshBasicMaterial, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import { configure2DTexture } from '../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
+import {
+  applyTextureRegionToTexture,
+  composeTextureRegion,
+  type TextureRegion,
+} from '../../core/texture-region';
+import { baseRegionOf, copyAtlasMetadata } from '../../core/atlas-frame-map';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
 import {
@@ -303,16 +309,23 @@ export class AnimatedSprite2D extends Node2D {
         this.material.needsUpdate = true;
       }
 
-      if (usesSequenceTexture) {
-        texture.offset.set(0, 0);
-        texture.repeat.set(1, 1);
-      } else if (currentFrame) {
-        texture.offset.set(currentFrame.offset.x, currentFrame.offset.y);
-        texture.repeat.set(currentFrame.repeat.x, currentFrame.repeat.y);
-      } else {
-        texture.offset.set(0, 0);
-        texture.repeat.set(1, 1);
+      // Compose the frame's local UV rect against the texture's atlas frame (if
+      // it is an atlas view) so the sampled subrect lands inside the packed
+      // frame. A sequence frame or the no-frame fallback used to reset to
+      // (0,0)/(1,1) — which would erase the atlas region — so they now resolve to
+      // the base frame region (null localRegion → base). baseRegionOf is null for
+      // a non-atlased texture, giving the original absolute behavior.
+      const baseRegion = baseRegionOf(texture);
+      let localRegion: TextureRegion | null = null;
+      if (!usesSequenceTexture && currentFrame) {
+        localRegion = {
+          x: currentFrame.offset.x,
+          y: currentFrame.offset.y,
+          width: currentFrame.repeat.x,
+          height: currentFrame.repeat.y,
+        };
       }
+      applyTextureRegionToTexture(texture, composeTextureRegion(baseRegion, localRegion));
 
       this.material.color.set('#ffffff');
     } else {
@@ -404,6 +417,10 @@ export class AnimatedSprite2D extends Node2D {
     const nextTexture = texture.clone();
     // sRGB + mipmaps disabled (see configure2DTexture for the why).
     configure2DTexture(nextTexture);
+    // Re-stamp atlas metadata explicitly — Texture.copy's userData handling
+    // varies across three versions — so per-frame region composition can find
+    // the packed frame region on this per-node clone.
+    copyAtlasMetadata(texture, nextTexture);
     return nextTexture;
   }
 

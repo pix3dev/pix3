@@ -65,6 +65,35 @@ export function applyTextureRegionToTexture(texture: Texture, region: TextureReg
   }
 }
 
+/**
+ * Compose a `local` region (expressed in a source texture's own UV space) into
+ * the UV space of an atlas sheet, given the `base` region where that source was
+ * packed. Identity when `base` is null (non-atlased texture), and passthrough
+ * when `local` is null (no crop — the base frame itself). This is the single
+ * mapping that lets a Sprite2D crop or an AnimatedSprite2D frame — authored
+ * against the full source texture — sample the correct subrect of a packed sheet.
+ *
+ * `result = base ∘ local`: the local rect is scaled into the base rect and
+ * offset by the base origin, matching three.js `offset`/`repeat` semantics.
+ */
+export function composeTextureRegion(
+  base: TextureRegion | null,
+  local: TextureRegion | null
+): TextureRegion | null {
+  if (!base) {
+    return local;
+  }
+  if (!local) {
+    return base;
+  }
+  return {
+    x: base.x + local.x * base.width,
+    y: base.y + local.y * base.height,
+    width: local.width * base.width,
+    height: local.height * base.height,
+  };
+}
+
 export function isSameTextureRegion(a: TextureRegion | null, b: TextureRegion | null): boolean {
   if (a === b) {
     return true;

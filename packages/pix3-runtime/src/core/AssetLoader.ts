@@ -15,6 +15,20 @@ import {
   normalizeAnimationResource,
   type AnimationResource,
 } from './AnimationResource';
+import { configure2DTexture } from './configure-2d-texture';
+import { applyTextureRegionToTexture } from './texture-region';
+import { stampAtlasView, type AtlasFrame, type AtlasResolver } from './atlas-frame-map';
+
+/** Options for {@link AssetLoader.loadTexture}. */
+export interface LoadTextureOptions {
+  /**
+   * Consult the atlas resolver (default true). Pass `false` for consumers that
+   * must always receive the raw, standalone texture — 3D materials (which keep
+   * mipmaps) and 9-slice / tiled sprites (whose geometry assumes full-[0,1] UVs).
+   * Defense in depth: the packer already excludes any path such a node references.
+   */
+  atlas?: boolean;
+}
 
 export interface AssetLoaderResult {
   node: NodeBase;
@@ -50,6 +64,7 @@ export class AssetLoader {
   private readonly animationResourceLoadInFlight = new Map<string, Promise<AnimationResource>>();
   private readonly audioLoadInFlight = new Map<string, Promise<AudioBuffer>>();
   private readonly audioMetadataCache = new Map<string, LoadedAudioMetadata>();
+  private atlasResolver: AtlasResolver | null = null;
 
   constructor(resources: ResourceManager, audioService?: AudioService) {
     this.resources = resources;
@@ -59,6 +74,27 @@ export class AssetLoader {
 
   getResourceManager(): ResourceManager {
     return this.resources;
+  }
+
+  /**
+   * Install (or clear with `null`) the pre-launch texture atlas resolver. Set it
+   * before `SceneRunner.startScene` — thereafter every atlas-eligible
+   * {@link loadTexture} returns a lightweight view onto a packed sheet instead of
+   * loading the standalone source file. Null = feature off, byte-identical to the
+   * pre-atlas path.
+   */
+  setAtlasResolver(resolver: AtlasResolver | null): void {
+    this.atlasResolver = resolver;
+  }
+
+  /**
+   * Pre-seed the texture cache with a ready sheet under a synthetic key (e.g.
+   * `pix3atlas://<hash>/sheet-0`). The editor packer calls this for its
+   * in-memory / cache-hit sheets so the recursive sheet load inside
+   * {@link loadTexture} resolves without touching the project filesystem.
+   */
+  seedTexture(resourcePath: string, texture: Texture): void {
+    this.textureCache.set(resourcePath, texture);
   }
 
   getAudioMetadata(resourcePath: string): LoadedAudioMetadata | null {
@@ -192,9 +228,12 @@ export class AssetLoader {
   }
 
   /**
-   * Load an image as a THREE.Texture.
+   * Load an image as a THREE.Texture. When an atlas resolver is installed and the
+   * path was packed, returns a view onto the shared sheet (see
+   * {@link setAtlasResolver}); otherwise loads the standalone file exactly as
+   * before. Pass `{ atlas: false }` to force the raw file (3D / tiled consumers).
    */
-  async loadTexture(resourcePath: string): Promise<Texture> {
+  async loadTexture(resourcePath: string, options?: LoadTextureOptions): Promise<Texture> {
     const cached = this.textureCache.get(resourcePath);
     if (cached) {
       return cached;
@@ -203,6 +242,21 @@ export class AssetLoader {
     const inFlight = this.textureLoadInFlight.get(resourcePath);
     if (inFlight) {
       return inFlight;
+    }
+
+    // Atlas remap: if this path was packed, return a view onto its sheet. The
+    // view is cached under the original path so all later hits (including the
+    // startScene clone re-resolving the same paths) return the same instance.
+    if (options?.atlas !== false && this.atlasResolver) {
+      const frame = this.atlasResolver.resolve(resourcePath);
+      if (frame) {
+        const viewPromise = this.buildAtlasView(resourcePath, frame);
+        this.textureLoadInFlight.set(resourcePath, viewPromise);
+        viewPromise.finally(() => {
+          this.textureLoadInFlight.delete(resourcePath);
+        });
+        return viewPromise;
+      }
     }
 
     console.log(`[AssetLoader] Loading texture: ${resourcePath}`);
@@ -254,6 +308,25 @@ export class AssetLoader {
     });
 
     return loadPromise;
+  }
+
+  /**
+   * Build (and cache under the original path) a texture view for a packed frame.
+   * The sheet is loaded once through the normal path (`atlas: false` so the
+   * resolver never re-maps a sheet key), and its GPU image is shared by every
+   * view via three.js `Source` refcounting — one upload per sheet. Per-view
+   * `offset`/`repeat` are material `uvTransform` uniforms, not GL texture state,
+   * so all views of a sheet (identically configured via `configure2DTexture`)
+   * share a single GL texture object.
+   */
+  private async buildAtlasView(resourcePath: string, frame: AtlasFrame): Promise<Texture> {
+    const sheet = await this.loadTexture(frame.sheetPath, { atlas: false });
+    const view = sheet.clone();
+    configure2DTexture(view);
+    applyTextureRegionToTexture(view, frame.region);
+    stampAtlasView(view, frame.region, { width: frame.pixelWidth, height: frame.pixelHeight });
+    this.textureCache.set(resourcePath, view);
+    return view;
   }
 
   async loadAnimationResource(resourcePath: string): Promise<AnimationResource> {

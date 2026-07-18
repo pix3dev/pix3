@@ -1152,7 +1152,9 @@ export class SceneLoader {
 
         if (texturePath) {
           try {
-            const loadedTexture = await this.assetLoader.loadTexture(texturePath);
+            // Never atlas a tiled/9-slice sprite: its geometry assumes full-[0,1]
+            // UVs with edge-clamp semantics that differ inside a packed sheet.
+            const loadedTexture = await this.assetLoader.loadTexture(texturePath, { atlas: false });
             node.setTexture(loadedTexture);
           } catch (error) {
             console.warn(
@@ -1630,7 +1632,8 @@ export class SceneLoader {
         });
         if (aoMapSrc) {
           try {
-            const aoTexture = await this.assetLoader.loadTexture(aoMapSrc);
+            // 3D material textures keep mipmaps and must never be atlased.
+            const aoTexture = await this.assetLoader.loadTexture(aoMapSrc, { atlas: false });
             geometryMesh.setAOMap(aoTexture);
           } catch (error) {
             console.warn(
@@ -1641,7 +1644,8 @@ export class SceneLoader {
         }
         if (mapSrc) {
           try {
-            const albedoTexture = await this.assetLoader.loadTexture(mapSrc);
+            // 3D material textures keep mipmaps and must never be atlased.
+            const albedoTexture = await this.assetLoader.loadTexture(mapSrc, { atlas: false });
             geometryMesh.setMap(albedoTexture);
           } catch (error) {
             console.warn(

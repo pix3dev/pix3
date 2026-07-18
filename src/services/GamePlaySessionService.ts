@@ -20,6 +20,8 @@ import { createDefaultQualitySettings, DEFAULT_TARGET_PLATFORM } from '@/core/Pr
 import { OperationService } from '@/services/OperationService';
 import { ProfilerSessionService } from '@/services/ProfilerSessionService';
 import { RuntimeErrorBridgeService } from '@/services/RuntimeErrorBridgeService';
+import { TextureAtlasService } from '@/services/atlas/TextureAtlasService';
+import { isAtlas2DEnabled } from '@/services/atlas/rendering-2d-flags';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
@@ -62,6 +64,9 @@ export class GamePlaySessionService {
 
   @inject(RuntimeErrorBridgeService)
   private readonly runtimeErrorBridge!: RuntimeErrorBridgeService;
+
+  @inject(TextureAtlasService)
+  private readonly textureAtlasService!: TextureAtlasService;
 
   private initialized = false;
   private disposeUiSubscription?: () => void;
@@ -337,6 +342,17 @@ export class GamePlaySessionService {
       return;
     }
 
+    // Phase 2: pack (or reuse cached) texture atlas and install the resolver on
+    // the shared AssetLoader BEFORE startScene, so the scene clone resolves every
+    // eligible texture to a view onto a packed sheet. Failures fall back to
+    // un-atlased loading inside prepareForPlay; when disabled we clear any
+    // resolver from a prior run so the path is byte-identical to pre-atlas.
+    if (isAtlas2DEnabled()) {
+      await this.textureAtlasService.prepareForPlay(this.assetLoader);
+    } else {
+      this.assetLoader.setAtlasResolver(null);
+    }
+
     try {
       await runner.startScene(activeSceneId);
       this.updateHostRunningState(true);
@@ -354,6 +370,9 @@ export class GamePlaySessionService {
     this.focusCleanup?.();
     this.focusCleanup = undefined;
     this.profilerSessionService.endSession();
+    // Keep atlasing strictly play-mode-scoped: edit-mode texture loads on the
+    // shared AssetLoader must always get raw standalone textures.
+    this.assetLoader.setAtlasResolver(null);
 
     if (this.runner) {
       this.runner.stop();

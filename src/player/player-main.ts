@@ -6,6 +6,7 @@ import {
   AssetLoader,
   AudioService,
   getGameDebug,
+  installAtlasFromManifest,
   registerBuiltInScripts,
   RuntimeRenderer,
   SceneLoader,
@@ -306,6 +307,8 @@ class PreviewPlayerApp {
     this.stack = { runner, renderer, disposeFrameSubscription };
     this.resetMetricsWindow();
 
+    // Pre-packed atlas (if the session shipped one) → texture views onto sheets.
+    await installAtlasFromManifest(assetLoader, resourceManager);
     await runner.startScene(scenePath);
     if (generation !== this.startGeneration) {
       return;

@@ -6,9 +6,11 @@ import { configure2DTexture } from '../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
 import {
   applyTextureRegionToTexture,
+  composeTextureRegion,
   sanitizeTextureRegion,
   type TextureRegion,
 } from '../../core/texture-region';
+import { atlasSizeOf, baseRegionOf } from '../../core/atlas-frame-map';
 
 export interface SpriteAnchor2D {
   x: number;
@@ -159,7 +161,11 @@ export class Sprite2D extends Node2D {
         // flags the clone for its own GPU upload.
         configure2DTexture(this.ownedTexture);
       }
-      applyTextureRegionToTexture(this.ownedTexture, region);
+      // Compose the crop against the base texture's atlas frame (if any) so the
+      // crop selects a subrect of the packed frame, not of the whole sheet.
+      // baseRegionOf is null for a non-atlased texture → the crop is used as-is.
+      const composed = composeTextureRegion(baseRegionOf(this.baseTexture), region);
+      applyTextureRegionToTexture(this.ownedTexture, composed);
       if (this.material.map !== this.ownedTexture) {
         this.material.map = this.ownedTexture;
         this.material.needsUpdate = true;
@@ -212,15 +218,15 @@ export class Sprite2D extends Node2D {
     // active crop must be restored after the swap.
     this.applyTexturePresentation();
 
-    // Capture the texture aspect ratio and original dimensions
-    if (texture.image) {
-      const img = texture.image as any;
-      const w = img.naturalWidth ?? img.width;
-      const h = img.naturalHeight ?? img.height;
-
-      console.log(
-        `[Sprite2D] Texture loaded: ${w}x${h} for node "${this.name}" (natural=${img.naturalWidth}x${img.naturalHeight})`
-      );
+    // Capture the texture aspect ratio and original dimensions. For an atlas
+    // view, `texture.image` is the whole sheet, so prefer the packed frame's
+    // recorded source size — otherwise an un-sized sprite would blow up to the
+    // sheet dimensions.
+    const atlasSize = atlasSizeOf(texture);
+    if (atlasSize || texture.image) {
+      const img = (texture.image ?? {}) as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number };
+      const w = atlasSize?.width ?? img.naturalWidth ?? img.width;
+      const h = atlasSize?.height ?? img.naturalHeight ?? img.height;
 
       if (w && h) {
         this.textureAspectRatio = w / h; // Store aspect ratio
@@ -229,7 +235,6 @@ export class Sprite2D extends Node2D {
 
         // If no explicit dimensions, use texture dimensions
         if (this.width === undefined || this.height === undefined) {
-          console.log(`[Sprite2D] Auto-resizing "${this.name}" to texture dimensions: ${w}x${h}`);
           this.updateSize(w, h);
         }
       }
