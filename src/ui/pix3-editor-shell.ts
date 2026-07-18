@@ -654,10 +654,19 @@ export class Pix3EditorShell extends ComponentBase {
         // If a project is not already open, attempt to open the most recent one (best-effort).
         if (noTargetFound && appState.project.status !== 'ready') {
           const recents = this.projectService.getRecentProjects();
+          // `recents` is sorted by lastOpenedAt (most recent first). Restore the
+          // most recently opened project regardless of backend — previously we
+          // always preferred any browser project over a local one, so a local
+          // project opened later would still lose to an older browser project on
+          // reload. Cloud entries are only openable while authenticated, so skip
+          // those when signed out.
           const preferredRecent =
-            recents.find(entry => entry.backend === 'browser') ??
-            recents.find(entry => entry.backend === 'local') ??
-            (this.isAuthenticated ? recents[0] : null);
+            recents.find(
+              entry =>
+                entry.backend === 'browser' ||
+                entry.backend === 'local' ||
+                (entry.backend === 'cloud' && this.isAuthenticated)
+            ) ?? null;
 
           if (preferredRecent) {
             // Don't block the UI; attempt to open the most recent project in background.

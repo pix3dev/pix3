@@ -1450,12 +1450,12 @@ export class InspectorPanel extends ComponentBase {
           <button
             class="group-fit-button"
             type="button"
-            title="Resize this group to wrap its children (without moving them)"
+            title="Fit to contents — resize this group to wrap its children (without moving them)"
+            aria-label="Fit to contents"
             ?disabled=${readOnly || !hasChildren}
             @click=${() => this.fitGroup2DToContents()}
           >
             ${this.iconService.getIcon('minimize-2', 14)}
-            <span>Fit to contents</span>
           </button>
         </div>
       `,

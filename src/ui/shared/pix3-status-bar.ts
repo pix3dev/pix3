@@ -12,6 +12,7 @@ import {
   ProjectDiagnosticsService,
   type ScriptDiagnosticsSummary,
 } from '@/services/ProjectDiagnosticsService';
+import { TabPerformanceService, type TabPerformanceSample } from '@/services/TabPerformanceService';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
@@ -44,6 +45,9 @@ export class Pix3StatusBar extends ComponentBase {
   @inject(ProjectDiagnosticsService)
   private readonly diagnosticsService!: ProjectDiagnosticsService;
 
+  @inject(TabPerformanceService)
+  private readonly tabPerformanceService!: TabPerformanceService;
+
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
 
@@ -66,6 +70,9 @@ export class Pix3StatusBar extends ComponentBase {
   private diagnostics: ScriptDiagnosticsSummary | null = null;
 
   @state()
+  private perfSample: TabPerformanceSample = { cpuLoad: 0, gpuMs: null, renderMs: 0 };
+
+  @state()
   private updateState: UpdateCheckState = {
     status: 'idle',
     currentVersion: CURRENT_EDITOR_VERSION,
@@ -78,6 +85,7 @@ export class Pix3StatusBar extends ComponentBase {
   private disposeUiSubscription?: () => void;
   private disposeUpdateCheckSubscription?: () => void;
   private disposeDiagnosticsSubscription?: () => void;
+  private disposePerformanceSubscription?: () => void;
 
   connectedCallback() {
     super.connectedCallback();
@@ -114,6 +122,10 @@ export class Pix3StatusBar extends ComponentBase {
       this.diagnostics = summary;
     });
 
+    this.disposePerformanceSubscription = this.tabPerformanceService.subscribe(sample => {
+      this.perfSample = sample;
+    });
+
     // Initialize state
     this.projectName = appState.project.projectName;
     this.isPlaying = appState.ui.isPlaying;
@@ -126,6 +138,7 @@ export class Pix3StatusBar extends ComponentBase {
     this.disposeUiSubscription?.();
     this.disposeUpdateCheckSubscription?.();
     this.disposeDiagnosticsSubscription?.();
+    this.disposePerformanceSubscription?.();
     if (this.messageTimeout !== null) {
       window.clearTimeout(this.messageTimeout);
     }
@@ -183,7 +196,8 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
-          ${this.renderDiagnostics()} ${this.projectName ? this.renderBundleSize() : html``}
+          ${this.renderPerformance()} ${this.renderDiagnostics()}
+          ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`
@@ -223,6 +237,37 @@ export class Pix3StatusBar extends ComponentBase {
     this.layoutManager.focusPanel('logs');
     void this.diagnosticsService.checkProject();
   };
+
+  /**
+   * A glanceable CPU/GPU load readout for the whole editor tab. CPU is a
+   * main-thread load estimate (event-loop lag); GPU is the viewport's measured
+   * GPU frame time, falling back to render (CPU-side) frame time where the
+   * backend can't report GPU timing.
+   */
+  private renderPerformance() {
+    const { cpuLoad, gpuMs, renderMs } = this.perfSample;
+    const cpuPct = Math.round(cpuLoad * 100);
+    const level = cpuLoad >= 0.75 ? 'high' : cpuLoad >= 0.4 ? 'mid' : 'low';
+
+    const hasGpu = gpuMs !== null;
+    const gpuLabel = hasGpu ? 'GPU' : 'Frame';
+    const gpuValue = `${(hasGpu ? gpuMs : renderMs).toFixed(1)}ms`;
+
+    const title =
+      'Editor tab load\n' +
+      `CPU ${cpuPct}% — main-thread load (event-loop lag)\n` +
+      (hasGpu
+        ? `GPU ${gpuValue} — viewport GPU frame time`
+        : `Frame ${gpuValue} — viewport render time (GPU timing unavailable on this backend)`);
+
+    return html`
+      <span class="status-indicator status-perf ${level}" title=${title}>
+        <span class="status-perf-metric">CPU ${cpuPct}%</span>
+        <span class="status-perf-sep">·</span>
+        <span class="status-perf-metric">${gpuLabel} ${gpuValue}</span>
+      </span>
+    `;
+  }
 
   private renderBundleSize() {
     const label = this.bundleSizeComputing

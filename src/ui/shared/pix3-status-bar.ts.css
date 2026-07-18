@@ -151,6 +151,28 @@ pix3-status-bar .status-bundle-size:focus-visible {
   outline-offset: 2px;
 }
 
+pix3-status-bar .status-perf {
+  gap: 6px;
+  cursor: default;
+  background: rgba(243, 244, 246, 0.08);
+  color: rgba(243, 244, 246, 0.78);
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-status-bar .status-perf.mid {
+  background: rgba(251, 191, 36, 0.14);
+  color: rgba(251, 191, 36, 0.95);
+}
+
+pix3-status-bar .status-perf.high {
+  background: rgba(248, 113, 113, 0.16);
+  color: rgba(248, 113, 113, 0.95);
+}
+
+pix3-status-bar .status-perf-sep {
+  opacity: 0.45;
+}
+
 pix3-status-bar .status-version {
   color: rgba(243, 244, 246, 0.72);
 }
