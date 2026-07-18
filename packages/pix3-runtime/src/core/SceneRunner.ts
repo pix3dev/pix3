@@ -139,6 +139,20 @@ export class SceneRunner {
   /** Phase-3 2D quad batcher (only while enabled). Rebuilt from a fresh scene. */
   private batch2D: Batch2DSystem | null = null;
   private batch2DEnabled = false;
+
+  /** Play-mode localization: its own instance so a game `setLocale` never leaks
+   *  into the editor preview. Created in `runGraph`, torn down in `stop()`. */
+  private localization: LocalizationService | null = null;
+  /** The active-localization pointer that was live before we started (the editor
+   *  preview instance in-editor, or null in exports) — restored on `stop()`. */
+  private previousActiveLocalization: LocalizationService | null = null;
+  private localizationUnsub: (() => void) | null = null;
+  /** Config injected by the host before `startScene` (from the project manifest);
+   *  null = no localization block ⇒ an inert default instance. */
+  private localizationConfig: LocalizationConfig | null = null;
+  /** Locale to seed the play instance with (editor's current preview locale), so
+   *  "preview ru → Play" starts in ru; null ⇒ config's `defaultLocale`. */
+  private seedLocale: string | null = null;
   /** Reused per-frame collector for the render-order walk → batcher input. */
   private readonly ordered2DBuffer: OrderedMesh2D[] = [];
 
@@ -200,6 +214,18 @@ export class SceneRunner {
   /** Current batcher stats for the last frame, or null when batching is off. */
   getBatch2DStats(): Batch2DStats | null {
     return this.batch2D ? this.batch2D.stats : null;
+  }
+
+  /**
+   * Configure play-mode localization. Call before `startScene`. `config` comes
+   * from the project manifest's `localization` block (null = no localization);
+   * `seedLocale` is the editor's current preview locale so play starts in it
+   * (omit in exports to start in `config.defaultLocale`). The generated export
+   * bootstrap instead `await`s `setLocale(defaultLocale)` before start (no seed).
+   */
+  setLocalizationConfig(config: LocalizationConfig | null, seedLocale?: string | null): void {
+    this.localizationConfig = config;
+    this.seedLocale = seedLocale ?? null;
   }
 
   /**
@@ -344,6 +370,11 @@ export class SceneRunner {
     this.gameTime.reset();
     this.audioMuffled = false;
 
+    // Localization: create a play-mode instance (isolated from the editor
+    // preview), activate it, and subscribe live re-render before the first tick
+    // so scripts' onStart already resolve `this.scene.localization` correctly.
+    this.setupLocalization(this.runtimeGraph.rootNodes);
+
     this.ecsService.beginScene(this.sceneService, this.inputService);
 
     // Initial tick to update transforms before render
@@ -355,6 +386,62 @@ export class SceneRunner {
     this.tick();
   }
 
+  /**
+   * Stand up the play-mode {@link LocalizationService}: configure it from the
+   * injected manifest block (or an inert `en` default), point it at the runtime
+   * ResourceManager for lazy table loads, stash the previously-active pointer
+   * (the editor preview instance), activate this one, and subscribe live
+   * re-render. Seeds the editor's preview locale so "preview ru → Play" starts
+   * in ru; the table load is async, so the tree is re-walked once it lands.
+   */
+  private setupLocalization(roots: readonly NodeBase[]): void {
+    const service = new LocalizationService();
+    service.configure(this.localizationConfig ?? { defaultLocale: 'en' });
+    service.attachResources(this.resourceManager);
+
+    this.previousActiveLocalization = getActiveLocalization();
+    this.localization = service;
+    setActiveLocalization(service);
+
+    // Re-render keyed labels whenever the locale switches or a table is injected.
+    this.localizationUnsub = service.onChange(() => {
+      if (this.runtimeGraph) applyLocaleToTree(this.runtimeGraph.rootNodes);
+    });
+
+    const seed = this.seedLocale ?? this.localizationConfig?.defaultLocale ?? 'en';
+    // setLocale loads the table lazily; kick a re-walk when it resolves so a
+    // seeded non-default locale paints (fire-and-forget — runGraph is sync).
+    void service
+      .setLocale(seed)
+      .then(() => {
+        if (this.localization === service && this.runtimeGraph) {
+          applyLocaleToTree(this.runtimeGraph.rootNodes);
+        }
+      })
+      .catch(() => {
+        /* setLocale never throws (keeps an empty table on load failure) */
+      });
+
+    // Initial pass for keys already resolvable (fallback locale / injected tables).
+    applyLocaleToTree(roots);
+  }
+
+  /** Tear down play-mode localization and restore the editor preview pointer.
+   *  Safe to call when localization was never set up (all guards are null-safe). */
+  private teardownLocalization(): void {
+    if (this.localizationUnsub) {
+      this.localizationUnsub();
+      this.localizationUnsub = null;
+    }
+    if (this.localization) {
+      // Restore whatever was active before play (editor preview, or null in exports).
+      setActiveLocalization(this.previousActiveLocalization);
+      this.localization.dispose();
+      this.localization = null;
+    }
+    this.previousActiveLocalization = null;
+  }
+
   private isPaused: boolean = false;
 
   stop(): void {
@@ -364,6 +451,9 @@ export class SceneRunner {
     // skip listeners and input lock are all released before we detach scripts
     // and dispose the graph below (D9).
     this.sceneService.cancelActiveCutscene();
+    // Restore the editor preview localization pointer and dispose the play
+    // instance BEFORE the graph is torn down — runs on every stop (incl. abnormal).
+    this.teardownLocalization();
     registerRuntimeSceneRoot(null);
     registerRuntimeLivePropertySink(null);
     if (this.physicsDebugOverlay) {
@@ -1171,6 +1261,9 @@ export class SceneRunner {
       },
       getAudioService(): AudioService {
         return runner.audioService;
+      },
+      getLocalizationService(): LocalizationService | null {
+        return runner.localization;
       },
       getAssetLoader(): AssetLoader {
         return runner.assetLoader;

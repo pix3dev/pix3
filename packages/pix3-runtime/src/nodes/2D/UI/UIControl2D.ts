@@ -303,9 +303,10 @@ export abstract class UIControl2D extends Node2D {
 
   /**
    * The text actually rendered: the translation of `labelKey` (falling back to the literal `label`)
-   * when a key is set and localization is active, otherwise the literal `label`.
+   * when a key is set and localization is active, otherwise the literal `label`. Public so the
+   * editor's viewport label proxies paint the same resolved text as the runtime (no drift).
    */
-  protected getDisplayText(): string {
+  getDisplayText(): string {
     return this.labelKey ? resolveLocalizedText(this.labelKey, this.label) : this.label;
   }
 

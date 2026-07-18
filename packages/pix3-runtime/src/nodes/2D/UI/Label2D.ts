@@ -67,7 +67,7 @@ export class Label2D extends UIControl2D {
     this.updateLabel();
   }
 
-  protected override getDisplayText(): string {
+  override getDisplayText(): string {
     return this.labelKey
       ? resolveLocalizedText(this.labelKey, this.label, this.labelKeyParams ?? undefined)
       : this.label;
