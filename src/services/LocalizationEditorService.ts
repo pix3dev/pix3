@@ -137,20 +137,36 @@ export class LocalizationEditorService {
       this.tables.set(locale, table);
     }
 
-    // Build the preview instance from the loaded tables.
-    const preview = new LocalizationService();
-    preview.configure({
-      defaultLocale: settings.defaultLocale,
-      fallbackLocale: settings.fallbackLocale,
-      locales: settings.locales,
-    });
+    // Build the preview instance from the loaded tables and activate it.
+    const preview = this.ensurePreview();
     for (const table of this.tables.values()) {
       preview.setTable(table);
     }
-    this.preview = preview;
     this.previewLocale = settings.defaultLocale;
     void preview.setLocale(settings.defaultLocale);
-    setActiveLocalization(preview);
+  }
+
+  /**
+   * Ensure the editor-preview {@link LocalizationService} exists and is the active
+   * localization pointer (so viewport label proxies resolve translations). Built
+   * lazily so authoring a first locale into a previously-inert project activates
+   * the preview without a project reload.
+   */
+  private ensurePreview(): LocalizationService {
+    if (!this.preview) {
+      const preview = new LocalizationService();
+      preview.configure({
+        defaultLocale: this.settings?.defaultLocale ?? 'en',
+        fallbackLocale: this.settings?.fallbackLocale,
+        locales: this.settings?.locales,
+      });
+      this.preview = preview;
+      if (!this.previewLocale) {
+        this.previewLocale = this.settings?.defaultLocale ?? 'en';
+      }
+      setActiveLocalization(preview);
+    }
+    return this.preview;
   }
 
   private async readTableFile(locale: string): Promise<LocaleTable> {
@@ -284,7 +300,7 @@ export class LocalizationEditorService {
     } else {
       this.settings = { defaultLocale: locale, locales: [locale] };
     }
-    this.preview?.setTable(table);
+    this.ensurePreview().setTable(table);
     await this.saveLocale(locale);
     this.mirrorSlice();
   }
@@ -302,6 +318,10 @@ export class LocalizationEditorService {
     const table = this.tables.get(locale);
     if (!table) return;
     try {
+      // writeTextFile does not create parent dirs; ensure `locales/` exists first
+      // (idempotent — no-op when already present) so the first save in a project
+      // without a locales/ directory succeeds.
+      await this.storage.createDirectory(LOCALES_DIR);
       await this.storage.writeTextFile(`${LOCALES_DIR}/${locale}.json`, serializeTableFile(table));
     } catch (error) {
       console.error(`[Localization] Failed to save locale "${locale}"`, error);
