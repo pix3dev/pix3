@@ -1,0 +1,32 @@
+# Enemy cannon shell (the original `Ball` / `Ball1`) — a small visible round
+# fired by parked gunships (NZ/SUC/Avalon/Lavalon) toward the castle. Spawned
+# at runtime under `effects` by EnemyBalloon.fireGun; flies left, and on
+# reaching the castle column deals its castle damage and pops. No hitbox — the
+# original Ball only ever hits the castle (no friendly fire). See EnemyShell.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Enemy cannon shell (prefab)
+root:
+  - id: enemy-shell
+    type: Sprite2D
+    name: Enemy Shell
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/bammo.png' }
+      width: 11
+      height: 11
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: enemy-shell-logic
+        type: user:EnemyShell
+        enabled: true
+        config:
+          vx: -300
+          vy: 0
+          damage: 0
+          impactX: -205
+          shake: 4
+    children: []

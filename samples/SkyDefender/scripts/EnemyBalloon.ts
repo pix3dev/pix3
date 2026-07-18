@@ -1,5 +1,7 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
+import { AdditiveBlending } from 'three';
+import type { Mesh, MeshBasicMaterial } from 'three';
 import { BurningWreck } from './BurningWreck';
 
 const HIT_SOUNDS = [
@@ -20,6 +22,17 @@ const DROP_SOUNDS = [
 ];
 const FALLING_MINE_PREFAB = 'res://src/assets/prefabs/falling-mine.pix3scene';
 const DEFAULT_SPRITE = 'res://src/assets/textures/enemy/air/typical_bloon/SU_typical.png';
+
+/** Gunship fire (NZ/SUC/Avalon/Lavalon): a visible shell + muzzle flash + recoil. */
+const ENEMY_SHELL_PREFAB = 'res://src/assets/prefabs/enemy-shell.pix3scene';
+const SHOT_SOUNDS = [
+  'res://src/assets/audio/guns/enemy/eshot1.mp3',
+  'res://src/assets/audio/guns/enemy/eshot2.mp3',
+  'res://src/assets/audio/guns/enemy/eshot3.mp3',
+];
+const SHELL_SPEED = 300;
+const RECOIL_DUR = 0.18;
+const FLASH_DUR = 0.12;
 
 /**
  * EnemyBalloon — a typical aerostat (GDD "S" class) with the original
@@ -51,6 +64,15 @@ export class EnemyBalloon extends Script {
   private linkNode: NodeBase | null = null;
   private mineNode: NodeBase | null = null;
 
+  // ── gunship rig (only on units with a gun; plain balloons leave these null) ──
+  private gunPivot: NodeBase | null = null;
+  private gunFlash: (NodeBase & { opacity?: number }) | null = null;
+  private gunBaseX = 0;
+  private gunBaseY = 0;
+  private gunBaseCaptured = false;
+  private recoilT = 0;
+  private flashT = 0;
+
   constructor(id: string, type: string) {
     super(id, type);
     this.config = {
@@ -70,6 +92,9 @@ export class EnemyBalloon extends Script {
       // Weapon rig parts (only active on units that carry the mine).
       linkHp: 25,
       mineHp: 25,
+      // Gunship type ('typical'|'heavy'|'' none) — set by WaveSpawner; drives
+      // the visible shell + muzzle flash + recoil in updateAttack.
+      gunType: '',
       // Texture the burning wreck reuses (set by WaveSpawner per livery).
       spritePath: '',
     };
@@ -135,6 +160,18 @@ export class EnemyBalloon extends Script {
     this.mineNode?.connect('damaged', this, (amount: unknown) => {
       this.onMineDamaged(Number(amount) || 0);
     });
+
+    // Gunship rig (WaveSpawner shows + positions it for NZ/SUC/Avalon/Lavalon).
+    this.gunPivot = (this.node?.getChildByName('Gun Pivot') as NodeBase | undefined) ?? null;
+    this.gunFlash =
+      (this.gunPivot?.getChildByName('Muzzle Flash') as (NodeBase & { opacity?: number }) | undefined) ??
+      null;
+    // Additive blend sells the flash (same trick as the explosion shockwave).
+    this.gunFlash?.traverse(obj => {
+      const mesh = obj as Mesh;
+      if (mesh.isMesh) (mesh.material as MeshBasicMaterial).blending = AdditiveBlending;
+    });
+    if (this.gunFlash) this.gunFlash.opacity = 0;
   }
 
   onUpdate(dt: number): void {
@@ -144,6 +181,9 @@ export class EnemyBalloon extends Script {
     if (this.baseY === null) {
       this.baseY = node.position.y;
     }
+
+    // Gun recoil/flash decay (no-op on plain balloons without a rig).
+    this.updateGunRig(dt);
 
     if (this.state === 'flyaway') {
       // The freed balloon sails up and slightly onward until off-screen.
@@ -248,10 +288,85 @@ export class EnemyBalloon extends Script {
     const period = Math.max(0.5, Number(this.config.attackPeriod));
     if (this.attackTimer < period) return;
     this.attackTimer = 0;
+    // Gunships fire a visible shell (damage rides on impact — see fireGun);
+    // plain platforms just thump the castle immediately.
+    if (this.hasGun()) {
+      this.fireGun(damage);
+      return;
+    }
     const sound = DROP_SOUNDS[Math.floor(Math.random() * DROP_SOUNDS.length)];
     this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.1 });
     this.scene?.juice.shake('camera2d', { amplitude: 4, duration: 0.15 });
     this.emitToGameRoot('castle-damaged', damage);
+  }
+
+  // ── gunship rig ─────────────────────────────────────────────────────────────
+
+  private hasGun(): boolean {
+    return !!this.gunPivot && this.gunPivot.visible && !!this.config.gunType;
+  }
+
+  /**
+   * Fire the suspended gun: recoil kick + muzzle flash + a visible shell that
+   * carries the castle damage to impact (so damage isn't double-counted with
+   * the cadence). Faithful to the original FN_MobStrike Ball + FxMg + d1 recoil.
+   */
+  private fireGun(damage: number): void {
+    const node = this.node;
+    const pivot = this.gunPivot;
+    if (!node || !pivot) return;
+    this.recoilT = RECOIL_DUR;
+    this.flashT = FLASH_DUR;
+    const sound = SHOT_SOUNDS[Math.floor(Math.random() * SHOT_SOUNDS.length)];
+    this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.1 });
+
+    // Muzzle in stage-local coords (enemies + effects share the stage transform,
+    // so local positions are interchangeable). The flash node sits at the muzzle.
+    const baseX = this.gunBaseCaptured ? this.gunBaseX : pivot.position.x;
+    const baseY = this.gunBaseCaptured ? this.gunBaseY : pivot.position.y;
+    const mx = node.position.x + baseX + (this.gunFlash?.position.x ?? 0);
+    const my = node.position.y + baseY + (this.gunFlash?.position.y ?? 0);
+    const heavy = this.config.gunType === 'heavy';
+    void this.scene
+      ?.instantiate(ENEMY_SHELL_PREFAB, { parent: 'effects' })
+      .then(shell => {
+        shell.position.set(mx, my, 0);
+        if (heavy) shell.scale.set(1.3, 1.3, 1);
+        const logic = shell.components.find(
+          c => (c as { type?: string }).type === 'user:EnemyShell'
+        ) as { config?: Record<string, unknown> } | undefined;
+        if (logic?.config) {
+          logic.config.vx = -SHELL_SPEED;
+          logic.config.vy = 0;
+          logic.config.damage = damage;
+        }
+      })
+      // If the shell can't spawn, don't lose the hit.
+      .catch(() => this.emitToGameRoot('castle-damaged', damage));
+  }
+
+  /** Per-frame recoil/flash decay for the gun rig (guarded; plain balloons skip). */
+  private updateGunRig(dt: number): void {
+    const pivot = this.gunPivot;
+    if (!pivot || !pivot.visible) return;
+    if (!this.gunBaseCaptured) {
+      this.gunBaseX = pivot.position.x;
+      this.gunBaseY = pivot.position.y;
+      this.gunBaseCaptured = true;
+    }
+    if (this.recoilT > 0) {
+      this.recoilT = Math.max(0, this.recoilT - dt);
+      const k = this.recoilT / RECOIL_DUR; // 1 → 0
+      const kick = this.config.gunType === 'heavy' ? 8 : 5;
+      pivot.position.x = this.gunBaseX + kick * k * k; // kicks back (+x), eases home
+    }
+    if (this.flashT > 0 && this.gunFlash) {
+      this.flashT = Math.max(0, this.flashT - dt);
+      const t = this.flashT / FLASH_DUR; // 1 → 0
+      this.gunFlash.opacity = 0.9 * t;
+      const s = 0.6 + 0.9 * t;
+      this.gunFlash.scale.set(s, s, 1);
+    }
   }
 
   // ── destruction scenarios ─────────────────────────────────────────────────

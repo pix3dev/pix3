@@ -13,6 +13,10 @@ const TRUCK_PREFAB = 'res://src/assets/prefabs/ground-truck.pix3scene';
 const TRANSPORTER_ENEMY_PREFAB = 'res://src/assets/prefabs/transporter-enemy.pix3scene';
 /** Joe's alarm cry — the original plays it on every ground-unit spawn. */
 const GROUND_ALARM_SOUND = 'res://src/assets/audio/other/warning_scream.mp3';
+/** Gunship barrels (B_TypGun / BigGun) — not any unit's body sprite, so they
+ *  must be warmed separately from the roster loop. */
+const TYP_GUN_TEX = 'res://src/assets/textures/enemy/weapons/typical_gun.png';
+const BIG_GUN_TEX = 'res://src/assets/textures/enemy/weapons/big_gun1.png';
 
 /** Original 640×480 top-left y → stage-local center-origin Y-up. */
 const toStageY = (origY: number): number => 240 - origY;
@@ -108,17 +112,20 @@ export class WaveSpawner extends Script {
     this.findNode('game-root')?.connect('bridge-ready', this, () => {
       this.bridgeReady = true;
     });
-    // Warm the sprite cache for every unit in the roster.
+    // Warm the sprite cache for every unit in the roster + the gunship barrels.
     const loader = this.scene?.getAssetLoader();
     if (loader) {
-      for (const [id, unit] of Object.entries(UNITS)) {
-        const paths = [unit.sprite, ...(unit.spriteVariants ?? [])].filter(Boolean);
-        for (const path of paths) {
-          void loader
-            .loadTexture(path)
-            .then(tex => this.unitTextures.set(path, tex))
-            .catch(() => console.warn(`[WaveSpawner] missing sprite ${path} (unit ${id})`));
+      const paths = new Set<string>([TYP_GUN_TEX, BIG_GUN_TEX]);
+      for (const unit of Object.values(UNITS)) {
+        for (const p of [unit.sprite, ...(unit.spriteVariants ?? [])].filter(Boolean)) {
+          paths.add(p);
         }
+      }
+      for (const path of paths) {
+        void loader
+          .loadTexture(path)
+          .then(tex => this.unitTextures.set(path, tex))
+          .catch(() => console.warn(`[WaveSpawner] missing sprite ${path}`));
       }
     }
   }
@@ -323,8 +330,64 @@ export class WaveSpawner extends Script {
       logic.config.attackDamage = unit.attackDamage ?? 0;
       logic.config.attackPeriod = unit.attackPeriod ?? 4;
       logic.config.bomber = unit.bomber === true;
+      logic.config.gunType = unit.gunType ?? '';
       // The burning wreck reuses the livery this balloon was dressed with.
       logic.config.spritePath = spritePath;
+    }
+
+    this.applyGunRig(node, unit);
+  }
+
+  /**
+   * Dress the (hidden) gun rig for gunship units. Typical (NZ/SUC) hang the
+   * TypGun on the gondola (the re-shown Weapon Mount, hitbox left disabled);
+   * heavy (Avalon/Lavalon) mount the BigGun toward the front of the hull with
+   * the gondola baked into the body art. Plain balloons keep the rig hidden.
+   */
+  private applyGunRig(node: NodeBase, unit: UnitDef): void {
+    const pivot = node.getChildByName('Gun Pivot');
+    if (!pivot) return;
+    if (!unit.gunType) {
+      pivot.visible = false;
+      return;
+    }
+    pivot.visible = true;
+    const barrel = pivot.getChildByName('Gun Barrel') as SpriteNode | null;
+    const flash = pivot.getChildByName('Muzzle Flash');
+    const w = unit.width;
+    const h = unit.height;
+    // Gun art points left already (muzzle on the left), so no mirror: the
+    // barrel extends leftward from the breech at the pivot origin, muzzle at
+    // x = -barrelWidth. The flash sits just inside that muzzle tip.
+    if (unit.gunType === 'typical') {
+      // Gondola = the re-shown Weapon Mount (hitbox stays 'disabled' from the
+      // carries block — it's decorative here, not the shootable mine link).
+      const mount = node.getChildByName('Weapon Mount');
+      if (mount) {
+        mount.visible = true;
+        mount.position.set(0, -(h / 2 + 2), 0);
+      }
+      pivot.position.set(0, -(h / 2 + 5), 0);
+      const tex = this.unitTextures.get(TYP_GUN_TEX);
+      if (barrel && tex && barrel.setTexture) {
+        barrel.setTexture(tex);
+        barrel.updateSize?.(23, 9);
+        barrel.scale.set(1, 1, 1);
+        barrel.position.set(-11.5, 0, 0);
+      }
+      flash?.position.set(-21, 0, 0);
+    } else {
+      // Heavy: BigGun toward the front (left) of the hull; no separate gondola.
+      const s = w >= 150 ? 1 : 0.75;
+      pivot.position.set(-w * 0.4, -h * 0.2, 0);
+      const tex = this.unitTextures.get(BIG_GUN_TEX);
+      if (barrel && tex && barrel.setTexture) {
+        barrel.setTexture(tex);
+        barrel.updateSize?.(55, 10);
+        barrel.scale.set(s, s, 1);
+        barrel.position.set(-(55 * s) / 2, 0, 0);
+      }
+      flash?.position.set(-(55 * s) + 4, 0, 0);
     }
   }
 

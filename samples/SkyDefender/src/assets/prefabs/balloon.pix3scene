@@ -45,6 +45,51 @@ root:
           linkHp: 25
           mineHp: 25
     children:
+      # Gunship rig (NZ/SUC/Avalon/Lavalon) — hidden by default; WaveSpawner
+      # shows it and positions/sizes it per unit. The gun recoils and fires a
+      # visible shell + muzzle flash (see EnemyBalloon.fireGun). No hitbox: the
+      # gun is part of the mob, covered by the body hitbox (as in the original).
+      # First child so the barrel draws just above the body but BEHIND the
+      # gondola (weapon-mount), matching the Flash z-order (_tpg < B_Korzina).
+      - id: gun-pivot
+        type: Group2D
+        name: Gun Pivot
+        properties:
+          width: 24
+          height: 10
+          initiallyVisible: false
+          transform:
+            position: [0, -24]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: gun-barrel
+            type: Sprite2D
+            name: Gun Barrel
+            # Art already points left (muzzle on the left) → no mirror; the
+            # barrel extends leftward from the breech at the pivot origin.
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/typical_gun.png' }
+              width: 23
+              height: 9
+              transform:
+                position: [-11.5, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: gun-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 22
+              height: 22
+              opacity: 0
+              transform:
+                position: [-21, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
       # Hanging weapon rig — the typical "S" aerostat carries a naval mine.
       # The mount is the "перемычка" (link) — its own target: shoot it off and
       # the bomb falls while the balloon flies away. WaveSpawner hides the rig

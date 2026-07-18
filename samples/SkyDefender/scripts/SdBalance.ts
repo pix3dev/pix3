@@ -244,6 +244,12 @@ export interface UnitDef {
   /** Gun platforms: castle damage per attack while holding at `a`. */
   attackDamage?: number;
   attackPeriod?: number;
+  /**
+   * Gunship type — draws a suspended gun that recoils and fires a visible shell
+   * (see balloon.pix3scene gun rig + EnemyBalloon.fireGun). `heavy` = BigGun
+   * (Avalon/Lavalon), `typical` = TypGunMob on a gondola (NZ/SUC).
+   */
+  gunType?: 'typical' | 'heavy';
   /** Bombers (Lucky/Slevin): carry ONE bomb, drop at `a`, then climb away. */
   bomber?: boolean;
   /** tpb 3 fire bomb (Stone + Burn1 flame) vs plain mine/stone. */
@@ -396,6 +402,9 @@ function buildUnit(id: number): UnitDef {
     carriesMine: undefined,
     attackDamage: v.dmg,
     attackPeriod: ground ? 5 : 1.7,
+    // Gunships: 5–12 Avalon + 13–20 Lavalon fire the heavy BigGun; 21–29
+    // NZ/SUC fire the typical gun on a gondola. Others have no gun rig.
+    gunType: id >= 5 && id <= 20 ? 'heavy' : id >= 21 && id <= 29 ? 'typical' : undefined,
     spriteVariants: a?.variants,
     unsupported: a ? undefined : true,
   };
