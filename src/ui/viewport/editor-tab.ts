@@ -39,6 +39,8 @@ import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraPr
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
 import type { Align2DActionId } from '@/features/alignment/types';
+import { SetPreviewLocaleCommand } from '@/features/localization/SetPreviewLocaleCommand';
+import { LocalizationEditorService } from '@/services/LocalizationEditorService';
 import {
   classifySceneCreateAssetResource,
   deriveAssetNodeName,
@@ -81,6 +83,9 @@ export class EditorTabComponent extends ComponentBase {
   @inject(LibraryInsertService)
   private readonly libraryInsert!: LibraryInsertService;
 
+  @inject(LocalizationEditorService)
+  private readonly localizationEditorService!: LocalizationEditorService;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId: string = '';
 
@@ -113,6 +118,7 @@ export class EditorTabComponent extends ComponentBase {
   private disposeTabsSubscription?: () => void;
   private disposeScenesSubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
+  private disposeLocalizationSubscription?: () => void;
   private pointerDownPos?: { x: number; y: number };
   private pointerDownTime?: number;
   private marqueeSelectionStart?: { x: number; y: number };
@@ -230,6 +236,11 @@ export class EditorTabComponent extends ComponentBase {
       this.requestUpdate();
     });
 
+    // Refresh the preview-locale dropdown when locales load / the preview switches.
+    this.disposeLocalizationSubscription = subscribe(appState.localization, () => {
+      this.requestUpdate();
+    });
+
     this.addEventListener('wheel', this.handleWheel as EventListener, {
       passive: false,
       capture: true,
@@ -265,6 +276,8 @@ export class EditorTabComponent extends ComponentBase {
     this.disposeScenesSubscription = undefined;
     this.disposeSelectionSubscription?.();
     this.disposeSelectionSubscription = undefined;
+    this.disposeLocalizationSubscription?.();
+    this.disposeLocalizationSubscription = undefined;
     this.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.renderRoot.removeEventListener('wheel', this.handleWheel as EventListener, true);
     this.wheelCanvas?.removeEventListener('wheel', this.handleWheel as EventListener, true);
@@ -309,6 +322,7 @@ export class EditorTabComponent extends ComponentBase {
       label: previewCameraLabel,
       isActive: isPreviewCameraActive,
     } = this.getPreviewCameraDropdownState();
+    const localePreview = this.getPreviewLocaleDropdownState();
     const showAlignmentTools = isSceneTab && this.has2DSelection;
 
     return html`
@@ -343,6 +357,9 @@ export class EditorTabComponent extends ComponentBase {
               canAlignToContainer: isSceneTab && this.canAlignToContainer,
               canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
               canDistributeSelection: isSceneTab && this.canDistributeSelection,
+              showLocalePreview: isSceneTab && localePreview.show,
+              previewLocaleLabel: localePreview.label,
+              previewLocaleItems: localePreview.items,
             },
             {
               onTransformModeChange: m => this.handleTransformModeChange(m),
@@ -355,6 +372,7 @@ export class EditorTabComponent extends ComponentBase {
               onToggleLayer2D: () => this.toggleLayer2D(),
               onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
               onRunAlignmentAction: action => this.handleAlignmentAction(action),
+              onSelectPreviewLocale: localeId => this.handlePreviewLocaleSelect(localeId),
             },
             this.iconService
           )}
@@ -772,6 +790,34 @@ export class EditorTabComponent extends ComponentBase {
       this.viewportRenderer.updateSelection();
       this.viewportRenderer.requestRender();
     });
+  }
+
+  private handlePreviewLocaleSelect(localeId: string): void {
+    void this.commandDispatcher.execute(new SetPreviewLocaleCommand({ locale: localeId }));
+  }
+
+  private getPreviewLocaleDropdownState(): {
+    show: boolean;
+    label: string;
+    items: Array<{ id: string; label: string }>;
+  } {
+    const service = this.localizationEditorService;
+    const locales = service.getLocales();
+    if (locales.length === 0) {
+      return { show: false, label: '', items: [] };
+    }
+    const preview = service.getPreviewLocale();
+    const defaultLocale = service.getDefaultLocale();
+    const items = locales.map(locale => {
+      const parts = [service.getLocaleDisplayName(locale)];
+      if (locale === defaultLocale) parts.push('(default)');
+      return { id: locale, label: `${parts.join(' ')} · ${locale}` };
+    });
+    return {
+      show: true,
+      label: `${service.getLocaleDisplayName(preview)} (${preview})`,
+      items,
+    };
   }
 
   private setEditorCameraProjection(projection: EditorCameraProjection): void {

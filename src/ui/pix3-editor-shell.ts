@@ -94,6 +94,7 @@ import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
 import { ProjectService } from '@/services';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { LocalizationEditorService } from '@/services/LocalizationEditorService';
 import { EditorTabService } from '@/services/EditorTabService';
 import { RouterService } from '@/services/RouterService';
 import { AuthService } from '@/services/AuthService';
@@ -172,6 +173,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(GamePlaySessionService)
   private readonly gamePlaySessionService!: GamePlaySessionService;
+
+  @inject(LocalizationEditorService)
+  private readonly localizationEditorService!: LocalizationEditorService;
 
   @inject(FileWatchService)
   private readonly fileWatchService!: FileWatchService;
@@ -549,6 +553,7 @@ export class Pix3EditorShell extends ComponentBase {
     // Initialize tab service early to catch session persistence
     this.editorTabService.initialize();
     this.gamePlaySessionService.initialize();
+    this.localizationEditorService.initialize();
     this.updateCheckService.initialize();
 
     this.editorSettingsService.initialize();

@@ -29,6 +29,10 @@ export interface ViewportToolbarState {
   readonly canAlignToContainer: boolean;
   readonly canAlignToSelectionBounds: boolean;
   readonly canDistributeSelection: boolean;
+  /** Localization is configured for the project — show the preview-locale switch. */
+  readonly showLocalePreview: boolean;
+  readonly previewLocaleLabel: string;
+  readonly previewLocaleItems: DropdownItem[];
 }
 
 export interface ViewportToolbarHandlers {
@@ -42,6 +46,7 @@ export interface ViewportToolbarHandlers {
   readonly onToggleLayer2D: () => void;
   readonly onSetEditorCameraProjection: (projection: EditorCameraProjection) => void;
   readonly onRunAlignmentAction?: (action: Align2DActionId) => void;
+  readonly onSelectPreviewLocale?: (localeId: string) => void;
 }
 
 export interface ViewportZoomOverlayHandlers {
@@ -220,6 +225,24 @@ export function renderViewportToolbar(
           }}
         ></pix3-dropdown-button>
       </div>
+
+      ${state.showLocalePreview && handlers.onSelectPreviewLocale
+        ? html`
+            <div class="toolbar-group" role="group" aria-label="Preview locale">
+              <pix3-dropdown-button
+                class="toolbar-dropdown-button"
+                icon="globe"
+                aria-label="Preview locale"
+                title=${`Preview Locale: ${state.previewLocaleLabel}`}
+                .items=${state.previewLocaleItems}
+                @item-select=${(e: CustomEvent<DropdownItem>) => {
+                  e.stopPropagation();
+                  handlers.onSelectPreviewLocale?.(e.detail.id);
+                }}
+              ></pix3-dropdown-button>
+            </div>
+          `
+        : null}
 
       ${renderAlignmentToolbarGroups(
         {

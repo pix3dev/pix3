@@ -3751,6 +3751,26 @@ export class ViewportRendererService {
     }
   }
 
+  /**
+   * Repaint every UIControl2D label proxy after the preview locale or a locale
+   * table changed. Label text comes from `node.getDisplayText()`, which resolves
+   * through the active (editor-preview) localization instance, so re-running the
+   * standard per-node visual sync picks up the new translation (and re-sizes
+   * auto-sized Label2D boxes). Then forces a paint. Called from the localization
+   * operations; a no-op when nothing is localized.
+   */
+  refreshLocalizedLabels(): void {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) return;
+    for (const nodeId of this.uiControl2DVisuals.keys()) {
+      const node = graph.nodeMap.get(nodeId);
+      if (node instanceof UIControl2D) {
+        this.updateNodeTransform(node);
+      }
+    }
+    this.requestRender();
+  }
+
   updateNodeVisibility(node: NodeBase): void {
     if (node instanceof Group2D) {
       const visualRoot = this.group2DVisuals.get(node.nodeId);
@@ -6082,7 +6102,7 @@ export class ViewportRendererService {
 
     root.add(sizeGroup);
 
-    if (node.label.trim().length > 0) {
+    if (node.getDisplayText().trim().length > 0) {
       const labelMesh = this.createUIControlLabelMesh(node);
       root.add(labelMesh);
     }
@@ -6220,7 +6240,7 @@ export class ViewportRendererService {
       measureCtx.font = `${fontSize}px ${node.labelFontFamily}`;
     }
     const layout = layoutLabelText(
-      node.label ?? '',
+      node.getDisplayText(),
       line => (measureCtx ? measureCtx.measureText(line).width : line.length * fontSize * 0.6),
       { fontSize, maxWidth: node.width > 0 ? node.width : 0 }
     );
@@ -6303,7 +6323,8 @@ export class ViewportRendererService {
       return new THREE.Mesh(fallbackGeometry, fallbackMaterial);
     }
     measureCtx.font = `${fontSize}px ${node.labelFontFamily}`;
-    const measured = measureCtx.measureText(node.label || ' ');
+    const displayText = node.getDisplayText();
+    const measured = measureCtx.measureText(displayText || ' ');
     const logicalWidth = Math.max(32, Math.ceil(measured.width + paddingX * 2));
     const logicalHeight = Math.max(20, Math.ceil(fontSize + paddingY * 2));
 
@@ -6338,7 +6359,7 @@ export class ViewportRendererService {
       ctx.textAlign = 'center';
     }
 
-    ctx.fillText(node.label, x, logicalHeight / 2);
+    ctx.fillText(displayText, x, logicalHeight / 2);
 
     const texture = new THREE.CanvasTexture(canvas);
     this.configureSpriteTexture(texture);
@@ -6371,7 +6392,7 @@ export class ViewportRendererService {
       Boolean((child as THREE.Object3D).userData?.isUIControlLabel)
     );
 
-    if (node.label.trim().length === 0) {
+    if (node.getDisplayText().trim().length === 0) {
       if (existingLabel) {
         visualRoot.remove(existingLabel);
         this.disposeObject3D(existingLabel);

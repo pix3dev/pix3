@@ -11,6 +11,7 @@ import {
   NodeBase,
   Node2D,
   Sprite2D,
+  UIControl2D,
 } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { appState } from '@/state';
@@ -21,6 +22,8 @@ import { UpdateSprite2DSizeCommand } from '@/features/properties/UpdateSprite2DS
 import { ResizeGroup2DCommand } from '@/features/properties/ResizeGroup2DCommand';
 import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
 import { CreateAndBindAnimationAssetCommand } from '@/features/scene/CreateAndBindAnimationAssetCommand';
+import { UpdateLocaleEntryCommand } from '@/features/localization/UpdateLocaleEntryCommand';
+import { LocalizationEditorService } from '@/services/LocalizationEditorService';
 import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { BehaviorPickerService } from '@/services/BehaviorPickerService';
 import { EffectPickerService } from '@/services/EffectPickerService';
@@ -187,6 +190,9 @@ export class InspectorPanel extends ComponentBase {
   @inject(ViewportRendererService)
   private readonly viewportService!: ViewportRendererService;
 
+  @inject(LocalizationEditorService)
+  private readonly localizationEditorService!: LocalizationEditorService;
+
   @state()
   private selectedNodes: NodeBase[] = [];
 
@@ -245,6 +251,7 @@ export class InspectorPanel extends ComponentBase {
   private disposeSelectionSubscription?: () => void;
   private disposeSceneSubscription?: () => void;
   private disposeUiSubscription?: () => void;
+  private disposeLocalizationSubscription?: () => void;
   private disposeAssetPreviewSubscription?: () => void;
   private disposeAnimationEditorSubscription?: () => void;
   private disposeAnimationControllerSubscription?: () => void;
@@ -304,6 +311,11 @@ export class InspectorPanel extends ComponentBase {
         this.isPlaying = appState.ui.isPlaying;
         this.onPlayModeChanged();
       }
+    });
+    // Re-render the localization-key editor's status/preview when the preview
+    // locale switches or a locale table is edited.
+    this.disposeLocalizationSubscription = subscribe(appState.localization, () => {
+      this.requestUpdate();
     });
     this.disposeAssetPreviewSubscription = this.assetsPreviewService.subscribe(snapshot => {
       this.selectedAssetItem = snapshot.selectedItem;
@@ -371,6 +383,8 @@ export class InspectorPanel extends ComponentBase {
     this.disposeSceneSubscription = undefined;
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
+    this.disposeLocalizationSubscription?.();
+    this.disposeLocalizationSubscription = undefined;
     this.stopLiveTimer();
     // Reset live-mirror UI state so a reused Lit instance starts clean even if it
     // was detached mid-play and play stopped while it was disconnected.
@@ -3597,6 +3611,109 @@ ${textPreview?.content || 'Empty file'}</pre
     `;
   }
 
+  /**
+   * Inspector editor for a `labelKey` (or any `editor: 'localization-key'` string
+   * property): a key text input with autocomplete over known keys, a status glyph
+   * showing whether the key resolves in the preview locale, a live preview of the
+   * translation, and an "Extract" action that lifts the node's literal `label`
+   * into the default-locale table. The key itself is set through the normal
+   * property-change path (UpdateObjectPropertyCommand); Extract additionally
+   * writes the default-locale entry via UpdateLocaleEntryCommand.
+   */
+  private renderLocalizationKeyEditor(
+    propertyName: string,
+    value: string,
+    readOnly: boolean,
+    labelTemplate: unknown
+  ) {
+    const service = this.localizationEditorService;
+    const active = service.isActive();
+    const key = value.trim();
+    const node = this.primaryNode instanceof UIControl2D ? this.primaryNode : null;
+    const literal = node?.label?.trim() ?? '';
+    const resolves = key ? service.keyResolvesInPreview(key) : false;
+    const preview = key ? service.resolveInPreview(key) : '';
+    const canExtract = active && !readOnly && !key && literal.length > 0;
+    const keys = active ? service.getAllKeys() : [];
+    const listId = `loc-keys-${propertyName}`;
+    const previewLocale = service.getPreviewLocale();
+
+    const status = key
+      ? html`<span
+          class="localization-key-status ${resolves ? 'is-ok' : 'is-missing'}"
+          title=${resolves
+            ? `Resolves in "${previewLocale}": ${preview}`
+            : `No "${previewLocale}" translation — the literal label is shown as fallback`}
+        >
+          ${this.iconService.getIcon(resolves ? 'check' : 'alert-triangle', 14)}
+        </span>`
+      : '';
+
+    return html`
+      <div class="property-group">
+        ${labelTemplate}
+        <div class="localization-key-editor">
+          <div class="localization-key-row">
+            <input
+              type="text"
+              class="property-input property-input--text"
+              list=${listId}
+              .value=${value}
+              ?disabled=${readOnly}
+              placeholder=${active ? 'translation key — e.g. menu.play' : 'no locales in project'}
+              @change=${(e: Event) =>
+                void this.applyPropertyChange(
+                  propertyName,
+                  (e.target as HTMLInputElement).value.trim()
+                )}
+            />
+            ${status}
+            ${canExtract
+              ? html`<button
+                  type="button"
+                  class="localization-extract-button"
+                  title="Create a '${service.getDefaultLocale()}' key from the literal label"
+                  @click=${() => void this.extractLocalizationKey(propertyName, node!)}
+                >
+                  Extract
+                </button>`
+              : ''}
+          </div>
+          <datalist id=${listId}>
+            ${keys.map(k => html`<option value=${k}></option>`)}
+          </datalist>
+          ${key && resolves
+            ? html`<div class="localization-key-preview" title="Preview-locale translation">
+                ${preview}
+              </div>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  /** Lift a UIControl2D's literal `label` into the default locale and bind its key. */
+  private async extractLocalizationKey(propertyName: string, node: UIControl2D): Promise<void> {
+    const service = this.localizationEditorService;
+    const literal = node.label?.trim();
+    const defaultLocale = service.getDefaultLocale();
+    if (!literal || !defaultLocale) return;
+    const key = this.suggestLocalizationKey(node);
+    await this.commandDispatcher.execute(
+      new UpdateLocaleEntryCommand({ locale: defaultLocale, key, value: literal })
+    );
+    await this.applyPropertyChange(propertyName, key);
+  }
+
+  /** Derive a dot-namespaced key suggestion from a node's name (e.g. "Play Button" → "play.button"). */
+  private suggestLocalizationKey(node: UIControl2D): string {
+    const slug = node.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '');
+    return slug || 'label';
+  }
+
   private renderPropertyInput(prop: PropertyDefinition) {
     if (!this.primaryNode || !this.propertyValues[prop.name]) {
       return '';
@@ -3607,6 +3724,15 @@ ${textPreview?.content || 'Empty file'}</pre
     const readOnly = this.isPropertyReadOnly(prop.ui?.readOnly, this.primaryNode);
     const isOverridden = this.isPropertyOverriddenForPrimaryNode(prop);
     const labelTemplate = this.renderPropertyLabel(prop, label, isOverridden);
+
+    if (prop.type === 'string' && prop.ui?.editor === 'localization-key') {
+      return this.renderLocalizationKeyEditor(
+        prop.name,
+        String(state.value ?? ''),
+        readOnly,
+        labelTemplate
+      );
+    }
 
     if (prop.type === 'object' && prop.ui?.editor === 'texture-resource') {
       const textureValue = this.toTextureResourceValue(state.value);

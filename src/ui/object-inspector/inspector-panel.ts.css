@@ -1656,3 +1656,68 @@ pix3-panel {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Localization-key property editor (labelKey / textureKey) */
+.localization-key-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.localization-key-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.localization-key-row .property-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.localization-key-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.localization-key-status.is-ok {
+  color: var(--pix3-accent-color);
+}
+
+.localization-key-status.is-missing {
+  color: var(--color-error);
+}
+
+.localization-extract-button {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-family: var(--font-family-ui);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-item);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.localization-extract-button:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--pix3-accent-color);
+}
+
+.localization-key-preview {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-item);
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
