@@ -1,8 +1,9 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture } from 'three';
+import { Mesh, MeshBasicMaterial, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { configure2DTexture } from '../../core/configure-2d-texture';
+import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
 import {
   applyTextureRegionToTexture,
   sanitizeTextureRegion,
@@ -50,7 +51,6 @@ export class Sprite2D extends Node2D {
   textureRegion: TextureRegion | null = null;
 
   private mesh: Mesh;
-  private geometry: PlaneGeometry;
   private material: MeshBasicMaterial;
   /**
    * The shared, AssetLoader-cached texture last handed to {@link setTexture}.
@@ -81,8 +81,8 @@ export class Sprite2D extends Node2D {
     this.anchor = Sprite2D.normalizeAnchor(props.anchor);
     this.isContainer = false;
 
-    // Create visuals
-    this.geometry = new PlaneGeometry(this.width ?? 64, this.height ?? 64);
+    // Create visuals. Size lives on mesh.scale over the shared unit quad (see
+    // SHARED_UNIT_QUAD_GEOMETRY); the anchor offset lives on mesh.position.
     this.material = new MeshBasicMaterial({
       color: props.color ?? '#ffffff',
       transparent: true,
@@ -90,8 +90,9 @@ export class Sprite2D extends Node2D {
     });
     this.registerOpacityMaterial(this.material, 1);
 
-    this.mesh = new Mesh(this.geometry, this.material);
+    this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
+    this.mesh.scale.set(this.width ?? 64, this.height ?? 64, 1);
     this.applyAnchorOffset();
     this.add(this.mesh);
   }
@@ -238,14 +239,9 @@ export class Sprite2D extends Node2D {
   private updateSize(w: number, h: number): void {
     this.width = w;
     this.height = h;
-    this.geometry.dispose();
-    this.geometry = new PlaneGeometry(w, h);
-    this.mesh.geometry = this.geometry;
+    // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
+    this.mesh.scale.set(w, h, 1);
     this.applyAnchorOffset();
-
-    // Re-apply opacity to the new geometry/material if needed
-    // The material is reused, but we need to ensure it updates
-    this.material.needsUpdate = true;
     this.refreshOpacity();
   }
 
@@ -262,17 +258,18 @@ export class Sprite2D extends Node2D {
   }
 
   /**
-   * Release the per-sprite crop clone (if any) before the default cleanup
-   * disposes the geometry/material. The shared cached {@link baseTexture} is
-   * intentionally left intact for other sprites — the default resource disposal
-   * never touches `material.map` for exactly that reason.
+   * Release the per-sprite crop clone (if any) and this sprite's material. The
+   * geometry is the shared unit quad and is deliberately NOT disposed — it is
+   * referenced by every other sprite (so we do not call `super.disposeResources`,
+   * which would dispose it). The shared cached {@link baseTexture} is also left
+   * intact for other sprites; `material.dispose()` never frees `material.map`.
    */
   protected override disposeResources(): void {
     if (this.ownedTexture) {
       this.ownedTexture.dispose();
       this.ownedTexture = null;
     }
-    super.disposeResources();
+    this.material.dispose();
   }
 
   /**

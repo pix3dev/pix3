@@ -775,3 +775,71 @@ only for the visual-parity check):
 - **D9 — Await-pack on cache miss (no background rebuild).** One-time sub-
   second cost with a log line beats racing a half-atlased run; revisit with a
   Worker if projects with hundreds of large textures appear.
+
+---
+
+## 11. Phase 0 — MEASURED baseline (2026-07-18, SkyDefender `main.pix3scene`)
+
+Measured via chrome-devtools MCP against the editor Game tab (dev build v0.8.10
+build 36, Windows/ANGLE). Method: `__PIX3_DEBUG__.play.start()`, force frames
+with MCP screenshots, read `ProfilerSessionService.getSnapshot().performance`
+(= `RuntimeRenderer.getStatsSnapshot()`), and walk the live runtime THREE scene
+via `window.__PIX3_ENGINE__.getRuntimeSceneRoot()` to classify rendered 2D
+meshes (`material.depthTest === false`) in stamped-`renderOrder` paint order.
+
+### 11.1 Per-state baseline
+
+| State | Draw calls | Textures (GPU-resident) | Triangles | Render ms | FPS |
+| --- | --- | --- | --- | --- | --- |
+| Warmup (first frames, textures still streaming in) | 55 → 63 | 34 → 95 | — | ~2.2 | 60 |
+| **Shop / between-wave menu** (24-icon upgrade grid) | **90** | 152 | 180 | 1.6 | 60 |
+| Early wave (wave start, few enemies) | 68 | 154 | 136 | 1.5 | 60 |
+| **Peak mid-wave** (full enemy set + muzzle/tracers/bombs, castle 92/250, 634 runtime objs) | **128** | 156 | 256 | **3.9** | 59 |
+
+The doc's pre-measurement estimate (~95 static) was in the right ballpark; the
+real numbers are **~90 at the shop menu and ~128 at a busy mid-wave peak**, and
+draw calls scale ~linearly with active sprites (68 early → 128 peak).
+
+### 11.2 Paint-order mesh breakdown (SYNCHRONIZED anchor = Shop, 90 meshes ≡ 90 calls)
+
+| Metric | Shop | Peak wave (adjacent frame) |
+| --- | --- | --- |
+| Rendered 2D meshes | 90 | ~108 |
+| — sprites / colorrect / text | 83 / 3 / 4 | 101 / 4 / 3 |
+| Distinct sprite texture **sources drawn** | 57 | 45 |
+| Runs A — current contiguous (per-texture, no atlas) | 70 | 82 |
+| **Runs B — single-sheet atlas floor** (only text labels break runs) | **7** | **6** |
+
+**Cross-check that proves the thesis:** at the shop, rendered 2D meshes (90) ≡
+draw calls (90), and 3D meshes = 0. So today it is **exactly one draw call per
+2D mesh, zero batching**. The single-sheet paint-order floor is **6–7 across
+every state** — bounded only by the 3–4 scattered `Label2D`/canvas-text meshes
+and the number of sheets, and **independent of sprite count**. That is the
+Phase-3 headroom: 90–128 → ~6–15.
+
+### 11.3 Atlas-packing universe (Phase-2 input)
+
+| Metric | Value |
+| --- | --- |
+| File textures loaded over one full run (`AssetLoader.textureCache`) | **210** |
+| Distinct file texture sources in the live 2D graph | 61 |
+| Canvas/text (`Label2D`) textures | 6 |
+| Total 2D meshes in graph incl. hidden | 146 |
+
+The packing universe (~210 file textures) is **larger than the doc's ~93
+estimate** — SkyDefender's `AnimatedSprite2D` enemies carry per-frame PNG
+sequences (enemy/air, bosses, effects), which is precisely the many-small-files
+case atlasing targets. This makes Phase 2 more valuable (bigger texture-count
+collapse) and flags two things: (a) expect **2–4 sheets at 2048², not 1**, and
+(b) re-check the await-on-miss pack time against the doc's <1 s estimate at this
+input size (still await; just log it).
+
+### 11.4 Phase-target re-confirmation (revised numbers)
+
+- **Phase 2 (textures):** ~152–161 GPU-resident / ~210 loaded → **K sheets
+  (1–4) + ~6 text canvases + excluded (sky background + oversized)**; the ≤12
+  acceptance target holds. Draw calls unchanged (~90 shop / ~128 peak).
+- **Phase 3 (draw calls):** floor 6–7; realistic HUD/wave clustering ~10–15.
+  The ≤30 mid-wave / ≥70% cut target is comfortable (128 → ≤30 is a floor-6
+  problem). AnimatedSprite2D is the single biggest win **and** the biggest
+  correctness risk (offset/repeat reset trap + clone re-stamp, §5.3/§7.11).

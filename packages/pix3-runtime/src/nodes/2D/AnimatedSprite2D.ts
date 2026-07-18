@@ -1,6 +1,7 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture } from 'three';
+import { Mesh, MeshBasicMaterial, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import { configure2DTexture } from '../../core/configure-2d-texture';
+import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
 import {
@@ -38,7 +39,6 @@ export class AnimatedSprite2D extends Node2D {
   private readonly frameTextures = new Map<number, Texture>();
 
   private mesh: Mesh;
-  private geometry: PlaneGeometry;
   private material: MeshBasicMaterial;
 
   constructor(props: AnimatedSprite2DProps) {
@@ -65,7 +65,6 @@ export class AnimatedSprite2D extends Node2D {
     this.properties.isPlaying = this.isPlaying;
     this.properties.currentFrame = this._currentFrame;
 
-    this.geometry = new PlaneGeometry(this.width, this.height);
     this.material = new MeshBasicMaterial({
       color: this.color,
       transparent: true,
@@ -73,8 +72,10 @@ export class AnimatedSprite2D extends Node2D {
     });
     this.registerOpacityMaterial(this.material, 1);
 
-    this.mesh = new Mesh(this.geometry, this.material);
+    // Size is mesh.scale over the shared unit quad (see SHARED_UNIT_QUAD_GEOMETRY).
+    this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
+    this.mesh.scale.set(this.width, this.height, 1);
     this.add(this.mesh);
   }
 
@@ -194,7 +195,7 @@ export class AnimatedSprite2D extends Node2D {
           setValue: (node: unknown, value: unknown) => {
             const sprite = node as AnimatedSprite2D;
             sprite.width = Number(value);
-            sprite.updateGeometry();
+            sprite.updateSize();
           },
         },
         {
@@ -205,7 +206,7 @@ export class AnimatedSprite2D extends Node2D {
           setValue: (node: unknown, value: unknown) => {
             const sprite = node as AnimatedSprite2D;
             sprite.height = Number(value);
-            sprite.updateGeometry();
+            sprite.updateSize();
           },
         },
         {
@@ -406,14 +407,13 @@ export class AnimatedSprite2D extends Node2D {
     return nextTexture;
   }
 
-  private updateGeometry(): void {
-    this.geometry.dispose();
-    this.geometry = new PlaneGeometry(this.width, this.height);
-    this.mesh.geometry = this.geometry;
+  private updateSize(): void {
+    // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
+    this.mesh.scale.set(this.width, this.height, 1);
   }
 
   protected override disposeResources(): void {
-    this.geometry.dispose();
+    // The geometry is the shared unit quad and must NOT be disposed here.
     if (this.spritesheetTexture) {
       this.spritesheetTexture.dispose();
       this.spritesheetTexture = null;

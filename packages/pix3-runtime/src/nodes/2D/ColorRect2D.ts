@@ -1,6 +1,7 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry } from 'three';
+import { Mesh, MeshBasicMaterial } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
 
 export interface ColorRect2DProps extends Omit<Node2DProps, 'type'> {
   width?: number;
@@ -15,7 +16,6 @@ export class ColorRect2D extends Node2D {
   color: string;
 
   private mesh: Mesh;
-  private geometry: PlaneGeometry;
   private material: MeshBasicMaterial;
 
   constructor(props: ColorRect2DProps) {
@@ -26,7 +26,6 @@ export class ColorRect2D extends Node2D {
     this.opacity = props.opacity ?? 1.0;
     this.isContainer = false;
 
-    this.geometry = new PlaneGeometry(this.width, this.height);
     this.material = new MeshBasicMaterial({
       color: this.color,
       transparent: true,
@@ -35,8 +34,10 @@ export class ColorRect2D extends Node2D {
     });
     this.registerOpacityMaterial(this.material, 1);
 
-    this.mesh = new Mesh(this.geometry, this.material);
+    // Size is mesh.scale over the shared unit quad (see SHARED_UNIT_QUAD_GEOMETRY).
+    this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
+    this.mesh.scale.set(this.width, this.height, 1);
     this.add(this.mesh);
   }
 
@@ -55,7 +56,7 @@ export class ColorRect2D extends Node2D {
           setValue: (node: unknown, value: unknown) => {
             const n = node as ColorRect2D;
             n.width = Number(value);
-            n.updateGeometry();
+            n.updateSize();
           },
         },
         {
@@ -66,7 +67,7 @@ export class ColorRect2D extends Node2D {
           setValue: (node: unknown, value: unknown) => {
             const n = node as ColorRect2D;
             n.height = Number(value);
-            n.updateGeometry();
+            n.updateSize();
           },
         },
         {
@@ -89,14 +90,13 @@ export class ColorRect2D extends Node2D {
     };
   }
 
-  private updateGeometry(): void {
-    this.geometry.dispose();
-    this.geometry = new PlaneGeometry(this.width, this.height);
-    this.mesh.geometry = this.geometry;
+  private updateSize(): void {
+    // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
+    this.mesh.scale.set(this.width, this.height, 1);
   }
 
   protected override disposeResources(): void {
-    this.geometry.dispose();
+    // Dispose only the material — the geometry is the shared unit quad.
     this.material.dispose();
   }
 }
