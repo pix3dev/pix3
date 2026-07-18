@@ -17,6 +17,9 @@
 - **[agent-eval-scenarios.md](agent-eval-scenarios.md)** / **[agent-eval-results.md](agent-eval-results.md)** — сценарии и результаты eval-прогонов встроенного агента (S1–S4, тюнинг промптов/тулов).
 - **[p1-m-feature-designs.md](p1-m-feature-designs.md)** — design-спеки P1 M-фич: particles, shader-effects, audio-buses, cutscene-director реализованы; осталась секция video-recording.
 - **[postprocess-effects-list-design.md](postprocess-effects-list-design.md)** — design-спека attached-effect списка на PostProcess (по образцу shipped GeometryMesh-паттерна); не реализована.
+- **[localization-design.md](localization-design.md)** / **[localization-SESSION-PROMPT.md](localization-SESSION-PROMPT.md)** — i18n/l10n (Godot `tr()`-adapted). **Последнее начатое.** Реализован только runtime-core (Phase 0, commit `8987ac7`: `LocalizationService`, `labelKey`/`getDisplayText`, persistence, `SceneService.localization`); остаётся SceneRunner play-mode wiring + весь editor-слой (Phase 1 manifest/preview/inspector), Phase 2 (панель + локализованные спрайты + export), Phase 3 (миграция SkyDefender + docs).
+- **[group2d-autosize-resize-design.md](group2d-autosize-resize-design.md)** — Group2D fit-to-contents + Figma-style пропорциональный resize детей. Phase 1 / MVP (обе фичи A+B, commit `7cd1bac`) реализован; остаются Phase 2 (auto-fit при создании группы) и Phase 3 (Ctrl-drag box-only, меню/шорткат, reactive-флаг — опционально).
+- **[sprite-editor-design.md](sprite-editor-design.md)** — переименование Asset Generator → Sprite Editor + double-click open. Phase 1 (commit `53e6c07`) реализован; остаются Phase 2 (общий slicing-модуль + «Create Animation from image») и Phase 3 (shell-merge с flipbook-редактором, gated).
 - **[browser-storage-projects.md](browser-storage-projects.md)** — реализовано (MVP); держим в активных до явной ручной проверки OPFS-сценария в редакторе.
 
 **Базис верификации:** commit `d591e68`, 2026-07-06. Все утверждения «есть / partial / нет» проверены по исходникам, ссылки на файлы указаны в документах.
@@ -33,6 +36,7 @@
 - [done/rapid-prototyping-design.md](done/rapid-prototyping-design.md) — rapid prototyping: PWA + шаблоны, remote preview (relay + player), agent HTTP API, zip-экспорт + PlayableSDK, телеметрия устройств (все 5 фаз).
 - [done/in-editor-agent.md](done/in-editor-agent.md) — встроенный AI-агент (чат-панель, BYOK-провайдеры, тул-слой); E2E закрыт eval-прогонами S1–S4.
 - [done/shader-effects-v2-list-design.md](done/shader-effects-v2-list-design.md) — registry-backed attached-effect список на GeometryMesh.
+- [done/2d-batching-atlas-design.md](done/2d-batching-atlas-design.md) / [done/2d-batching-atlas-SESSION-PROMPT.md](done/2d-batching-atlas-SESSION-PROMPT.md) — оптимизация 2D draw-calls: shared unit-quad (Phase 1), pre-launch texture-atlas + cache (Phase 2), paint-order quad-batcher (Phase 3). Все фазы shipped и верифицированы на SkyDefender (render 5.8→2.0 ms, GPU-текстур 152→3). Отложены follow-ups: export-emission атласа, label/glyph-атлас, worker-packing, white-pixel sheet.
 
 ## Как поддерживать
 
