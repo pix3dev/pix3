@@ -1,4 +1,7 @@
+import { subscribe } from 'valtio/vanilla';
+
 import { injectable } from '@/fw/di';
+import { appState } from '@/state';
 import { isDocumentActive } from './page-activity';
 
 /**
@@ -19,22 +22,20 @@ export class FileWatchService {
   /** Callbacks invoked when a watched file is modified externally. */
   private readonly changeListeners = new Map<string, Set<() => void>>();
 
-  /** Polling interval in milliseconds (default 500ms). */
-  private readonly pollInterval: number = 500;
+  /**
+   * Polling interval in milliseconds. External edits to an open scene are a
+   * human-scale event — each poll costs a `getFile()` per watched file, so a
+   * couple of seconds of latency buys a large idle-CPU/battery saving over the
+   * old 500ms cadence.
+   */
+  private readonly pollInterval: number = 2500;
   private isPageActive = isDocumentActive(document);
+  private isPlaying = appState.ui.isPlaying;
+  private readonly disposePlaySubscription: () => void;
 
   private readonly handlePageActivityChange = () => {
     this.isPageActive = isDocumentActive(document);
-
-    if (this.isPageActive) {
-      this.resumePolling();
-      for (const [filePath, fileHandle] of this.fileHandles.entries()) {
-        void this.checkFileChange(filePath, fileHandle);
-      }
-      return;
-    }
-
-    this.pausePolling();
+    this.updatePollingState();
   };
 
   constructor() {
@@ -43,6 +44,33 @@ export class FileWatchService {
     window.addEventListener('pageshow', this.handlePageActivityChange);
     window.addEventListener('pagehide', this.handlePageActivityChange);
     document.addEventListener('visibilitychange', this.handlePageActivityChange);
+    // Auto-reload from an external edit mid-play would tear down the running
+    // game anyway, so polling during play is pure waste — pause it and catch up
+    // with an immediate check when play stops.
+    this.disposePlaySubscription = subscribe(appState.ui, () => {
+      if (appState.ui.isPlaying !== this.isPlaying) {
+        this.isPlaying = appState.ui.isPlaying;
+        this.updatePollingState();
+      }
+    });
+  }
+
+  /** True while polling timers should be running at all. */
+  private get shouldPoll(): boolean {
+    return this.isPageActive && !this.isPlaying;
+  }
+
+  /** Start/stop all pollers to match {@link shouldPoll}; checks immediately on resume. */
+  private updatePollingState(): void {
+    if (this.shouldPoll) {
+      this.resumePolling();
+      for (const [filePath, fileHandle] of this.fileHandles.entries()) {
+        void this.checkFileChange(filePath, fileHandle);
+      }
+      return;
+    }
+
+    this.pausePolling();
   }
 
   /**
@@ -96,7 +124,7 @@ export class FileWatchService {
       this.lastModifiedTimes.set(filePath, lastModifiedTime);
     }
 
-    if (this.isPageActive) {
+    if (this.shouldPoll) {
       this.startPolling(filePath);
     }
   }
@@ -231,6 +259,7 @@ export class FileWatchService {
     window.removeEventListener('pageshow', this.handlePageActivityChange);
     window.removeEventListener('pagehide', this.handlePageActivityChange);
     document.removeEventListener('visibilitychange', this.handlePageActivityChange);
+    this.disposePlaySubscription();
     this.unwatchAll();
   }
 }

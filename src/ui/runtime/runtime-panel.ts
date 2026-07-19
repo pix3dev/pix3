@@ -157,6 +157,8 @@ export class RuntimePanel extends ComponentBase {
 
   private refreshTimer: number | null = null;
   private disposeUiSubscription?: () => void;
+  /** Fingerprint of the last DTO tree pushed to Lit — see {@link refreshTree}. */
+  private lastTreeHash: number | null = null;
 
   /** Box3 highlight drawn into the running scene for the selected object. */
   private highlight?: THREE.Box3Helper;
@@ -193,10 +195,20 @@ export class RuntimePanel extends ComponentBase {
       return;
     }
     this.refreshTimer = window.setInterval(() => {
-      if (this.live && this.isPlaying) {
+      // Skip live refreshes while the panel is hidden (e.g. its Golden Layout
+      // tab is inactive) — walking 400+ live objects into DTOs 3×/second for an
+      // invisible tree is pure CPU/battery waste. The next tick after the panel
+      // becomes visible again catches up.
+      if (this.live && this.isPlaying && this.isPanelVisible()) {
         this.refreshTree();
       }
     }, REFRESH_INTERVAL_MS);
+  }
+
+  private isPanelVisible(): boolean {
+    return typeof this.checkVisibility === 'function'
+      ? this.checkVisibility()
+      : this.offsetParent !== null;
   }
 
   private stopTimer(): void {
@@ -211,16 +223,25 @@ export class RuntimePanel extends ComponentBase {
     if (!root) {
       this.roots = [];
       this.nodeCount = 0;
+      this.lastTreeHash = null;
       return;
     }
-    const counter = { n: 0 };
+    const counter = { n: 0, hash: 17 };
     // Show the scene root's children as top-level rows (the root itself is just a Scene).
     const children = Array.isArray(root.children) ? root.children : [];
-    this.roots = children
+    const nextRoots = children
       .filter(child => !isHelperObject(child))
       .slice(0, MAX_CHILDREN_PER_NODE)
       .map(child => this.toNode(child, MAX_DEPTH, counter));
-    this.nodeCount = counter.n;
+
+    // Only push a new tree into Lit when something actually changed: the walk
+    // hashes every rendered field, so an idle/paused scene costs the DTO walk
+    // but no template re-render (the dominant cost for 400+ rows).
+    if (counter.hash !== this.lastTreeHash || counter.n !== this.nodeCount) {
+      this.lastTreeHash = counter.hash;
+      this.roots = nextRoots;
+      this.nodeCount = counter.n;
+    }
 
     // Keep the detail + highlight in sync with the live object (it may have
     // moved, or the scene may have been re-cloned since the last tick).
@@ -229,7 +250,11 @@ export class RuntimePanel extends ComponentBase {
     }
   }
 
-  private toNode(obj: LiveObject3D, depth: number, counter: { n: number }): RuntimeNode {
+  private toNode(
+    obj: LiveObject3D,
+    depth: number,
+    counter: { n: number; hash: number }
+  ): RuntimeNode {
     counter.n += 1;
     const m = obj.matrixWorld?.elements;
     const pos =
@@ -247,7 +272,7 @@ export class RuntimePanel extends ComponentBase {
       children = slice.map(child => this.toNode(child, depth - 1, counter));
     }
 
-    return {
+    const node: RuntimeNode = {
       uuid: obj.uuid,
       nodeId: typeof ud.nodeId === 'string' ? ud.nodeId : null,
       type: obj.type || 'Object3D',
@@ -262,6 +287,19 @@ export class RuntimePanel extends ComponentBase {
       truncatedChildren: truncated,
       children,
     };
+
+    // Fold every rendered field into the walk fingerprint so refreshTree can
+    // skip the Lit re-render when nothing visible changed.
+    counter.hash = hashString(
+      counter.hash,
+      `${node.uuid}|${node.name}|${node.type}|${node.visible ? 1 : 0}|${
+        node.pos ? `${node.pos.x},${node.pos.y},${node.pos.z}` : '-'
+      }|${node.instances ?? ''}|${node.droppable ? 1 : 0}|${node.gizmo ? 1 : 0}|${
+        node.childCount
+      }|${node.truncatedChildren}`
+    );
+
+    return node;
   }
 
   private onFilterInput(event: Event): void {
@@ -721,6 +759,15 @@ export class RuntimePanel extends ComponentBase {
 /** True for objects the panel injects itself (the selection highlight). */
 function isHelperObject(obj: LiveObject3D): boolean {
   return obj.userData?.isRuntimeHighlight === true;
+}
+
+/** Fold a string into a 32-bit rolling hash (FNV-style, order-sensitive). */
+function hashString(hash: number, value: string): number {
+  let h = hash;
+  for (let i = 0; i < value.length; i += 1) {
+    h = (Math.imul(h, 31) + value.charCodeAt(i)) | 0;
+  }
+  return h;
 }
 
 function accentColor(): string {

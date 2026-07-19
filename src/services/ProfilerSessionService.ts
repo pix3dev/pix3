@@ -135,6 +135,8 @@ export class ProfilerSessionService {
   private state: ProfilerSessionSnapshot = this.createIdleSnapshot();
   private notifyThrottleTimer: number | null = null;
   private lastNotifyTime = 0;
+  /** Newest frame sample not yet folded into {@link state} (see rebuildRunningState). */
+  private latestFrameSample: SceneRunnerFrameSample | null = null;
 
   subscribe(listener: ProfilerListener): () => void {
     this.listeners.add(listener);
@@ -145,6 +147,9 @@ export class ProfilerSessionService {
   }
 
   getSnapshot(): ProfilerSessionSnapshot {
+    if (this.latestFrameSample) {
+      this.rebuildRunningState();
+    }
     return {
       status: this.state.status,
       performance: { ...this.state.performance },
@@ -177,6 +182,7 @@ export class ProfilerSessionService {
     this.activityFrames.length = 0;
     this.audioFiles.clear();
     this.previousFrameImpactOrder = [];
+    this.latestFrameSample = null;
     this.runtimeRenderer = null;
     this.disposeRunnerSubscription?.();
     this.disposeRunnerSubscription = undefined;
@@ -233,17 +239,17 @@ export class ProfilerSessionService {
     this.activityFrames.length = 0;
     this.audioFiles.clear();
     this.previousFrameImpactOrder = [];
+    this.latestFrameSample = null;
     this.state = this.createIdleSnapshot();
     this.notify();
   }
 
   private handleFrameSample(sample: SceneRunnerFrameSample): void {
+    // Per-frame accumulators — these must see every frame (rolling averages,
+    // the frame-impact window, and the session audio-file registry, which would
+    // miss sub-100ms sounds if sampled at notify cadence).
     this.pushFrameTime(sample.dt * 1000);
     const averagedFrameTime = this.getAverageFrameTimeMs();
-    const rendererStats =
-      this.runtimeRenderer?.getStatsSnapshot() ??
-      sample.rendererStats ??
-      this.createEmptyRendererStats();
     const fps = averagedFrameTime > 0 ? 1000 / averagedFrameTime : null;
     const frameTimeMs = averagedFrameTime > 0 ? averagedFrameTime : null;
     this.pushActivityFrame(this.createFrameImpactActivities(sample), sample.dt * 1000);
@@ -251,6 +257,31 @@ export class ProfilerSessionService {
     this.pushHistorySample(this.frameTimeHistory, frameTimeMs);
     this.pushHistorySample(this.logicHistory, sample.logicMs);
     this.pushHistorySample(this.renderHistory, sample.renderMs);
+    this.reconcileAudioFiles(sample.activeAudioPlaybacks);
+
+    // Snapshot assembly (history array copies, frame-impact aggregation, audio
+    // DTO sort, renderer-stats + JS-heap reads) is deferred to notify time —
+    // building it per frame only to throw it away between throttled UI pushes
+    // was measurable churn.
+    this.latestFrameSample = sample;
+    this.notifyThrottled();
+  }
+
+  /** Assemble {@link state} from the newest frame sample (10Hz, not per-frame). */
+  private rebuildRunningState(): void {
+    const sample = this.latestFrameSample;
+    if (!sample) {
+      return;
+    }
+    this.latestFrameSample = null;
+
+    const averagedFrameTime = this.getAverageFrameTimeMs();
+    const rendererStats =
+      this.runtimeRenderer?.getStatsSnapshot() ??
+      sample.rendererStats ??
+      this.createEmptyRendererStats();
+    const fps = averagedFrameTime > 0 ? 1000 / averagedFrameTime : null;
+    const frameTimeMs = averagedFrameTime > 0 ? averagedFrameTime : null;
     this.state = {
       status: 'running',
       performance: {
@@ -276,9 +307,8 @@ export class ProfilerSessionService {
         renderMs: [...this.renderHistory],
       },
       frameImpact: this.createFrameImpactSnapshot(),
-      audio: this.createAudioSnapshot(sample.activeAudioPlaybacks),
+      audio: this.buildAudioSnapshot(),
     };
-    this.notifyThrottled();
   }
 
   private createFrameImpactActivities(sample: SceneRunnerFrameSample): FrameProfilerActivity[] {
@@ -652,11 +682,8 @@ export class ProfilerSessionService {
     };
   }
 
-  private createAudioSnapshot(
-    instances: readonly ActiveAudioPlaybackSnapshot[] | undefined
-  ): ProfilerAudioSnapshot {
-    this.reconcileAudioFiles(instances);
-
+  /** Pure DTO over the (per-frame reconciled) audio-file registry. */
+  private buildAudioSnapshot(): ProfilerAudioSnapshot {
     const files = [...this.audioFiles.values()]
       .map(entry => ({
         key: entry.key,
