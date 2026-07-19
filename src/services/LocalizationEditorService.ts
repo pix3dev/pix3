@@ -234,6 +234,12 @@ export class LocalizationEditorService {
     return this.tables.get(locale)?.[section][key] ?? '';
   }
 
+  /** Whether `locale` records an entry for `key` — even an empty `""` placeholder
+   *  (getEntry can't distinguish an absent key from a seeded placeholder). */
+  hasEntry(locale: string, key: string, section: LocaleTableSection = 'strings'): boolean {
+    return key in (this.tables.get(locale)?.[section] ?? {});
+  }
+
   /** Whether a key resolves (current-or-fallback) in the preview locale — as a
    *  string or as a sprite path (the inspector widget serves both labelKey and
    *  textureKey properties, which share the `localization-key` editor hint). */
@@ -355,6 +361,50 @@ export class LocalizationEditorService {
     }
     this.ensurePreview().setTable(table);
     await this.saveLocale(table.locale);
+    this.mirrorSlice();
+  }
+
+  /**
+   * Seed keys missing from `locale` as `""` placeholders (extraction template
+   * fill, design §4.5) so translators see the full key set. Returns the keys
+   * actually seeded (already-present keys are left untouched) for undo.
+   */
+  async seedMissingKeys(
+    locale: string,
+    keys: string[],
+    section: LocaleTableSection = 'strings'
+  ): Promise<string[]> {
+    const table = this.ensureTable(locale);
+    const seeded = keys.filter(key => !(key in table[section]));
+    if (seeded.length === 0) return [];
+    for (const key of seeded) table[section][key] = '';
+    this.preview?.setTable(table);
+    await this.saveLocale(locale);
+    this.mirrorSlice();
+    return seeded;
+  }
+
+  /**
+   * Remove previously seeded placeholder keys (undo of {@link seedMissingKeys}).
+   * Entries the author has since filled in are kept.
+   */
+  async unseedKeys(
+    locale: string,
+    keys: string[],
+    section: LocaleTableSection = 'strings'
+  ): Promise<void> {
+    const table = this.tables.get(locale);
+    if (!table) return;
+    let changed = false;
+    for (const key of keys) {
+      if (key in table[section] && table[section][key] === '') {
+        delete table[section][key];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.preview?.setTable(table);
+    await this.saveLocale(locale);
     this.mirrorSlice();
   }
 

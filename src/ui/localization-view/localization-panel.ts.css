@@ -264,3 +264,85 @@ pix3-localization-panel .loc-empty {
   align-items: flex-start;
   gap: 0.6rem;
 }
+
+/* ---- extraction report ---- */
+
+pix3-localization-panel .loc-report {
+  margin: 0.4rem 0.4rem 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.25);
+  border-radius: 0.3rem;
+  background: rgba(var(--pix3-accent-rgb), 0.05);
+  font-size: 0.72rem;
+}
+
+pix3-localization-panel .loc-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+pix3-localization-panel .loc-report-summary {
+  color: rgba(245, 247, 250, 0.65);
+}
+
+pix3-localization-panel .loc-report-clean {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.35rem 0 0;
+  color: rgba(140, 220, 160, 0.9);
+}
+
+pix3-localization-panel .loc-report-title {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(245, 247, 250, 0.8);
+}
+
+pix3-localization-panel .loc-report-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+pix3-localization-panel .loc-report-main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+pix3-localization-panel .loc-report-node {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: rgba(245, 247, 250, 0.85);
+}
+
+pix3-localization-panel .loc-report-literal {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(245, 247, 250, 0.55);
+}
+
+pix3-localization-panel .loc-report-key {
+  flex: 0 0 auto;
+  font-family: var(--pix3-font-mono, monospace);
+  color: rgba(var(--pix3-accent-rgb), 0.9);
+}
+
+pix3-localization-panel .loc-report-action {
+  flex: 0 0 auto;
+}
+
+pix3-localization-panel .loc-report-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

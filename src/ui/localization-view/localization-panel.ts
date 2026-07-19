@@ -9,11 +9,18 @@ import {
   LocalizationEditorService,
   type LocaleTableSection,
 } from '@/services/LocalizationEditorService';
+import {
+  LocalizationExtractionService,
+  type MissingScriptKey,
+  type UnlocalizedSceneLabel,
+} from '@/services/LocalizationExtractionService';
 import { UpdateLocaleEntryCommand } from '@/features/localization/UpdateLocaleEntryCommand';
 import { RemoveLocalizationKeyCommand } from '@/features/localization/RemoveLocalizationKeyCommand';
 import { AddLocaleCommand } from '@/features/localization/AddLocaleCommand';
 import { RemoveLocaleCommand } from '@/features/localization/RemoveLocaleCommand';
 import { SetPreviewLocaleCommand } from '@/features/localization/SetPreviewLocaleCommand';
+import { ExtractLocalizationKeysCommand } from '@/features/localization/ExtractLocalizationKeysCommand';
+import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 
 import '../shared/pix3-panel';
 import './localization-panel.ts.css';
@@ -39,6 +46,9 @@ export class LocalizationPanel extends ComponentBase {
   @inject(LocalizationEditorService)
   private readonly service!: LocalizationEditorService;
 
+  @inject(LocalizationExtractionService)
+  private readonly extraction!: LocalizationExtractionService;
+
   /** Bumped from appState.localization.revision to force a re-read/re-render. */
   @state()
   private revision = 0;
@@ -62,6 +72,9 @@ export class LocalizationPanel extends ComponentBase {
 
   @state()
   private addingKey = false;
+
+  @state()
+  private scanning = false;
 
   private disposeSub?: () => void;
 
@@ -157,6 +170,50 @@ export class LocalizationPanel extends ComponentBase {
     }
   }
 
+  // ---- extraction (design §4.5) --------------------------------------------
+
+  private async onScan(): Promise<void> {
+    if (this.scanning) return;
+    this.scanning = true;
+    try {
+      await this.commandDispatcher.execute(new ExtractLocalizationKeysCommand());
+    } finally {
+      this.scanning = false;
+    }
+  }
+
+  /** Lift a scanned literal into the default locale and bind the node's labelKey. */
+  private async onExtractItem(item: UnlocalizedSceneLabel): Promise<void> {
+    const def = this.service.getDefaultLocale();
+    if (!def) return;
+    await this.commandDispatcher.execute(
+      new UpdateLocaleEntryCommand({ locale: def, key: item.suggestedKey, value: item.literal })
+    );
+    await this.commandDispatcher.execute(
+      new UpdateObjectPropertyCommand({
+        nodeId: item.nodeId,
+        propertyPath: 'labelKey',
+        value: item.suggestedKey,
+      })
+    );
+    this.extraction.dismissSceneLabel(item);
+  }
+
+  /** Add a script-referenced key to the default table (key echoed as starter value). */
+  private async onAddMissingKey(item: MissingScriptKey): Promise<void> {
+    const def = this.service.getDefaultLocale();
+    if (!def) return;
+    await this.commandDispatcher.execute(
+      new UpdateLocaleEntryCommand({
+        locale: def,
+        key: item.key,
+        value: item.key,
+        section: item.section,
+      })
+    );
+    this.extraction.dismissMissingKey(item.key);
+  }
+
   // ---- rendering -----------------------------------------------------------
 
   private visibleKeys(): string[] {
@@ -201,7 +258,7 @@ export class LocalizationPanel extends ComponentBase {
         actions-label="Localization controls"
       >
         <div slot="toolbar" class="loc-toolbar">${this.renderToolbar()}</div>
-        <div class="loc-body">${this.renderGrid()}</div>
+        <div class="loc-body">${this.renderReport()}${this.renderGrid()}</div>
       </pix3-panel>
     `;
   }
@@ -260,6 +317,15 @@ export class LocalizationPanel extends ComponentBase {
           title="Add a new translation key"
         >
           ${this.icons.getIcon('plus', IconSize.SMALL)} Key
+        </button>
+        <button
+          type="button"
+          class="loc-btn"
+          @click=${() => void this.onScan()}
+          ?disabled=${this.scanning}
+          title="Scan scenes and scripts for unlocalized text; seed missing keys into other locales"
+        >
+          ${this.icons.getIcon('search', IconSize.SMALL)} ${this.scanning ? 'Scanning…' : 'Scan'}
         </button>
       </div>
 
@@ -354,6 +420,109 @@ export class LocalizationPanel extends ComponentBase {
       autofocus
       aria-label="New locale id"
     />`;
+  }
+
+  /** Post-scan report: unlocalized scene labels + script keys missing from the template. */
+  private renderReport() {
+    const report = this.extraction.getReport();
+    if (!report) return null;
+
+    const seededTotal = Object.values(report.seededKeys).reduce((n, keys) => n + keys.length, 0);
+    const clean = report.sceneLabels.length === 0 && report.missingScriptKeys.length === 0;
+
+    return html`
+      <section class="loc-report" aria-label="Extraction report">
+        <div class="loc-report-head">
+          <span class="loc-report-summary">
+            Scanned ${report.scannedScenes} scene${report.scannedScenes === 1 ? '' : 's'},
+            ${report.scannedScripts} script${report.scannedScripts === 1 ? '' : 's'}
+            ${seededTotal > 0 ? html` · seeded ${seededTotal} template keys` : null}
+          </span>
+          <button
+            type="button"
+            class="loc-row-remove"
+            @click=${() => this.extraction.clearReport()}
+            title="Dismiss report"
+            aria-label="Dismiss extraction report"
+          >
+            ${this.icons.getIcon('x', IconSize.SMALL)}
+          </button>
+        </div>
+        ${clean
+          ? html`<p class="loc-report-clean">
+              ${this.icons.getIcon('check', IconSize.SMALL)} No unlocalized text found.
+            </p>`
+          : null}
+        ${report.sceneLabels.length > 0
+          ? html`
+              <h4 class="loc-report-title">Unlocalized labels (${report.sceneLabels.length})</h4>
+              ${repeat(
+                report.sceneLabels,
+                item => `${item.scenePath}:${item.nodeId}`,
+                item => this.renderSceneLabelItem(item)
+              )}
+            `
+          : null}
+        ${report.missingScriptKeys.length > 0
+          ? html`
+              <h4 class="loc-report-title">
+                Script keys missing from the default table (${report.missingScriptKeys.length})
+              </h4>
+              ${repeat(
+                report.missingScriptKeys,
+                item => item.key,
+                item => this.renderMissingKeyItem(item)
+              )}
+            `
+          : null}
+      </section>
+    `;
+  }
+
+  private renderSceneLabelItem(item: UnlocalizedSceneLabel) {
+    return html`
+      <div class="loc-report-row">
+        <div class="loc-report-main">
+          <span class="loc-report-node" title=${`${item.scenePath} · #${item.nodeId}`}>
+            ${item.nodeName}
+          </span>
+          <span class="loc-report-literal" title=${item.literal}>“${item.literal}”</span>
+          <span class="loc-report-key" title="Suggested key">→ ${item.suggestedKey}</span>
+        </div>
+        <button
+          type="button"
+          class="loc-btn loc-report-action"
+          ?disabled=${!item.extractable}
+          @click=${() => void this.onExtractItem(item)}
+          title=${item.extractable
+            ? 'Create the key in the default locale and bind labelKey'
+            : `Open ${item.scenePath} as the active scene to extract`}
+        >
+          Extract
+        </button>
+      </div>
+    `;
+  }
+
+  private renderMissingKeyItem(item: MissingScriptKey) {
+    return html`
+      <div class="loc-report-row">
+        <div class="loc-report-main">
+          <span class="loc-report-key">${item.key}</span>
+          <span class="loc-report-literal" title=${`${item.file}:${item.line}`}>
+            ${item.file}:${item.line}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="loc-btn loc-report-action"
+          @click=${() => void this.onAddMissingKey(item)}
+          title="Add the key to the default locale table"
+        >
+          Add
+        </button>
+      </div>
+    `;
   }
 
   private renderGrid() {
