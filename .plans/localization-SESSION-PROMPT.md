@@ -1,55 +1,68 @@
-# Session prompt — Feature #1: Localization (editor authoring + play-mode wiring + migration)
+# Session prompt — Localization: commit Phase 2+3 + post-MVP polish
 
 > Paste the section below as the first message of a fresh Claude Code session in the `pix3` repo.
 > Everything above this line is a note; everything below is the prompt.
 
 ---
 
-Continue the **unified localization (i18n/l10n) system for Pix3**. The engine-agnostic **runtime core is already built and shipped** (commit `8987ac7` on branch `feat/editor-improvements`); your job is the **editor authoring layer + play-mode auto-wiring + the SkyDefender migration**. This is an **engine+editor feature** — per `CLAUDE.md`, state the plan and get my confirmation before writing code.
+Continue the **unified localization (i18n/l10n) system for Pix3**. **All planned phases (0–3) are implemented and live-verified**, but the Phase 2+3 work sits **uncommitted in the working tree** — your first job is to review and commit it in sensible increments, then take the post-MVP polish backlog.
 
-## Authoritative plan — read first
-- **`.plans/localization-design.md`** — the full design (Godot `tr()`-adapted). Source of truth: data model (per-locale JSON tables + `sprites` section + `pix3project.yaml` `localization:` block), the `LocalizationService` API, node integration, editor UX, commands/operations, script API, export, edge cases, and the phased plan (§8). Follow it.
-- Also read `AGENTS.md`, `CLAUDE.md`, `docs/nodes-and-systems.md`. Load the `pix3-game-dev` skill before runtime work and the `pix3-ui-conventions` skill before building the panel/inspector widget.
+## Authoritative context — read first
+- **`.plans/localization-design.md`** — the full design (source of truth for data model, API, phases §8, open decisions).
+- `docs/pix3-specification.md` **§6.17 Localization** (v1.22) and the Localization section in `docs/nodes-and-systems.md` — describe exactly what shipped.
+- Auto-memory `localization-i18n.md` has the condensed history + debug lessons.
+- `AGENTS.md` / `CLAUDE.md` as always; `pix3-ui-conventions` before touching panel UI, `pix3-game-dev` before runtime work.
 
-## What's ALREADY DONE — do NOT rebuild (commit `8987ac7`)
-Runtime core, live-verified + 8 unit tests:
-- `packages/pix3-runtime/src/core/localization/`: `LocalizationService` (per-locale JSON tables via `ResourceManager`, `tr`/`trSprite`/`has` with current→fallback→key chain, `{param}` interpolation, `onChange`, `setLocale`/`setTable`), `active-localization.ts` (globalThis sink: `setActiveLocalization`/`getActiveLocalization`/`resolveLocalizedText(key, fallbackLiteral, params?)`), `apply-locale-to-tree.ts` (re-renders keyed labels), `localization-types.ts`, spec. All exported from `packages/pix3-runtime/src/index.ts`.
-- `UIControl2D`: `labelKey` field + schema prop (`editor: 'localization-key'`), `getDisplayText()` (= `tr(labelKey)` else literal), `updateLabel()` paints it, public `refreshLocalizedLabel()`. `property-schema.ts` has the `'localization-key'` editor hint.
-- `Label2D`: `updateLabel()` uses `getDisplayText()`, `setTextKey(key, params?)`, `setText()` clears the key, `labelKeyParams` (runtime-only).
-- Persistence: `SceneSaver.serializeCommonUIControlProps` writes `labelKey`; `SceneLoader` reads it into every UIControl2D subclass. Prefab-override diffs work (schema prop).
-- `SceneService.get localization()` returns `delegate?.getLocalizationService?.() ?? getActiveLocalization() ?? inert` — so `this.scene.localization.tr(...)` works for scripts. The `SceneServiceDelegate` interface has the optional `getLocalizationService?()` method.
+## What is DONE and in the working tree (uncommitted) — commit it, don't rebuild
 
-> Note: the branch may have advanced (a parallel #4 batching effort added `core/atlas-frame-map`, `batch-2d`, `shared-quad-geometry` etc. to the runtime index). That's unrelated to localization; don't touch it.
+Run `git status` first; roughly the changeset is:
 
-## What REMAINS (your work)
+**Runtime (`packages/pix3-runtime`)** — after committing: `npm run yalc:publish` + `yalc update` in `../DeepCore` (already done for the current tree, repeat only if you amend):
+- `Sprite2D.textureKey` + `Button2D.stateTextureKeys` (schema props `textureNormalKey`/`textureHoverKey`/`texturePressedKey`/`textureDisabledKey`, editor hint `localization-key`) with `getEffectiveTexturePath()` / `getEffectiveStateTexturePath(state)` as the single source of truth; SceneLoader resolves through them, SceneSaver persists them.
+- `apply-locale-to-tree.ts` takes an optional `LocaleTextureLoader` and re-resolves keyed sprite textures on locale change (stale async loads dropped).
+- `LocalizationService.trPlural(key, count, params?)` — `Intl.PluralRules` suffix keys `.one/.few/.many/.other`, falls to `.other` → bare key, `{count}` auto-token. Spec tests incl. ru one/few/many.
+- **`SceneRunner`: `runGraph` is now async and AWAITS the seed locale table before the first frame** (`setupLocalization` async). This kills the frame-1 raw-key flash. Critical detail: an unfocused/paused session freezes the Game canvas on frame 1, so without this the game *looks* unlocalized (cost us an hour of debugging — see Verification below).
+- `main.ts` bootstrap reads `runtimeLocalization` from the generated scene-manifest and calls `setLocalizationConfig` before `startScene`; placeholder `generated/scene-manifest.ts` gained the export.
 
-**Phase 0 completion — SceneRunner play-mode wiring** (I deferred this): `SceneRunner` must, on `startScene`, create + `configure()` (from injected config) + `attachResources()` + `setActiveLocalization()` a play-mode `LocalizationService` (seeded with the editor's current preview locale in-editor, or `defaultLocale` in exports), stash the previous active pointer, subscribe its `onChange` → `applyLocaleToTree(rootNodes)`, and implement `SceneServiceDelegate.getLocalizationService()`; on `stop()` restore the stashed pointer + dispose (even on abnormal stop). Runtime `LocalizationService.spec` extend for lifecycle if useful.
+**Editor (`src/`)**:
+- Localization panel `src/ui/localization-view/` with **Strings/Sprites section tabs**; service + `UpdateLocaleEntry`/`RemoveLocalizationKey` commands/ops take `section: 'strings' | 'sprites'`.
+- `AddLocale`/`RemoveLocale`/`RemoveLocalizationKey`/`OpenLocalizationPanel` commands+ops (`src/features/localization/`), LayoutManager panel registration (`revealLocalizationPanel` docks before Inspector), View-menu entry.
+- `ViewportRenderService`: sprite proxies + Button2D skins render effective (localized) texture paths; `refreshLocalizedLabels()` also refreshes keyed sprite proxies.
+- `ProjectBuildService`: `collectLocaleAssetPaths` ships `locales/*.json` + every `sprites`-section texture; bakes `runtimeLocalization` into the generated scene-manifest.
+- `LocalizationEditorService.keyResolvesInPreview` checks both `strings` and `sprites` (inspector status glyph fix).
 
-**Phase 1 — Editor preview + inspector + manifest (the MVP the user wants authorable):**
-- `src/core/ProjectManifest.ts` — `localization: { defaultLocale, fallbackLocale, locales }` block + `normalizeProjectManifest` default (absent ⇒ inert).
-- `src/services/LocalizationEditorService.ts` (`@injectable`, `dispose()`): load `locales/*.json` + manifest block at project open; own the **editor-preview `LocalizationService`** instance + `setActiveLocalization()`; feed it via `setTable()` on edits; authoring API (`getTable`/`setEntry`/`removeKey`/`addLocale`/`getMissing`/`save`); mirror `appState.localization` slice `{ locales, defaultLocale, previewLocale, missingCounts, revision }`.
-- `src/state/AppState.ts` — `localization` slice (IDs/counters only; tables stay in the service).
-- `src/features/localization/`: `SetPreviewLocaleCommand`/`Operation` (non-dirtying; undo restores previous locale; runs `applyLocaleToTree` + refreshes label proxies + `requestRender()`), `UpdateLocaleEntryCommand`/`Operation` (undoable, write-through).
-- `src/services/ViewportRenderService.ts` — label proxies must render `node.getDisplayText()` (not `node.label`) so keyed labels show translations in the editor; refresh affected label visuals on preview-locale change / table edit, then `requestRender()`.
-- Inspector: `pix3-localization-key-editor` widget in `src/ui/object-inspector/property-editors.ts`, dispatched by the `editor: 'localization-key'` hint in `inspector-panel.ts` — text input + autocomplete over known keys, a status glyph (IconService `check`/`alert-triangle`) for "resolves in preview locale?", and an **Extract** button (literal `label` + empty `labelKey` → creates default-locale key from node path, sets `labelKey` via `UpdateObjectPropertyOperation`). Setting `labelKey` needs **no new op** — it's a schema prop through the existing `UpdateObjectPropertyCommand`.
-- Viewport toolbar: a compact preview-locale dropdown (IconService `globe`).
+**SkyDefender migration (`samples/SkyDefender/`)** — the Phase-3 proof:
+- `SdBalance.ts`: `BriefingLine = { speaker, textKey }`, `goalKey`, helpers `missionNameKey(n)`/`speakerKey(s)`, missions 4–30 collapsed into `stubMeta(n)`.
+- `MapController`/`GameFlow`/`ShopController` → `setTextKey`/`tr(...)` with params; wave-failed banner uses `trPlural`; shop item names/descs via `shop.item.<id>.*` keys.
+- `locales/en.json` + `ru.json` (~190 keys each; EN generated from SdBalance data, RU авторский перевод). Generator script (one-off) was in the session scratchpad — regenerate by hand-editing the JSONs directly if needed.
+- Authored `labelKey` on menu subtitle + map mission-title; `localization:` block in `pix3project.yaml`.
 
-**Phase 2 — Localization panel + localized sprites + extraction + export** (design §3.3, §4.3–4.5, §6): `pix3-localization-panel` (Golden Layout; keys×locales grid + Sprites tab + missing view), `Sprite2D.textureKey` / `Button2D.stateTextureKeys` resolved through the `sprites` table at the `SceneLoader` texture-load sites, `Add/Remove/RenameLocale` + `ExtractLocalizationKeys` commands, and `ProjectBuildService.collectAssetPaths` enumerating `locales/*.json` + their sprite paths (the one mandatory export change) + baking the `localization` config into the generated bootstrap.
+**Docs**: spec §6.17 + v1.22 changelog + header bump; nodes-and-systems Localization section (incl. trPlural + SkyDefender reference).
 
-**Phase 3 — SkyDefender migration (the proof) + docs + publish:** `samples/SkyDefender/locales/{en,ru}.json`; migrate `SdBalance.ts` `MISSION_NAMES`/`MISSION_META` literals to key helpers + `speakerKey`/`textKey`/`goalKey`; `GameFlow`/`MapController`/`HudController`/`ShopController` `setText(...)` → `setTextKey(...)` where persistent; `labelKey` on authored scene labels; menu-button EN/RU sprite keys. Then update `docs/nodes-and-systems.md` + `docs/pix3-specification.md` + `pix3-game-dev` skill; `cd packages/pix3-runtime && npm run yalc:publish` → `yalc update` in `../DeepCore`.
+**Verified live** (chrome-devtools MCP on SkyDefender): panel authoring writes sorted `$meta` JSONs; editor preview switch flips authored labels AND `textureKey` sprite proxies (en→CONTINUE / ru→CREDITS); play mode starts in the preview locale with frame 1 already translated; mission-1 briefing shows «Миссия 1 — Пролог», «Король», RU dialog. Full suite: 1212 passed, 1 pre-existing fail (`UpdateCheckService`); lint clean; tsc at the ~32-error baseline.
 
-## ⚠️ Verification environment (learnings not in the design doc)
-Editor-viewport label re-rendering on a locale switch **needs a real rendering context** — use the **chrome-devtools MCP**, not raw CDP:
-- The editor renders **on-demand** (rAF); a background Chrome throttles rAF so **no WebGL canvas is created** and the viewport camera is null / `0×0`. The MCP's `take_screenshot` **forces a paint** — screenshot after every state change before checking that labels changed on screen.
-- **Runtime-core mechanism is already proven** (this recipe worked live): via MCP `evaluate_script`, `const E = window.__PIX3_ENGINE__; const loc = new E.LocalizationService(); loc.configure({defaultLocale:'en',fallbackLocale:'en'}); loc.setTable({locale:'en',strings:{'menu.play':'Play'},sprites:{}}); loc.setTable({locale:'ru',strings:{'menu.play':'Играть'},sprites:{}}); E.setActiveLocalization(loc); const l = new E.Label2D({id:'t',labelKey:'menu.play'}); l.getDisplayText(); // 'Play'; await loc.setLocale('ru'); E.applyLocaleToTree([l]); l.getDisplayText(); // 'Играть'`. Your job is to verify the **editor path**: set `labelKey` in the inspector, switch preview locale, screenshot → the label in the viewport shows the translated text; and the **play-mode path**: start play (`window.__PIX3_DEBUG__.play.start()`), a script `setLocale('ru')`, screenshot → keyed labels re-render.
-- Open a project/scene headlessly: OPFS "browser" project via `ProjectLifecycleService.createProject({ name, backend:"browser", viewportBaseWidth:1280, viewportBaseHeight:720, templateId:"empty-2d" })` then `EditorTabService.focusOrOpenScene(...)`; build nodes with `d.agentTools.execute("create_node", {...})`. The MCP profile also has a real project "S1 Clean Ring Racing". Test target **SkyDefender** (`samples/SkyDefender`) needs a one-time human directory-pick — ask me to open `c:\Projects\pix3-stuff\pix3\samples\SkyDefender` in the MCP's Chrome.
-- Skills: `debug-running-game`, `pix3-remote-preview`.
+**Commit plan suggestion** (confirm with me first): (1) runtime sprites+trPlural+first-frame-await, (2) editor panel/commands/viewport/export, (3) SkyDefender migration + locales, (4) docs. End commit messages with the standard Co-Authored-By line.
+
+## Post-MVP backlog (after committing — pick with me)
+1. **`ExtractLocalizationKeysCommand`** (design §4.5): scan `.pix3scene` files for UIControl2D `label:` literals without `labelKey` and scripts for `tr('…')`/`setTextKey('…')` literals; report into the panel (unlocalized list with per-item Extract); add missing keys to non-default locales as `""`.
+2. **`RenameLocalizationKeyCommand`/Operation** (design §4.4): rename across all locale tables + rewrite `labelKey`/`textureKey` in open scenes via the property op.
+3. **Per-locale Button2D skins for the SkyDefender menu** — blocked on RU-baked button art; the `generate-sprites-in-editor` skill can produce it (needs the in-editor AI key configured).
+4. `locales` category in `src/core/asset-categories.ts` (asset-browser by-type grouping).
+5. (Optional, design §1.2) PO/CSV import-export converters over the JSON model.
+
+## ⚠️ Verification environment (hard-won lessons)
+- **Frozen-first-frame trap**: an MCP-driven (unfocused) Chrome pauses the game render loop; the Game canvas keeps the FIRST frame forever. If play mode "shows raw keys", check the live nodes first: `globalThis.__PIX3_RUNTIME_SCENE__.traverse(o => ...)` — read `renderState.text`/`getDisplayText()`; if those are translated, the localization is fine and you're looking at a stale frame. (The await-seed fix makes frame 1 correct, so this should no longer bite for locale text specifically.)
+- User-script registration needs the page compiled state — check the Logs panel for "Scripts compiled and loaded successfully" before judging play mode; `d.agentTools.execute('check_scripts', {})` type-checks all project scripts.
+- `window.__PIX3_DEBUG__.command(id)` takes NO args (`executeById`) — parameterized commands can't be driven through it; drive the panel/inspector DOM directly (dispatch `change` events) or use `d.agentTools.execute(name, argsObject)` (e.g. `create_node` wants `{nodeType, name, parentNodeId}`).
+- `d.setProperty({nodeId, propertyPath: 'textureKey', ...})` returned `false` in one session while the inspector-widget path worked — unresolved bridge quirk; prefer the widget input.
+- The `create_node` agent tool **auto-saves the scene** — after MCP experiments, `git checkout` test scenes and delete stray test nodes/locales from real sample projects.
+- Editor renders on demand: MCP `take_screenshot` forces a paint; screenshot after every state change. Preview-locale switch: Localization panel → `select[aria-label="Preview locale"]`.
+- SkyDefender opens via the persisted local project in the MCP Chrome profile (`http://localhost:8123`, dev server `npm run dev`); if the profile lost it, ask me to re-pick `samples/SkyDefender`.
 
 ## Conventions
-- Mutation gateway (Command+Operation) for every editor state change; DI (`@injectable`/`@inject`, `dispose()`); Light-DOM Lit on `ComponentBase` + sibling `.ts.css` + **IconService** (never emoji) + theme tokens for the panel/widget/dropdown; no `any`.
-- Runtime package stays editor-agnostic + publishable — the `LocalizationEditorService`/panel/commands live editor-side; the runtime only gets the SceneRunner wiring. `yalc:publish` after runtime changes.
-- Keep `tsc --noEmit` at the repo baseline (~32 pre-existing errors); lint clean (ignore the repo-wide CRLF/prettier `Delete ␍` noise); no runtime-spec regressions.
-- Backward-compatible: projects with no `localization` block / no `labelKey` behave exactly as today.
-- Commit incrementally (SceneRunner wiring; Phase 1 editor MVP; Phase 2; Phase 3 migration); end commit messages with `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- Mutation gateway (Command+Operation) for every editor state change; DI; Light-DOM Lit + IconService (never emoji) + theme tokens; no `any`.
+- Runtime package stays editor-agnostic; `yalc:publish` + DeepCore `yalc update` after runtime changes.
+- tsc stays at the ~32-error baseline; ignore repo-wide CRLF `Delete ␍` lint noise; keep the full vitest suite green (1 known `UpdateCheckService` fail).
+- Backward-compatible: projects with no locales stay byte-identical in behavior.
 
-Start with Phase 0 completion (SceneRunner wiring) + the Phase-1 plan (manifest + LocalizationEditorService + preview switch + inspector widget), propose it for my confirmation, then implement and verify the editor preview-locale switch changing scene labels in the viewport.
+Start by running `git status` + `git diff --stat`, propose the commit split for my confirmation, commit, then present the post-MVP backlog and let me pick.
