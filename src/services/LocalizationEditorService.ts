@@ -365,6 +365,38 @@ export class LocalizationEditorService {
   }
 
   /**
+   * Move a key to a new name in every locale table that has it. Returns the moved
+   * values per locale (for undo — renaming back restores them exactly), or null
+   * when `oldKey` resolves nowhere or `newKey` is already taken in the section.
+   * Symmetric: undo = `renameKey(newKey, oldKey, section)`.
+   */
+  async renameKey(
+    oldKey: string,
+    newKey: string,
+    section: LocaleTableSection = 'strings'
+  ): Promise<Record<string, string> | null> {
+    if (!oldKey || !newKey || oldKey === newKey) return null;
+    let found = false;
+    for (const table of this.tables.values()) {
+      if (oldKey in table[section]) found = true;
+      if (newKey in table[section]) return null;
+    }
+    if (!found) return null;
+
+    const moved: Record<string, string> = {};
+    for (const [locale, table] of this.tables) {
+      if (!(oldKey in table[section])) continue;
+      moved[locale] = table[section][oldKey];
+      delete table[section][oldKey];
+      table[section][newKey] = moved[locale];
+      this.preview?.setTable(table);
+      await this.saveLocale(locale);
+    }
+    this.mirrorSlice();
+    return moved;
+  }
+
+  /**
    * Seed keys missing from `locale` as `""` placeholders (extraction template
    * fill, design §4.5) so translators see the full key set. Returns the keys
    * actually seeded (already-present keys are left untouched) for undo.

@@ -159,7 +159,7 @@ pix3-localization-panel .loc-grid {
 pix3-localization-panel .loc-grid-head,
 pix3-localization-panel .loc-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 1.3fr) minmax(6rem, 2fr) minmax(6rem, 2fr) 1.6rem;
+  grid-template-columns: minmax(8rem, 1.3fr) minmax(6rem, 2fr) minmax(6rem, 2fr) 3.2rem;
   align-items: center;
   gap: 0.4rem;
   padding: 0.15rem 0.4rem;
@@ -345,4 +345,10 @@ pix3-localization-panel .loc-report-action {
 pix3-localization-panel .loc-report-action:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+pix3-localization-panel .loc-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
 }

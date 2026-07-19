@@ -20,6 +20,7 @@ import { AddLocaleCommand } from '@/features/localization/AddLocaleCommand';
 import { RemoveLocaleCommand } from '@/features/localization/RemoveLocaleCommand';
 import { SetPreviewLocaleCommand } from '@/features/localization/SetPreviewLocaleCommand';
 import { ExtractLocalizationKeysCommand } from '@/features/localization/ExtractLocalizationKeysCommand';
+import { RenameLocalizationKeyCommand } from '@/features/localization/RenameLocalizationKeyCommand';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 
 import '../shared/pix3-panel';
@@ -75,6 +76,10 @@ export class LocalizationPanel extends ComponentBase {
 
   @state()
   private scanning = false;
+
+  /** Key currently being renamed inline (its key cell renders as an input). */
+  @state()
+  private renamingKey: string | null = null;
 
   private disposeSub?: () => void;
 
@@ -167,6 +172,18 @@ export class LocalizationPanel extends ComponentBase {
     } else if (event.key === 'Escape') {
       this.addingLocale = false;
       this.addingKey = false;
+      this.renamingKey = null;
+    }
+  }
+
+  private commitRenameKey(oldKey: string, event: Event): void {
+    const newKey = (event.target as HTMLInputElement).value.trim();
+    if (this.renamingKey !== oldKey) return; // already committed or cancelled
+    this.renamingKey = null;
+    if (newKey && newKey !== oldKey) {
+      void this.commandDispatcher.execute(
+        new RenameLocalizationKeyCommand({ oldKey, newKey, section: this.section })
+      );
     }
   }
 
@@ -401,7 +418,11 @@ export class LocalizationPanel extends ComponentBase {
   private renderAddLocale(cls: string) {
     return this.addingLocale
       ? this.renderAddLocaleInput()
-      : html`<button type="button" class="loc-btn ${cls}" @click=${() => (this.addingLocale = true)}>
+      : html`<button
+          type="button"
+          class="loc-btn ${cls}"
+          @click=${() => (this.addingLocale = true)}
+        >
           ${this.icons.getIcon('plus', IconSize.SMALL)} Add locale
         </button>`;
   }
@@ -540,7 +561,9 @@ export class LocalizationPanel extends ComponentBase {
           <span class="loc-col-val" role="columnheader">${def || 'default'}</span>
           ${target
             ? html`<span class="loc-col-val" role="columnheader">${target}</span>`
-            : html`<span class="loc-col-val loc-col-hint" role="columnheader">add a locale →</span>`}
+            : html`<span class="loc-col-val loc-col-hint" role="columnheader"
+                >add a locale →</span
+              >`}
           <span class="loc-col-actions" role="columnheader"></span>
         </div>
 
@@ -582,9 +605,27 @@ export class LocalizationPanel extends ComponentBase {
 
   private renderRow(key: string, def: string, target: string, isMissing: boolean) {
     const valuePlaceholder = this.section === 'sprites' ? 'res://path/to/texture.png' : '';
+    const renaming = this.renamingKey === key;
     return html`
       <div class="loc-row" role="row">
-        <span class="loc-col-key" role="cell" title=${key}>${key}</span>
+        ${renaming
+          ? html`<input
+              class="loc-add-input loc-col-key"
+              type="text"
+              .value=${key}
+              @change=${(e: Event) => this.commitRenameKey(key, e)}
+              @keydown=${this.onEditKeydown}
+              @blur=${(e: Event) => this.commitRenameKey(key, e)}
+              autofocus
+              aria-label=${`Rename ${key}`}
+            />`
+          : html`<span
+              class="loc-col-key"
+              role="cell"
+              title=${`${key} — double-click to rename`}
+              @dblclick=${() => (this.renamingKey = key)}
+              >${key}</span
+            >`}
         <input
           class="loc-cell loc-col-val"
           role="cell"
@@ -605,15 +646,26 @@ export class LocalizationPanel extends ComponentBase {
               aria-label=${`${key} in ${target}`}
             />`
           : html`<span class="loc-col-val"></span>`}
-        <button
-          type="button"
-          class="loc-row-remove loc-col-actions"
-          @click=${() => this.onRemoveKey(key)}
-          title="Remove key from all locales"
-          aria-label=${`Remove ${key}`}
-        >
-          ${this.icons.getIcon('trash-2', IconSize.SMALL)}
-        </button>
+        <span class="loc-col-actions loc-row-actions">
+          <button
+            type="button"
+            class="loc-row-remove"
+            @click=${() => (this.renamingKey = key)}
+            title="Rename key everywhere (tables + open scenes)"
+            aria-label=${`Rename ${key}`}
+          >
+            ${this.icons.getIcon('edit-2', IconSize.SMALL)}
+          </button>
+          <button
+            type="button"
+            class="loc-row-remove"
+            @click=${() => this.onRemoveKey(key)}
+            title="Remove key from all locales"
+            aria-label=${`Remove ${key}`}
+          >
+            ${this.icons.getIcon('trash-2', IconSize.SMALL)}
+          </button>
+        </span>
       </div>
     `;
   }

@@ -193,7 +193,9 @@ viewport). The panel's **Scan** button extracts keys project-wide: it lists
 unlocalized `label:` literals (per-item Extract creates the default-locale key
 and binds `labelKey`) and script `tr()`-literal keys missing from the default
 table, then seeds missing keys into other locales as `""` placeholders (empty
-entries count as untranslated and fall through to the fallback locale).
+entries count as untranslated and fall through to the fallback locale). Rows
+rename in place (pencil / double-click) — the key moves in every locale table
+and `labelKey`/`textureKey` references in open scenes are rewritten, one undo.
 Locale list/default live in `pix3project.yaml` (`localization:` block)
 or are auto-discovered from `locales/`. Exports bake the config and embed the
 tables + localized sprites automatically. Lives in
