@@ -38,6 +38,19 @@ describe('LocalizationService', () => {
     expect(svc.tr('does.not.exist')).toBe('does.not.exist'); // → key echoed
   });
 
+  it('treats empty entries as untranslated (extraction placeholders fall through)', async () => {
+    const svc = makeService();
+    svc.setTable({
+      locale: 'ru',
+      strings: { 'menu.play': 'Играть', 'only.en': '' }, // "" seeded by extraction
+      sprites: { 'btn.credits': '' },
+    });
+    await svc.setLocale('ru');
+    expect(svc.tr('only.en')).toBe('English only'); // "" → en fallback, not empty
+    expect(svc.has('only.en')).toBe(true); // resolvable via fallback
+    expect(svc.trSprite('btn.credits')).toBeNull(); // "" sprite → authored texture
+  });
+
   it('interpolates {token} params', () => {
     const svc = makeService();
     expect(svc.tr('hud.gold', { amount: 250 })).toBe('Gold: 250');

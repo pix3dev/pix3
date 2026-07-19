@@ -120,10 +120,12 @@ export class LocalizationService {
     return params ? interpolate(raw, params) : raw;
   }
 
+  /** Empty entries count as untranslated (Godot semantics) — they are template
+   *  placeholders seeded by extraction, so the chain falls through them. */
   private lookupString(key: string): string | undefined {
     const current = this.tables.get(this.currentLocale)?.strings[key];
-    if (current !== undefined) return current;
-    return this.tables.get(this.fallbackLocale)?.strings[key];
+    if (current) return current;
+    return this.tables.get(this.fallbackLocale)?.strings[key] || undefined;
   }
 
   /**
@@ -160,8 +162,8 @@ export class LocalizationService {
   trSprite(key: string): string | null {
     if (!key) return null;
     const current = this.tables.get(this.currentLocale)?.sprites[key];
-    if (current !== undefined) return current;
-    return this.tables.get(this.fallbackLocale)?.sprites[key] ?? null;
+    if (current) return current;
+    return this.tables.get(this.fallbackLocale)?.sprites[key] || null;
   }
 
   /** Whether `key` resolves in the current-or-fallback chain (vs. echoing the key). */
