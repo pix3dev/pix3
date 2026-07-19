@@ -1,12 +1,12 @@
 import { registerGameDebug, Script } from '@pix3/runtime';
-import type { Bar2D, Label2D, NodeBase, PropertySchema } from '@pix3/runtime';
+import type { Bar2D, Label2D, NodeBase, PropertySchema, TrParams } from '@pix3/runtime';
 import { Vector3 } from 'three';
 import { WaveSpawner } from './WaveSpawner';
 import {
   AIR_SUPPORT_DAMAGE,
   AIR_SUPPORT_PERIOD,
   AIR_SUPPORT_TARGETS,
-  MISSIONS,
+  missionNameKey,
   REPAIR_AMOUNT,
   SHOP_ITEMS,
   UMBRELLA_FACTOR,
@@ -316,7 +316,11 @@ export class GameFlow extends Script {
       case 'countdown': {
         const total = Number(this.config.countdownSeconds);
         const remaining = Math.ceil(total - this.stateTime);
-        this.setLabel(this.centerLabel, remaining > 0 ? String(remaining) : 'FIGHT!');
+        if (remaining > 0) {
+          this.setLabel(this.centerLabel, String(remaining));
+        } else {
+          this.setLabelKey(this.centerLabel, 'game.fight');
+        }
         if (this.stateTime >= total + 0.7) {
           this.enterState('wave');
         }
@@ -506,12 +510,15 @@ export class GameFlow extends Script {
     switch (next) {
       case 'countdown':
         this.setLabel(this.centerLabel, '');
-        this.setLabel(
-          this.waveLabel,
-          this.mode === 'survival'
-            ? `Wave ${this.wave}`
-            : `${MISSIONS[this.wave - 1]?.name ?? 'Mission'} — ${this.wave}/${this.spawner?.waveCount ?? 1}`
-        );
+        if (this.mode === 'survival') {
+          this.setLabelKey(this.waveLabel, 'game.wave', { n: this.wave });
+        } else {
+          this.setLabelKey(this.waveLabel, 'game.mission-wave', {
+            name: this.tr(missionNameKey(this.wave)),
+            wave: this.wave,
+            total: this.spawner?.waveCount ?? 1,
+          });
+        }
         break;
       case 'wave':
         this.setLabel(this.centerLabel, '');
@@ -535,13 +542,15 @@ export class GameFlow extends Script {
         this.node?.emit('mission-started', this.wave);
         break;
       case 'intermission':
-        this.setLabel(this.centerLabel, `WAVE ${this.wave} CLEARED`);
+        this.setLabelKey(this.centerLabel, 'game.wave-cleared', { n: this.wave });
         this.scene?.audio.play(SFX.panel, { bus: 'sfx' });
         break;
       case 'wave-failed':
+        // Plural-aware ('… — 1 LIFE LEFT' vs '… — N LIVES LEFT'); transient banner,
+        // so resolving once via trPlural (no live key binding) is fine.
         this.setLabel(
           this.centerLabel,
-          this.lives === 1 ? 'WAVE FAILED — 1 LIFE LEFT' : `WAVE FAILED — ${this.lives} LIVES LEFT`
+          this.scene?.localization.trPlural('game.wave-failed', this.lives) ?? ''
         );
         this.scene?.audio.play(SFX.warning, { bus: 'sfx' });
         break;
@@ -556,19 +565,22 @@ export class GameFlow extends Script {
         const total = Math.floor(this.battleTime);
         const time = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
         if (this.mode === 'survival') {
-          this.setLabel(this.resultTitle, 'GAME OVER');
-          this.setLabel(
-            this.resultStats,
-            `Score ${this.score} — Kills ${this.kills} — Time ${time} — Waves ${this.wave}`
-          );
+          this.setLabelKey(this.resultTitle, 'game.game-over');
+          this.setLabelKey(this.resultStats, 'game.result.survival', {
+            score: this.score,
+            kills: this.kills,
+            time,
+            waves: this.wave,
+          });
         } else {
-          this.setLabel(this.resultTitle, this.victory ? 'VICTORY!' : 'DEFEAT');
-          this.setLabel(
-            this.resultStats,
-            this.victory
-              ? `The province is safe… for now. Gold earned: ${Math.floor(session.gold)}`
-              : 'The castle has fallen. Joe will remember this.'
-          );
+          this.setLabelKey(this.resultTitle, this.victory ? 'game.victory' : 'game.defeat');
+          if (this.victory) {
+            this.setLabelKey(this.resultStats, 'game.result.victory', {
+              gold: Math.floor(session.gold),
+            });
+          } else {
+            this.setLabelKey(this.resultStats, 'game.result.defeat');
+          }
         }
         this.scene?.audio.play(SFX.panel, { bus: 'sfx' });
         break;
@@ -577,13 +589,22 @@ export class GameFlow extends Script {
   }
 
   private updateGoldLabel(): void {
-    this.setLabel(this.goldLabel, `Gold: ${Math.floor(session.gold)}`);
+    this.setLabelKey(this.goldLabel, 'hud.gold', { amount: Math.floor(session.gold) });
   }
 
+  /** Set a literal (clears any bound translation key — see Label2D.setText). */
   private setLabel(label: RuntimeLabel2D | null, text: string): void {
-    if (!label || label.label === text) return;
-    label.label = text;
-    label.updateLabel();
+    label?.setText(text);
+  }
+
+  /** Bind a label to a translation key — re-resolves live on locale switch. */
+  private setLabelKey(label: RuntimeLabel2D | null, key: string, params?: TrParams): void {
+    label?.setTextKey(key, params);
+  }
+
+  /** Translate a key through the scene's localization (echoes the key when inert). */
+  private tr(key: string): string {
+    return this.scene?.localization.tr(key) ?? key;
   }
 
   private static readonly scratch = new Vector3();

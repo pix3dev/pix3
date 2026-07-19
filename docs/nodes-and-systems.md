@@ -180,9 +180,13 @@ set `textureKey` on a `Sprite2D`, or the per-state `textureNormalKey`/
 `textureHoverKey`/`texturePressedKey`/`textureDisabledKey` on a `Button2D`;
 authored texture refs stay as fallback. **Use — scripts:**
 `this.scene.localization.tr('mission.name.2', {n: 2})`,
+`trPlural('game.wave-failed', lives)` (suffix keys `.one/.few/.many/.other` via
+`Intl.PluralRules`, `{count}` auto-interpolated),
 `await this.scene.localization.setLocale('ru')` (every keyed label/sprite
 re-renders live), `onChange(cb)`, `trSprite(key)`; `label.setTextKey(key, params?)`
 keeps dynamic labels re-resolvable on locale switch (`setText` clears the key).
+Reference migration: `samples/SkyDefender` (mission names/briefings/goals as
+keys in `SdBalance`, `locales/en.json`+`ru.json`, keyed HUD/shop/map labels).
 **Authoring:** View → Localization panel (Strings/Sprites tabs, per-locale
 columns, missing-translation filter, preview-locale switch that live-updates the
 viewport). Locale list/default live in `pix3project.yaml` (`localization:` block)

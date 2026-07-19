@@ -10,6 +10,10 @@ quality:
   antialias: true
   shadows: true
   maxPixelRatio: 3
+localization:
+  defaultLocale: en
+  fallbackLocale: en
+  locales: [en, ru]
 metadata:
   projectName: SkyDefender
   templateId: empty-2d

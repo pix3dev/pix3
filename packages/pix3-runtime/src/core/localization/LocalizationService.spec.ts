@@ -75,4 +75,45 @@ describe('LocalizationService', () => {
     expect(svc.tr('anything')).toBe('anything');
     expect(svc.tr('')).toBe('');
   });
+
+  it('selects plural suffix keys via Intl.PluralRules', async () => {
+    const svc = makeService();
+    svc.setTable({
+      locale: 'en',
+      strings: {
+        'lives.one': '{count} LIFE LEFT',
+        'lives.other': '{count} LIVES LEFT',
+      },
+      sprites: {},
+    });
+    expect(svc.trPlural('lives', 1)).toBe('1 LIFE LEFT');
+    expect(svc.trPlural('lives', 3)).toBe('3 LIVES LEFT');
+
+    // Russian: one/few/many categories; missing categories fall to .other.
+    svc.setTable({
+      locale: 'ru',
+      strings: {
+        'lives.one': 'ОСТАЛАСЬ {count} ЖИЗНЬ',
+        'lives.few': 'ОСТАЛОСЬ {count} ЖИЗНИ',
+        'lives.many': 'ОСТАЛОСЬ {count} ЖИЗНЕЙ',
+      },
+      sprites: {},
+    });
+    await svc.setLocale('ru');
+    expect(svc.trPlural('lives', 1)).toBe('ОСТАЛАСЬ 1 ЖИЗНЬ');
+    expect(svc.trPlural('lives', 3)).toBe('ОСТАЛОСЬ 3 ЖИЗНИ');
+    expect(svc.trPlural('lives', 5)).toBe('ОСТАЛОСЬ 5 ЖИЗНЕЙ');
+  });
+
+  it('trPlural falls back to .other, then the bare key', () => {
+    const svc = makeService();
+    svc.setTable({
+      locale: 'en',
+      strings: { 'waves.other': '{count} waves', bare: '{count} things' },
+      sprites: {},
+    });
+    expect(svc.trPlural('waves', 1)).toBe('1 waves'); // no .one → .other
+    expect(svc.trPlural('bare', 2)).toBe('2 things'); // no suffixes → bare key
+    expect(svc.trPlural('nope', 2)).toBe('nope'); // nothing → key echoed
+  });
 });

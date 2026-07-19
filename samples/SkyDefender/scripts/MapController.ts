@@ -1,7 +1,16 @@
 import { Script } from '@pix3/runtime';
 import type { Label2D, NodeBase, PropertySchema } from '@pix3/runtime';
 import type { Texture } from 'three';
-import { MISSIONS, MISSION_META, PORTRAITS, type BriefingLine, type Speaker } from './SdBalance';
+import {
+  MISSIONS,
+  MISSION_META,
+  PORTRAITS,
+  missionNameKey,
+  speakerKey,
+  type BriefingLine,
+  type Speaker,
+} from './SdBalance';
+import type { TrParams } from '@pix3/runtime';
 import { session, type GameMode } from './SdSession';
 
 /** Map → battle hand-off (SdSession owns the run; GameFlow reads these). */
@@ -158,11 +167,9 @@ export class MapController extends Script {
     }
 
     this.updateGoldLabel();
-    this.setLabel(
+    this.setLabelKey(
       this.missionTitle,
-      session.mission > MISSIONS.length
-        ? 'The province is safe — replay any mission.'
-        : 'Select a mission to defend.'
+      session.mission > MISSIONS.length ? 'map.province-safe' : 'map.select-mission'
     );
 
     // Returning victorious: play the cleared missions' debriefings (GDD
@@ -191,7 +198,7 @@ export class MapController extends Script {
     if (this.briefingMission !== 0) return;
     this.scene?.audio.play(CLICK_SOUND, { bus: 'sfx' });
     if (n > session.mission) {
-      this.setLabel(this.missionTitle, `Mission ${n} is locked — clear the previous one first.`);
+      this.setLabelKey(this.missionTitle, 'map.mission-locked', { n });
       return;
     }
     this.openBriefing(n);
@@ -219,10 +226,11 @@ export class MapController extends Script {
     this.setButton(this.cancelButton, true);
     this.setButton(this.fightButton, false);
 
-    const name = MISSIONS[n - 1]?.name ?? '';
-    this.setLabel(
+    const name = this.tr(missionNameKey(n));
+    this.setLabelKey(
       this.briefingTitle,
-      mode === 'epilogue' ? `Mission ${n} — ${name} cleared` : `Mission ${n} — ${name}`
+      mode === 'epilogue' ? 'map.briefing.title-cleared' : 'map.briefing.title',
+      { n, name }
     );
     this.setLabel(this.goalLabel, '');
     this.showCurrentLine();
@@ -256,10 +264,10 @@ export class MapController extends Script {
       this.finishDialog();
       return;
     }
-    this.setLabel(this.speakerLabel, line.speaker);
+    this.setLabelKey(this.speakerLabel, speakerKey(line.speaker));
     const portrait = this.portraits.get(line.speaker);
     if (portrait && this.portraitSprite?.setTexture) this.portraitSprite.setTexture(portrait);
-    this.briefingText?.setText(line.text);
+    this.briefingText?.setTextKey(line.textKey);
     // setText only restarts on changed text; replaying the same line
     // (re-opened briefing) still needs a fresh reveal.
     this.briefingText?.restartTypewriter();
@@ -305,7 +313,11 @@ export class MapController extends Script {
       return;
     }
     const meta = MISSION_META[this.briefingMission - 1];
-    this.setLabel(this.goalLabel, meta ? `Objective: ${meta.goal}` : '');
+    if (meta) {
+      this.setLabelKey(this.goalLabel, 'map.objective', { goal: this.tr(meta.goalKey) });
+    } else {
+      this.setLabel(this.goalLabel, '');
+    }
     this.setButton(this.fightButton, true);
   }
 
@@ -349,11 +361,21 @@ export class MapController extends Script {
   }
 
   private updateGoldLabel(): void {
-    this.setLabel(this.goldLabel, `Gold: ${Math.floor(session.gold)}`);
+    this.setLabelKey(this.goldLabel, 'hud.gold', { amount: Math.floor(session.gold) });
   }
 
   private setLabel(label: Label2D | null, text: string): void {
     label?.setText(text);
+  }
+
+  /** Bind a label to a translation key — re-resolves live on locale switch. */
+  private setLabelKey(label: Label2D | null, key: string, params?: TrParams): void {
+    label?.setTextKey(key, params);
+  }
+
+  /** Translate a key through the scene's localization (echoes the key when inert). */
+  private tr(key: string): string {
+    return this.scene?.localization.tr(key) ?? key;
   }
 
   private async goTo(scenePath: string): Promise<void> {

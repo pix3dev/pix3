@@ -208,6 +208,7 @@ root:
             name: Mission Title
             properties:
               label: 'Select a mission to defend.'
+              labelKey: map.select-mission
               labelFontSize: 14
               labelColor: '#d9b877'
               labelAlign: center

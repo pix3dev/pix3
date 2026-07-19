@@ -344,7 +344,17 @@ const ART: Record<number, Art> = {
   62: { sprite: `${GROUND}/warchild/warchild.png`, w: 80, h: 27 },
 };
 
-/** Official mission names (ar_disc, cannon_game_v15). */
+/** Localization key of a 1-based mission's display name (see `locales/en.json`). */
+export const missionNameKey = (mission1Based: number): string => `mission.name.${mission1Based}`;
+
+/** Localization key of a speaker's display name (`speaker.king` / `speaker.fargo` / `speaker.joe`). */
+export const speakerKey = (speaker: Speaker): string => `speaker.${speaker.toLowerCase()}`;
+
+/**
+ * Official mission names (ar_disc, cannon_game_v15). English source of truth —
+ * mirrored into `locales/en.json` (`mission.name.<n>`); display sites resolve
+ * through {@link missionNameKey} so RU/other locales apply.
+ */
 export const MISSION_NAMES: readonly string[] = [
   'Prologue',
   'On Guard',
@@ -460,7 +470,8 @@ export const PORTRAITS: Record<Speaker, string> = {
 
 export interface BriefingLine {
   speaker: Speaker;
-  text: string;
+  /** Localization key of the line's text (`briefing.m<N>.<i>` / `epilogue.m<N>.<i>`, see locales/). */
+  textKey: string;
 }
 
 export interface MissionMeta {
@@ -469,8 +480,8 @@ export interface MissionMeta {
   region: string;
   /** Pre-battle dialog (GDD missions-dialogues; mission 1 uses the intro speech). */
   briefing: BriefingLine[];
-  /** One-line objective shown after the dialog, before FIGHT. */
-  goal: string;
+  /** Localization key of the one-line objective shown after the dialog, before FIGHT. */
+  goalKey: string;
   /**
    * Post-victory dialog (GDD missions-dialogues epilogues), played on the map
    * once per run after the mission first clears. The GDD numbers epilogues
@@ -494,249 +505,64 @@ export const MISSION_SPOTS: [number, number][] = [
   [459, 191], [436, 282],
 ];
 
+/** Dialog line: `briefing.m<N>.<i>` / `epilogue.m<N>.<i>` key (text lives in locales/). */
+const line = (speaker: Speaker, textKey: string): BriefingLine => ({ speaker, textKey });
+
+/**
+ * Placeholder meta for missions whose full GDD dialogue isn't wired yet
+ * (4–30): a single Fargo line + the default objective, keys still per-mission
+ * so wiring the real dialogue later is a locales-only change.
+ */
+const stubMeta = (n: number): MissionMeta => ({
+  spot: MISSION_SPOTS[n - 1],
+  region: 'Montarg',
+  briefing: [line('Fargo', `briefing.m${n}.1`)],
+  goalKey: `mission.goal.${n}`,
+});
+
 /** Indexed as MISSIONS (mission 1 = [0]). Missions 1–3 defend Montarg. */
 export const MISSION_META: MissionMeta[] = [
   {
     spot: MISSION_SPOTS[0],
     region: 'Montarg',
-    briefing: [
-      {
-        speaker: 'King',
-        text:
-          'Joe, we have little time, so I will be brief. The war has reached our last province — it still stands only thanks to you.',
-      },
-      {
-        speaker: 'King',
-        text:
-          'Your home and your fortress are part of an ancient defence system. Every province we win back will work for you, Joe — so your tower grows stronger. So that WE can win.',
-      },
-    ],
-    goal: 'Destroy all enemy forces.',
+    briefing: [line('King', 'briefing.m1.1'), line('King', 'briefing.m1.2')],
+    goalKey: 'mission.goal.1',
   },
   {
     spot: MISSION_SPOTS[1],
     region: 'Montarg',
     briefing: [
-      {
-        speaker: 'Fargo',
-        text:
-          'Well, Joe... We have a little problem. Enemy scouts have run into us. There is just a handful of them, but soon the hordes will follow.',
-      },
-      {
-        speaker: 'Fargo',
-        text:
-          'Destroy everything that can be destroyed. Oh, yes! If you do well, you will be generously rewarded by the company.',
-      },
-      { speaker: 'Joe', text: 'How generously?' },
-      { speaker: 'Fargo', text: 'One hundred Gold.' },
-      { speaker: 'Joe', text: "I'll do my best." },
+      line('Fargo', 'briefing.m2.1'),
+      line('Fargo', 'briefing.m2.2'),
+      line('Joe', 'briefing.m2.3'),
+      line('Fargo', 'briefing.m2.4'),
+      line('Joe', 'briefing.m2.5'),
     ],
-    goal: 'Destroy all enemy forces. (Bonus: 100 gold)',
+    goalKey: 'mission.goal.2',
     // GDD "Mission 1: Epilogue" — the payout for On Guard's 100-gold promise.
     epilogue: [
-      { speaker: 'Fargo', text: "Well, Joe, here's your hard-earned 70 Gold." },
-      { speaker: 'Joe', text: 'Actually, we agreed on 100 Gold.' },
-      {
-        speaker: 'Fargo',
-        text: 'Joe, are you a law-abiding citizen? Have you heard about taxes?',
-      },
-      {
-        speaker: 'Joe',
-        text: 'Yes, Fargo, I know what taxes are: I work — you screw around, and the treasury grows. Have I got it right?',
-      },
-      {
-        speaker: 'Fargo',
-        text: "I bet you haven't heard about the impudence tax yet, my dear old Joe. I've just invented it, by the way.",
-      },
-      { speaker: 'Joe', text: 'Moron.' },
-      { speaker: 'Fargo', text: "You are welcome, Joe. Ok, let's turn to our muttons." },
+      line('Fargo', 'epilogue.m2.1'),
+      line('Joe', 'epilogue.m2.2'),
+      line('Fargo', 'epilogue.m2.3'),
+      line('Joe', 'epilogue.m2.4'),
+      line('Fargo', 'epilogue.m2.5'),
+      line('Joe', 'epilogue.m2.6'),
+      line('Fargo', 'epilogue.m2.7'),
     ],
   },
   {
     spot: MISSION_SPOTS[2],
     region: 'Montarg',
     briefing: [
-      {
-        speaker: 'Fargo',
-        text:
-          'Joe, you may have noticed that I turn to you only with problems. Such is life: I find problems — you solve them.',
-      },
-      {
-        speaker: 'Fargo',
-        text:
-          'Damned invaders continue their wicked work. This time their target is the Royal gold mine. Do not let them rob me... ahem, rob the King. If everything goes smoothly, I promise to repair your tower.',
-      },
-      { speaker: 'Joe', text: 'Are you going to deduct the impudence tax again?' },
-      { speaker: 'Fargo', text: 'Depends on your behavior, my dear Joe.' },
+      line('Fargo', 'briefing.m3.1'),
+      line('Fargo', 'briefing.m3.2'),
+      line('Joe', 'briefing.m3.3'),
+      line('Fargo', 'briefing.m3.4'),
     ],
-    goal: "Defend the Royal gold mine — don't let them steal the gold.",
+    goalKey: 'mission.goal.3',
     // GDD "Mission 2: Epilogue" — the payout for Royal Treasury's repair promise.
-    epilogue: [
-      { speaker: 'Fargo', text: "Well done, Joe. I've given an order to repair your tower." },
-      { speaker: 'Joe', text: 'How many percent will they repair?' },
-      { speaker: 'Fargo', text: 'Depends on your deeds, Joe. Depends on your deeds...' },
-    ],
+    epilogue: [line('Fargo', 'epilogue.m3.1'), line('Joe', 'epilogue.m3.2'), line('Fargo', 'epilogue.m3.3')],
   },
-  {
-    spot: MISSION_SPOTS[3],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 4: Enemy At the Gate. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[4],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 5: I need to go. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[5],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 6: Touchy Issue. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[6],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 7: A Steak. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[7],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 8: Shopping. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[8],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 9: Royal Gold 2. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[9],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 10: Another Business Trip. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[10],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 11: Lemmings. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[11],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 12: Problems Start I. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[12],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 13: Problems Start II. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[13],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 14: Problems Start III. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[14],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 15: The Real Fargo. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[15],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 16: Apples of Hesperides. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[16],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 17: "Mario". Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[17],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 18: I\'ll Make You Rich. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[18],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 19: Echo of War. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[19],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 20: The Crucial Point. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[20],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 21: The Golden Train. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[21],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 22: "As good as Mozart". Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[22],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 23: Pull Devil!. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[23],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 24: Pull Devil! II. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[24],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 25: Dragon\'s Rag. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[25],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 26: Earl Furious. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[26],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 27: That Damned King. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[27],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 28: Near Go. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[28],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 29: Prelude. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
-  {
-    spot: MISSION_SPOTS[29],
-    region: 'Montarg',
-    briefing: [{ speaker: 'Fargo', text: 'Mission 30: A Quick Mare Is In Time Everywhere. Hold the line, Joe.' }],
-    goal: 'Destroy all enemy forces.',
-  },
+  ...Array.from({ length: 27 }, (_, i) => stubMeta(i + 4)),
 ];
+

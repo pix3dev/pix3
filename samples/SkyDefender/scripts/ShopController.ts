@@ -223,12 +223,12 @@ export class ShopController extends Script {
     }
     if (item.requires && !session.isOwned(item.requires)) {
       audio?.play(SFX_DENY, { bus: 'sfx' });
-      this.showInfo(item, `Requires: ${this.itemName(item.requires)}`);
+      this.showInfo(item, this.tr('shop.requires', { item: this.itemName(item.requires) }));
       return;
     }
     if (!session.spendGold(item.price)) {
       audio?.play(SFX_DENY, { bus: 'sfx' });
-      this.showInfo(item, 'Not enough gold!');
+      this.showInfo(item, this.tr('shop.not-enough-gold'));
       return;
     }
 
@@ -244,33 +244,51 @@ export class ShopController extends Script {
     this.showInfo(item);
   }
 
+  /** Localized item display name (`shop.item.<id>.name`, authored name as fallback). */
   private itemName(id: string): string {
-    return SHOP_ITEMS.find(i => i.id === id)?.name ?? id;
+    const fallback = SHOP_ITEMS.find(i => i.id === id)?.name ?? id;
+    const t = this.scene?.localization;
+    return t?.has(`shop.item.${id}.name`) ? t.tr(`shop.item.${id}.name`) : fallback;
   }
 
   // ── info panel ─────────────────────────────────────────────────────────────
 
   private showInfo(item: ShopItem | null, warning?: string): void {
     if (!item) {
-      this.setLabel(this.infoName, 'UPGRADES');
-      this.setLabel(this.infoDesc, 'Hover an item for details. Click to buy.');
+      this.setLabelKey(this.infoName, 'shop.upgrades');
+      this.setLabelKey(this.infoDesc, 'shop.hint');
       return;
     }
     const owned = session.isOwned(item.id) && !item.repeatable;
+    const name = this.itemName(item.id);
     const title = warning
-      ? `${item.name} — ${warning}`
+      ? this.tr('shop.title-warning', { name, warning })
       : owned
-        ? `${item.name} — OWNED`
+        ? this.tr('shop.owned', { name })
         : item.price > 0
-          ? `${item.name} — ${item.price} gold`
-          : item.name;
+          ? this.tr('shop.item-price', { name, price: item.price })
+          : name;
     this.setLabel(this.infoName, title);
-    this.setLabel(this.infoDesc, item.desc);
+    const t = this.scene?.localization;
+    if (t?.has(`shop.item.${item.id}.desc`)) {
+      this.setLabelKey(this.infoDesc, `shop.item.${item.id}.desc`);
+    } else {
+      this.setLabel(this.infoDesc, item.desc);
+    }
   }
 
+  /** Set a literal (clears any bound translation key — see Label2D.setText). */
   private setLabel(label: RuntimeLabel2D | null, text: string): void {
-    if (!label || label.label === text) return;
-    label.label = text;
-    label.updateLabel();
+    label?.setText(text);
+  }
+
+  /** Bind a label to a translation key — re-resolves live on locale switch. */
+  private setLabelKey(label: RuntimeLabel2D | null, key: string): void {
+    label?.setTextKey(key);
+  }
+
+  /** Translate a key through the scene's localization (echoes the key when inert). */
+  private tr(key: string, params?: Record<string, string | number>): string {
+    return this.scene?.localization.tr(key, params) ?? key;
   }
 }

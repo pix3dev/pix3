@@ -263,7 +263,7 @@ export class SceneRunner {
       throw err;
     }
 
-    this.runGraph(clone);
+    await this.runGraph(clone);
   }
 
   /**
@@ -278,7 +278,7 @@ export class SceneRunner {
     const filePath = normalizeScenePath(path);
     const text = await this.resourceManager.readText(`res://${filePath}`);
     const graph = await this.sceneManager.parseScene(text, { filePath });
-    this.runGraph(graph);
+    await this.runGraph(graph);
   }
 
   /** Monotonic id source for runtime-spawned prefab instances. */
@@ -313,9 +313,11 @@ export class SceneRunner {
    * Take exclusive ownership of `graph` and run it, stopping whatever ran
    * before. The graph MUST be runner-private (a fresh clone or a fresh parse) —
    * it is disposed on the next `stop()`, so never pass a graph still registered
-   * in the SceneManager or referenced by the editor.
+   * in the SceneManager or referenced by the editor. Async only for the seed
+   * locale table load (see {@link setupLocalization}); everything else is
+   * synchronous, and the scene is running by the time the promise resolves.
    */
-  private runGraph(graph: import('./SceneManager').SceneGraph): void {
+  private async runGraph(graph: import('./SceneManager').SceneGraph): Promise<void> {
     this.stop();
     this.bindSceneServiceDelegate();
     playable.reset();
@@ -380,7 +382,10 @@ export class SceneRunner {
     // Localization: create a play-mode instance (isolated from the editor
     // preview), activate it, and subscribe live re-render before the first tick
     // so scripts' onStart already resolve `this.scene.localization` correctly.
-    this.setupLocalization(this.runtimeGraph.rootNodes);
+    // Awaited so the seed locale's table is loaded before the first frame —
+    // otherwise keyed labels paint the raw key for a frame (and a paused /
+    // unfocused session freezes on that frame).
+    await this.setupLocalization(this.runtimeGraph.rootNodes);
 
     this.ecsService.beginScene(this.sceneService, this.inputService);
 
@@ -399,9 +404,11 @@ export class SceneRunner {
    * ResourceManager for lazy table loads, stash the previously-active pointer
    * (the editor preview instance), activate this one, and subscribe live
    * re-render. Seeds the editor's preview locale so "preview ru → Play" starts
-   * in ru; the table load is async, so the tree is re-walked once it lands.
+   * in ru; the seed table load is awaited so the first frame already renders
+   * translated (no key→text flash — critical when a paused/background session
+   * freezes on the first frame).
    */
-  private setupLocalization(roots: readonly NodeBase[]): void {
+  private async setupLocalization(roots: readonly NodeBase[]): Promise<void> {
     const service = new LocalizationService();
     service.configure(this.localizationConfig ?? { defaultLocale: 'en' });
     service.attachResources(this.resourceManager);
@@ -416,20 +423,17 @@ export class SceneRunner {
     });
 
     const seed = this.seedLocale ?? this.localizationConfig?.defaultLocale ?? 'en';
-    // setLocale loads the table lazily; kick a re-walk when it resolves so a
-    // seeded non-default locale paints (fire-and-forget — runGraph is sync).
-    void service
-      .setLocale(seed)
-      .then(() => {
-        if (this.localization === service && this.runtimeGraph) {
-          applyLocaleToTree(this.runtimeGraph.rootNodes, this.assetLoader);
-        }
-      })
-      .catch(() => {
+    // Only wait when localization is actually configured — an inert default has
+    // no table file and must not delay play start with a doomed fetch.
+    if (this.localizationConfig) {
+      try {
+        await service.setLocale(seed);
+      } catch {
         /* setLocale never throws (keeps an empty table on load failure) */
-      });
+      }
+    }
 
-    // Initial pass for keys already resolvable (fallback locale / injected tables).
+    // Repaint keys now resolvable (seeded table / fallback locale / injected tables).
     applyLocaleToTree(roots, this.assetLoader);
   }
 

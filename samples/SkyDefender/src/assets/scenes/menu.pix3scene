@@ -204,6 +204,7 @@ root:
         name: Version Label
         properties:
           label: 'Sky Defender Remaster — M0 flow skeleton'
+          labelKey: menu.subtitle
           labelFontSize: 20
           labelColor: '#9aa7bd'
           labelAlign: center

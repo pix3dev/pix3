@@ -126,6 +126,36 @@ export class LocalizationService {
     return this.tables.get(this.fallbackLocale)?.strings[key];
   }
 
+  /**
+   * Translate a count-dependent string via convention-based suffix keys:
+   * `key.one` / `key.few` / `key.many` / `key.other` (whichever the table
+   * provides), selected with `Intl.PluralRules(locale)`. Falls back to
+   * `key.other`, then the bare `key`, then the key text itself — never throws.
+   * `{count}` is always available as an interpolation token.
+   */
+  trPlural(key: string, count: number, params?: TrParams): string {
+    const merged: TrParams = { count, ...params };
+    const category = this.pluralCategory(count);
+    if (this.has(`${key}.${category}`)) return this.tr(`${key}.${category}`, merged);
+    if (this.has(`${key}.other`)) return this.tr(`${key}.other`, merged);
+    return this.tr(key, merged);
+  }
+
+  private pluralRulesCache = new Map<string, Intl.PluralRules | null>();
+
+  private pluralCategory(count: number): Intl.LDMLPluralRule {
+    let rules = this.pluralRulesCache.get(this.currentLocale);
+    if (rules === undefined) {
+      try {
+        rules = new Intl.PluralRules(this.currentLocale);
+      } catch {
+        rules = null; // unknown/invalid locale id — fall back to 'other'
+      }
+      this.pluralRulesCache.set(this.currentLocale, rules);
+    }
+    return rules ? rules.select(count) : 'other';
+  }
+
   /** Resolve a localized sprite path, or null (caller keeps the node's authored texture). */
   trSprite(key: string): string | null {
     if (!key) return null;
