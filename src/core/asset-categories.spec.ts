@@ -25,6 +25,15 @@ describe('asset-categories', () => {
     expect(categorizeAssetPath('config/settings.json')).toBe('data');
   });
 
+  it('classifies locale tables by their locales/ directory', () => {
+    expect(categorizeAssetPath('locales/en.json')).toBe('locales');
+    expect(categorizeAssetPath('locales/ru.json')).toBe('locales');
+    expect(categorizeAssetPath('res://locales/de.json')).toBe('locales');
+    expect(categorizeAssetPath('sub\\Locales\\fr.json')).toBe('locales');
+    expect(categorizeAssetPath('locales/readme.txt')).toBe('data'); // only JSON tables
+    expect(categorizeAssetPath('mylocales/en.json')).toBe('data'); // segment match, not substring
+  });
+
   it('falls back to "other" for unknown or missing extensions', () => {
     expect(categorizeAssetPath('README')).toBe('other');
     expect(categorizeAssetPath('archive.zip')).toBe('other');

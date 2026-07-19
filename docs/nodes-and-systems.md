@@ -197,8 +197,9 @@ entries count as untranslated and fall through to the fallback locale). Rows
 rename in place (pencil / double-click) — the key moves in every locale table
 and `labelKey`/`textureKey` references in open scenes are rewritten, one undo.
 Locale list/default live in `pix3project.yaml` (`localization:` block)
-or are auto-discovered from `locales/`. Exports bake the config and embed the
-tables + localized sprites automatically. Lives in
+or are auto-discovered from `locales/`; locale tables get their own **Locales**
+category in the asset browser's by-type view. Exports bake the config and embed
+the tables + localized sprites automatically. Lives in
 `packages/pix3-runtime/src/core/localization/`.
 
 ### Particles

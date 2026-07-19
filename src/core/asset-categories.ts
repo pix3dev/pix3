@@ -15,6 +15,7 @@ export type AssetCategoryId =
   | 'scripts'
   | 'fonts'
   | 'video'
+  | 'locales'
   | 'data'
   | 'other';
 
@@ -35,6 +36,7 @@ export const ASSET_CATEGORIES: readonly AssetCategoryDefinition[] = [
   { id: 'scripts', label: 'Scripts', icon: 'code' },
   { id: 'fonts', label: 'Fonts', icon: 'type' },
   { id: 'video', label: 'Video', icon: 'video' },
+  { id: 'locales', label: 'Locales', icon: 'globe' },
   { id: 'data', label: 'Data', icon: 'database' },
   { id: 'other', label: 'Other', icon: 'file-text' },
 ];
@@ -46,7 +48,7 @@ export const ASSET_CATEGORY_BY_ID: Readonly<Record<AssetCategoryId, AssetCategor
   >;
 
 const EXTENSIONS_BY_CATEGORY: Readonly<
-  Record<Exclude<AssetCategoryId, 'other'>, readonly string[]>
+  Record<Exclude<AssetCategoryId, 'other' | 'locales'>, readonly string[]>
 > = {
   scenes: ['pix3scene'],
   images: [
@@ -88,10 +90,18 @@ export function getAssetPathExtension(path: string): string {
   return name.slice(lastDot + 1).toLowerCase();
 }
 
+/** Locale tables live in a `locales/` directory (see §6.17 in the spec). */
+const LOCALES_SEGMENT_RE = /(^|[\\/])locales[\\/]/i;
+
 export function categorizeAssetPath(path: string): AssetCategoryId {
   const extension = getAssetPathExtension(path);
   if (!extension) {
     return 'other';
+  }
+  // Path-based: locale tables are JSON, but they get their own category so the
+  // grouped view doesn't bury them in generic data files.
+  if (extension === 'json' && LOCALES_SEGMENT_RE.test(path)) {
+    return 'locales';
   }
   return CATEGORY_BY_EXTENSION.get(extension) ?? 'other';
 }
