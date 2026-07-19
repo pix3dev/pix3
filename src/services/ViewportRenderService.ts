@@ -3684,7 +3684,8 @@ export class ViewportRendererService {
         }
 
         if (mesh && mesh.material instanceof THREE.MeshBasicMaterial) {
-          const currentTexturePath = node.texturePath ?? null;
+          // Effective = localized (textureKey via the preview locale) else authored.
+          const currentTexturePath = node.getEffectiveTexturePath() ?? null;
           const previousTexturePath = (visualRoot.userData.texturePath as string | null) ?? null;
           if (currentTexturePath !== previousTexturePath) {
             mesh.material.map = null;
@@ -3752,12 +3753,14 @@ export class ViewportRendererService {
   }
 
   /**
-   * Repaint every UIControl2D label proxy after the preview locale or a locale
-   * table changed. Label text comes from `node.getDisplayText()`, which resolves
-   * through the active (editor-preview) localization instance, so re-running the
-   * standard per-node visual sync picks up the new translation (and re-sizes
-   * auto-sized Label2D boxes). Then forces a paint. Called from the localization
-   * operations; a no-op when nothing is localized.
+   * Repaint every localized proxy after the preview locale or a locale table
+   * changed. Label text comes from `node.getDisplayText()` and sprite/skin
+   * textures from `getEffectiveTexturePath()`/`getEffectiveStateTexturePath()`,
+   * all of which resolve through the active (editor-preview) localization
+   * instance — so re-running the standard per-node visual sync picks up the new
+   * translation / localized texture (the sync compares effective texture paths
+   * and reloads only on change). Then forces a paint. Called from the
+   * localization operations; a no-op when nothing is localized.
    */
   refreshLocalizedLabels(): void {
     const graph = this.sceneManager.getActiveSceneGraph();
@@ -3765,6 +3768,12 @@ export class ViewportRendererService {
     for (const nodeId of this.uiControl2DVisuals.keys()) {
       const node = graph.nodeMap.get(nodeId);
       if (node instanceof UIControl2D) {
+        this.updateNodeTransform(node);
+      }
+    }
+    for (const nodeId of this.sprite2DVisuals.keys()) {
+      const node = graph.nodeMap.get(nodeId);
+      if (node instanceof Sprite2D && node.textureKey) {
         this.updateNodeTransform(node);
       }
     }
@@ -4900,7 +4909,7 @@ export class ViewportRendererService {
     root.userData.sizeGroup = sizeGroup;
     root.userData.spriteMesh = mesh;
     root.userData.anchorMarker = anchorMarker;
-    root.userData.texturePath = node.texturePath ?? null;
+    root.userData.texturePath = node.getEffectiveTexturePath() ?? null;
     this.apply2DVisualOpacity(node, root);
 
     return root;
@@ -5145,7 +5154,8 @@ export class ViewportRendererService {
   }
 
   private applyTextureToSprite2DMaterial(node: Sprite2D, material: THREE.MeshBasicMaterial): void {
-    const texturePath = node.texturePath;
+    // Effective = localized (textureKey via the preview locale) else authored.
+    const texturePath = node.getEffectiveTexturePath();
     if (!texturePath) {
       return;
     }
@@ -6172,7 +6182,13 @@ export class ViewportRendererService {
    */
   private getUIControlSkinTextureUrl(node: UIControl2D): string | null {
     if (node instanceof Button2D) {
-      return node.textureNormal?.url ?? node.texturePath ?? null;
+      // Effective-normal: localized state key (preview locale), else the explicit
+      // normal sprite, else the legacy single skin.
+      return (
+        node.getEffectiveStateTexturePath('normal') ??
+        node.texturePath ??
+        null
+      );
     }
     return node.texturePath ?? null;
   }

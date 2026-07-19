@@ -1,5 +1,6 @@
 import { injectable, inject } from '@/fw/di';
 import { ProjectStorageService } from './ProjectStorageService';
+import { LocalizationEditorService } from './LocalizationEditorService';
 import type { CommandContext } from '@/core/command';
 import {
   createDefaultQualitySettings,
@@ -74,10 +75,20 @@ const runtimeSourceFiles = import.meta.glob(
 // Entry-point files that ship in the user's src/ folder (not part of the library).
 const RUNTIME_SRC_ENTRY_FILES = new Set(['main.ts', 'register-project-scripts.ts']);
 
+/** Runtime localization config baked into the generated scene manifest. */
+type RuntimeLocalizationConfig = {
+  defaultLocale: string;
+  fallbackLocale?: string;
+  locales: string[];
+} | null;
+
 @injectable()
 export class ProjectBuildService {
   @inject(ProjectStorageService)
   private readonly fs!: ProjectStorageService;
+
+  @inject(LocalizationEditorService)
+  private readonly localizationEditor!: LocalizationEditorService;
 
   async buildRuntimeProjectModel(
     context: CommandContext,
@@ -92,6 +103,10 @@ export class ProjectBuildService {
     const quality =
       context.state.project.manifest?.quality ??
       createDefaultQualitySettings(DEFAULT_TARGET_PLATFORM);
+    // Effective localization (manifest block, else auto-discovered locales/) —
+    // baked into the generated scene manifest so the exported game boots in
+    // defaultLocale with the first frame already translated.
+    const localization = this.localizationEditor.getRuntimeConfig();
 
     return {
       projectName,
@@ -99,7 +114,14 @@ export class ProjectBuildService {
       entryScenePath,
       assetPaths,
       projectScriptFiles,
-      files: this.buildGeneratedFiles(projectName, scenePaths, entryScenePath, assetPaths, quality),
+      files: this.buildGeneratedFiles(
+        projectName,
+        scenePaths,
+        entryScenePath,
+        assetPaths,
+        quality,
+        localization
+      ),
       warnings,
     };
   }
@@ -217,7 +239,37 @@ export class ProjectBuildService {
       this.collectResourcePathsFromText(sourceContents, files);
     }
 
+    await this.collectLocaleAssetPaths(files, warnings);
+
     return Array.from(files).sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Add `locales/*.json` tables and every texture path referenced in their
+   * `sprites` sections to the build's file set. The sprite paths are the one
+   * class of assets invisible to the `res://` regex scan of scenes/scripts —
+   * they are referenced only through localization keys.
+   */
+  private async collectLocaleAssetPaths(files: Set<string>, warnings: string[]): Promise<void> {
+    const localeFiles = await this.discoverFilesByExtension('locales', '.json');
+    for (const localePath of localeFiles) {
+      files.add(localePath);
+      try {
+        const contents = await this.fs.readTextFile(localePath);
+        const parsed = JSON.parse(contents) as { sprites?: Record<string, unknown> };
+        for (const value of Object.values(parsed.sprites ?? {})) {
+          if (typeof value !== 'string') {
+            continue;
+          }
+          const resourcePath = this.normalizeResourcePath(value.trim());
+          if (this.isConcreteResourcePath(resourcePath)) {
+            files.add(resourcePath);
+          }
+        }
+      } catch {
+        warnings.push(`Failed to scan locale table for sprite references: ${localePath}`);
+      }
+    }
   }
 
   private async collectProjectScriptFiles(): Promise<ReadonlyMap<string, string>> {
@@ -436,7 +488,8 @@ export class ProjectBuildService {
     scenePaths: readonly string[],
     entryScenePath: string,
     assetPaths: readonly string[],
-    quality: QualitySettings
+    quality: QualitySettings,
+    localization: RuntimeLocalizationConfig
   ): ReadonlyMap<string, string> {
     const replacements: Record<string, string> = {
       PROJECT_NAME: projectName,
@@ -455,7 +508,7 @@ export class ProjectBuildService {
 
     files.set(
       'src/generated/scene-manifest.ts',
-      this.buildSceneManifestTs(scenePaths, entryScenePath, quality)
+      this.buildSceneManifestTs(scenePaths, entryScenePath, quality, localization)
     );
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
@@ -584,7 +637,8 @@ export class ProjectBuildService {
   private buildSceneManifestTs(
     scenePaths: readonly string[],
     activeScenePath: string,
-    quality: QualitySettings
+    quality: QualitySettings,
+    localization: RuntimeLocalizationConfig
   ): string {
     const scenePathsJson = JSON.stringify(scenePaths, null, 2);
     const activeJson = JSON.stringify(activeScenePath);
@@ -597,11 +651,13 @@ export class ProjectBuildService {
       null,
       2
     );
+    const localizationJson = localization ? JSON.stringify(localization, null, 2) : 'null';
 
     return [
       'export const scenePaths = ' + scenePathsJson + ' as const;',
       'export const activeScenePath = ' + activeJson + ';',
       'export const runtimeQuality = ' + qualityJson + ' as const;',
+      'export const runtimeLocalization = ' + localizationJson + ' as const;',
       '',
     ].join('\n');
   }

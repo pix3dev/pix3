@@ -7,6 +7,9 @@ import type { LocalizationSettings } from '@/core/ProjectManifest';
 
 const LOCALES_DIR = 'locales';
 
+/** Which half of a locale table an entry lives in: UI strings or localized sprite paths. */
+export type LocaleTableSection = 'strings' | 'sprites';
+
 /** Human-readable default names for common locale ids (used when a table has no `$meta.name`). */
 const LOCALE_DISPLAY_NAMES: Record<string, string> = {
   en: 'English',
@@ -216,24 +219,27 @@ export class LocalizationEditorService {
     );
   }
 
-  /** Union of string keys across all locales (default locale first), for autocomplete. */
-  getAllKeys(): string[] {
+  /** Union of keys in `section` across all locales (default locale first), for autocomplete. */
+  getAllKeys(section: LocaleTableSection = 'strings'): string[] {
     const keys = new Set<string>();
     const def = this.getDefaultLocale();
-    for (const k of Object.keys(this.tables.get(def)?.strings ?? {})) keys.add(k);
+    for (const k of Object.keys(this.tables.get(def)?.[section] ?? {})) keys.add(k);
     for (const table of this.tables.values()) {
-      for (const k of Object.keys(table.strings)) keys.add(k);
+      for (const k of Object.keys(table[section])) keys.add(k);
     }
     return [...keys].sort();
   }
 
-  getEntry(locale: string, key: string): string {
-    return this.tables.get(locale)?.strings[key] ?? '';
+  getEntry(locale: string, key: string, section: LocaleTableSection = 'strings'): string {
+    return this.tables.get(locale)?.[section][key] ?? '';
   }
 
-  /** Whether a key resolves (current-or-fallback) in the preview locale. */
+  /** Whether a key resolves (current-or-fallback) in the preview locale — as a
+   *  string or as a sprite path (the inspector widget serves both labelKey and
+   *  textureKey properties, which share the `localization-key` editor hint). */
   keyResolvesInPreview(key: string): boolean {
-    return this.preview?.has(key) ?? false;
+    if (!this.preview) return false;
+    return this.preview.has(key) || this.preview.trSprite(key) !== null;
   }
 
   /** The preview-locale translation of `key` (falls back to the key itself). */
@@ -242,12 +248,12 @@ export class LocalizationEditorService {
   }
 
   /** Keys present (non-empty) in the default locale but missing/empty in `locale`. */
-  getMissing(locale: string): string[] {
+  getMissing(locale: string, section: LocaleTableSection = 'strings'): string[] {
     const def = this.getDefaultLocale();
     if (!def || locale === def) return [];
-    const defStrings = this.tables.get(def)?.strings ?? {};
-    const locStrings = this.tables.get(locale)?.strings ?? {};
-    return Object.keys(defStrings).filter(k => !(locStrings[k] ?? '').trim());
+    const defEntries = this.tables.get(def)?.[section] ?? {};
+    const locEntries = this.tables.get(locale)?.[section] ?? {};
+    return Object.keys(defEntries).filter(k => !(locEntries[k] ?? '').trim());
   }
 
   // ---- mutation API (called by Operations; persists + refreshes preview) ---
@@ -261,14 +267,19 @@ export class LocalizationEditorService {
     this.mirrorSlice();
   }
 
-  /** Set/clear a single translation. Persists the file and re-feeds the preview. */
-  async setEntry(locale: string, key: string, value: string): Promise<void> {
+  /** Set/clear a single entry (translation or sprite path). Persists the file and re-feeds the preview. */
+  async setEntry(
+    locale: string,
+    key: string,
+    value: string,
+    section: LocaleTableSection = 'strings'
+  ): Promise<void> {
     if (!key) return;
     const table = this.ensureTable(locale);
     if (value) {
-      table.strings[key] = value;
+      table[section][key] = value;
     } else {
-      delete table.strings[key];
+      delete table[section][key];
     }
     this.preview?.setTable(table);
     await this.saveLocale(locale);
@@ -276,12 +287,15 @@ export class LocalizationEditorService {
   }
 
   /** Remove a key from every locale. Returns the removed values for undo. */
-  async removeKey(key: string): Promise<Record<string, string>> {
+  async removeKey(
+    key: string,
+    section: LocaleTableSection = 'strings'
+  ): Promise<Record<string, string>> {
     const removed: Record<string, string> = {};
     for (const [locale, table] of this.tables) {
-      if (key in table.strings) {
-        removed[locale] = table.strings[key];
-        delete table.strings[key];
+      if (key in table[section]) {
+        removed[locale] = table[section][key];
+        delete table[section][key];
         this.preview?.setTable(table);
         await this.saveLocale(locale);
       }
@@ -302,6 +316,60 @@ export class LocalizationEditorService {
     }
     this.ensurePreview().setTable(table);
     await this.saveLocale(locale);
+    this.mirrorSlice();
+  }
+
+  /**
+   * Remove a declared locale: drop its table, its manifest/settings entry, and
+   * delete the `locales/<locale>.json` file. Returns the removed table so the
+   * operation can restore it on undo. Refuses to remove the default locale (it
+   * is the template) — returns null in that case.
+   */
+  async removeLocale(locale: string): Promise<LocaleTable | null> {
+    if (!this.settings || !this.tables.has(locale)) return null;
+    if (locale === this.settings.defaultLocale) return null;
+
+    const removed = this.tables.get(locale) ?? null;
+    this.tables.delete(locale);
+    this.settings.locales = this.settings.locales.filter(l => l !== locale);
+    if (this.previewLocale === locale) {
+      this.previewLocale = this.settings.defaultLocale;
+      void this.preview?.setLocale(this.settings.defaultLocale);
+    }
+    try {
+      await this.storage.deleteEntry(`${LOCALES_DIR}/${locale}.json`);
+    } catch (error) {
+      console.error(`[Localization] Failed to delete locale file "${locale}"`, error);
+    }
+    this.mirrorSlice();
+    return removed;
+  }
+
+  /** Re-insert a previously removed locale table (undo of {@link removeLocale}). */
+  async restoreLocale(table: LocaleTable): Promise<void> {
+    this.tables.set(table.locale, table);
+    if (this.settings) {
+      if (!this.settings.locales.includes(table.locale)) this.settings.locales.push(table.locale);
+    } else {
+      this.settings = { defaultLocale: table.locale, locales: [table.locale] };
+    }
+    this.ensurePreview().setTable(table);
+    await this.saveLocale(table.locale);
+    this.mirrorSlice();
+  }
+
+  /** Re-insert removed key values across locales (undo of {@link removeKey}). */
+  async restoreKey(
+    key: string,
+    values: Record<string, string>,
+    section: LocaleTableSection = 'strings'
+  ): Promise<void> {
+    for (const [locale, value] of Object.entries(values)) {
+      const table = this.ensureTable(locale);
+      table[section][key] = value;
+      this.preview?.setTable(table);
+      await this.saveLocale(locale);
+    }
     this.mirrorSlice();
   }
 

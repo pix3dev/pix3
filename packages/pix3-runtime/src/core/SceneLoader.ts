@@ -1069,7 +1069,6 @@ export class SceneLoader {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
         const texture = coerceTextureResource(props.texture ?? props.texturePath ?? null);
-        const texturePath = texture?.url ?? null;
 
         const sprite = new Sprite2D({
           ...baseProps,
@@ -1083,6 +1082,7 @@ export class SceneLoader {
           layout: this.parseNode2DLayout(props),
           opacity: this.asNumber(props.opacity, undefined),
           texture,
+          textureKey: this.asString(props.textureKey),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
           aspectRatioLocked:
@@ -1091,6 +1091,8 @@ export class SceneLoader {
           color: typeof props.color === 'string' ? props.color : undefined,
         });
 
+        // Localized key (active locale's sprites table) wins over the authored ref.
+        const texturePath = sprite.getEffectiveTexturePath();
         if (texturePath) {
           try {
             const texture = await this.assetLoader.loadTexture(texturePath);
@@ -1380,6 +1382,15 @@ export class SceneLoader {
           ['disabled', coerceTextureResource(props.textureDisabled ?? null)],
         ];
 
+        const stateTextureKeys: Partial<Record<Button2DSpriteState, string>> = {};
+        {
+          const keys = this.asRecord(props.stateTextureKeys);
+          for (const state of ['normal', 'hover', 'pressed', 'disabled'] as const) {
+            const key = keys ? this.asString(keys[state]) : undefined;
+            if (key) stateTextureKeys[state] = key;
+          }
+        }
+
         const button = new Button2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
@@ -1408,14 +1419,17 @@ export class SceneLoader {
           textureHover: stateRefs[1][1],
           texturePressed: stateRefs[2][1],
           textureDisabled: stateRefs[3][1],
+          stateTextureKeys,
         });
 
-        for (const [state, ref] of stateRefs) {
-          if (!ref) {
+        for (const [state] of stateRefs) {
+          // Localized key (active locale's sprites table) wins over the authored ref.
+          const path = button.getEffectiveStateTexturePath(state);
+          if (!path) {
             continue;
           }
           try {
-            button.setStateTexture(state, await this.assetLoader.loadTexture(ref.url));
+            button.setStateTexture(state, await this.assetLoader.loadTexture(path));
           } catch (error) {
             console.warn(
               `[SceneLoader] Error loading ${state} texture for Button2D "${button.nodeId}":`,

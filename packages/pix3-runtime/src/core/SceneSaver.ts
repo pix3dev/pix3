@@ -387,6 +387,11 @@ export class SceneSaver {
       if (node.texture) {
         props.texture = { ...node.texture };
       }
+      if (node.textureKey) {
+        props.textureKey = node.textureKey;
+      } else {
+        delete props.textureKey;
+      }
       // Save width/height in pixels
       props.width = node.width;
       props.height = node.height;
@@ -479,6 +484,11 @@ export class SceneSaver {
         props.textureDisabled = { ...node.textureDisabled };
       } else {
         delete props.textureDisabled;
+      }
+      if (node.hasLocalizedStateTextures()) {
+        props.stateTextureKeys = { ...node.stateTextureKeys };
+      } else {
+        delete props.stateTextureKeys;
       }
     } else if (node instanceof Label2D) {
       this.serializeCommonUIControlProps(node, props);

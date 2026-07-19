@@ -13,7 +13,12 @@ import {
   SceneSaver,
   ScriptRegistry,
 } from '@pix3/runtime';
-import { activeScenePath, scenePaths, runtimeQuality } from './generated/scene-manifest';
+import {
+  activeScenePath,
+  scenePaths,
+  runtimeQuality,
+  runtimeLocalization,
+} from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
 
@@ -54,6 +59,15 @@ async function bootstrap(): Promise<void> {
 
   const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);
   runner.setBatching2DEnabled(true);
+  if (runtimeLocalization) {
+    // Baked from pix3project.yaml (or auto-discovered locales/) at export time;
+    // SceneRunner boots in defaultLocale so the first frame renders translated.
+    runner.setLocalizationConfig({
+      defaultLocale: runtimeLocalization.defaultLocale,
+      fallbackLocale: runtimeLocalization.fallbackLocale,
+      locales: runtimeLocalization.locales,
+    });
+  }
   // Pre-packed atlas (if the export shipped one) → texture views onto sheets.
   await installAtlasFromManifest(assetLoader, resourceManager);
   await runner.startScene(scenePath);

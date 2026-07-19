@@ -6,12 +6,15 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { OperationService } from '@/services/OperationService';
+import type { LocaleTableSection } from '@/services/LocalizationEditorService';
 import { UpdateLocaleEntryOperation } from './UpdateLocaleEntryOperation';
 
 export interface UpdateLocaleEntryCommandParams {
   locale: string;
   key: string;
   value: string;
+  /** Table section the entry lives in (default `'strings'`; `'sprites'` = localized texture paths). */
+  section?: LocaleTableSection;
 }
 
 /** Set or clear a single translation (locale × key). Persists + refreshes preview. */
@@ -44,6 +47,7 @@ export class UpdateLocaleEntryCommand extends CommandBase<void, void> {
         locale: this.params.locale,
         key: this.params.key,
         value: this.params.value,
+        section: this.params.section,
       })
     );
     return { didMutate: pushed, payload: undefined };

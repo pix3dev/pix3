@@ -4,13 +4,18 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
+import {
+  LocalizationEditorService,
+  type LocaleTableSection,
+} from '@/services/LocalizationEditorService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 
 export interface UpdateLocaleEntryParams {
   locale: string;
   key: string;
   value: string;
+  /** Table section the entry lives in (default `'strings'`; `'sprites'` = localized texture paths). */
+  section?: LocaleTableSection;
 }
 
 /**
@@ -37,13 +42,14 @@ export class UpdateLocaleEntryOperation implements Operation<OperationInvokeResu
     const { locale, key } = this.params;
     if (!locale || !key) return { didMutate: false };
 
+    const section = this.params.section ?? 'strings';
     const next = this.params.value;
-    const prev = service.getEntry(locale, key);
+    const prev = service.getEntry(locale, key, section);
     if (next === prev) return { didMutate: false };
 
     const viewport = tryGetService(context, ViewportRendererService);
     const apply = async (value: string): Promise<void> => {
-      await service.setEntry(locale, key, value);
+      await service.setEntry(locale, key, value, section);
       // Only the previewed locale affects the viewport, but refreshing is cheap
       // and correct regardless of which locale was edited.
       viewport?.refreshLocalizedLabels();

@@ -12,6 +12,7 @@ import {
 } from '../../core/texture-region';
 import { atlasSizeOf, baseRegionOf } from '../../core/atlas-frame-map';
 import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
+import { getActiveLocalization } from '../../core/localization/active-localization';
 
 export interface SpriteAnchor2D {
   x: number;
@@ -21,6 +22,7 @@ export interface SpriteAnchor2D {
 export interface Sprite2DProps extends Omit<Node2DProps, 'type'> {
   texture?: TextureResourceRef | null;
   texturePath?: string | null;
+  textureKey?: string;
   width?: number;
   height?: number;
   color?: string;
@@ -30,6 +32,13 @@ export interface Sprite2DProps extends Omit<Node2DProps, 'type'> {
 
 export class Sprite2D extends Node2D {
   texture: TextureResourceRef | null;
+  /**
+   * Localization sprite key resolved through the active locale table's `sprites`
+   * section (e.g. a button skin with baked text that differs per language). When
+   * set and the key resolves, the localized path wins; the authored {@link texture}
+   * ref stays as the universal fallback. Empty = not localized.
+   */
+  textureKey: string;
   /** Width in pixels. Defaults to texture width when loaded, or 64 as placeholder. */
   width: number | undefined;
   /** Height in pixels. Defaults to texture height when loaded, or 64 as placeholder. */
@@ -75,6 +84,7 @@ export class Sprite2D extends Node2D {
   constructor(props: Sprite2DProps) {
     super(props, 'Sprite2D');
     this.texture = coerceTextureResource(props.texture ?? props.texturePath ?? null);
+    this.textureKey = props.textureKey ?? '';
     this.width = props.width;
     this.height = props.height;
     this.textureAspectRatio = (props as any).textureAspectRatio ?? null;
@@ -188,6 +198,20 @@ export class Sprite2D extends Node2D {
 
   get texturePath(): string | null {
     return this.texture?.url ?? null;
+  }
+
+  /**
+   * The texture path that should actually be loaded: the locale table's
+   * `sprites[textureKey]` for the active locale (with its fallback chain), else
+   * the authored {@link texturePath}. Used by the SceneLoader, the locale-change
+   * re-resolve walk, and the editor viewport proxy — single source of truth.
+   */
+  getEffectiveTexturePath(): string | null {
+    if (this.textureKey) {
+      const localized = getActiveLocalization()?.trSprite(this.textureKey);
+      if (localized) return localized;
+    }
+    return this.texturePath;
   }
 
   set texturePath(value: string | null) {
@@ -308,6 +332,21 @@ export class Sprite2D extends Node2D {
             },
           setValue: (node: unknown, value: unknown) => {
             (node as Sprite2D).setTextureResource(value);
+          },
+        },
+        {
+          name: 'textureKey',
+          type: 'string',
+          ui: {
+            label: 'Texture Key',
+            description:
+              'Localization sprite key (locale table "sprites" section). When set and resolvable, the localized texture wins; the authored texture is the fallback',
+            group: 'Sprite',
+            editor: 'localization-key',
+          },
+          getValue: (node: unknown) => (node as Sprite2D).textureKey,
+          setValue: (node: unknown, value: unknown) => {
+            (node as Sprite2D).textureKey = String(value ?? '');
           },
         },
         {

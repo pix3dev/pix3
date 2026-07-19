@@ -412,7 +412,7 @@ export class SceneRunner {
 
     // Re-render keyed labels whenever the locale switches or a table is injected.
     this.localizationUnsub = service.onChange(() => {
-      if (this.runtimeGraph) applyLocaleToTree(this.runtimeGraph.rootNodes);
+      if (this.runtimeGraph) applyLocaleToTree(this.runtimeGraph.rootNodes, this.assetLoader);
     });
 
     const seed = this.seedLocale ?? this.localizationConfig?.defaultLocale ?? 'en';
@@ -422,7 +422,7 @@ export class SceneRunner {
       .setLocale(seed)
       .then(() => {
         if (this.localization === service && this.runtimeGraph) {
-          applyLocaleToTree(this.runtimeGraph.rootNodes);
+          applyLocaleToTree(this.runtimeGraph.rootNodes, this.assetLoader);
         }
       })
       .catch(() => {
@@ -430,7 +430,7 @@ export class SceneRunner {
       });
 
     // Initial pass for keys already resolvable (fallback locale / injected tables).
-    applyLocaleToTree(roots);
+    applyLocaleToTree(roots, this.assetLoader);
   }
 
   /** Tear down play-mode localization and restore the editor preview pointer.

@@ -9,3 +9,8 @@ export const runtimeQuality: {
   shadows: true,
   maxPixelRatio: 2,
 };
+export const runtimeLocalization: {
+  readonly defaultLocale: string;
+  readonly fallbackLocale?: string;
+  readonly locales: readonly string[];
+} | null = null;

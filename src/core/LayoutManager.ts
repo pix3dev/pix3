@@ -27,6 +27,7 @@ const PANEL_COMPONENT_TYPES = {
   spriteEditor: 'sprite-editor',
   agentChat: 'agent-chat',
   library: 'library',
+  localization: 'localization',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -48,6 +49,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.spriteEditor]: 'pix3-sprite-editor-panel',
   [PANEL_COMPONENT_TYPES.agentChat]: 'pix3-agent-chat-panel',
   [PANEL_COMPONENT_TYPES.library]: 'pix3-library-panel',
+  [PANEL_COMPONENT_TYPES.localization]: 'pix3-localization-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -67,6 +69,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.spriteEditor]: 'Sprite Editor',
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
+  [PANEL_COMPONENT_TYPES.localization]: 'Localization',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -619,6 +622,63 @@ export class LayoutManagerService {
     }
   }
 
+  /**
+   * Reveal the Localization panel. It is not part of the default layout, so the
+   * first open docks it as a new column just before the Inspector (falling back
+   * to Golden Layout's default placement if the tree can't be navigated); once
+   * present, this just brings it to the front of its stack.
+   */
+  revealLocalizationPanel(): void {
+    if (!this.layout) {
+      return;
+    }
+
+    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
+    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.localization);
+    if (existing) {
+      this.focusPanel(PANEL_COMPONENT_TYPES.localization);
+      return;
+    }
+
+    const componentConfig: ComponentItemConfig = {
+      type: 'component',
+      componentType: PANEL_COMPONENT_TYPES.localization,
+      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.localization],
+      isClosable: true,
+    };
+
+    try {
+      const root = rootItem as
+        | (ContentItem & {
+            addItem?: (config: unknown, index?: number) => number;
+            contentItems?: ContentItem[];
+          })
+        | undefined;
+      if (root && root.type === 'row' && typeof root.addItem === 'function') {
+        const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
+        root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
+        this.focusPanel(PANEL_COMPONENT_TYPES.localization);
+        return;
+      }
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Localization panel as a column', error);
+    }
+
+    try {
+      const layoutApi = this.layout as unknown as {
+        addComponent?: (componentType: string, state?: unknown, title?: string) => void;
+      };
+      layoutApi.addComponent?.(
+        PANEL_COMPONENT_TYPES.localization,
+        undefined,
+        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.localization]
+      );
+      this.focusPanel(PANEL_COMPONENT_TYPES.localization);
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Localization panel', error);
+    }
+  }
+
   private findEditorTabByTabId(
     node: ContentItem | null | undefined,
     tabId: string
@@ -849,6 +909,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.library) {
           void import('@/ui/asset-library/library-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.localization) {
+          void import('@/ui/localization-view/localization-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;

@@ -167,6 +167,29 @@ Add a `PostProcess` node to enable an EffectComposer pass (bloom / vignette /
 chromatic aberration / AO modes). **Use:** drop one `PostProcess` node; configure
 its properties. Pure-2D scenes can opt 2D in via `affect2D`.
 
+### Localization (i18n)
+Per-locale JSON tables in the project's `locales/` directory
+(`locales/en.json`, `locales/ru.json`): a `strings` section (translation key →
+text, `{param}` interpolation) and a `sprites` section (sprite key → `res://`
+texture path, for skins with baked text). Resolution never throws: current
+locale → fallback locale → the key itself (strings) / the authored texture
+(sprites). **Use — text:** set `labelKey` on any `UIControl2D` (inspector has
+an autocomplete widget with an "extract from literal" button); the literal
+`label` stays as designer fallback, key wins when both are set. **Use — sprites:**
+set `textureKey` on a `Sprite2D`, or the per-state `textureNormalKey`/
+`textureHoverKey`/`texturePressedKey`/`textureDisabledKey` on a `Button2D`;
+authored texture refs stay as fallback. **Use — scripts:**
+`this.scene.localization.tr('mission.name.2', {n: 2})`,
+`await this.scene.localization.setLocale('ru')` (every keyed label/sprite
+re-renders live), `onChange(cb)`, `trSprite(key)`; `label.setTextKey(key, params?)`
+keeps dynamic labels re-resolvable on locale switch (`setText` clears the key).
+**Authoring:** View → Localization panel (Strings/Sprites tabs, per-locale
+columns, missing-translation filter, preview-locale switch that live-updates the
+viewport). Locale list/default live in `pix3project.yaml` (`localization:` block)
+or are auto-discovered from `locales/`. Exports bake the config and embed the
+tables + localized sprites automatically. Lives in
+`packages/pix3-runtime/src/core/localization/`.
+
 ### Particles
 `Particles3D` — emission, trails, sub-emitters, world/local simulation space, and
 `emitBurstAt(...)` for scripted bursts.

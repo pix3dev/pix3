@@ -10,6 +10,7 @@ import { coerceTextureResource, type TextureResourceRef } from '../../../core/Te
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../../core/shared-quad-geometry';
 import { BATCHABLE_2D_KEY } from '../../../core/batch-2d';
+import { getActiveLocalization } from '../../../core/localization/active-localization';
 
 export type Button2DSpriteState = 'normal' | 'hover' | 'pressed' | 'disabled';
 
@@ -24,6 +25,7 @@ export interface Button2DProps extends UIControl2DProps {
     textureHover?: TextureResourceRef | string | null;
     texturePressed?: TextureResourceRef | string | null;
     textureDisabled?: TextureResourceRef | string | null;
+    stateTextureKeys?: Partial<Record<Button2DSpriteState, string>>;
 }
 
 /**
@@ -47,6 +49,13 @@ export class Button2D extends UIControl2D {
     textureHover: TextureResourceRef | null;
     texturePressed: TextureResourceRef | null;
     textureDisabled: TextureResourceRef | null;
+    /**
+     * Localization sprite keys per interaction state, resolved through the active
+     * locale table's `sprites` section (skins with baked text that differ per
+     * language). A resolvable key wins over the authored state texture ref; the
+     * ref stays as the universal fallback. Missing/empty entries = not localized.
+     */
+    stateTextureKeys: Partial<Record<Button2DSpriteState, string>>;
 
     private buttonMesh: Mesh;
     private buttonMaterial: MeshBasicMaterial;
@@ -70,6 +79,7 @@ export class Button2D extends UIControl2D {
         this.textureHover = coerceTextureResource(props.textureHover ?? null);
         this.texturePressed = coerceTextureResource(props.texturePressed ?? null);
         this.textureDisabled = coerceTextureResource(props.textureDisabled ?? null);
+        this.stateTextureKeys = { ...(props.stateTextureKeys ?? {}) };
 
         // Create button mesh. Size lives on mesh.scale over the shared unit quad
         // so the skin can be quad-batched (see SHARED_UNIT_QUAD_GEOMETRY).
@@ -193,6 +203,52 @@ export class Button2D extends UIControl2D {
         if (hadMap !== (texture !== null)) {
             this.buttonMaterial.needsUpdate = true;
         }
+    }
+
+    /**
+     * The texture path that should actually be loaded for a state: the locale
+     * table's `sprites[stateTextureKeys[state]]` for the active locale, else the
+     * authored state texture ref. Single source of truth for the SceneLoader and
+     * the locale-change re-resolve walk.
+     */
+    getEffectiveStateTexturePath(state: Button2DSpriteState): string | null {
+        const key = this.stateTextureKeys[state];
+        if (key) {
+            const localized = getActiveLocalization()?.trSprite(key);
+            if (localized) return localized;
+        }
+        switch (state) {
+            case 'normal':
+                return this.textureNormal?.url ?? null;
+            case 'hover':
+                return this.textureHover?.url ?? null;
+            case 'pressed':
+                return this.texturePressed?.url ?? null;
+            case 'disabled':
+                return this.textureDisabled?.url ?? null;
+        }
+    }
+
+    /** Whether any interaction state carries a localization sprite key. */
+    hasLocalizedStateTextures(): boolean {
+        return Boolean(
+            this.stateTextureKeys.normal ||
+            this.stateTextureKeys.hover ||
+            this.stateTextureKeys.pressed ||
+            this.stateTextureKeys.disabled
+        );
+    }
+
+    private setStateTextureKey(state: Button2DSpriteState, value: unknown): void {
+        const key = String(value ?? '');
+        if ((this.stateTextureKeys[state] ?? '') === key) return;
+        if (key) {
+            this.stateTextureKeys[state] = key;
+        } else {
+            delete this.stateTextureKeys[state];
+        }
+        // The loaded Texture may no longer match; the SceneLoader / locale walk
+        // reloads from the effective path on the next load or locale change.
     }
 
     private setStateTextureRef(state: Button2DSpriteState, value: unknown): void {
@@ -320,6 +376,34 @@ export class Button2D extends UIControl2D {
                     ui: { label: 'Disabled Sprite', group: 'Skin', editor: 'texture-resource', resourceType: 'texture' },
                     getValue: (n) => (n as Button2D).textureDisabled ?? { type: 'texture', url: '' },
                     setValue: (n, v) => { (n as Button2D).setStateTextureRef('disabled', v); },
+                },
+                {
+                    name: 'textureNormalKey',
+                    type: 'string',
+                    ui: { label: 'Normal Sprite Key', group: 'Skin', editor: 'localization-key', description: 'Localization sprite key for the normal state (wins over the authored sprite when resolvable)' },
+                    getValue: (n) => (n as Button2D).stateTextureKeys.normal ?? '',
+                    setValue: (n, v) => { (n as Button2D).setStateTextureKey('normal', v); },
+                },
+                {
+                    name: 'textureHoverKey',
+                    type: 'string',
+                    ui: { label: 'Hover Sprite Key', group: 'Skin', editor: 'localization-key', description: 'Localization sprite key for the hover state' },
+                    getValue: (n) => (n as Button2D).stateTextureKeys.hover ?? '',
+                    setValue: (n, v) => { (n as Button2D).setStateTextureKey('hover', v); },
+                },
+                {
+                    name: 'texturePressedKey',
+                    type: 'string',
+                    ui: { label: 'Pressed Sprite Key', group: 'Skin', editor: 'localization-key', description: 'Localization sprite key for the pressed state' },
+                    getValue: (n) => (n as Button2D).stateTextureKeys.pressed ?? '',
+                    setValue: (n, v) => { (n as Button2D).setStateTextureKey('pressed', v); },
+                },
+                {
+                    name: 'textureDisabledKey',
+                    type: 'string',
+                    ui: { label: 'Disabled Sprite Key', group: 'Skin', editor: 'localization-key', description: 'Localization sprite key for the disabled state' },
+                    getValue: (n) => (n as Button2D).stateTextureKeys.disabled ?? '',
+                    setValue: (n, v) => { (n as Button2D).setStateTextureKey('disabled', v); },
                 },
             ],
             groups: {

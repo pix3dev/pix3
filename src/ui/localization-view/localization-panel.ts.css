@@ -1,0 +1,266 @@
+pix3-localization-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---- toolbar ---- */
+
+pix3-localization-panel .loc-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+pix3-localization-panel .loc-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+pix3-localization-panel .loc-section-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0;
+}
+
+pix3-localization-panel .loc-tab {
+  border-radius: 0;
+}
+
+pix3-localization-panel .loc-tab:first-child {
+  border-radius: 0.25rem 0 0 0.25rem;
+}
+
+pix3-localization-panel .loc-tab:last-child {
+  border-radius: 0 0.25rem 0.25rem 0;
+  margin-left: -1px;
+}
+
+pix3-localization-panel .loc-tab.is-active {
+  background: rgba(var(--pix3-accent-rgb), 0.12);
+}
+
+pix3-localization-panel .loc-filter {
+  flex: 1 1 auto;
+  min-width: 4rem;
+  height: 1.6rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 13, 15, 0.6);
+  color: rgba(245, 247, 250, 0.92);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-localization-panel .loc-filter:focus-visible,
+pix3-localization-panel .loc-select:focus-visible,
+pix3-localization-panel .loc-add-input:focus-visible,
+pix3-localization-panel .loc-cell:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-localization-panel .loc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  height: 1.6rem;
+  padding: 0 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.78);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-localization-panel .loc-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+pix3-localization-panel .loc-btn.is-active {
+  color: var(--pix3-accent-color, #ffcf33);
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+}
+
+pix3-localization-panel .loc-btn-danger:hover {
+  color: #f0806a;
+  border-color: rgba(240, 128, 106, 0.5);
+}
+
+pix3-localization-panel .loc-btn svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-localization-panel .loc-select-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+pix3-localization-panel .loc-select-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.66rem;
+  color: rgba(245, 247, 250, 0.5);
+}
+
+pix3-localization-panel .loc-select-label svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+pix3-localization-panel .loc-select {
+  height: 1.6rem;
+  max-width: 10rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 13, 15, 0.6);
+  color: rgba(245, 247, 250, 0.92);
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+pix3-localization-panel .loc-add-input {
+  height: 1.6rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.5);
+  background: rgba(10, 13, 15, 0.6);
+  color: rgba(245, 247, 250, 0.92);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+/* ---- body / grid ---- */
+
+pix3-localization-panel .loc-body {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+pix3-localization-panel .loc-grid {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+pix3-localization-panel .loc-grid-head,
+pix3-localization-panel .loc-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1.3fr) minmax(6rem, 2fr) minmax(6rem, 2fr) 1.6rem;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.4rem;
+}
+
+pix3-localization-panel .loc-grid-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(16, 20, 24, 0.96);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(245, 247, 250, 0.45);
+}
+
+pix3-localization-panel .loc-col-hint {
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgba(245, 247, 250, 0.3);
+}
+
+pix3-localization-panel .loc-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+pix3-localization-panel .loc-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+pix3-localization-panel .loc-col-key {
+  font-size: 0.7rem;
+  color: rgba(245, 247, 250, 0.82);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-localization-panel .loc-cell {
+  width: 100%;
+  height: 1.5rem;
+  padding: 0 0.35rem;
+  border-radius: 0.2rem;
+  border: 1px solid transparent;
+  background: rgba(10, 13, 15, 0.4);
+  color: rgba(245, 247, 250, 0.92);
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+pix3-localization-panel .loc-cell:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+pix3-localization-panel .loc-cell:focus {
+  border-color: rgba(var(--pix3-accent-rgb), 0.6);
+  background: rgba(10, 13, 15, 0.7);
+  outline: none;
+}
+
+pix3-localization-panel .loc-cell.is-missing {
+  border-color: rgba(240, 176, 80, 0.35);
+  background: rgba(240, 176, 80, 0.08);
+}
+
+pix3-localization-panel .loc-row-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 0.2rem;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.4);
+  cursor: pointer;
+}
+
+pix3-localization-panel .loc-row-remove:hover {
+  color: #f0806a;
+  background: rgba(240, 128, 106, 0.12);
+}
+
+pix3-localization-panel .loc-row-remove svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-localization-panel .loc-placeholder,
+pix3-localization-panel .loc-empty {
+  padding: 1rem;
+  font-size: 0.74rem;
+  color: rgba(245, 247, 250, 0.5);
+}
+
+pix3-localization-panel .loc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
