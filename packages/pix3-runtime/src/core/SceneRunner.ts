@@ -124,6 +124,13 @@ export class SceneRunner {
    * the extra overlay render/raycast passes. */
   private overlay2DActive = false;
   private viewportSize = { width: 0, height: 0 };
+  /** Canvas CSS size maintained by a ResizeObserver so the render loop never
+   * queries `clientWidth`/`clientHeight` per frame — those force a synchronous
+   * reflow of the host document whenever anything invalidated layout that frame
+   * (in-editor that's practically every frame while HUD panels update). */
+  private canvasCssSize: { width: number; height: number } | null = null;
+  private canvasSizeObserver: ResizeObserver | null = null;
+  private observedCanvas: HTMLCanvasElement | null = null;
   /** Adaptive logical camera dimensions computed from viewportBaseSize + viewport aspect. */
   private logicalCameraSize = { width: 1, height: 1 };
   private readonly rootLayoutAuthoredSize: { width: number; height: number };
@@ -538,6 +545,11 @@ export class SceneRunner {
       this.orthographicCamera.updateProjectionMatrix();
     }
 
+    this.canvasSizeObserver?.disconnect();
+    this.canvasSizeObserver = null;
+    this.observedCanvas = null;
+    this.canvasCssSize = null;
+
     this.inputService.detach();
   }
 
@@ -777,6 +789,33 @@ export class SceneRunner {
     }
   }
 
+  /**
+   * Keep {@link canvasCssSize} in sync with the canvas's CSS box. Re-observes
+   * when the host swaps the canvas element. The observer fires once immediately
+   * on `observe()`, so the fallback clientWidth read in {@link render} only
+   * happens for the first frame(s) after (re)attach.
+   */
+  private observeCanvasSize(canvas: HTMLCanvasElement): void {
+    if (this.observedCanvas === canvas && this.canvasSizeObserver !== null) {
+      return;
+    }
+    this.canvasSizeObserver?.disconnect();
+    this.canvasSizeObserver = null;
+    this.observedCanvas = canvas;
+    this.canvasCssSize = null;
+    if (typeof ResizeObserver === 'undefined') {
+      return; // per-frame clientWidth fallback (tests / exotic hosts)
+    }
+    this.canvasSizeObserver = new ResizeObserver(entries => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      if (rect) {
+        // Round to whole CSS px to match clientWidth semantics.
+        this.canvasCssSize = { width: Math.round(rect.width), height: Math.round(rect.height) };
+      }
+    });
+    this.canvasSizeObserver.observe(canvas);
+  }
+
   private updateNodes(dt: number): void {
     const graph = this.runtimeGraph;
     if (graph) {
@@ -791,10 +830,25 @@ export class SceneRunner {
 
   private render(): void {
     const canvas = this.renderer.domElement;
+    this.observeCanvasSize(canvas);
     // Use CSS (logical) pixel dimensions for display-independent scaling so that
     // the camera coordinate space is consistent regardless of device pixel ratio.
-    const cssWidth = canvas.clientWidth > 0 ? canvas.clientWidth : canvas.width;
-    const cssHeight = canvas.clientHeight > 0 ? canvas.clientHeight : canvas.height;
+    // Prefer the observer-maintained cache; fall back to a (layout-forcing)
+    // clientWidth read only until the observer has delivered its first size, or
+    // in environments without ResizeObserver.
+    const cached = this.canvasCssSize;
+    const cssWidth =
+      cached && cached.width > 0
+        ? cached.width
+        : canvas.clientWidth > 0
+          ? canvas.clientWidth
+          : canvas.width;
+    const cssHeight =
+      cached && cached.height > 0
+        ? cached.height
+        : canvas.clientHeight > 0
+          ? canvas.clientHeight
+          : canvas.height;
 
     // 0. Handle Resizing
     // Track whether viewport changed so we can notify scripts AFTER cameras are updated.

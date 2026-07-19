@@ -18,9 +18,22 @@ import { getProjectTextureFiltering } from './project-texture-filtering';
  * texture loading; this is the runtime-side equivalent so play mode matches.
  */
 export function configure2DTexture(texture: Texture): void {
+  const filter = getProjectTextureFiltering() === 'nearest' ? NearestFilter : LinearFilter;
+  if (
+    texture.colorSpace === SRGBColorSpace &&
+    texture.generateMipmaps === false &&
+    texture.minFilter === filter &&
+    texture.magFilter === filter
+  ) {
+    // Already configured — return WITHOUT bumping needsUpdate. This runs on the
+    // shared cached texture every time a sprite (re)binds it, and needsUpdate
+    // forces three.js to re-upload the full image to the GPU. With the shared
+    // pre-launch atlas that meant every spawned projectile/effect re-uploaded a
+    // whole atlas sheet, saturating the GPU (frame time grew with every spawn).
+    return;
+  }
   texture.colorSpace = SRGBColorSpace;
   texture.generateMipmaps = false;
-  const filter = getProjectTextureFiltering() === 'nearest' ? NearestFilter : LinearFilter;
   texture.minFilter = filter;
   texture.magFilter = filter;
   texture.needsUpdate = true;

@@ -133,6 +133,8 @@ export class ProfilerSessionService {
   private disposeRunnerSubscription?: () => void;
   private runtimeRenderer: RuntimeRenderer | null = null;
   private state: ProfilerSessionSnapshot = this.createIdleSnapshot();
+  private notifyThrottleTimer: number | null = null;
+  private lastNotifyTime = 0;
 
   subscribe(listener: ProfilerListener): () => void {
     this.listeners.add(listener);
@@ -276,7 +278,7 @@ export class ProfilerSessionService {
       frameImpact: this.createFrameImpactSnapshot(),
       audio: this.createAudioSnapshot(sample.activeAudioPlaybacks),
     };
-    this.notify();
+    this.notifyThrottled();
   }
 
   private createFrameImpactActivities(sample: SceneRunnerFrameSample): FrameProfilerActivity[] {
@@ -782,9 +784,48 @@ export class ProfilerSessionService {
   }
 
   private notify(): void {
+    if (this.notifyThrottleTimer !== null) {
+      window.clearTimeout(this.notifyThrottleTimer);
+      this.notifyThrottleTimer = null;
+    }
+    this.lastNotifyTime = monotonicNowMs();
     const snapshot = this.getSnapshot();
     for (const listener of this.listeners) {
       listener(snapshot);
     }
   }
+
+  /**
+   * Frame samples arrive on every rAF tick, but pushing each one straight to
+   * the UI made the profiler panel re-render (snapshot deep-copy + Lit diff +
+   * SVG chart update) at the game's frame rate — the observer measurably
+   * dragged down the thing it was observing. Coalesce UI pushes to
+   * {@link ProfilerSessionService.LIVE_NOTIFY_INTERVAL_MS}; session lifecycle
+   * transitions still notify immediately via {@link notify}.
+   */
+  private notifyThrottled(): void {
+    const elapsed = monotonicNowMs() - this.lastNotifyTime;
+    if (elapsed >= ProfilerSessionService.LIVE_NOTIFY_INTERVAL_MS) {
+      this.notify();
+      return;
+    }
+    if (this.notifyThrottleTimer === null) {
+      this.notifyThrottleTimer = window.setTimeout(
+        () => {
+          this.notifyThrottleTimer = null;
+          this.notify();
+        },
+        Math.max(0, ProfilerSessionService.LIVE_NOTIFY_INTERVAL_MS - elapsed)
+      );
+    }
+  }
+
+  private static readonly LIVE_NOTIFY_INTERVAL_MS = 100;
+}
+
+/** performance.now() with a Date.now() fallback (test envs stub `performance`). */
+function monotonicNowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
 }

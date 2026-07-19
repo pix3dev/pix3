@@ -612,32 +612,22 @@ export class ProfilerPanel extends ComponentBase {
     const resampledLogic = this.resampleSeries(logicValues, this.chartWidth);
     const resampledRender = this.resampleSeries(renderValues, this.chartWidth);
     const sampleCount = Math.min(resampledLogic.length, resampledRender.length);
-    const bars = [];
+
+    // Two step-outline polygons (render band + logic band stacked on top of it)
+    // instead of two <rect> per column: per-column rects meant thousands of SVG
+    // attribute writes per update once frame times got noisy, which itself
+    // dragged the frame rate down. A step polygon rasterizes to the exact same
+    // 1px-column bars but costs a single `points` write per series.
+    const renderTop: number[] = new Array(sampleCount);
+    const totalTop: number[] = new Array(sampleCount);
     for (let index = 0; index < sampleCount; index += 1) {
       const logicValue = resampledLogic[index] ?? 0;
       const renderValue = resampledRender[index] ?? 0;
-      const totalHeight = this.normalizeChartValue(logicValue + renderValue, maxValue) * 100;
-      const renderHeight = this.normalizeChartValue(renderValue, maxValue) * 100;
-      const logicHeight = this.normalizeChartValue(logicValue, maxValue) * 100;
-      const x = index;
-      const width = 1;
-      bars.push(svg`
-        <rect
-          class="chart-bar chart-bar-render"
-          x=${x}
-          y=${100 - renderHeight}
-          width=${width}
-          height=${renderHeight}
-        ></rect>
-        <rect
-          class="chart-bar chart-bar-logic"
-          x=${x}
-          y=${100 - totalHeight}
-          width=${width}
-          height=${logicHeight}
-        ></rect>
-      `);
+      renderTop[index] = 100 - this.normalizeChartValue(renderValue, maxValue) * 100;
+      totalTop[index] = 100 - this.normalizeChartValue(logicValue + renderValue, maxValue) * 100;
     }
+    const renderPoints = `0,100 ${this.stepEdgePoints(renderTop)} ${sampleCount},100`;
+    const logicPoints = `${this.stepEdgePoints(totalTop)} ${this.stepEdgePoints(renderTop, true)}`;
 
     return svg`
       <svg
@@ -650,9 +640,27 @@ export class ProfilerPanel extends ComponentBase {
         <polyline class="chart-grid-line" points=${`0,75 ${sampleCount},75`}></polyline>
         <polyline class="chart-grid-line" points=${`0,50 ${sampleCount},50`}></polyline>
         <polyline class="chart-grid-line" points=${`0,25 ${sampleCount},25`}></polyline>
-        ${bars}
+        <polygon class="chart-bar chart-bar-render" points=${renderPoints}></polygon>
+        <polygon class="chart-bar chart-bar-logic" points=${logicPoints}></polygon>
       </svg>
     `;
+  }
+
+  /**
+   * Staircase edge through per-column values: column i contributes the segment
+   * (i, y[i]) → (i+1, y[i]). `reverse` walks it right-to-left for closing a
+   * band polygon against the edge below it.
+   */
+  private stepEdgePoints(columnY: readonly number[], reverse = false): string {
+    const parts: string[] = [];
+    for (let index = 0; index < columnY.length; index += 1) {
+      const y = round2(columnY[index] ?? 100);
+      parts.push(`${index},${y} ${index + 1},${y}`);
+    }
+    if (reverse) {
+      parts.reverse();
+    }
+    return parts.join(' ');
   }
 
   private resampleSeries(values: readonly number[], targetColumns: number): number[] {
@@ -872,6 +880,11 @@ export class ProfilerPanel extends ComponentBase {
 
     return `${Math.min(value, 100).toFixed(2)}%`;
   }
+}
+
+/** Round to 2 decimals — keeps chart `points` strings short and stable. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 declare global {
