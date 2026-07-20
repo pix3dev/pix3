@@ -52,6 +52,22 @@ pix3-toolbar {
   color: var(--fg-1);
 }
 
+.project-name-label {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  transform: translate(-50%, -50%);
+  max-inline-size: min(40%, 420px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  pointer-events: none;
+  z-index: var(--pix3-z-base);
+}
+
 .toolbar-group--play {
   display: inline-flex;
   align-items: center;

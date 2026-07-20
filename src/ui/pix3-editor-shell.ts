@@ -986,7 +986,9 @@ export class Pix3EditorShell extends ComponentBase {
   protected render() {
     return html`
       <div class="editor-shell" data-ready=${this.shellReady ? 'true' : 'false'}>
-        <div class="toolbar-layer">${this.renderToolbar()} ${this.renderAccountPopover()}</div>
+        <div class="toolbar-layer">
+          ${this.renderToolbar()} ${this.renderProjectNameLabel()} ${this.renderAccountPopover()}
+        </div>
         <div class="workspace" role="presentation">
           <div class="layout-host" role="application" aria-busy=${!this.isLayoutReady}></div>
         </div>
@@ -1033,7 +1035,6 @@ export class Pix3EditorShell extends ComponentBase {
               @item-select=${this.onRunOptionSelect}
             ></pix3-dropdown-button>
           </div>
-          <span> Project: ${appState.project.projectName ?? 'No project open'} </span>
           <collab-participants-strip></collab-participants-strip>
         </div>
         <pix3-toolbar-button
@@ -1244,6 +1245,14 @@ export class Pix3EditorShell extends ComponentBase {
           ></pix3-auth-screen>
         </div>
       </div>
+    `;
+  }
+
+  private renderProjectNameLabel() {
+    return html`
+      <span class="project-name-label"
+        >${appState.project.projectName ?? 'No project open'}</span
+      >
     `;
   }
 

@@ -54,6 +54,14 @@ export interface LibraryItemManifest {
   entry?: string;
   /** Every file in the bundle, bundle-relative, including `entry` and `preview`. */
   files: string[];
+  /**
+   * Bundle-relative paths that must be restored to their ORIGINAL project-relative locations on
+   * insert (user scripts + assets referenced from script code), instead of being copied under
+   * `res://assets/library/<slug>/`. References to these files are never remapped — the files are
+   * written verbatim, and their `res://`/import paths only resolve at the original layout. Absent
+   * ⇒ empty (pre-existing items keep the fully-namespaced behavior).
+   */
+  originalPathFiles?: string[];
   source: LibraryItemSource;
   /**
    * SPDX-ish license id. Required for builtin/public (white-listed: OFL, CC0, MIT,

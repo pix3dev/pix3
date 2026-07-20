@@ -117,6 +117,16 @@ export class LibraryInspector extends ComponentBase {
     }
   }
 
+  private async openAsScene(): Promise<void> {
+    const id = this.selection?.item.manifest.id;
+    if (!id) return;
+    try {
+      await this.insertService.addAsScene(id);
+    } catch (error) {
+      console.error('[LibraryInspector] Failed to open as scene:', error);
+    }
+  }
+
   private async setCategory(categoryId: string | undefined): Promise<void> {
     this.categoryMenuOpen = false;
     const item = this.selection?.item;
@@ -273,6 +283,28 @@ export class LibraryInspector extends ComponentBase {
             aria-label="Open store page"
           >
             ${this.icon('external-link')}
+          </button>
+        </div>
+      `;
+    }
+    // A scene *template* (shop, level map, settings menu, cutscene shell) opens as its own scene
+    // tab rather than being instanced into the current scene.
+    if (item.manifest.type === 'scene') {
+      return html`
+        <div class="lib-insp__actions">
+          <button
+            type="button"
+            class="lib-insp__btn lib-insp__btn--primary"
+            @click=${() => void this.openAsScene()}
+          >
+            ${this.icon('film')}<span>Open as Scene</span>
+          </button>
+          <button
+            type="button"
+            class="lib-insp__btn lib-insp__btn--ghost"
+            @click=${() => void this.importFiles()}
+          >
+            ${this.icon('download')}<span>Import</span>
           </button>
         </div>
       `;

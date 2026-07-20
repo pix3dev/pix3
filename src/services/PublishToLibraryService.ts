@@ -7,6 +7,15 @@
  * bundle at its project-relative path, and recurses into nested `.pix3scene`/prefab files.
  * References are left as absolute `res://<project-path>`; on insert `LibraryInsertService`
  * prefixes them with the bundle's target dir, keeping the graph internally consistent.
+ *
+ * **Script packing (two buckets).** `user:<ClassName>` script components serialize as class-name
+ * references, not `res://` paths, so the scan also resolves those names to their project script
+ * files (under `scripts/`/`src/scripts/`), bundles them plus their transitive relative imports,
+ * and scans the script source for its own `res://` references (e.g. audio played from code).
+ * Because a `.ts` file's paths cannot be safely rewritten on insert (unlike scene YAML), scripts
+ * and everything reachable from them are tracked as the **original-path bucket** in
+ * {@link LibraryItemManifest.originalPathFiles}: on insert they restore to their original project
+ * locations verbatim, while the rest stays namespaced under `assets/library/<slug>/`.
  */
 
 import { inject, injectable } from '@/fw/di';
@@ -24,11 +33,34 @@ import type {
 import { normalizeBundlePath } from './library/library-path-remap';
 import { inferItemTypeFromPath } from './library/library-types';
 import {
+  collectRelativeImports,
   collectResourceReferences,
+  collectUserComponentTypes,
   isScriptReference,
   isSceneReference,
+  resolveImportCandidates,
   stripResScheme,
 } from './library/library-dependencies';
+
+/** Project directories scanned for `user:*` script classes (mirrors ProjectScriptLoaderService). */
+const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+const EXCLUDED_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
+/** `export [default] [abstract] class X extends Script` — the registrable `user:X` marker. */
+const SCRIPT_CLASS_PATTERN =
+  /export\s+(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_$]+)\s+extends\s+Script\b/g;
+
+/**
+ * Working state threaded through the recursive dependency walk. `files` accumulates every bundled
+ * blob (keyed by project-relative path); `originalPaths` marks the subset that must restore to
+ * original project locations (scripts + anything reachable from script source); `visited` guards
+ * `res://` cycles; `scriptIndex` maps `ClassName` → script file path, built lazily once.
+ */
+interface CollectContext {
+  readonly files: Map<string, Blob>;
+  readonly originalPaths: Set<string>;
+  readonly visited: Set<string>;
+  scriptIndex: Map<string, string> | null;
+}
 
 export interface PublishNodeParams {
   readonly nodeId: string;
@@ -72,10 +104,10 @@ export class PublishToLibraryService {
       metadata: {},
     });
 
-    const files = new Map<string, Blob>();
-    files.set(ENTRY_FILE, new Blob([entryText], { type: 'text/yaml' }));
-    await this.collectDependencies(entryText, files, new Set<string>());
-    const preview = await this.renderScenePreview(entryText, ENTRY_FILE, files);
+    const ctx = this.newCollectContext();
+    ctx.files.set(ENTRY_FILE, new Blob([entryText], { type: 'text/yaml' }));
+    await this.collectDependencies(entryText, ctx, false);
+    const preview = await this.renderScenePreview(entryText, ENTRY_FILE, ctx.files);
 
     const name = params.name ?? sourceNode.name ?? 'Prefab';
     const slug = await this.library.suggestSlug(name);
@@ -89,12 +121,13 @@ export class PublishToLibraryService {
       description: params.description,
       preview,
       entry: ENTRY_FILE,
-      files: [...files.keys()],
+      files: [...ctx.files.keys()],
+      originalPathFiles: this.originalPathList(ctx),
       source: 'packed',
       createdAt: 0,
       updatedAt: 0,
     };
-    return { manifest, files };
+    return { manifest, files: ctx.files };
   }
 
   /** Build the bundle and persist it into the personal library. */
@@ -136,7 +169,7 @@ export class PublishToLibraryService {
     const name = this.deriveName(fileName);
     const slug = await this.library.suggestSlug(name);
 
-    const files = new Map<string, Blob>();
+    const ctx = this.newCollectContext();
     let entry: string;
     let preview: string | undefined;
     let source: LibraryItemSource = 'imported';
@@ -145,14 +178,15 @@ export class PublishToLibraryService {
       // Keep the entry at its project-relative path so its own `res://` references stay valid,
       // then walk them to pull every referenced asset into the bundle.
       entry = relativePath;
-      files.set(relativePath, blob);
+      ctx.files.set(relativePath, blob);
+      ctx.visited.add(this.bucketKey(relativePath, false));
       const text = await blob.text();
-      await this.collectDependencies(text, files, new Set<string>([relativePath]));
-      preview = await this.renderScenePreview(text, relativePath, files);
+      await this.collectDependencies(text, ctx, false);
+      preview = await this.renderScenePreview(text, relativePath, ctx.files);
       source = 'packed';
     } else {
       entry = fileName;
-      files.set(fileName, blob);
+      ctx.files.set(fileName, blob);
       if (type === 'image') {
         preview = fileName;
       }
@@ -167,12 +201,13 @@ export class PublishToLibraryService {
       category: opts?.category,
       preview,
       entry,
-      files: [...files.keys()],
+      files: [...ctx.files.keys()],
+      originalPathFiles: this.originalPathList(ctx),
       source,
       createdAt: 0,
       updatedAt: 0,
     };
-    return this.library.putUserItem({ manifest, files });
+    return this.library.putUserItem({ manifest, files: ctx.files });
   }
 
   /**
@@ -207,6 +242,24 @@ export class PublishToLibraryService {
 
   // -- internals -------------------------------------------------------------
 
+  private newCollectContext(): CollectContext {
+    return {
+      files: new Map<string, Blob>(),
+      originalPaths: new Set<string>(),
+      visited: new Set<string>(),
+      scriptIndex: null,
+    };
+  }
+
+  private originalPathList(ctx: CollectContext): string[] | undefined {
+    return ctx.originalPaths.size > 0 ? [...ctx.originalPaths].sort() : undefined;
+  }
+
+  /** Per-bucket visited key so a namespaced file can be re-walked when promoted to original. */
+  private bucketKey(path: string, original: boolean): string {
+    return `${original ? 'O' : 'N'}:${path}`;
+  }
+
   private collectSubtree(node: NodeBase, out: Map<string, NodeBase>): void {
     out.set(node.nodeId, node);
     for (const child of node.children) {
@@ -217,35 +270,160 @@ export class PublishToLibraryService {
   }
 
   /**
-   * Copy every `res://` file referenced by `text` into `files` (keyed by project-relative
-   * path), recursing into nested scene/prefab files. `visited` guards reference cycles.
+   * Walk `text` for dependencies and pull them into `ctx.files`:
+   *  - `res://` references (textures, audio, nested scenes/scripts) — recursing into scene/script
+   *    files, inheriting the referrer's bucket;
+   *  - `user:<ClassName>` components — resolved to their project script file and forced into the
+   *    original-path bucket (see class header);
+   *  - relative imports (only when `fromFile` is itself a script) — the script's `.ts`/`.js`
+   *    siblings, also original-path.
+   *
+   * `inOriginalBucket` is the bucket of `text` itself; `fromFile` is its project path (or null for
+   * the synthetic entry). Anything reachable from an original-bucket file is itself original-path,
+   * so its own `res://`/import paths stay valid when it is restored verbatim on insert.
    */
   private async collectDependencies(
     text: string,
-    files: Map<string, Blob>,
-    visited: Set<string>
+    ctx: CollectContext,
+    inOriginalBucket: boolean,
+    fromFile: string | null = null
   ): Promise<void> {
     for (const reference of collectResourceReferences(text)) {
       const relativePath = normalizeBundlePath(stripResScheme(reference));
-      if (!relativePath || visited.has(relativePath) || files.has(relativePath)) {
-        continue;
+      if (relativePath) {
+        await this.collectResourceFile(relativePath, reference, ctx, inOriginalBucket);
       }
-      visited.add(relativePath);
+    }
 
-      let blob: Blob;
+    for (const className of collectUserComponentTypes(text)) {
+      await this.collectScriptClass(className, ctx);
+    }
+
+    if (fromFile && /\.(ts|js|mjs)$/.test(fromFile)) {
+      for (const specifier of collectRelativeImports(text)) {
+        await this.collectRelativeImport(fromFile, specifier, ctx);
+      }
+    }
+  }
+
+  /** Add one `res://` file to the bundle in the given bucket and recurse into scene/script text. */
+  private async collectResourceFile(
+    relativePath: string,
+    reference: string,
+    ctx: CollectContext,
+    inOriginalBucket: boolean
+  ): Promise<void> {
+    if (inOriginalBucket) {
+      ctx.originalPaths.add(relativePath);
+    }
+    const key = this.bucketKey(relativePath, inOriginalBucket);
+    if (ctx.visited.has(key)) {
+      return;
+    }
+    ctx.visited.add(key);
+
+    let blob = ctx.files.get(relativePath);
+    if (!blob) {
       try {
         blob = await this.storage.readBlob(relativePath);
       } catch {
         // Missing file (e.g. a builtin/public asset not in the project) — skip it.
-        continue;
+        return;
       }
-      files.set(relativePath, blob);
+      ctx.files.set(relativePath, blob);
+    }
 
-      if (isSceneReference(reference) || isScriptReference(reference)) {
-        const nestedText = await blob.text();
-        await this.collectDependencies(nestedText, files, visited);
+    if (isSceneReference(reference) || isScriptReference(reference)) {
+      const nestedText = await blob.text();
+      await this.collectDependencies(nestedText, ctx, inOriginalBucket, relativePath);
+    }
+  }
+
+  /** Resolve `user:<className>` to its project script file and pull it in (original-path). */
+  private async collectScriptClass(className: string, ctx: CollectContext): Promise<void> {
+    const index = await this.ensureScriptIndex(ctx);
+    const scriptPath = index.get(className);
+    if (!scriptPath) {
+      console.warn(
+        `[PublishToLibraryService] user:${className} not found under ${SCRIPT_DIRECTORIES.join(
+          '/'
+        )} — the bundle will not carry it.`
+      );
+      return;
+    }
+    await this.collectResourceFile(scriptPath, `res://${scriptPath}`, ctx, true);
+  }
+
+  /** Probe an import specifier's candidate paths; the first that exists is bundled (original). */
+  private async collectRelativeImport(
+    fromFile: string,
+    specifier: string,
+    ctx: CollectContext
+  ): Promise<void> {
+    for (const candidate of resolveImportCandidates(fromFile, specifier)) {
+      const normalized = normalizeBundlePath(candidate);
+      let blob = ctx.files.get(normalized);
+      if (!blob) {
+        try {
+          blob = await this.storage.readBlob(normalized);
+        } catch {
+          continue; // Not this candidate — try the next extension/index form.
+        }
+        ctx.files.set(normalized, blob);
+      }
+      // Found it — treat like an original-path script reference.
+      await this.collectResourceFile(normalized, `res://${normalized}`, ctx, true);
+      return;
+    }
+  }
+
+  /** Lazily build (once per publish) a `ClassName → script file path` index over the script dirs. */
+  private async ensureScriptIndex(ctx: CollectContext): Promise<Map<string, string>> {
+    if (ctx.scriptIndex) {
+      return ctx.scriptIndex;
+    }
+    const index = new Map<string, string>();
+    for (const directory of SCRIPT_DIRECTORIES) {
+      let paths: string[];
+      try {
+        paths = await this.listSourceFilesRecursively(directory);
+      } catch {
+        continue; // Directory absent — normal.
+      }
+      for (const path of paths) {
+        if (!/\.(ts|js)$/.test(path) || EXCLUDED_SCRIPT_SUFFIXES.some(s => path.endsWith(s))) {
+          continue;
+        }
+        let text: string;
+        try {
+          text = await this.storage.readTextFile(path);
+        } catch {
+          continue;
+        }
+        const pattern = new RegExp(SCRIPT_CLASS_PATTERN.source, 'g');
+        for (const match of text.matchAll(pattern)) {
+          const className = match[1];
+          if (!index.has(className)) {
+            index.set(className, normalizeBundlePath(path));
+          }
+        }
       }
     }
+    ctx.scriptIndex = index;
+    return index;
+  }
+
+  private async listSourceFilesRecursively(directory: string): Promise<string[]> {
+    const collected: string[] = [];
+    const entries = await this.storage.listDirectory(directory);
+    for (const entry of entries) {
+      if (entry.kind === 'file') {
+        collected.push(entry.path);
+      } else if (entry.kind === 'directory') {
+        collected.push(...(await this.listSourceFilesRecursively(entry.path)));
+      }
+    }
+    return collected;
   }
 
   private newId(): string {
