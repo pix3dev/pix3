@@ -4,6 +4,8 @@ import {
   AssetLibraryService,
   LibraryInsertService,
   LibrarySelectionService,
+  LibrarySyncService,
+  type LibrarySyncState,
   PublishToLibraryService,
   IconService,
   IconSize,
@@ -71,6 +73,7 @@ export class LibraryPanel extends ComponentBase {
   @inject(LibraryInsertService) private readonly insertService!: LibraryInsertService;
   @inject(PublishToLibraryService) private readonly publishService!: PublishToLibraryService;
   @inject(LibrarySelectionService) private readonly selectionService!: LibrarySelectionService;
+  @inject(LibrarySyncService) private readonly syncService!: LibrarySyncService;
   @inject(IconService) private readonly iconService!: IconService;
 
   @state() private items: LibraryItem[] = [];
@@ -86,9 +89,11 @@ export class LibraryPanel extends ComponentBase {
   @state() private dropTarget: DropTarget | null = null;
   /** Bumped after creating a custom category so the rail re-derives. */
   @state() private categoryRevision = 0;
+  @state() private syncState: LibrarySyncState = this.syncService.getState();
 
   private disposeLibrarySubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
+  private disposeSyncSubscription?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -102,6 +107,9 @@ export class LibraryPanel extends ComponentBase {
         this.selectedItemId = id;
       }
     });
+    this.disposeSyncSubscription = this.syncService.subscribe(state => {
+      this.syncState = state;
+    });
     void this.reload();
   }
 
@@ -111,6 +119,8 @@ export class LibraryPanel extends ComponentBase {
     this.disposeLibrarySubscription = undefined;
     this.disposeSelectionSubscription?.();
     this.disposeSelectionSubscription = undefined;
+    this.disposeSyncSubscription?.();
+    this.disposeSyncSubscription = undefined;
     // Closing the panel returns the Inspector to node properties.
     this.selectionService.clear();
   }
@@ -469,6 +479,7 @@ export class LibraryPanel extends ComponentBase {
     if (source.editable) {
       const isDropTarget = this.dropTarget?.kind === 'zone';
       return html`
+        ${source.id === 'user' ? this.renderSyncStatus() : nothing}
         <div
           class="lib-dropzone ${isDropTarget ? 'is-drop-target' : ''}"
           @dragover=${(e: DragEvent) => this.onDropTargetDragOver(e, { kind: 'zone' })}
@@ -488,6 +499,65 @@ export class LibraryPanel extends ComponentBase {
         <span>Read-only source · ${source.hint}</span>
       </div>
     `;
+  }
+
+  /** Cloud-sync status + manual "Sync now" for the personal library. */
+  private renderSyncStatus() {
+    const { status } = this.syncState;
+    const label =
+      status === 'disabled'
+        ? 'Sign in to sync'
+        : status === 'syncing'
+          ? 'Syncing…'
+          : status === 'error'
+            ? 'Sync failed'
+            : this.syncState.lastSyncedAt
+              ? `Synced ${this.formatSyncedAt(this.syncState.lastSyncedAt)}`
+              : 'Synced to cloud';
+    const iconName =
+      status === 'disabled'
+        ? 'cloud-off'
+        : status === 'syncing'
+          ? 'refresh-cw'
+          : status === 'error'
+            ? 'alert-triangle'
+            : 'cloud';
+    return html`
+      <div class="lib-sync lib-sync--${status}" title=${this.syncState.error ?? label}>
+        <span class="lib-sync__icon ${status === 'syncing' ? 'is-spinning' : ''}"
+          >${this.icon(iconName)}</span
+        >
+        <span class="lib-sync__label">${label}</span>
+        ${status === 'disabled'
+          ? nothing
+          : html`<button
+              type="button"
+              class="lib-sync__now"
+              title="Sync now"
+              aria-label="Sync now"
+              ?disabled=${status === 'syncing'}
+              @click=${() => void this.syncService.syncNow()}
+            >
+              ${this.icon('refresh-cw')}
+            </button>`}
+      </div>
+    `;
+  }
+
+  private formatSyncedAt(timestamp: number): string {
+    const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+    if (seconds < 45) {
+      return 'just now';
+    }
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) {
+      return `${minutes}m ago`;
+    }
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) {
+      return `${hours}h ago`;
+    }
+    return `${Math.round(hours / 24)}d ago`;
   }
 
   private renderContent() {

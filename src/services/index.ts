@@ -184,6 +184,11 @@ export {
 export { AgentAdvisorService, type Advisor, type AdvisorInfo } from './agent/AgentAdvisorService';
 export { AgentSkillsService, type AgentSkill } from './agent/AgentSkillsService';
 export { AssetLibraryService } from './AssetLibraryService';
+export {
+  LibrarySyncService,
+  type LibrarySyncState,
+  type LibrarySyncStatus,
+} from './LibrarySyncService';
 export { PublishToLibraryService, type PublishNodeParams } from './PublishToLibraryService';
 export {
   LibraryInsertService,

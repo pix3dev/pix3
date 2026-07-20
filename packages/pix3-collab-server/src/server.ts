@@ -10,6 +10,7 @@ import { initDb } from './core/db.js';
 import { authRouter } from './core/auth/auth-router.js';
 import { projectsRouter } from './core/projects/projects-router.js';
 import { storageRouter } from './core/storage/storage-router.js';
+import { libraryRouter } from './core/library/library-router.js';
 import { adminRouter } from './core/admin/admin-router.js';
 import { previewRouter } from './core/preview/preview-router.js';
 import { createHocuspocusServer } from './sync/hocuspocus.js';
@@ -50,8 +51,9 @@ export async function startServer(): Promise<void> {
   initDb();
   console.log('[pix3-collab] Database initialized');
 
-  // Ensure projects storage directory exists
+  // Ensure storage directories exist
   fs.mkdirSync(path.resolve(config.PROJECTS_STORAGE_DIR), { recursive: true });
+  fs.mkdirSync(path.resolve(config.LIBRARY_STORAGE_DIR), { recursive: true });
 
   const app = express();
   app.use(cookieParser());
@@ -65,6 +67,7 @@ export async function startServer(): Promise<void> {
   app.use('/api/auth', authRouter);
   app.use('/api/projects', projectsRouter);
   app.use('/api/projects', storageRouter);
+  app.use('/api/library', libraryRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/preview', previewRouter);
 

@@ -19,6 +19,13 @@ import type {
 } from './library-types';
 import { normalizeBundlePath } from './library-path-remap';
 
+/** A local deletion record kept so a delete can be pushed to the cloud on the next sync. */
+export interface LibraryTombstone {
+  id: string;
+  /** Epoch millis of the deletion, compared against the cloud row for last-write-wins. */
+  deletedAt: number;
+}
+
 type StorageManagerWithDirectory = StorageManager & {
   getDirectory?: () => Promise<FileSystemDirectoryHandle>;
 };
@@ -27,8 +34,9 @@ export class LocalLibraryProvider implements LibraryProvider {
   readonly scope = 'user' as const;
 
   private static readonly DB_NAME = 'pix3-user-library';
-  private static readonly DB_VERSION = 1;
+  private static readonly DB_VERSION = 2;
   private static readonly STORE = 'items';
+  private static readonly STORE_TOMBSTONES = 'tombstones';
   private static readonly INDEX_UPDATED = 'by_updatedAt';
   private static readonly OPFS_ROOT = 'pix3-user-library';
 
@@ -96,6 +104,38 @@ export class LocalLibraryProvider implements LibraryProvider {
     }
 
     await this.putManifest(manifest);
+    // A (re)created item is no longer deleted — drop any tombstone so sync won't re-delete it.
+    await this.clearTombstone(manifest.id);
+    this.notify();
+    return { scope: this.scope, manifest };
+  }
+
+  /**
+   * Write a bundle pulled from the cloud, preserving its manifest verbatim (createdAt/updatedAt
+   * untouched — those timestamps are authoritative for last-write-wins). Unlike {@link put} this
+   * does not restamp `updatedAt`, so a pulled item won't look "newer" and bounce back on push.
+   */
+  async putRemote(bundle: LibraryBundle): Promise<LibraryItem> {
+    if (!this.isSupported()) {
+      throw new Error('Local library storage is not supported in this environment.');
+    }
+    const manifest: LibraryItemManifest = {
+      ...bundle.manifest,
+      files: [...bundle.files.keys()].map(normalizeBundlePath),
+    };
+
+    this.revokePreview(manifest.id);
+    await this.deleteItemDirectory(manifest.id);
+    const itemDir = await this.getItemDirectory(manifest.id, true);
+    if (!itemDir) {
+      throw new Error('Failed to open OPFS directory for library item.');
+    }
+    for (const [relativePath, blob] of bundle.files) {
+      await this.writeOpfsFile(itemDir, normalizeBundlePath(relativePath), blob);
+    }
+
+    await this.putManifest(manifest);
+    await this.clearTombstone(manifest.id);
     this.notify();
     return { scope: this.scope, manifest };
   }
@@ -129,10 +169,29 @@ export class LocalLibraryProvider implements LibraryProvider {
     if (!this.isSupported()) {
       return;
     }
+    await this.removeItemData(id);
+    // Record a tombstone so the deletion propagates to the cloud on the next sync.
+    await this.putTombstone({ id, deletedAt: Date.now() });
+    this.notify();
+  }
+
+  /**
+   * Remove an item locally WITHOUT leaving a tombstone — used when applying a delete that already
+   * came from the cloud (the server owns that tombstone; a local one would try to push it back).
+   */
+  async hardDelete(id: string): Promise<void> {
+    if (!this.isSupported()) {
+      return;
+    }
+    await this.removeItemData(id);
+    await this.clearTombstone(id);
+    this.notify();
+  }
+
+  private async removeItemData(id: string): Promise<void> {
     this.revokePreview(id);
     await this.deleteManifest(id);
     await this.deleteItemDirectory(id);
-    this.notify();
   }
 
   subscribe(listener: () => void): () => void {
@@ -167,6 +226,10 @@ export class LocalLibraryProvider implements LibraryProvider {
           if (!db.objectStoreNames.contains(LocalLibraryProvider.STORE)) {
             const store = db.createObjectStore(LocalLibraryProvider.STORE, { keyPath: 'id' });
             store.createIndex(LocalLibraryProvider.INDEX_UPDATED, 'updatedAt');
+          }
+          // v2: tombstones for two-way cloud sync (a delete must survive to be pushed).
+          if (!db.objectStoreNames.contains(LocalLibraryProvider.STORE_TOMBSTONES)) {
+            db.createObjectStore(LocalLibraryProvider.STORE_TOMBSTONES, { keyPath: 'id' });
           }
         };
         req.onsuccess = () => resolve(req.result);
@@ -238,6 +301,57 @@ export class LocalLibraryProvider implements LibraryProvider {
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(LocalLibraryProvider.STORE, 'readwrite');
         tx.objectStore(LocalLibraryProvider.STORE).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction error'));
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  // -- Tombstones (deletion records for cloud sync) --------------------------
+
+  /** Pending local deletions to be pushed to the cloud. */
+  async listTombstones(): Promise<LibraryTombstone[]> {
+    if (!this.isSupported()) {
+      return [];
+    }
+    const db = await this.openDb();
+    try {
+      return await new Promise<LibraryTombstone[]>((resolve, reject) => {
+        const tx = db.transaction(LocalLibraryProvider.STORE_TOMBSTONES, 'readonly');
+        const getAll = tx.objectStore(LocalLibraryProvider.STORE_TOMBSTONES).getAll();
+        getAll.onsuccess = () => resolve((getAll.result as LibraryTombstone[]) ?? []);
+        getAll.onerror = () => reject(getAll.error ?? new Error('IndexedDB getAll error'));
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  private async putTombstone(tombstone: LibraryTombstone): Promise<void> {
+    const db = await this.openDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(LocalLibraryProvider.STORE_TOMBSTONES, 'readwrite');
+        tx.objectStore(LocalLibraryProvider.STORE_TOMBSTONES).put(tombstone);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction error'));
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  async clearTombstone(id: string): Promise<void> {
+    if (!this.isSupported()) {
+      return;
+    }
+    const db = await this.openDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(LocalLibraryProvider.STORE_TOMBSTONES, 'readwrite');
+        tx.objectStore(LocalLibraryProvider.STORE_TOMBSTONES).delete(id);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction error'));
       });

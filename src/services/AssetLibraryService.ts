@@ -140,6 +140,44 @@ export class AssetLibraryService {
     return this.local.isSupported();
   }
 
+  // -- Cloud sync bridge -----------------------------------------------------
+  // Narrow delegates to the user-scope provider for LibrarySyncService. Kept here (not by exposing
+  // the provider) so cache invalidation stays centralized; the provider already notifies on write,
+  // which invalidates this cache and refreshes the UI.
+
+  /** User-scope items only (excludes builtin), for reconciling against the cloud. */
+  async listUserItems(): Promise<LibraryItem[]> {
+    if (!this.local.isSupported()) {
+      return [];
+    }
+    return this.local.list();
+  }
+
+  /** Materialize a user-scope bundle to push to the cloud. */
+  getUserBundle(id: string): Promise<LibraryBundle | null> {
+    return this.local.getBundle(id);
+  }
+
+  /** Write a bundle pulled from the cloud (manifest timestamps preserved). */
+  async storeUserItemFromCloud(bundle: LibraryBundle): Promise<void> {
+    await this.local.putRemote(bundle);
+  }
+
+  /** Apply a cloud deletion locally without leaving a tombstone (the server owns it). */
+  async removeUserItemFromCloud(id: string): Promise<void> {
+    await this.local.hardDelete(id);
+  }
+
+  /** Pending local deletions awaiting a push to the cloud. */
+  listUserTombstones() {
+    return this.local.listTombstones();
+  }
+
+  /** Drop a tombstone once its deletion has been pushed (or is moot). */
+  clearUserTombstone(id: string): Promise<void> {
+    return this.local.clearTombstone(id);
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

@@ -3,6 +3,9 @@ export const config = {
   DB_PATH: process.env.DB_PATH || './data/core.sqlite',
   HOCUSPOCUS_DB_PATH: process.env.HOCUSPOCUS_DB_PATH || './data/crdt.sqlite',
   PROJECTS_STORAGE_DIR: process.env.PROJECTS_STORAGE_DIR || './data/projects',
+  // Per-user personal Asset Library bundles: LIBRARY_STORAGE_DIR/<itemId>/<bundle-relative>.
+  // Ownership/visibility live in the `library_items` table; the directory only holds blobs.
+  LIBRARY_STORAGE_DIR: process.env.LIBRARY_STORAGE_DIR || './data/library',
   JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-production',
   PASSWORD_SALT_ROUNDS: parseInt(process.env.PASSWORD_SALT_ROUNDS || '10', 10),
   COLLABORATION_PATH: process.env.COLLABORATION_PATH || '/collaboration',

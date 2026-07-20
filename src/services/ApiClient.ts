@@ -313,6 +313,78 @@ export async function createDirectory(
   });
 }
 
+// --- Personal Asset Library (cloud sync) ---
+
+export interface LibraryIndexEntry {
+  id: string;
+  visibility: 'private' | 'team';
+  /** Parsed manifest JSON, or null for a tombstone (deleted item). */
+  manifest: unknown | null;
+  /** Epoch-ms authoritative timestamp for last-write-wins reconciliation. */
+  updatedAt: number;
+  deleted: boolean;
+}
+
+/** A bundle file to upload, keyed by its bundle-relative path. */
+export interface LibraryUploadFile {
+  path: string;
+  blob: Blob;
+}
+
+/** The caller's full private library index, including tombstones (for two-way sync). */
+export function getLibraryIndex(): Promise<{ items: LibraryIndexEntry[] }> {
+  return request('/api/library/items');
+}
+
+export async function downloadLibraryFile(itemId: string, filePath: string): Promise<Response> {
+  const res = await fetch(
+    `${BASE_URL}/api/library/items/${encodeURIComponent(itemId)}/files/${filePath}`,
+    { credentials: 'include' }
+  );
+  if (!res.ok) {
+    throw new ApiClientError(`Failed to download library file ${filePath}`, res.status);
+  }
+  return res;
+}
+
+/** Upload/replace a whole bundle. `manifest.id` must equal `itemId` (server-enforced). */
+export async function uploadLibraryItem(
+  itemId: string,
+  manifest: unknown,
+  files: readonly LibraryUploadFile[]
+): Promise<{ id: string; updatedAt: number }> {
+  const formData = new FormData();
+  formData.append('manifest', JSON.stringify(manifest));
+  formData.append('paths', JSON.stringify(files.map(file => file.path)));
+  for (const file of files) {
+    formData.append('files', file.blob, file.path.split('/').pop() ?? 'file');
+  }
+
+  const res = await fetch(`${BASE_URL}/api/library/items/${encodeURIComponent(itemId)}`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  if (!res.ok) {
+    if (res.status === 413) {
+      throw new ApiClientError(getUploadLimitMessage(itemId), res.status);
+    }
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiClientError(body.error ?? res.statusText, res.status);
+  }
+  return res.json();
+}
+
+export function deleteLibraryItem(
+  itemId: string,
+  deletedAt: number
+): Promise<{ ok: boolean; deletedAt: number }> {
+  return request(`/api/library/items/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ deletedAt }),
+  });
+}
+
 export function getBaseUrl(): string {
   return BASE_URL || SERVER_BASE_URL;
 }

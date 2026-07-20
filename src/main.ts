@@ -39,6 +39,14 @@ container
   .getService<ProjectDiagnosticsService>(container.getOrCreateToken(ProjectDiagnosticsService))
   .initialize();
 
+// Keep the personal Asset Library mirrored to the cloud (sign-in, local edits, tab-focus).
+// Boot eagerly so sync runs even before the Library panel is opened.
+import { LibrarySyncService } from './services/LibrarySyncService';
+
+container
+  .getService<LibrarySyncService>(container.getOrCreateToken(LibrarySyncService))
+  .initialize();
+
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';

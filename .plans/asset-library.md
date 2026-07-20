@@ -1,6 +1,6 @@
 # Asset Library: каталог стандартных, шаренных и пользовательских ассетов в редакторе
 
-**Статус:** Phase 1 / MVP реализован (2026-07: `AssetLibraryService`, `LibraryInsertService`, `PublishToLibraryService`, панель — builtin + user-OPFS scope). Осталось: `team`-scope на collab-сервере и API/тул для агента. **Оценка:** L (фазами: MVP ~M ✅, сервер ~M, agent ~S).
+**Статус:** Phase 1 / MVP реализован (2026-07: `AssetLibraryService`, `LibraryInsertService`, `PublishToLibraryService`, панель — builtin + user-OPFS scope). **Phase 2 частично (2026-07-20):** личная (`user`) библиотека синкается в облако — серверный роутер `core/library/` (`library_items` + `LIBRARY_STORAGE_DIR`, `visibility:'private'`, томбстоуны), `LibrarySyncService` (local-first двусторонний mirror, LWW по `id`+`updatedAt`, авто-триггеры sign-in/put-delete/focus + «Sync now» в панели). Осталось по Phase 2: `team`-scope (тот же роутер, `visibility:'team'`) + `RemoteLibraryProvider` для чтения чужих team-item'ов + agent API. **Оценка:** L (фазами: MVP ~M ✅, user-sync ~M ✅, team+agent ~S–M).
 **Базис верификации:** рабочее дерево на 2026-07-12, ссылки на файлы проверены по исходникам.
 
 ## 1. Зачем

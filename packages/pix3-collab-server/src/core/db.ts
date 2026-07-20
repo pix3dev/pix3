@@ -51,5 +51,22 @@ function runMigrations(db: Database.Database): void {
       role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
       PRIMARY KEY (project_id, user_id)
     );
+
+    -- Personal ("private") Asset Library items, synced from the editor's OPFS/IndexedDB store.
+    -- One row per bundle. \`updated_at\` is an epoch-ms authoritative timestamp for last-write-wins
+    -- sync (either the manifest's updatedAt on write, or the delete time). \`deleted\` keeps a
+    -- tombstone so a delete on one device propagates to others on the next pull. \`visibility\`
+    -- is 'private' today; 'team' is reserved for the shared scope (same mechanism, wider read).
+    CREATE TABLE IF NOT EXISTS library_items (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private', 'team')),
+      manifest TEXT,
+      updated_at INTEGER NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_library_items_owner
+      ON library_items(owner_id, visibility);
   `);
 }
