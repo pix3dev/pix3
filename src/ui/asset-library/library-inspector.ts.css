@@ -1,0 +1,333 @@
+pix3-library-inspector {
+  display: block;
+  font: 13px/1.4 var(--font-ui);
+  color: var(--fg-0);
+  background: var(--bg-1);
+}
+
+pix3-library-inspector *,
+pix3-library-inspector *::before,
+pix3-library-inspector *::after {
+  box-sizing: border-box;
+}
+
+pix3-library-inspector .lib-insp {
+  padding: 14px 16px;
+  background: var(--bg-1);
+}
+
+pix3-library-inspector .lib-insp--empty {
+  padding: 24px 16px;
+  font-size: 12.5px;
+  color: var(--fg-3);
+}
+
+pix3-library-inspector .lib-insp__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+pix3-library-inspector .lib-insp__plaque {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 9px;
+}
+
+pix3-library-inspector .lib-insp__title {
+  flex: 1;
+  min-width: 0;
+}
+
+pix3-library-inspector .lib-insp__name {
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--fg-0);
+}
+
+pix3-library-inspector .lib-insp__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+pix3-library-inspector .lib-insp__preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 14px;
+  overflow: hidden;
+  color: var(--fg-3);
+  background-color: oklch(0.24 0.02 var(--lib-thumb-hue, 250));
+  background-image: repeating-linear-gradient(
+    45deg,
+    oklch(1 0 0 / 0.035) 0 8px,
+    transparent 8px 16px
+  );
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+}
+
+pix3-library-inspector .lib-insp__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+pix3-library-inspector .lib-insp__preview-icon {
+  display: inline-flex;
+  opacity: 0.8;
+}
+
+pix3-library-inspector .lib-insp__price {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--fg-0);
+  background: oklch(0 0 0 / 0.5);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+}
+
+pix3-library-inspector .lib-insp__price.is-free {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+pix3-library-inspector .lib-insp__actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+pix3-library-inspector .lib-insp__btn {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  font: inherit;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__btn--primary {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+pix3-library-inspector .lib-insp__btn--ghost {
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+}
+
+pix3-library-inspector .lib-insp__btn--ghost:hover {
+  border-color: var(--line-strong);
+}
+
+pix3-library-inspector .lib-insp__desc {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg-1);
+}
+
+pix3-library-inspector .lib-insp__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0 16px;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-library-inspector .lib-insp__section-title {
+  margin-bottom: 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-library-inspector .lib-insp__row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+pix3-library-inspector .lib-insp__row-label {
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+pix3-library-inspector .lib-insp__row-value {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--fg-0);
+}
+
+pix3-library-inspector .lib-insp__inline-icon {
+  display: inline-flex;
+  color: var(--fg-2);
+}
+
+pix3-library-inspector .lib-insp__mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-library-inspector .lib-insp__mono.is-free {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+pix3-library-inspector .lib-insp__dropdown {
+  position: relative;
+}
+
+pix3-library-inspector .lib-insp__dropdown-btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+}
+
+pix3-library-inspector .lib-insp__menu-item {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__menu-item:hover {
+  background: var(--bg-2);
+}
+
+pix3-library-inspector .lib-insp__menu-item.is-active {
+  color: var(--accent);
+}
+
+pix3-library-inspector .lib-insp__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+pix3-library-inspector .lib-insp__tag {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+}
+
+pix3-library-inspector .lib-insp__tag-icon {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+pix3-library-inspector .lib-insp__tag-remove {
+  display: inline-flex;
+  padding: 0;
+  color: var(--fg-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__tag-remove:hover {
+  color: var(--fg-1);
+}
+
+pix3-library-inspector .lib-insp__tag--add {
+  color: var(--fg-3);
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__tags-empty {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+pix3-library-inspector .lib-insp__danger {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  align-self: flex-start;
+  height: 30px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+pix3-library-inspector :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

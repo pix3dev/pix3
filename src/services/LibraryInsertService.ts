@@ -66,15 +66,21 @@ export class LibraryInsertService {
     }
     const manifest = bundle.manifest;
     const targetDir = insertTargetDir(manifest.slug);
-    const bundleFiles = [...bundle.files.keys()].map(normalizeBundlePath);
-    const entryFile = this.resolveEntryFile(manifest, bundleFiles);
+    const allFiles = [...bundle.files.keys()].map(normalizeBundlePath);
+    const entryFile = this.resolveEntryFile(manifest, allFiles);
+
+    // A rendered preview thumbnail is library-only chrome; don't leak it into the project. Keep
+    // it only when the preview IS the asset (e.g. an image item that previews as itself).
+    const previewFile = manifest.preview ? normalizeBundlePath(manifest.preview) : null;
+    const skipFile = previewFile && previewFile !== entryFile ? previewFile : null;
+    const bundleFiles = allFiles.filter(file => file !== skipFile);
 
     const alreadyPresent = entryFile
       ? await this.pathExists(bundleFileToProjectPath(entryFile, targetDir))
       : await this.pathExists(targetDir);
 
     if (!alreadyPresent) {
-      await this.writeBundle(bundle, targetDir, bundleFiles);
+      await this.writeBundle(bundle, targetDir, bundleFiles, skipFile);
     }
 
     const resourcePaths = bundleFiles.map(
@@ -164,10 +170,14 @@ export class LibraryInsertService {
   private async writeBundle(
     bundle: LibraryBundle,
     targetDir: string,
-    bundleFiles: readonly string[]
+    bundleFiles: readonly string[],
+    skipFile: string | null
   ): Promise<void> {
     for (const [rawPath, blob] of bundle.files) {
       const relativePath = normalizeBundlePath(rawPath);
+      if (relativePath === skipFile) {
+        continue;
+      }
       const projectPath = bundleFileToProjectPath(relativePath, targetDir);
       await this.ensureParentDirectory(projectPath);
       if (isTextReferenceFile(relativePath)) {

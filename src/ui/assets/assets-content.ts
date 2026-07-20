@@ -14,11 +14,14 @@ import {
   ASSET_PATH_MIME,
   ASSET_RESOURCE_LIST_MIME,
   ASSET_RESOURCE_MIME,
+  getLibraryItemDragData,
   hasGenerationDragData,
+  hasLibraryItemDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
 import { EditorTabService } from '@/services/EditorTabService';
 import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
+import { LibraryInsertService } from '@/services/LibraryInsertService';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
@@ -54,6 +57,9 @@ export class AssetsContent extends ComponentBase {
 
   @inject(GeneratedAssetDropService)
   private readonly generatedAssetDropService!: GeneratedAssetDropService;
+
+  @inject(LibraryInsertService)
+  private readonly libraryInsertService!: LibraryInsertService;
 
   @inject(ProjectService)
   private readonly projectService!: ProjectService;
@@ -432,9 +438,7 @@ export class AssetsContent extends ComponentBase {
   /** Emits a delete request for the multi-selection (or the clicked item alone). */
   private requestDelete(item: AssetPreviewItem): void {
     this.closeContextMenu();
-    const paths = this.selectedPaths.has(item.path)
-      ? Array.from(this.selectedPaths)
-      : [item.path];
+    const paths = this.selectedPaths.has(item.path) ? Array.from(this.selectedPaths) : [item.path];
     this.dispatchEvent(
       new CustomEvent('content-delete-request', {
         detail: { paths },
@@ -536,7 +540,9 @@ export class AssetsContent extends ComponentBase {
         <span class="row-thumb">
           ${item.thumbnailUrl
             ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
-            : html`<span class="icon">${this.iconService.getIcon(item.iconName, IconSize.MEDIUM)}</span>`}
+            : html`<span class="icon"
+                >${this.iconService.getIcon(item.iconName, IconSize.MEDIUM)}</span
+              >`}
         </span>
         <span class="row-name">${item.name}</span>
         <span class="row-dim">${dimensions}</span>
@@ -627,7 +633,7 @@ export class AssetsContent extends ComponentBase {
   }
 
   private onGenerationDragOver(event: DragEvent): void {
-    if (!hasGenerationDragData(event.dataTransfer)) {
+    if (!hasGenerationDragData(event.dataTransfer) && !hasLibraryItemDragData(event.dataTransfer)) {
       return;
     }
     event.preventDefault();
@@ -646,6 +652,22 @@ export class AssetsContent extends ComponentBase {
   }
 
   private async onGenerationDrop(event: DragEvent): Promise<void> {
+    // A Library card imports its files into the project (no scene node); a generation entry
+    // saves into the current folder. Both refresh the preview via the write signal.
+    if (hasLibraryItemDragData(event.dataTransfer)) {
+      event.preventDefault();
+      this.isGenerationDropActive = false;
+      const drag = getLibraryItemDragData(event.dataTransfer);
+      if (!drag) {
+        return;
+      }
+      try {
+        await this.libraryInsertService.copyBundleIntoProject(drag.itemId);
+      } catch (error) {
+        console.error('[AssetsContent] Failed to import library item:', error);
+      }
+      return;
+    }
     if (!hasGenerationDragData(event.dataTransfer)) {
       return;
     }

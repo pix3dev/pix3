@@ -117,18 +117,6 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
               },
             ],
           },
-          {
-            type: 'stack',
-            height: 50,
-            content: [
-              {
-                type: 'component',
-                componentType: PANEL_COMPONENT_TYPES.library,
-                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library],
-                isClosable: false,
-              },
-            ],
-          },
         ],
       },
       {
@@ -660,6 +648,64 @@ export class LayoutManagerService {
       this.focusPanel(PANEL_COMPONENT_TYPES.localization);
     } catch (error) {
       console.error('[LayoutManager] Failed to re-add Localization panel', error);
+    }
+  }
+
+  /**
+   * Reveal the Asset Library panel. It is not part of the default layout, so the first open docks
+   * it as a new column just before the Inspector (falling back to Golden Layout's default
+   * placement if the tree can't be navigated); once present, this just brings it to the front of
+   * its stack. Being a normal docked panel, the user can drag/snap it anywhere — e.g. beside the
+   * viewport so the editor and library sit side by side.
+   */
+  revealLibraryPanel(): void {
+    if (!this.layout) {
+      return;
+    }
+
+    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
+    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.library);
+    if (existing) {
+      this.focusPanel(PANEL_COMPONENT_TYPES.library);
+      return;
+    }
+
+    const componentConfig: ComponentItemConfig = {
+      type: 'component',
+      componentType: PANEL_COMPONENT_TYPES.library,
+      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library],
+      isClosable: true,
+    };
+
+    try {
+      const root = rootItem as
+        | (ContentItem & {
+            addItem?: (config: unknown, index?: number) => number;
+            contentItems?: ContentItem[];
+          })
+        | undefined;
+      if (root && root.type === 'row' && typeof root.addItem === 'function') {
+        const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
+        root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
+        this.focusPanel(PANEL_COMPONENT_TYPES.library);
+        return;
+      }
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Library panel as a column', error);
+    }
+
+    try {
+      const layoutApi = this.layout as unknown as {
+        addComponent?: (componentType: string, state?: unknown, title?: string) => void;
+      };
+      layoutApi.addComponent?.(
+        PANEL_COMPONENT_TYPES.library,
+        undefined,
+        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library]
+      );
+      this.focusPanel(PANEL_COMPONENT_TYPES.library);
+    } catch (error) {
+      console.error('[LayoutManager] Failed to re-add Library panel', error);
     }
   }
 

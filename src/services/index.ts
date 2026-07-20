@@ -212,3 +212,18 @@ export {
   filterItems,
   collectTags,
 } from './library/library-search';
+export {
+  type LibrarySourceKind,
+  type LibrarySourceCategory,
+  type LibrarySourceConfig,
+  LIBRARY_SOURCES,
+  getLibrarySource,
+  itemsForSource,
+  categorySlug,
+  loadCustomCategories,
+  addCustomCategory,
+  categoriesForSource,
+  countItemsInCategory,
+  labelForCategoryId,
+} from './library/library-sources';
+export { LibrarySelectionService, type LibrarySelection } from './library/LibrarySelectionService';

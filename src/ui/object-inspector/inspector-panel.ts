@@ -36,7 +36,9 @@ import {
   AnimationEditorService,
   AssetsPreviewService,
   ProjectStorageService,
+  LibrarySelectionService,
   type AssetPreviewItem,
+  type LibrarySelection,
 } from '@/services';
 import type {
   AnimationInspectorController,
@@ -66,6 +68,7 @@ import { analyzeAudioBlob } from '@/services/audio-preview-utils';
 import type { AnimationPlaybackMode } from '@pix3/runtime';
 
 import '../shared/pix3-panel';
+import '../asset-library/library-inspector';
 import './inspector-panel.ts.css';
 import './model-asset-preview';
 import './property-editors';
@@ -193,6 +196,16 @@ export class InspectorPanel extends ComponentBase {
   @inject(LocalizationEditorService)
   private readonly localizationEditorService!: LocalizationEditorService;
 
+  @inject(LibrarySelectionService)
+  private readonly librarySelectionService!: LibrarySelectionService;
+
+  /**
+   * Selected library item. When set, the inspector shows library-item details instead of node
+   * properties (the Library panel writes it; selecting a scene node clears it — last-pick wins).
+   */
+  @state()
+  private librarySelection: LibrarySelection | null = null;
+
   @state()
   private selectedNodes: NodeBase[] = [];
 
@@ -252,6 +265,7 @@ export class InspectorPanel extends ComponentBase {
   private disposeSceneSubscription?: () => void;
   private disposeUiSubscription?: () => void;
   private disposeLocalizationSubscription?: () => void;
+  private disposeLibrarySelectionSubscription?: () => void;
   private disposeAssetPreviewSubscription?: () => void;
   private disposeAnimationEditorSubscription?: () => void;
   private disposeAnimationControllerSubscription?: () => void;
@@ -301,6 +315,10 @@ export class InspectorPanel extends ComponentBase {
     // may be lazily mounted (Golden Layout) while a game is already running.
     this.isPlaying = appState.ui.isPlaying;
     this.disposeSelectionSubscription = subscribe(appState.selection, () => {
+      // Selecting a scene node takes the inspector back to node properties (last pick wins).
+      if (appState.selection.nodeIds.length > 0) {
+        this.librarySelectionService.clear();
+      }
       this.updateSelectedNodes();
     });
     this.disposeSceneSubscription = subscribe(appState.scenes, () => {
@@ -316,6 +334,10 @@ export class InspectorPanel extends ComponentBase {
     // locale switches or a locale table is edited.
     this.disposeLocalizationSubscription = subscribe(appState.localization, () => {
       this.requestUpdate();
+    });
+    this.librarySelection = this.librarySelectionService.getSelection();
+    this.disposeLibrarySelectionSubscription = this.librarySelectionService.subscribe(() => {
+      this.librarySelection = this.librarySelectionService.getSelection();
     });
     this.disposeAssetPreviewSubscription = this.assetsPreviewService.subscribe(snapshot => {
       this.selectedAssetItem = snapshot.selectedItem;
@@ -385,6 +407,8 @@ export class InspectorPanel extends ComponentBase {
     this.disposeUiSubscription = undefined;
     this.disposeLocalizationSubscription?.();
     this.disposeLocalizationSubscription = undefined;
+    this.disposeLibrarySelectionSubscription?.();
+    this.disposeLibrarySelectionSubscription = undefined;
     this.stopLiveTimer();
     // Reset live-mirror UI state so a reused Lit instance starts clean even if it
     // was detached mid-play and play stopped while it was disconnected.
@@ -1751,6 +1775,20 @@ export class InspectorPanel extends ComponentBase {
   }
 
   protected render() {
+    // A selected library item takes over the inspector with its details; selecting a scene node
+    // clears it (see the selection subscription) and restores the node property view.
+    if (this.librarySelection) {
+      return html`
+        <pix3-panel
+          panel-role="form"
+          panel-description="Details for the selected library item."
+          actions-label="Inspector actions"
+        >
+          <pix3-library-inspector .selection=${this.librarySelection}></pix3-library-inspector>
+        </pix3-panel>
+      `;
+    }
+
     const hasSelection = this.selectedNodes.length > 0;
     const hasAnimationSelection = this.activeAnimationState !== null;
     const hasAssetSelection = this.selectedAssetItem !== null && !hasAnimationSelection;
@@ -3705,9 +3743,7 @@ ${textPreview?.content || 'Empty file'}</pre
                 </button>`
               : ''}
           </div>
-          <datalist id=${listId}>
-            ${keys.map(k => html`<option value=${k}></option>`)}
-          </datalist>
+          <datalist id=${listId}>${keys.map(k => html`<option value=${k}></option>`)}</datalist>
           ${key && resolves
             ? html`<div class="localization-key-preview" title="Preview-locale translation">
                 ${preview}

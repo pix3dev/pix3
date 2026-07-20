@@ -41,6 +41,12 @@ export interface LibraryItemManifest {
   name: string;
   type: LibraryItemType;
   tags: string[];
+  /**
+   * Author-assigned collection within a source (e.g. `ui`, `brand`, `characters`). Editable
+   * sources let the user create/assign these; read-only sources declare theirs in source config.
+   * Absent ⇒ the item only appears under the aggregate ("All") category.
+   */
+  category?: string;
   description?: string;
   /** Bundle-relative thumbnail path, e.g. `preview.png`. */
   preview?: string;

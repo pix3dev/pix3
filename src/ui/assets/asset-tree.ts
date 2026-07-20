@@ -8,9 +8,15 @@ import { TemplateService, DEFAULT_TEMPLATE_SCENE_ID } from '@/services/TemplateS
 import { DialogService } from '@/services/DialogService';
 import { IconService } from '@/services/IconService';
 import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
+import { LibraryInsertService } from '@/services/LibraryInsertService';
 import { computeDirectoryStats } from '@/services/asset-folder-stats';
 import { isDocumentActive } from '@/services/page-activity';
-import { ASSET_PATH_LIST_MIME, hasGenerationDragData } from '@/ui/shared/asset-drag-drop';
+import {
+  ASSET_PATH_LIST_MIME,
+  getLibraryItemDragData,
+  hasGenerationDragData,
+  hasLibraryItemDragData,
+} from '@/ui/shared/asset-drag-drop';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { appState, type AssetBrowserViewMode } from '@/state';
 import { subscribe } from 'valtio/vanilla';
@@ -38,6 +44,8 @@ export class AssetTree extends ComponentBase {
   private readonly assetsPreviewService!: AssetsPreviewService;
   @inject(GeneratedAssetDropService)
   private readonly generatedAssetDropService!: GeneratedAssetDropService;
+  @inject(LibraryInsertService)
+  private readonly libraryInsertService!: LibraryInsertService;
   // Parent will handle actions via 'asset-activate' event
 
   // root path to show, defaults to project root
@@ -1215,6 +1223,19 @@ export class AssetTree extends ComponentBase {
       return;
     }
 
+    // Dragging a Library card — import its files into the project (directories only).
+    if (hasLibraryItemDragData(_e.dataTransfer)) {
+      if (node.kind !== 'directory') {
+        return;
+      }
+      _e.preventDefault();
+      if (_e.dataTransfer) {
+        _e.dataTransfer.dropEffect = 'copy';
+      }
+      this.dragOverPath = node.path;
+      return;
+    }
+
     // Check if this is an external drag (files from outside browser)
     if (_e.dataTransfer?.items && _e.dataTransfer.items.length > 0) {
       const hasFiles = Array.from(_e.dataTransfer.items).some(item => item.kind === 'file');
@@ -1268,6 +1289,18 @@ export class AssetTree extends ComponentBase {
 
     // Dragging an Sprite Editor history entry — drop into the project root.
     if (hasGenerationDragData(e.dataTransfer)) {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      if (!this.dragOverPath || this.dragOverPath === '__TREE_ROOT__') {
+        this.dragOverPath = '__TREE_ROOT__';
+      }
+      return;
+    }
+
+    // Dragging a Library card — import into the project root.
+    if (hasLibraryItemDragData(e.dataTransfer)) {
       e.preventDefault();
       if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
@@ -1354,6 +1387,12 @@ export class AssetTree extends ComponentBase {
       return;
     }
 
+    // Dropping a Library card — import its files into the project.
+    if (hasLibraryItemDragData(dataTransfer)) {
+      await this.importLibraryBundle(dataTransfer);
+      return;
+    }
+
     // Check if this is an external file drop.
     const hasExternalFiles =
       !!dataTransfer.items && Array.from(dataTransfer.items).some(item => item.kind === 'file');
@@ -1367,6 +1406,24 @@ export class AssetTree extends ComponentBase {
 
     // Internal move → project root (supports multi-path grid drags).
     await this.moveDroppedPaths(dataTransfer, '.', 'project root');
+  }
+
+  /**
+   * Import a Library card dropped from the Library document: copies its bundle files into the
+   * project (no scene node). Bundles always land under `res://assets/library/<slug>/`, so the
+   * hovered folder is not honored — this is a plain "add files to the project" action. The write
+   * signals a directory change, so both panes refresh automatically.
+   */
+  private async importLibraryBundle(dataTransfer: DataTransfer | null): Promise<void> {
+    const drag = getLibraryItemDragData(dataTransfer);
+    if (!drag) {
+      return;
+    }
+    try {
+      await this.libraryInsertService.copyBundleIntoProject(drag.itemId);
+    } catch (error) {
+      console.error('[AssetTree] Failed to import library item:', error);
+    }
   }
 
   /**
@@ -1461,6 +1518,12 @@ export class AssetTree extends ComponentBase {
       const targetDirectory =
         targetNode.kind === 'directory' ? targetNode.path : this.getParentPath(targetNode.path);
       await this.generatedAssetDropService.handleDrop(e.dataTransfer, targetDirectory);
+      return;
+    }
+
+    // Dropping a Library card — import its files into the project.
+    if (hasLibraryItemDragData(e.dataTransfer)) {
+      await this.importLibraryBundle(e.dataTransfer);
       return;
     }
 

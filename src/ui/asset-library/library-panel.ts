@@ -1,70 +1,127 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
-import { AssetLibraryService, LibraryInsertService } from '@/services';
-import { DialogService } from '@/services/DialogService';
-import { filterItems, type LibraryFilter } from '@/services/library/library-search';
+import {
+  AssetLibraryService,
+  LibraryInsertService,
+  LibrarySelectionService,
+  PublishToLibraryService,
+  IconService,
+  IconSize,
+} from '@/services';
+import {
+  LIBRARY_SOURCES,
+  addCustomCategory,
+  categoriesForSource,
+  countItemsInCategory,
+  itemsForSource,
+  type LibrarySourceCategory,
+  type LibrarySourceConfig,
+} from '@/services/library/library-sources';
 import {
   LIBRARY_ITEM_TYPES,
-  LIBRARY_SCOPES,
-  LIBRARY_SCOPE_LABELS,
   type LibraryItem,
   type LibraryItemType,
-  type LibraryScope,
 } from '@/services/library/library-types';
-import { setLibraryItemDragData } from '@/ui/shared/asset-drag-drop';
+import {
+  getDroppedAssetResourcePath,
+  getLibraryItemDragData,
+  hasAssetDragData,
+  hasLibraryItemDragData,
+  setLibraryItemDragData,
+} from '@/ui/shared/asset-drag-drop';
+import {
+  assetFileCount,
+  formatItemType,
+  iconForItemType,
+  isFreePrice,
+  isStoreLike,
+  priceLabel,
+  publisherLabel,
+  thumbHue,
+} from './library-view-model';
 
-import '../shared/pix3-panel';
-import '../shared/pix3-toolbar';
 import './library-panel.ts.css';
 
-interface ContextMenuState {
-  readonly item: LibraryItem;
-  readonly x: number;
-  readonly y: number;
+/** MIME emitted by the Scene Tree when dragging a node (payload = node id). */
+const SCENE_TREE_NODE_MIME = 'application/x-scene-tree-node';
+
+/** Type filter chips: the aggregate plus every item type, in display order. */
+const TYPE_FILTERS: ReadonlyArray<'all' | LibraryItemType> = ['all', ...LIBRARY_ITEM_TYPES];
+
+const THUMB_MIN = 72;
+const THUMB_MAX = 150;
+const THUMB_DEFAULT = 104;
+
+interface DropTarget {
+  readonly kind: 'zone' | 'grid' | 'category';
+  readonly categoryId?: string;
 }
 
 /**
- * The Asset Library panel: a card grid over the aggregated builtin/user/team items, with
- * scope/type filters and text search. Cards drag into the viewport/scene tree (via
- * {@link LibraryInsertService}) and expose insert/add-files/manage actions in a context menu.
- * Filter state is panel-local UI state; item data lives in {@link AssetLibraryService}.
+ * The Asset Library document: a source rail (My Library / Team / Pix3 Store / providers, from
+ * config) + a content pane (breadcrumb toolbar, search + type chips, grid/list of items). Selecting
+ * an item routes its details to the Inspector via {@link LibrarySelectionService}. Editable sources
+ * accept drops (scene-tree nodes, asset files) into the personal library, and cards drag out into
+ * the viewport/scene. Real data comes from {@link AssetLibraryService} (user + builtin); Team and
+ * providers are declared in config and list no items until the server lands.
  */
 @customElement('pix3-library-panel')
 export class LibraryPanel extends ComponentBase {
   @inject(AssetLibraryService) private readonly library!: AssetLibraryService;
   @inject(LibraryInsertService) private readonly insertService!: LibraryInsertService;
-  @inject(DialogService) private readonly dialogService!: DialogService;
+  @inject(PublishToLibraryService) private readonly publishService!: PublishToLibraryService;
+  @inject(LibrarySelectionService) private readonly selectionService!: LibrarySelectionService;
+  @inject(IconService) private readonly iconService!: IconService;
 
   @state() private items: LibraryItem[] = [];
-  @state() private loading = true;
-  @state() private query = '';
-  @state() private activeScopes = new Set<LibraryScope>();
-  @state() private activeTypes = new Set<LibraryItemType>();
   @state() private previews = new Map<string, string>();
-  @state() private contextMenu: ContextMenuState | null = null;
+  @state() private loading = true;
+  @state() private sourceId = 'user';
+  @state() private categoryId = 'all';
+  @state() private typeFilter: 'all' | LibraryItemType = 'all';
+  @state() private query = '';
+  @state() private view: 'grid' | 'list' = 'grid';
+  @state() private thumb = THUMB_DEFAULT;
+  @state() private selectedItemId: string | null = null;
+  @state() private dropTarget: DropTarget | null = null;
+  /** Bumped after creating a custom category so the rail re-derives. */
+  @state() private categoryRevision = 0;
 
   private disposeLibrarySubscription?: () => void;
-  private readonly onDocumentPointerDown = () => this.closeContextMenu();
+  private disposeSelectionSubscription?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.restoreViewPrefs();
     this.disposeLibrarySubscription = this.library.subscribe(() => void this.reload());
+    // Mirror the shared selection so the card highlight tracks it (e.g. the Inspector clears the
+    // library selection when a scene node is picked — the highlight should clear with it).
+    this.disposeSelectionSubscription = this.selectionService.subscribe(() => {
+      const id = this.selectionService.getSelection()?.item.manifest.id ?? null;
+      if (id !== this.selectedItemId) {
+        this.selectedItemId = id;
+      }
+    });
     void this.reload();
-    document.addEventListener('pointerdown', this.onDocumentPointerDown);
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.disposeLibrarySubscription?.();
     this.disposeLibrarySubscription = undefined;
-    document.removeEventListener('pointerdown', this.onDocumentPointerDown);
+    this.disposeSelectionSubscription?.();
+    this.disposeSelectionSubscription = undefined;
+    // Closing the panel returns the Inspector to node properties.
+    this.selectionService.clear();
   }
 
+  // ── Data ───────────────────────────────────────────────────────────────────
   private async reload(): Promise<void> {
     this.loading = true;
     try {
       this.items = await this.library.getItems(true);
       await this.loadPreviews();
+      this.reconcileSelection();
     } catch (error) {
       console.error('[LibraryPanel] Failed to load library items:', error);
       this.items = [];
@@ -86,47 +143,92 @@ export class LibraryPanel extends ComponentBase {
             next.set(item.manifest.id, url);
           }
         } catch {
-          // Missing preview — the card falls back to a type placeholder.
+          // Missing preview — the card falls back to the type placeholder.
         }
       })
     );
     this.previews = next;
   }
 
-  private get filter(): LibraryFilter {
-    return {
-      query: this.query,
-      scopes: this.activeScopes.size > 0 ? [...this.activeScopes] : undefined,
-      types: this.activeTypes.size > 0 ? [...this.activeTypes] : undefined,
-    };
+  private reconcileSelection(): void {
+    if (!this.selectedItemId) {
+      return;
+    }
+    const item = this.items.find(i => i.manifest.id === this.selectedItemId);
+    if (!item) {
+      this.selectedItemId = null;
+      this.selectionService.clear();
+      return;
+    }
+    // Re-assert into the shared selection when it drifted (e.g. the panel was re-docked and
+    // remounted, which clears the service on the way out).
+    if (this.selectionService.getSelection()?.item.manifest.id !== this.selectedItemId) {
+      this.selectionService.setSelection({ item, source: this.source });
+    }
+  }
+
+  // ── Derived views ───────────────────────────────────────────────────────────
+  private get source(): LibrarySourceConfig {
+    return LIBRARY_SOURCES.find(s => s.id === this.sourceId) ?? LIBRARY_SOURCES[0];
+  }
+
+  private get sourceItems(): LibraryItem[] {
+    return itemsForSource(this.source, this.items);
+  }
+
+  private get categories(): LibrarySourceCategory[] {
+    void this.categoryRevision;
+    return categoriesForSource(this.source, this.sourceItems);
   }
 
   private get visibleItems(): LibraryItem[] {
-    return filterItems(this.items, this.filter);
+    const query = this.query.trim().toLowerCase();
+    return this.sourceItems.filter(item => {
+      const inCategory = this.categoryId === 'all' || item.manifest.category === this.categoryId;
+      const inType = this.typeFilter === 'all' || item.manifest.type === this.typeFilter;
+      const inQuery = !query || item.manifest.name.toLowerCase().includes(query);
+      return inCategory && inType && inQuery;
+    });
   }
 
-  private toggleScope(scope: LibraryScope): void {
-    const next = new Set(this.activeScopes);
-    if (next.has(scope)) {
-      next.delete(scope);
-    } else {
-      next.add(scope);
+  // ── Interactions ──────────────────────────────────────────────────────────
+  private switchSource(id: string): void {
+    if (this.sourceId === id) {
+      return;
     }
-    this.activeScopes = next;
+    this.sourceId = id;
+    this.categoryId = 'all';
+    this.typeFilter = 'all';
+    this.query = '';
+    this.selectedItemId = null;
+    this.selectionService.clear();
   }
 
-  private toggleType(type: LibraryItemType): void {
-    const next = new Set(this.activeTypes);
-    if (next.has(type)) {
-      next.delete(type);
-    } else {
-      next.add(type);
+  private select(item: LibraryItem): void {
+    this.selectedItemId = item.manifest.id;
+    this.selectionService.setSelection({ item, source: this.source });
+  }
+
+  private async activatePrimary(item: LibraryItem): Promise<void> {
+    try {
+      if (isStoreLike(this.source)) {
+        await this.insertService.copyBundleIntoProject(item.manifest.id);
+      } else {
+        await this.insertService.insert(item.manifest.id);
+      }
+    } catch (error) {
+      console.error('[LibraryPanel] Failed to activate item:', error);
     }
-    this.activeTypes = next;
   }
 
-  private onSearchInput(event: Event): void {
-    this.query = (event.target as HTMLInputElement).value;
+  private async onNewCategory(): Promise<void> {
+    const label = window.prompt('New category name:')?.trim();
+    if (!label) {
+      return;
+    }
+    const category = addCustomCategory(this.sourceId, label);
+    this.categoryRevision += 1;
+    this.categoryId = category.id;
   }
 
   private onCardDragStart(event: DragEvent, item: LibraryItem): void {
@@ -139,226 +241,449 @@ export class LibraryPanel extends ComponentBase {
     });
   }
 
-  private async onInsert(item: LibraryItem): Promise<void> {
-    this.closeContextMenu();
+  private setThumb(value: number): void {
+    this.thumb = value;
+    this.saveViewPrefs();
+  }
+
+  private setView(view: 'grid' | 'list'): void {
+    this.view = view;
+    this.saveViewPrefs();
+  }
+
+  private restoreViewPrefs(): void {
     try {
-      await this.insertService.insert(item.manifest.id);
-    } catch (error) {
-      console.error('[LibraryPanel] Failed to insert item:', error);
+      const view = localStorage.getItem('pix3.library.view');
+      if (view === 'grid' || view === 'list') {
+        this.view = view;
+      }
+      const thumb = Number(localStorage.getItem('pix3.library.thumb'));
+      if (Number.isFinite(thumb) && thumb >= THUMB_MIN && thumb <= THUMB_MAX) {
+        this.thumb = thumb;
+      }
+    } catch {
+      // Ignore unavailable storage.
     }
   }
 
-  private async onAddFiles(item: LibraryItem): Promise<void> {
-    this.closeContextMenu();
+  private saveViewPrefs(): void {
     try {
-      await this.insertService.copyBundleIntoProject(item.manifest.id);
-    } catch (error) {
-      console.error('[LibraryPanel] Failed to copy item files:', error);
+      localStorage.setItem('pix3.library.view', this.view);
+      localStorage.setItem('pix3.library.thumb', String(this.thumb));
+    } catch {
+      // Ignore unavailable storage.
     }
   }
 
-  private async onDelete(item: LibraryItem): Promise<void> {
-    this.closeContextMenu();
-    const confirmed = await this.dialogService.showConfirmation({
-      title: 'Delete Library Item?',
-      message: `Remove "${item.manifest.name}" from your library? This does not affect projects it was inserted into.`,
-      confirmLabel: 'Delete',
-      cancelLabel: 'Cancel',
-      isDangerous: true,
-    });
-    if (!confirmed) {
+  // ── Drag & drop into the library ────────────────────────────────────────────
+  private dropAllowed(dataTransfer: DataTransfer | null): boolean {
+    if (!this.source.editable || !dataTransfer) {
+      return false;
+    }
+    const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+    return (
+      types.includes(SCENE_TREE_NODE_MIME) ||
+      hasAssetDragData(dataTransfer) ||
+      hasLibraryItemDragData(dataTransfer)
+    );
+  }
+
+  private onDropTargetDragOver(event: DragEvent, target: DropTarget): void {
+    if (!this.dropAllowed(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    if (
+      this.dropTarget?.kind !== target.kind ||
+      this.dropTarget?.categoryId !== target.categoryId
+    ) {
+      this.dropTarget = target;
+    }
+  }
+
+  private onDropTargetDragLeave(): void {
+    this.dropTarget = null;
+  }
+
+  private onDropTargetDrop(event: DragEvent, target: DropTarget): void {
+    const dataTransfer = event.dataTransfer;
+    if (!this.dropAllowed(dataTransfer) || !dataTransfer) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.dropTarget = null;
+    void this.handleDropInto(target, dataTransfer);
+  }
+
+  private async handleDropInto(target: DropTarget, dataTransfer: DataTransfer): Promise<void> {
+    // Resolve the destination category: a category row targets itself; the grid uses the
+    // currently-browsed category; the rail drop zone files under no category ("All").
+    const categoryId =
+      target.kind === 'category'
+        ? target.categoryId
+        : target.kind === 'grid' && this.categoryId !== 'all'
+          ? this.categoryId
+          : undefined;
+
+    // Reordering an existing library card between categories.
+    const libraryDrag = getLibraryItemDragData(dataTransfer);
+    if (libraryDrag) {
+      await this.reassignCategory(libraryDrag.itemId, categoryId);
+      return;
+    }
+
+    // A subtree dragged from the Scene Tree → pack into a personal-library prefab.
+    const nodeId = dataTransfer.getData(SCENE_TREE_NODE_MIME);
+    if (nodeId) {
+      try {
+        await this.publishService.publishNode({ nodeId, category: categoryId });
+        this.afterPublish(categoryId);
+      } catch (error) {
+        console.error('[LibraryPanel] Failed to publish node to library:', error);
+      }
+      return;
+    }
+
+    // Files dragged from the Asset Browser → one-file library items.
+    const assetPath = getDroppedAssetResourcePath(dataTransfer);
+    if (assetPath) {
+      try {
+        await this.publishService.publishAssetPath(assetPath, { category: categoryId });
+        this.afterPublish(categoryId);
+      } catch (error) {
+        console.error('[LibraryPanel] Failed to publish asset to library:', error);
+      }
+    }
+  }
+
+  private async reassignCategory(itemId: string, categoryId: string | undefined): Promise<void> {
+    const item = this.items.find(i => i.manifest.id === itemId);
+    // Only the personal (user) library is writable today.
+    if (!item || item.scope !== 'user') {
       return;
     }
     try {
-      await this.library.deleteItem(item);
-    } catch (error) {
-      console.error('[LibraryPanel] Failed to delete item:', error);
-    }
-  }
-
-  private onCopyId(item: LibraryItem): void {
-    this.closeContextMenu();
-    void navigator.clipboard?.writeText(item.manifest.id);
-  }
-
-  private async onRename(item: LibraryItem): Promise<void> {
-    this.closeContextMenu();
-    const name = window.prompt('Rename library item:', item.manifest.name)?.trim();
-    if (!name || name === item.manifest.name) {
-      return;
-    }
-    await this.updateManifest(item, manifest => ({ ...manifest, name }));
-  }
-
-  private async onEditTags(item: LibraryItem): Promise<void> {
-    this.closeContextMenu();
-    const raw = window.prompt('Tags (comma-separated):', item.manifest.tags.join(', '));
-    if (raw === null) {
-      return;
-    }
-    const tags = raw
-      .split(',')
-      .map(tag => tag.trim())
-      .filter(Boolean);
-    await this.updateManifest(item, manifest => ({ ...manifest, tags }));
-  }
-
-  private async updateManifest(
-    item: LibraryItem,
-    mutate: (manifest: LibraryItem['manifest']) => LibraryItem['manifest']
-  ): Promise<void> {
-    try {
-      const bundle = await this.library.getItemBundle(item.manifest.id);
+      const bundle = await this.library.getItemBundle(itemId);
       if (!bundle) {
         return;
       }
-      await this.library.putUserItem({ manifest: mutate(bundle.manifest), files: bundle.files });
+      const category = categoryId && categoryId !== 'all' ? categoryId : undefined;
+      await this.library.putUserItem({
+        manifest: { ...bundle.manifest, category },
+        files: bundle.files,
+      });
     } catch (error) {
-      console.error('[LibraryPanel] Failed to update item metadata:', error);
+      console.error('[LibraryPanel] Failed to reassign category:', error);
     }
   }
 
-  private openContextMenu(event: MouseEvent, item: LibraryItem): void {
-    event.preventDefault();
-    event.stopPropagation();
-    this.contextMenu = { item, x: event.clientX, y: event.clientY };
-  }
-
-  private closeContextMenu(): void {
-    if (this.contextMenu) {
-      this.contextMenu = null;
+  /** Publishing always lands in the personal library — surface it there. */
+  private afterPublish(categoryId: string | undefined): void {
+    if (this.sourceId !== 'user') {
+      this.switchSource('user');
+    }
+    if (categoryId) {
+      this.categoryId = categoryId;
     }
   }
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   protected render() {
+    return html` <div class="lib-doc">${this.renderRail()} ${this.renderContent()}</div> `;
+  }
+
+  private icon(name: string, size: number = IconSize.SMALL) {
+    return this.iconService.getIcon(name, size);
+  }
+
+  private renderRail() {
+    const source = this.source;
     return html`
-      <pix3-panel
-        panel-description="Reusable prefabs, images, fonts, audio and shaders. Drag a card into the scene."
-        actions-label="Asset library actions"
-      >
-        <div class="library-filters" slot="toolbar">
-          <input
-            class="library-search"
-            type="search"
-            placeholder="Search library…"
-            aria-label="Search library"
-            .value=${this.query}
-            @input=${(event: Event) => this.onSearchInput(event)}
-          />
+      <div class="lib-rail">
+        <div class="lib-rail__head">SOURCE</div>
+        <div class="lib-rail__group">${LIBRARY_SOURCES.map(s => this.renderSourceRow(s))}</div>
+        <div class="lib-rail__divider"></div>
+        <div class="lib-rail__head">CATEGORIES</div>
+        <div class="lib-rail__categories">
+          ${this.categories.map(cat => this.renderCategoryRow(cat))}
+          ${source.editable
+            ? html`<button
+                type="button"
+                class="lib-cat lib-cat--new"
+                @click=${() => void this.onNewCategory()}
+              >
+                ${this.icon('plus')}<span>New category</span>
+              </button>`
+            : nothing}
         </div>
-        ${this.renderChips()} ${this.renderBody()} ${this.renderContextMenu()}
-      </pix3-panel>
-    `;
-  }
-
-  private renderChips() {
-    return html`
-      <div class="library-chip-row" role="group" aria-label="Filter by scope">
-        ${LIBRARY_SCOPES.map(
-          scope => html`
-            <button
-              type="button"
-              class="library-chip ${this.activeScopes.has(scope) ? 'is-active' : ''}"
-              @click=${() => this.toggleScope(scope)}
-            >
-              ${LIBRARY_SCOPE_LABELS[scope]}
-            </button>
-          `
-        )}
-      </div>
-      <div class="library-chip-row" role="group" aria-label="Filter by type">
-        ${LIBRARY_ITEM_TYPES.map(
-          type => html`
-            <button
-              type="button"
-              class="library-chip ${this.activeTypes.has(type) ? 'is-active' : ''}"
-              @click=${() => this.toggleType(type)}
-            >
-              ${type}
-            </button>
-          `
-        )}
+        ${this.renderRailFooter(source)}
       </div>
     `;
   }
 
-  private renderBody() {
-    if (this.loading) {
-      return html`<div class="library-empty">Loading…</div>`;
-    }
-    const items = this.visibleItems;
-    if (items.length === 0) {
-      return html`<div class="library-empty">
-        ${this.items.length === 0
-          ? 'Your library is empty. Save assets from the generator or publish a prefab.'
-          : 'No items match the current filters.'}
-      </div>`;
-    }
-    return html`<div class="library-grid">${items.map(item => this.renderCard(item))}</div>`;
-  }
-
-  private renderCard(item: LibraryItem) {
-    const preview = this.previews.get(item.manifest.id);
+  private renderSourceRow(s: LibrarySourceConfig) {
+    const active = s.id === this.sourceId;
+    const count = itemsForSource(s, this.items).length;
     return html`
       <button
         type="button"
-        class="library-card"
-        draggable="true"
-        title=${item.manifest.description ?? item.manifest.name}
-        @dragstart=${(event: DragEvent) => this.onCardDragStart(event, item)}
-        @dblclick=${() => void this.onInsert(item)}
-        @contextmenu=${(event: MouseEvent) => this.openContextMenu(event, item)}
+        class="lib-source ${active ? 'is-active' : ''}"
+        @click=${() => this.switchSource(s.id)}
       >
-        <span class="library-card__thumb" data-type=${item.manifest.type}>
-          ${preview
-            ? html`<img src=${preview} alt="" loading="lazy" />`
-            : html`<span class="library-card__placeholder">${item.manifest.type}</span>`}
-        </span>
-        <span class="library-card__name">${item.manifest.name}</span>
-        <span class="library-card__meta">
-          <span class="library-card__badge">${item.manifest.type}</span>
-          <span class="library-card__scope">${LIBRARY_SCOPE_LABELS[item.scope]}</span>
-        </span>
+        <span class="lib-source__icon">${this.icon(s.icon)}</span>
+        <span class="lib-source__name">${s.name}</span>
+        <span class="lib-source__count">${count}</span>
       </button>
     `;
   }
 
-  private renderContextMenu() {
-    const menu = this.contextMenu;
-    if (!menu) {
-      return nothing;
-    }
-    const isUser = menu.item.scope === 'user';
+  private renderCategoryRow(cat: LibrarySourceCategory) {
+    const active = cat.id === this.categoryId;
+    const isDropTarget =
+      this.dropTarget?.kind === 'category' && this.dropTarget.categoryId === cat.id;
+    const count = countItemsInCategory(cat.id, this.sourceItems);
     return html`
-      <div
-        class="library-context-menu"
-        style="left:${menu.x}px; top:${menu.y}px"
-        @pointerdown=${(event: Event) => event.stopPropagation()}
+      <button
+        type="button"
+        class="lib-cat ${active ? 'is-active' : ''} ${isDropTarget ? 'is-drop-target' : ''}"
+        @click=${() => (this.categoryId = cat.id)}
+        @dragover=${(e: DragEvent) =>
+          this.onDropTargetDragOver(e, { kind: 'category', categoryId: cat.id })}
+        @dragleave=${() => this.onDropTargetDragLeave()}
+        @drop=${(e: DragEvent) =>
+          this.onDropTargetDrop(e, { kind: 'category', categoryId: cat.id })}
       >
-        <button type="button" @click=${() => void this.onInsert(menu.item)}>
-          Insert into scene
-        </button>
-        <button type="button" @click=${() => void this.onAddFiles(menu.item)}>
-          Add files to project
-        </button>
-        ${isUser
-          ? html`
-              <button type="button" @click=${() => void this.onRename(menu.item)}>Rename…</button>
-              <button type="button" @click=${() => void this.onEditTags(menu.item)}>
-                Edit tags…
-              </button>
-              <button type="button" @click=${() => this.onCopyId(menu.item)}>Copy id</button>
-              <button
-                type="button"
-                class="is-dangerous"
-                @click=${() => void this.onDelete(menu.item)}
-              >
-                Delete
-              </button>
-            `
-          : html`<button type="button" @click=${() => this.onCopyId(menu.item)}>Copy id</button>`}
+        <span class="lib-cat__icon">${this.icon('folder')}</span>
+        <span class="lib-cat__label">${cat.label}</span>
+        <span class="lib-cat__count">${count}</span>
+      </button>
+    `;
+  }
+
+  private renderRailFooter(source: LibrarySourceConfig) {
+    if (source.editable) {
+      const isDropTarget = this.dropTarget?.kind === 'zone';
+      return html`
+        <div
+          class="lib-dropzone ${isDropTarget ? 'is-drop-target' : ''}"
+          @dragover=${(e: DragEvent) => this.onDropTargetDragOver(e, { kind: 'zone' })}
+          @dragleave=${() => this.onDropTargetDragLeave()}
+          @drop=${(e: DragEvent) => this.onDropTargetDrop(e, { kind: 'zone' })}
+        >
+          <span class="lib-dropzone__icon">${this.icon('download', IconSize.MEDIUM)}</span>
+          <span class="lib-dropzone__text">
+            Drop nodes, prefabs or files here to save to <b>${source.name}</b>
+          </span>
+        </div>
+      `;
+    }
+    return html`
+      <div class="lib-readonly">
+        <span class="lib-readonly__icon">${this.icon('lock')}</span>
+        <span>Read-only source · ${source.hint}</span>
       </div>
     `;
+  }
+
+  private renderContent() {
+    const source = this.source;
+    const items = this.visibleItems;
+    const categoryLabel = (
+      this.categories.find(c => c.id === this.categoryId) ?? this.categories[0]
+    ).label;
+    return html`
+      <div class="lib-content">
+        <div class="lib-toolbar">
+          <div class="lib-crumb">
+            <span class="lib-crumb__source">${source.name}</span>
+            <span class="lib-crumb__sep">›</span>
+            <span class="lib-crumb__current">${categoryLabel}</span>
+          </div>
+          <span class="lib-toolbar__spacer"></span>
+          <span class="lib-count">${items.length} items</span>
+          <input
+            class="lib-thumb-slider"
+            type="range"
+            min=${THUMB_MIN}
+            max=${THUMB_MAX}
+            .value=${String(this.thumb)}
+            title="Thumbnail size"
+            aria-label="Thumbnail size"
+            @input=${(e: Event) => this.setThumb(Number((e.target as HTMLInputElement).value))}
+          />
+          <button
+            type="button"
+            class="lib-iconbtn ${this.view === 'grid' ? 'is-active' : ''}"
+            title="Grid view"
+            aria-label="Grid view"
+            @click=${() => this.setView('grid')}
+          >
+            ${this.icon('grid')}
+          </button>
+          <button
+            type="button"
+            class="lib-iconbtn ${this.view === 'list' ? 'is-active' : ''}"
+            title="List view"
+            aria-label="List view"
+            @click=${() => this.setView('list')}
+          >
+            ${this.icon('list')}
+          </button>
+        </div>
+
+        <div class="lib-filters">
+          <div class="lib-search">
+            <span class="lib-search__icon">${this.icon('search')}</span>
+            <input
+              type="search"
+              placeholder=${`Search ${source.name}…`}
+              aria-label=${`Search ${source.name}`}
+              .value=${this.query}
+              @input=${(e: Event) => (this.query = (e.target as HTMLInputElement).value)}
+            />
+            ${this.query
+              ? html`<button
+                  type="button"
+                  class="lib-search__clear"
+                  aria-label="Clear search"
+                  @click=${() => (this.query = '')}
+                >
+                  ${this.icon('x')}
+                </button>`
+              : nothing}
+          </div>
+          <div class="lib-chips" role="group" aria-label="Filter by type">
+            ${TYPE_FILTERS.map(type => {
+              const active = this.typeFilter === type;
+              const label = type === 'all' ? 'All' : formatItemType(type);
+              return html`<button
+                type="button"
+                class="lib-chip ${active ? 'is-active' : ''}"
+                @click=${() => (this.typeFilter = type)}
+              >
+                ${label}
+              </button>`;
+            })}
+          </div>
+        </div>
+
+        ${this.loading
+          ? html`<div class="lib-empty">Loading…</div>`
+          : this.view === 'grid'
+            ? this.renderGrid(items)
+            : this.renderList(items)}
+      </div>
+    `;
+  }
+
+  private renderGrid(items: LibraryItem[]) {
+    const isGridDropTarget = this.dropTarget?.kind === 'grid';
+    return html`
+      <div
+        class="lib-results lib-results--grid ${isGridDropTarget ? 'is-drop-target' : ''}"
+        style=${`--lib-thumb:${this.thumb}px`}
+        @dragover=${(e: DragEvent) => this.onDropTargetDragOver(e, { kind: 'grid' })}
+        @dragleave=${() => this.onDropTargetDragLeave()}
+        @drop=${(e: DragEvent) => this.onDropTargetDrop(e, { kind: 'grid' })}
+      >
+        ${items.length === 0
+          ? html`<div class="lib-empty">Nothing matches — clear the search or filters.</div>`
+          : html`<div class="lib-grid">${items.map(item => this.renderGridCard(item))}</div>`}
+      </div>
+    `;
+  }
+
+  private renderGridCard(item: LibraryItem) {
+    const selected = item.manifest.id === this.selectedItemId;
+    const meta = this.cardMeta(item);
+    return html`
+      <div
+        class="lib-card ${selected ? 'is-selected' : ''}"
+        draggable="true"
+        title=${item.manifest.description ?? item.manifest.name}
+        @click=${() => this.select(item)}
+        @dblclick=${() => void this.activatePrimary(item)}
+        @dragstart=${(e: DragEvent) => this.onCardDragStart(e, item)}
+      >
+        ${this.renderThumb(item, `height:${Math.round(this.thumb * 0.7)}px`)}
+        <div class="lib-card__meta">
+          <div class="lib-card__name">${item.manifest.name}</div>
+          <div class="lib-card__sub">${meta}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderList(items: LibraryItem[]) {
+    const isGridDropTarget = this.dropTarget?.kind === 'grid';
+    return html`
+      <div
+        class="lib-results lib-results--list ${isGridDropTarget ? 'is-drop-target' : ''}"
+        @dragover=${(e: DragEvent) => this.onDropTargetDragOver(e, { kind: 'grid' })}
+        @dragleave=${() => this.onDropTargetDragLeave()}
+        @drop=${(e: DragEvent) => this.onDropTargetDrop(e, { kind: 'grid' })}
+      >
+        ${items.length === 0
+          ? html`<div class="lib-empty">Nothing matches — clear the search or filters.</div>`
+          : items.map(item => this.renderListRow(item))}
+      </div>
+    `;
+  }
+
+  private renderListRow(item: LibraryItem) {
+    const selected = item.manifest.id === this.selectedItemId;
+    const store = isStoreLike(this.source);
+    const price = store ? priceLabel(item, this.source) : '';
+    return html`
+      <div
+        class="lib-row ${selected ? 'is-selected' : ''}"
+        draggable="true"
+        @click=${() => this.select(item)}
+        @dblclick=${() => void this.activatePrimary(item)}
+        @dragstart=${(e: DragEvent) => this.onCardDragStart(e, item)}
+      >
+        <span class="lib-row__icon">${this.icon(iconForItemType(item.manifest.type))}</span>
+        <span class="lib-row__name">${item.manifest.name}</span>
+        <span class="lib-row__type">${formatItemType(item.manifest.type)}</span>
+        <span class="lib-row__spacer"></span>
+        ${store
+          ? html`<span class="lib-row__pub">${publisherLabel(item, this.source)}</span>
+              <span class="lib-row__price ${isFreePrice(price) ? 'is-free' : ''}">${price}</span>`
+          : html`<span class="lib-row__files">${assetFileCount(item)} files</span>`}
+      </div>
+    `;
+  }
+
+  private renderThumb(item: LibraryItem, sizeStyle: string) {
+    const preview = this.previews.get(item.manifest.id);
+    const store = isStoreLike(this.source);
+    const price = store ? priceLabel(item, this.source) : '';
+    return html`
+      <div class="lib-thumb" style=${`--lib-thumb-hue:${thumbHue(item.manifest.id)};${sizeStyle}`}>
+        ${preview
+          ? html`<img src=${preview} alt="" loading="lazy" />`
+          : html`<span class="lib-thumb__icon"
+              >${this.icon(iconForItemType(item.manifest.type), IconSize.XLARGE)}</span
+            >`}
+        ${store
+          ? html`<span class="lib-thumb__price ${isFreePrice(price) ? 'is-free' : ''}"
+              >${price}</span
+            >`
+          : nothing}
+      </div>
+    `;
+  }
+
+  private cardMeta(item: LibraryItem): string {
+    if (isStoreLike(this.source)) {
+      return `${publisherLabel(item, this.source)} · ${priceLabel(item, this.source)}`;
+    }
+    return `${formatItemType(item.manifest.type)} · ${assetFileCount(item)} files`;
   }
 }
 
