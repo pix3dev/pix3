@@ -1170,6 +1170,127 @@ pix3-agent-chat-panel .agent-model-picker-caret svg {
   height: 0.8rem;
 }
 
+/* ── Reasoning-level picker (compact button + dropdown, left of the model picker) ── */
+
+pix3-agent-chat-panel .agent-reasoning-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 30px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker:hover,
+pix3-agent-chat-panel .agent-reasoning-picker.is-open {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker-icon svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker-caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-reasoning-picker-caret svg {
+  display: block;
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+pix3-agent-chat-panel .agent-reasoning-popover {
+  position: absolute;
+  bottom: calc(100% + 0.3rem);
+  right: 0.6rem;
+  z-index: 30;
+  width: min(16rem, calc(100% - 1.2rem));
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+}
+
+pix3-agent-chat-panel .agent-reasoning-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-reasoning-row:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-reasoning-row.is-active {
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-reasoning-row-check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 0.9rem;
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-reasoning-row-check svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-reasoning-row-label {
+  flex: 0 0 auto;
+}
+
+pix3-agent-chat-panel .agent-reasoning-row-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--fg-3);
+}
+
 /* ── Model picker dropdown (anchored to composer, opens above the box) ───── */
 
 pix3-agent-chat-panel .agent-model-picker-popover {

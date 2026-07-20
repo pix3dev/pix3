@@ -1,12 +1,17 @@
 import { inject, injectable } from '@/fw/di';
 import { SecretStorageService } from '@/services/SecretStorageService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
-import type { LlmProvider } from '@/services/llm/LlmTypes';
+import { REASONING_EFFORTS, type LlmProvider, type ReasoningEffort } from '@/services/llm/LlmTypes';
 
 export interface AgentPreferences {
   selectedProviderId: string;
   /** Selected model id per provider id. */
   modelByProvider: Record<string, string>;
+  /**
+   * Chosen reasoning-effort level per model, keyed by {@link reasoningEffortKey} (`provider::model`).
+   * Absent entries mean "use the model's default effort" — nothing is sent to the provider.
+   */
+  reasoningEffortByModel: Record<string, ReasoningEffort>;
   /** Base URL override for the OpenAI-compatible provider (OpenAI / Ollama / LM Studio). */
   customBaseUrl: string;
   /**
@@ -35,6 +40,27 @@ export interface AgentPreferences {
 }
 
 const STORAGE_KEY = 'pix3.agentSettings:v1';
+
+/** Compose the {@link AgentPreferences.reasoningEffortByModel} key for a provider + model pair. */
+export const reasoningEffortKey = (providerId: string, modelId: string): string =>
+  `${providerId}::${modelId}`;
+
+const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  typeof value === 'string' && (REASONING_EFFORTS as readonly string[]).includes(value);
+
+/** Keep only well-formed `provider::model → level` entries when loading persisted prefs. */
+const sanitizeReasoningEffortMap = (raw: unknown): Record<string, ReasoningEffort> => {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const out: Record<string, ReasoningEffort> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (isReasoningEffort(value)) {
+      out[key] = value;
+    }
+  }
+  return out;
+};
 // 25 proved too tight for build-scale tasks: cheap models spend ~15 iterations exploring and then
 // hit the cap right after play_start, before reading errors (see .plans/agent-eval-results.md).
 const DEFAULT_MAX_TOOL_ITERATIONS = 40;
@@ -67,8 +93,46 @@ export class AgentSettingsService {
     if (patch.modelByProvider) {
       next.modelByProvider = { ...this.ensureLoaded().modelByProvider, ...patch.modelByProvider };
     }
+    if (patch.reasoningEffortByModel) {
+      next.reasoningEffortByModel = {
+        ...this.ensureLoaded().reasoningEffortByModel,
+        ...patch.reasoningEffortByModel,
+      };
+    }
     this.prefs = next;
     this.persist(next);
+    this.notify();
+  }
+
+  /** The chosen reasoning level for a model, or undefined to use the model's default effort. */
+  getReasoningEffort(providerId: string, modelId: string): ReasoningEffort | undefined {
+    if (!modelId) {
+      return undefined;
+    }
+    return this.ensureLoaded().reasoningEffortByModel[reasoningEffortKey(providerId, modelId)];
+  }
+
+  /**
+   * Set (or, with `undefined`, clear back to default) the reasoning level for one model. Clearing
+   * deletes the key rather than storing a sentinel, so {@link getReasoningEffort} reports "default".
+   */
+  setReasoningEffort(
+    providerId: string,
+    modelId: string,
+    effort: ReasoningEffort | undefined
+  ): void {
+    if (!modelId) {
+      return;
+    }
+    const key = reasoningEffortKey(providerId, modelId);
+    const map = { ...this.ensureLoaded().reasoningEffortByModel };
+    if (effort) {
+      map[key] = effort;
+    } else {
+      delete map[key];
+    }
+    this.prefs = { ...this.ensureLoaded(), reasoningEffortByModel: map };
+    this.persist(this.prefs);
     this.notify();
   }
 
@@ -178,6 +242,7 @@ export class AgentSettingsService {
     return {
       selectedProviderId: defaultProvider?.id ?? '',
       modelByProvider: {},
+      reasoningEffortByModel: {},
       customBaseUrl: '',
       visionProviderId: '',
       visionModelId: '',
@@ -209,6 +274,7 @@ export class AgentSettingsService {
           parsed.modelByProvider && typeof parsed.modelByProvider === 'object'
             ? { ...(parsed.modelByProvider as Record<string, string>) }
             : {},
+        reasoningEffortByModel: sanitizeReasoningEffortMap(parsed.reasoningEffortByModel),
         customBaseUrl:
           typeof parsed.customBaseUrl === 'string' ? parsed.customBaseUrl : defaults.customBaseUrl,
         visionProviderId:

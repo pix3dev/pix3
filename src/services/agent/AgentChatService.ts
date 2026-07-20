@@ -469,6 +469,13 @@ export class AgentChatService {
     const model = this.modelCatalog.getModel(provider.id, modelId);
     const tools =
       model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
+    // Reasoning-depth level, only when the (possibly live-fetched) model advertises the chosen one —
+    // so the provider can emit it verbatim and a stale/unsupported pick is quietly ignored.
+    const reasoningPref = this.settings.getReasoningEffort(provider.id, modelId);
+    const reasoningEffort =
+      reasoningPref && model?.capabilities.reasoningEfforts?.includes(reasoningPref)
+        ? reasoningPref
+        : undefined;
     // AGENTS.md is authored per project; read it once per user turn so mid-session edits land.
     const agentsMd = await this.loadAgentsMd();
     // Script inventory shares AGENTS.md's cadence: once per turn, so the agent always knows the
@@ -516,6 +523,7 @@ export class AgentChatService {
         provider: provider.id,
         modelId,
         iteration,
+        reasoningEffort,
         system: system.text,
         systemStableChars: system.stableChars,
         predictedCacheTokens,
@@ -532,6 +540,7 @@ export class AgentChatService {
           system: system.text,
           cache: { systemStableChars: system.stableChars, conversation: true },
           maxTokens: model?.capabilities.maxOutputTokens,
+          reasoningEffort,
           signal,
         },
         { apiKey, modelId, baseUrl },

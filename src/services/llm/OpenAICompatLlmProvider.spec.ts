@@ -52,6 +52,21 @@ describe('OpenAICompatLlmProvider', () => {
     expect(result.stopReason).toBe('end_turn');
   });
 
+  it('forwards a reasoning effort as reasoning_effort, clamping xhigh/max down to high', async () => {
+    const send = async (effort: 'low' | 'xhigh'): Promise<unknown> => {
+      const fetchImpl = vi.fn(async () =>
+        okJson({ choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }] })
+      );
+      await provider.chat(
+        { messages: [{ role: 'user', content: 'hi' }], reasoningEffort: effort },
+        { apiKey: 'sk', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl }
+      );
+      return bodyOf(fetchImpl).reasoning_effort;
+    };
+    expect(await send('low')).toBe('low');
+    expect(await send('xhigh')).toBe('high');
+  });
+
   it('surfaces cached prompt tokens from prompt_tokens_details', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({

@@ -55,6 +55,28 @@ describe('AnthropicLlmProvider', () => {
     expect(result.stopReason).toBe('end_turn');
   });
 
+  it('forwards a reasoning effort as output_config.effort', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })
+    );
+    await provider.chat(
+      { messages: [{ role: 'user', content: 'hi' }], reasoningEffort: 'xhigh' },
+      { apiKey: 'sk-ant', modelId: 'claude-opus-4-8', baseUrl: BASE, fetchImpl }
+    );
+    expect(bodyOf(fetchImpl).output_config).toEqual({ effort: 'xhigh' });
+  });
+
+  it('omits output_config when no reasoning effort is set', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })
+    );
+    await provider.chat(
+      { messages: [{ role: 'user', content: 'hi' }] },
+      { apiKey: 'sk-ant', modelId: 'claude-opus-4-8', baseUrl: BASE, fetchImpl }
+    );
+    expect(bodyOf(fetchImpl).output_config).toBeUndefined();
+  });
+
   it('places cache_control breakpoints when a cache hint is supplied', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })

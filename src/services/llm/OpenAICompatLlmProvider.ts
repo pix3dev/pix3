@@ -243,6 +243,13 @@ export class OpenAICompatLlmProvider implements LlmProvider {
       }));
     }
 
+    if (params.reasoningEffort) {
+      // OpenAI-style reasoning models take `reasoning_effort` with the low/medium/high triad; the
+      // extended Anthropic-only levels are clamped down so a stray value can't 400 the request.
+      const effort = params.reasoningEffort;
+      body.reasoning_effort = effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+    }
+
     return body;
   }
 }

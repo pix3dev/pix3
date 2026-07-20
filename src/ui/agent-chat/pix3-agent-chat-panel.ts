@@ -18,12 +18,38 @@ import {
   type LlmProvider,
   type LlmToolResultBlock,
   type LlmToolUseBlock,
+  type ReasoningEffort,
 } from '@/services/llm/LlmTypes';
 import { renderMarkdownLite } from './markdown-lite';
 import './pix3-agent-chat-panel.ts.css';
 
 /** Tool groups with at least this many steps start collapsed (unless running). */
 const GROUP_COLLAPSE_THRESHOLD = 6;
+
+/** Short, capitalised labels for the reasoning-level picker (keyed by {@link ReasoningEffort}). */
+const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+};
+
+/** One-line trade-off blurb shown next to each reasoning level in the picker. */
+const reasoningEffortHint = (effort: ReasoningEffort): string => {
+  switch (effort) {
+    case 'low':
+      return 'Fastest, cheapest';
+    case 'medium':
+      return 'Balanced';
+    case 'high':
+      return 'Deeper (default)';
+    case 'xhigh':
+      return 'For hard coding / agentic work';
+    case 'max':
+      return 'Maximum depth';
+  }
+};
 
 /** Diff previews clamp to this many rendered lines, with an overflow note below. */
 const DIFF_LINE_CAP = 24;
@@ -514,6 +540,10 @@ export class AgentChatPanel extends ComponentBase {
   @state() private keyDraft = '';
   /** Whether the Copilot-style model picker dropdown is open. */
   @state() private modelPickerOpen = false;
+  /** Chosen reasoning level for the current model, or undefined to use its default effort. */
+  @state() private reasoningEffort: ReasoningEffort | undefined = undefined;
+  /** Whether the reasoning-level dropdown is open. */
+  @state() private reasoningPickerOpen = false;
   /** Live filter typed into the model picker's search box (matches provider/model labels + ids). */
   @state() private modelPickerQuery = '';
   /** Per-provider key presence, loaded when the picker opens (`hasApiKey` is async). */
@@ -565,6 +595,7 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeSettingsSubscription = this.settings.subscribe(prefs => {
       this.providerId = prefs.selectedProviderId;
       this.modelId = this.settings.getSelectedModelId(prefs.selectedProviderId) ?? '';
+      this.reasoningEffort = this.settings.getReasoningEffort(this.providerId, this.modelId);
       this.customBaseUrl = prefs.customBaseUrl;
       this.debugMode = prefs.debugMode;
       if (!prefs.debugMode) {
@@ -594,6 +625,7 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeCatalogSubscription?.();
     this.disposeCatalogSubscription = undefined;
     this.closeModelPicker();
+    this.closeReasoningPicker();
     super.disconnectedCallback();
   }
 
@@ -878,6 +910,77 @@ export class AgentChatPanel extends ComponentBase {
     `;
   }
 
+  /** Reasoning levels the current model accepts (empty when it has no reasoning control). */
+  private currentReasoningEfforts(): readonly ReasoningEffort[] {
+    return (
+      this.modelCatalog.getModel(this.providerId, this.modelId)?.capabilities.reasoningEfforts ?? []
+    );
+  }
+
+  /**
+   * Compact reasoning-level button, shown only for models that expose an effort control. Sits left
+   * of the model picker and mirrors its styling. The label is the chosen level, or "Auto" when none
+   * is set (the model's default effort).
+   */
+  private renderReasoningPickerButton() {
+    const efforts = this.currentReasoningEfforts();
+    if (efforts.length === 0) {
+      return null;
+    }
+    const label = this.reasoningEffort ? REASONING_EFFORT_LABELS[this.reasoningEffort] : 'Auto';
+    return html`
+      <button
+        type="button"
+        class="agent-reasoning-picker ${this.reasoningPickerOpen ? 'is-open' : ''}"
+        aria-haspopup="listbox"
+        aria-expanded=${String(this.reasoningPickerOpen)}
+        title="Reasoning effort · ${label}"
+        @click=${() => this.toggleReasoningPicker()}
+      >
+        <span class="agent-reasoning-picker-icon"
+          >${this.icons.getIcon('sparkles', IconSize.SMALL)}</span
+        >
+        <span class="agent-reasoning-picker-label">${label}</span>
+        <span class="agent-reasoning-picker-caret"
+          >${this.icons.getIcon('chevron-down-caret', IconSize.SMALL)}</span
+        >
+      </button>
+    `;
+  }
+
+  /** The reasoning-level dropdown: an "Auto" (default) row plus one row per level the model accepts. */
+  private renderReasoningPicker() {
+    const efforts = this.currentReasoningEfforts();
+    return html`
+      <div class="agent-reasoning-popover" role="listbox">
+        ${this.renderReasoningRow(undefined, 'Auto', "The model's default effort")}
+        ${efforts.map(effort =>
+          this.renderReasoningRow(effort, REASONING_EFFORT_LABELS[effort], reasoningEffortHint(effort))
+        )}
+      </div>
+    `;
+  }
+
+  private renderReasoningRow(effort: ReasoningEffort | undefined, label: string, hint: string) {
+    const active = this.reasoningEffort === effort;
+    return html`
+      <button
+        type="button"
+        class="agent-reasoning-row ${active ? 'is-active' : ''}"
+        role="option"
+        aria-selected=${String(active)}
+        title=${hint}
+        @click=${() => this.selectReasoning(effort)}
+      >
+        <span class="agent-reasoning-row-check"
+          >${active ? this.icons.getIcon('check', IconSize.SMALL) : null}</span
+        >
+        <span class="agent-reasoning-row-label">${label}</span>
+        <span class="agent-reasoning-row-hint">${hint}</span>
+      </button>
+    `;
+  }
+
   /**
    * The dropdown itself: a search box, then every provider as a group (label + a key icon-button
    * that reveals an inline key editor), and under each its models as selectable rows. Providers that
@@ -886,7 +989,7 @@ export class AgentChatPanel extends ComponentBase {
    */
   private renderModelPicker() {
     const query = this.modelPickerQuery.trim().toLowerCase();
-    const providers = this.providers.list();
+    const providers = this.providers.list().filter(provider => !provider.hidden);
     const groups = providers
       .map(provider => {
         const providerMatches = query === '' || provider.label.toLowerCase().includes(query);
@@ -1413,7 +1516,7 @@ export class AgentChatPanel extends ComponentBase {
               ${this.icons.getIcon('paperclip', IconSize.SMALL)}
             </button>
             <span class="agent-input-spacer"></span>
-            ${this.renderModelPickerButton()}
+            ${this.renderReasoningPickerButton()} ${this.renderModelPickerButton()}
             ${running
               ? html`<button type="button" class="agent-stop" @click=${() => this.chat.stop()}>
                   <span class="agent-btn-icon">${this.icons.getIcon('stop', IconSize.SMALL)}</span>
@@ -1431,6 +1534,7 @@ export class AgentChatPanel extends ComponentBase {
           </div>
         </div>
         ${this.modelPickerOpen ? this.renderModelPicker() : null}
+        ${this.reasoningPickerOpen ? this.renderReasoningPicker() : null}
         ${this.debugMode
           ? html`<div class="agent-debug-row">
               <button
@@ -1931,6 +2035,52 @@ export class AgentChatPanel extends ComponentBase {
     this.closeModelPicker();
   }
 
+  // ── Reasoning-level picker open/close + selection ────────────────────────────
+
+  private toggleReasoningPicker(): void {
+    if (this.reasoningPickerOpen) {
+      this.closeReasoningPicker();
+    } else {
+      this.openReasoningPicker();
+    }
+  }
+
+  private openReasoningPicker(): void {
+    if (this.reasoningPickerOpen) return;
+    this.reasoningPickerOpen = true;
+    document.addEventListener('pointerdown', this.handleReasoningPointerDown, true);
+    document.addEventListener('keydown', this.handleReasoningKeydown, true);
+  }
+
+  private closeReasoningPicker(): void {
+    if (!this.reasoningPickerOpen) return;
+    this.reasoningPickerOpen = false;
+    document.removeEventListener('pointerdown', this.handleReasoningPointerDown, true);
+    document.removeEventListener('keydown', this.handleReasoningKeydown, true);
+  }
+
+  private readonly handleReasoningPointerDown = (event: PointerEvent): void => {
+    if (!this.reasoningPickerOpen) return;
+    const path = event.composedPath();
+    const popover = this.querySelector('.agent-reasoning-popover');
+    const trigger = this.querySelector('.agent-reasoning-picker');
+    if (popover && path.includes(popover)) return;
+    if (trigger && path.includes(trigger)) return;
+    this.closeReasoningPicker();
+  };
+
+  private readonly handleReasoningKeydown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape' && this.reasoningPickerOpen) {
+      event.preventDefault();
+      this.closeReasoningPicker();
+    }
+  };
+
+  private selectReasoning(effort: ReasoningEffort | undefined): void {
+    this.settings.setReasoningEffort(this.providerId, this.modelId, effort);
+    this.closeReasoningPicker();
+  }
+
   /** Free-text model id for a base-URL provider: selects that provider and its typed model. */
   private handleCustomModelEntry(providerId: string, event: Event): void {
     const modelId = (event.target as HTMLInputElement).value.trim();
@@ -1944,10 +2094,13 @@ export class AgentChatPanel extends ComponentBase {
 
   private async refreshProviderKeys(): Promise<void> {
     const entries = await Promise.all(
-      this.providers.list().map(async provider => {
-        const has = await this.settings.hasApiKey(provider.id);
-        return [provider.id, has] as const;
-      })
+      this.providers
+        .list()
+        .filter(provider => !provider.hidden)
+        .map(async provider => {
+          const has = await this.settings.hasApiKey(provider.id);
+          return [provider.id, has] as const;
+        })
     );
     this.providerKeys = Object.fromEntries(entries);
   }

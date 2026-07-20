@@ -74,6 +74,23 @@ export interface LlmToolDefinition {
 /** Why the model stopped. `blocked` covers safety refusals; `unknown` is the catch-all. */
 export type LlmStopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'blocked' | 'unknown';
 
+/**
+ * Reasoning-depth level, ordered cheapest → deepest. A provider-agnostic name for the "how hard
+ * should the model think" knob: Anthropic maps it to `output_config.effort` (adaptive thinking),
+ * OpenAI-compatible models to `reasoning_effort`. Only levels a model actually accepts are offered
+ * (see {@link LlmModelCapabilities.reasoningEfforts}); `high` matches most providers' default.
+ */
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** All reasoning levels, cheapest → deepest. Providers advertise the subset each model accepts. */
+export const REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
+
 /** Token accounting, when the provider reports it. */
 export interface LlmUsage {
   /**
@@ -136,6 +153,13 @@ export interface ChatParams {
   readonly cache?: LlmCacheHint;
   /** Cap on generated tokens. Providers clamp to their model's ceiling. */
   readonly maxTokens?: number;
+  /**
+   * Reasoning-depth level for models that expose one. The caller only sets it for a model whose
+   * {@link LlmModelCapabilities.reasoningEfforts} lists the chosen level, so providers may emit it
+   * verbatim (Anthropic → `output_config.effort`, OpenAI-compatible → `reasoning_effort`) without
+   * re-checking capability. Omit to use the model's default effort.
+   */
+  readonly reasoningEffort?: ReasoningEffort;
   /** Cancellation. Forwarded to `fetch`; an abort surfaces as an `aborted` {@link LlmError}. */
   readonly signal?: AbortSignal;
   /** Optional streaming sink. May be ignored by providers that return the full response. */
@@ -163,6 +187,13 @@ export interface LlmModelCapabilities {
    * the context is; when absent, the fill indicator degrades to a bare token count.
    */
   readonly contextWindow?: number;
+  /**
+   * Reasoning-depth levels this model accepts, cheapest → deepest, or omitted/empty for models with
+   * no reasoning control. Presence is the capability flag: the chat UI shows a reasoning-level picker
+   * only when this is non-empty, and offers exactly these levels. (Anthropic Opus/Sonnet expose the
+   * full `low…max` range; gateway/OpenAI-style models expose `low/medium/high`.)
+   */
+  readonly reasoningEfforts?: readonly ReasoningEffort[];
 }
 
 /** Indicative USD price per 1M tokens (shown as a hint in the model picker; may drift). */
@@ -228,6 +259,11 @@ export interface LlmProvider {
   readonly apiKeyHelpUrl?: string;
   /** True when the provider needs a user-supplied base URL (OpenAI-compatible / local endpoints). */
   readonly requiresBaseUrl?: boolean;
+  /**
+   * When true, the provider is registered (so stored selections and its catalog still resolve) but
+   * hidden from the picker / settings UI — used to retire a provider without deleting its code.
+   */
+  readonly hidden?: boolean;
   /** Default host used when no `baseUrl` override is supplied. */
   readonly defaultBaseUrl?: string;
   getModel(modelId: string): LlmModel | undefined;

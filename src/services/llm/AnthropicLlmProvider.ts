@@ -12,11 +12,25 @@ import {
   type LlmResult,
   type LlmStopReason,
   type LlmUsage,
+  type ReasoningEffort,
 } from './LlmTypes';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * Reasoning levels the modern Claude models accept via `output_config.effort` (adaptive thinking).
+ * Opus 4.8 / Sonnet 5 / Fable 5 cover the full range; older/smaller models (Haiku 4.5) don't take
+ * the effort parameter at all and so advertise none.
+ */
+export const CLAUDE_REASONING_EFFORTS: readonly ReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+];
 
 /**
  * Anthropic Claude chat via the Messages API (`POST /v1/messages`). Direct browser calls require the
@@ -49,6 +63,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 16000,
         contextWindow: 200_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 5, outputPer1M: 25 },
     },
@@ -62,6 +77,7 @@ export class AnthropicLlmProvider implements LlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 16000,
         contextWindow: 200_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 3, outputPer1M: 15 },
     },
@@ -173,6 +189,13 @@ export class AnthropicLlmProvider implements LlmProvider {
         }
         return spec;
       });
+    }
+    if (params.reasoningEffort) {
+      // Adaptive-thinking depth control on modern Claude models. `high` is the API default, so we
+      // still send it explicitly for a stable, self-documenting request. Emitting effort alone (no
+      // `thinking` block) needs no thinking-block round-trip on the next tool turn — the model
+      // decides when to think, and any thinking is summarised, not returned as replayable blocks.
+      body.output_config = { effort: params.reasoningEffort };
     }
     return body;
   }

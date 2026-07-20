@@ -30,6 +30,9 @@ export class CerebrasLlmProvider extends OpenAICompatLlmProvider {
   // Fixed hosted endpoint — unlike the generic OpenAI-compatible lane, the user does not type a base URL.
   override readonly requiresBaseUrl = false;
   override readonly defaultBaseUrl = CEREBRAS_BASE_URL;
+  // Retired from the UI (Cerebras tightened its terms) but kept registered so a stored selection
+  // and the provider's code survive intact — flip this back to re-expose it in the picker/settings.
+  readonly hidden = true;
 
   override readonly models: readonly LlmModel[] = [
     {

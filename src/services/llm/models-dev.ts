@@ -1,4 +1,13 @@
-import { LlmError, isAbortError, isRecord, type LlmModel } from './LlmTypes';
+import {
+  LlmError,
+  isAbortError,
+  isRecord,
+  type LlmModel,
+  type ReasoningEffort,
+} from './LlmTypes';
+
+/** OpenAI-compatible reasoning levels — the set gateway (`reasoning_effort`) models accept. */
+const OPENAI_REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
 
 /**
  * Shared [models.dev](https://models.dev) catalog client. models.dev is the community model
@@ -84,13 +93,14 @@ export const mapModelsDevModel = (id: string, entry: unknown): LlmModel | null =
   const context = asNumber(limit.context);
   const output = asNumber(limit.output);
   const supportsImages = entry.attachment === true;
+  const supportsReasoning = entry.reasoning === true;
   const free = inputCost === 0 && outputCost === 0;
 
   const descriptionParts: string[] = [];
   if (free) descriptionParts.push('Free');
   if (context) descriptionParts.push(`${Math.round(context / 1024)}K ctx`);
   if (supportsImages) descriptionParts.push('vision');
-  if (entry.reasoning === true) descriptionParts.push('reasoning');
+  if (supportsReasoning) descriptionParts.push('reasoning');
 
   return {
     id,
@@ -102,6 +112,9 @@ export const mapModelsDevModel = (id: string, entry: unknown): LlmModel | null =
       supportsSystemPrompt: true,
       maxOutputTokens: Math.min(output ?? DEFAULT_OUTPUT_TOKENS, MAX_ADVERTISED_OUTPUT_TOKENS),
       contextWindow: context,
+      // These gateway models speak the OpenAI `reasoning_effort` surface, which accepts the
+      // low/medium/high triad (the extended xhigh/max levels are Anthropic-only).
+      ...(supportsReasoning ? { reasoningEfforts: OPENAI_REASONING_EFFORTS } : {}),
     },
     pricing:
       inputCost !== undefined && outputCost !== undefined

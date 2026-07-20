@@ -38,6 +38,8 @@ describe('models-dev', () => {
         supportsSystemPrompt: true,
         // The 131K output limit is clamped to a sane request budget.
         maxOutputTokens: 32768,
+        // The reasoning flag becomes the OpenAI-style low/medium/high effort triad.
+        reasoningEfforts: ['low', 'medium', 'high'],
       },
     });
     expect(model?.description).toBe('Free · 200K ctx · reasoning');
@@ -52,6 +54,8 @@ describe('models-dev', () => {
       capabilities: { supportsTools: false, supportsImages: false, maxOutputTokens: 8192 },
     });
     expect(bare?.pricing).toBeUndefined();
+    // No reasoning flag → no effort control offered.
+    expect(bare?.capabilities.reasoningEfforts).toBeUndefined();
   });
 
   it('fetches one provider catalog and shares a single api.json download across calls', async () => {

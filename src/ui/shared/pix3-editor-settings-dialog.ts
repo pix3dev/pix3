@@ -437,7 +437,7 @@ export class EditorSettingsDialog extends ComponentBase {
   }
 
   private renderAgentModelTab() {
-    const providers = this.llmProviders.list();
+    const providers = this.llmProviders.list().filter(provider => !provider.hidden);
     if (providers.length === 0) {
       return html`<div class="hint">No LLM providers are registered.</div>`;
     }

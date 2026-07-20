@@ -8,7 +8,11 @@ import {
   type LlmModel,
   type LlmRequestContext,
   type LlmResult,
+  type ReasoningEffort,
 } from './LlmTypes';
+
+/** Zen serves reasoning models on the OpenAI `reasoning_effort` surface (low/medium/high triad). */
+const ZEN_REASONING_EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
 
 /**
  * Default endpoint. OpenCode Zen sends **no CORS headers at all** (its reference integrations are
@@ -79,6 +83,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32000,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -91,6 +96,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -103,6 +109,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 32000,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -115,6 +122,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -127,6 +135,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -139,6 +148,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0.3, outputPer1M: 1.2 },
     },
@@ -151,6 +161,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: false,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 1.4, outputPer1M: 4.4 },
     },
@@ -163,6 +174,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0.5, outputPer1M: 3 },
     },
@@ -175,6 +187,7 @@ export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
         supportsImages: true,
         supportsSystemPrompt: true,
         maxOutputTokens: 32768,
+        reasoningEfforts: ZEN_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 2, outputPer1M: 10 },
     },

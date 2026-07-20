@@ -1,4 +1,4 @@
-import { AnthropicLlmProvider } from './AnthropicLlmProvider';
+import { AnthropicLlmProvider, CLAUDE_REASONING_EFFORTS } from './AnthropicLlmProvider';
 import {
   LlmError,
   type LlmListModelsContext,
@@ -53,6 +53,7 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 32000,
         contextWindow: 1_000_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -66,6 +67,7 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 32000,
         contextWindow: 1_000_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -79,6 +81,7 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
         supportsSystemPrompt: true,
         maxOutputTokens: 32000,
         contextWindow: 1_000_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
@@ -133,13 +136,27 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
 
     const payload: unknown = await response.json();
     const rawModels = isRecord(payload) && Array.isArray(payload.models) ? payload.models : [];
-    const models = rawModels.filter(
-      (model): model is LlmModel =>
-        isRecord(model) &&
-        typeof model.id === 'string' &&
-        typeof model.label === 'string' &&
-        isRecord(model.capabilities)
-    );
+    const models = rawModels
+      .filter(
+        (model): model is LlmModel =>
+          isRecord(model) &&
+          typeof model.id === 'string' &&
+          typeof model.label === 'string' &&
+          isRecord(model.capabilities)
+      )
+      // The bridge's /models payload predates the reasoning-effort field, so carry it over from the
+      // static catalog by id — otherwise the live list would silently drop the reasoning picker.
+      .map(model =>
+        model.capabilities.reasoningEfforts
+          ? model
+          : {
+              ...model,
+              capabilities: {
+                ...model.capabilities,
+                reasoningEfforts: this.getModel(model.id)?.capabilities.reasoningEfforts,
+              },
+            }
+      );
     if (models.length === 0) {
       throw new LlmError('unknown', 'The Claude bridge returned no models.');
     }

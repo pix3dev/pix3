@@ -106,6 +106,36 @@ describe('AgentSettingsService', () => {
     expect(service.getSelectedModelId('cerebras')).toBe('qwen-3-235b');
   });
 
+  it('stores, clears, and reloads a per-model reasoning effort', () => {
+    const service = buildService();
+    expect(service.getReasoningEffort('anthropic', 'claude-opus-4-8')).toBeUndefined();
+
+    service.setReasoningEffort('anthropic', 'claude-opus-4-8', 'xhigh');
+    service.setReasoningEffort('anthropic', 'claude-sonnet-5', 'low');
+    expect(service.getReasoningEffort('anthropic', 'claude-opus-4-8')).toBe('xhigh');
+
+    // Survives a reload, keyed per model.
+    const reloaded = buildService();
+    expect(reloaded.getReasoningEffort('anthropic', 'claude-opus-4-8')).toBe('xhigh');
+    expect(reloaded.getReasoningEffort('anthropic', 'claude-sonnet-5')).toBe('low');
+
+    // Clearing (undefined) drops the entry back to "default".
+    reloaded.setReasoningEffort('anthropic', 'claude-opus-4-8', undefined);
+    expect(reloaded.getReasoningEffort('anthropic', 'claude-opus-4-8')).toBeUndefined();
+    expect(buildService().getReasoningEffort('anthropic', 'claude-opus-4-8')).toBeUndefined();
+  });
+
+  it('drops malformed reasoning-effort entries on load', () => {
+    localStorage.setItem(
+      'pix3.agentSettings:v1',
+      JSON.stringify({ reasoningEffortByModel: { 'a::b': 'high', 'c::d': 'bogus', 'e::f': 3 } })
+    );
+    const service = buildService();
+    expect(service.getReasoningEffort('a', 'b')).toBe('high');
+    expect(service.getReasoningEffort('c', 'd')).toBeUndefined();
+    expect(service.getReasoningEffort('e', 'f')).toBeUndefined();
+  });
+
   it('returns the custom base URL only for the provider that requires one', () => {
     const service = buildService();
     service.updatePreferences({ customBaseUrl: 'http://localhost:1234/v1' });

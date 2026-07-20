@@ -42,6 +42,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
       getSelectedModelId: () => 'fake-model',
       getApiKey: async () => 'fake-key',
       getBaseUrl: () => undefined,
+      getReasoningEffort: () => undefined,
       getPreferences: () => ({
         selectedProviderId: 'fake',
         modelByProvider: {},
