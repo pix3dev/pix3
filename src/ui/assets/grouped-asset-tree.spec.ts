@@ -165,6 +165,47 @@ describe('buildGroupedTree', () => {
     const tree = build([file('a.png'), file('b.mp3')], [], true);
     expect(tree.every(node => node.expanded)).toBe(true);
   });
+
+  it('omits file leaves but keeps compaction labels and fileCount when includeFiles is false', () => {
+    const options = { expandedKeys: new Set<string>(), defaultCategoryExpanded: true };
+    const withFiles = buildGroupedTree([file('assets/textures/ui/button.png', 42)], options);
+    const withoutFiles = buildGroupedTree([file('assets/textures/ui/button.png', 42)], {
+      ...options,
+      includeFiles: false,
+    });
+
+    const withImages = withFiles.find(node => node.categoryId === 'images');
+    const withoutImages = withoutFiles.find(node => node.categoryId === 'images');
+
+    // Compaction label / folderPath / fileCount are identical with or without files.
+    expect(withImages?.folderLabel).toBe('assets/textures/ui');
+    expect(withoutImages?.folderLabel).toBe('assets/textures/ui');
+    expect(withImages?.folderPath).toBe('assets/textures/ui');
+    expect(withoutImages?.folderPath).toBe('assets/textures/ui');
+    expect(withImages?.fileCount).toBe(1);
+    expect(withoutImages?.fileCount).toBe(1);
+
+    // The file leaf renders by default but is omitted when includeFiles is false.
+    expect(names(withImages?.children)).toEqual(['button.png']);
+    expect(names(withoutImages?.children)).toEqual([]);
+  });
+
+  it('keeps dir sizeBytes and subfolders when includeFiles is false', () => {
+    const tree = buildGroupedTree(
+      [file('tex/a.png', 100), file('tex/deep/b.png', 50), file('cover.png', 7)],
+      { expandedKeys: new Set<string>(), defaultCategoryExpanded: true, includeFiles: false }
+    );
+    const images = tree.find(node => node.categoryId === 'images');
+    // The loose root file (omitted from output) still blocks lifting, so `tex`
+    // stays a real dir node.
+    expect(images?.folderLabel).toBeUndefined();
+    expect(names(images?.children)).toEqual(['tex']);
+    const tex = images?.children?.find(node => node.name === 'tex');
+    // Directory size still sums nested files even though file leaves are hidden.
+    expect(tex?.sizeBytes).toBe(150);
+    expect(names(tex?.children)).toEqual(['deep']);
+    expect(tex?.children?.every(child => child.nodeType !== 'file')).toBe(true);
+  });
 });
 
 describe('collectGroupedExpandedKeys', () => {

@@ -131,7 +131,6 @@ import './collab/pix3-share-dialog';
 import './welcome/pix3-welcome';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
-import './assets-preview/assets-preview-panel';
 import './profiler/profiler-panel';
 import './animation-editor/animation-panel';
 import './viewport/game-tab';

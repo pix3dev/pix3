@@ -50,8 +50,328 @@ function formatBytes(size: number): string {
   return `${mb.toFixed(2)} MB`;
 }
 
+/** Axis identity for a number field — drives the coloured chip and reads like Blender/Unity. */
+export type NumberFieldAxis = 'x' | 'y' | 'z' | 'w' | 'h' | '';
+
 /**
- * Vector2 Editor - Displays x, y fields in one row
+ * Shared styles for the drag-to-scrub number field. Kept as a standalone
+ * template so every vector/size editor renders identical fields.
+ */
+const NUMBER_FIELD_STYLES = css`
+  :host {
+    display: inline-flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 0.5rem;
+    box-sizing: border-box;
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--radius-1);
+    cursor: ew-resize;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+
+  .field:hover:not(.disabled):not(.editing) {
+    border-color: var(--line-2);
+  }
+
+  .field.editing {
+    cursor: text;
+    border-color: var(--accent);
+  }
+
+  .field.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .axis {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--fg-2);
+  }
+
+  .axis--x,
+  .axis--w {
+    color: var(--axis-x);
+  }
+
+  .axis--y,
+  .axis--h {
+    color: var(--axis-y);
+  }
+
+  .axis--z {
+    color: var(--axis-z);
+  }
+
+  .value {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--fg-0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  .unit {
+    margin-left: 0.15rem;
+    color: var(--fg-3);
+  }
+
+  input {
+    all: unset;
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--fg-0);
+    text-align: right;
+  }
+`;
+
+/**
+ * Drag-to-scrub number input (Blender / Unity style).
+ *
+ * - Press and drag horizontally to scrub the value live. Hold Shift for fine
+ *   (×0.1) and Ctrl/Cmd for coarse (×10) steps.
+ * - A plain click (no drag) drops into text-edit mode; Enter or blur commits,
+ *   Escape cancels.
+ *
+ * Emits `preview-change` continuously while scrubbing (coalesced into a single
+ * undo step by the mutation gateway) and `commit-change` once on release / edit
+ * commit. Both carry `{ value: number }` and are `bubbles` + `composed` so hosts
+ * in light DOM can listen through the editor's shadow boundary.
+ */
+@customElement('pix3-number-field')
+export class NumberField extends ComponentBase {
+  protected static useShadowDom = true;
+
+  @property({ type: Number })
+  value: number = 0;
+
+  @property({ type: Number })
+  step: number = 0.01;
+
+  @property({ type: Number })
+  precision: number = 2;
+
+  @property({ type: Number })
+  min: number = Number.NEGATIVE_INFINITY;
+
+  @property({ type: Number })
+  max: number = Number.POSITIVE_INFINITY;
+
+  /** Units changed per horizontal pixel while scrubbing. `0` → derive from step. */
+  @property({ type: Number })
+  sensitivity: number = 0;
+
+  @property({ type: Boolean })
+  disabled: boolean = false;
+
+  @property({ type: String })
+  axis: NumberFieldAxis = '';
+
+  /** Overrides the axis letter shown in the chip (e.g. a custom glyph). */
+  @property({ type: String })
+  label: string = '';
+
+  @property({ type: String })
+  unit: string = '';
+
+  @state()
+  private editing = false;
+
+  private pointerId: number | null = null;
+  private dragged = false;
+  private accumX = 0;
+  private startValue = 0;
+
+  static styles = NUMBER_FIELD_STYLES;
+
+  private get decimals(): number {
+    return Number.isFinite(this.precision) && this.precision >= 0 ? this.precision : 2;
+  }
+
+  private get scrubSensitivity(): number {
+    if (Number.isFinite(this.sensitivity) && this.sensitivity > 0) {
+      return this.sensitivity;
+    }
+    return Number.isFinite(this.step) && this.step > 0 ? this.step : 0.01;
+  }
+
+  private clamp(v: number): number {
+    let result = v;
+    if (Number.isFinite(this.min)) {
+      result = Math.max(this.min, result);
+    }
+    if (Number.isFinite(this.max)) {
+      result = Math.min(this.max, result);
+    }
+    return result;
+  }
+
+  /** Snap to the step grid and strip float noise to the field's precision. */
+  private snap(v: number): number {
+    const step = Number.isFinite(this.step) && this.step > 0 ? this.step : 0;
+    const snapped = step > 0 ? Math.round(v / step) * step : v;
+    return Number.parseFloat(snapped.toFixed(this.decimals));
+  }
+
+  private format(v: number): string {
+    return v.toFixed(this.decimals);
+  }
+
+  private emit(type: 'preview-change' | 'commit-change', value: number): void {
+    // composed:false so a vector/euler editor wrapping this field is the ONLY
+    // listener — its own re-emitted {x,y,…} event is what reaches the inspector.
+    // Directly-hosted fields (size/rotation) still receive it: the inspector's
+    // listener sits on this element in the same (light DOM) tree.
+    this.dispatchEvent(new CustomEvent(type, { detail: { value }, bubbles: true }));
+  }
+
+  private onPointerDown(event: PointerEvent): void {
+    if (this.disabled || this.editing || event.button !== 0) {
+      return;
+    }
+    const target = event.currentTarget as HTMLElement;
+    this.pointerId = event.pointerId;
+    this.dragged = false;
+    this.accumX = 0;
+    this.startValue = this.value;
+    // Pointer capture keeps move/up events flowing while the cursor leaves the
+    // field; a rare failure (detached element) must not abort the scrub.
+    try {
+      target.setPointerCapture(event.pointerId);
+    } catch {
+      /* non-fatal — scrubbing still works within the element bounds */
+    }
+    event.preventDefault();
+  }
+
+  private onPointerMove(event: PointerEvent): void {
+    if (this.pointerId === null) {
+      return;
+    }
+    this.accumX += event.movementX;
+    if (!this.dragged && Math.abs(this.accumX) < 3) {
+      return;
+    }
+    this.dragged = true;
+    const multiplier = event.shiftKey ? 0.1 : event.ctrlKey || event.metaKey ? 10 : 1;
+    const delta = this.accumX * this.scrubSensitivity * multiplier;
+    const next = this.clamp(this.snap(this.startValue + delta));
+    if (next !== this.value) {
+      this.value = next;
+      this.emit('preview-change', next);
+    }
+  }
+
+  private onPointerUp(event: PointerEvent): void {
+    if (this.pointerId === null) {
+      return;
+    }
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+    this.pointerId = null;
+    if (this.dragged) {
+      this.emit('commit-change', this.value);
+    } else {
+      this.enterEdit();
+    }
+  }
+
+  private enterEdit(): void {
+    if (this.disabled) {
+      return;
+    }
+    this.editing = true;
+    void this.updateComplete.then(() => {
+      const input = this.renderRoot.querySelector('input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }
+
+  private commitEdit(rawValue: string): void {
+    this.editing = false;
+    const parsed = Number.parseFloat(rawValue);
+    if (Number.isFinite(parsed)) {
+      const next = this.clamp(parsed);
+      this.value = next;
+      this.emit('commit-change', next);
+    }
+  }
+
+  private onInputKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      (event.target as HTMLInputElement).blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.editing = false;
+    }
+  }
+
+  protected render() {
+    const chip = this.label || (this.axis ? this.axis.toUpperCase() : '');
+    const editValue = Number.parseFloat(this.value.toFixed(this.decimals)).toString();
+    return html`
+      <div
+        class="field ${this.editing ? 'editing' : ''} ${this.disabled ? 'disabled' : ''}"
+        @pointerdown=${(e: PointerEvent) => this.onPointerDown(e)}
+        @pointermove=${(e: PointerEvent) => this.onPointerMove(e)}
+        @pointerup=${(e: PointerEvent) => this.onPointerUp(e)}
+        @pointercancel=${(e: PointerEvent) => this.onPointerUp(e)}
+      >
+        ${chip ? html`<span class="axis axis--${this.axis || 'none'}">${chip}</span>` : ''}
+        ${this.editing
+          ? html`<input
+              type="text"
+              inputmode="decimal"
+              .value=${editValue}
+              @keydown=${(e: KeyboardEvent) => this.onInputKeydown(e)}
+              @blur=${(e: Event) => this.commitEdit((e.target as HTMLInputElement).value)}
+            />`
+          : html`<span class="value"
+              >${this.format(this.value)}${this.unit
+                ? html`<span class="unit">${this.unit}</span>`
+                : ''}</span
+            >`}
+      </div>
+    `;
+  }
+}
+
+/**
+ * Vector2 Editor - Displays x, y drag-scrub fields in one row
  */
 @customElement('pix3-vector2-editor')
 export class Vector2Editor extends ComponentBase {
@@ -68,13 +388,16 @@ export class Vector2Editor extends ComponentBase {
   @property({ type: Number })
   precision: number = 2;
 
+  /** Scrub sensitivity (units/px) forwarded to both fields; `0` → derive from step. */
+  @property({ type: Number })
+  sensitivity: number = 0;
+
   @property({ type: Boolean })
   disabled = false;
 
   static styles = css`
     :host {
       display: flex;
-      gap: 0.5rem;
       align-items: center;
       min-width: 0;
       flex: 1;
@@ -82,103 +405,51 @@ export class Vector2Editor extends ComponentBase {
 
     .vector-input-group {
       display: flex;
-      gap: 0.25rem;
+      gap: 0.35rem;
       flex: 1;
       min-width: 0;
       align-items: center;
     }
-
-    .vector-input {
-      width: 4.4rem;
-      min-width: 4.4rem;
-    }
-
-    input {
-      background: var(--bg-2);
-      color: var(--fg-0);
-      border: 1px solid var(--line-1);
-      border-radius: var(--radius-1);
-      padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      box-sizing: border-box;
-      width: 100%;
-    }
-
-    input:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    input:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .axis-label {
-      font-size: 12px;
-      color: var(--fg-3);
-      min-width: 0.95rem;
-      height: 1.9rem;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      text-align: center;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    .axis-label--x {
-      color: var(--fg-3);
-    }
-
-    .axis-label--y {
-      color: var(--fg-3);
-    }
   `;
+
+  private emit(type: 'preview-change' | 'commit-change', detail: Vector2Value): void {
+    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  }
 
   protected render() {
     return html`
       <div class="vector-input-group">
-        <div class="axis-label axis-label--x">X</div>
-        <input
-          type="number"
-          class="vector-input"
-          step=${this.step}
-          .value=${this.x.toFixed(this.precision)}
+        <pix3-number-field
+          axis="x"
+          .value=${this.x}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${this.sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: { x: parseFloat((e.target as HTMLInputElement).value), y: this.y },
-              })
-            )}
-        />
-
-        <div class="axis-label axis-label--y">Y</div>
-        <input
-          type="number"
-          class="vector-input"
-          step=${this.step}
-          .value=${this.y.toFixed(this.precision)}
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: e.detail.value, y: this.y })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: e.detail.value, y: this.y })}
+        ></pix3-number-field>
+        <pix3-number-field
+          axis="y"
+          .value=${this.y}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${this.sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: { x: this.x, y: parseFloat((e.target as HTMLInputElement).value) },
-              })
-            )}
-        />
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: this.x, y: e.detail.value })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: this.x, y: e.detail.value })}
+        ></pix3-number-field>
       </div>
     `;
   }
 }
 
 /**
- * Vector3 Editor - Displays x, y, z fields in one row
+ * Vector3 Editor - Displays x, y, z drag-scrub fields in one row
  */
 @customElement('pix3-vector3-editor')
 export class Vector3Editor extends ComponentBase {
@@ -198,13 +469,15 @@ export class Vector3Editor extends ComponentBase {
   @property({ type: Number })
   precision: number = 2;
 
+  @property({ type: Number })
+  sensitivity: number = 0;
+
   @property({ type: Boolean })
   disabled = false;
 
   static styles = css`
     :host {
       display: flex;
-      gap: 0.5rem;
       align-items: center;
       min-width: 0;
       flex: 1;
@@ -212,127 +485,56 @@ export class Vector3Editor extends ComponentBase {
 
     .vector-input-group {
       display: flex;
-      gap: 0.25rem;
+      gap: 0.35rem;
       flex: 1;
       min-width: 0;
       align-items: center;
     }
-
-    .vector-input {
-      width: 4.2rem;
-      min-width: 4.2rem;
-    }
-
-    input {
-      background: var(--bg-2);
-      color: var(--fg-0);
-      border: 1px solid var(--line-1);
-      border-radius: var(--radius-1);
-      padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      box-sizing: border-box;
-      width: 100%;
-    }
-
-    input:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    input:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .axis-label {
-      font-size: 12px;
-      color: var(--fg-3);
-      min-width: 0.95rem;
-      height: 1.9rem;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      text-align: center;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    .axis-label--x {
-      color: var(--fg-3);
-    }
-
-    .axis-label--y {
-      color: var(--fg-3);
-    }
-
-    .axis-label--z {
-      color: var(--fg-3);
-    }
   `;
+
+  private emit(type: 'preview-change' | 'commit-change', detail: Vector3Value): void {
+    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  }
 
   protected render() {
     return html`
       <div class="vector-input-group">
-        <div class="axis-label axis-label--x">X</div>
-        <input
-          type="number"
-          class="vector-input"
-          step=${this.step}
-          .value=${this.x.toFixed(this.precision)}
+        <pix3-number-field
+          axis="x"
+          .value=${this.x}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${this.sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: parseFloat((e.target as HTMLInputElement).value),
-                  y: this.y,
-                  z: this.z,
-                },
-              })
-            )}
-        />
-
-        <div class="axis-label axis-label--y">Y</div>
-        <input
-          type="number"
-          class="vector-input"
-          step=${this.step}
-          .value=${this.y.toFixed(this.precision)}
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: e.detail.value, y: this.y, z: this.z })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: e.detail.value, y: this.y, z: this.z })}
+        ></pix3-number-field>
+        <pix3-number-field
+          axis="y"
+          .value=${this.y}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${this.sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: this.x,
-                  y: parseFloat((e.target as HTMLInputElement).value),
-                  z: this.z,
-                },
-              })
-            )}
-        />
-
-        <div class="axis-label axis-label--z">Z</div>
-        <input
-          type="number"
-          class="vector-input"
-          step=${this.step}
-          .value=${this.z.toFixed(this.precision)}
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: this.x, y: e.detail.value, z: this.z })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: this.x, y: e.detail.value, z: this.z })}
+        ></pix3-number-field>
+        <pix3-number-field
+          axis="z"
+          .value=${this.z}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${this.sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: this.x,
-                  y: this.y,
-                  z: parseFloat((e.target as HTMLInputElement).value),
-                },
-              })
-            )}
-        />
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: this.x, y: this.y, z: e.detail.value })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: this.x, y: this.y, z: e.detail.value })}
+        ></pix3-number-field>
       </div>
     `;
   }
@@ -359,13 +561,16 @@ export class EulerEditor extends ComponentBase {
   @property({ type: Number })
   precision: number = 1;
 
+  /** Scrub sensitivity (deg/px); defaults to a rotation-friendly 0.5 when unset. */
+  @property({ type: Number })
+  sensitivity: number = 0;
+
   @property({ type: Boolean })
   disabled = false;
 
   static styles = css`
     :host {
       display: flex;
-      gap: 0.5rem;
       align-items: center;
       min-width: 0;
       flex: 1;
@@ -373,134 +578,60 @@ export class EulerEditor extends ComponentBase {
 
     .euler-input-group {
       display: flex;
-      gap: 0.25rem;
+      gap: 0.35rem;
       flex: 1;
       min-width: 0;
       align-items: center;
     }
-
-    .euler-input {
-      width: 4.2rem;
-      min-width: 4.2rem;
-    }
-
-    input {
-      background: var(--bg-2);
-      color: var(--fg-0);
-      border: 1px solid var(--line-1);
-      border-radius: var(--radius-1);
-      padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      box-sizing: border-box;
-      width: 100%;
-    }
-
-    input:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    input:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .axis-label {
-      font-size: 12px;
-      color: var(--fg-3);
-      min-width: 0.95rem;
-      height: 1.9rem;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-      text-align: center;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    .axis-label--x {
-      color: var(--fg-3);
-    }
-
-    .axis-label--y {
-      color: var(--fg-3);
-    }
-
-    .axis-label--z {
-      color: var(--fg-3);
-    }
-
-    .unit-label {
-      font-size: 0.7rem;
-      color: var(--fg-3);
-      margin-left: 0.25rem;
-    }
   `;
 
+  private emit(type: 'preview-change' | 'commit-change', detail: Vector3Value): void {
+    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  }
+
   protected render() {
+    const sensitivity = this.sensitivity > 0 ? this.sensitivity : 0.5;
     return html`
       <div class="euler-input-group">
-        <div class="axis-label axis-label--x">X</div>
-        <input
-          type="number"
-          class="euler-input"
-          step=${this.step}
-          .value=${this.x.toFixed(this.precision)}
+        <pix3-number-field
+          axis="x"
+          unit="°"
+          .value=${this.x}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: parseFloat((e.target as HTMLInputElement).value),
-                  y: this.y,
-                  z: this.z,
-                },
-              })
-            )}
-        />
-
-        <div class="axis-label axis-label--y">Y</div>
-        <input
-          type="number"
-          class="euler-input"
-          step=${this.step}
-          .value=${this.y.toFixed(this.precision)}
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: e.detail.value, y: this.y, z: this.z })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: e.detail.value, y: this.y, z: this.z })}
+        ></pix3-number-field>
+        <pix3-number-field
+          axis="y"
+          unit="°"
+          .value=${this.y}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: this.x,
-                  y: parseFloat((e.target as HTMLInputElement).value),
-                  z: this.z,
-                },
-              })
-            )}
-        />
-
-        <div class="axis-label axis-label--z">Z</div>
-        <input
-          type="number"
-          class="euler-input"
-          step=${this.step}
-          .value=${this.z.toFixed(this.precision)}
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: this.x, y: e.detail.value, z: this.z })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: this.x, y: e.detail.value, z: this.z })}
+        ></pix3-number-field>
+        <pix3-number-field
+          axis="z"
+          unit="°"
+          .value=${this.z}
+          .step=${this.step}
+          .precision=${this.precision}
+          .sensitivity=${sensitivity}
           ?disabled=${this.disabled}
-          @input=${(e: Event) =>
-            this.dispatchEvent(
-              new CustomEvent('change', {
-                detail: {
-                  x: this.x,
-                  y: this.y,
-                  z: parseFloat((e.target as HTMLInputElement).value),
-                },
-              })
-            )}
-        />
-        <span class="unit-label">°</span>
+          @preview-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('preview-change', { x: this.x, y: this.y, z: e.detail.value })}
+          @commit-change=${(e: CustomEvent<{ value: number }>) =>
+            this.emit('commit-change', { x: this.x, y: this.y, z: e.detail.value })}
+        ></pix3-number-field>
       </div>
     `;
   }
@@ -1386,8 +1517,7 @@ export class SizeEditor extends ComponentBase {
     );
   }
 
-  private onWidthChange(e: Event): void {
-    const newWidth = parseFloat((e.target as HTMLInputElement).value);
+  private onWidthChange(newWidth: number): void {
     if (!Number.isFinite(newWidth) || newWidth <= 0) return;
 
     let newHeight = this.height;
@@ -1398,8 +1528,7 @@ export class SizeEditor extends ComponentBase {
     this.emitChange(newWidth, newHeight);
   }
 
-  private onHeightChange(e: Event): void {
-    const newHeight = parseFloat((e.target as HTMLInputElement).value);
+  private onHeightChange(newHeight: number): void {
     if (!Number.isFinite(newHeight) || newHeight <= 0) return;
 
     let newWidth = this.width;
@@ -1442,39 +1571,9 @@ export class SizeEditor extends ComponentBase {
 
     .field-group {
       display: flex;
-      gap: 0.25rem;
-      align-items: center;
-    }
-
-    .field-label {
-      font-size: 12px;
-      color: var(--fg-3);
-      min-width: 0.9rem;
-    }
-
-    input[type='number'] {
-      width: 4.75rem;
-      background: var(--bg-2);
-      color: var(--fg-0);
-      border: 1px solid var(--line-1);
-      border-radius: var(--radius-1);
-      padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
-      font-family: var(--font-mono);
-      font-variant-numeric: tabular-nums;
-      box-sizing: border-box;
+      flex: 1;
       min-width: 0;
-    }
-
-    input[type='number']:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    input[type='number']:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
+      align-items: center;
     }
 
     button {
@@ -1557,27 +1656,31 @@ export class SizeEditor extends ComponentBase {
     return html`
       <div class="size-fields">
         <div class="field-group">
-          <label class="field-label">W</label>
-          <input
-            type="number"
+          <pix3-number-field
+            axis="w"
+            .value=${this.width}
+            .step=${1}
+            .precision=${0}
+            .min=${1}
+            .sensitivity=${0.5}
             ?disabled=${this.disabled}
-            .value=${this.width.toString()}
-            step="1"
-            min="1"
-            @input=${(e: Event) => this.onWidthChange(e)}
-          />
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.onWidthChange(e.detail.value)}
+          ></pix3-number-field>
         </div>
 
         <div class="field-group">
-          <label class="field-label">H</label>
-          <input
-            type="number"
+          <pix3-number-field
+            axis="h"
+            .value=${this.height}
+            .step=${1}
+            .precision=${0}
+            .min=${1}
+            .sensitivity=${0.5}
             ?disabled=${this.disabled}
-            .value=${this.height.toString()}
-            step="1"
-            min="1"
-            @input=${(e: Event) => this.onHeightChange(e)}
-          />
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.onHeightChange(e.detail.value)}
+          ></pix3-number-field>
         </div>
 
         <div class="controls">
@@ -1784,6 +1887,7 @@ export class SliderNumberEditor extends ComponentBase {
 
 declare global {
   interface HTMLElementTagNameMap {
+    'pix3-number-field': NumberField;
     'pix3-vector2-editor': Vector2Editor;
     'pix3-vector3-editor': Vector3Editor;
     'pix3-euler-editor': EulerEditor;

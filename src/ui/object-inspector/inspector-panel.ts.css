@@ -1133,7 +1133,8 @@ pix3-panel {
 }
 
 .size-inline-input {
-  width: 4.75rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .size-inline-unit {

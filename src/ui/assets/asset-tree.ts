@@ -8,8 +8,10 @@ import { TemplateService, DEFAULT_TEMPLATE_SCENE_ID } from '@/services/TemplateS
 import { DialogService } from '@/services/DialogService';
 import { IconService } from '@/services/IconService';
 import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
+import { computeDirectoryStats } from '@/services/asset-folder-stats';
 import { isDocumentActive } from '@/services/page-activity';
-import { hasGenerationDragData } from '@/ui/shared/asset-drag-drop';
+import { ASSET_PATH_LIST_MIME, hasGenerationDragData } from '@/ui/shared/asset-drag-drop';
+import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { appState, type AssetBrowserViewMode } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { ASSET_CATEGORY_BY_ID, type AssetCategoryId } from '@/core/asset-categories';
@@ -107,6 +109,23 @@ export class AssetTree extends ComponentBase {
 
   @state()
   private isExternalDrag: boolean = false;
+
+  /** Right-click context menu on a tree row (Rename / Delete). */
+  @state()
+  private contextMenu: { node: Node; x: number; y: number } | null = null;
+
+  private readonly contextMenuPortal = new DropdownPortal({ minWidth: '12rem' });
+  private readonly onGlobalPointerDownForMenu = (event: PointerEvent): void => {
+    // `Node` is aliased to AssetTreeNode in this module; use the DOM node type explicitly.
+    if (this.contextMenu && !this.contextMenuPortal.contains(event.target as globalThis.Node)) {
+      this.closeContextMenu();
+    }
+  };
+  private readonly onGlobalKeyDownForMenu = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      this.closeContextMenu();
+    }
+  };
 
   // Click-and-wait rename behavior
   private _lastClickedPath: string | null = null;
@@ -238,6 +257,17 @@ export class AssetTree extends ComponentBase {
   }
 
   /**
+   * Clears the current tree selection (used by the panel's project-root row,
+   * which selects the root outside the tree).
+   */
+  public clearSelection(): void {
+    this.selectedPath = null;
+    this.selectedCategoryId = null;
+    this.requestUpdate();
+    this.saveState();
+  }
+
+  /**
    * Programmatically select a file/folder by its path
    * Expands parent directories if needed and ensures the path is visible
    */
@@ -253,29 +283,35 @@ export class AssetTree extends ComponentBase {
       const [currentSegment, ...remainingSegments] = pathSegments;
 
       for (const node of nodes) {
-        if (node.name === currentSegment) {
-          if (remainingSegments.length === 0) {
-            // Found the target node
+        if (node.name !== currentSegment) {
+          continue;
+        }
+
+        if (remainingSegments.length === 0) {
+          // Found the target node (a directory — files are no longer tree rows).
+          this.selectedPath = node.path;
+          void this.assetsPreviewService.syncFromAssetSelection(node.path, node.kind);
+          this.tree = [...this.tree];
+          return true;
+        }
+
+        if (node.kind === 'directory') {
+          // Ensure this directory is expanded (loads children if needed).
+          if (node.children === null || !node.expanded) {
+            await this.expandNode(node);
+          }
+          if (node.children && (await findAndSelectNode(node.children, remainingSegments))) {
+            return true;
+          }
+          // File fallback: the only unmatched segment left is the final one and
+          // it isn't a directory node — it's a file, which no longer exists in
+          // the folders-only tree. Select this deepest matched directory and let
+          // the content grid select the parent folder + highlight the file.
+          if (remainingSegments.length === 1) {
             this.selectedPath = node.path;
-            void this.assetsPreviewService.syncFromAssetSelection(node.path, node.kind);
+            void this.assetsPreviewService.syncFromAssetSelection(targetPath, 'file');
             this.tree = [...this.tree];
             return true;
-          } else if (node.kind === 'directory' && node.children) {
-            // Need to go deeper, ensure this directory is expanded
-            if (!node.expanded) {
-              await this.expandNode(node);
-            }
-            // Recursively search in children
-            if (await findAndSelectNode(node.children, remainingSegments)) {
-              return true;
-            }
-          } else if (node.kind === 'directory' && node.children === null) {
-            // Directory not loaded yet, load it
-            await this.expandNode(node);
-            // Now search again with loaded children
-            if (node.children && (await findAndSelectNode(node.children, remainingSegments))) {
-              return true;
-            }
           }
         }
       }
@@ -289,14 +325,29 @@ export class AssetTree extends ComponentBase {
     const found = await findAndSelectNode(this.tree, pathSegments);
 
     if (!found) {
-      console.warn('[AssetTree] Path not found in tree:', targetPath);
       // Force refresh and try again
       await this.loadRoot();
       const retryFound = await findAndSelectNode(this.tree, pathSegments);
       if (retryFound) {
         this.saveState();
+        return true;
       }
-      return retryFound;
+
+      // Root-level file: it has no parent directory node to anchor on (and is not
+      // itself a tree row in the folders-only tree). Select the project root and
+      // let the content grid highlight the file.
+      const parent = this.getParentPath(targetPath);
+      if (parent === '.' || parent === '') {
+        this.selectedPath = null;
+        this.selectedCategoryId = null;
+        void this.assetsPreviewService.syncFromAssetSelection(targetPath, 'file');
+        this.tree = [...this.tree];
+        this.saveState();
+        return true;
+      }
+
+      console.warn('[AssetTree] Path not found in tree:', targetPath);
+      return false;
     }
 
     this.saveState();
@@ -313,10 +364,35 @@ export class AssetTree extends ComponentBase {
     if (!selected) {
       return false;
     }
-    const found = this.findNodeByPath(this.selectedPath ?? targetPath);
-    if (found?.node && found.node.kind === 'file') {
-      this.activateAsset(found.node);
+
+    const normalizedTreePath = this.normalizeTreePath(targetPath);
+    const normalizedTarget = this.normalizePath(normalizedTreePath);
+    const normalizedSelected = this.selectedPath ? this.normalizePath(this.selectedPath) : null;
+
+    // An exact selection match means a directory node was revealed (files are no
+    // longer tree rows). Preserve directory behavior: reveal without activating.
+    if (normalizedSelected === normalizedTarget || !normalizedTreePath) {
+      return true;
     }
+
+    // File reveal: no tree node exists, so build the activation directly from the
+    // path and dispatch `asset-activate`, same as a file double-click did.
+    const name = normalizedTreePath.split('/').pop() ?? normalizedTreePath;
+    const activation: AssetActivation = {
+      name,
+      path: targetPath,
+      kind: 'file',
+      resourcePath: this.buildResourcePath(normalizedTreePath),
+      extension: this.getFileExtension(name),
+    };
+
+    this.dispatchEvent(
+      new CustomEvent<AssetActivation>('asset-activate', {
+        detail: activation,
+        bubbles: true,
+        composed: true,
+      })
+    );
     return true;
   }
 
@@ -353,6 +429,55 @@ export class AssetTree extends ComponentBase {
       return false;
     };
 
+    // File fallback: the path points at a file (no longer a grouped-tree node).
+    // Select the deepest matched directory (or the category that lifted the
+    // file's folder) and let the content grid highlight the file.
+    const tryRevealFile = (): boolean => {
+      const lastSlash = normalized.lastIndexOf('/');
+      if (lastSlash < 0) {
+        return false;
+      }
+      const parentPath = normalized.slice(0, lastSlash);
+
+      for (const category of this.tree) {
+        if (category.nodeType !== 'category' || !category.children) {
+          continue;
+        }
+        const trail = this.findGroupedTrail(category.children, parentPath);
+        if (!trail || trail.node.kind !== 'directory') {
+          continue;
+        }
+        category.expanded = true;
+        for (const ancestor of trail.ancestors) {
+          ancestor.expanded = true;
+        }
+        trail.node.expanded = true;
+        this.selectedPath = trail.node.path;
+        this.selectedCategoryId = category.categoryId ?? null;
+        void this.assetsPreviewService.syncFromAssetSelection(targetPath, 'file');
+        this.tree = [...this.tree];
+        return true;
+      }
+
+      // The parent folder may have been lifted into its category row.
+      for (const category of this.tree) {
+        if (category.nodeType !== 'category' || !category.folderPath) {
+          continue;
+        }
+        if (this.normalizePath(category.folderPath) !== parentPath) {
+          continue;
+        }
+        category.expanded = true;
+        this.selectedPath = category.path;
+        this.selectedCategoryId = category.categoryId ?? null;
+        void this.assetsPreviewService.syncFromAssetSelection(targetPath, 'file');
+        this.tree = [...this.tree];
+        return true;
+      }
+
+      return false;
+    };
+
     if (tryReveal()) {
       this.saveState();
       return true;
@@ -361,6 +486,11 @@ export class AssetTree extends ComponentBase {
     // Force refresh and try again (mirrors the folder-mode retry).
     await this.loadRoot();
     if (tryReveal()) {
+      this.saveState();
+      return true;
+    }
+
+    if (tryRevealFile()) {
       this.saveState();
       return true;
     }
@@ -440,6 +570,13 @@ export class AssetTree extends ComponentBase {
     const nextNodes: Node[] = [];
 
     for (const entry of entries) {
+      // Folders-only tree: files are shown in the content grid, not as tree rows.
+      // `listDirectory` still returns files (folder-size walk, external-change
+      // signature, and create-existence checks depend on them) — exclude them
+      // only here, at node-build time.
+      if (entry.kind === 'file') {
+        continue;
+      }
       nextNodes.push(await this.createNodeFromEntry(entry, expandedPaths));
     }
 
@@ -521,6 +658,22 @@ export class AssetTree extends ComponentBase {
     // Listen for window focus and visibility changes to detect external file changes
     window.addEventListener('focus', this.onWindowFocus);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
+
+    // Dismiss the row context menu on outside pointerdown / Escape.
+    window.addEventListener('pointerdown', this.onGlobalPointerDownForMenu, true);
+    window.addEventListener('keydown', this.onGlobalKeyDownForMenu);
+  }
+
+  /** Move the row context menu into a body-level portal so it isn't clipped by the tree scroller. */
+  protected updated(): void {
+    if (this.contextMenu && !this.contextMenuPortal.isOpen()) {
+      const menu = this.querySelector<HTMLElement>('.tree-context-menu');
+      if (menu) {
+        this.contextMenuPortal.openAt(this.contextMenu.x, this.contextMenu.y, menu);
+      }
+    } else if (!this.contextMenu && this.contextMenuPortal.isOpen()) {
+      this.contextMenuPortal.close();
+    }
   }
 
   disconnectedCallback(): void {
@@ -532,6 +685,9 @@ export class AssetTree extends ComponentBase {
 
     window.removeEventListener('focus', this.onWindowFocus);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('pointerdown', this.onGlobalPointerDownForMenu, true);
+    window.removeEventListener('keydown', this.onGlobalKeyDownForMenu);
+    this.contextMenuPortal.close();
   }
 
   /**
@@ -664,6 +820,9 @@ export class AssetTree extends ComponentBase {
       this.tree = buildGroupedTree(files, {
         expandedKeys,
         defaultCategoryExpanded,
+        // Folders-only tree: keep files in the trie (for compaction / sizes /
+        // counts) but omit the file leaf nodes.
+        includeFiles: false,
       });
       this.treeViewMode = 'by-type';
 
@@ -685,6 +844,10 @@ export class AssetTree extends ComponentBase {
       const entries = await this.listDirectory(node.path);
       const children: Node[] = [];
       for (const entry of entries) {
+        // Folders-only tree: skip files (see buildTreeFromExpandedPaths).
+        if (entry.kind === 'file') {
+          continue;
+        }
         children.push(await this.createNodeFromEntry(entry));
       }
       node.children = this.sortNodes(children);
@@ -848,16 +1011,21 @@ export class AssetTree extends ComponentBase {
 
     if (entry.kind === 'directory') {
       const isExpanded = expandedPaths?.has(this.normalizePath(entry.path)) ?? false;
+      // The folders-only tree only expands directories that contain subdirectories;
+      // a shallow listing tells us whether to render the expand triangle at all.
+      const childEntries = await this.listDirectory(entry.path);
+      const hasChildDirectories = childEntries.some(child => child.kind === 'directory');
       const directoryNode: Node = {
         name: entry.name,
         path: entry.path,
         kind: entry.kind,
         sizeBytes,
-        expanded: isExpanded,
-        children: isExpanded ? [] : null,
+        expanded: isExpanded && hasChildDirectories,
+        hasChildDirectories,
+        children: isExpanded && hasChildDirectories ? [] : null,
       };
 
-      if (isExpanded && expandedPaths) {
+      if (directoryNode.expanded && expandedPaths) {
         directoryNode.children = await this.buildTreeFromExpandedPaths(entry.path, expandedPaths);
       }
 
@@ -882,19 +1050,7 @@ export class AssetTree extends ComponentBase {
   }
 
   private async getDirectoryContentSize(directoryPath: string): Promise<number> {
-    const entries = await this.listDirectory(directoryPath);
-    let totalSize = 0;
-
-    for (const entry of entries) {
-      if (entry.kind === 'directory') {
-        totalSize += await this.getDirectoryContentSize(entry.path);
-        continue;
-      }
-
-      totalSize += entry.size ?? 0;
-    }
-
-    return totalSize;
+    return (await computeDirectoryStats(this.projectService, directoryPath)).sizeBytes;
   }
 
   private getNodeMetaLabel(node: Node): string | null {
@@ -934,6 +1090,13 @@ export class AssetTree extends ComponentBase {
     const isSelected = this.isNodeSelected(node);
     const isDragOver = this.dragOverPath === node.path && node.kind === 'directory' && !isCategory;
     const metaLabel = isCategory ? null : this.getNodeMetaLabel(node);
+    // Only directories with subdirectories are expandable in the folders-only tree.
+    // Folder mode: `hasChildDirectories` (computed at build). Grouped mode: derived
+    // from `children`. Categories are always expandable containers.
+    const isExpandable = isCategory
+      ? true
+      : node.kind === 'directory' &&
+        (node.hasChildDirectories ?? ((node.children?.length ?? 0) > 0 || node.children === null));
     const nameContent =
       isCategory && node.folderLabel
         ? html`${node.name}<span class="node-name-suffix"> (${node.folderLabel})</span>`
@@ -958,10 +1121,11 @@ export class AssetTree extends ComponentBase {
         @dragover=${(e: DragEvent) => this.onDragOver(e, node)}
         @dragleave=${(e: DragEvent) => this.onDragLeave(e, node)}
         @drop=${(e: DragEvent) => this.onDrop(e, node)}
+        @contextmenu=${(e: MouseEvent) => this.onNodeContextMenu(e, node)}
         draggable=${isCategory ? 'false' : 'true'}
         tabindex="0"
       >
-        ${node.kind === 'directory'
+        ${isExpandable
           ? html`<button
               type="button"
               class="expander expander--visible expander--button ${node.expanded
@@ -1166,50 +1330,118 @@ export class AssetTree extends ComponentBase {
     e.preventDefault();
     e.stopPropagation();
 
-    this.dragOverPath = null;
-
-    // Dropping an Sprite Editor history entry into the project root.
-    if (hasGenerationDragData(e.dataTransfer)) {
-      await this.generatedAssetDropService.handleDrop(e.dataTransfer, '.');
+    if (!e.dataTransfer) {
+      this.dragOverPath = null;
       return;
     }
 
-    // Check if this is an external file drop
-    if (this.isExternalDrag && e.dataTransfer?.items) {
-      await this.handleExternalFileDrop(e.dataTransfer.items, '.');
+    // Reuse the shared root-drop handler (also called directly by the panel root row).
+    await this.handleRootDrop(e.dataTransfer);
+  }
+
+  /**
+   * Handles a drop targeting the project root (`.`): a generated-asset drop, an
+   * external-file drop, or an internal move — the latter supports moving a whole
+   * grid multi-selection at once. Exposed so the unified Assets panel's root row
+   * can reuse the exact same logic instead of duplicating it.
+   */
+  public async handleRootDrop(dataTransfer: DataTransfer): Promise<void> {
+    this.dragOverPath = null;
+
+    // Dropping a Sprite Editor history entry into the project root.
+    if (hasGenerationDragData(dataTransfer)) {
+      await this.generatedAssetDropService.handleDrop(dataTransfer, '.');
+      return;
+    }
+
+    // Check if this is an external file drop.
+    const hasExternalFiles =
+      !!dataTransfer.items && Array.from(dataTransfer.items).some(item => item.kind === 'file');
+    if (this.isExternalDrag || hasExternalFiles) {
+      if (dataTransfer.items) {
+        await this.handleExternalFileDrop(dataTransfer.items, '.');
+      }
       this.isExternalDrag = false;
       return;
     }
 
-    // Handle internal drag (existing logic)
-    const sourcePath = e.dataTransfer?.getData('text/plain');
-    if (!sourcePath) {
+    // Internal move → project root (supports multi-path grid drags).
+    await this.moveDroppedPaths(dataTransfer, '.', 'project root');
+  }
+
+  /**
+   * Reads the dragged source paths from a drop, preferring the multi-path list
+   * MIME (a JSON array set by the content grid's drag start) so an entire
+   * multi-selection moves at once; falls back to the single `text/plain` path
+   * (a tree-node drag) when the list MIME is absent.
+   */
+  private getDroppedSourcePaths(dataTransfer: DataTransfer): string[] {
+    const listRaw = dataTransfer.getData(ASSET_PATH_LIST_MIME);
+    if (listRaw) {
+      try {
+        const parsed: unknown = JSON.parse(listRaw);
+        if (Array.isArray(parsed)) {
+          const paths = parsed.filter(
+            (value): value is string => typeof value === 'string' && value.length > 0
+          );
+          if (paths.length > 0) {
+            return paths;
+          }
+        }
+      } catch {
+        // fall through to the single-path fallback
+      }
+    }
+
+    const plain = dataTransfer.getData('text/plain');
+    return plain ? [plain] : [];
+  }
+
+  /**
+   * Moves the dragged source paths into `targetDirPath` behind a single
+   * confirmation dialog, skipping no-op moves (items already in the target).
+   */
+  private async moveDroppedPaths(
+    dataTransfer: DataTransfer,
+    targetDirPath: string,
+    targetLabel: string
+  ): Promise<void> {
+    const targetDir = targetDirPath || '.';
+    const sourcePaths = this.getDroppedSourcePaths(dataTransfer).filter(sourcePath => {
+      if (!sourcePath || sourcePath === targetDir) {
+        return false;
+      }
+      // Skip items that already live directly in the target directory.
+      return this.getParentPath(sourcePath) !== targetDir;
+    });
+
+    if (sourcePaths.length === 0) {
       return;
     }
 
-    // Don't allow moving to root if already at root
-    const sourceParent = this.getParentPath(sourcePath);
-    if (sourceParent === '.' || sourceParent === '') {
-      return;
-    }
-
-    // Show confirmation dialog
-    const sourceName = sourcePath.split('/').pop() || sourcePath;
+    const message =
+      sourcePaths.length === 1
+        ? `Move "${sourcePaths[0].split('/').pop() || sourcePaths[0]}" to "${targetLabel}"?`
+        : `Move ${sourcePaths.length} items to "${targetLabel}"?`;
 
     try {
       const confirmed = await this.dialogService.showConfirmation({
-        title: 'Move to Root?',
-        message: `Move "${sourceName}" to the project root?`,
+        title: sourcePaths.length === 1 ? 'Move Item?' : 'Move Items?',
+        message,
         confirmLabel: 'Move',
         cancelLabel: 'Cancel',
         isDangerous: false,
       });
 
-      if (confirmed) {
-        await this.performMove(sourcePath, '.');
+      if (!confirmed) {
+        return;
+      }
+
+      for (const sourcePath of sourcePaths) {
+        await this.performMove(sourcePath, targetDir);
       }
     } catch (error) {
-      console.error('[AssetTree] Error during move to root operation:', error);
+      console.error('[AssetTree] Error during move operation:', error);
     }
   }
 
@@ -1239,31 +1471,11 @@ export class AssetTree extends ComponentBase {
       return;
     }
 
-    // Handle internal drag (existing logic)
-    const sourcePath = e.dataTransfer?.getData('text/plain');
-    if (!sourcePath || sourcePath === targetNode.path || targetNode.kind !== 'directory') {
+    // Handle internal drag — supports multi-path grid drags via the list MIME.
+    if (targetNode.kind !== 'directory' || !e.dataTransfer) {
       return;
     }
-
-    // Show confirmation dialog
-    const sourceName = sourcePath.split('/').pop() || sourcePath;
-    const targetName = targetNode.name;
-
-    try {
-      const confirmed = await this.dialogService.showConfirmation({
-        title: 'Move Item?',
-        message: `Move "${sourceName}" to "${targetName}"?`,
-        confirmLabel: 'Move',
-        cancelLabel: 'Cancel',
-        isDangerous: false,
-      });
-
-      if (confirmed) {
-        await this.performMove(sourcePath, targetNode.path);
-      }
-    } catch (error) {
-      console.error('[AssetTree] Error during move operation:', error);
-    }
+    await this.moveDroppedPaths(e.dataTransfer, targetNode.path, targetNode.name);
   }
 
   private async performMove(sourcePath: string, targetDirPath: string): Promise<void> {
@@ -1436,6 +1648,76 @@ export class AssetTree extends ComponentBase {
           ? html`<p class="empty">No assets</p>`
           : this.tree.map(n => this.renderNode(n))}
       </div>
+      ${this.renderContextMenu()}
+    </div>`;
+  }
+
+  // ── Row context menu (Rename / Delete) ───────────────────────────────────
+  private onNodeContextMenu(event: MouseEvent, node: Node): void {
+    // Virtual category rows and compacted grouped dirs can't be renamed/deleted.
+    if (node.nodeType === 'category' || this.isCompactedDirNode(node)) {
+      this.closeContextMenu();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.onSelect(node, { suppressRename: true });
+    this.contextMenu = { node, x: event.clientX, y: event.clientY };
+  }
+
+  private closeContextMenu(): void {
+    if (this.contextMenu) {
+      this.contextMenu = null;
+    }
+  }
+
+  private onContextRename(node: Node): void {
+    this.closeContextMenu();
+    void this.startRename(node.path);
+  }
+
+  private async onContextDelete(node: Node): Promise<void> {
+    this.closeContextMenu();
+    if (this.isReadOnly || isCategoryPath(node.path)) {
+      return;
+    }
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Delete Item?',
+      message: `Are you sure you want to delete ${node.name}?`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+    });
+    if (confirmed) {
+      await this.deleteEntry(node.path);
+    }
+  }
+
+  private renderContextMenu(): ReturnType<typeof html> {
+    // Always rendered (gated by `hidden`) so DropdownPortal can move/restore the same
+    // node cleanly — matches the content pane's context menu.
+    const node = this.contextMenu?.node ?? null;
+    return html`<div
+      class="tree-context-menu"
+      role="menu"
+      ?hidden=${!this.contextMenu}
+      @click=${(e: Event) => e.stopPropagation()}
+    >
+      ${node
+        ? html`
+            <button type="button" role="menuitem" @click=${() => this.onContextRename(node)}>
+              Rename
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="is-danger"
+              @click=${() => void this.onContextDelete(node)}
+            >
+              Delete
+            </button>
+          `
+        : null}
     </div>`;
   }
 

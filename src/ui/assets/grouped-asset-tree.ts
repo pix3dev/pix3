@@ -20,6 +20,13 @@ export type AssetTreeNode = {
   children?: AssetTreeNode[] | null; // null = not loaded yet, [] = loaded and empty
   expanded?: boolean;
   editing?: boolean;
+  /**
+   * Folder-mode directories only: whether the directory contains at least one
+   * subdirectory. Drives whether the expand triangle is shown (folders with no
+   * subfolders aren't expandable in the folders-only tree). Undefined in grouped
+   * mode, where expandability is derived from `children`.
+   */
+  hasChildDirectories?: boolean;
   /** Set on every grouped-view node; undefined in folder mode. */
   nodeType?: AssetTreeNodeType;
   categoryId?: AssetCategoryId;
@@ -61,6 +68,12 @@ export interface BuildGroupedTreeOptions {
   expandedKeys: ReadonlySet<string>;
   /** Expand all category rows (first use of the grouped view, nothing persisted yet). */
   defaultCategoryExpanded: boolean;
+  /**
+   * Emit file leaf nodes (default true). When false the folders-only Assets tree
+   * keeps files in the trie — so chain compaction, dir `sizeBytes`, and category
+   * `fileCount` are unchanged — but omits the file leaf nodes from the output.
+   */
+  includeFiles?: boolean;
 }
 
 const normalizeAssetPath = (path: string): string =>
@@ -112,6 +125,7 @@ export function buildGroupedTree(
     }
   }
 
+  const includeFiles = options.includeFiles ?? true;
   const tree: AssetTreeNode[] = [];
   for (const definition of ASSET_CATEGORIES) {
     const categoryFiles = filesByCategory.get(definition.id);
@@ -135,14 +149,22 @@ export function buildGroupedTree(
       current.files.push(file);
     }
 
-    let children = trieToNodes(root, definition.id, options.expandedKeys);
+    let children = trieToNodes(root, definition.id, options.expandedKeys, includeFiles);
     let folderLabel: string | undefined;
     let folderPath: string | undefined;
     // VS Code-style single-folder compaction: when a category holds exactly one
     // top-level folder and no loose files, drop that redundant intermediate level
     // and lift its content straight into the category row, surfacing the folder's
     // (already chain-compacted) path in parentheses on the category label.
-    if (children.length === 1 && children[0].nodeType === 'dir') {
+    // The loose-file check reads the trie (`root.files`), not `children`, so the
+    // decision is identical whether or not file leaf nodes are emitted
+    // (`includeFiles: false` in the folders-only tree).
+    if (
+      root.files.length === 0 &&
+      root.dirs.size === 1 &&
+      children.length === 1 &&
+      children[0].nodeType === 'dir'
+    ) {
       const [lone] = children;
       folderLabel = lone.name;
       folderPath = lone.path;
@@ -172,11 +194,18 @@ export function buildGroupedTree(
 function trieToNodes(
   dir: TrieDir,
   categoryId: AssetCategoryId,
-  expandedKeys: ReadonlySet<string>
+  expandedKeys: ReadonlySet<string>,
+  includeFiles: boolean
 ): AssetTreeNode[] {
   const dirNodes = Array.from(dir.dirs.values(), child =>
-    compactedDirNode(child, categoryId, expandedKeys)
+    compactedDirNode(child, categoryId, expandedKeys, includeFiles)
   );
+  dirNodes.sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!includeFiles) {
+    return dirNodes;
+  }
+
   const fileNodes = dir.files.map<AssetTreeNode>(file => ({
     name: file.name,
     path: file.path,
@@ -187,7 +216,6 @@ function trieToNodes(
     children: [],
   }));
 
-  dirNodes.sort((a, b) => a.name.localeCompare(b.name));
   fileNodes.sort((a, b) => a.name.localeCompare(b.name));
   return [...dirNodes, ...fileNodes];
 }
@@ -195,7 +223,8 @@ function trieToNodes(
 function compactedDirNode(
   dir: TrieDir,
   categoryId: AssetCategoryId,
-  expandedKeys: ReadonlySet<string>
+  expandedKeys: ReadonlySet<string>,
+  includeFiles: boolean
 ): AssetTreeNode {
   let current = dir;
   let label = dir.label;
@@ -213,7 +242,7 @@ function compactedDirNode(
     categoryId,
     sizeBytes: sumTrieSizes(current),
     expanded: expandedKeys.has(groupedDirectoryExpansionKey(categoryId, current.path)),
-    children: trieToNodes(current, categoryId, expandedKeys),
+    children: trieToNodes(current, categoryId, expandedKeys, includeFiles),
   };
 }
 

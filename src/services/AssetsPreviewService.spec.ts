@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState, resetAppState } from '@/state';
+import type { FileDescriptor } from '@/services/FileSystemAPIService';
 import type { AssetsPreviewSnapshot } from './AssetsPreviewService';
 
 const mockProjectService = {
@@ -223,11 +224,14 @@ describe('AssetsPreviewService', () => {
     const service = new AssetsPreviewService();
     try {
       await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(2));
-      expect(mockProjectService.listDirectory).toHaveBeenCalledTimes(1);
+      // Wait for the background folder-stats walk (an extra listDirectory) to settle.
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).not.toBeNull());
+      const callsAfterLoad = mockProjectService.listDirectory.mock.calls.length;
 
       await service.syncFromAssetSelection('notes.md', 'file');
 
-      expect(mockProjectService.listDirectory).toHaveBeenCalledTimes(1);
+      // Selecting a file already in the current folder must not reload the folder.
+      expect(mockProjectService.listDirectory).toHaveBeenCalledTimes(callsAfterLoad);
       expect(service.getSnapshot().selectedItemPath).toBe('notes.md');
       expect(service.getSnapshot().selectedItem?.path).toBe('notes.md');
     } finally {
@@ -257,6 +261,74 @@ describe('AssetsPreviewService', () => {
       expect(item.previewText).toContain('name: Example');
       expect(item.previewText).toContain('components:');
       expect(item.thumbnailStatus).toBe('ready');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('computes recursive folder stats after a folder loads', async () => {
+    mockProjectService.listDirectory.mockImplementation(async (path = '.') => {
+      if (path === '.') {
+        return [
+          { name: 'a.bin', path: 'a.bin', kind: 'file', size: 100 },
+          { name: 'sub', path: 'sub', kind: 'directory' },
+        ];
+      }
+      if (path === 'sub') {
+        return [{ name: 'b.bin', path: 'sub/b.bin', kind: 'file', size: 200 }];
+      }
+      return [];
+    });
+    mockProjectStorageService.readBlob.mockImplementation(async (path: string) =>
+      createFile(path, 'data', 'application/octet-stream', 7)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      // Root: a.bin (file) + sub (dir → b.bin) = 3 nested items, 300 bytes total.
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).toBe(3));
+      expect(service.getSnapshot().folderSizeBytes).toBe(300);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('version-guards folder stats against a newer folder selection', async () => {
+    const slow: { resolve: ((entries: FileDescriptor[]) => void) | null } = { resolve: null };
+    mockProjectService.listDirectory.mockImplementation(async (path = '.') => {
+      if (path === '.') {
+        return [{ name: 'slow', path: 'slow', kind: 'directory' }];
+      }
+      if (path === 'slow') {
+        // The root folder's stats walk hangs here until we release it.
+        return new Promise<FileDescriptor[]>(resolve => {
+          slow.resolve = resolve;
+        });
+      }
+      if (path === 'fast') {
+        return [{ name: 'x.bin', path: 'fast/x.bin', kind: 'file', size: 50 }];
+      }
+      return [];
+    });
+    mockProjectStorageService.readBlob.mockImplementation(async (path: string) =>
+      createFile(path, 'data', 'application/octet-stream', 7)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      // Wait until the (hanging) root stats walk has reached the `slow` directory.
+      await vi.waitFor(() => expect(slow.resolve).not.toBeNull());
+
+      // Advance the selection before the root stats resolve.
+      await service.syncFromAssetSelection('fast', 'directory');
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).toBe(1));
+      expect(service.getSnapshot().folderSizeBytes).toBe(50);
+
+      // Releasing the stale root walk must NOT clobber the newer folder's stats.
+      slow.resolve?.([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(service.getSnapshot().folderItemCount).toBe(1);
+      expect(service.getSnapshot().folderSizeBytes).toBe(50);
     } finally {
       service.dispose();
     }

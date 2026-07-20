@@ -1,0 +1,174 @@
+pix3-assets-panel {
+  display: block;
+  height: 100%;
+}
+
+pix3-assets-panel pix3-panel {
+  height: 100%;
+}
+
+/* ── Split layout: [tree pane] [splitter] [content pane] ─────────────────── */
+pix3-assets-panel .assets-split {
+  display: grid;
+  grid-template-columns: var(--assets-tree-width, 220px) 4px 1fr;
+  /* Constrain the single row to the container height (default `auto` rows size to
+     content, which lets tall content overflow and scroll BOTH panes together). */
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+/* Grid children must be allowed to shrink below content size so each pane owns its
+   own scroll (the folder tree and the content grid scroll independently). */
+pix3-assets-panel .assets-split > pix3-assets-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+pix3-assets-panel .assets-tree-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--line-1);
+  overflow: hidden;
+}
+
+pix3-assets-panel .assets-tree-pane pix3-asset-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ── Splitter handle ─────────────────────────────────────────────────────── */
+pix3-assets-panel .assets-splitter {
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+pix3-assets-panel .assets-splitter:hover {
+  background: var(--accent-line);
+}
+
+/* ── Sticky project-root row ─────────────────────────────────────────────── */
+pix3-assets-panel .tree-root-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 0.35rem 0 0.25rem;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--line-1);
+  cursor: pointer;
+  user-select: none;
+}
+
+pix3-assets-panel .tree-root-row:hover {
+  background: var(--bg-2);
+}
+
+pix3-assets-panel .tree-root-row.selected {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+
+pix3-assets-panel .tree-root-row.selected .icon.folder {
+  color: var(--accent);
+}
+
+pix3-assets-panel .tree-root-row .icon.folder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--fg-1);
+  flex-shrink: 0;
+}
+
+pix3-assets-panel .tree-root-row .icon.folder svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+pix3-assets-panel .tree-root-row .root-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+pix3-assets-panel .tree-root-row .root-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex: 0 0 auto;
+}
+
+/* Create dropdown sits inline on the root row: override the default 42x32 raised
+   box so it matches the transparent, same-height toggle button beside it. */
+pix3-assets-panel .root-actions .root-create {
+  width: auto;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.2rem;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-1);
+}
+
+pix3-assets-panel .root-actions .root-create:hover:not([disabled]) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-assets-panel .root-actions .root-create .dropdown__trigger {
+  gap: 0.1rem;
+}
+
+pix3-assets-panel .root-actions .root-create .dropdown__icon {
+  font-size: 1rem;
+}
+
+pix3-assets-panel .root-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+pix3-assets-panel .root-action-btn svg {
+  display: block;
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+pix3-assets-panel .root-action-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-assets-panel .root-action-btn.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-assets-panel .root-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

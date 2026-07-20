@@ -36,6 +36,12 @@
   --warn: oklch(0.82 0.15 80);
   --warn-soft: oklch(0.82 0.15 80 / 0.16);
 
+  /* Axis identity — transform/size fields, gizmo parity (X red · Y green · Z blue).
+     Width maps to X, height to Y. Consumed by pix3-number-field's axis chip. */
+  --axis-x: oklch(0.68 0.19 25);
+  --axis-y: oklch(0.76 0.17 145);
+  --axis-z: oklch(0.68 0.15 250);
+
   /* Presence (collaborator cursors/avatars) */
   --presence-1: oklch(0.8 0.15 75); /* amber (you) — matches --accent */
   --presence-2: oklch(0.74 0.16 30); /* coral */

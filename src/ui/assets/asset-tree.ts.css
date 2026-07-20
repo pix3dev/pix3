@@ -287,3 +287,50 @@ asset-tree {
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* Row context menu — rendered through DropdownPortal at document.body, so these
+   selectors are intentionally NOT scoped under the component element. */
+.tree-context-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 12rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
+}
+
+/* display:flex above beats the UA [hidden] rule, so re-assert it (see assets-content). */
+.tree-context-menu[hidden] {
+  display: none;
+}
+
+/* fixed => shrink-to-fit so DropdownPortal measures the content width. */
+.pix3-dropdown-portal .tree-context-menu {
+  position: fixed;
+}
+
+.tree-context-menu button[role='menuitem'] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-context-menu button[role='menuitem']:hover {
+  background: var(--accent-soft);
+}
+
+.tree-context-menu button[role='menuitem'].is-danger {
+  color: var(--danger);
+}

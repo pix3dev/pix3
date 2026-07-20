@@ -766,6 +766,26 @@ export class InspectorPanel extends ComponentBase {
     return `${componentId}:${propertyName}`;
   }
 
+  /**
+   * Scrub sensitivity (units per pixel) for a property's drag-to-scrub fields.
+   * Pixel-space transforms (position/size) scrub far faster than their small
+   * keyboard step; scale/opacity stay fine. `0` lets the field derive from step.
+   */
+  private getScrubSensitivity(prop: PropertyDefinition): number {
+    switch (prop.name) {
+      case 'position':
+      case 'width':
+      case 'height':
+        return 0.5;
+      case 'rotation':
+        return 0.5;
+      case 'scale':
+        return 0.01;
+      default:
+        return 0;
+    }
+  }
+
   private toTextureResourceValue(rawValue: unknown): TextureResourceValue {
     if (typeof rawValue === 'object' && rawValue !== null) {
       const value = rawValue as { type?: unknown; url?: unknown };
@@ -1430,36 +1450,30 @@ export class InspectorPanel extends ComponentBase {
             this.isPropertyOverriddenForPrimaryNode(widthProp)
           )}
           <div class="size-inline-editor">
-            <label class="size-inline-field">
-              <span class="size-inline-axis">W</span>
-              <input
-                type="number"
-                class="property-input property-input--number size-inline-input"
-                step=${widthProp.ui?.step ?? 1}
-                .value=${width.toFixed(widthProp.ui?.precision ?? 0)}
-                ?disabled=${readOnly}
-                @change=${(e: Event) =>
-                  this.applyGroup2DSizeChange(
-                    parseFloat((e.target as HTMLInputElement).value),
-                    height
-                  )}
-              />
-            </label>
-            <label class="size-inline-field">
-              <span class="size-inline-axis">H</span>
-              <input
-                type="number"
-                class="property-input property-input--number size-inline-input"
-                step=${heightProp.ui?.step ?? 1}
-                .value=${height.toFixed(heightProp.ui?.precision ?? 0)}
-                ?disabled=${readOnly}
-                @change=${(e: Event) =>
-                  this.applyGroup2DSizeChange(
-                    width,
-                    parseFloat((e.target as HTMLInputElement).value)
-                  )}
-              />
-            </label>
+            <pix3-number-field
+              axis="w"
+              class="size-inline-input"
+              .value=${width}
+              .step=${widthProp.ui?.step ?? 1}
+              .precision=${widthProp.ui?.precision ?? 0}
+              .min=${1}
+              .sensitivity=${0.5}
+              ?disabled=${readOnly}
+              @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                this.applyGroup2DSizeChange(e.detail.value, height)}
+            ></pix3-number-field>
+            <pix3-number-field
+              axis="h"
+              class="size-inline-input"
+              .value=${height}
+              .step=${heightProp.ui?.step ?? 1}
+              .precision=${heightProp.ui?.precision ?? 0}
+              .min=${1}
+              .sensitivity=${0.5}
+              ?disabled=${readOnly}
+              @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                this.applyGroup2DSizeChange(width, e.detail.value)}
+            ></pix3-number-field>
           </div>
           <button
             class="group-fit-button"
@@ -3082,18 +3096,18 @@ ${textPreview?.content || 'Empty file'}</pre
             isOverridden
           )}
           <div class="transform-single-axis-editor">
-            <span class="transform-single-axis-label transform-single-axis-label--z">Z</span>
-            <input
-              type="number"
-              step=${prop.ui?.step ?? 0.01}
-              class="property-input property-input--number ${state.isValid
-                ? ''
-                : 'property-input--invalid'}"
-              .value=${state.value}
+            <pix3-number-field
+              axis="z"
+              .value=${Number.parseFloat(state.value) || 0}
+              .step=${prop.ui?.step ?? 0.1}
+              .precision=${prop.ui?.precision ?? 1}
+              .sensitivity=${this.getScrubSensitivity(prop)}
               ?disabled=${readOnly}
-              @input=${(e: Event) => this.handlePropertyInput(prop.name, e)}
-              @blur=${(e: Event) => this.handlePropertyBlur(prop.name, e)}
-            />
+              @preview-change=${(e: CustomEvent<{ value: number }>) =>
+                this.previewPropertyChange(prop.name, e.detail.value)}
+              @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                this.commitPropertyChange(prop.name, e.detail.value)}
+            ></pix3-number-field>
           </div>
         </div>
       `;
@@ -3193,30 +3207,30 @@ ${textPreview?.content || 'Empty file'}</pre
             this.isPropertyOverriddenForPrimaryNode(widthProp)
           )}
           <div class="size-inline-editor">
-            <label class="size-inline-field">
-              <span class="size-inline-axis">W</span>
-              <input
-                type="number"
-                class="property-input property-input--number size-inline-input"
-                step=${widthProp.ui?.step ?? 1}
-                .value=${width.toFixed(widthProp.ui?.precision ?? 0)}
-                ?disabled=${readOnly}
-                @change=${(e: Event) =>
-                  handleWidthChange(parseFloat((e.target as HTMLInputElement).value))}
-              />
-            </label>
-            <label class="size-inline-field">
-              <span class="size-inline-axis">H</span>
-              <input
-                type="number"
-                class="property-input property-input--number size-inline-input"
-                step=${heightProp.ui?.step ?? 1}
-                .value=${height.toFixed(heightProp.ui?.precision ?? 0)}
-                ?disabled=${readOnly}
-                @change=${(e: Event) =>
-                  handleHeightChange(parseFloat((e.target as HTMLInputElement).value))}
-              />
-            </label>
+            <pix3-number-field
+              axis="w"
+              class="size-inline-input"
+              .value=${width}
+              .step=${widthProp.ui?.step ?? 1}
+              .precision=${widthProp.ui?.precision ?? 0}
+              .min=${1}
+              .sensitivity=${0.5}
+              ?disabled=${readOnly}
+              @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                handleWidthChange(e.detail.value)}
+            ></pix3-number-field>
+            <pix3-number-field
+              axis="h"
+              class="size-inline-input"
+              .value=${height}
+              .step=${heightProp.ui?.step ?? 1}
+              .precision=${heightProp.ui?.precision ?? 0}
+              .min=${1}
+              .sensitivity=${0.5}
+              ?disabled=${readOnly}
+              @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                handleHeightChange(e.detail.value)}
+            ></pix3-number-field>
             ${widthProp.ui?.unit || heightProp.ui?.unit
               ? html`
                   <span class="size-inline-unit">${widthProp.ui?.unit ?? heightProp.ui?.unit}</span>
@@ -3387,11 +3401,14 @@ ${textPreview?.content || 'Empty file'}</pre
           <pix3-vector2-editor
             .x=${value.x}
             .y=${value.y}
-            step=${prop.ui?.step ?? 0.01}
-            precision=${prop.ui?.precision ?? 2}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .sensitivity=${this.getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) =>
-              this.applyComponentPropertyChange(component.id, prop, e.detail)}
+            @preview-change=${(e: CustomEvent) =>
+              this.previewComponentPropertyChange(component.id, prop, e.detail)}
+            @commit-change=${(e: CustomEvent) =>
+              this.commitComponentPropertyChange(component.id, prop, e.detail)}
           ></pix3-vector2-editor>
         </div>
       `;
@@ -3411,11 +3428,14 @@ ${textPreview?.content || 'Empty file'}</pre
             .x=${value.x}
             .y=${value.y}
             .z=${value.z}
-            step=${prop.ui?.step ?? 0.01}
-            precision=${prop.ui?.precision ?? 2}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .sensitivity=${this.getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) =>
-              this.applyComponentPropertyChange(component.id, prop, e.detail)}
+            @preview-change=${(e: CustomEvent) =>
+              this.previewComponentPropertyChange(component.id, prop, e.detail)}
+            @commit-change=${(e: CustomEvent) =>
+              this.commitComponentPropertyChange(component.id, prop, e.detail)}
           ></pix3-vector3-editor>
         </div>
       `;
@@ -3435,11 +3455,13 @@ ${textPreview?.content || 'Empty file'}</pre
             .x=${value.x}
             .y=${value.y}
             .z=${value.z}
-            step=${prop.ui?.step ?? 0.1}
-            precision=${prop.ui?.precision ?? 1}
+            .step=${prop.ui?.step ?? 0.1}
+            .precision=${prop.ui?.precision ?? 1}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) =>
-              this.applyComponentPropertyChange(component.id, prop, e.detail)}
+            @preview-change=${(e: CustomEvent) =>
+              this.previewComponentPropertyChange(component.id, prop, e.detail)}
+            @commit-change=${(e: CustomEvent) =>
+              this.commitComponentPropertyChange(component.id, prop, e.detail)}
           ></pix3-euler-editor>
         </div>
       `;
@@ -3870,10 +3892,12 @@ ${textPreview?.content || 'Empty file'}</pre
           <pix3-vector2-editor
             .x=${value.x}
             .y=${value.y}
-            step=${prop.ui?.step ?? 0.01}
-            precision=${prop.ui?.precision ?? 2}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .sensitivity=${this.getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) => this.applyPropertyChange(prop.name, e.detail)}
+            @preview-change=${(e: CustomEvent) => this.previewPropertyChange(prop.name, e.detail)}
+            @commit-change=${(e: CustomEvent) => this.commitPropertyChange(prop.name, e.detail)}
           ></pix3-vector2-editor>
         </div>
       `;
@@ -3893,10 +3917,12 @@ ${textPreview?.content || 'Empty file'}</pre
             .x=${value.x}
             .y=${value.y}
             .z=${value.z}
-            step=${prop.ui?.step ?? 0.01}
-            precision=${prop.ui?.precision ?? 2}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .sensitivity=${this.getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) => this.applyPropertyChange(prop.name, e.detail)}
+            @preview-change=${(e: CustomEvent) => this.previewPropertyChange(prop.name, e.detail)}
+            @commit-change=${(e: CustomEvent) => this.commitPropertyChange(prop.name, e.detail)}
           ></pix3-vector3-editor>
         </div>
       `;
@@ -3916,10 +3942,11 @@ ${textPreview?.content || 'Empty file'}</pre
             .x=${value.x}
             .y=${value.y}
             .z=${value.z}
-            step=${prop.ui?.step ?? 0.1}
-            precision=${prop.ui?.precision ?? 1}
+            .step=${prop.ui?.step ?? 0.1}
+            .precision=${prop.ui?.precision ?? 1}
             ?disabled=${readOnly}
-            @change=${(e: CustomEvent) => this.applyPropertyChange(prop.name, e.detail)}
+            @preview-change=${(e: CustomEvent) => this.previewPropertyChange(prop.name, e.detail)}
+            @commit-change=${(e: CustomEvent) => this.commitPropertyChange(prop.name, e.detail)}
           ></pix3-euler-editor>
         </div>
       `;

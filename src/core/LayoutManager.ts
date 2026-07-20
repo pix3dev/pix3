@@ -15,8 +15,7 @@ const PANEL_COMPONENT_TYPES = {
   viewport: 'viewport',
   inspector: 'inspector',
   profiler: 'profiler',
-  assetBrowser: 'asset-browser',
-  assetsPreview: 'assets-preview',
+  assets: 'assets',
   animation: 'animation',
   animationTimeline: 'animation-timeline',
   logs: 'logs',
@@ -37,8 +36,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.viewport]: 'pix3-editor-tab',
   [PANEL_COMPONENT_TYPES.inspector]: 'pix3-inspector-panel',
   [PANEL_COMPONENT_TYPES.profiler]: 'pix3-profiler-panel',
-  [PANEL_COMPONENT_TYPES.assetBrowser]: 'pix3-asset-browser-panel',
-  [PANEL_COMPONENT_TYPES.assetsPreview]: 'pix3-assets-preview-panel',
+  [PANEL_COMPONENT_TYPES.assets]: 'pix3-assets-panel',
   [PANEL_COMPONENT_TYPES.animation]: 'pix3-animation-panel',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'pix3-animation-timeline-panel',
   [PANEL_COMPONENT_TYPES.logs]: 'pix3-logs-panel',
@@ -57,8 +55,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.viewport]: 'Viewport',
   [PANEL_COMPONENT_TYPES.inspector]: 'Inspector',
   [PANEL_COMPONENT_TYPES.profiler]: 'Profiler',
-  [PANEL_COMPONENT_TYPES.assetBrowser]: 'Asset Browser',
-  [PANEL_COMPONENT_TYPES.assetsPreview]: 'Assets Preview',
+  [PANEL_COMPONENT_TYPES.assets]: 'Assets',
   [PANEL_COMPONENT_TYPES.animation]: 'Sprite Animation',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'Animation',
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
@@ -77,8 +74,7 @@ const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   viewport: true,
   inspector: true,
   profiler: true,
-  assetBrowser: true,
-  assetsPreview: true,
+  assets: true,
   animation: false,
   animationTimeline: true,
   logs: true,
@@ -127,12 +123,6 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
             content: [
               {
                 type: 'component',
-                componentType: PANEL_COMPONENT_TYPES.assetBrowser,
-                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assetBrowser],
-                isClosable: false,
-              },
-              {
-                type: 'component',
                 componentType: PANEL_COMPONENT_TYPES.library,
                 title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library],
                 isClosable: false,
@@ -164,8 +154,8 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
             content: [
               {
                 type: 'component',
-                componentType: PANEL_COMPONENT_TYPES.assetsPreview,
-                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assetsPreview],
+                componentType: PANEL_COMPONENT_TYPES.assets,
+                title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.assets],
                 isClosable: false,
               },
               {
@@ -848,8 +838,7 @@ export class LayoutManagerService {
         previousPanelVisibility.viewport === nextPanelVisibility.viewport &&
         previousPanelVisibility.inspector === nextPanelVisibility.inspector &&
         previousPanelVisibility.profiler === nextPanelVisibility.profiler &&
-        previousPanelVisibility.assetBrowser === nextPanelVisibility.assetBrowser &&
-        previousPanelVisibility.assetsPreview === nextPanelVisibility.assetsPreview &&
+        previousPanelVisibility.assets === nextPanelVisibility.assets &&
         previousPanelVisibility.animation === nextPanelVisibility.animation &&
         previousPanelVisibility.animationTimeline === nextPanelVisibility.animationTimeline &&
         previousPanelVisibility.logs === nextPanelVisibility.logs
@@ -906,6 +895,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.localization) {
           void import('@/ui/localization-view/localization-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.assets) {
+          void import('@/ui/assets/assets-panel');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;

@@ -42,7 +42,7 @@ container
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';
-import './ui/assets-browser/asset-browser-panel';
+import './ui/assets/assets-panel';
 import './ui/pix3-editor-shell';
 
 // Dev-only debugging bridge for external tooling (Chrome DevTools / MCP).

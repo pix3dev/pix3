@@ -7,6 +7,7 @@ import { resolveThumbnailCacheService } from './ThumbnailCacheService';
 import { resolveThumbnailGenerator } from './ThumbnailGenerator';
 import { resolveSceneThumbnailGenerator } from './SceneThumbnailGenerator';
 import { analyzeAudioBlob } from './audio-preview-utils';
+import { computeDirectoryStats } from './asset-folder-stats';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
@@ -66,6 +67,10 @@ export interface AssetsPreviewSnapshot {
   readonly selectedItemPath: string | null;
   readonly selectedItem: AssetPreviewItem | null;
   readonly items: readonly AssetPreviewItem[];
+  /** Recursive nested-item count of the selected folder; null while loading / none. */
+  readonly folderItemCount: number | null;
+  /** Recursive nested byte size of the selected folder; null while loading / none. */
+  readonly folderSizeBytes: number | null;
 }
 
 type AssetsPreviewListener = (snapshot: AssetsPreviewSnapshot) => void;
@@ -90,6 +95,8 @@ export class AssetsPreviewService {
     selectedItemPath: string | null;
     selectedItem: AssetPreviewItem | null;
     items: AssetPreviewItem[];
+    folderItemCount: number | null;
+    folderSizeBytes: number | null;
   } = {
     selectedFolderPath: null,
     displayPath: 'res://',
@@ -98,6 +105,8 @@ export class AssetsPreviewService {
     selectedItemPath: null,
     selectedItem: null,
     items: [],
+    folderItemCount: null,
+    folderSizeBytes: null,
   };
 
   private requestVersion = 0;
@@ -126,6 +135,8 @@ export class AssetsPreviewService {
       selectedItemPath: this.state.selectedItemPath,
       selectedItem: this.state.selectedItem,
       items: this.state.items,
+      folderItemCount: this.state.folderItemCount,
+      folderSizeBytes: this.state.folderSizeBytes,
     };
   }
 
@@ -223,6 +234,8 @@ export class AssetsPreviewService {
       this.state.selectedItem = null;
       this.state.items = [];
       this.state.isLoading = false;
+      this.state.folderItemCount = null;
+      this.state.folderSizeBytes = null;
       this.notify();
       return;
     }
@@ -269,6 +282,8 @@ export class AssetsPreviewService {
     const requestVersion = ++this.requestVersion;
     this.state.isLoading = true;
     this.state.errorMessage = null;
+    this.state.folderItemCount = null;
+    this.state.folderSizeBytes = null;
     this.notify();
 
     try {
@@ -309,6 +324,7 @@ export class AssetsPreviewService {
       this.state.errorMessage = null;
       this.notify();
       this.enqueueMissingModelThumbnails(items, requestVersion);
+      void this.computeFolderStats(folderPath, requestVersion);
     } catch (error) {
       if (requestVersion !== this.requestVersion) {
         return;
@@ -325,6 +341,30 @@ export class AssetsPreviewService {
         this.state.isLoading = false;
       }
       this.notify();
+    }
+  }
+
+  /**
+   * Recursively totals the selected folder's nested size + item count and
+   * publishes them. Version-guarded the same way as {@link loadFolder}: if the
+   * selection advanced (a newer `requestVersion` exists) before the walk
+   * resolves, the stale result is discarded.
+   */
+  private async computeFolderStats(folderPath: string, requestVersion: number): Promise<void> {
+    if (requestVersion !== this.requestVersion) {
+      return;
+    }
+
+    try {
+      const stats = await computeDirectoryStats(this.projectService, folderPath);
+      if (requestVersion !== this.requestVersion) {
+        return;
+      }
+      this.state.folderItemCount = stats.itemCount;
+      this.state.folderSizeBytes = stats.sizeBytes;
+      this.notify();
+    } catch {
+      // Leave the stats null on failure; the folder view still functions.
     }
   }
 

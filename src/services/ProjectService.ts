@@ -42,6 +42,12 @@ export interface AssetBrowserPersistedState {
   selectedPath: string | null;
   viewMode: AssetBrowserViewMode;
   groupedExpandedKeys: string[];
+  /** Assets content-pane thumbnail tile size in px. */
+  thumbnailSize?: number;
+  /** Assets content-pane layout: thumbnail grid or details list. */
+  contentView?: 'grid' | 'list';
+  /** Width in px of the unified Assets panel's folder-tree pane (Phase 4). */
+  treePaneWidth?: number;
 }
 
 export interface RecentProjectEntry {
@@ -138,6 +144,9 @@ export class ProjectService {
           patch.selectedPath !== undefined ? patch.selectedPath : (current?.selectedPath ?? null),
         viewMode: patch.viewMode ?? current?.viewMode ?? 'folders',
         groupedExpandedKeys: patch.groupedExpandedKeys ?? current?.groupedExpandedKeys ?? [],
+        thumbnailSize: patch.thumbnailSize ?? current?.thumbnailSize ?? 104,
+        contentView: patch.contentView ?? current?.contentView ?? 'grid',
+        treePaneWidth: patch.treePaneWidth ?? current?.treePaneWidth,
         savedAt: Date.now(),
       };
       localStorage.setItem(key, JSON.stringify(state));
@@ -171,6 +180,15 @@ export class ProjectService {
               (entry: unknown): entry is string => typeof entry === 'string'
             )
           : [],
+        thumbnailSize:
+          typeof parsed.thumbnailSize === 'number' && Number.isFinite(parsed.thumbnailSize)
+            ? parsed.thumbnailSize
+            : 104,
+        contentView: parsed.contentView === 'list' ? 'list' : 'grid',
+        treePaneWidth:
+          typeof parsed.treePaneWidth === 'number' && Number.isFinite(parsed.treePaneWidth)
+            ? parsed.treePaneWidth
+            : undefined,
       };
     } catch {
       return null;

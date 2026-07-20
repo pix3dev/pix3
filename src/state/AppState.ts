@@ -213,6 +213,10 @@ export interface ProjectState {
   assetBrowserViewMode: AssetBrowserViewMode;
   /** Asset browser expanded keys for the "group by type" view (persisted per project). */
   assetBrowserGroupedExpandedKeys: string[];
+  /** Assets content-pane thumbnail tile size in px (persisted per project). */
+  assetsThumbnailSize: number;
+  /** Assets content-pane layout: thumbnail grid or details list (persisted per project). */
+  assetsContentView: 'grid' | 'list';
   /** Current status of script compilation and loading. */
   scriptsStatus: ScriptLoadStatus;
   /** Signal counter incremented when project files change (triggers asset explorer refresh). */
@@ -265,8 +269,7 @@ export interface PanelVisibilityState {
   viewport: boolean;
   inspector: boolean;
   profiler: boolean;
-  assetBrowser: boolean;
-  assetsPreview: boolean;
+  assets: boolean;
   animation: boolean;
   animationTimeline: boolean;
   logs: boolean;
@@ -518,6 +521,8 @@ export const createInitialAppState = (): AppState => ({
     assetBrowserSelectedPath: null,
     assetBrowserViewMode: 'folders',
     assetBrowserGroupedExpandedKeys: [],
+    assetsThumbnailSize: 104,
+    assetsContentView: 'grid',
     scriptsStatus: 'idle',
     fileRefreshSignal: 0,
     scriptRefreshSignal: 0,
@@ -572,8 +577,7 @@ export const createInitialAppState = (): AppState => ({
       viewport: true,
       inspector: true,
       profiler: true,
-      assetBrowser: true,
-      assetsPreview: true,
+      assets: true,
       animation: true,
       animationTimeline: true,
       logs: true,
