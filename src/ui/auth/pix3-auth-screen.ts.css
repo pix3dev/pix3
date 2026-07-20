@@ -13,6 +13,7 @@ pix3-auth-screen {
   height: 100%;
   z-index: var(--pix3-z-overlay);
   pointer-events: auto;
+  background-color: var(--bg-0);
   background-image: url('/splash.jpg');
   background-size: cover;
   background-position: center;
@@ -24,19 +25,19 @@ pix3-auth-screen {
 }
 .auth-card {
   position: relative;
-  background: rgba(24, 28, 34, 0.85);
+  background: var(--bg-1);
   padding: 2.5rem 2rem;
-  border-radius: 1rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-3);
   max-width: 24rem;
   width: 100%;
-  color: #f7fafc;
+  color: var(--fg-0);
   text-align: center;
-  backdrop-filter: blur(8px);
 }
 .auth-root--modal .auth-card {
   max-width: 26rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-float);
 }
 .auth-logo {
   max-width: 160px;
@@ -60,35 +61,35 @@ pix3-auth-screen {
   flex-direction: column;
   gap: 0.3rem;
   font-size: 0.85rem;
-  color: #a0aec0;
+  color: var(--fg-2);
 }
 .auth-form input {
   padding: 0.55rem 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 0.4rem;
-  background: rgba(255, 255, 255, 0.07);
-  color: #f7fafc;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font-size: 0.9rem;
   outline: none;
   transition: border-color 0.15s;
 }
 .auth-form input:focus {
-  border-color: var(--pix3-accent, #5b9aff);
+  border-color: var(--accent-line);
 }
 .auth-error {
-  color: #fc8181;
+  color: var(--danger);
   font-size: 0.85rem;
   text-align: center;
 }
 .auth-submit {
   padding: 0.6rem;
-  background: var(--pix3-accent, #5b9aff);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-fg);
   border: none;
-  border-radius: 0.4rem;
+  border-radius: var(--radius-2);
   cursor: pointer;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   transition: opacity 0.15s;
 }
 .auth-submit:hover {
@@ -102,13 +103,13 @@ pix3-auth-screen {
   margin-top: 1rem;
   background: none;
   border: none;
-  color: #a0aec0;
+  color: var(--fg-2);
   cursor: pointer;
   font-size: 0.8rem;
   text-decoration: underline;
 }
 .auth-toggle:hover {
-  color: #f7fafc;
+  color: var(--fg-0);
 }
 .auth-close {
   position: absolute;
@@ -119,12 +120,13 @@ pix3-auth-screen {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(247, 250, 252, 0.82);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--fg-1);
   cursor: pointer;
 }
 .auth-close:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }

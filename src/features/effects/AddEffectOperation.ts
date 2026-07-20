@@ -1,5 +1,6 @@
 /**
- * AddEffectOperation - attach a shader effect to a GeometryMesh.
+ * AddEffectOperation - attach a shader effect to any shader-effect host node
+ * (GeometryMesh, Sprite2D, AnimatedSprite2D, Button2D, ...).
  */
 import type {
   Operation,
@@ -7,7 +8,7 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { SceneManager, GeometryMesh } from '@pix3/runtime';
+import { SceneManager, isShaderEffectHost } from '@pix3/runtime';
 
 export interface AddEffectParams {
   nodeId: string;
@@ -42,14 +43,17 @@ export class AddEffectOperation implements Operation<OperationInvokeResult> {
     }
 
     const node = scene.nodeMap.get(this.params.nodeId);
-    if (!(node instanceof GeometryMesh)) {
-      console.error(`[AddEffectOperation] Node "${this.params.nodeId}" is not a GeometryMesh`);
+    if (!node || !isShaderEffectHost(node)) {
+      console.error(
+        `[AddEffectOperation] Node "${this.params.nodeId}" does not host shader effects`
+      );
       return { didMutate: false };
     }
 
-    const attached = node.attachEffect(this.params.effectType);
+    const stack = node.getShaderEffectStack();
+    const attached = stack.attach(this.params.effectType);
     if (!attached) {
-      // Already attached (one-per-type) or unknown type.
+      // Already attached (one-per-type), unknown type, or unsupported target.
       return { didMutate: false };
     }
 
@@ -67,11 +71,11 @@ export class AddEffectOperation implements Operation<OperationInvokeResult> {
       commit: {
         label: `Add Effect ${this.params.effectType}`,
         undo: async () => {
-          node.detachEffect(this.params.effectType);
+          stack.detach(this.params.effectType);
           markDirty();
         },
         redo: async () => {
-          node.attachEffect(this.params.effectType);
+          stack.attach(this.params.effectType);
           markDirty();
         },
       },

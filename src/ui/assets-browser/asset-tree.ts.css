@@ -11,7 +11,7 @@ asset-tree {
   padding-right: 0;
   box-sizing: border-box;
   font-size: 0.75rem;
-  color: rgba(245, 247, 250, 0.88);
+  color: var(--fg-1);
 }
 
 .tree-node {
@@ -19,7 +19,7 @@ asset-tree {
 }
 
 .node-children {
-  padding-inline-start: 1rem;
+  padding-inline-start: 14px;
   margin-top: 0.08rem;
   margin-bottom: 0.12rem;
   margin-left: 0;
@@ -30,11 +30,15 @@ asset-tree {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.08rem 0.18rem;
-  border-radius: 0.15rem;
+  min-height: 26px;
+  padding: 0 0.18rem;
+  border-left: 2px solid transparent;
   cursor: pointer;
   user-select: none;
   min-width: 0;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .icon {
@@ -45,7 +49,7 @@ asset-tree {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(245, 247, 250, 0.9);
+  color: var(--fg-2);
   flex-shrink: 0;
 }
 
@@ -56,34 +60,39 @@ asset-tree {
 }
 
 .icon.folder {
-  /* Windows Explorer like folder yellow */
-  color: #f2c94c;
+  color: var(--fg-1);
 }
 
 /* .icon.folder svg path left intentionally empty to allow future fine-tuning of folder svg strokes */
 
 .node-row:hover {
-  background: rgba(56, 62, 74, 0.18);
+  background: var(--bg-2);
 }
 
 .node-row:focus-visible {
-  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
-  outline-offset: 1px;
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .node-row.selected {
-  background: rgba(var(--pix3-accent-rgb), 0.25);
-  outline: 1px solid rgba(var(--pix3-accent-rgb), 0.4);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+
+.node-row.selected .icon {
+  color: var(--accent);
 }
 
 .node-row.drag-over {
-  background: rgba(76, 175, 80, 0.2);
-  outline: 2px solid rgba(76, 175, 80, 0.5);
+  background: var(--accent-soft);
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
 }
 
 .tree.drag-over-root {
-  background: rgba(76, 175, 80, 0.1);
-  outline: 2px dashed rgba(76, 175, 80, 0.4);
+  background: var(--accent-soft);
+  outline: 2px dashed var(--accent-line);
   outline-offset: -2px;
 }
 
@@ -97,7 +106,7 @@ asset-tree {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(245, 247, 250, 0.45);
+  color: var(--fg-3);
   font-size: 0.68rem;
   line-height: 1;
   font: inherit;
@@ -120,18 +129,18 @@ asset-tree {
 }
 
 .expander--button:hover {
-  color: rgba(245, 247, 250, 0.7);
+  color: var(--fg-1);
 }
 
 .expander--button:focus-visible {
-  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.8);
-  border-radius: 0.35rem;
+  outline: 2px solid var(--accent);
+  border-radius: var(--radius-1);
 }
 
 .node-name {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: inherit;
+  font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -140,8 +149,8 @@ asset-tree {
 }
 
 .node-meta {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.7rem;
+  color: var(--fg-3);
+  font-size: 10.5px;
   margin-left: 0.5rem;
   flex: 0 0 auto;
 }
@@ -160,26 +169,26 @@ asset-tree {
 
 /* Path of a lone folder lifted into its category row, e.g. Images (textures) */
 .node-name-suffix {
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
   font-weight: 400;
   letter-spacing: normal;
 }
 
 .icon.category {
-  color: rgba(var(--pix3-accent-rgb), 0.8);
+  color: var(--accent);
 }
 
 .node-count {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
   border-radius: 999px;
   padding: 0 0.45em;
-  font-size: 0.65rem;
+  font-size: 11px;
   line-height: 1.4;
 }
 
 .empty {
   margin: 0;
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
   font-style: italic;
   padding: 0.5rem 0.25rem;
 }
@@ -196,8 +205,8 @@ asset-tree {
   gap: 0.4rem;
   align-items: center;
   padding: 0.25rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
+  border-bottom: 1px solid var(--line-1);
+  background: transparent;
   box-sizing: border-box;
   width: 100%;
 }
@@ -205,19 +214,23 @@ asset-tree {
 .tb-btn {
   background: none;
   border: none;
-  color: inherit;
+  color: var(--fg-1);
   width: 28px;
   height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .tb-btn:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .tb-dropdown {
@@ -248,11 +261,11 @@ asset-tree {
   position: absolute;
   top: 34px;
   left: 0;
-  background: #15171a;
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
   padding: 0.25rem;
-  border-radius: 6px;
+  border-radius: var(--radius-3);
   min-width: 120px;
   z-index: 10;
 }
@@ -262,14 +275,15 @@ asset-tree {
   width: 100%;
   background: none;
   border: none;
-  color: rgba(245, 247, 250, 0.95);
+  color: var(--fg-0);
   text-align: left;
   padding: 0.35rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   cursor: pointer;
   font-size: 0.75rem;
 }
 
 .menu-item:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--accent-soft);
+  color: var(--accent);
 }

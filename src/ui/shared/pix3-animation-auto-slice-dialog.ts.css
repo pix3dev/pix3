@@ -4,8 +4,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 10, 16, 0.7);
-  backdrop-filter: blur(6px);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   z-index: 1200;
 }
 
@@ -14,11 +14,11 @@
   max-height: calc(100vh - 2rem);
   overflow: auto;
   padding: 1.1rem;
-  border-radius: 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #16191f;
-  color: #eceff4;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
 }
 
 .dialog-title {
@@ -28,7 +28,7 @@
 
 .dialog-copy {
   margin: 0 0 1rem;
-  color: #b8c0cc;
+  color: var(--fg-1);
   line-height: 1.5;
 }
 
@@ -38,15 +38,15 @@
 
 .dialog-copy--path {
   margin-bottom: 0;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
 .dialog-highlight {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
-  color: #ffcf33;
+  color: var(--accent);
 }
 
 .dialog-layout {
@@ -76,29 +76,31 @@
   min-height: 2rem;
   padding: 0 0.75rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
   font-size: 0.78rem;
-  color: #c8d0dc;
+  color: var(--fg-1);
 }
 
 .preview-surface {
   position: relative;
   min-height: 20rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-2);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%), #10141b;
-  background-size: 16px 16px;
+  border: 1px solid var(--line-1);
+  /* transparency checkerboard (matches global .checker) */
+  background-image:
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
   background-position:
     0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
 }
 
 .preview-image {
@@ -115,18 +117,8 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(
-      to right,
-      rgba(255, 207, 51, 0.78) 0,
-      rgba(255, 207, 51, 0.78) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      rgba(255, 207, 51, 0.78) 0,
-      rgba(255, 207, 51, 0.78) 1px,
-      transparent 1px
-    );
+    linear-gradient(to right, var(--accent) 0, var(--accent) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--accent) 0, var(--accent) 1px, transparent 1px);
   background-size:
     calc(100% / var(--slice-columns)) 100%,
     100% calc(100% / var(--slice-rows));
@@ -139,7 +131,7 @@
   min-height: 20rem;
   padding: 1rem;
   text-align: center;
-  color: #94a0b2;
+  color: var(--fg-2);
 }
 
 .form-grid {
@@ -157,28 +149,28 @@
 
 .field label {
   font-size: 0.8rem;
-  color: #b8c0cc;
+  color: var(--fg-2);
 }
 
 .field input {
   width: 100%;
   min-width: 0;
   padding: 0.55rem 0.65rem;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #0f1318;
-  color: #eceff4;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .field input:focus {
   outline: none;
-  border-color: #ffcf33;
+  border-color: var(--accent);
 }
 
 .dialog-note {
   margin: 0 0 1rem;
   font-size: 0.8rem;
-  color: #94a0b2;
+  color: var(--fg-2);
 }
 
 .preview-stats-grid {
@@ -192,14 +184,14 @@
   flex-direction: column;
   gap: 0.2rem;
   padding: 0.75rem;
-  border-radius: 0.55rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
 }
 
 .stats-label {
   font-size: 0.74rem;
-  color: #94a0b2;
+  color: var(--fg-2);
 }
 
 .dialog-actions {
@@ -211,20 +203,20 @@
 .btn-secondary,
 .btn-primary {
   padding: 0.55rem 0.8rem;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
   cursor: pointer;
 }
 
 .btn-secondary {
-  background: #0f1318;
-  color: #d8dee9;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .btn-primary {
-  background: #ffcf33;
-  color: #171a20;
-  border-color: #ffcf33;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
   font-weight: 600;
 }
 

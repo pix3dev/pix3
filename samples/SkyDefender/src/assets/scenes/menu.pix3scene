@@ -1,6 +1,3 @@
-# Sky Defender — Main Menu (M0)
-# Floating-islands sky (recovered from the original SWF), drifting clouds,
-# Campaign / Survival selectors. Entry scene of the game flow.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
@@ -16,6 +13,10 @@ root:
         enabled: true
         horizontalAlign: stretch
         verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
     components:
       - id: menu-controller
         type: user:MenuController
@@ -28,7 +29,9 @@ root:
         type: Sprite2D
         name: Sky Background
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/menu_bg.jpg' }
+          texture:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/menu_bg.jpg
           width: 1920
           height: 1440
           transform:
@@ -59,7 +62,9 @@ root:
             type: Sprite2D
             name: Cloud B1
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud3.png' }
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/cloud3.png
               width: 620
               height: 280
               opacity: 0.9
@@ -72,7 +77,9 @@ root:
             type: Sprite2D
             name: Cloud B2
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud5.png' }
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/cloud5.png
               width: 500
               height: 230
               opacity: 0.85
@@ -85,7 +92,9 @@ root:
             type: Sprite2D
             name: Cloud B3
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud7.png' }
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/cloud7.png
               width: 660
               height: 300
               opacity: 0.9
@@ -117,7 +126,9 @@ root:
             type: Sprite2D
             name: Cloud F1
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/clouds_firstplane.png' }
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/clouds_firstplane.png
               width: 1150
               height: 560
               opacity: 0.75
@@ -130,7 +141,9 @@ root:
             type: Sprite2D
             name: Cloud F2
             properties:
-              texture: { type: 'texture', url: 'res://src/assets/textures/backgrounds/level_0/cloud1.png' }
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/cloud1.png
               width: 780
               height: 380
               opacity: 0.6
@@ -143,7 +156,9 @@ root:
         type: Sprite2D
         name: Logo
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/logo.png' }
+          texture:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/logo.png
           width: 630
           height: 84
           transform:
@@ -155,58 +170,111 @@ root:
         type: Button2D
         name: Campaign Button
         properties:
-          label: ''
+          label: ""
           width: 376
           height: 310
-          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign_dark.png' }
-          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
-          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/campaign.png' }
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/campaign.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/campaign.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/campaign.png
           buttonAction: campaign
           transform:
             position: [-270, -120]
             scale: [1, 1]
             rotation: 0
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
+          effects:
+            - type: core:adjust
+              enabled: true
+              params:
+                brightness: 0.65
+        components:
+          - id: campaign-hover-fx
+            type: user:HoverBrightness
+            enabled: true
+            config:
+              dimBrightness: "0.3"
+              hoverBrightness: 1
+              fadeSpeed: 10
         children: []
       - id: survival-button
         type: Button2D
         name: Survival Button
         properties:
-          label: ''
+          label: ""
           width: 376
           height: 310
-          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival_dark.png' }
-          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
-          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/mmenu/survival.png' }
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/survival.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/survival.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/mmenu/survival.png
           buttonAction: survival
           transform:
             position: [270, -120]
             scale: [1, 1]
             rotation: 0
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
+          effects:
+            - type: core:adjust
+              enabled: true
+              params:
+                brightness: 0.65
+        components:
+          - id: survival-hover-fx
+            type: user:HoverBrightness
+            enabled: true
+            config:
+              dimBrightness: "0.3"
+              hoverBrightness: 1
+              fadeSpeed: 10
         children: []
       - id: continue-button
         type: Button2D
         name: Continue Button
         properties:
-          label: ''
+          label: ""
           width: 244
           height: 100
-          textureNormal: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue.png' }
-          textureHover: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue_o.png' }
-          texturePressed: { type: 'texture', url: 'res://src/assets/textures/gui/unibut/continue_o.png' }
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/continue.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/continue_o.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/continue_o.png
           buttonAction: continue
           transform:
             position: [0, -350]
             scale: [1, 1]
             rotation: 0
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
         children: []
       - id: version-label
         type: Label2D
         name: Version Label
         properties:
-          label: 'Sky Defender Remaster — M0 flow skeleton'
+          label: Sky Defender Remaster — M0 flow skeleton
           labelKey: menu.subtitle
           labelFontSize: 20
-          labelColor: '#9aa7bd'
+          labelColor: "#9aa7bd"
           labelAlign: center
           transform:
             position: [0, -500]
@@ -222,7 +290,8 @@ root:
       loop: true
       volume: 0.8
       bus: music
-    children: []
+      pitchVariation: 0
+      volumeVariation: 0
   - id: menu-wind
     type: AudioPlayer
     name: Menu Wind
@@ -232,4 +301,5 @@ root:
       loop: true
       volume: 0.5
       bus: sfx
-    children: []
+      pitchVariation: 0
+      volumeVariation: 0

@@ -18,7 +18,8 @@ pix3-panel {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -26,12 +27,12 @@ pix3-panel {
 }
 
 .delete-modal {
-  background: var(--color-bg-secondary, #2a2a2a);
-  border: 1px solid var(--color-border, #444);
-  border-radius: 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
   padding: 1.5rem;
   max-width: 400px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-float);
   animation: slideUp 0.2s ease-out;
 }
 
@@ -49,17 +50,17 @@ pix3-panel {
 .delete-modal h2 {
   margin: 0 0 1rem 0;
   font-size: 1.2em;
-  color: var(--color-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .delete-modal p {
   margin: 0.5rem 0;
-  color: var(--color-text-secondary, #ccc);
+  color: var(--fg-1);
   line-height: 1.5;
 }
 
 .delete-modal strong {
-  color: var(--color-text-primary, #fff);
+  color: var(--fg-0);
   word-break: break-word;
 }
 
@@ -73,28 +74,30 @@ pix3-panel {
 .modal-actions button {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   font-size: 0.95em;
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .btn-cancel {
-  background: var(--color-bg-tertiary, #3a3a3a);
-  color: var(--color-text-primary, #fff);
-  border: 1px solid var(--color-border, #444);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
 }
 
 .btn-cancel:hover {
-  background: var(--color-bg-hover, #444);
+  background: var(--bg-3);
 }
 
 .btn-delete {
-  background: var(--color-danger, #d32f2f);
-  color: #fff;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .btn-delete:hover {
-  background: var(--color-danger-hover, #b71c1c);
+  background: var(--danger-line);
 }

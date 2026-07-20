@@ -1,5 +1,6 @@
 /**
- * RemoveEffectCommand - command to detach a shader effect from a GeometryMesh.
+ * RemoveEffectCommand - command to detach a shader effect from a shader-effect
+ * host node (GeometryMesh, Sprite2D, AnimatedSprite2D, Button2D, ...).
  */
 import {
   CommandBase,
@@ -19,7 +20,7 @@ export class RemoveEffectCommand extends CommandBase<object, void> {
   readonly metadata: CommandMetadata = {
     id: 'effects.remove-effect',
     title: 'Remove Effect',
-    description: 'Detach a shader effect from a mesh',
+    description: 'Detach a shader effect from a node',
     keywords: ['remove', 'effect', 'shader'],
   };
 

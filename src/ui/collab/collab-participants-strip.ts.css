@@ -12,13 +12,13 @@ collab-participants-strip {
 .participants-strip__divider {
   width: 1px;
   height: 1.6rem;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--line-1);
   flex-shrink: 0;
 }
 
 .participants-strip__chip {
   position: relative;
-  margin-left: -0.4rem;
+  margin-left: -6px;
 }
 
 .participants-strip__chip:first-child {
@@ -32,9 +32,8 @@ collab-participants-strip {
   width: 1.9rem;
   height: 1.9rem;
   border-radius: 999px;
-  border: 2px solid rgba(19, 22, 27, 0.96);
-  color: rgba(10, 12, 16, 0.88);
+  box-shadow: 0 0 0 1.5px var(--bg-1);
+  color: var(--accent-fg);
   font-size: 0.72rem;
   font-weight: 700;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }

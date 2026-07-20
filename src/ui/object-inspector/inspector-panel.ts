@@ -5,8 +5,8 @@ import {
   getPropertyDisplayValue,
   getRuntimeSceneRoot,
   AnimatedSprite2D,
-  GeometryMesh,
   Group2D,
+  isShaderEffectHost,
   MeshInstance,
   NodeBase,
   Node2D,
@@ -2831,9 +2831,9 @@ ${textPreview?.content || 'Empty file'}</pre
 
   private renderEffectsSection() {
     const node = this.primaryNode;
-    if (!(node instanceof GeometryMesh)) return '';
+    if (!node || !isShaderEffectHost(node)) return '';
 
-    const effects = node.getAttachedEffects();
+    const effects = node.getShaderEffectStack().getAttached();
     // Effect attach/remove/toggle on a prefab instance is not serialized as an
     // override, so lock the structural actions (mirrors the components section).
     const structureLocked = isPrefabNode(node);
@@ -2909,9 +2909,10 @@ ${textPreview?.content || 'Empty file'}</pre
 
   private async onAddEffect() {
     const node = this.primaryNode;
-    if (!(node instanceof GeometryMesh)) return;
-    const exclude = node.getAttachedEffects().map(e => e.type);
-    const effectType = await this.effectPickerService.showPicker(exclude);
+    if (!node || !isShaderEffectHost(node)) return;
+    const stack = node.getShaderEffectStack();
+    const exclude = stack.getAttached().map(e => e.type);
+    const effectType = await this.effectPickerService.showPicker(exclude, stack.materialTarget);
     if (effectType) {
       void this.commandDispatcher.execute(
         new AddEffectCommand({ nodeId: node.nodeId, effectType })
@@ -2928,8 +2929,11 @@ ${textPreview?.content || 'Empty file'}</pre
 
   private onToggleEffect(effectType: string, enabled: boolean) {
     const node = this.primaryNode;
-    if (!(node instanceof GeometryMesh)) return;
-    const effect = node.getAttachedEffects().find(e => e.type === effectType);
+    if (!node || !isShaderEffectHost(node)) return;
+    const effect = node
+      .getShaderEffectStack()
+      .getAttached()
+      .find(e => e.type === effectType);
     if (!effect) return;
     void this.applyPropertyChange(`fx.${effect.info.key}.enabled`, enabled);
   }

@@ -11,6 +11,13 @@ import { baseRegionOf, copyAtlasMetadata } from '../../core/atlas-frame-map';
 import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
+import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
+import {
+  ShaderEffectStack,
+  type ShaderEffectEntry,
+  type ShaderEffectHost,
+} from '../../shader-effects/ShaderEffectStack';
+import type { AttachedShaderEffect } from '../../shader-effects/shader-effect-types';
 import {
   findAnimationClip,
   isSequenceAnimationFrame,
@@ -27,9 +34,14 @@ export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   width?: number;
   height?: number;
   color?: string;
+  /** Registry-backed shader effects attached to this sprite's material. */
+  effects?: ShaderEffectEntry[];
 }
 
-export class AnimatedSprite2D extends Node2D {
+export class AnimatedSprite2D
+  extends Node2D
+  implements InstancePropertySchemaProvider, ShaderEffectHost
+{
   animationResourcePath: string | null;
   currentClip: string;
   isPlaying: boolean;
@@ -47,6 +59,9 @@ export class AnimatedSprite2D extends Node2D {
 
   private mesh: Mesh;
   private material: MeshBasicMaterial;
+  /** Registry-backed shader effects; while non-empty the mesh opts out of the
+   * 2D quad batcher so its effected material is used directly (see Sprite2D). */
+  private readonly effectStack: ShaderEffectStack;
 
   constructor(props: AnimatedSprite2DProps) {
     super(props, 'AnimatedSprite2D');
@@ -85,6 +100,60 @@ export class AnimatedSprite2D extends Node2D {
     this.mesh.scale.set(this.width, this.height, 1);
     this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.add(this.mesh);
+
+    // Shader effects: install before attaching, then attach authored entries.
+    this.effectStack = new ShaderEffectStack({
+      nodeType: 'AnimatedSprite2D',
+      target: 'basic',
+      onAttachmentsChanged: () => {
+        this.mesh.userData[BATCHABLE_2D_KEY] = this.effectStack.isEmpty;
+      },
+    });
+    this.effectStack.install(this.material);
+    const effectEntries = props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
+    for (const entry of effectEntries ?? []) {
+      if (entry && typeof entry.type === 'string') {
+        this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
+      }
+    }
+  }
+
+  /** The shader-effect stack driving this sprite's material. */
+  getShaderEffectStack(): ShaderEffectStack {
+    return this.effectStack;
+  }
+
+  /** Per-instance schema contribution: the attached effects' `fx.*` params. */
+  getInstancePropertySchema(): PropertySchema | null {
+    return this.effectStack.buildInstanceSchema();
+  }
+
+  /** Attach a shader effect by registry id (e.g. `core:adjust`). */
+  attachEffect(
+    type: string,
+    init?: { enabled?: boolean; params?: Record<string, unknown> }
+  ): boolean {
+    return this.effectStack.attach(type, init);
+  }
+
+  /** Detach an effect by type. Returns the removed attachment or null. */
+  detachEffect(type: string): AttachedShaderEffect | null {
+    return this.effectStack.detach(type);
+  }
+
+  /** Enable/disable an attached effect. */
+  setEffectEnabled(type: string, on: boolean): void {
+    this.effectStack.setEnabled(type, on);
+  }
+
+  /** Set one param on an attached effect (by registry id or short key). */
+  setEffectParam(typeOrKey: string, param: string, value: unknown): boolean {
+    return this.effectStack.setParam(typeOrKey, param, value);
+  }
+
+  /** The attached effects, in composition order (read-only view). */
+  getAttachedEffects(): readonly AttachedShaderEffect[] {
+    return this.effectStack.getAttached();
   }
 
   get currentFrame(): number {
@@ -136,6 +205,7 @@ export class AnimatedSprite2D extends Node2D {
 
   tick(dt: number): void {
     super.tick(dt);
+    this.effectStack.tick(dt);
 
     const clip = this.activeClip;
     if (!this.isPlaying || !clip || clip.frames.length <= 1 || clip.fps <= 0) {

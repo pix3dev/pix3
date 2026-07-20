@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { Group2D, Node2D } from '@pix3/runtime';
+import { Group2D, Node2D, Sprite2D } from '@pix3/runtime';
 import {
   buildFitPlans,
   buildProportionalResizePlans,
@@ -40,6 +40,19 @@ describe('group2d-resize-utils', () => {
       const targets = collectProportionalTargets(group);
       expect(targets.map(t => t.node)).toEqual([child, grandchild]);
       expect(targets.every(t => t.kind === 'size')).toBe(true);
+    });
+
+    it('treats any size-bearing 2D node (not just Group2D) as a container', () => {
+      // A sprite parenting another sprite is a "container for another object" too: resizing the
+      // face sprite should scale its eye-sprite child (the motivating case).
+      const face = new Sprite2D({ id: `s${++idCounter}`, width: 150, height: 150 });
+      const eye = new Sprite2D({ id: `s${++idCounter}`, width: 20, height: 20 });
+      eye.position.set(10, 5, 0);
+      face.add(eye);
+
+      const targets = collectProportionalTargets(face);
+      expect(targets.map(t => t.node)).toEqual([eye]);
+      expect(targets[0].kind).toBe('size');
     });
 
     it('skips anchored (layoutEnabled) children and their subtrees', () => {

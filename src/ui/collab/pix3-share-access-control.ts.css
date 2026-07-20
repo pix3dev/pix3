@@ -10,7 +10,7 @@ pix3-share-access-control {
 }
 
 .share-access-control__label {
-  color: rgba(243, 244, 246, 0.62);
+  color: var(--fg-2);
   font-size: 0.78rem;
   white-space: nowrap;
 }
@@ -18,10 +18,10 @@ pix3-share-access-control {
 .share-access-control__select,
 .share-access-control__copy {
   min-height: 2.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(34, 39, 48, 0.95);
-  color: #f3f4f6;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
   padding: 0 0.75rem;
   font: inherit;
 }

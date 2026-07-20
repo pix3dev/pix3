@@ -8,21 +8,20 @@ pix3-share-dialog {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(12, 14, 18, 0.62);
-  backdrop-filter: blur(10px);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   z-index: var(--pix3-z-modal);
 }
 
 .pix3-share-dialog {
   box-sizing: border-box;
   width: min(100%, 520px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
   padding: 20px;
-  background:
-    linear-gradient(180deg, rgba(33, 39, 48, 0.98), rgba(22, 26, 33, 0.98)), rgba(22, 26, 33, 0.98);
-  color: rgba(243, 244, 246, 0.94);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
 }
 
 .pix3-share-header {
@@ -38,7 +37,7 @@ pix3-share-dialog {
 }
 
 .pix3-share-subtitle {
-  color: rgba(243, 244, 246, 0.66);
+  color: var(--fg-2);
   font-size: 0.88rem;
   line-height: 1.45;
 }
@@ -53,9 +52,9 @@ pix3-share-dialog {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
 }
 
 .pix3-share-section__header {
@@ -75,9 +74,9 @@ pix3-share-dialog {
   align-items: center;
   padding: 0.26rem 0.56rem;
   border-radius: 999px;
-  background: rgba(var(--pix3-accent-rgb), 0.12);
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.22);
-  color: rgba(255, 244, 204, 0.95);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -90,24 +89,24 @@ pix3-share-dialog {
 }
 
 .pix3-share-field-label {
-  color: rgba(243, 244, 246, 0.72);
+  color: var(--fg-1);
   font-size: 0.84rem;
 }
 
 .pix3-share-select {
   min-height: 44px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(243, 244, 246, 0.92);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   padding: 0 14px;
   font: inherit;
   color-scheme: dark;
 }
 
 .pix3-share-select option {
-  color: rgba(243, 244, 246, 0.94);
-  background: rgba(22, 26, 33, 0.98);
+  color: var(--fg-0);
+  background: var(--bg-1);
 }
 
 .pix3-share-select--compact {
@@ -120,10 +119,10 @@ pix3-share-dialog {
   width: 100%;
   min-width: 0;
   padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(243, 244, 246, 0.92);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font-size: 0.84rem;
 }
 
@@ -146,16 +145,16 @@ pix3-share-dialog {
   display: grid;
   gap: 4px;
   padding: 8px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(16, 19, 24, 0.98);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
   z-index: 2;
 }
 
 .pix3-share-suggestions__status {
   padding: 10px 12px;
-  color: rgba(243, 244, 246, 0.68);
+  color: var(--fg-2);
   font-size: 0.82rem;
 }
 
@@ -164,35 +163,34 @@ pix3-share-dialog {
   gap: 2px;
   padding: 10px 12px;
   border: 0;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-1);
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .pix3-share-suggestion:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-2);
 }
 
 .pix3-share-suggestion__email {
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--fg-0);
   font-size: 0.84rem;
 }
 
 .pix3-share-suggestion__name {
-  color: rgba(243, 244, 246, 0.62);
+  color: var(--fg-2);
   font-size: 0.78rem;
 }
 
 .pix3-share-input:focus {
   outline: none;
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
-  box-shadow: 0 0 0 3px rgba(var(--pix3-accent-rgb), 0.18);
+  border-color: var(--accent-line);
 }
 
 .pix3-share-hint {
-  color: rgba(243, 244, 246, 0.64);
+  color: var(--fg-2);
   font-size: 0.82rem;
   line-height: 1.45;
 }
@@ -200,20 +198,20 @@ pix3-share-dialog {
 .pix3-share-empty,
 .pix3-share-error {
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-2);
   font-size: 0.85rem;
   line-height: 1.45;
 }
 
 .pix3-share-empty {
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(243, 244, 246, 0.72);
+  background: var(--bg-2);
+  color: var(--fg-1);
 }
 
 .pix3-share-error {
-  background: rgba(239, 68, 68, 0.12);
-  color: rgba(254, 202, 202, 0.95);
-  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-line);
 }
 
 .pix3-share-members {
@@ -230,9 +228,9 @@ pix3-share-dialog {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
 }
 
 .pix3-share-member__info {
@@ -249,13 +247,13 @@ pix3-share-dialog {
 }
 
 .pix3-share-member__email {
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--fg-0);
   font-size: 0.84rem;
   word-break: break-word;
 }
 
 .pix3-share-member__name {
-  color: rgba(243, 244, 246, 0.62);
+  color: var(--fg-2);
   font-size: 0.78rem;
 }
 
@@ -266,8 +264,8 @@ pix3-share-dialog {
   min-height: 30px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(243, 244, 246, 0.82);
+  background: var(--bg-3);
+  color: var(--fg-1);
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -295,36 +293,36 @@ pix3-share-dialog {
 .pix3-share-button {
   min-width: 96px;
   padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(243, 244, 246, 0.94);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font-weight: 600;
   cursor: pointer;
 }
 
 .pix3-share-button:hover:not([disabled]) {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--bg-3);
 }
 
 .pix3-share-button--primary {
-  background: rgba(var(--pix3-accent-rgb), 0.16);
-  border-color: rgba(var(--pix3-accent-rgb), 0.3);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
 }
 
 .pix3-share-button--primary:hover:not([disabled]) {
-  background: rgba(var(--pix3-accent-rgb), 0.24);
+  background: var(--accent);
 }
 
 .pix3-share-button--danger {
-  background: rgba(239, 68, 68, 0.14);
-  border-color: rgba(239, 68, 68, 0.22);
-  color: rgba(254, 226, 226, 0.96);
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 
 .pix3-share-button--danger:hover:not([disabled]) {
-  background: rgba(239, 68, 68, 0.22);
+  background: var(--danger-soft);
 }
 
 .pix3-share-button[disabled] {

@@ -24,16 +24,16 @@ pix3-runtime-panel .runtime-filter {
   min-width: 4rem;
   height: 1.5rem;
   padding: 0 0.4rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.92);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 12px;
 }
 
 pix3-runtime-panel .runtime-filter:focus-visible {
-  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -42,30 +42,30 @@ pix3-runtime-panel .runtime-refresh {
   flex: 0 0 auto;
   height: 1.5rem;
   padding: 0 0.5rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.78);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 pix3-runtime-panel .runtime-live-toggle.is-live {
-  color: #5ec27a;
-  border-color: rgba(94, 194, 122, 0.4);
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
 
 pix3-runtime-panel .runtime-live-toggle:hover,
 pix3-runtime-panel .runtime-refresh:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
 }
 
 pix3-runtime-panel .runtime-count {
   flex: 0 0 auto;
   font-size: 0.66rem;
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
   white-space: nowrap;
 }
 
@@ -75,10 +75,10 @@ pix3-runtime-panel .runtime-collapse-all {
   width: 1.5rem;
   height: 1.5rem;
   padding: 0;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.78);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -86,7 +86,7 @@ pix3-runtime-panel .runtime-collapse-all {
 }
 
 pix3-runtime-panel .runtime-collapse-all:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
 }
 
 pix3-runtime-panel .runtime-collapse-all svg {
@@ -99,10 +99,10 @@ pix3-runtime-panel .runtime-root-filter {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 0.3rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   overflow: hidden;
-  background: rgba(10, 13, 15, 0.5);
+  background: var(--bg-2);
 }
 
 pix3-runtime-panel .runtime-root-filter-btn {
@@ -111,11 +111,11 @@ pix3-runtime-panel .runtime-root-filter-btn {
   min-width: 2.1rem;
   padding: 0 0.55rem;
   border: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid var(--line-1);
   background: transparent;
-  color: rgba(245, 247, 250, 0.64);
+  color: var(--fg-2);
   font: inherit;
-  font-size: 0.68rem;
+  font-size: 12px;
   letter-spacing: 0.01em;
   cursor: pointer;
 }
@@ -125,18 +125,18 @@ pix3-runtime-panel .runtime-root-filter-btn:last-child {
 }
 
 pix3-runtime-panel .runtime-root-filter-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
 }
 
 pix3-runtime-panel .runtime-root-filter-btn.is-active {
-  background: rgba(var(--pix3-accent-rgb), 0.2);
-  color: rgba(255, 236, 172, 0.95);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 pix3-runtime-panel .runtime-placeholder {
   padding: 1rem;
-  color: rgba(245, 247, 250, 0.5);
-  font-size: 0.78rem;
+  color: var(--fg-2);
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -151,7 +151,7 @@ pix3-runtime-panel .runtime-tree {
   flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
-  font-size: 0.72rem;
+  font-size: 12px;
   line-height: 1.4;
   user-select: none;
 }
@@ -161,22 +161,22 @@ pix3-runtime-panel .runtime-row {
   align-items: center;
   gap: 0.3rem;
   padding: 0.06rem 0.3rem 0.06rem 0;
-  border-radius: 0.15rem;
+  border-radius: var(--radius-1);
   cursor: default;
   white-space: nowrap;
 }
 
 pix3-runtime-panel .runtime-row:hover {
-  background: rgba(56, 62, 74, 0.22);
+  background: var(--bg-2);
 }
 
 pix3-runtime-panel .runtime-row.is-selected {
-  background: rgba(var(--pix3-accent-rgb), 0.22);
-  outline: 1px solid rgba(var(--pix3-accent-rgb), 0.35);
+  background: var(--accent-soft);
+  outline: 1px solid var(--accent-line);
 }
 
 pix3-runtime-panel .runtime-row.is-match .runtime-type {
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-runtime-panel .runtime-twisty {
@@ -187,7 +187,7 @@ pix3-runtime-panel .runtime-twisty {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(245, 247, 250, 0.45);
+  color: var(--fg-3);
   font-size: 0.55rem;
   line-height: 1;
   cursor: pointer;
@@ -198,27 +198,28 @@ pix3-runtime-panel .runtime-twisty.is-leaf {
 }
 
 pix3-runtime-panel .runtime-type {
-  color: rgba(245, 247, 250, 0.92);
+  color: var(--fg-0);
   font-weight: 500;
 }
 
 pix3-runtime-panel .runtime-name {
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
   font-style: italic;
 }
 
 pix3-runtime-panel .runtime-pos {
   margin-left: auto;
   padding-left: 0.6rem;
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.66rem;
+  font-size: 11px;
 }
 
 pix3-runtime-panel .runtime-badge {
   flex: 0 0 auto;
   padding: 0 0.28rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-1);
   font-size: 0.6rem;
   line-height: 1.2;
   font-weight: 600;
@@ -227,34 +228,34 @@ pix3-runtime-panel .runtime-badge {
 }
 
 pix3-runtime-panel .badge-drop {
-  background: rgba(255, 207, 51, 0.18);
-  color: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 pix3-runtime-panel .badge-inst {
-  background: rgba(120, 170, 255, 0.16);
-  color: #93b8ff;
+  background: color-mix(in oklab, var(--presence-5) 16%, transparent);
+  color: var(--presence-5);
 }
 
 pix3-runtime-panel .badge-gizmo {
-  background: rgba(150, 150, 160, 0.16);
-  color: rgba(220, 222, 228, 0.8);
+  background: var(--bg-3);
+  color: var(--fg-1);
 }
 
 pix3-runtime-panel .badge-hidden {
-  background: rgba(255, 120, 120, 0.14);
-  color: #ff9a9a;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 pix3-runtime-panel .runtime-more {
-  color: rgba(245, 247, 250, 0.38);
+  color: var(--fg-3);
   font-style: italic;
   cursor: default;
 }
 
 pix3-runtime-panel .badge-node {
-  background: rgba(94, 194, 122, 0.16);
-  color: #7fd79a;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Detail pane (selected raw THREE.Object3D) */
@@ -264,8 +265,8 @@ pix3-runtime-panel .runtime-detail {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.5);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
 }
 
 pix3-runtime-panel .runtime-detail-head {
@@ -273,20 +274,20 @@ pix3-runtime-panel .runtime-detail-head {
   align-items: center;
   gap: 0.35rem;
   padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--line-1);
   flex: 0 0 auto;
 }
 
 pix3-runtime-panel .runtime-detail-type {
-  color: rgba(245, 247, 250, 0.95);
+  color: var(--fg-0);
   font-weight: 600;
-  font-size: 0.74rem;
+  font-size: 12px;
 }
 
 pix3-runtime-panel .runtime-detail-name {
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
   font-style: italic;
-  font-size: 0.72rem;
+  font-size: 12px;
 }
 
 pix3-runtime-panel .runtime-detail-close {
@@ -296,17 +297,17 @@ pix3-runtime-panel .runtime-detail-close {
   height: 1.2rem;
   padding: 0;
   border: none;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-1);
   background: transparent;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-3);
   cursor: pointer;
   font-size: 0.7rem;
   line-height: 1;
 }
 
 pix3-runtime-panel .runtime-detail-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(245, 247, 250, 0.9);
+  background: var(--bg-3);
+  color: var(--fg-0);
 }
 
 pix3-runtime-panel .runtime-detail-body {
@@ -320,7 +321,7 @@ pix3-runtime-panel .runtime-detail-section {
 }
 
 pix3-runtime-panel .runtime-detail-section-title {
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
   font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -334,18 +335,18 @@ pix3-runtime-panel .runtime-kv {
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.04rem 0;
-  font-size: 0.7rem;
+  font-size: 12px;
 }
 
 pix3-runtime-panel .runtime-kv-key {
   flex: 0 0 auto;
   min-width: 5.5rem;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
 }
 
 pix3-runtime-panel .runtime-kv-val {
   flex: 1 1 auto;
-  color: rgba(245, 247, 250, 0.9);
+  color: var(--fg-0);
   word-break: break-word;
   display: inline-flex;
   align-items: center;
@@ -353,6 +354,7 @@ pix3-runtime-panel .runtime-kv-val {
 }
 
 pix3-runtime-panel .runtime-kv-vec {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -360,6 +362,6 @@ pix3-runtime-panel .runtime-swatch {
   display: inline-block;
   width: 0.7rem;
   height: 0.7rem;
-  border-radius: 0.15rem;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-strong);
 }

@@ -94,19 +94,22 @@ export class Vector2Editor extends ComponentBase {
     }
 
     input {
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
       box-sizing: border-box;
       width: 100%;
     }
 
-    input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     input:disabled {
@@ -115,7 +118,8 @@ export class Vector2Editor extends ComponentBase {
     }
 
     .axis-label {
-      font-size: 0.75rem;
+      font-size: 12px;
+      color: var(--fg-3);
       min-width: 0.95rem;
       height: 1.9rem;
       display: inline-flex;
@@ -128,11 +132,11 @@ export class Vector2Editor extends ComponentBase {
     }
 
     .axis-label--x {
-      color: #ff6b6b;
+      color: var(--fg-3);
     }
 
     .axis-label--y {
-      color: #51cf66;
+      color: var(--fg-3);
     }
   `;
 
@@ -220,19 +224,22 @@ export class Vector3Editor extends ComponentBase {
     }
 
     input {
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
       box-sizing: border-box;
       width: 100%;
     }
 
-    input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     input:disabled {
@@ -241,7 +248,8 @@ export class Vector3Editor extends ComponentBase {
     }
 
     .axis-label {
-      font-size: 0.75rem;
+      font-size: 12px;
+      color: var(--fg-3);
       min-width: 0.95rem;
       height: 1.9rem;
       display: inline-flex;
@@ -254,15 +262,15 @@ export class Vector3Editor extends ComponentBase {
     }
 
     .axis-label--x {
-      color: #ff6b6b;
+      color: var(--fg-3);
     }
 
     .axis-label--y {
-      color: #51cf66;
+      color: var(--fg-3);
     }
 
     .axis-label--z {
-      color: #4c6ef5;
+      color: var(--fg-3);
     }
   `;
 
@@ -377,19 +385,22 @@ export class EulerEditor extends ComponentBase {
     }
 
     input {
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
       box-sizing: border-box;
       width: 100%;
     }
 
-    input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     input:disabled {
@@ -398,7 +409,8 @@ export class EulerEditor extends ComponentBase {
     }
 
     .axis-label {
-      font-size: 0.75rem;
+      font-size: 12px;
+      color: var(--fg-3);
       min-width: 0.95rem;
       height: 1.9rem;
       display: inline-flex;
@@ -411,20 +423,20 @@ export class EulerEditor extends ComponentBase {
     }
 
     .axis-label--x {
-      color: #ff6b6b;
+      color: var(--fg-3);
     }
 
     .axis-label--y {
-      color: #51cf66;
+      color: var(--fg-3);
     }
 
     .axis-label--z {
-      color: #4c6ef5;
+      color: var(--fg-3);
     }
 
     .unit-label {
       font-size: 0.7rem;
-      color: var(--color-text-subtle, #888);
+      color: var(--fg-3);
       margin-left: 0.25rem;
     }
   `;
@@ -528,11 +540,11 @@ export class TextureResourceEditor extends ComponentBase {
 
     .preview {
       position: relative;
-      border: 1px dashed var(--color-border, #333);
-      border-radius: 0.375rem;
+      border: 1px dashed var(--line-1);
+      border-radius: var(--radius-2);
       width: 64px;
       height: 64px;
-      background: var(--color-input-bg, #222);
+      background: var(--bg-2);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -554,7 +566,7 @@ export class TextureResourceEditor extends ComponentBase {
       flex-direction: column;
       gap: 0.2rem;
       font-size: 0.7rem;
-      color: var(--color-text-dim, #888);
+      color: var(--fg-3);
       line-height: 1.25;
       overflow: hidden;
     }
@@ -567,13 +579,13 @@ export class TextureResourceEditor extends ComponentBase {
 
     .info-label {
       font-weight: 600;
-      color: var(--color-text, #ccc);
+      color: var(--fg-1);
       margin-right: 2px;
     }
 
     .preview.is-dragover {
-      border-color: var(--pix3-accent-color, #ffcf33);
-      background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.08);
+      border-color: var(--accent);
+      background: var(--accent-soft);
     }
 
     .preview img {
@@ -584,7 +596,7 @@ export class TextureResourceEditor extends ComponentBase {
     }
 
     .preview-empty {
-      color: var(--color-text-subtle, #888);
+      color: var(--fg-3);
       font-size: 0.75rem;
       text-align: center;
       padding: 0.5rem;
@@ -599,25 +611,26 @@ export class TextureResourceEditor extends ComponentBase {
     input {
       flex: 1;
       min-width: 0;
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
       box-sizing: border-box;
     }
 
-    input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     button {
-      border: 1px solid var(--color-border, #333);
-      background: transparent;
-      color: var(--color-text-secondary, #aaa);
-      border-radius: 0.25rem;
+      border: 1px solid var(--line-1);
+      background: var(--bg-2);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
       padding: 0.2rem 0.5rem;
       font-size: 0.75rem;
       cursor: pointer;
@@ -625,8 +638,13 @@ export class TextureResourceEditor extends ComponentBase {
     }
 
     button:hover:not(:disabled) {
-      border-color: var(--pix3-accent-color, #ffcf33);
-      color: var(--color-text-primary, #eee);
+      background: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     button:disabled,
@@ -782,10 +800,10 @@ export class AudioResourceEditor extends ComponentBase {
     }
 
     .drop-zone {
-      border: 1px dashed var(--color-border, #333);
-      border-radius: 0.375rem;
+      border: 1px dashed var(--line-1);
+      border-radius: var(--radius-2);
       min-height: 3.5rem;
-      background: var(--color-input-bg, #222);
+      background: var(--bg-2);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -797,12 +815,12 @@ export class AudioResourceEditor extends ComponentBase {
     }
 
     .drop-zone.is-dragover {
-      border-color: var(--pix3-accent-color, #ffcf33);
-      background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.08);
+      border-color: var(--accent);
+      background: var(--accent-soft);
     }
 
     .drop-label {
-      color: var(--color-text-subtle, #888);
+      color: var(--fg-3);
       font-size: 0.75rem;
       text-align: center;
       line-height: 1.35;
@@ -813,18 +831,18 @@ export class AudioResourceEditor extends ComponentBase {
       flex-direction: column;
       gap: 0.5rem;
       padding: 0.625rem;
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.5rem;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-2);
+      background: var(--bg-2);
     }
 
     .waveform {
       display: block;
       width: 100%;
       min-height: 5rem;
-      border-radius: 0.4rem;
+      border-radius: var(--radius-1);
       overflow: hidden;
-      background: rgba(0, 0, 0, 0.22);
+      background: var(--bg-0);
       object-fit: cover;
     }
 
@@ -832,10 +850,10 @@ export class AudioResourceEditor extends ComponentBase {
       display: grid;
       place-items: center;
       min-height: 5rem;
-      border-radius: 0.4rem;
-      border: 1px dashed var(--color-border, #333);
-      background: rgba(0, 0, 0, 0.15);
-      color: var(--color-text-subtle, #888);
+      border-radius: var(--radius-1);
+      border: 1px dashed var(--line-1);
+      background: var(--bg-0);
+      color: var(--fg-3);
       font-size: 0.75rem;
       text-align: center;
       padding: 0.75rem;
@@ -859,14 +877,14 @@ export class AudioResourceEditor extends ComponentBase {
       gap: 0.25rem;
       padding: 0.2rem 0.45rem;
       border-radius: 999px;
-      background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
-      color: var(--color-text-primary, #eee);
+      background: var(--accent-soft);
+      color: var(--fg-0);
       font-size: 0.72rem;
       line-height: 1.2;
     }
 
     .info-label {
-      color: var(--color-text-subtle, #888);
+      color: var(--fg-3);
     }
 
     .url-row {
@@ -878,25 +896,26 @@ export class AudioResourceEditor extends ComponentBase {
     input {
       flex: 1;
       min-width: 0;
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
       box-sizing: border-box;
     }
 
-    input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     button {
-      border: 1px solid var(--color-border, #333);
-      background: transparent;
-      color: var(--color-text-secondary, #aaa);
-      border-radius: 0.25rem;
+      border: 1px solid var(--line-1);
+      background: var(--bg-2);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
       padding: 0.2rem 0.5rem;
       font-size: 0.75rem;
       cursor: pointer;
@@ -904,8 +923,13 @@ export class AudioResourceEditor extends ComponentBase {
     }
 
     button:hover:not(:disabled) {
-      border-color: var(--pix3-accent-color, #ffcf33);
-      color: var(--color-text-primary, #eee);
+      background: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     button:disabled,
@@ -1423,26 +1447,29 @@ export class SizeEditor extends ComponentBase {
     }
 
     .field-label {
-      font-size: 0.72rem;
-      color: var(--color-text-subtle, #888);
+      font-size: 12px;
+      color: var(--fg-3);
       min-width: 0.9rem;
     }
 
     input[type='number'] {
       width: 4.75rem;
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
       box-sizing: border-box;
       min-width: 0;
     }
 
-    input[type='number']:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    input[type='number']:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     input[type='number']:disabled {
@@ -1451,10 +1478,10 @@ export class SizeEditor extends ComponentBase {
     }
 
     button {
-      background: transparent;
-      border: 1px solid var(--color-border, #333);
-      color: var(--color-text-secondary, #aaa);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      border: 1px solid var(--line-1);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
       padding: 0.2rem 0.4rem;
       font-size: 0.7rem;
       cursor: pointer;
@@ -1463,8 +1490,13 @@ export class SizeEditor extends ComponentBase {
     }
 
     button.reset-btn:hover:not(:disabled) {
-      border-color: var(--pix3-accent-color, #ffcf33);
-      color: var(--color-text-primary, #eee);
+      background: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     button:disabled {
@@ -1486,27 +1518,33 @@ export class SizeEditor extends ComponentBase {
 
     .lock-btn {
       background: transparent;
-      border: 1px solid var(--color-border, #333);
-      color: var(--color-text-secondary, #aaa);
-      border-radius: 0.25rem;
+      border: 1px solid var(--line-1);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
       padding: 0.2rem 0.4rem;
       font-size: 0.8rem;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      height: 22px;
+      height: 30px;
       min-width: 28px;
     }
 
     .lock-btn:hover:not(:disabled) {
-      border-color: var(--pix3-accent-color, #ffcf33);
+      background: var(--bg-2);
+      color: var(--fg-0);
+    }
+
+    .lock-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     .lock-btn.locked {
-      color: var(--pix3-accent-color, #ffcf33);
-      border-color: var(--pix3-accent-color, #ffcf33);
-      background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.1);
+      color: var(--accent);
+      border-color: var(--accent-line);
+      background: var(--accent-soft);
     }
 
     .lock-btn:disabled {
@@ -1550,7 +1588,20 @@ export class SizeEditor extends ComponentBase {
               ?disabled=${this.disabled}
               @click=${() => this.onToggleLock()}
             >
-              🔗
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+              </svg>
             </button>
           </div>
 
@@ -1667,25 +1718,28 @@ export class SliderNumberEditor extends ComponentBase {
 
     .slider {
       flex: 1;
-      accent-color: var(--pix3-accent-color, #ffcf33);
+      accent-color: var(--accent);
       min-width: 0;
     }
 
     .number-input {
       width: 5.5rem;
-      background: var(--color-input-bg, #222);
-      color: var(--color-text-primary, #eee);
-      border: 1px solid var(--color-border, #333);
-      border-radius: 0.25rem;
+      background: var(--bg-2);
+      color: var(--fg-0);
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
       padding: 0.25rem 0.45rem;
-      font-size: 0.8rem;
+      height: 30px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
       box-sizing: border-box;
       text-align: right;
     }
 
-    .number-input:focus {
-      outline: none;
-      border-color: var(--color-accent, #4e8df5);
+    .number-input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
 
     .slider:disabled,

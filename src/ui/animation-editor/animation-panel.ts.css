@@ -27,7 +27,7 @@ pix3-animation-panel .editor-toolbar {
 pix3-animation-panel .editor-toolbar-separator {
   width: 1px;
   height: 1.3rem;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--line-1);
   margin: 0 0.2rem;
 }
 
@@ -37,24 +37,24 @@ pix3-animation-panel .editor-toolbar-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--color-border, #333);
-  border-radius: 0.42rem;
-  background: var(--color-input-bg, #222);
-  color: var(--color-text-secondary, #aaa);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
   cursor: pointer;
   padding: 0;
 }
 
 pix3-animation-panel .editor-toolbar-button:hover:not(:disabled) {
-  color: var(--color-text-primary, #eee);
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.35);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.08);
+  color: var(--fg-0);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .editor-toolbar-button.is-active {
-  color: var(--pix3-accent-color, #ffcf33);
-  border-color: var(--pix3-accent-color, #ffcf33);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.1);
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .editor-toolbar-button:disabled {
@@ -70,9 +70,9 @@ pix3-animation-panel .editor-toolbar-button-icon {
 
 pix3-animation-panel .editor-surface {
   min-height: 0;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.55rem;
-  background: color-mix(in srgb, var(--color-panel-bg, #171717) 96%, white 4%);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
 }
 
 pix3-animation-panel .editor-surface--stage {
@@ -94,10 +94,9 @@ pix3-animation-panel .texture-drop-overlay {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  border: 1px dashed var(--pix3-accent-color, #ffcf33);
-  border-radius: 0.65rem;
-  background: rgba(13, 15, 19, 0.76);
-  backdrop-filter: blur(4px);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-3);
+  background: oklch(0 0 0 / 0.55);
   pointer-events: none;
 }
 
@@ -107,22 +106,22 @@ pix3-animation-panel .texture-drop-overlay__card {
   gap: 0.35rem;
   max-width: 22rem;
   padding: 0.85rem 1rem;
-  border: 1px solid rgba(255, 207, 51, 0.35);
-  border-radius: 0.55rem;
-  background: rgba(24, 24, 24, 0.94);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
   text-align: center;
 }
 
 pix3-animation-panel .texture-drop-overlay__title {
   font-size: 0.88rem;
   font-weight: 600;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-animation-panel .texture-drop-overlay__body {
   font-size: 0.75rem;
   line-height: 1.4;
-  color: var(--color-text-secondary, #aaa);
+  color: var(--fg-2);
 }
 
 pix3-animation-panel .timeline {
@@ -138,49 +137,51 @@ pix3-animation-panel .frame-card {
   flex-direction: column;
   gap: 0.3rem;
   padding: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.45rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
   background: transparent;
-  color: var(--color-text-primary, #eee);
+  color: var(--fg-0);
   cursor: pointer;
   text-align: left;
 }
 
 pix3-animation-panel .frame-card:hover {
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.22);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.05);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .frame-card.is-selected {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  box-shadow: inset 0 0 0 1px var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .frame-card.is-preview {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.08);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .frame-card.is-drop-target {
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.75);
-  box-shadow: inset 0 0 0 1px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.55);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .frame-thumb {
   position: relative;
   overflow: hidden;
   aspect-ratio: 1;
-  border-radius: 0.3rem;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%), #1a1a1a;
-  background-size: 14px 14px;
+  border-radius: var(--radius-1);
+  /* transparency checkerboard (matches global .checker) */
+  background-image:
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
   background-position:
     0 0,
-    0 7px,
-    7px -7px,
-    -7px 0;
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
 }
 
 pix3-animation-panel .frame-thumb img {
@@ -196,9 +197,8 @@ pix3-animation-panel .frame-thumb-anchor {
   margin-left: -0.3rem;
   margin-top: -0.3rem;
   border-radius: 999px;
-  border: 2px solid #0f1116;
-  background: var(--pix3-accent-color, #ffcf33);
-  box-shadow: 0 0 0 1px rgba(255, 207, 51, 0.45);
+  border: 2px solid var(--bg-0);
+  background: var(--accent);
   pointer-events: none;
 }
 
@@ -228,8 +228,8 @@ pix3-animation-panel .frame-badge {
   min-height: 1.25rem;
   padding: 0 0.4rem;
   border-radius: 999px;
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
-  color: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 0.67rem;
 }
 
@@ -244,15 +244,14 @@ pix3-animation-panel .frame-delete-button {
   width: 1.35rem;
   height: 1.35rem;
   border-radius: 999px;
-  color: var(--color-text-secondary, #aaa);
-  background: rgba(15, 17, 22, 0.72);
-  backdrop-filter: blur(4px);
+  color: var(--fg-1);
+  background: oklch(0 0 0 / 0.55);
 }
 
 pix3-animation-panel .frame-delete-button:hover,
 pix3-animation-panel .frame-delete-button:focus-visible {
-  color: #f4a4a4;
-  background: rgba(233, 143, 143, 0.12);
+  color: var(--danger);
+  background: var(--danger-soft);
   outline: none;
 }
 
@@ -300,12 +299,12 @@ pix3-animation-panel .anchor-tools-header {
 pix3-animation-panel .anchor-tools-title {
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--color-text-primary, #eee);
+  color: var(--fg-0);
 }
 
 pix3-animation-panel .anchor-tools-value {
   font-size: 0.67rem;
-  color: var(--color-text-secondary, #aaa);
+  color: var(--fg-2);
 }
 
 pix3-animation-panel .anchor-tools-body {
@@ -328,10 +327,10 @@ pix3-animation-panel .anchor-preset-grid {
 
 pix3-animation-panel .anchor-preset-button,
 pix3-animation-panel .anchor-action-button {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.42rem;
-  background: var(--color-input-bg, #222);
-  color: var(--color-text-secondary, #aaa);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   cursor: pointer;
 }
 
@@ -347,16 +346,16 @@ pix3-animation-panel .anchor-preset-button:hover,
 pix3-animation-panel .anchor-preset-button:focus-visible,
 pix3-animation-panel .anchor-action-button:hover,
 pix3-animation-panel .anchor-action-button:focus-visible {
-  color: var(--color-text-primary, #eee);
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.35);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.08);
+  color: var(--fg-0);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
   outline: none;
 }
 
 pix3-animation-panel .anchor-preset-button.is-active {
-  color: var(--pix3-accent-color, #ffcf33);
-  border-color: var(--pix3-accent-color, #ffcf33);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-animation-panel .anchor-action-button {
@@ -373,19 +372,21 @@ pix3-animation-panel .stage-frame {
   overflow: hidden;
   flex: none;
   cursor: crosshair;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.05) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.05) 75%), #1a1a1a;
-  background-size: 18px 18px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  /* transparency checkerboard (matches global .checker) */
+  background-image:
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
   background-position:
     0 0,
-    0 9px,
-    9px -9px,
-    -9px 0;
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
 }
 
 pix3-animation-panel .stage-image {
@@ -403,22 +404,23 @@ pix3-animation-panel .stage-overlay {
 }
 
 pix3-animation-panel .stage-bbox {
-  fill: rgba(255, 207, 51, 0.08);
-  stroke: rgba(255, 207, 51, 0.95);
+  fill: var(--accent-soft);
+  stroke: var(--accent);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
 pix3-animation-panel .stage-polygon {
-  fill: rgba(88, 179, 255, 0.14);
-  stroke: #58b3ff;
+  fill: var(--presence-5);
+  fill-opacity: 0.14;
+  stroke: var(--presence-5);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
 pix3-animation-panel .stage-polygon-vertex {
-  fill: #58b3ff;
-  stroke: #0f1116;
+  fill: var(--presence-5);
+  stroke: var(--bg-0);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
@@ -434,9 +436,8 @@ pix3-animation-panel .stage-anchor {
   margin-left: -0.475rem;
   margin-top: -0.475rem;
   border-radius: 999px;
-  border: 2px solid #0f1116;
-  background: var(--pix3-accent-color, #ffcf33);
-  box-shadow: 0 0 0 2px rgba(255, 207, 51, 0.25);
+  border: 2px solid var(--bg-0);
+  background: var(--accent);
 }
 
 pix3-animation-panel .stage-anchor::before,
@@ -445,7 +446,7 @@ pix3-animation-panel .stage-anchor::after {
   position: absolute;
   left: 50%;
   top: 50%;
-  background: #0f1116;
+  background: var(--bg-0);
   transform: translate(-50%, -50%);
 }
 
@@ -467,7 +468,7 @@ pix3-animation-panel .editor-status-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  color: var(--color-text-secondary, #aaa);
+  color: var(--fg-2);
   font-size: 0.72rem;
 }
 
@@ -477,19 +478,19 @@ pix3-animation-panel .editor-status-row span {
   min-height: 1.5rem;
   padding: 0 0.5rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-2);
 }
 
 pix3-animation-panel .empty-state,
 pix3-animation-panel .error-state {
   padding: 1rem;
-  border: 1px dashed var(--color-border, #333);
-  border-radius: 0.55rem;
-  color: var(--color-text-secondary, #aaa);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--radius-2);
+  color: var(--fg-2);
 }
 
 pix3-animation-panel .empty-state code {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 pix3-animation-panel .empty-state--inline {
@@ -501,7 +502,7 @@ pix3-animation-panel .empty-state--inline {
 }
 
 pix3-animation-panel .error-state {
-  color: #ff8f8f;
+  color: var(--danger);
 }
 
 @media (max-width: 900px) {

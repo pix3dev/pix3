@@ -2,6 +2,16 @@ pix3-agent-chat-panel {
   display: block;
   height: 100%;
   min-height: 0;
+
+  /* Semantic state colours — the only hex/oklch literals allowed in this file (per design brief).
+     Error and diff add/del sit in the same chroma family as the amber accent. */
+  --reag-err: oklch(0.7 0.18 25);
+  --reag-err-soft: oklch(0.7 0.18 25 / 0.16);
+  --reag-err-line: oklch(0.7 0.18 25 / 0.44);
+  --reag-add: oklch(0.8 0.13 155);
+  --reag-add-bg: oklch(0.72 0.15 155 / 0.13);
+  --reag-del: oklch(0.78 0.15 25);
+  --reag-del-bg: oklch(0.7 0.17 25 / 0.12);
 }
 
 pix3-agent-chat-panel .agent-chat {
@@ -10,64 +20,13 @@ pix3-agent-chat-panel .agent-chat {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: rgba(10, 13, 15, 0.35);
-  color: rgba(245, 247, 250, 0.92);
+  background: var(--bg-1);
+  color: var(--fg-0);
   font-size: 0.78rem;
 }
 
-/* ── Composer toolbar (provider / model / key, below the input) ──────────── */
+/* ── Composer input box (textarea + inline action row) ──────────────────── */
 
-pix3-agent-chat-panel .agent-provider-select,
-pix3-agent-chat-panel .agent-model-select,
-pix3-agent-chat-panel .agent-model-input,
-pix3-agent-chat-panel .agent-baseurl-input {
-  height: 1.6rem;
-  padding: 0 0.4rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.92);
-  font: inherit;
-  font-size: 0.72rem;
-}
-
-pix3-agent-chat-panel .agent-provider-select {
-  flex: 0 1 9rem;
-  min-width: 6rem;
-}
-
-pix3-agent-chat-panel .agent-model-select {
-  flex: 1 1 8rem;
-  min-width: 6rem;
-}
-
-pix3-agent-chat-panel .agent-model-input {
-  flex: 1 1 8rem;
-  min-width: 6rem;
-}
-
-pix3-agent-chat-panel .agent-baseurl-input {
-  flex: 1 1 10rem;
-  min-width: 8rem;
-}
-
-pix3-agent-chat-panel .agent-provider-select:focus-visible,
-pix3-agent-chat-panel .agent-model-select:focus-visible,
-pix3-agent-chat-panel .agent-model-input:focus-visible,
-pix3-agent-chat-panel .agent-baseurl-input:focus-visible,
-pix3-agent-chat-panel .agent-input:focus-visible {
-  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
-  outline-offset: 1px;
-}
-
-pix3-agent-chat-panel .agent-key-wrap {
-  /* NOT position:relative — the popover anchors to the composer (see .agent-key-popover), so a
-     17rem popover can't overflow the panel edge from a button sitting near it. */
-  flex: 0 0 auto;
-}
-
-pix3-agent-chat-panel .agent-key-button,
-pix3-agent-chat-panel .agent-new-chat,
 pix3-agent-chat-panel .agent-send,
 pix3-agent-chat-panel .agent-stop,
 pix3-agent-chat-panel .agent-key-save,
@@ -79,10 +38,10 @@ pix3-agent-chat-panel .agent-banner-action {
   gap: 0.3rem;
   height: 1.6rem;
   padding: 0 0.55rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.82);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   font: inherit;
   font-size: 0.72rem;
   cursor: pointer;
@@ -122,80 +81,43 @@ pix3-agent-chat-panel .agent-attachment-icon svg {
   height: 0.9rem;
 }
 
-pix3-agent-chat-panel .agent-key-button:hover,
-pix3-agent-chat-panel .agent-new-chat:hover,
 pix3-agent-chat-panel .agent-send:hover:not(:disabled),
 pix3-agent-chat-panel .agent-stop:hover,
 pix3-agent-chat-panel .agent-key-save:hover,
 pix3-agent-chat-panel .agent-key-clear:hover {
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
-  color: rgba(245, 247, 250, 1);
-}
-
-pix3-agent-chat-panel .agent-key-button.is-missing {
-  border-color: rgba(var(--pix3-accent-rgb), 0.55);
-  color: var(--pix3-accent-color);
-}
-
-pix3-agent-chat-panel .agent-key-button.is-configured {
-  color: #5ec27a;
-  border-color: rgba(94, 194, 122, 0.35);
-}
-
-pix3-agent-chat-panel .agent-key-popover {
-  /* Anchored to .agent-composer (its containing block), not the key button: the button sits at
-     the right side of the toolbar, so a button-anchored popover would overflow the panel edge and
-     get clipped by the layout container. Right-aligned above the composer, clamped to its width. */
-  position: absolute;
-  bottom: calc(100% + 0.3rem);
-  right: 0.6rem;
-  z-index: 30;
-  width: 17rem;
-  max-width: calc(100% - 1.2rem);
-  padding: 0.6rem;
-  border-radius: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(18, 22, 26, 0.98);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
-}
-
-pix3-agent-chat-panel .agent-key-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.72rem;
-  color: rgba(245, 247, 250, 0.75);
+  border-color: var(--accent-line);
+  color: var(--fg-0);
 }
 
 pix3-agent-chat-panel .agent-key-input {
-  height: 1.6rem;
+  width: 100%;
+  box-sizing: border-box;
+  height: 1.7rem;
   padding: 0 0.4rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(10, 13, 15, 0.7);
-  color: rgba(245, 247, 250, 0.95);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.74rem;
+}
+
+pix3-agent-chat-panel .agent-key-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 pix3-agent-chat-panel .agent-key-actions {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 
 pix3-agent-chat-panel .agent-key-help {
   margin-left: auto;
-  color: var(--pix3-accent-color);
+  color: var(--accent);
   font-size: 0.7rem;
-}
-
-pix3-agent-chat-panel .agent-key-note {
-  margin: 0.5rem 0 0;
-  font-size: 0.66rem;
-  line-height: 1.35;
-  color: rgba(245, 247, 250, 0.5);
 }
 
 /* ── Conversation history ───────────────────────────────────────────────── */
@@ -212,10 +134,10 @@ pix3-agent-chat-panel .agent-history-btn {
   gap: 0.3rem;
   height: 1.6rem;
   padding: 0 0.55rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.82);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   font: inherit;
   font-size: 0.72rem;
   cursor: pointer;
@@ -224,8 +146,8 @@ pix3-agent-chat-panel .agent-history-btn {
 
 pix3-agent-chat-panel .agent-history-btn:hover,
 pix3-agent-chat-panel .agent-history-btn.is-active {
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
-  color: rgba(245, 247, 250, 1);
+  border-color: var(--accent-line);
+  color: var(--fg-0);
 }
 
 pix3-agent-chat-panel .agent-history-popover {
@@ -238,10 +160,10 @@ pix3-agent-chat-panel .agent-history-popover {
   max-height: 22rem;
   display: flex;
   flex-direction: column;
-  border-radius: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(18, 22, 26, 0.98);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
@@ -251,14 +173,14 @@ pix3-agent-chat-panel .agent-history-head {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: rgba(245, 247, 250, 0.55);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--line-1);
 }
 
 pix3-agent-chat-panel .agent-history-empty {
   padding: 0.8rem 0.6rem;
   font-size: 0.72rem;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
 }
 
 pix3-agent-chat-panel .agent-history-list {
@@ -273,16 +195,16 @@ pix3-agent-chat-panel .agent-history-item {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem 0.45rem;
-  border-radius: 0.3rem;
+  border-radius: var(--radius-1);
   cursor: pointer;
 }
 
 pix3-agent-chat-panel .agent-history-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-3);
 }
 
 pix3-agent-chat-panel .agent-history-item.is-active {
-  background: rgba(var(--pix3-accent-rgb), 0.14);
+  background: var(--accent-soft);
 }
 
 pix3-agent-chat-panel .agent-history-item-main {
@@ -295,7 +217,7 @@ pix3-agent-chat-panel .agent-history-item-main {
 
 pix3-agent-chat-panel .agent-history-item-title {
   font-size: 0.75rem;
-  color: rgba(245, 247, 250, 0.9);
+  color: var(--fg-0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -303,17 +225,17 @@ pix3-agent-chat-panel .agent-history-item-title {
 
 pix3-agent-chat-panel .agent-history-item-meta {
   font-size: 0.66rem;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
 }
 
 pix3-agent-chat-panel .agent-history-delete {
   flex: 0 0 auto;
   width: 1.5rem;
   height: 1.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-1);
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(245, 247, 250, 0.55);
+  color: var(--fg-2);
   cursor: pointer;
   opacity: 0;
 }
@@ -323,8 +245,8 @@ pix3-agent-chat-panel .agent-history-item:hover .agent-history-delete {
 }
 
 pix3-agent-chat-panel .agent-history-delete:hover {
-  border-color: rgba(233, 90, 90, 0.5);
-  color: #e95a5a;
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 
 /* ── Messages ───────────────────────────────────────────────────────────── */
@@ -333,23 +255,126 @@ pix3-agent-chat-panel .agent-messages {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 0.6rem;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 10px;
+}
+
+/* ── Session header strip ───────────────────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line-1);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+pix3-agent-chat-panel .agent-header-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-header-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+  font-weight: 500;
+}
+
+pix3-agent-chat-panel .agent-header-steps {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-header-spacer {
+  flex: 1 1 auto;
+}
+
+pix3-agent-chat-panel .agent-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-header-btn:hover,
+pix3-agent-chat-panel .agent-header-btn.is-active {
+  background: var(--bg-2);
+  border-color: var(--line-2);
+  color: var(--fg-0);
+}
+
+/* History popover dropped DOWN from the header button (base popover drops up from composer). */
+pix3-agent-chat-panel .agent-history-wrap--header {
+  position: relative;
+}
+
+pix3-agent-chat-panel .agent-history-wrap--header .agent-history-popover {
+  top: calc(100% + 0.3rem);
+  bottom: auto;
+  right: 0;
+  /* Anchored to the 28px header button, so the composer-relative clamp would crush it. */
+  width: 18rem;
+  max-width: none;
+}
+
+/* ── Left-aligned rows (assistant reply / image / running) with avatar gutter ─ */
+
+pix3-agent-chat-panel .agent-left-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+pix3-agent-chat-panel .agent-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-avatar-gutter {
+  flex: 0 0 auto;
+  width: 26px;
 }
 
 pix3-agent-chat-panel .agent-empty {
   margin: auto;
   max-width: 26rem;
   text-align: center;
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
 }
 
 pix3-agent-chat-panel .agent-empty h3 {
   margin: 0 0 0.4rem;
   font-size: 0.95rem;
-  color: rgba(245, 247, 250, 0.85);
+  color: var(--fg-1);
 }
 
 pix3-agent-chat-panel .agent-empty p {
@@ -359,31 +384,69 @@ pix3-agent-chat-panel .agent-empty p {
 }
 
 pix3-agent-chat-panel .agent-empty-key-hint {
-  color: var(--pix3-accent-color);
+  color: var(--accent);
 }
 
 pix3-agent-chat-panel .agent-message {
-  max-width: 88%;
-  padding: 0.45rem 0.6rem;
-  border-radius: 0.45rem;
-  line-height: 1.45;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 pix3-agent-chat-panel .agent-message.is-user {
   align-self: flex-end;
-  background: rgba(var(--pix3-accent-rgb), 0.14);
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.28);
+  max-width: 90%;
+  padding: 10px 14px;
+  border-radius: 13px 13px 5px 13px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--fg-0);
 }
 
 pix3-agent-chat-panel .agent-message.is-assistant {
-  align-self: flex-start;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 13px 13px 13px 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  color: var(--fg-1);
+  line-height: 1.55;
 }
 
 pix3-agent-chat-panel .agent-message-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Hover Copy / Retry toolbar on the last settled assistant reply. */
+pix3-agent-chat-panel .agent-msg-actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+pix3-agent-chat-panel .agent-message.is-assistant:hover .agent-msg-actions {
+  opacity: 1;
+}
+
+pix3-agent-chat-panel .agent-msg-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-msg-action:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
 }
 
 /* ── Markdown (assistant replies) ───────────────────────────────────────── */
@@ -403,7 +466,7 @@ pix3-agent-chat-panel .agent-message-md > :last-child {
 
 pix3-agent-chat-panel .agent-message-md .md-h {
   margin: 0.5rem 0 0.3rem;
-  color: rgba(245, 247, 250, 0.95);
+  color: var(--fg-0);
 }
 
 pix3-agent-chat-panel .agent-message-md .md-h1 {
@@ -430,9 +493,10 @@ pix3-agent-chat-panel .agent-message-md .md-list li {
 pix3-agent-chat-panel .agent-message-md .md-code {
   margin: 0.3rem 0 0.5rem;
   padding: 0.4rem 0.5rem;
-  border-radius: 0.3rem;
-  background: rgba(10, 13, 15, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-1);
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  font-family: var(--font-mono);
   font-size: 0.7rem;
   line-height: 1.45;
   overflow-x: auto;
@@ -441,13 +505,14 @@ pix3-agent-chat-panel .agent-message-md .md-code {
 
 pix3-agent-chat-panel .agent-message-md .md-inline-code {
   padding: 0.05rem 0.3rem;
-  border-radius: 0.2rem;
-  background: rgba(10, 13, 15, 0.7);
+  border-radius: var(--radius-1);
+  background: var(--bg-0);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
 }
 
 pix3-agent-chat-panel .agent-message-md a {
-  color: var(--pix3-accent-color);
+  color: var(--accent);
 }
 
 /* ── Tool images (screenshots / previews) ───────────────────────────────── */
@@ -457,89 +522,417 @@ pix3-agent-chat-panel .agent-image {
   max-width: min(20rem, 88%);
   max-height: 14rem;
   object-fit: contain;
-  border-radius: 0.35rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: repeating-conic-gradient(rgba(255, 255, 255, 0.06) 0% 25%, transparent 0% 50%) 0 0 /
-    16px 16px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  /* transparency checkerboard, token-based */
+  background: repeating-conic-gradient(oklch(1 0 0 / 0.06) 0% 25%, transparent 0% 50%) 0 0 / 16px
+    16px;
 }
 
-/* ── Tool calls ─────────────────────────────────────────────────────────── */
+/* ── Status badges (tool rows + group headers) ──────────────────────────── */
 
-pix3-agent-chat-panel .agent-tool-call {
-  align-self: flex-start;
-  max-width: 95%;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 0.35rem;
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 0.72rem;
-}
-
-pix3-agent-chat-panel .agent-tool-call.is-error {
-  border-color: rgba(224, 92, 92, 0.45);
-}
-
-pix3-agent-chat-panel .agent-tool-call summary {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.3rem 0.55rem;
-  cursor: pointer;
-  color: rgba(245, 247, 250, 0.7);
-  list-style: none;
-}
-
-pix3-agent-chat-panel .agent-tool-call summary::-webkit-details-marker {
-  display: none;
-}
-
-pix3-agent-chat-panel .agent-tool-call summary code {
-  flex: 0 0 auto;
-}
-
-/* The primary-argument descriptor (file / node / command) beside the tool name. */
-pix3-agent-chat-panel .agent-tool-arg {
-  min-width: 0;
-  max-width: 22rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(245, 247, 250, 0.5);
-  font-variant-numeric: tabular-nums;
-}
-
-pix3-agent-chat-panel .agent-tool-call[open] summary {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-pix3-agent-chat-panel .agent-tool-status {
+pix3-agent-chat-panel .agent-badge {
   display: inline-flex;
-  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 1rem;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border-radius: 999px;
 }
 
-pix3-agent-chat-panel .agent-tool-status.is-ok {
-  color: #5ec27a;
+pix3-agent-chat-panel .agent-badge--row {
+  width: 16px;
+  height: 16px;
 }
 
-pix3-agent-chat-panel .agent-tool-status.is-error,
-pix3-agent-chat-panel .agent-tool-call.is-error .agent-tool-status {
-  color: #e05c5c;
+pix3-agent-chat-panel .agent-badge--group {
+  width: 18px;
+  height: 18px;
 }
 
-/* Pending tool call — a small spinner that mirrors the running indicator. */
-pix3-agent-chat-panel .agent-inline-spinner {
-  width: 0.7rem;
-  height: 0.7rem;
+pix3-agent-chat-panel .agent-badge svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+}
+
+pix3-agent-chat-panel .agent-badge.is-done {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-badge.is-error {
+  background: var(--reag-err-soft);
+  border: 1px solid var(--reag-err-line);
+  color: var(--reag-err);
+}
+
+pix3-agent-chat-panel .agent-badge.is-queued {
+  border: 1px solid var(--line-2);
+}
+
+pix3-agent-chat-panel .agent-badge-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-badge-spinner {
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  border: 2px solid rgba(var(--pix3-accent-rgb), 0.25);
-  border-top-color: var(--pix3-accent-color);
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
   animation: pix3-agent-spin 0.8s linear infinite;
 }
 
+/* ── Tool group card ────────────────────────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-group {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+pix3-agent-chat-panel .agent-group.is-error {
+  border-color: var(--reag-err-line);
+}
+
+pix3-agent-chat-panel .agent-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-group-head:hover {
+  background: var(--bg-2);
+}
+
+pix3-agent-chat-panel .agent-group-caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+  transition: transform 0.12s ease;
+}
+
+pix3-agent-chat-panel .agent-group-caret svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+pix3-agent-chat-panel .agent-group-caret.is-open {
+  transform: rotate(90deg);
+}
+
+pix3-agent-chat-panel .agent-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-group.is-error .agent-group-label {
+  color: var(--reag-err);
+}
+
+pix3-agent-chat-panel .agent-group-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-group-spacer {
+  flex: 1 1 auto;
+}
+
+pix3-agent-chat-panel .agent-group-flag {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--reag-err);
+}
+
+/* Indeterminate progress sliver under a running group's header. */
+pix3-agent-chat-panel .agent-group-progress {
+  position: relative;
+  display: block;
+  height: 2px;
+  background: var(--line-1);
+  overflow: hidden;
+}
+
+pix3-agent-chat-panel .agent-group-progress-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: var(--accent);
+  animation: pix3-agent-bar 1.1s ease-in-out infinite;
+}
+
+@keyframes pix3-agent-bar {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+pix3-agent-chat-panel .agent-group-body {
+  padding: 3px 9px 6px 10px;
+  border-top: 1px solid var(--line-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* ── Tool row ───────────────────────────────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-row-details {
+  border-radius: 5px;
+}
+
+pix3-agent-chat-panel .agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px 0 0;
+  border-radius: 5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+pix3-agent-chat-panel .agent-row::-webkit-details-marker {
+  display: none;
+}
+
+pix3-agent-chat-panel .agent-row:hover {
+  background: var(--bg-2);
+}
+
+pix3-agent-chat-panel .agent-row.is-queued {
+  opacity: 0.55;
+}
+
+pix3-agent-chat-panel .agent-row-argicon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-row-argicon svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+pix3-agent-chat-panel .agent-row.is-error .agent-row-argicon {
+  color: var(--reag-err);
+}
+
+pix3-agent-chat-panel .agent-row-name {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-row.is-error .agent-row-name {
+  color: var(--reag-err);
+}
+
+pix3-agent-chat-panel .agent-row-arg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-agent-chat-panel .agent-row-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+pix3-agent-chat-panel .agent-row-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-row-note.is-running {
+  color: var(--accent);
+  animation: pix3-agent-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pix3-agent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+pix3-agent-chat-panel .agent-row-affordance {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--fg-2);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+pix3-agent-chat-panel .agent-row:hover .agent-row-affordance {
+  opacity: 1;
+}
+
+pix3-agent-chat-panel .agent-row-affordance-caret {
+  display: inline-flex;
+  color: var(--fg-3);
+  transition: transform 0.12s ease;
+}
+
+pix3-agent-chat-panel .agent-row-affordance-caret svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+}
+
+pix3-agent-chat-panel .agent-row-details[open] .agent-row-affordance-caret {
+  transform: rotate(90deg);
+}
+
+/* ── Diff stat + preview ────────────────────────────────────────────────── */
+
+pix3-agent-chat-panel .agent-diffstat {
+  display: inline-flex;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+pix3-agent-chat-panel .agent-diffstat .is-add {
+  color: var(--reag-add);
+}
+
+pix3-agent-chat-panel .agent-diffstat .is-del {
+  color: var(--reag-del);
+}
+
+pix3-agent-chat-panel .agent-diff {
+  margin: 4px 0 6px;
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+pix3-agent-chat-panel .agent-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-agent-chat-panel .agent-diff-file-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-diff-file-icon svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+pix3-agent-chat-panel .agent-diff-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-1);
+}
+
+pix3-agent-chat-panel .agent-diff-head-stat {
+  margin-left: auto;
+}
+
+pix3-agent-chat-panel .agent-diff-body {
+  padding: 5px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+pix3-agent-chat-panel .agent-diff-line {
+  display: flex;
+  padding: 0 9px;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-diff-line.is-add {
+  background: var(--reag-add-bg);
+  color: var(--reag-add);
+}
+
+pix3-agent-chat-panel .agent-diff-line.is-del {
+  background: var(--reag-del-bg);
+  color: var(--reag-del);
+}
+
+pix3-agent-chat-panel .agent-diff-sign {
+  width: 13px;
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+
+pix3-agent-chat-panel .agent-diff-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+pix3-agent-chat-panel .agent-diff-more {
+  padding: 3px 9px 0;
+  color: var(--fg-3);
+}
+
 pix3-agent-chat-panel .agent-tool-detail {
-  padding: 0.4rem 0.55rem;
+  padding: 2px 0 6px 24px;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -549,7 +942,7 @@ pix3-agent-chat-panel .agent-tool-section {
   font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(245, 247, 250, 0.45);
+  color: var(--fg-3);
 }
 
 pix3-agent-chat-panel .agent-tool-detail pre {
@@ -557,8 +950,9 @@ pix3-agent-chat-panel .agent-tool-detail pre {
   max-height: 14rem;
   overflow: auto;
   padding: 0.35rem 0.45rem;
-  border-radius: 0.25rem;
-  background: rgba(10, 13, 15, 0.7);
+  border-radius: var(--radius-1);
+  background: var(--bg-0);
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   line-height: 1.4;
   white-space: pre-wrap;
@@ -572,7 +966,7 @@ pix3-agent-chat-panel .agent-running {
   align-items: center;
   gap: 0.45rem;
   align-self: flex-start;
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
   font-size: 0.72rem;
   padding: 0.2rem 0.1rem;
 }
@@ -581,8 +975,8 @@ pix3-agent-chat-panel .agent-running-spinner {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 50%;
-  border: 2px solid rgba(var(--pix3-accent-rgb), 0.25);
-  border-top-color: var(--pix3-accent-color);
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
   animation: pix3-agent-spin 0.8s linear infinite;
 }
 
@@ -598,21 +992,21 @@ pix3-agent-chat-panel .agent-banner {
   gap: 0.5rem;
   margin: 0 0.6rem 0.4rem;
   padding: 0.4rem 0.55rem;
-  border-radius: 0.3rem;
+  border-radius: var(--radius-1);
   font-size: 0.72rem;
   line-height: 1.4;
 }
 
 pix3-agent-chat-panel .agent-banner.is-error {
-  background: rgba(224, 92, 92, 0.12);
-  border: 1px solid rgba(224, 92, 92, 0.4);
-  color: #f0b1b1;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  color: var(--danger);
 }
 
 pix3-agent-chat-panel .agent-banner.is-notice {
-  background: rgba(var(--pix3-accent-rgb), 0.08);
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.3);
-  color: rgba(245, 247, 250, 0.8);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--fg-1);
 }
 
 /* ── Composer (input + toolbar below it) ────────────────────────────────── */
@@ -624,38 +1018,75 @@ pix3-agent-chat-panel .agent-composer {
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.5rem 0.6rem 0.6rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--line-1);
+}
+
+/* Single rounded box that visually holds the textarea + the inline action row (Copilot-style). */
+pix3-agent-chat-panel .agent-input-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem 0.45rem;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+}
+
+pix3-agent-chat-panel .agent-input-box:focus-within {
+  border-color: var(--accent-line);
+  outline: 1px solid var(--accent-line);
 }
 
 pix3-agent-chat-panel .agent-input {
   width: 100%;
   box-sizing: border-box;
-  min-height: 2.6rem;
+  min-height: 3.2rem;
+  max-height: 14rem;
   resize: vertical;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.3rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.95);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-0);
   font: inherit;
-  font-size: 0.76rem;
-  line-height: 1.4;
+  font-size: 13.5px;
+  line-height: 1.45;
 }
 
-pix3-agent-chat-panel .agent-composer-toolbar {
+pix3-agent-chat-panel .agent-input:focus,
+pix3-agent-chat-panel .agent-input:focus-visible {
+  outline: none;
+}
+
+pix3-agent-chat-panel .agent-input-actions {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex-wrap: wrap;
+}
+
+pix3-agent-chat-panel .agent-input-spacer {
+  flex: 1 1 auto;
 }
 
 pix3-agent-chat-panel .agent-toolbar-spacer {
   flex: 1 1 auto;
 }
 
+/* Send: filled accent (primary action inside the box). */
 pix3-agent-chat-panel .agent-send {
-  border-color: rgba(var(--pix3-accent-rgb), 0.55);
-  color: var(--pix3-accent-color);
+  height: 30px;
+  padding: 0 14px;
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+pix3-agent-chat-panel .agent-send:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.06);
 }
 
 pix3-agent-chat-panel .agent-send:disabled {
@@ -664,8 +1095,292 @@ pix3-agent-chat-panel .agent-send:disabled {
 }
 
 pix3-agent-chat-panel .agent-stop {
-  border-color: rgba(224, 92, 92, 0.5);
-  color: #e08c8c;
+  height: 30px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+
+/* ── Model picker button (in the input action row) ──────────────────────── */
+
+pix3-agent-chat-panel .agent-model-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 15rem;
+  height: 30px;
+  padding: 0 0.55rem;
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-model-picker:hover,
+pix3-agent-chat-panel .agent-model-picker.is-open {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-model-picker.is-missing {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-agent-chat-panel .agent-model-picker-keyicon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-model-picker-keyicon svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-model-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Provider hint is hidden on the collapsed button (Copilot-style: model name only);
+   the provider is shown grouped in the dropdown. */
+pix3-agent-chat-panel .agent-model-picker-hint {
+  display: none;
+}
+
+pix3-agent-chat-panel .agent-model-picker-caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-model-picker-caret svg {
+  display: block;
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+/* ── Model picker dropdown (anchored to composer, opens above the box) ───── */
+
+pix3-agent-chat-panel .agent-model-picker-popover {
+  position: absolute;
+  bottom: calc(100% + 0.3rem);
+  right: 0.6rem;
+  z-index: 30;
+  width: min(22rem, calc(100% - 1.2rem));
+  max-height: 22rem;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+pix3-agent-chat-panel .agent-mp-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--line-1);
+  flex: 0 0 auto;
+}
+
+pix3-agent-chat-panel .agent-mp-search-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-mp-search-icon svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-mp-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+pix3-agent-chat-panel .agent-mp-search-input:focus,
+pix3-agent-chat-panel .agent-mp-search-input:focus-visible {
+  outline: none;
+}
+
+pix3-agent-chat-panel .agent-mp-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+
+pix3-agent-chat-panel .agent-mp-empty,
+pix3-agent-chat-panel .agent-mp-none {
+  padding: 0.5rem 0.5rem;
+  font-size: 0.72rem;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-mp-group {
+  padding: 0.1rem 0 0.3rem;
+}
+
+pix3-agent-chat-panel .agent-mp-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.45rem 0.15rem;
+}
+
+pix3-agent-chat-panel .agent-mp-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-mp-key-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-mp-key-btn svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-mp-key-btn:hover,
+pix3-agent-chat-panel .agent-mp-key-btn.is-open {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+
+pix3-agent-chat-panel .agent-mp-key-btn.is-set {
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-mp-keyeditor {
+  padding: 0.35rem 0.45rem 0.5rem;
+}
+
+pix3-agent-chat-panel .agent-mp-model {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-mp-model:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-mp-model.is-active {
+  background: var(--accent-soft);
+}
+
+pix3-agent-chat-panel .agent-mp-model-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 0.9rem;
+  color: var(--accent);
+}
+
+pix3-agent-chat-panel .agent-mp-model-check svg {
+  display: block;
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+pix3-agent-chat-panel .agent-mp-model-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+pix3-agent-chat-panel .agent-mp-model-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-mp-baseurl,
+pix3-agent-chat-panel .agent-mp-custom {
+  box-sizing: border-box;
+  height: 1.6rem;
+  margin: 0.2rem 0.45rem;
+  padding: 0 0.4rem;
+  width: calc(100% - 0.9rem);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-agent-chat-panel .agent-mp-baseurl:focus-visible,
+pix3-agent-chat-panel .agent-mp-custom:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Debug affordance row (Raw / Sys), only when debug mode is on ───────── */
+
+pix3-agent-chat-panel .agent-debug-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 /* Full-width context-usage progress bar at the top of the composer. */
@@ -674,7 +1389,7 @@ pix3-agent-chat-panel .agent-context {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.64rem;
-  color: rgba(245, 247, 250, 0.55);
+  color: var(--fg-2);
   font-variant-numeric: tabular-nums;
   cursor: help;
 }
@@ -683,15 +1398,15 @@ pix3-agent-chat-panel .agent-context-label {
   flex: 0 0 auto;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
 }
 
 pix3-agent-chat-panel .agent-context-bar {
   position: relative;
   flex: 1 1 auto;
   height: 0.35rem;
-  border-radius: 0.2rem;
-  background: rgba(245, 247, 250, 0.1);
+  border-radius: var(--radius-1);
+  background: var(--bg-3);
   overflow: hidden;
 }
 
@@ -701,14 +1416,14 @@ pix3-agent-chat-panel .agent-context-fill {
   height: 100%;
   min-width: 0.15rem;
   border-radius: inherit;
-  background: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent);
   transition: width 0.25s ease;
 }
 
 /*
  * Cached slice of the used context, painted from the same left origin on top of the fill in a cool
- * "cheap/reused" green so the bar reads [cached][fresh][empty]. Sits above the fill (later in the
- * DOM) and stays green even when the fill turns amber/red at high fill.
+ * "cheap/reused" tone so the bar reads [cached][fresh][empty]. Sits above the fill (later in the
+ * DOM) and stays distinct even when the fill turns amber/red at high fill.
  */
 pix3-agent-chat-panel .agent-context-cache {
   position: absolute;
@@ -716,29 +1431,29 @@ pix3-agent-chat-panel .agent-context-cache {
   height: 100%;
   min-width: 0.15rem;
   border-radius: inherit;
-  background: #4fb477;
+  background: var(--presence-5);
   transition: width 0.25s ease;
 }
 
 pix3-agent-chat-panel .agent-context-value {
   flex: 0 0 auto;
-  color: rgba(245, 247, 250, 0.65);
+  color: var(--fg-2);
 }
 
 pix3-agent-chat-panel .agent-context.is-mid .agent-context-value {
-  color: #f5c877;
+  color: var(--warn);
 }
 
 pix3-agent-chat-panel .agent-context.is-mid .agent-context-fill {
-  background: #f5a623;
+  background: var(--warn);
 }
 
 pix3-agent-chat-panel .agent-context.is-high .agent-context-value {
-  color: #ff9a8a;
+  color: var(--danger);
 }
 
 pix3-agent-chat-panel .agent-context.is-high .agent-context-fill {
-  background: #ff5a4d;
+  background: var(--danger);
 }
 
 /* Fallback (no known context window): just a right-aligned token count, no bar. */
@@ -746,22 +1461,23 @@ pix3-agent-chat-panel .agent-context.is-unbounded {
   justify-content: space-between;
 }
 
+/* Attach: ghost icon-button living inside the input box. */
 pix3-agent-chat-panel .agent-attach {
-  height: 1.6rem;
-  min-width: 1.7rem;
+  height: 30px;
+  min-width: 30px;
   padding: 0 0.35rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.82);
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
   font: inherit;
   line-height: 1;
   cursor: pointer;
 }
 
 pix3-agent-chat-panel .agent-attach:hover {
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
-  color: rgba(245, 247, 250, 1);
+  background: var(--bg-3);
+  color: var(--fg-0);
 }
 
 /* ── Debug affordances (raw log / system prompt / metrics) ───────────────── */
@@ -773,10 +1489,10 @@ pix3-agent-chat-panel .agent-debug-btn {
   gap: 0.25rem;
   height: 1.6rem;
   padding: 0 0.5rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.7);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
   font: inherit;
   font-size: 0.68rem;
   cursor: pointer;
@@ -790,8 +1506,8 @@ pix3-agent-chat-panel .agent-debug-btn.agent-icon-btn {
 
 pix3-agent-chat-panel .agent-debug-btn:hover,
 pix3-agent-chat-panel .agent-debug-btn.is-active {
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
-  color: var(--pix3-accent-color);
+  border-color: var(--accent-line);
+  color: var(--accent);
 }
 
 pix3-agent-chat-panel .agent-metrics {
@@ -800,7 +1516,7 @@ pix3-agent-chat-panel .agent-metrics {
   padding: 0 0.1rem;
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
   cursor: help;
 }
 
@@ -810,8 +1526,8 @@ pix3-agent-chat-panel .agent-debug-drawer {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  background: rgba(12, 15, 18, 0.98);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line-1);
 }
 
 pix3-agent-chat-panel .agent-debug-head {
@@ -819,9 +1535,9 @@ pix3-agent-chat-panel .agent-debug-head {
   align-items: center;
   gap: 0.4rem;
   padding: 0.45rem 0.6rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--line-1);
   font-size: 0.74rem;
-  color: rgba(245, 247, 250, 0.85);
+  color: var(--fg-1);
 }
 
 pix3-agent-chat-panel .agent-debug-body {
@@ -830,17 +1546,18 @@ pix3-agent-chat-panel .agent-debug-body {
   margin: 0;
   padding: 0.6rem;
   overflow: auto;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: rgba(245, 247, 250, 0.82);
+  color: var(--fg-1);
 }
 
 /* ── Composer attachments + drag-drop ───────────────────────────────────── */
 
 pix3-agent-chat-panel .agent-composer.is-drag {
-  outline: 2px dashed rgba(var(--pix3-accent-rgb), 0.6);
+  outline: 2px dashed var(--accent);
   outline-offset: -3px;
 }
 
@@ -852,9 +1569,9 @@ pix3-agent-chat-panel .agent-drop-hint {
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  border-radius: 0.3rem;
-  background: rgba(12, 15, 18, 0.72);
-  color: var(--pix3-accent-color);
+  border-radius: var(--radius-1);
+  background: oklch(0 0 0 / 0.55);
+  color: var(--accent);
   font-size: 0.8rem;
 }
 
@@ -871,9 +1588,9 @@ pix3-agent-chat-panel .agent-attachment {
   gap: 0.3rem;
   max-width: 12rem;
   padding: 0.15rem 0.3rem 0.15rem 0.15rem;
-  border-radius: 0.3rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
   font-size: 0.68rem;
 }
 
@@ -881,7 +1598,7 @@ pix3-agent-chat-panel .agent-attachment-thumb {
   width: 1.5rem;
   height: 1.5rem;
   object-fit: cover;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-1);
 }
 
 pix3-agent-chat-panel .agent-attachment-icon {
@@ -889,14 +1606,14 @@ pix3-agent-chat-panel .agent-attachment-icon {
   align-items: center;
   justify-content: center;
   width: 1.5rem;
-  color: rgba(245, 247, 250, 0.6);
+  color: var(--fg-2);
 }
 
 pix3-agent-chat-panel .agent-attachment-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(245, 247, 250, 0.8);
+  color: var(--fg-1);
 }
 
 pix3-agent-chat-panel .agent-attachment-remove {
@@ -904,7 +1621,7 @@ pix3-agent-chat-panel .agent-attachment-remove {
   padding: 0 0.15rem;
   border: none;
   background: none;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
   cursor: pointer;
   line-height: 1;
 }
@@ -916,10 +1633,10 @@ pix3-agent-chat-panel .agent-attachment-remove svg {
 }
 
 pix3-agent-chat-panel .agent-attachment-remove:hover {
-  color: #e08c8c;
+  color: var(--danger);
 }
 
 pix3-agent-chat-panel .agent-attachment-warning {
   font-size: 0.66rem;
-  color: #e0a85c;
+  color: var(--warn);
 }

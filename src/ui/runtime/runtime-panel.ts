@@ -159,6 +159,16 @@ export class RuntimePanel extends ComponentBase {
   private disposeUiSubscription?: () => void;
   /** Fingerprint of the last DTO tree pushed to Lit — see {@link refreshTree}. */
   private lastTreeHash: number | null = null;
+  /**
+   * Live world-position text per object uuid, rebuilt on every walk. Positions
+   * are deliberately NOT part of the tree fingerprint and NOT a Lit binding: in
+   * a running game something moves every frame, so hashing positions made every
+   * 350 ms tick re-render the whole tree (20-60 ms main-thread tasks = dropped
+   * game frames). Instead the `.runtime-pos` spans render empty and are filled
+   * imperatively by {@link syncPositions} — a few hundred dirty-checked
+   * `textContent` writes, no template diff.
+   */
+  private readonly posByUuid = new Map<string, string>();
 
   /** Box3 highlight drawn into the running scene for the selected object. */
   private highlight?: THREE.Box3Helper;
@@ -224,23 +234,30 @@ export class RuntimePanel extends ComponentBase {
       this.roots = [];
       this.nodeCount = 0;
       this.lastTreeHash = null;
+      this.posByUuid.clear();
       return;
     }
     const counter = { n: 0, hash: 17 };
     // Show the scene root's children as top-level rows (the root itself is just a Scene).
     const children = Array.isArray(root.children) ? root.children : [];
+    this.posByUuid.clear();
     const nextRoots = children
       .filter(child => !isHelperObject(child))
       .slice(0, MAX_CHILDREN_PER_NODE)
       .map(child => this.toNode(child, MAX_DEPTH, counter));
 
     // Only push a new tree into Lit when something actually changed: the walk
-    // hashes every rendered field, so an idle/paused scene costs the DTO walk
-    // but no template re-render (the dominant cost for 400+ rows).
+    // hashes every rendered field EXCEPT positions (see {@link posByUuid}), so a
+    // scene where things merely move costs the DTO walk + imperative position
+    // writes but no template re-render (the dominant cost for 400+ rows).
     if (counter.hash !== this.lastTreeHash || counter.n !== this.nodeCount) {
       this.lastTreeHash = counter.hash;
       this.roots = nextRoots;
       this.nodeCount = counter.n;
+      // Positions land via syncPositions() in updated(), after Lit commits the
+      // new rows (the spans render empty — writing now would hit stale DOM).
+    } else {
+      this.syncPositions();
     }
 
     // Keep the detail + highlight in sync with the live object (it may have
@@ -288,18 +305,47 @@ export class RuntimePanel extends ComponentBase {
       children,
     };
 
+    if (pos) {
+      this.posByUuid.set(node.uuid, `${pos.x}, ${pos.y}, ${pos.z}`);
+    }
+
     // Fold every rendered field into the walk fingerprint so refreshTree can
-    // skip the Lit re-render when nothing visible changed.
+    // skip the Lit re-render when nothing visible changed. Positions stay OUT
+    // of the hash (only their presence, which decides whether the span exists):
+    // they change every frame in a running game, and hashing them forced a full
+    // tree re-render on every tick — see {@link posByUuid}.
     counter.hash = hashString(
       counter.hash,
       `${node.uuid}|${node.name}|${node.type}|${node.visible ? 1 : 0}|${
-        node.pos ? `${node.pos.x},${node.pos.y},${node.pos.z}` : '-'
+        node.pos ? 'p' : '-'
       }|${node.instances ?? ''}|${node.droppable ? 1 : 0}|${node.gizmo ? 1 : 0}|${
         node.childCount
       }|${node.truncatedChildren}`
     );
 
     return node;
+  }
+
+  /**
+   * Write the live world positions into the rendered `.runtime-pos` spans.
+   * The spans render empty and Lit never binds their content, so this owns
+   * them outright; `textContent` is only touched when the value changed.
+   * Runs from `updated()` (fresh DOM after a tree re-render) and from the
+   * 350 ms tick when the walk found only movement (no re-render).
+   */
+  private syncPositions(): void {
+    const spans = this.querySelectorAll<HTMLSpanElement>('.runtime-pos[data-uuid]');
+    for (const span of spans) {
+      const text = this.posByUuid.get(span.dataset.uuid ?? '');
+      if (text !== undefined && span.textContent !== text) {
+        span.textContent = text;
+      }
+    }
+  }
+
+  protected updated(changed: Map<PropertyKey, unknown>): void {
+    super.updated(changed);
+    this.syncPositions();
   }
 
   private onFilterInput(event: Event): void {
@@ -613,9 +659,7 @@ export class RuntimePanel extends ComponentBase {
             : null}
           ${node.gizmo ? html`<span class="runtime-badge badge-gizmo">gizmo</span>` : null}
           ${!node.visible ? html`<span class="runtime-badge badge-hidden">hidden</span>` : null}
-          ${node.pos
-            ? html`<span class="runtime-pos">${node.pos.x}, ${node.pos.y}, ${node.pos.z}</span>`
-            : null}
+          ${node.pos ? html`<span class="runtime-pos" data-uuid=${node.uuid}></span>` : null}
         </div>
         ${hasChildren && !isCollapsed
           ? html`<div class="runtime-children">
@@ -771,10 +815,9 @@ function hashString(hash: number, value: string): number {
 }
 
 function accentColor(): string {
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue('--pix3-accent-color')
-    .trim();
-  return value || '#ffcf33';
+  // THREE.Color cannot parse the oklch() string behind var(--accent), so use the
+  // sRGB equivalent directly — keep in sync with --accent in src/index.css.
+  return '#f5ae39';
 }
 
 /** Build a full inspection DTO straight off the raw live THREE object. */

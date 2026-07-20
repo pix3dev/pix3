@@ -4,7 +4,7 @@ pix3-script-creator .dialog-backdrop {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: oklch(0 0 0 / 0.55);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -14,10 +14,10 @@ pix3-script-creator .dialog-backdrop {
 }
 
 pix3-script-creator .dialog-content {
-  background: var(--pix3-panel-bg, #1e1e1e);
-  border: 1px solid var(--pix3-panel-border, #333);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-float);
   min-width: 480px;
   max-width: 600px;
   animation: slideUp 0.3s ease;
@@ -25,14 +25,14 @@ pix3-script-creator .dialog-content {
 
 pix3-script-creator .dialog-header {
   padding: 20px 24px;
-  border-bottom: 1px solid var(--pix3-panel-border, #333);
+  border-bottom: 1px solid var(--line-1);
 }
 
 pix3-script-creator .dialog-title {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--pix3-text-primary, #e0e0e0);
+  color: var(--fg-0);
 }
 
 pix3-script-creator .dialog-body {
@@ -48,53 +48,52 @@ pix3-script-creator .form-group {
 pix3-script-creator .form-label {
   font-size: 14px;
   font-weight: 500;
-  color: var(--pix3-text-primary, #e0e0e0);
+  color: var(--fg-0);
 }
 
 pix3-script-creator .form-input {
   padding: 8px 12px;
   font-size: 14px;
-  background: var(--pix3-input-bg, #2a2a2a);
-  border: 1px solid var(--pix3-input-border, #444);
-  border-radius: 4px;
-  color: var(--pix3-text-primary, #e0e0e0);
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  color: var(--fg-0);
+  font-family: var(--font-mono);
   transition: border-color 0.2s;
 }
 
 pix3-script-creator .form-input:focus {
   outline: none;
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.6);
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.1);
+  border-color: var(--accent);
 }
 
 pix3-script-creator .help-text {
   font-size: 12px;
-  color: var(--pix3-text-secondary, #888);
+  color: var(--fg-3);
   line-height: 1.4;
 }
 
 pix3-script-creator .help-text code {
   padding: 2px 6px;
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.1);
-  border-radius: 3px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  background: var(--accent-soft);
+  border-radius: var(--radius-1);
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-script-creator .error-message {
   padding: 8px 12px;
-  background: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.3);
-  border-radius: 4px;
-  color: #ef4444;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-1);
+  color: var(--danger);
   font-size: 13px;
 }
 
 pix3-script-creator .dialog-actions {
   padding: 16px 24px;
-  border-top: 1px solid var(--pix3-panel-border, #333);
+  border-top: 1px solid var(--line-1);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -105,30 +104,30 @@ pix3-script-creator .btn-primary {
   padding: 8px 16px;
   font-size: 14px;
   font-weight: 500;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   border: none;
   cursor: pointer;
-  transition: all 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
 
 pix3-script-creator .btn-secondary {
-  background: var(--pix3-button-secondary-bg, #3a3a3a);
-  color: var(--pix3-text-primary, #e0e0e0);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 pix3-script-creator .btn-secondary:hover {
-  background: var(--pix3-button-secondary-hover, #4a4a4a);
+  background: var(--bg-3);
 }
 
 pix3-script-creator .btn-primary {
-  background: var(--pix3-accent-color, #ffcf33);
-  color: #1e1e1e;
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 pix3-script-creator .btn-primary:hover:not(:disabled) {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.9);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.3);
+  background: var(--accent);
 }
 
 pix3-script-creator .btn-primary:disabled {

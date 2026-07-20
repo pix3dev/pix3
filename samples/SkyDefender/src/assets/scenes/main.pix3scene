@@ -258,6 +258,7 @@ root:
                   width: 210
                   height: 55
                   initiallyVisible: false
+                  visible: false
                   transform:
                     position: [-215, -0.5]
                     scale: [1, 1]
@@ -273,6 +274,7 @@ root:
                   width: 210
                   height: 128
                   initiallyVisible: false
+                  visible: false
                   transform:
                     position: [-215, 91]
                     scale: [1, 1]
@@ -300,7 +302,7 @@ root:
                   width: 80
                   height: 60
                   transform:
-                    position: [-273.08105432486315, -26.883387397760128]
+                    position: [-273.5798863010342, -30.12587578722908]
                     scale: [1, 1]
                     rotation: 0
                 components:
@@ -317,6 +319,20 @@ root:
                       muzzleDistance: 52
                       poolSize: 36
                 children:
+                  - id: sprite2d-1784217824701-al9nhlu
+                    type: Sprite2D
+                    name: Gun Base
+                    properties:
+                      texture:
+                        type: texture
+                        url: res://src/assets/textures/maingun/gunplace.png
+                      width: 50
+                      height: 41
+                      transform:
+                        position: [5.73671158818928, 17.256362475821103]
+                        scale: [1, 1]
+                        rotation: -0
+                    children: []
                   - id: barrel-pivot
                     type: Group2D
                     name: Barrel Pivot
@@ -324,23 +340,25 @@ root:
                       width: 80
                       height: 60
                       transform:
-                        position: [10, 20]
+                        position: [25.713597732562533, 34.217050424684494]
                         scale: [1, 1]
                         rotation: 0
                     children:
-                      - id: mount-carriage
+                      - id: barrel-gun
                         type: Sprite2D
-                        name: Mount Carriage
+                        name: Barrel Gun
                         properties:
                           texture:
                             type: texture
-                            url: res://src/assets/textures/maingun/gunplace.png
-                          width: 50
-                          height: 41
+                            url: res://src/assets/textures/maingun/gun/00000.png
+                          width: 54
+                          height: 29
+                          initiallyVisible: true
+                          visible: true
                           transform:
-                            position: [-17, -17.5]
+                            position: [8.24939237646808, 0.24124730237532344]
                             scale: [1, 1]
-                            rotation: 0
+                            rotation: -0
                         children: []
                       - id: mount-pilot
                         type: Sprite2D
@@ -351,8 +369,10 @@ root:
                             url: res://src/assets/textures/maingun/pplace.png
                           width: 49
                           height: 37
+                          initiallyVisible: true
+                          visible: true
                           transform:
-                            position: [-16.5, -14.5]
+                            position: [-13.756362475821135, -1.7794763314477375]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -366,22 +386,9 @@ root:
                           width: 32
                           height: 36
                           initiallyVisible: false
+                          visible: true
                           transform:
-                            position: [34, -3]
-                            scale: [1, 1]
-                            rotation: 0
-                        children: []
-                      - id: barrel-gun
-                        type: Sprite2D
-                        name: Barrel Gun
-                        properties:
-                          texture:
-                            type: texture
-                            url: res://src/assets/textures/maingun/gun/00000.png
-                          width: 54
-                          height: 29
-                          transform:
-                            position: [8, -3.5]
+                            position: [29.510320430235367, 0.242369500116542]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -395,8 +402,9 @@ root:
                           width: 31
                           height: 13
                           initiallyVisible: false
+                          visible: false
                           transform:
-                            position: [2, -3.5]
+                            position: [7.73671158818928, 6.975728396417441]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -410,8 +418,9 @@ root:
                           width: 37
                           height: 25
                           initiallyVisible: false
+                          visible: false
                           transform:
-                            position: [2, -3.5]
+                            position: [7.73671158818928, 6.975728396417441]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -425,8 +434,9 @@ root:
                           width: 55
                           height: 10
                           initiallyVisible: false
+                          visible: false
                           transform:
-                            position: [11, -3.5]
+                            position: [16.73671158818928, 6.975728396417441]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -440,8 +450,9 @@ root:
                           width: 26
                           height: 30
                           initiallyVisible: false
+                          visible: true
                           transform:
-                            position: [34, -3]
+                            position: [29.011455397838574, -0.007007046715118648]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -454,8 +465,9 @@ root:
                           color: "#ff4040"
                           opacity: 0.32
                           initiallyVisible: false
+                          visible: false
                           transform:
-                            position: [538, -3]
+                            position: [543.7367115881892, 7.475728396417441]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -468,8 +480,9 @@ root:
                           color: "#ffefc0"
                           opacity: 0.9
                           initiallyVisible: false
+                          visible: false
                           transform:
-                            position: [538, -3]
+                            position: [543.7367115881892, 7.475728396417441]
                             scale: [1, 1]
                             rotation: 0
                         children: []
@@ -483,22 +496,9 @@ root:
                       width: 103
                       height: 99
                       initiallyVisible: false
+                      visible: false
                       transform:
-                        position: [-4, 18]
-                        scale: [1, 1]
-                        rotation: 0
-                    children: []
-                  - id: sprite2d-1784217824701-al9nhlu
-                    type: Sprite2D
-                    name: Gun Base
-                    properties:
-                      texture:
-                        type: texture
-                        url: res://src/assets/textures/maingun/gunplace.png
-                      width: 50
-                      height: 41
-                      transform:
-                        position: [0, 20]
+                        position: [6.974570648461508, 4.780623803530723]
                         scale: [1, 1]
                         rotation: 0
                     children: []
@@ -993,7 +993,6 @@ root:
                     position: [152, 9]
                     scale: [1, 1]
                     rotation: 0
-                children: []
           - id: portrait-cluster
             type: Group2D
             name: Portrait Cluster
@@ -1026,10 +1025,10 @@ root:
                   texture:
                     type: texture
                     url: res://src/assets/textures/npc/joe/main.png
-                  width: 150
-                  height: 150
+                  width: 269.0454540613503
+                  height: 269.0454540613503
                   transform:
-                    position: [-54, -53]
+                    position: [-49.91907141909007, -48.91907141909002]
                     scale: [1, 1]
                     rotation: 0
                 components:
@@ -1046,8 +1045,8 @@ root:
                       texture:
                         type: texture
                         url: res://src/assets/textures/npc/joe/eye.png
-                      width: 150
-                      height: 150
+                      width: 269.0454540613503
+                      height: 269.0454540613503
                       initiallyVisible: false
                       transform:
                         position: [0, 0]
@@ -1075,7 +1074,7 @@ root:
                   hoverColor: "#5a5a5a"
                   pressedColor: "#3a3a3a"
                   transform:
-                    position: [-70, 87]
+                    position: [-69.6150651175891, 105.8612277655011]
                     scale: [1, 1]
                     rotation: 0
                 children: []
@@ -1100,7 +1099,7 @@ root:
                   hoverColor: "#5a5a5a"
                   pressedColor: "#3a3a3a"
                   transform:
-                    position: [27, 73]
+                    position: [20.841253326019455, 86.47229799519391]
                     scale: [1, 1]
                     rotation: 0
                 children: []
@@ -1125,7 +1124,7 @@ root:
                   hoverColor: "#5a5a5a"
                   pressedColor: "#3a3a3a"
                   transform:
-                    position: [92, 17]
+                    position: [86.22618820843024, 18.924603930523176]
                     scale: [1, 1]
                     rotation: 0
                 children: []
@@ -1150,7 +1149,7 @@ root:
                   hoverColor: "#5a5a5a"
                   pressedColor: "#3a3a3a"
                   transform:
-                    position: [97, -73]
+                    position: [103.15878191474621, -72.61510035835471]
                     scale: [1, 1]
                     rotation: 0
                 children: []
@@ -1343,7 +1342,7 @@ root:
                     type: user:Odometer
                     enabled: true
                     config:
-                      initialValue: "0"
+                      initialValue: 0
                 children:
                   - id: odo-score-0
                     type: Sprite2D

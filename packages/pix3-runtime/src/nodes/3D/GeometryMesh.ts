@@ -15,34 +15,32 @@ import {
   type Texture,
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
-import type { PropertySchema, PropertyDefinition } from '../../fw/property-schema';
+import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
-import type {
-  AttachedShaderEffect,
-  ShaderEffectParamDef,
-  ShaderEffectParamType,
-  ShaderEffectParamValue,
-} from '../../shader-effects/shader-effect-types';
-import { getShaderEffectType } from '../../shader-effects/ShaderEffectRegistry';
-import { composeEffectShaders, shaderEffectsCacheKey } from '../../shader-effects/compose';
+import type { AttachedShaderEffect } from '../../shader-effects/shader-effect-types';
+import {
+  ShaderEffectStack,
+  type ShaderEffectEntry,
+  type ShaderEffectHost,
+} from '../../shader-effects/ShaderEffectStack';
 
 /** Supported primitive kinds. `size` is interpreted per-shape (see buildGeometry). */
 export const GEOMETRY_KINDS = ['box', 'sphere', 'plane', 'cylinder', 'cone', 'torus'] as const;
 export type GeometryKind = (typeof GEOMETRY_KINDS)[number];
 
-/** One authored, serialized shader-effect attachment (one per type in v1). */
-export interface GeometryMeshEffectEntry {
-  /** Registry id, e.g. `core:dissolve`. */
-  type: string;
-  /** Defaults to true when omitted. */
-  enabled?: boolean;
-  /** Non-default param overrides (keyed by the effect's param keys). */
-  params?: Record<string, unknown>;
-}
+/**
+ * One authored, serialized shader-effect attachment.
+ * @deprecated Renamed to {@link ShaderEffectEntry} now that effects are
+ * node-agnostic. Kept as an alias for DeepCore / consumer back-compat.
+ */
+export type GeometryMeshEffectEntry = ShaderEffectEntry;
 
-/** Ordered list of attached shader effects, as serialized under `material.effects`. */
-export type GeometryMeshEffectsConfig = GeometryMeshEffectEntry[];
+/**
+ * Ordered list of attached shader effects, as serialized under `material.effects`.
+ * @deprecated Use `ShaderEffectEntry[]`.
+ */
+export type GeometryMeshEffectsConfig = ShaderEffectEntry[];
 
 export interface GeometryMeshProps extends Omit<Node3DProps, 'type'> {
   geometry?: string;
@@ -62,7 +60,10 @@ export interface GeometryMeshProps extends Omit<Node3DProps, 'type'> {
   };
 }
 
-export class GeometryMesh extends Node3D implements InstancePropertySchemaProvider {
+export class GeometryMesh
+  extends Node3D
+  implements InstancePropertySchemaProvider, ShaderEffectHost
+{
   private _geometry?: BufferGeometry;
   private _material?: Material;
   /** Authored geometry kind / size, kept so serialization survives round-trips
@@ -83,14 +84,11 @@ export class GeometryMesh extends Node3D implements InstancePropertySchemaProvid
   /** res:// path of the albedo map, kept for serialization (the Texture itself
    * is loaded async by the loader / editor viewport sync). */
   private _mapSrc = '';
-  /** Ordered list of attached shader effects (one per type in v1). */
-  private _effects: AttachedShaderEffect[] = [];
-  /** Merged uniform bag across attached effects. The per-effect `{ value }` refs
-   * are shared into every compiled program so param edits survive recompiles. */
-  private _fxUniforms: Record<string, { value: unknown }> = {};
-  /** Bumped on attach/detach; keys the instance-schema cache. */
-  private _effectsRevision = 0;
-  private _instanceSchemaCache: { rev: number; schema: PropertySchema } | null = null;
+  /** Registry-backed shader effects attached to the mesh material (standard). */
+  private readonly effectStack = new ShaderEffectStack({
+    nodeType: 'GeometryMesh',
+    target: 'standard',
+  });
 
   constructor(props: GeometryMeshProps) {
     super(props, 'GeometryMesh');
@@ -306,213 +304,59 @@ export class GeometryMesh extends Node3D implements InstancePropertySchemaProvid
   // Shader effects (registry-backed attached list)
   // ---------------------------------------------------------------------------
 
+  /** The shader-effect stack driving the mesh material (editor + script access). */
+  getShaderEffectStack(): ShaderEffectStack {
+    return this.effectStack;
+  }
+
   /**
-   * Wire the composer onto a freshly-built material. `onBeforeCompile` reads the
-   * live `_effects` list, so it always reflects the current attachment set;
-   * `customProgramCacheKey` versions the injected text by that set + order so
-   * three recompiles when it changes (it only re-runs `onBeforeCompile` on a
-   * cache-key miss).
+   * Wire the composer onto a freshly-built material via the effect stack, which
+   * versions + injects the live attached-effect set (`onBeforeCompile` +
+   * `customProgramCacheKey`) and syncs the `PIX3_FX_*` defines onto it.
    */
   private installEffectComposer(material: MeshStandardMaterial): void {
-    material.onBeforeCompile = shader => {
-      composeEffectShaders(shader, this._effects, this._fxUniforms);
-    };
-    material.customProgramCacheKey = () => shaderEffectsCacheKey(this._effects);
+    this.effectStack.install(material);
   }
 
   /**
    * Attach a shader effect by registry id (e.g. `core:dissolve`). One instance
    * per type in v1 — a duplicate attach is a no-op. Returns whether it attached.
    */
-  attachEffect(type: string, init?: { enabled?: boolean; params?: Record<string, unknown> }): boolean {
-    if (this._effects.some(e => e.type === type)) {
-      return false;
-    }
-    const info = getShaderEffectType(type);
-    if (!info) {
-      console.warn(`[GeometryMesh] Unknown shader effect "${type}" — skipped.`);
-      return false;
-    }
-    const effect: AttachedShaderEffect = {
-      type,
-      info,
-      enabled: typeof init?.enabled === 'boolean' ? init.enabled : true,
-      params: {},
-      uniforms: info.createUniforms(),
-    };
-    for (const p of info.params) {
-      const override = init?.params?.[p.key];
-      effect.params[p.key] =
-        override !== undefined ? coerceParamValue(override, p.type) : cloneParamDefault(p.default);
-    }
-    this._effects.push(effect);
-    this.applyParamsToUniforms(effect);
-    this.rebuildUniformBag();
-    this._effectsRevision += 1;
-    this._instanceSchemaCache = null;
-    this.syncEffectDefines(true);
-    return true;
+  attachEffect(
+    type: string,
+    init?: { enabled?: boolean; params?: Record<string, unknown> }
+  ): boolean {
+    return this.effectStack.attach(type, init);
   }
 
   /** Detach an effect by type. Returns the removed attachment (for undo) or null. */
   detachEffect(type: string): AttachedShaderEffect | null {
-    const idx = this._effects.findIndex(e => e.type === type);
-    if (idx < 0) {
-      return null;
-    }
-    const [removed] = this._effects.splice(idx, 1);
-    this.rebuildUniformBag();
-    this._effectsRevision += 1;
-    this._instanceSchemaCache = null;
-    this.syncEffectDefines(true);
-    return removed ?? null;
+    return this.effectStack.detach(type);
   }
 
   /** Enable/disable an attached effect (recompiles the program). */
   setEffectEnabled(type: string, on: boolean): void {
-    const effect = this._effects.find(e => e.type === type);
-    if (!effect || effect.enabled === on) {
-      return;
-    }
-    effect.enabled = on;
-    this.syncEffectDefines(true);
+    this.effectStack.setEnabled(type, on);
   }
 
   /** The attached effects, in composition order (read-only view). */
   getAttachedEffects(): readonly AttachedShaderEffect[] {
-    return this._effects;
-  }
-
-  /** Rebuild the merged uniform bag from the per-effect bags (refs reused). */
-  private rebuildUniformBag(): void {
-    const bag: Record<string, { value: unknown }> = {};
-    for (const effect of this._effects) {
-      Object.assign(bag, effect.uniforms);
-    }
-    this._fxUniforms = bag;
-  }
-
-  /** Set/clear the `PIX3_FX_*` defines from the attached+enabled effects. */
-  private syncEffectDefines(needsUpdate: boolean): void {
-    const mat = this._stdMaterial;
-    if (!mat) {
-      return;
-    }
-    mat.defines ??= {};
-    const defines = mat.defines;
-    for (const key of Object.keys(defines)) {
-      if (key.startsWith('PIX3_FX_')) {
-        delete defines[key];
-      }
-    }
-    for (const effect of this._effects) {
-      if (effect.enabled) {
-        defines[effect.info.define] = '';
-      }
-    }
-    if (needsUpdate) {
-      mat.needsUpdate = true;
-    }
-  }
-
-  private applyParamsToUniforms(effect: AttachedShaderEffect): void {
-    for (const p of effect.info.params) {
-      this.applyParamToUniform(effect, p);
-    }
-  }
-
-  private applyParamToUniform(effect: AttachedShaderEffect, param: ShaderEffectParamDef): void {
-    if (!param.uniform) {
-      return;
-    }
-    const uniform = effect.uniforms[param.uniform];
-    if (!uniform) {
-      return;
-    }
-    const value = effect.params[param.key];
-    switch (param.type) {
-      case 'number':
-        (uniform as { value: number }).value = Number(value);
-        break;
-      case 'color':
-        (uniform.value as Color).set(String(value)).convertSRGBToLinear();
-        break;
-      case 'vector2': {
-        const vec = value as { x: number; y: number };
-        (uniform.value as { set: (x: number, y: number) => void }).set(vec.x, vec.y);
-        break;
-      }
-      case 'boolean':
-        (uniform as { value: number }).value = value ? 1 : 0;
-        break;
-    }
-  }
-
-  /** Write one effect param (from a schema setValue) + sync its uniform. */
-  private writeEffectParam(
-    effect: AttachedShaderEffect,
-    param: ShaderEffectParamDef,
-    value: unknown
-  ): void {
-    effect.params[param.key] = coerceParamValue(value, param.type);
-    this.applyParamToUniform(effect, param);
+    return this.effectStack.getAttached();
   }
 
   /**
    * Per-instance schema: the attached effects' params as `fx.<key>.<param>`
    * props (+ `fx.<key>.enabled`). Merged after the static schema by
-   * `getNodePropertySchema`, which every schema consumer funnels through — so
-   * effect params are inspectable, keyframe-animatable, undoable, and prefab-
-   * diffable. Cached by `_effectsRevision` (invalidated on attach/detach); the
-   * closures capture the effect instance so identities stay stable for the
-   * animation binder / preview snapshot.
+   * `getNodePropertySchema` — so effect params are inspectable, keyframe-
+   * animatable, undoable, and prefab-diffable. See {@link ShaderEffectStack}.
    */
   getInstancePropertySchema(): PropertySchema | null {
-    if (this._effects.length === 0) {
-      return null;
-    }
-    if (this._instanceSchemaCache && this._instanceSchemaCache.rev === this._effectsRevision) {
-      return this._instanceSchemaCache.schema;
-    }
-
-    const properties: PropertyDefinition[] = [];
-    const groups: NonNullable<PropertySchema['groups']> = {};
-
-    for (const effect of this._effects) {
-      const group = `Effect: ${effect.info.displayName}`;
-      groups[group] = { label: effect.info.displayName, expanded: true };
-
-      properties.push(
-        defineProperty(`fx.${effect.info.key}.enabled`, 'boolean', {
-          ui: { label: 'Enabled', group },
-          getValue: () => effect.enabled,
-          setValue: (_n: unknown, v: unknown) => this.setEffectEnabled(effect.type, Boolean(v)),
-        })
-      );
-
-      for (const param of effect.info.params) {
-        properties.push(
-          defineProperty(`fx.${effect.info.key}.${param.key}`, param.type, {
-            ui: { ...(param.ui ?? {}), group, readOnly: () => !effect.enabled },
-            getValue: () => readEffectParam(effect, param),
-            setValue: (_n: unknown, v: unknown) => this.writeEffectParam(effect, param, v),
-          })
-        );
-      }
-    }
-
-    const schema: PropertySchema = { nodeType: 'GeometryMesh', properties, groups };
-    this._instanceSchemaCache = { rev: this._effectsRevision, schema };
-    return schema;
+    return this.effectStack.buildInstanceSchema();
   }
 
   /** Play-mode only: advance any effect with a per-frame CPU update (uv-scroll). */
   override tick(dt: number): void {
-    for (const effect of this._effects) {
-      if (effect.enabled && effect.info.onTick) {
-        effect.info.onTick({ params: effect.params, uniforms: effect.uniforms }, dt);
-      }
-    }
+    this.effectStack.tick(dt);
     super.tick(dt);
   }
 
@@ -604,8 +448,8 @@ export class GeometryMesh extends Node3D implements InstancePropertySchemaProvid
     if (this._mapSrc) {
       material.map = this._mapSrc;
     }
-    if (this._effects.length > 0) {
-      material.effects = this._effects.map(effect => serializeEffectEntry(effect));
+    if (!this.effectStack.isEmpty) {
+      material.effects = this.effectStack.serialize();
     }
     return {
       geometry: this._geometryKind,
@@ -746,73 +590,4 @@ function readResourceUrl(value: unknown): string {
     }
   }
   return '';
-}
-
-/** Fresh copy of a param default (vector2 defaults are objects — must clone). */
-function cloneParamDefault(value: ShaderEffectParamValue): unknown {
-  return value && typeof value === 'object' ? { ...(value as object) } : value;
-}
-
-/** Coerce an inbound value to the stored representation for a param type. */
-function coerceParamValue(value: unknown, type: ShaderEffectParamType): unknown {
-  switch (type) {
-    case 'number': {
-      const n = Number(value);
-      return Number.isFinite(n) ? n : 0;
-    }
-    case 'color':
-      return String(value);
-    case 'vector2': {
-      if (Array.isArray(value)) {
-        return { x: Number(value[0]) || 0, y: Number(value[1]) || 0 };
-      }
-      const vec = value as { x?: unknown; y?: unknown };
-      return { x: Number(vec?.x) || 0, y: Number(vec?.y) || 0 };
-    }
-    case 'boolean':
-      return Boolean(value);
-  }
-}
-
-/** Read a param the way the inspector expects (vector2 → a fresh {x,y}). */
-function readEffectParam(effect: AttachedShaderEffect, param: ShaderEffectParamDef): unknown {
-  const value = effect.params[param.key];
-  if (param.type === 'vector2') {
-    const vec = value as { x: number; y: number };
-    return { x: vec.x, y: vec.y };
-  }
-  return value;
-}
-
-function paramEquals(a: unknown, b: unknown, type: ShaderEffectParamType): boolean {
-  if (type === 'vector2') {
-    const va = a as { x: number; y: number };
-    const vb = b as { x: number; y: number };
-    return va.x === vb.x && va.y === vb.y;
-  }
-  return a === b;
-}
-
-function serializeParamValue(value: unknown, type: ShaderEffectParamType): unknown {
-  if (type === 'vector2') {
-    const vec = value as { x: number; y: number };
-    return { x: vec.x, y: vec.y };
-  }
-  return value;
-}
-
-/** Serialize one attachment, emitting only params that differ from default. */
-function serializeEffectEntry(effect: AttachedShaderEffect): GeometryMeshEffectEntry {
-  const entry: GeometryMeshEffectEntry = { type: effect.type, enabled: effect.enabled };
-  const params: Record<string, unknown> = {};
-  for (const p of effect.info.params) {
-    const value = effect.params[p.key];
-    if (!paramEquals(value, p.default, p.type)) {
-      params[p.key] = serializeParamValue(value, p.type);
-    }
-  }
-  if (Object.keys(params).length > 0) {
-    entry.params = params;
-  }
-  return entry;
 }

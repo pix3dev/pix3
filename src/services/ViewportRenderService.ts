@@ -40,6 +40,7 @@ import { Camera3D } from '@pix3/runtime';
 import { VirtualCamera3D } from '@pix3/runtime';
 import { PostProcess, PostProcessingPipeline } from '@pix3/runtime';
 import { GeometryMesh } from '@pix3/runtime';
+import { isShaderEffectHost, type ShaderEffectStack } from '@pix3/runtime';
 import { MeshInstance } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
@@ -108,6 +109,10 @@ const LAYER_3D = 0;
 const LAYER_2D = 1;
 const LAYER_GIZMOS = 2;
 const TARGET_DIRECTION_RAY_LENGTH = 500;
+/** sRGB of the canvas backdrop token oklch(0.13 0.008 250) — keep in sync with src/index.css .viewport-grid. */
+const VIEWPORT_BACKGROUND_COLOR = 0x05080a;
+/** sRGB of the accent token oklch(0.8 0.15 75) — keep in sync with --accent in src/index.css. */
+const EDITOR_ACCENT_COLOR = 0xf5ae39;
 const DEFAULT_VIEWPORT_BASE_WIDTH = 1920;
 const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
 const DEFAULT_3D_CAMERA_POSITION = new THREE.Vector3(5, 5, 5);
@@ -126,7 +131,7 @@ const THREE_D_FRAME_ALL_PADDING_MULTIPLIER = 1.5;
 // lights) so focusing them still produces a sensible view instead of NaN zoom.
 const FRAME_FALLBACK_HALF_EXTENT_2D = 100;
 const FRAME_FALLBACK_HALF_EXTENT_3D = 2.5;
-const MARQUEE_PREVIEW_2D_COLOR = 0xffcf33;
+const MARQUEE_PREVIEW_2D_COLOR = EDITOR_ACCENT_COLOR;
 // While idle (no dirty flag, no animated previews) the render loop still
 // paints one frame this often as a safety net for mutations that bypass
 // requestRender() (async texture loads, background-tab agent screenshots).
@@ -351,12 +356,43 @@ export class ViewportRendererService {
           | THREE.Material[]
           | undefined;
         if (material instanceof THREE.Material) {
+          this.uninstallProxyEffects(material);
           material.dispose();
         } else if (Array.isArray(material)) {
-          material.forEach(m => m.dispose());
+          material.forEach(m => {
+            this.uninstallProxyEffects(m);
+            m.dispose();
+          });
         }
       }
     });
+  }
+
+  /**
+   * Wire a shader-effect host node's effect stack onto its editor proxy material
+   * so effects render in the viewport exactly as they do in the runtime. The
+   * stack is stamped on the material's `userData` so {@link disposeObject3D} can
+   * detach it on every rebuild/dispose path — otherwise the stack's installed-
+   * material set would accumulate disposed proxy materials. No-op for nodes that
+   * don't host effects (only Sprite2D/AnimatedSprite2D/Button2D do among the 2D
+   * proxies; Button2D installs on the SKIN material, never the label).
+   */
+  private installProxyEffects(node: NodeBase, material: THREE.Material): void {
+    if (!isShaderEffectHost(node)) {
+      return;
+    }
+    const stack = node.getShaderEffectStack();
+    stack.install(material);
+    (material.userData as { effectStack?: ShaderEffectStack }).effectStack = stack;
+  }
+
+  /** Detach an installed effect stack from a proxy material (see install above). */
+  private uninstallProxyEffects(material: THREE.Material): void {
+    const userData = material.userData as { effectStack?: ShaderEffectStack };
+    if (userData.effectStack) {
+      userData.effectStack.uninstall(material);
+      userData.effectStack = undefined;
+    }
   }
 
   /**
@@ -431,14 +467,14 @@ export class ViewportRendererService {
     };
 
     this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setClearColor(0x13161b, 1);
+    this.renderer.setClearColor(VIEWPORT_BACKGROUND_COLOR, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = this.shouldEnableRendererShadowMap();
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     // Create scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x13161b);
+    this.scene.background = new THREE.Color(VIEWPORT_BACKGROUND_COLOR);
 
     // Create camera
     this.perspectiveCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 10000);
@@ -2575,7 +2611,7 @@ export class ViewportRendererService {
     // Top border
     const topGeometry = new THREE.PlaneGeometry(1, 1);
     const topMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffcf33,
+      color: EDITOR_ACCENT_COLOR,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -2593,7 +2629,7 @@ export class ViewportRendererService {
     // Bottom border
     const bottomGeometry = new THREE.PlaneGeometry(1, 1);
     const bottomMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffcf33,
+      color: EDITOR_ACCENT_COLOR,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -2611,7 +2647,7 @@ export class ViewportRendererService {
     // Left border
     const leftGeometry = new THREE.PlaneGeometry(1, 1);
     const leftMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffcf33,
+      color: EDITOR_ACCENT_COLOR,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -2629,7 +2665,7 @@ export class ViewportRendererService {
     // Right border
     const rightGeometry = new THREE.PlaneGeometry(1, 1);
     const rightMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffcf33,
+      color: EDITOR_ACCENT_COLOR,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -4822,6 +4858,7 @@ export class ViewportRendererService {
       depthWrite: false,
     });
     material.userData.baseOpacity = 1;
+    this.installProxyEffects(node, material);
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.layers.set(LAYER_2D);
@@ -4876,6 +4913,7 @@ export class ViewportRendererService {
     });
     material.userData.baseOpacity = 1;
     this.applyTextureToSprite2DMaterial(node, material);
+    this.installProxyEffects(node, material);
 
     const mesh = new THREE.Mesh(geometry, material);
 
@@ -5025,7 +5063,7 @@ export class ViewportRendererService {
     const center = new THREE.Mesh(
       new THREE.CircleGeometry(0.5, 16),
       new THREE.MeshBasicMaterial({
-        color: 0xffcf33,
+        color: EDITOR_ACCENT_COLOR,
         transparent: true,
         opacity: 1,
         depthTest: false,
@@ -6091,6 +6129,8 @@ export class ViewportRendererService {
     material.userData.baseOpacity = node instanceof Label2D ? 0 : 1;
 
     this.applyTextureTo2DMaterial(node, material);
+    // Only Button2D hosts effects among UIControl2D; installs on the SKIN mesh.
+    this.installProxyEffects(node, material);
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.layers.set(LAYER_2D);
@@ -7759,13 +7799,12 @@ export class ViewportRendererService {
         this.updateNodeTransform(node);
       }
     }
-    // A Group2D resize proportionally scales its descendants (in TransformTool2d) — repaint all 2D
-    // proxies once per frame so the child visuals track the drag.
-    const resizingGroup =
-      this.active2DTransform.handle !== 'move' &&
-      this.active2DTransform.handle !== 'rotate' &&
-      this.active2DTransform.nodeIds.some(id => sceneGraph.nodeMap.get(id) instanceof Group2D);
-    if (resizingGroup) {
+    // A container resize proportionally scales its descendants (in TransformTool2d) — repaint all 2D
+    // proxies once per frame so the child visuals track the drag. `childStartStates` is populated
+    // (scale gesture only) for any container with eligible children, Group2D or a sprite parenting
+    // other 2D nodes alike.
+    const resizingContainer = (this.active2DTransform.childStartStates?.size ?? 0) > 0;
+    if (resizingContainer) {
       this.syncAll2DVisuals();
     }
   }

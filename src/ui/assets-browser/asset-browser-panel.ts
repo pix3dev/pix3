@@ -466,15 +466,6 @@ export class ${singletonName} extends Script {
             }}
           ></pix3-dropdown-button>
           <pix3-toolbar-button
-            icon="layers"
-            label="Group by type"
-            title=${this.assetViewMode === 'by-type'
-              ? 'Show project folder structure'
-              : 'Group assets by type'}
-            ?toggled=${this.assetViewMode === 'by-type'}
-            @click=${this.onToggleViewMode}
-          ></pix3-toolbar-button>
-          <pix3-toolbar-button
             icon="upload"
             label="Import"
             title="Import assets into the selected folder"
@@ -500,6 +491,16 @@ export class ${singletonName} extends Script {
             label="Open in IDE"
             title="Open project folder in VS Code"
             @click=${this.onOpenInIdeClick}
+          ></pix3-toolbar-button>
+          <pix3-toolbar-button
+            slot="actions"
+            icon="layers"
+            label="Group by type"
+            title=${this.assetViewMode === 'by-type'
+              ? 'Show project folder structure'
+              : 'Group assets by type'}
+            ?toggled=${this.assetViewMode === 'by-type'}
+            @click=${this.onToggleViewMode}
           ></pix3-toolbar-button>
         </pix3-toolbar>
 

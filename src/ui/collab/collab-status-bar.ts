@@ -150,12 +150,12 @@ export class CollabStatusBar extends ComponentBase {
           users.push({
             clientId,
             name: user.name,
-            color: user.color || '#888',
+            color: user.color || 'var(--fg-3)',
           });
           remoteUsers.push({
             clientId,
             name: user.name,
-            color: user.color || '#888',
+            color: user.color || 'var(--fg-3)',
             selection: Array.isArray(user.selection) ? [...user.selection] : [],
           });
         }

@@ -15,15 +15,15 @@ pix3-library-panel .library-search {
   min-width: 0;
   padding: 4px 8px;
   font: inherit;
-  color: var(--pix3-text-primary, #e6e6e6);
-  background: var(--pix3-bg-secondary, rgba(0, 0, 0, 0.25));
-  border: 1px solid var(--pix3-border, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
 }
 
 pix3-library-panel .library-search:focus-visible {
   outline: none;
-  border-color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
 }
 
 pix3-library-panel .library-chip-row {
@@ -38,22 +38,22 @@ pix3-library-panel .library-chip {
   font-size: 11px;
   line-height: 1.6;
   text-transform: capitalize;
-  color: var(--pix3-text-secondary, #b8b8b8);
+  color: var(--fg-2);
   background: transparent;
-  border: 1px solid var(--pix3-border, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--line-1);
   border-radius: 999px;
   cursor: pointer;
 }
 
 pix3-library-panel .library-chip:hover {
-  color: var(--pix3-text-primary, #e6e6e6);
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.6);
+  color: var(--fg-0);
+  border-color: var(--accent-line);
 }
 
 pix3-library-panel .library-chip.is-active {
-  color: #1a1a1a;
-  background: var(--pix3-accent-color, #ffcf33);
-  border-color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 pix3-library-panel .library-grid {
@@ -67,7 +67,7 @@ pix3-library-panel .library-grid {
 pix3-library-panel .library-empty {
   padding: 24px 16px;
   font-size: 12px;
-  color: var(--pix3-text-muted, #8a8a8a);
+  color: var(--fg-3);
   text-align: center;
 }
 
@@ -76,16 +76,16 @@ pix3-library-panel .library-card {
   flex-direction: column;
   gap: 4px;
   padding: 6px;
-  color: var(--pix3-text-primary, #e6e6e6);
+  color: var(--fg-0);
   text-align: left;
-  background: var(--pix3-bg-secondary, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--pix3-border, rgba(255, 255, 255, 0.1));
-  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
   cursor: grab;
 }
 
 pix3-library-panel .library-card:hover {
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.7);
+  border-color: var(--accent-line);
 }
 
 pix3-library-panel .library-card__thumb {
@@ -94,8 +94,8 @@ pix3-library-panel .library-card__thumb {
   justify-content: center;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  background: var(--pix3-bg-primary, rgba(0, 0, 0, 0.35));
-  border-radius: 4px;
+  background: var(--bg-0);
+  border-radius: var(--radius-1);
 }
 
 pix3-library-panel .library-card__thumb img {
@@ -108,7 +108,7 @@ pix3-library-panel .library-card__placeholder {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--pix3-text-muted, #8a8a8a);
+  color: var(--fg-3);
 }
 
 pix3-library-panel .library-card__name {
@@ -125,7 +125,7 @@ pix3-library-panel .library-card__meta {
   align-items: center;
   justify-content: space-between;
   font-size: 10px;
-  color: var(--pix3-text-muted, #8a8a8a);
+  color: var(--fg-3);
 }
 
 pix3-library-panel .library-card__badge {
@@ -139,28 +139,28 @@ pix3-library-panel .library-context-menu {
   flex-direction: column;
   min-width: 168px;
   padding: 4px;
-  background: var(--pix3-bg-secondary, #23232a);
-  border: 1px solid var(--pix3-border, rgba(255, 255, 255, 0.14));
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-pop);
 }
 
 pix3-library-panel .library-context-menu button {
   padding: 6px 10px;
   font: inherit;
   font-size: 12px;
-  color: var(--pix3-text-primary, #e6e6e6);
+  color: var(--fg-0);
   text-align: left;
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   cursor: pointer;
 }
 
 pix3-library-panel .library-context-menu button:hover {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.16);
+  background: var(--accent-soft);
 }
 
 pix3-library-panel .library-context-menu button.is-dangerous {
-  color: #ff6b6b;
+  color: var(--danger);
 }

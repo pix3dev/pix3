@@ -14,15 +14,15 @@ pix3-playable-export-progress-dialog {
   width: 42px;
   height: 42px;
   border-radius: 999px;
-  border: 4px solid rgba(255, 255, 255, 0.14);
-  border-top-color: var(--pix3-accent-color, #ffcf33);
+  border: 4px solid var(--line-2);
+  border-top-color: var(--accent);
   animation: playable-export-progress-spin 0.9s linear infinite;
 }
 
 .playable-export-progress__hint {
   font-size: 12px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--fg-2);
 }
 
 @keyframes playable-export-progress-spin {

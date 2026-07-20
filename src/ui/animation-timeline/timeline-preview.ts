@@ -23,8 +23,9 @@ import type {
 
 export const PREVIEW_PAD = 3;
 /** Per-vector-component stroke colors: x / y / z(w). */
-const CHANNEL_COLORS = ['#ff6b6b', '#4ade80', '#60a5fa'];
-const SINGLE_CHANNEL_COLOR = '#cbd5e1';
+// Canvas stroke colors — aligned to the presence palette in src/index.css (coral/mint/sky, fg-1)
+const CHANNEL_COLORS = ['#ff7f6c', '#4ad496', '#1ebde3'];
+const SINGLE_CHANNEL_COLOR = '#c1c4c8';
 
 export interface CurvePath {
   color: string;

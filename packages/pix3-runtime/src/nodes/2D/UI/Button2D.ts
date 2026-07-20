@@ -6,6 +6,13 @@ import {
 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import type { InstancePropertySchemaProvider } from '../../../fw/property-schema-utils';
+import {
+  ShaderEffectStack,
+  type ShaderEffectEntry,
+  type ShaderEffectHost,
+} from '../../../shader-effects/ShaderEffectStack';
+import type { AttachedShaderEffect } from '../../../shader-effects/shader-effect-types';
 import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../../core/shared-quad-geometry';
@@ -26,6 +33,8 @@ export interface Button2DProps extends UIControl2DProps {
     texturePressed?: TextureResourceRef | string | null;
     textureDisabled?: TextureResourceRef | string | null;
     stateTextureKeys?: Partial<Record<Button2DSpriteState, string>>;
+    /** Registry-backed shader effects attached to the button skin material. */
+    effects?: ShaderEffectEntry[];
 }
 
 /**
@@ -38,7 +47,10 @@ export interface Button2DProps extends UIControl2DProps {
  * pressedColor). The actual Texture objects are supplied post-construction by the
  * SceneLoader (nodes have no asset loader); the schema stores only resource refs.
  */
-export class Button2D extends UIControl2D {
+export class Button2D
+    extends UIControl2D
+    implements InstancePropertySchemaProvider, ShaderEffectHost
+{
     width: number;
     height: number;
     backgroundColor: string;
@@ -59,6 +71,9 @@ export class Button2D extends UIControl2D {
 
     private buttonMesh: Mesh;
     private buttonMaterial: MeshBasicMaterial;
+    /** Registry-backed shader effects on the skin material; while non-empty the
+     * skin mesh opts out of the 2D quad batcher (see Sprite2D for the why). */
+    private readonly effectStack: ShaderEffectStack;
     private readonly stateTextures: Record<Button2DSpriteState, Texture | null> = {
         normal: null,
         hover: null,
@@ -97,6 +112,61 @@ export class Button2D extends UIControl2D {
         this.add(this.buttonMesh);
 
         this.refreshSkinState();
+
+        // Shader effects: install on the skin material before attaching entries.
+        this.effectStack = new ShaderEffectStack({
+            nodeType: 'Button2D',
+            target: 'basic',
+            onAttachmentsChanged: () => {
+                this.buttonMesh.userData[BATCHABLE_2D_KEY] = this.effectStack.isEmpty;
+            },
+        });
+        this.effectStack.install(this.buttonMaterial);
+        const effectEntries =
+            props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
+        for (const entry of effectEntries ?? []) {
+            if (entry && typeof entry.type === 'string') {
+                this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
+            }
+        }
+    }
+
+    /** The shader-effect stack driving the button skin material. */
+    getShaderEffectStack(): ShaderEffectStack {
+        return this.effectStack;
+    }
+
+    /** Per-instance schema contribution: the attached effects' `fx.*` params. */
+    getInstancePropertySchema(): PropertySchema | null {
+        return this.effectStack.buildInstanceSchema();
+    }
+
+    /** Attach a shader effect by registry id (e.g. `core:adjust`). */
+    attachEffect(
+        type: string,
+        init?: { enabled?: boolean; params?: Record<string, unknown> }
+    ): boolean {
+        return this.effectStack.attach(type, init);
+    }
+
+    /** Detach an effect by type. Returns the removed attachment or null. */
+    detachEffect(type: string): AttachedShaderEffect | null {
+        return this.effectStack.detach(type);
+    }
+
+    /** Enable/disable an attached effect. */
+    setEffectEnabled(type: string, on: boolean): void {
+        this.effectStack.setEnabled(type, on);
+    }
+
+    /** Set one param on an attached effect (by registry id or short key). */
+    setEffectParam(typeOrKey: string, param: string, value: unknown): boolean {
+        return this.effectStack.setParam(typeOrKey, param, value);
+    }
+
+    /** The attached effects, in composition order (read-only view). */
+    getAttachedEffects(): readonly AttachedShaderEffect[] {
+        return this.effectStack.getAttached();
     }
 
     override isPointInBounds(worldPoint: Vector2): boolean {
@@ -108,6 +178,7 @@ export class Button2D extends UIControl2D {
 
     override tick(dt: number): void {
         super.tick(dt);
+        this.effectStack.tick(dt);
         if (!this.input) return;
 
         const isDown = this.input.isPointerDown;

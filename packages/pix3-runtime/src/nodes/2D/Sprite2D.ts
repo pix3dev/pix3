@@ -1,6 +1,13 @@
 import { Mesh, MeshBasicMaterial, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
+import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
+import {
+  ShaderEffectStack,
+  type ShaderEffectEntry,
+  type ShaderEffectHost,
+} from '../../shader-effects/ShaderEffectStack';
+import type { AttachedShaderEffect } from '../../shader-effects/shader-effect-types';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { configure2DTexture } from '../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
@@ -28,9 +35,11 @@ export interface Sprite2DProps extends Omit<Node2DProps, 'type'> {
   color?: string;
   anchor?: SpriteAnchor2D | [number, number];
   aspectRatioLocked?: boolean;
+  /** Registry-backed shader effects attached to this sprite's material. */
+  effects?: ShaderEffectEntry[];
 }
 
-export class Sprite2D extends Node2D {
+export class Sprite2D extends Node2D implements InstancePropertySchemaProvider, ShaderEffectHost {
   texture: TextureResourceRef | null;
   /**
    * Localization sprite key resolved through the active locale table's `sprites`
@@ -81,6 +90,14 @@ export class Sprite2D extends Node2D {
    */
   private ownedTexture: Texture | null = null;
 
+  /**
+   * Registry-backed shader effects on this sprite's material. While any effect
+   * is attached the mesh opts OUT of the 2D quad batcher (the batcher would draw
+   * it with its own stock material, dropping the injected GLSL); a passthrough
+   * mesh renders with its own effected material, so the injection just works.
+   */
+  private readonly effectStack: ShaderEffectStack;
+
   constructor(props: Sprite2DProps) {
     super(props, 'Sprite2D');
     this.texture = coerceTextureResource(props.texture ?? props.texturePath ?? null);
@@ -109,6 +126,68 @@ export class Sprite2D extends Node2D {
     this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.applyAnchorOffset();
     this.add(this.mesh);
+
+    // Shader effects: install the composer on the material BEFORE attaching so
+    // the first program is the right variant, then attach authored entries. The
+    // batcher opt-out flag tracks whether the stack is empty.
+    this.effectStack = new ShaderEffectStack({
+      nodeType: 'Sprite2D',
+      target: 'basic',
+      onAttachmentsChanged: () => {
+        this.mesh.userData[BATCHABLE_2D_KEY] = this.effectStack.isEmpty;
+      },
+    });
+    this.effectStack.install(this.material);
+    const effectEntries = props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
+    for (const entry of effectEntries ?? []) {
+      if (entry && typeof entry.type === 'string') {
+        this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
+      }
+    }
+  }
+
+  /** The shader-effect stack driving this sprite's material. */
+  getShaderEffectStack(): ShaderEffectStack {
+    return this.effectStack;
+  }
+
+  /** Per-instance schema contribution: the attached effects' `fx.*` params. */
+  getInstancePropertySchema(): PropertySchema | null {
+    return this.effectStack.buildInstanceSchema();
+  }
+
+  /** Attach a shader effect by registry id (e.g. `core:adjust`). */
+  attachEffect(
+    type: string,
+    init?: { enabled?: boolean; params?: Record<string, unknown> }
+  ): boolean {
+    return this.effectStack.attach(type, init);
+  }
+
+  /** Detach an effect by type. Returns the removed attachment or null. */
+  detachEffect(type: string): AttachedShaderEffect | null {
+    return this.effectStack.detach(type);
+  }
+
+  /** Enable/disable an attached effect. */
+  setEffectEnabled(type: string, on: boolean): void {
+    this.effectStack.setEnabled(type, on);
+  }
+
+  /** Set one param on an attached effect (by registry id or short key). */
+  setEffectParam(typeOrKey: string, param: string, value: unknown): boolean {
+    return this.effectStack.setParam(typeOrKey, param, value);
+  }
+
+  /** The attached effects, in composition order (read-only view). */
+  getAttachedEffects(): readonly AttachedShaderEffect[] {
+    return this.effectStack.getAttached();
+  }
+
+  /** Play-mode: advance any effect with a per-frame CPU update (uv-scroll). */
+  override tick(dt: number): void {
+    this.effectStack.tick(dt);
+    super.tick(dt);
   }
 
   private static normalizeAnchor(

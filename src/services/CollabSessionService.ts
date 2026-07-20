@@ -7,7 +7,7 @@ import { OperationService } from './OperationService';
 import { SceneCRDTBinding } from './SceneCRDTBinding';
 import * as ApiClient from './ApiClient';
 
-const HOST_COLOR = '#ffcf33';
+const HOST_COLOR = '#f5ae39'; // --presence-1 (amber, you)
 
 @injectable()
 export class CollabSessionService {

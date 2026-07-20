@@ -8,21 +8,20 @@ pix3-project-sync-dialog {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(12, 14, 18, 0.62);
-  backdrop-filter: blur(10px);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   z-index: var(--pix3-z-modal);
 }
 
 .project-sync-dialog {
   box-sizing: border-box;
   width: min(100%, 520px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
   padding: 20px;
-  background:
-    linear-gradient(180deg, rgba(33, 39, 48, 0.98), rgba(22, 26, 33, 0.98)), rgba(22, 26, 33, 0.98);
-  color: rgba(243, 244, 246, 0.94);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
 }
 
 .project-sync-header {
@@ -38,7 +37,7 @@ pix3-project-sync-dialog {
 }
 
 .project-sync-subtitle {
-  color: rgba(243, 244, 246, 0.66);
+  color: var(--fg-2);
   font-size: 0.88rem;
   line-height: 1.45;
 }
@@ -53,9 +52,9 @@ pix3-project-sync-dialog {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
 }
 
 .project-sync-section__header {
@@ -75,9 +74,9 @@ pix3-project-sync-dialog {
   align-items: center;
   padding: 0.26rem 0.56rem;
   border-radius: 999px;
-  background: rgba(var(--pix3-accent-rgb), 0.12);
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.22);
-  color: rgba(255, 244, 204, 0.95);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -85,7 +84,7 @@ pix3-project-sync-dialog {
 }
 
 .project-sync-linkage {
-  color: rgba(243, 244, 246, 0.78);
+  color: var(--fg-1);
   font-size: 0.8rem;
   word-break: break-word;
 }
@@ -93,7 +92,7 @@ pix3-project-sync-dialog {
 .project-sync-progress {
   display: inline-flex;
   align-items: center;
-  color: rgba(243, 244, 246, 0.72);
+  color: var(--fg-1);
   font-size: 0.82rem;
   white-space: nowrap;
 }
@@ -107,7 +106,7 @@ pix3-project-sync-dialog {
 .project-sync-issues__title {
   font-size: 0.82rem;
   font-weight: 700;
-  color: rgba(255, 244, 204, 0.92);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -124,38 +123,38 @@ pix3-project-sync-dialog {
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
 }
 
 .project-sync-issues__path {
   font-size: 0.85rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.94);
+  color: var(--fg-0);
   word-break: break-word;
 }
 
 .project-sync-issues__reason {
   font-size: 0.8rem;
   line-height: 1.4;
-  color: rgba(243, 244, 246, 0.72);
+  color: var(--fg-1);
 }
 
 .project-sync-hint {
-  color: rgba(243, 244, 246, 0.64);
+  color: var(--fg-2);
   font-size: 0.82rem;
   line-height: 1.45;
 }
 
 .project-sync-error {
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-2);
   font-size: 0.85rem;
   line-height: 1.45;
-  background: rgba(239, 68, 68, 0.12);
-  color: rgba(254, 202, 202, 0.95);
-  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-line);
 }
 
 .project-sync-actions {
@@ -172,26 +171,26 @@ pix3-project-sync-dialog {
 .project-sync-button {
   min-width: 96px;
   padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(243, 244, 246, 0.94);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font-weight: 600;
   cursor: pointer;
 }
 
 .project-sync-button:hover:not([disabled]) {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--bg-3);
 }
 
 .project-sync-button--primary {
-  background: rgba(var(--pix3-accent-rgb), 0.16);
-  border-color: rgba(var(--pix3-accent-rgb), 0.3);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
 }
 
 .project-sync-button--primary:hover:not([disabled]) {
-  background: rgba(var(--pix3-accent-rgb), 0.24);
+  background: var(--accent);
 }
 
 .project-sync-button[disabled] {

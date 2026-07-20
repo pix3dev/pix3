@@ -190,7 +190,7 @@ export class CollaborationService {
       (awareness.getLocalState()?.user as Partial<CollabUserInfo> | undefined) ?? {};
     awareness.setLocalStateField('user', {
       name: currentState.name ?? appState.collaboration.localUser?.name ?? 'Pix3 User',
-      color: currentState.color ?? appState.collaboration.localUser?.color ?? '#ffcf33',
+      color: currentState.color ?? appState.collaboration.localUser?.color ?? '#f5ae39', // --presence-1 (amber, you)
       selection: [...appState.selection.nodeIds],
       cursor3d: currentState.cursor3d ?? null,
       cameraPosition: currentState.cameraPosition ?? null,

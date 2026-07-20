@@ -13,21 +13,20 @@ pix3-easing-picker .pix3-easing-trigger {
   height: 1.6rem;
   min-width: 6.5rem;
   padding: 0 0.45rem;
-  background: var(--color-input-bg, #1b1f27);
-  color: var(--color-text-primary, #f3f4f6);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   font-size: 0.72rem;
   cursor: pointer;
 }
 
 pix3-easing-picker .pix3-easing-trigger:hover:not(:disabled) {
-  border-color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.5);
+  border-color: var(--accent-line);
 }
 
 pix3-easing-picker .pix3-easing-trigger:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.6);
+  border-color: var(--accent);
 }
 
 pix3-easing-picker[disabled] .pix3-easing-trigger,
@@ -37,13 +36,13 @@ pix3-easing-picker .pix3-easing-trigger:disabled {
 }
 
 pix3-easing-picker .pix3-easing-trigger--placeholder .pix3-easing-trigger__label {
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
 }
 
 pix3-easing-picker .pix3-easing-trigger__curve {
   display: block;
   flex: 0 0 auto;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-easing-picker .pix3-easing-trigger__label {
@@ -60,10 +59,10 @@ pix3-easing-picker .pix3-easing-popover {
 .pix3-dropdown-portal .pix3-easing-popover {
   position: fixed;
   display: block;
-  background: var(--color-panel-bg, #1b1f27);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-pop);
   padding: 0.55rem 0.65rem;
   max-height: 70vh;
   overflow: auto;
@@ -80,7 +79,7 @@ pix3-easing-picker .pix3-easing-popover {
 
 .pix3-easing-row-label {
   font-size: 0.66rem;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   text-align: right;
   padding-right: 0.15rem;
   white-space: nowrap;
@@ -90,7 +89,7 @@ pix3-easing-picker .pix3-easing-popover {
   font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   text-align: center;
 }
 
@@ -101,26 +100,25 @@ pix3-easing-picker .pix3-easing-popover {
   gap: 2px;
   padding: 3px;
   border: 1px solid transparent;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.03);
-  color: color-mix(in srgb, var(--color-text-primary, #f3f4f6) 66%, transparent);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: color-mix(in srgb, var(--fg-0) 66%, transparent);
   cursor: pointer;
 }
 
 .pix3-easing-card:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-primary, #f3f4f6);
+  background: var(--bg-3);
+  color: var(--fg-0);
 }
 
 .pix3-easing-card:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.6);
+  border-color: var(--accent);
 }
 
 .pix3-easing-card--selected {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
-  color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .pix3-easing-card__curve {
@@ -143,7 +141,7 @@ pix3-easing-picker .pix3-easing-popover {
 
 .pix3-easing-guide {
   fill: none;
-  stroke: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.22);
+  stroke: var(--accent-soft);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }

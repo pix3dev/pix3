@@ -26,21 +26,21 @@ describe('getNodeVisuals', () => {
     ],
   ])('returns sun icon for %s', (_label, node) => {
     expect(getNodeVisuals(node)).toEqual({
-      color: '#fe9ebeff',
+      color: '#ff7f6cff',
       icon: 'sun',
     });
   });
 
   it('keeps existing camera visuals unchanged', () => {
     expect(getNodeVisuals(new Camera3D({ id: 'camera-node', name: 'Camera' }))).toEqual({
-      color: '#fe9ebeff',
+      color: '#ff7f6cff',
       icon: 'camera',
     });
   });
 
   it('keeps existing audio visuals unchanged', () => {
     expect(getNodeVisuals(new AudioPlayer({ id: 'audio-node', name: 'Audio Player' }))).toEqual({
-      color: '#7fd1b9ff',
+      color: '#a5abffff',
       icon: 'volume-2',
     });
   });

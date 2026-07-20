@@ -95,13 +95,14 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   dimensions: {
     minItemHeight: 120,
     minItemWidth: 200,
+    headerHeight: 34,
   },
   root: {
     type: 'row',
     content: [
       {
         type: 'column',
-        width: 18,
+        width: 20,
         content: [
           {
             type: 'stack',
@@ -142,7 +143,7 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
       },
       {
         type: 'column',
-        width: 42,
+        width: 55,
         content: [
           {
             type: 'stack',
@@ -187,20 +188,7 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
       {
         type: 'stack',
         id: 'agent-stack',
-        width: 20,
-        content: [
-          {
-            type: 'component',
-            componentType: PANEL_COMPONENT_TYPES.agentChat,
-            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat],
-            isClosable: true,
-          },
-        ],
-      },
-
-      {
-        type: 'stack',
-        width: 20,
+        width: 25,
         content: [
           {
             type: 'component',
@@ -213,6 +201,12 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
             componentType: PANEL_COMPONENT_TYPES.profiler,
             title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.profiler],
             isClosable: false,
+          },
+          {
+            type: 'component',
+            componentType: PANEL_COMPONENT_TYPES.agentChat,
+            title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat],
+            isClosable: true,
           },
         ],
       },

@@ -8,7 +8,8 @@ pix3-editor-settings-dialog {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,23 +19,23 @@ pix3-editor-settings-dialog {
 .dialog-content {
   display: flex;
   flex-direction: column;
-  background: var(--pix3-bg-secondary, #2a2a2a);
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
   padding: 1.5rem;
   width: 760px;
   max-width: 92vw;
   height: 640px;
   max-height: 85vh;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-float);
 }
 
 .dialog-title {
   margin: 0 0 1.25rem 0;
   font-size: 1.4rem;
   font-weight: 500;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 /* Godot-style body: fixed sidebar + scrolling content pane. */
@@ -51,7 +52,7 @@ pix3-editor-settings-dialog {
   gap: 0.15rem;
   flex: 0 0 172px;
   padding-right: 1.25rem;
-  border-right: 1px solid var(--pix3-border, #444);
+  border-right: 1px solid var(--line-1);
   overflow-y: auto;
 }
 
@@ -61,23 +62,25 @@ pix3-editor-settings-dialog {
   gap: 0.6rem;
   padding: 0.5rem 0.7rem;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
   cursor: pointer;
   font-size: 0.92rem;
   text-align: left;
-  transition: all 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .settings-nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .settings-nav-item.is-active {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
-  color: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .settings-nav-item .nav-icon {
@@ -116,21 +119,21 @@ pix3-editor-settings-dialog {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 500;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .pane-description {
   margin: 0.35rem 0 0 0;
   font-size: 0.82rem;
   line-height: 1.4;
-  color: var(--pix3-text-muted, #888);
+  color: var(--fg-3);
 }
 
 .settings-subtabs {
   display: flex;
   gap: 0.25rem;
   margin-bottom: 1.1rem;
-  border-bottom: 1px solid var(--pix3-border, #444);
+  border-bottom: 1px solid var(--line-1);
 }
 
 .settings-subtab {
@@ -138,20 +141,22 @@ pix3-editor-settings-dialog {
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-2);
   cursor: pointer;
   font-size: 0.88rem;
   margin-bottom: -1px;
-  transition: all 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .settings-subtab:hover {
-  color: #fff;
+  color: var(--fg-0);
 }
 
 .settings-subtab.is-active {
-  color: var(--pix3-accent-color, #ffcf33);
-  border-bottom-color: var(--pix3-accent-color, #ffcf33);
+  color: var(--fg-0);
+  border-bottom-color: var(--accent);
 }
 
 .settings-form {
@@ -178,30 +183,30 @@ pix3-editor-settings-dialog {
   align-items: center;
   gap: 0.65rem;
   font-size: 0.95rem;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .toggle-row input {
-  accent-color: var(--pix3-accent-color, #ffcf33);
+  accent-color: var(--accent);
 }
 
 .settings-field .hint {
   font-size: 0.8rem;
-  color: var(--pix3-text-muted, #777);
+  color: var(--fg-3);
   line-height: 1.4;
 }
 
 .settings-section {
   margin-top: 0.5rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--pix3-border, #444);
+  border-top: 1px solid var(--line-1);
 }
 
 .section-title {
   margin: 0 0 1rem 0;
   font-size: 1rem;
   font-weight: 500;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 /* A nested option group inside a section (e.g. Advisor / Vision helper under the Agent provider). */
@@ -211,14 +216,14 @@ pix3-editor-settings-dialog {
   gap: 0.7rem;
   margin-top: 1rem;
   padding-left: 0.85rem;
-  border-left: 2px solid var(--pix3-border, #444);
+  border-left: 2px solid var(--line-1);
 }
 
 .subsection-title {
   margin: 0;
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .slider-row {
@@ -226,12 +231,12 @@ pix3-editor-settings-dialog {
   flex-direction: column;
   gap: 0.5rem;
   font-size: 0.95rem;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .slider-row input[type='range'] {
   width: 100%;
-  accent-color: var(--pix3-accent-color, #ffcf33);
+  accent-color: var(--accent);
 }
 
 .select-row {
@@ -239,15 +244,15 @@ pix3-editor-settings-dialog {
   flex-direction: column;
   gap: 0.4rem;
   font-size: 0.95rem;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .select-row select {
   padding: 0.45rem 0.5rem;
-  border-radius: 4px;
-  background: var(--pix3-bg-primary, #1e1e1e);
-  color: var(--pix3-text-primary, #fff);
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
   font-size: 0.9rem;
 }
 
@@ -256,7 +261,7 @@ pix3-editor-settings-dialog {
   align-items: center;
   gap: 0.6rem;
   font-size: 0.95rem;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .key-status {
@@ -269,13 +274,13 @@ pix3-editor-settings-dialog {
 }
 
 .key-status.is-set {
-  background: rgba(80, 200, 120, 0.18);
-  color: #66d19e;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .key-status.is-unset {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--pix3-text-muted, #888);
+  background: var(--bg-2);
+  color: var(--fg-3);
 }
 
 .key-row {
@@ -288,27 +293,29 @@ pix3-editor-settings-dialog {
   flex: 1;
   min-width: 0;
   padding: 0.45rem 0.5rem;
-  border-radius: 4px;
-  background: var(--pix3-bg-primary, #1e1e1e);
-  color: var(--pix3-text-primary, #fff);
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
   font-size: 0.9rem;
 }
 
 .key-row button {
   padding: 0.45rem 0.85rem;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   cursor: pointer;
   font-size: 0.85rem;
-  border: 1px solid var(--pix3-border, #444);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
-  transition: all 0.15s;
+  color: var(--fg-1);
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .key-row button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .key-row button:disabled {
@@ -317,8 +324,8 @@ pix3-editor-settings-dialog {
 }
 
 .key-row .btn-key-save {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Live model-list refresh (providers with a dynamic catalog). */
@@ -328,12 +335,14 @@ pix3-editor-settings-dialog {
   justify-content: center;
   align-self: flex-start;
   padding: 0.3rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   cursor: pointer;
-  border: 1px solid var(--pix3-border, #444);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
-  transition: all 0.15s;
+  color: var(--fg-1);
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .select-row .llm-models-refresh svg {
@@ -353,8 +362,8 @@ pix3-editor-settings-dialog {
 }
 
 .select-row .llm-models-refresh:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .select-row .llm-models-refresh:disabled {
@@ -363,7 +372,7 @@ pix3-editor-settings-dialog {
 }
 
 .settings-field .hint a {
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 .dialog-actions {
@@ -372,32 +381,34 @@ pix3-editor-settings-dialog {
   justify-content: flex-end;
   margin-top: 1.25rem;
   padding-top: 1.25rem;
-  border-top: 1px solid var(--pix3-border, #444);
+  border-top: 1px solid var(--line-1);
 }
 
 .dialog-actions button {
   padding: 0.6rem 1.2rem;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   font-size: 0.95rem;
   border: 1px solid transparent;
-  transition: all 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
 
 .btn-cancel {
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
-  border-color: var(--pix3-border, #444);
+  color: var(--fg-1);
+  border-color: var(--line-1);
 }
 
 .btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .btn-save {
-  background: var(--pix3-accent-color, #ffcf33);
-  color: #000;
+  background: var(--accent);
+  color: var(--accent-fg);
   font-weight: 600;
 }
 

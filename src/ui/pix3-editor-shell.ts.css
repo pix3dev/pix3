@@ -12,8 +12,6 @@ pix3-editor-shell {
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  --pix3-accent-color: #ffcf33;
-  --pix3-accent-rgb: 255, 207, 51;
 }
 
 .editor-shell {
@@ -21,8 +19,8 @@ pix3-editor-shell {
   grid-template-rows: auto 1fr auto;
   min-block-size: 100vh;
   min-block-size: 100dvh;
-  background: var(--pix3-shell-background, #1b1e24);
-  color: #f3f4f6;
+  background: var(--bg-0);
+  color: var(--fg-0);
 }
 
 .toolbar-layer {
@@ -30,47 +28,79 @@ pix3-editor-shell {
 }
 
 pix3-toolbar {
-  --pix3-toolbar-background: rgba(19, 22, 27, 0.95);
-  --pix3-toolbar-foreground: rgba(243, 244, 246, 0.92);
   inline-size: 100%;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px);
   position: relative;
 }
 
 .product-title {
   margin: 0;
-  font-family: 'Inter', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: rgba(243, 244, 246, 0.72);
+  font-family: var(--font-ui);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--fg-0);
 }
 
 .toolbar-content {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 1rem;
+  gap: 16px;
   inline-size: 100%;
+  font-size: 14px;
+  color: var(--fg-1);
 }
 
 .toolbar-group--play {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
 }
 
+/* Play — the only accent-filled button in the chrome. */
 .toolbar-group--play pix3-toolbar-button {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
   border-start-end-radius: 0;
   border-end-end-radius: 0;
+}
+
+.toolbar-group--play pix3-toolbar-button:hover:not([disabled]) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.toolbar-group--play pix3-toolbar-button[toggled] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
 }
 
 .toolbar-group--play .run-options-dropdown {
   width: 22px;
   border-start-start-radius: 0;
   border-end-start-radius: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.toolbar-group--play .run-options-dropdown:hover:not([disabled]) {
+  background: var(--accent);
+  color: var(--accent-fg);
+  filter: brightness(1.08);
+}
+
+.toolbar-group--play:has(pix3-toolbar-button[toggled]) .run-options-dropdown {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
+}
+
+.toolbar-group--play:has(pix3-toolbar-button[toggled]) .run-options-dropdown:hover:not([disabled]) {
+  background: var(--accent-soft);
+  filter: none;
 }
 
 .workspace {
@@ -89,18 +119,19 @@ pix3-toolbar {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(18, 20, 24, 0.72);
+  background: oklch(0 0 0 / 0.55);
 }
 
 /* Welcome UI moved into <pix3-welcome> component */
 
 .loading-label {
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  background: rgba(34, 38, 44, 0.86);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
-  font-size: 0.85rem;
-  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-float);
+  font-size: 12px;
+  letter-spacing: 0.02em;
 }
 
 .loading-progress {
@@ -111,16 +142,15 @@ pix3-toolbar {
 
 .loading-progress__bar {
   overflow: hidden;
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-3);
 }
 
 .loading-progress__fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(255, 207, 51, 0.78), rgba(255, 239, 148, 0.94));
-  box-shadow: 0 0 18px rgba(255, 207, 51, 0.25);
+  background: var(--accent);
   transition: width 160ms ease-out;
 }
 
@@ -128,14 +158,14 @@ pix3-toolbar {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: rgba(243, 244, 246, 0.72);
-  font-size: 0.82rem;
+  color: var(--fg-2);
+  font-size: 11.5px;
 }
 
 .loading-progress__path {
   margin-top: 12px;
-  color: rgba(243, 244, 246, 0.6);
-  font-size: 0.78rem;
+  color: var(--fg-3);
+  font-size: 11px;
   word-break: break-word;
 }
 
@@ -146,38 +176,37 @@ pix3-toolbar {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    radial-gradient(circle at top, rgba(255, 207, 51, 0.08), transparent 36%),
-    linear-gradient(180deg, rgba(17, 19, 23, 0.92), rgba(14, 16, 20, 0.96));
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
 }
 
 .collab-join-card {
   width: min(100%, 560px);
   padding: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  background: rgba(27, 30, 36, 0.94);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.34);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-float);
 }
 
 .collab-join-eyebrow {
   margin-bottom: 10px;
-  color: rgba(255, 207, 51, 0.82);
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .collab-join-title {
   margin: 0 0 12px;
-  font-size: 1.5rem;
+  font-size: 18px;
   line-height: 1.15;
 }
 
 .collab-join-copy {
   margin: 0 0 18px;
-  color: rgba(243, 244, 246, 0.72);
+  color: var(--fg-1);
   line-height: 1.5;
 }
 
@@ -185,8 +214,8 @@ pix3-toolbar {
   display: grid;
   gap: 8px;
   margin-bottom: 22px;
-  color: rgba(243, 244, 246, 0.8);
-  font-size: 0.86rem;
+  color: var(--fg-1);
+  font-size: 12px;
   word-break: break-word;
 }
 
@@ -197,12 +226,13 @@ pix3-toolbar {
 
 .collab-join-actions button {
   min-width: 190px;
-  padding: 11px 16px;
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.28);
-  border-radius: 12px;
-  background: rgba(var(--pix3-accent-rgb), 0.18);
-  color: #fff7d1;
-  font-weight: 700;
+  height: 28px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -218,10 +248,8 @@ pix3-toolbar {
   display: grid;
   place-items: center;
   padding: 24px;
-  background:
-    radial-gradient(circle at top, rgba(255, 207, 51, 0.08), transparent 36%),
-    rgba(12, 14, 18, 0.72);
-  backdrop-filter: blur(10px);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
 }
 
 .auth-modal-shell {
@@ -234,50 +262,51 @@ pix3-toolbar {
   right: 16px;
   z-index: var(--pix3-z-popover);
   min-width: 220px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(24, 28, 34, 0.98);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
 }
 
 .account-popover__name {
-  font-weight: 700;
-  color: #f3f4f6;
+  font-weight: 600;
+  color: var(--fg-0);
 }
 
 .account-popover__email {
   margin-top: 4px;
-  color: rgba(243, 244, 246, 0.62);
-  font-size: 0.84rem;
+  color: var(--fg-2);
+  font-size: 11.5px;
   word-break: break-word;
 }
 
 .account-popover__action {
   width: 100%;
   margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: #f3f4f6;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   cursor: pointer;
 }
 
 .account-popover__action:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-3);
 }
 
 .account-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #ffd84d, #ffb800);
-  color: #171923;
-  font-size: 0.78rem;
-  font-weight: 800;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.02em;
 }

@@ -4,8 +4,8 @@ pix3-save-asset-dialog .dialog-backdrop {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 10, 16, 0.7);
-  backdrop-filter: blur(6px);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   z-index: 1200;
 }
 
@@ -17,11 +17,11 @@ pix3-save-asset-dialog .dialog-content {
   max-height: calc(100vh - 2rem);
   overflow: auto;
   padding: 1.1rem;
-  border-radius: 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #16191f;
-  color: #eceff4;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
 }
 
 pix3-save-asset-dialog .dialog-title {
@@ -39,21 +39,22 @@ pix3-save-asset-dialog .save-preview {
   flex: 0 0 auto;
   width: 96px;
   height: 96px;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
   overflow: hidden;
-  background-color: #2b2b2b;
+  /* transparency checkerboard (matches global .checker) */
   background-image:
-    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
-    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
-    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
-  background-size: 16px 16px;
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
   background-position:
     0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
 }
 
 pix3-save-asset-dialog .save-preview img {
@@ -74,24 +75,24 @@ pix3-save-asset-dialog .save-fields {
 pix3-save-asset-dialog .save-target {
   margin: 0;
   font-size: 0.82rem;
-  color: #b8c0cc;
+  color: var(--fg-1);
 }
 
 pix3-save-asset-dialog .save-target__path {
   margin-left: 0.25rem;
   padding: 0.1rem 0.4rem;
-  border-radius: 0.35rem;
-  background: rgba(255, 255, 255, 0.06);
-  font-family: 'IBM Plex Mono', monospace;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  font-family: var(--font-mono);
   font-size: 0.78rem;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
   overflow-wrap: anywhere;
 }
 
 pix3-save-asset-dialog .save-dimensions {
   margin: 0;
   font-size: 0.78rem;
-  color: #8b93a1;
+  color: var(--fg-2);
 }
 
 pix3-save-asset-dialog .save-field {
@@ -102,23 +103,23 @@ pix3-save-asset-dialog .save-field {
 
 pix3-save-asset-dialog .save-field__label {
   font-size: 0.78rem;
-  color: #b8c0cc;
+  color: var(--fg-2);
 }
 
 pix3-save-asset-dialog .save-field__input {
   width: 100%;
   box-sizing: border-box;
   padding: 0.45rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #0f1216;
-  color: #eceff4;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
 }
 
 pix3-save-asset-dialog .save-field__input:focus {
   outline: none;
-  border-color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
 }
 
 pix3-save-asset-dialog .dialog-actions {
@@ -130,22 +131,22 @@ pix3-save-asset-dialog .dialog-actions {
 pix3-save-asset-dialog .btn-cancel,
 pix3-save-asset-dialog .btn-confirm {
   padding: 0.45rem 1rem;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: #eceff4;
+  color: var(--fg-0);
   cursor: pointer;
   font: inherit;
 }
 
 pix3-save-asset-dialog .btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-2);
 }
 
 pix3-save-asset-dialog .btn-confirm {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  background: var(--pix3-accent-color, #ffcf33);
-  color: #000;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
   font-weight: 600;
 }
 

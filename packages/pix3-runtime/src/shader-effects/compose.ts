@@ -17,6 +17,7 @@ const ANCHOR_INCLUDE: Record<ShaderEffectAnchor, string> = {
   uv_vertex: '#include <uv_vertex>',
   emissivemap_fragment: '#include <emissivemap_fragment>',
   opaque_fragment: '#include <opaque_fragment>',
+  color_fragment: '#include <color_fragment>',
 };
 
 function parsOf(effects: AttachedShaderEffect[], stage: 'vertex' | 'fragment'): string {
@@ -82,6 +83,11 @@ export function composeEffectShaders(
 
   const fragmentPars = parsOf(effects, 'fragment');
   shader.fragmentShader = `varying vec2 vPix3Uv;\n${fragmentPars ? fragmentPars + '\n' : ''}${shader.fragmentShader}`;
+  shader.fragmentShader = injectAfter(
+    shader.fragmentShader,
+    ANCHOR_INCLUDE.color_fragment,
+    chunksFor(effects, 'fragment', 'color_fragment')
+  );
   shader.fragmentShader = injectAfter(
     shader.fragmentShader,
     ANCHOR_INCLUDE.emissivemap_fragment,

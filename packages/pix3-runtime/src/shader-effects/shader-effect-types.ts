@@ -17,8 +17,22 @@ import type { PropertyUIHints } from '../fw/property-schema';
  * - `uv_vertex` (vertex): `vPix3Uv` is in scope right after.
  * - `emissivemap_fragment` (fragment): `normal` + `totalEmissiveRadiance` in scope.
  * - `opaque_fragment` (fragment): `outgoingLight` still writable just before it.
+ * - `color_fragment` (fragment): present in BOTH `meshbasic.glsl.js` and
+ *   `meshphysical.glsl.js` (r183); right after it `diffuseColor` (vec4) is in
+ *   scope and writable — the shared color anchor for basic + standard materials.
  */
-export type ShaderEffectAnchor = 'uv_vertex' | 'emissivemap_fragment' | 'opaque_fragment';
+export type ShaderEffectAnchor =
+  | 'uv_vertex'
+  | 'emissivemap_fragment'
+  | 'opaque_fragment'
+  | 'color_fragment';
+
+/**
+ * Which material family an effect's GLSL targets:
+ * - `standard`: `MeshStandardMaterial` (PBR — GeometryMesh).
+ * - `basic`: `MeshBasicMaterial` (unlit — the 2D sprite/skin pipeline).
+ */
+export type ShaderEffectTarget = 'standard' | 'basic';
 
 export interface ShaderEffectChunk {
   stage: 'vertex' | 'fragment';
@@ -69,6 +83,12 @@ export interface ShaderEffectTypeInfo {
   keywords: string[];
   /** `#define` toggled by the effect's `enabled` flag, e.g. `PIX3_FX_DISSOLVE`. */
   define: string;
+  /**
+   * Material families this effect's GLSL supports. Omitted = `['standard']`
+   * (back-compat with the GeometryMesh-only effects). A host stack refuses to
+   * attach an effect whose targets don't include the stack's own target.
+   */
+  targets?: ShaderEffectTarget[];
   /** Declarations prepended once to the vertex shader (uniforms). */
   vertexPars?: string;
   /** Declarations prepended once to the fragment shader (uniforms, helper fns). */
@@ -80,6 +100,18 @@ export interface ShaderEffectTypeInfo {
   createUniforms(): Record<string, { value: unknown }>;
   /** Per-frame CPU update in play mode (e.g. uv-scroll offset accumulation). */
   onTick?(ctx: ShaderEffectTickContext, dt: number): void;
+}
+
+/**
+ * Whether an effect supports a given material target. An effect with no declared
+ * `targets` supports only `standard` (the original GeometryMesh-only default).
+ */
+export function effectSupportsTarget(
+  info: ShaderEffectTypeInfo,
+  target: ShaderEffectTarget
+): boolean {
+  const targets = info.targets ?? ['standard'];
+  return targets.includes(target);
 }
 
 /** A shader effect attached to a node instance (one per type in v1). */

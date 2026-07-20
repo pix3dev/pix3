@@ -10,8 +10,8 @@ pix3-sprite-editor-panel .sprite-editor {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--pix3-bg-primary, #1e1e1e);
-  color: var(--pix3-text-primary, #fff);
+  background: var(--bg-1);
+  color: var(--fg-0);
   font-size: 0.9rem;
 }
 
@@ -22,13 +22,13 @@ pix3-sprite-editor-panel .ag-toolbar {
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--pix3-border, #333);
-  background: var(--pix3-bg-secondary, #262626);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-1);
 }
 
 pix3-sprite-editor-panel .ag-title {
   font-weight: 600;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-icon-button {
@@ -38,18 +38,18 @@ pix3-sprite-editor-panel .ag-icon-button {
   width: 30px;
   height: 30px;
   padding: 0;
-  border-radius: 4px;
-  border: 1px solid var(--pix3-border, #333);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1;
 }
 
 pix3-sprite-editor-panel .ag-icon-button:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 pix3-sprite-editor-panel .ag-toolbar-spacer {
@@ -63,8 +63,8 @@ pix3-sprite-editor-panel .ag-save-wrap {
 }
 
 pix3-sprite-editor-panel .ag-save-button.is-open {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-save-popover {
@@ -74,10 +74,10 @@ pix3-sprite-editor-panel .ag-save-popover {
   width: 260px;
   max-width: 80vw;
   padding: 0.85rem;
-  border-radius: 8px;
-  background: var(--pix3-bg-secondary, #262626);
-  border: 1px solid var(--pix3-border, #444);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -97,10 +97,10 @@ pix3-sprite-editor-panel .ag-save-actions .ag-action-button {
 pix3-sprite-editor-panel select,
 pix3-sprite-editor-panel input[type='text'],
 pix3-sprite-editor-panel textarea {
-  background: var(--pix3-bg-primary, #1e1e1e);
-  color: var(--pix3-text-primary, #fff);
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   padding: 0.35rem 0.45rem;
   font: inherit;
 }
@@ -108,25 +108,27 @@ pix3-sprite-editor-panel textarea {
 pix3-sprite-editor-panel .ag-toolbar-button,
 pix3-sprite-editor-panel .ag-action-button {
   padding: 0.4rem 0.8rem;
-  border-radius: 4px;
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
   cursor: pointer;
   font-size: 0.85rem;
-  transition: all 0.15s;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 pix3-sprite-editor-panel .ag-toolbar-button:hover:not(:disabled),
 pix3-sprite-editor-panel .ag-action-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 pix3-sprite-editor-panel .ag-toolbar-button.is-active {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  color: var(--pix3-accent-color, #ffcf33);
-  background: rgba(255, 207, 51, 0.12);
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 pix3-sprite-editor-panel button:disabled {
@@ -146,7 +148,7 @@ pix3-sprite-editor-panel .ag-sidebar {
   width: 148px;
   overflow-y: auto;
   padding: 0.6rem;
-  border-right: 1px solid var(--pix3-border, #333);
+  border-right: 1px solid var(--line-1);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -160,7 +162,7 @@ pix3-sprite-editor-panel .ag-field {
 
 pix3-sprite-editor-panel .ag-field-label {
   font-size: 0.78rem;
-  color: var(--pix3-text-muted, #999);
+  color: var(--fg-2);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -172,22 +174,22 @@ pix3-sprite-editor-panel .ag-prompt-bar {
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.6rem 0.75rem;
-  border-top: 1px solid var(--pix3-border, #333);
-  background: var(--pix3-bg-secondary, #262626);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
 }
 
 /* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
 pix3-sprite-editor-panel .ag-prompt-box {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 8px;
-  background: var(--pix3-bg-primary, #1e1e1e);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
   overflow: visible;
 }
 
 pix3-sprite-editor-panel .ag-prompt-box:focus-within {
-  border-color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-prompt {
@@ -196,7 +198,7 @@ pix3-sprite-editor-panel .ag-prompt {
   max-height: 14rem;
   border: none;
   background: transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
 }
 
 pix3-sprite-editor-panel .ag-prompt:focus {
@@ -208,7 +210,7 @@ pix3-sprite-editor-panel .ag-prompt-toolbar {
   align-items: center;
   gap: 0.4rem;
   padding: 0.4rem;
-  border-top: 1px solid var(--pix3-border, #444);
+  border-top: 1px solid var(--line-1);
 }
 
 pix3-sprite-editor-panel .ag-prompt-spacer {
@@ -224,18 +226,18 @@ pix3-sprite-editor-panel .ag-key-button {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 6px;
-  border: 1px solid var(--pix3-border, #444);
-  background: var(--pix3-bg-secondary, #262626);
-  color: var(--pix3-text-secondary, #ccc);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1;
 }
 
 pix3-sprite-editor-panel .ag-key-button.is-connected {
-  border-color: #66d19e;
-  background: rgba(80, 200, 120, 0.14);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-sprite-editor-panel .ag-model-select {
@@ -257,10 +259,10 @@ pix3-sprite-editor-panel .ag-key-popover {
   width: 300px;
   max-width: 80vw;
   padding: 0.85rem;
-  border-radius: 8px;
-  background: var(--pix3-bg-secondary, #262626);
-  border: 1px solid var(--pix3-border, #444);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -270,7 +272,7 @@ pix3-sprite-editor-panel .ag-key-popover {
 pix3-sprite-editor-panel .ag-popover-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 pix3-sprite-editor-panel .ag-key-status-row {
@@ -289,13 +291,13 @@ pix3-sprite-editor-panel .ag-key-status {
 }
 
 pix3-sprite-editor-panel .ag-key-status.is-set {
-  background: rgba(80, 200, 120, 0.18);
-  color: #66d19e;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-key-status.is-unset {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--pix3-text-muted, #888);
+  background: var(--bg-3);
+  color: var(--fg-3);
 }
 
 pix3-sprite-editor-panel .ag-key-row {
@@ -311,17 +313,17 @@ pix3-sprite-editor-panel .ag-key-row input {
 
 pix3-sprite-editor-panel .ag-key-row button {
   padding: 0.4rem 0.7rem;
-  border-radius: 4px;
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
   cursor: pointer;
   font-size: 0.82rem;
 }
 
 pix3-sprite-editor-panel .ag-key-row .ag-key-save {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  color: var(--pix3-accent-color, #ffcf33);
+  border-color: var(--accent-line);
+  color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-key-row button:disabled {
@@ -331,12 +333,12 @@ pix3-sprite-editor-panel .ag-key-row button:disabled {
 
 pix3-sprite-editor-panel .ag-popover-hint {
   font-size: 0.75rem;
-  color: var(--pix3-text-muted, #888);
+  color: var(--fg-3);
   line-height: 1.4;
 }
 
 pix3-sprite-editor-panel .ag-popover-hint a {
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-sprite-editor-panel .ag-field-row {
@@ -353,7 +355,7 @@ pix3-sprite-editor-panel .ag-toggle-field {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.8rem;
-  color: var(--pix3-text-muted, #999);
+  color: var(--fg-2);
   cursor: pointer;
 }
 
@@ -386,10 +388,10 @@ pix3-sprite-editor-panel .ag-reference-grid {
 pix3-sprite-editor-panel .ag-reference {
   position: relative;
   aspect-ratio: 1;
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   overflow: hidden;
-  background: #0000;
+  background: transparent;
 }
 
 pix3-sprite-editor-panel .ag-reference img {
@@ -407,8 +409,8 @@ pix3-sprite-editor-panel .ag-reference-remove {
   height: 18px;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-0);
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
@@ -417,13 +419,13 @@ pix3-sprite-editor-panel .ag-reference-remove {
 pix3-sprite-editor-panel .ag-references-hint,
 pix3-sprite-editor-panel .ag-hint {
   font-size: 0.75rem;
-  color: var(--pix3-text-muted, #777);
+  color: var(--fg-3);
 }
 
 pix3-sprite-editor-panel .ag-link-button {
   background: none;
   border: none;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
   cursor: pointer;
   font: inherit;
   padding: 0;
@@ -432,9 +434,9 @@ pix3-sprite-editor-panel .ag-link-button {
 /* Generate -------------------------------------------------------------- */
 pix3-sprite-editor-panel .ag-warning {
   padding: 0.5rem 0.6rem;
-  border-radius: 4px;
-  background: rgba(255, 207, 51, 0.12);
-  color: var(--pix3-accent-color, #ffcf33);
+  border-radius: var(--radius-1);
+  background: var(--warn-soft);
+  color: var(--warn);
   font-size: 0.8rem;
 }
 
@@ -446,10 +448,10 @@ pix3-sprite-editor-panel .ag-generate-row {
 pix3-sprite-editor-panel .ag-generate-button {
   flex: 1 1 auto;
   padding: 0.55rem 1rem;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   border: none;
-  background: var(--pix3-accent-color, #ffcf33);
-  color: #000;
+  background: var(--accent);
+  color: var(--accent-fg);
   font-weight: 600;
   cursor: pointer;
 }
@@ -461,22 +463,22 @@ pix3-sprite-editor-panel .ag-generate-button:disabled {
 
 pix3-sprite-editor-panel .ag-cancel-button {
   padding: 0.55rem 0.9rem;
-  border-radius: 4px;
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
   cursor: pointer;
 }
 
 pix3-sprite-editor-panel .ag-error {
   font-size: 0.8rem;
-  color: #ff6b6b;
+  color: var(--danger);
   white-space: pre-wrap;
 }
 
 pix3-sprite-editor-panel .ag-success {
   font-size: 0.8rem;
-  color: #66d19e;
+  color: var(--accent);
 }
 
 /* Main / stage ---------------------------------------------------------- */
@@ -496,37 +498,37 @@ pix3-sprite-editor-panel .ag-stage {
   justify-content: center;
   overflow: auto;
   padding: 1rem;
-  background-color: #2b2b2b;
+  /* transparency checkerboard (matches global .checker) */
   background-image:
-    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
-    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
-    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
-  background-size: 20px 20px;
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
   background-position:
     0 0,
-    0 10px,
-    10px -10px,
-    -10px 0;
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
 }
 
 pix3-sprite-editor-panel .ag-stage-image {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 pix3-sprite-editor-panel .ag-empty {
   text-align: center;
-  color: var(--pix3-text-muted, #888);
+  color: var(--fg-3);
   max-width: 320px;
 }
 
 pix3-sprite-editor-panel .ag-empty-title {
   font-size: 1rem;
   margin-bottom: 0.4rem;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
 }
 
 pix3-sprite-editor-panel .ag-empty-body {
@@ -540,7 +542,7 @@ pix3-sprite-editor-panel .ag-progress {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: oklch(0 0 0 / 0.55);
 }
 
 pix3-sprite-editor-panel .ag-progress-inner {
@@ -548,17 +550,18 @@ pix3-sprite-editor-panel .ag-progress-inner {
   align-items: center;
   gap: 0.6rem;
   padding: 0.7rem 1rem;
-  border-radius: 6px;
-  background: var(--pix3-bg-secondary, #262626);
-  border: 1px solid var(--pix3-border, #444);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
   font-size: 0.85rem;
 }
 
 pix3-sprite-editor-panel .ag-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.25);
-  border-top-color: var(--pix3-accent-color, #ffcf33);
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: ag-spin 0.8s linear infinite;
 }
@@ -583,10 +586,10 @@ pix3-sprite-editor-panel .ag-save-resize select,
 pix3-sprite-editor-panel .ag-save-custom-size {
   width: 100%;
   box-sizing: border-box;
-  background: var(--pix3-bg-primary, #1e1e1e);
-  color: var(--pix3-text-primary, #fff);
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   padding: 0.35rem 0.45rem;
   font: inherit;
 }
@@ -594,9 +597,9 @@ pix3-sprite-editor-panel .ag-save-custom-size {
 /* History --------------------------------------------------------------- */
 pix3-sprite-editor-panel .ag-history {
   flex: 0 0 auto;
-  border-top: 1px solid var(--pix3-border, #333);
+  border-top: 1px solid var(--line-1);
   padding: 0.5rem 0.75rem;
-  background: var(--pix3-bg-secondary, #262626);
+  background: var(--bg-1);
 }
 
 pix3-sprite-editor-panel .ag-history-head {
@@ -610,7 +613,7 @@ pix3-sprite-editor-panel .ag-history-head {
 pix3-sprite-editor-panel .ag-history-hint {
   flex: 1 1 auto;
   font-size: 0.72rem;
-  color: var(--pix3-text-muted, #777);
+  color: var(--fg-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -640,11 +643,11 @@ pix3-sprite-editor-panel .ag-history-thumb {
   width: 64px;
   height: 64px;
   padding: 0;
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   overflow: hidden;
   cursor: pointer;
-  background: #2b2b2b;
+  background: var(--bg-2);
 }
 
 pix3-sprite-editor-panel .ag-history-thumb img {
@@ -662,8 +665,8 @@ pix3-sprite-editor-panel .ag-history-delete {
   height: 18px;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-0);
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
@@ -671,7 +674,7 @@ pix3-sprite-editor-panel .ag-history-delete {
 
 /* Drag overlay ---------------------------------------------------------- */
 pix3-sprite-editor-panel .sprite-editor.is-drag-active {
-  outline: 2px dashed var(--pix3-accent-color, #ffcf33);
+  outline: 2px dashed var(--accent);
   outline-offset: -4px;
 }
 
@@ -681,8 +684,8 @@ pix3-sprite-editor-panel .ag-drop-overlay {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 207, 51, 0.1);
-  color: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
   pointer-events: none;
   z-index: 5;
@@ -716,8 +719,9 @@ pix3-sprite-editor-panel .ag-crop-overlay {
 
 pix3-sprite-editor-panel .ag-crop-rect {
   position: absolute;
-  border: 1px solid var(--pix3-accent-color, #ffcf33);
-  box-shadow: 0 0 0 100000px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--accent);
+  /* Functional crop mask: dims everything outside the crop rect (not decorative elevation). */
+  box-shadow: 0 0 0 100000px oklch(0 0 0 / 0.55);
   cursor: move;
   box-sizing: border-box;
 }
@@ -726,9 +730,9 @@ pix3-sprite-editor-panel .ag-crop-handle {
   position: absolute;
   width: 12px;
   height: 12px;
-  background: var(--pix3-accent-color, #ffcf33);
-  border: 1px solid rgba(0, 0, 0, 0.6);
-  border-radius: 2px;
+  background: var(--accent);
+  border: 1px solid var(--bg-0);
+  border-radius: var(--radius-1);
   box-sizing: border-box;
 }
 
@@ -779,13 +783,15 @@ pix3-sprite-editor-panel .ag-crop-toolbar {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid var(--pix3-border, #333);
-  background: var(--pix3-bg-secondary, #262626);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
 }
 
 pix3-sprite-editor-panel .ag-crop-dims {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
-  color: var(--pix3-text-secondary, #ccc);
+  color: var(--fg-1);
 }
 
 pix3-sprite-editor-panel .ag-crop-apply {

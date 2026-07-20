@@ -31,16 +31,16 @@ pix3-localization-panel .loc-tab {
 }
 
 pix3-localization-panel .loc-tab:first-child {
-  border-radius: 0.25rem 0 0 0.25rem;
+  border-radius: var(--radius-1) 0 0 var(--radius-1);
 }
 
 pix3-localization-panel .loc-tab:last-child {
-  border-radius: 0 0.25rem 0.25rem 0;
+  border-radius: 0 var(--radius-1) var(--radius-1) 0;
   margin-left: -1px;
 }
 
 pix3-localization-panel .loc-tab.is-active {
-  background: rgba(var(--pix3-accent-rgb), 0.12);
+  background: var(--accent-soft);
 }
 
 pix3-localization-panel .loc-filter {
@@ -48,10 +48,10 @@ pix3-localization-panel .loc-filter {
   min-width: 4rem;
   height: 1.6rem;
   padding: 0 0.4rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.92);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.72rem;
 }
@@ -60,7 +60,7 @@ pix3-localization-panel .loc-filter:focus-visible,
 pix3-localization-panel .loc-select:focus-visible,
 pix3-localization-panel .loc-add-input:focus-visible,
 pix3-localization-panel .loc-cell:focus-visible {
-  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -71,10 +71,10 @@ pix3-localization-panel .loc-btn {
   flex: 0 0 auto;
   height: 1.6rem;
   padding: 0 0.5rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(16, 20, 24, 0.9);
-  color: rgba(245, 247, 250, 0.78);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
   font: inherit;
   font-size: 0.7rem;
   cursor: pointer;
@@ -82,17 +82,17 @@ pix3-localization-panel .loc-btn {
 }
 
 pix3-localization-panel .loc-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
 }
 
 pix3-localization-panel .loc-btn.is-active {
-  color: var(--pix3-accent-color, #ffcf33);
-  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
 
 pix3-localization-panel .loc-btn-danger:hover {
-  color: #f0806a;
-  border-color: rgba(240, 128, 106, 0.5);
+  color: var(--danger);
+  border-color: var(--danger-line);
 }
 
 pix3-localization-panel .loc-btn svg {
@@ -111,7 +111,7 @@ pix3-localization-panel .loc-select-label {
   display: inline-flex;
   align-items: center;
   font-size: 0.66rem;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
 }
 
 pix3-localization-panel .loc-select-label svg {
@@ -123,10 +123,10 @@ pix3-localization-panel .loc-select {
   height: 1.6rem;
   max-width: 10rem;
   padding: 0 0.3rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.92);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.7rem;
 }
@@ -134,10 +134,10 @@ pix3-localization-panel .loc-select {
 pix3-localization-panel .loc-add-input {
   height: 1.6rem;
   padding: 0 0.4rem;
-  border-radius: 0.25rem;
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.5);
-  background: rgba(10, 13, 15, 0.6);
-  color: rgba(245, 247, 250, 0.92);
+  border-radius: var(--radius-1);
+  border: 1px solid var(--accent-line);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.72rem;
 }
@@ -169,32 +169,32 @@ pix3-localization-panel .loc-grid-head {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: rgba(16, 20, 24, 0.96);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
   font-size: 0.64rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgba(245, 247, 250, 0.45);
+  color: var(--fg-3);
 }
 
 pix3-localization-panel .loc-col-hint {
   font-weight: normal;
   text-transform: none;
   letter-spacing: 0;
-  color: rgba(245, 247, 250, 0.3);
+  color: var(--fg-3);
 }
 
 pix3-localization-panel .loc-row {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--line-1);
 }
 
 pix3-localization-panel .loc-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-2);
 }
 
 pix3-localization-panel .loc-col-key {
   font-size: 0.7rem;
-  color: rgba(245, 247, 250, 0.82);
+  color: var(--fg-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -204,27 +204,27 @@ pix3-localization-panel .loc-cell {
   width: 100%;
   height: 1.5rem;
   padding: 0 0.35rem;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-1);
   border: 1px solid transparent;
-  background: rgba(10, 13, 15, 0.4);
-  color: rgba(245, 247, 250, 0.92);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.7rem;
 }
 
 pix3-localization-panel .loc-cell:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--line-1);
 }
 
 pix3-localization-panel .loc-cell:focus {
-  border-color: rgba(var(--pix3-accent-rgb), 0.6);
-  background: rgba(10, 13, 15, 0.7);
+  border-color: var(--accent);
+  background: var(--bg-2);
   outline: none;
 }
 
 pix3-localization-panel .loc-cell.is-missing {
-  border-color: rgba(240, 176, 80, 0.35);
-  background: rgba(240, 176, 80, 0.08);
+  border-color: var(--warn);
+  background: var(--warn-soft);
 }
 
 pix3-localization-panel .loc-row-remove {
@@ -235,15 +235,15 @@ pix3-localization-panel .loc-row-remove {
   height: 1.5rem;
   padding: 0;
   border: none;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-1);
   background: transparent;
-  color: rgba(245, 247, 250, 0.4);
+  color: var(--fg-3);
   cursor: pointer;
 }
 
 pix3-localization-panel .loc-row-remove:hover {
-  color: #f0806a;
-  background: rgba(240, 128, 106, 0.12);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 pix3-localization-panel .loc-row-remove svg {
@@ -255,7 +255,7 @@ pix3-localization-panel .loc-placeholder,
 pix3-localization-panel .loc-empty {
   padding: 1rem;
   font-size: 0.74rem;
-  color: rgba(245, 247, 250, 0.5);
+  color: var(--fg-2);
 }
 
 pix3-localization-panel .loc-empty {
@@ -270,9 +270,9 @@ pix3-localization-panel .loc-empty {
 pix3-localization-panel .loc-report {
   margin: 0.4rem 0.4rem 0.6rem;
   padding: 0.4rem 0.5rem;
-  border: 1px solid rgba(var(--pix3-accent-rgb), 0.25);
-  border-radius: 0.3rem;
-  background: rgba(var(--pix3-accent-rgb), 0.05);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  background: var(--accent-soft);
   font-size: 0.72rem;
 }
 
@@ -284,7 +284,7 @@ pix3-localization-panel .loc-report-head {
 }
 
 pix3-localization-panel .loc-report-summary {
-  color: rgba(245, 247, 250, 0.65);
+  color: var(--fg-2);
 }
 
 pix3-localization-panel .loc-report-clean {
@@ -292,14 +292,14 @@ pix3-localization-panel .loc-report-clean {
   align-items: center;
   gap: 0.3rem;
   margin: 0.35rem 0 0;
-  color: rgba(140, 220, 160, 0.9);
+  color: var(--accent);
 }
 
 pix3-localization-panel .loc-report-title {
   margin: 0.5rem 0 0.2rem;
   font-size: 0.7rem;
   font-weight: 600;
-  color: rgba(245, 247, 250, 0.8);
+  color: var(--fg-1);
 }
 
 pix3-localization-panel .loc-report-row {
@@ -320,7 +320,7 @@ pix3-localization-panel .loc-report-main {
 pix3-localization-panel .loc-report-node {
   flex: 0 0 auto;
   font-weight: 600;
-  color: rgba(245, 247, 250, 0.85);
+  color: var(--fg-1);
 }
 
 pix3-localization-panel .loc-report-literal {
@@ -329,13 +329,13 @@ pix3-localization-panel .loc-report-literal {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(245, 247, 250, 0.55);
+  color: var(--fg-2);
 }
 
 pix3-localization-panel .loc-report-key {
   flex: 0 0 auto;
-  font-family: var(--pix3-font-mono, monospace);
-  color: rgba(var(--pix3-accent-rgb), 0.9);
+  font-family: var(--font-mono);
+  color: var(--accent);
 }
 
 pix3-localization-panel .loc-report-action {

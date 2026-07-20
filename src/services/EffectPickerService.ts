@@ -1,9 +1,15 @@
 import { injectable } from '@/fw/di';
+import type { ShaderEffectTarget } from '@pix3/runtime';
 
 export interface EffectPickerInstance {
   id: string;
   /** Effect type ids already attached — hidden from the picker (one-per-type). */
   excludeTypes: string[];
+  /**
+   * Material family of the host stack — the picker lists only effects that
+   * support it. Omitted keeps the legacy (unfiltered) behavior.
+   */
+  target?: ShaderEffectTarget;
   resolve: (result: string | null) => void;
   reject: (error: Error) => void;
 }
@@ -19,12 +25,16 @@ export class EffectPickerService {
   private nextId = 0;
   private listeners = new Set<(pickers: EffectPickerInstance[]) => void>();
 
-  public async showPicker(excludeTypes: string[] = []): Promise<string | null> {
+  public async showPicker(
+    excludeTypes: string[] = [],
+    target?: ShaderEffectTarget
+  ): Promise<string | null> {
     return new Promise((resolve, reject) => {
       const id = `effect-picker-${this.nextId++}`;
       const instance: EffectPickerInstance = {
         id,
         excludeTypes,
+        target,
         resolve: (result: string | null) => {
           this.pickers.delete(id);
           this.notifyListeners();

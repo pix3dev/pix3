@@ -12,7 +12,7 @@ pix3-panel {
   flex-direction: column;
   min-height: 100%;
   font-size: 0.75rem; /* More compact, matches asset tree */
-  color: rgba(245, 247, 250, 0.88);
+  color: var(--fg-0);
   overflow: auto;
 }
 
@@ -31,7 +31,7 @@ pix3-panel {
 
 .panel-placeholder {
   margin: 0;
-  color: rgba(245, 247, 250, 0.58);
+  color: var(--fg-2);
   font-style: italic;
 }
 
@@ -41,10 +41,10 @@ pix3-panel {
   display: flex;
   flex-direction: column;
   padding: 0.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.4rem;
-  background: rgba(16, 20, 28, 0.96);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
 }
 
 .scene-tree-context-menu button {
@@ -54,9 +54,9 @@ pix3-panel {
   align-items: center;
   width: 100%;
   border: none;
-  border-radius: 0.28rem;
+  border-radius: var(--radius-1);
   background: transparent;
-  color: rgba(245, 247, 250, 0.92);
+  color: var(--fg-0);
   text-align: left;
   font-size: 0.75rem;
   line-height: 1.2;
@@ -74,5 +74,6 @@ pix3-panel {
 .scene-tree-context-menu button:hover,
 .scene-tree-context-menu button:focus-visible {
   outline: none;
-  background: rgba(var(--pix3-accent-rgb), 0.18);
+  background: var(--accent-soft);
+  color: var(--accent);
 }

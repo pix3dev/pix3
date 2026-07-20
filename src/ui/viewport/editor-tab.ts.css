@@ -3,7 +3,7 @@
   height: 100%;
   width: 100%;
   position: relative;
-  background: radial-gradient(circle at top, #20242a, #14171c 70%);
+  background: oklch(0.13 0.008 250);
 }
 
 .panel {
@@ -13,11 +13,11 @@
   outline: none;
   display: flex;
   flex-direction: column;
-  --pix3-nav-border: #fe9ebe;
+  --pix3-nav-border: var(--presence-2);
 }
 
 .panel[data-nav-mode='2d'] {
-  --pix3-nav-border: #96cbf6;
+  --pix3-nav-border: var(--presence-5);
 }
 
 .panel:focus-visible {
@@ -28,53 +28,73 @@
   box-shadow: none;
 }
 
+/* §6 — floating toolbar islands over the canvas, not an embedded bar.
+   Spans the top, transparent; each toolbar-group is its own card. The left
+   padding clears the vertical transform island (top-left), the right padding
+   forces a wrap before the top-right zoom island rather than underlapping it. */
 .top-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 6;
   display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-height: 2.25rem;
-  padding: 0.18rem 0.35rem;
-  background: rgba(42, 47, 58, 0.6);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  pointer-events: auto;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 150px 0 46px;
+  background: transparent;
+  border: none;
+  pointer-events: none;
+  user-select: none;
 }
 
 .viewport-toolbar-shell {
   display: contents;
 }
 
+/* Each group is a floating island card. */
 .toolbar-group {
   display: inline-flex;
   align-items: center;
-  gap: 0.125rem;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
   flex: 0 0 auto;
 }
 
-.toolbar-separator {
-  width: 1px;
-  height: 1.25rem;
-  background: rgba(255, 255, 255, 0.12);
-  margin: 0 0.25rem;
+/* Conditionally-empty groups (e.g. the nav-mode group) must not show an empty card.
+   :empty fails here because Lit leaves comment markers where a null child was, so
+   test for the absence of an element child instead. */
+.toolbar-group:not(:has(*)) {
+  display: none;
 }
 
+/* Islands provide separation; the inline hairline separator is redundant now. */
+.toolbar-separator {
+  display: none;
+}
+
+/* The spacer's push-right behaviour is unwanted once groups are left-packed islands. */
 .toolbar-spacer {
-  flex: 1;
+  display: none;
 }
 
 .toolbar-alignment-strip {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 8px;
   min-width: 0;
   max-width: min(48rem, 55vw);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
   flex: 0 1 auto;
+  pointer-events: auto;
 }
 
 .toolbar-alignment-strip::-webkit-scrollbar {
@@ -82,18 +102,17 @@
 }
 
 .top-toolbar .toolbar-button {
-  min-width: 1.9rem;
-  height: 1.9rem;
+  min-width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 0.35rem;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: rgba(240, 244, 250, 0.82);
+  color: var(--fg-1);
   font-size: 0.875rem;
   cursor: pointer;
   transition:
-    background 0.12s ease,
-    color 0.12s ease,
-    box-shadow 0.12s ease;
+    background 120ms ease,
+    color 120ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -102,7 +121,7 @@
 
 .top-toolbar .toolbar-button--layer,
 .top-toolbar .toolbar-button--mode {
-  min-width: 2.25rem;
+  min-width: 36px;
   padding: 0 0.35rem;
 }
 
@@ -118,30 +137,31 @@
 }
 
 .top-toolbar .toolbar-button:hover {
-  background: transparent;
-  color: rgba(240, 244, 250, 1);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .top-toolbar .toolbar-button:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-3);
 }
 
 .top-toolbar .toolbar-button[aria-pressed='true'] {
-  background: rgba(var(--pix3-accent-rgb), 0.92);
-  color: rgba(18, 20, 24, 0.95);
-  box-shadow: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
 }
 
 .top-toolbar .toolbar-button[aria-pressed='true']:hover {
-  background: rgba(var(--pix3-accent-rgb), 1);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .top-toolbar .toolbar-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
+  width: 16px;
+  height: 16px;
   line-height: 0;
 }
 
@@ -152,43 +172,43 @@
 }
 
 .top-toolbar .toolbar-label {
-  font-size: 0.71rem;
-  font-weight: 700;
+  font-size: 10.5px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .top-toolbar pix3-dropdown-button,
 .top-toolbar pix3-viewport-visibility-popover {
   width: auto;
-  min-width: 1.9rem;
-  height: 1.9rem;
-  min-height: 1.9rem;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
   padding: 0 0.35rem;
-  border-radius: 0.35rem;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: rgba(240, 244, 250, 0.82);
+  color: var(--fg-1);
   --pix3-toolbar-button-background: transparent;
-  --pix3-toolbar-button-foreground: rgba(240, 244, 250, 0.82);
+  --pix3-toolbar-button-foreground: var(--fg-1);
 }
 
 .top-toolbar pix3-dropdown-button:hover:not([disabled]),
 .top-toolbar pix3-viewport-visibility-popover:hover {
-  background: transparent;
-  color: rgba(240, 244, 250, 1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   transform: none;
-  --pix3-toolbar-button-foreground: rgba(240, 244, 250, 1);
+  --pix3-toolbar-button-foreground: var(--fg-0);
 }
 
 .top-toolbar pix3-dropdown-button.toolbar-dropdown-button--active {
-  background: rgba(var(--pix3-accent-rgb), 0.92);
-  color: rgba(18, 20, 24, 0.95);
-  --pix3-toolbar-button-background: rgba(var(--pix3-accent-rgb), 0.92);
-  --pix3-toolbar-button-foreground: rgba(18, 20, 24, 0.95);
-  box-shadow: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
+  --pix3-toolbar-button-background: transparent;
+  --pix3-toolbar-button-foreground: var(--accent);
 }
 
 .top-toolbar pix3-dropdown-button.toolbar-dropdown-button--active:hover {
-  background: rgba(var(--pix3-accent-rgb), 1);
+  background: var(--accent-soft);
 }
 
 .viewport-host {
@@ -220,28 +240,28 @@
 .panel:focus-visible .viewport-host::after {
   box-shadow:
     inset 0 0 0 2px var(--pix3-nav-border),
-    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.5);
+    inset 0 0 0 4px var(--accent-line);
 }
 
 .panel--asset-dragover .viewport-host::after {
   box-shadow:
     inset 0 0 0 2px var(--pix3-nav-border),
-    inset 0 0 0 4px rgba(var(--pix3-accent-rgb), 0.6);
+    inset 0 0 0 4px var(--accent-line);
 }
 
 .viewport-marquee-selection {
   position: absolute;
-  border: 1px solid rgba(255, 207, 51, 0.95);
-  background: rgba(255, 207, 51, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
   pointer-events: none;
   z-index: 3;
 }
 
+/* Floating tool island — top-left, vertical (§6). */
 .transform-overlay-shell {
   position: absolute;
-  top: 0.85rem;
-  left: 0.85rem;
+  top: 12px;
+  left: 12px;
   z-index: 4;
   width: max-content;
   pointer-events: none;
@@ -251,26 +271,27 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.85rem;
-  background: rgba(12, 15, 22, 0.88);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
   pointer-events: none;
 }
 
 .transform-overlay .toolbar-button {
-  min-width: 2rem;
-  height: 2rem;
+  min-width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 0.5rem;
-  background: rgba(42, 47, 58, 0.6);
-  color: rgba(240, 244, 250, 0.8);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--fg-1);
   font-size: 0.875rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -279,26 +300,27 @@
 }
 
 .transform-overlay .toolbar-button:hover {
-  background: rgba(42, 47, 58, 0.9);
-  color: rgba(240, 244, 250, 1);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .transform-overlay .toolbar-button[aria-pressed='true'] {
-  background: rgba(var(--pix3-accent-rgb), 0.92);
-  color: rgba(18, 20, 24, 0.95);
-  box-shadow: none;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent);
 }
 
 .transform-overlay .toolbar-button[aria-pressed='true']:hover {
-  background: rgba(var(--pix3-accent-rgb), 1);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .transform-overlay .toolbar-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
+  width: 16px;
+  height: 16px;
   line-height: 0;
 }
 
@@ -308,11 +330,12 @@
   height: 100%;
 }
 
+/* Floating zoom island — top-right (§6). */
 .zoom-overlay-shell {
   position: absolute;
-  bottom: 0.25rem;
-  left: 0.25rem;
-  z-index: 4;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
   width: max-content;
   pointer-events: none;
 }
@@ -321,41 +344,45 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.125rem;
-  padding: 0;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
   pointer-events: none;
 }
 
 .zoom-overlay .toolbar-button {
-  min-width: 1.85rem;
-  height: 1.85rem;
+  min-width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-2);
   background: transparent;
-  color: rgba(240, 244, 250, 0.85);
+  color: var(--fg-1);
   font-size: 0.875rem;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   pointer-events: auto;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 
 .zoom-overlay .toolbar-button:hover {
-  background: rgba(42, 47, 58, 0.9);
-  color: rgba(240, 244, 250, 1);
-  filter: none;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .zoom-overlay .toolbar-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
+  width: 16px;
+  height: 16px;
   line-height: 0;
 }
 

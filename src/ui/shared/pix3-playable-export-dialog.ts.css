@@ -14,21 +14,20 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--fg-1);
 }
 
 .dialog-field__select {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(12, 16, 24, 0.92);
-  color: #fff;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
 }
 
 .dialog-field__select:focus {
-  outline: 2px solid rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.45);
-  outline-offset: 2px;
+  border-color: var(--accent);
 }

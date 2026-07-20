@@ -5,11 +5,11 @@
 
 .remote-card {
   padding: 24px 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: rgba(10, 13, 15, 0.86);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
-  color: #f5f7fa;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-0);
 }
 
 .remote-card-header {
@@ -30,30 +30,30 @@
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.72);
+  background: var(--bg-2);
+  color: var(--fg-1);
 }
 
 .remote-status-online {
-  background: rgba(96, 220, 130, 0.16);
-  color: #7fe89d;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .remote-status-connecting {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.16);
-  color: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.95);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .remote-status-error {
-  background: rgba(255, 111, 92, 0.16);
-  color: #ff8b7a;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .remote-card-copy {
   margin: 10px 0 0;
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(245, 247, 250, 0.72);
+  color: var(--fg-1);
 }
 
 .remote-card-body {
@@ -67,8 +67,8 @@
 .remote-qr {
   flex: 0 0 auto;
   padding: 10px;
-  border-radius: 14px;
-  background: #f5f7fa;
+  border-radius: var(--radius-3);
+  background: var(--fg-0);
   line-height: 0;
 }
 
@@ -91,7 +91,7 @@
 
 .remote-field-label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--fg-2);
 }
 
 .remote-link {
@@ -100,27 +100,28 @@
   min-width: 0;
   min-height: 38px;
   padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(12, 16, 24, 0.92);
-  color: #fff;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
+  font-family: var(--font-mono);
   font-size: 12px;
   text-overflow: ellipsis;
 }
 
 .remote-link:focus {
-  outline: 2px solid rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.45);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
 .remote-status-line {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--fg-1);
 }
 
 .remote-status-line strong {
-  color: #fff;
+  color: var(--fg-0);
 }
 
 .remote-players {
@@ -137,8 +138,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
   font-size: 12px;
 }
 
@@ -146,46 +147,47 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #7fe89d;
+  background: var(--accent);
   flex: 0 0 auto;
 }
 
 .remote-player-offline .remote-player-dot {
-  background: rgba(255, 255, 255, 0.28);
+  background: var(--fg-3);
 }
 
 .remote-player-offline {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--fg-2);
 }
 
 .remote-player-label {
   font-weight: 600;
-  color: #f5f7fa;
+  color: var(--fg-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .remote-player-offline .remote-player-label {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--fg-2);
 }
 
 .remote-player-stats {
   margin-left: auto;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--fg-2);
 }
 
 .remote-players-empty {
   margin: 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--fg-2);
 }
 
 .remote-error {
   margin: 0;
   font-size: 13px;
-  color: #ff8b7a;
+  color: var(--danger);
 }
 
 .remote-actions {
@@ -196,20 +198,20 @@
 
 .remote-btn {
   padding: 8px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: #f5f7fa;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
   transition:
-    background 0.12s ease,
-    color 0.12s ease;
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .remote-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--bg-3);
 }
 
 .remote-btn:disabled {
@@ -218,10 +220,10 @@
 }
 
 .remote-btn-danger {
-  border-color: rgba(255, 111, 92, 0.4);
-  color: #ff8b7a;
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 
 .remote-btn-danger:hover:not(:disabled) {
-  background: rgba(255, 111, 92, 0.14);
+  background: var(--danger-soft);
 }

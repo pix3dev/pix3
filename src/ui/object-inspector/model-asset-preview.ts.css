@@ -8,10 +8,10 @@ pix3-model-asset-preview .model-asset-preview {
   width: 100%;
   min-height: 220px;
   height: 240px;
-  border-radius: 0.35rem;
-  border: 1px solid var(--color-border, #333);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.12));
+  background: var(--bg-0);
 }
 
 pix3-model-asset-preview .model-asset-preview-canvas {
@@ -30,7 +30,7 @@ pix3-model-asset-preview .model-asset-preview-overlay {
   justify-content: center;
   gap: 0.75rem;
   padding: 1rem;
-  background: rgba(15, 18, 24, 0.28);
+  background: oklch(0 0 0 / 0.28);
   pointer-events: none;
 }
 
@@ -52,19 +52,19 @@ pix3-model-asset-preview .model-asset-preview-cube {
   display: block;
   width: 2.2rem;
   height: 2.2rem;
-  border: 3px solid rgba(245, 247, 250, 0.86);
-  border-radius: 0.3rem;
+  border: 3px solid var(--fg-1);
+  border-radius: var(--radius-1);
   transform: rotate(45deg);
   box-shadow:
-    -0.6rem -0.6rem 0 -0.45rem rgba(245, 247, 250, 0.66),
-    0.6rem 0.6rem 0 -0.45rem rgba(245, 247, 250, 0.32);
+    -0.6rem -0.6rem 0 -0.45rem var(--fg-2),
+    0.6rem 0.6rem 0 -0.45rem var(--fg-3);
 }
 
 pix3-model-asset-preview .model-asset-preview-spinner {
   width: 1.2rem;
   height: 1.2rem;
-  border: 2px solid rgba(245, 247, 250, 0.2);
-  border-top-color: rgba(var(--pix3-accent-rgb), 0.92);
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
   border-radius: 999px;
   animation: pix3-model-asset-preview-spin 0.85s linear infinite;
 }
@@ -74,7 +74,7 @@ pix3-model-asset-preview .model-asset-preview-status {
   text-align: center;
   font-size: 0.72rem;
   line-height: 1.35;
-  color: rgba(245, 247, 250, 0.82);
+  color: var(--fg-1);
 }
 
 pix3-model-asset-preview .model-asset-preview-hint {
@@ -83,14 +83,13 @@ pix3-model-asset-preview .model-asset-preview-hint {
   right: 0.6rem;
   bottom: 0.55rem;
   padding: 0.35rem 0.5rem;
-  border-radius: 999px;
-  background: rgba(10, 12, 16, 0.58);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
   font-size: 0.66rem;
   line-height: 1.2;
-  color: rgba(245, 247, 250, 0.76);
+  color: var(--fg-1);
   text-align: center;
   pointer-events: none;
-  backdrop-filter: blur(4px);
 }
 
 @keyframes pix3-model-asset-preview-spin {

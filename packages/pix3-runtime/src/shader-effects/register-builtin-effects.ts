@@ -19,6 +19,7 @@ const DISSOLVE: ShaderEffectTypeInfo = {
   category: 'Surface',
   keywords: ['dissolve', 'disintegrate', 'erode', 'discard', 'burn'],
   define: 'PIX3_FX_DISSOLVE',
+  targets: ['standard'],
   fragmentPars: /* glsl */ `
 uniform float uPix3DissolveAmount;
 uniform float uPix3DissolveScale;
@@ -90,6 +91,7 @@ const RIM: ShaderEffectTypeInfo = {
   category: 'Surface',
   keywords: ['rim', 'fresnel', 'glow', 'outline', 'edge'],
   define: 'PIX3_FX_RIM',
+  targets: ['standard'],
   fragmentPars: /* glsl */ `
 uniform vec3 uPix3RimColor;
 uniform float uPix3RimIntensity;
@@ -140,6 +142,7 @@ const UV_SCROLL: ShaderEffectTypeInfo = {
   category: 'Texture',
   keywords: ['uv', 'scroll', 'flow', 'conveyor', 'panner', 'texture'],
   define: 'PIX3_FX_UVSCROLL',
+  targets: ['standard', 'basic'],
   vertexPars: /* glsl */ `uniform vec2 uPix3UvOffset;`,
   chunks: [
     {
@@ -181,6 +184,7 @@ const FLASH: ShaderEffectTypeInfo = {
   category: 'Color',
   keywords: ['flash', 'tint', 'hit', 'damage', 'blink'],
   define: 'PIX3_FX_FLASH',
+  targets: ['standard', 'basic'],
   fragmentPars: /* glsl */ `
 uniform vec3 uPix3FlashColor;
 uniform float uPix3FlashAmount;`,
@@ -209,5 +213,145 @@ uniform float uPix3FlashAmount;`,
   }),
 };
 
+/**
+ * Adjust — brightness / contrast / saturation grade on the diffuse color. Runs
+ * at `color_fragment` (shared by meshbasic + meshphysical), so it works on both
+ * 2D sprites/skins and 3D meshes. Applied saturation → contrast → brightness.
+ */
+const ADJUST: ShaderEffectTypeInfo = {
+  id: 'core:adjust',
+  key: 'adjust',
+  displayName: 'Adjust (Brightness/Contrast/Saturation)',
+  description: 'Brightness, contrast and saturation grade on the base color.',
+  category: 'Color',
+  keywords: ['adjust', 'brightness', 'contrast', 'saturation', 'darken', 'lighten', 'hover', 'grade', 'hsl'],
+  define: 'PIX3_FX_ADJUST',
+  targets: ['basic', 'standard'],
+  fragmentPars: /* glsl */ `
+uniform float uPix3AdjustSaturation;
+uniform float uPix3AdjustContrast;
+uniform float uPix3AdjustBrightness;`,
+  chunks: [
+    {
+      stage: 'fragment',
+      anchor: 'color_fragment',
+      position: 'after',
+      glsl: /* glsl */ `
+  float pix3AdjL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  diffuseColor.rgb = mix(vec3(pix3AdjL), diffuseColor.rgb, uPix3AdjustSaturation);
+  diffuseColor.rgb = (diffuseColor.rgb - 0.5) * uPix3AdjustContrast + 0.5;
+  diffuseColor.rgb *= uPix3AdjustBrightness;`,
+    },
+  ],
+  params: [
+    {
+      key: 'saturation',
+      type: 'number',
+      default: 1,
+      uniform: 'uPix3AdjustSaturation',
+      ui: { label: 'Saturation', min: 0, max: 2, step: 0.01, precision: 2, slider: true },
+    },
+    {
+      key: 'contrast',
+      type: 'number',
+      default: 1,
+      uniform: 'uPix3AdjustContrast',
+      ui: { label: 'Contrast', min: 0, max: 2, step: 0.01, precision: 2, slider: true },
+    },
+    {
+      key: 'brightness',
+      type: 'number',
+      default: 1,
+      uniform: 'uPix3AdjustBrightness',
+      ui: { label: 'Brightness', min: 0, max: 2, step: 0.01, precision: 2, slider: true },
+    },
+  ],
+  createUniforms: () => ({
+    uPix3AdjustSaturation: { value: 1 },
+    uPix3AdjustContrast: { value: 1 },
+    uPix3AdjustBrightness: { value: 1 },
+  }),
+};
+
+/** Grayscale — mixes the base color toward its Rec.709 luminance by `amount`. */
+const GRAYSCALE: ShaderEffectTypeInfo = {
+  id: 'core:grayscale',
+  key: 'grayscale',
+  displayName: 'Grayscale',
+  description: 'Desaturates the base color toward its luminance.',
+  category: 'Color',
+  keywords: ['grayscale', 'greyscale', 'desaturate', 'mono', 'monochrome', 'black', 'white'],
+  define: 'PIX3_FX_GRAYSCALE',
+  targets: ['basic', 'standard'],
+  fragmentPars: /* glsl */ `
+uniform float uPix3GrayAmount;`,
+  chunks: [
+    {
+      stage: 'fragment',
+      anchor: 'color_fragment',
+      position: 'after',
+      glsl: /* glsl */ `
+  float pix3GrayL = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(pix3GrayL), uPix3GrayAmount);`,
+    },
+  ],
+  params: [
+    {
+      key: 'amount',
+      type: 'number',
+      default: 1,
+      uniform: 'uPix3GrayAmount',
+      ui: { label: 'Amount', min: 0, max: 1, step: 0.01, precision: 2, slider: true },
+    },
+  ],
+  createUniforms: () => ({ uPix3GrayAmount: { value: 1 } }),
+};
+
+/** Tint — multiplies the base color toward `color × base`, blended by `amount`. */
+const TINT: ShaderEffectTypeInfo = {
+  id: 'core:tint',
+  key: 'tint',
+  displayName: 'Tint',
+  description: 'Multiplies the base color by a tint color.',
+  category: 'Color',
+  keywords: ['tint', 'color', 'colour', 'multiply', 'recolor', 'colorize', 'hue'],
+  define: 'PIX3_FX_TINT',
+  targets: ['basic', 'standard'],
+  fragmentPars: /* glsl */ `
+uniform vec3 uPix3TintColor;
+uniform float uPix3TintAmount;`,
+  chunks: [
+    {
+      stage: 'fragment',
+      anchor: 'color_fragment',
+      position: 'after',
+      glsl: /* glsl */ `
+  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * uPix3TintColor, saturate(uPix3TintAmount));`,
+    },
+  ],
+  params: [
+    { key: 'color', type: 'color', default: '#ffffff', uniform: 'uPix3TintColor', ui: { label: 'Color' } },
+    {
+      key: 'amount',
+      type: 'number',
+      default: 1,
+      uniform: 'uPix3TintAmount',
+      ui: { label: 'Amount', min: 0, max: 1, step: 0.01, precision: 2, slider: true },
+    },
+  ],
+  createUniforms: () => ({
+    uPix3TintColor: { value: new Color('#ffffff').convertSRGBToLinear() },
+    uPix3TintAmount: { value: 1 },
+  }),
+};
+
 /** Registration order = default picker order. */
-export const BUILTIN_SHADER_EFFECTS: ShaderEffectTypeInfo[] = [DISSOLVE, RIM, UV_SCROLL, FLASH];
+export const BUILTIN_SHADER_EFFECTS: ShaderEffectTypeInfo[] = [
+  DISSOLVE,
+  RIM,
+  UV_SCROLL,
+  FLASH,
+  ADJUST,
+  GRAYSCALE,
+  TINT,
+];

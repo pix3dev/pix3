@@ -1,5 +1,6 @@
 /**
- * AddEffectCommand - command to attach a shader effect to a GeometryMesh.
+ * AddEffectCommand - command to attach a shader effect to a shader-effect host
+ * node (GeometryMesh, Sprite2D, AnimatedSprite2D, Button2D, ...).
  */
 import {
   CommandBase,
@@ -19,7 +20,7 @@ export class AddEffectCommand extends CommandBase<object, void> {
   readonly metadata: CommandMetadata = {
     id: 'effects.add-effect',
     title: 'Add Effect',
-    description: 'Attach a shader effect to a mesh',
+    description: 'Attach a shader effect to a node',
     keywords: ['add', 'effect', 'shader', 'dissolve', 'rim', 'flash'],
   };
 

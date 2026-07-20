@@ -404,6 +404,13 @@ export class SceneSaver {
           Math.round(node.anchor.y * 1000) / 1000,
         ];
       }
+      // Drop the stale YAML-loaded value, then re-emit from the live stack (an
+      // editor detach must clear it). Empty stack → no `effects` key.
+      delete props.effects;
+      const spriteFx = node.getShaderEffectStack();
+      if (!spriteFx.isEmpty) {
+        props.effects = spriteFx.serialize();
+      }
     } else if (node instanceof TiledSprite2D) {
       if (node.texture) {
         props.texture = { ...node.texture };
@@ -449,6 +456,11 @@ export class SceneSaver {
       props.width = node.width;
       props.height = node.height;
       props.color = node.color;
+      delete props.effects;
+      const animFx = node.getShaderEffectStack();
+      if (!animFx.isEmpty) {
+        props.effects = animFx.serialize();
+      }
     } else if (node instanceof Joystick2D) {
       if (node.radius !== 50) props.radius = node.radius;
       if (node.handleRadius !== 20) props.handleRadius = node.handleRadius;
@@ -489,6 +501,11 @@ export class SceneSaver {
         props.stateTextureKeys = { ...node.stateTextureKeys };
       } else {
         delete props.stateTextureKeys;
+      }
+      delete props.effects;
+      const buttonFx = node.getShaderEffectStack();
+      if (!buttonFx.isEmpty) {
+        props.effects = buttonFx.serialize();
       }
     } else if (node instanceof Label2D) {
       this.serializeCommonUIControlProps(node, props);

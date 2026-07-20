@@ -1,5 +1,10 @@
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
-import { getAllShaderEffectTypes, type ShaderEffectTypeInfo } from '@pix3/runtime';
+import {
+  effectSupportsTarget,
+  getAllShaderEffectTypes,
+  type ShaderEffectTarget,
+  type ShaderEffectTypeInfo,
+} from '@pix3/runtime';
 import { IconService } from '@/services/IconService';
 // Reuse the behavior picker's styles (same modal/grid layout).
 import './pix3-behavior-picker.ts.css';
@@ -15,6 +20,13 @@ export class EffectPicker extends ComponentBase {
   @property({ attribute: false })
   public excludeTypes: string[] = [];
 
+  /**
+   * Material family of the host stack. When set, only effects declaring support
+   * for it are listed. Undefined lists everything (legacy behavior).
+   */
+  @property({ attribute: false })
+  public target?: ShaderEffectTarget;
+
   @state()
   private searchQuery: string = '';
 
@@ -24,7 +36,10 @@ export class EffectPicker extends ComponentBase {
   protected render() {
     const exclude = new Set(this.excludeTypes);
     const query = this.searchQuery.toLowerCase();
-    const effects = getAllShaderEffectTypes().filter(e => !exclude.has(e.id));
+    const target = this.target;
+    const effects = getAllShaderEffectTypes().filter(
+      e => !exclude.has(e.id) && (target === undefined || effectSupportsTarget(e, target))
+    );
 
     const filtered = effects.filter(
       e =>

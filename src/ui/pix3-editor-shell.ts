@@ -1316,6 +1316,7 @@ export class Pix3EditorShell extends ComponentBase {
             <pix3-effect-picker
               .pickerId=${picker.id}
               .excludeTypes=${picker.excludeTypes}
+              .target=${picker.target}
             ></pix3-effect-picker>
           `
         )}

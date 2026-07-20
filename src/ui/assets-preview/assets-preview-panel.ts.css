@@ -13,8 +13,8 @@ pix3-assets-preview-panel .folder-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.75rem;
-  color: rgba(245, 247, 250, 0.72);
+  font-size: 12px;
+  color: var(--fg-1);
 }
 
 pix3-assets-preview-panel .preview-root {
@@ -24,9 +24,9 @@ pix3-assets-preview-panel .preview-root {
 }
 
 pix3-assets-preview-panel .preview-root.is-generation-drop {
-  outline: 2px dashed var(--pix3-accent-color, #ffcf33);
+  outline: 2px dashed var(--accent);
   outline-offset: -4px;
-  background: rgba(255, 207, 51, 0.08);
+  background: var(--accent-soft);
 }
 
 pix3-assets-preview-panel .generation-drop-overlay {
@@ -38,11 +38,11 @@ pix3-assets-preview-panel .generation-drop-overlay {
   justify-content: center;
   height: 2.4rem;
   margin: 0.25rem;
-  border-radius: 6px;
+  border-radius: var(--radius-2);
   padding: 0 1rem;
   text-align: center;
-  background: rgba(255, 207, 51, 0.16);
-  color: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
   font-size: 0.8rem;
   pointer-events: none;
@@ -50,12 +50,12 @@ pix3-assets-preview-panel .generation-drop-overlay {
 
 pix3-assets-preview-panel .preview-status {
   margin: 0;
-  color: rgba(245, 247, 250, 0.62);
-  font-size: 0.78rem;
+  color: var(--fg-2);
+  font-size: 12px;
 }
 
 pix3-assets-preview-panel .preview-error {
-  color: #e98f8f;
+  color: var(--danger);
 }
 
 pix3-assets-preview-panel .assets-preview-grid {
@@ -71,23 +71,22 @@ pix3-assets-preview-panel .assets-preview-item {
   gap: 0.45rem;
   padding: 0.4rem;
   min-height: 146px;
-  border: 1px solid transparent;
-  border-radius: 0.35rem;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(245, 247, 250, 0.9);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
   cursor: default;
   text-align: left;
 }
 
 pix3-assets-preview-panel .assets-preview-item:hover {
-  border-color: rgba(var(--pix3-accent-rgb), 0.35);
-  background: rgba(var(--pix3-accent-rgb), 0.09);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
 }
 
 pix3-assets-preview-panel .assets-preview-item.is-selected {
-  border-color: rgba(var(--pix3-accent-rgb), 0.65);
-  background: rgba(var(--pix3-accent-rgb), 0.16);
-  box-shadow: inset 0 0 0 1px rgba(var(--pix3-accent-rgb), 0.35);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 pix3-assets-preview-panel .thumb {
@@ -97,9 +96,9 @@ pix3-assets-preview-panel .thumb {
   width: 100%;
   aspect-ratio: 1 / 1;
   min-height: 88px;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-1);
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--bg-0);
 }
 
 pix3-assets-preview-panel .thumb img {
@@ -115,19 +114,17 @@ pix3-assets-preview-panel .text-thumb {
   padding: 0.55rem;
   box-sizing: border-box;
   overflow: hidden;
-  color: rgba(245, 247, 250, 0.9);
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: var(--fg-0);
+  font-family: var(--font-mono);
   font-size: 0.58rem;
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
-    rgba(0, 0, 0, 0.22);
+  background: var(--bg-0);
 }
 
 pix3-assets-preview-panel .icon {
-  color: rgba(245, 247, 250, 0.72);
+  color: var(--fg-1);
 }
 
 pix3-assets-preview-panel .audio-play-btn {
@@ -139,8 +136,8 @@ pix3-assets-preview-panel .audio-play-btn {
   width: 1.9rem;
   height: 1.9rem;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-0);
   cursor: pointer;
   transition:
     background 0.12s ease,
@@ -149,8 +146,8 @@ pix3-assets-preview-panel .audio-play-btn {
 
 pix3-assets-preview-panel .audio-play-btn:hover,
 pix3-assets-preview-panel .audio-play-btn.is-playing {
-  background: rgba(var(--pix3-accent-rgb), 0.92);
-  color: #08110a;
+  background: var(--accent);
+  color: var(--accent-fg);
   transform: scale(1.06);
 }
 
@@ -158,14 +155,14 @@ pix3-assets-preview-panel .thumb-spinner {
   position: absolute;
   width: 1.15rem;
   height: 1.15rem;
-  border: 2px solid rgba(245, 247, 250, 0.2);
-  border-top-color: rgba(var(--pix3-accent-rgb), 0.9);
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
   border-radius: 999px;
   animation: pix3-assets-preview-spin 0.85s linear infinite;
 }
 
 pix3-assets-preview-panel .name {
-  font-size: 0.69rem;
+  font-size: 12.5px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -173,9 +170,9 @@ pix3-assets-preview-panel .name {
 }
 
 pix3-assets-preview-panel .meta {
-  font-size: 0.66rem;
+  font-size: 11px;
   line-height: 1.1;
-  color: rgba(245, 247, 250, 0.56);
+  color: var(--fg-2);
 }
 
 @keyframes pix3-assets-preview-spin {
@@ -191,10 +188,10 @@ pix3-assets-preview-panel .meta {
   flex-direction: column;
   min-width: 13rem;
   padding: 0.25rem;
-  border-radius: 6px;
-  background: var(--pix3-bg-secondary, #262626);
-  border: 1px solid var(--pix3-border, #444);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
 }
 
 /* fixed => shrink-to-fit, so DropdownPortal measures the content width instead of
@@ -211,9 +208,9 @@ pix3-assets-preview-panel .meta {
   width: 100%;
   padding: 0.45rem 0.6rem;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   background: transparent;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
   font: inherit;
   font-size: 0.85rem;
   text-align: left;
@@ -221,5 +218,5 @@ pix3-assets-preview-panel .meta {
 }
 
 .assets-preview-context-menu button[role='menuitem']:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--accent-soft);
 }

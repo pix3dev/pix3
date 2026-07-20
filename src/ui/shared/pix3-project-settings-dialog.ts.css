@@ -8,7 +8,8 @@ pix3-project-settings-dialog {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -16,22 +17,22 @@ pix3-project-settings-dialog {
 }
 
 .dialog-content {
-  background: var(--pix3-bg-secondary, #2a2a2a);
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
   padding: 1.5rem;
   width: 760px;
   max-width: 90vw;
   max-height: 85vh;
   overflow: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-float);
 }
 
 .dialog-title {
   margin: 0 0 1.5rem 0;
   font-size: 1.4rem;
   font-weight: 500;
-  color: var(--pix3-text-primary, #fff);
+  color: var(--fg-0);
 }
 
 .settings-form {
@@ -44,21 +45,22 @@ pix3-project-settings-dialog {
   display: flex;
   gap: 8px;
   margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line-1);
 }
 
 .settings-tab {
-  border: 1px solid var(--pix3-border, #444);
+  border: none;
+  border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
-  border-radius: 4px;
+  color: var(--fg-2);
   padding: 0.4rem 0.8rem;
+  margin-bottom: -1px;
   cursor: pointer;
 }
 
 .settings-tab--active {
-  border-color: var(--pix3-accent-color, #ffcf33);
-  color: var(--pix3-text-primary, #fff);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
+  color: var(--fg-0);
+  border-bottom-color: var(--accent);
 }
 
 .settings-field {
@@ -69,21 +71,21 @@ pix3-project-settings-dialog {
 
 .settings-field label {
   font-size: 0.9rem;
-  color: var(--pix3-text-secondary, #aaa);
+  color: var(--fg-2);
 }
 
 .settings-field input {
   padding: 0.6rem 0.8rem;
-  background: var(--pix3-bg-input, #1e1e1e);
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
-  color: var(--pix3-text-primary, #fff);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  color: var(--fg-0);
   font-size: 1rem;
 }
 
 .settings-field input:focus {
-  outline: 1px solid var(--pix3-accent-color, #ffcf33);
-  border-color: var(--pix3-accent-color, #ffcf33);
+  outline: none;
+  border-color: var(--accent);
 }
 
 .settings-grid-2col {
@@ -103,7 +105,7 @@ pix3-project-settings-dialog {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  color: var(--pix3-text-secondary, #aaa);
+  color: var(--fg-2);
   font-size: 0.9rem;
 }
 
@@ -120,22 +122,23 @@ pix3-project-settings-dialog {
   grid-template-columns: 32px 72px 160px 1fr 160px;
   gap: 8px;
   align-items: center;
-  border: 1px solid var(--pix3-border, #444);
-  border-radius: 4px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   padding: 0.35rem 0.5rem;
 }
 
 .autoload-row--header {
   font-size: 0.76rem;
-  color: var(--pix3-text-muted, #888);
+  color: var(--fg-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .autoload-path {
-  font-family: monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
-  color: var(--pix3-text-secondary, #bbb);
+  color: var(--fg-1);
 }
 
 .autoload-actions {
@@ -145,10 +148,10 @@ pix3-project-settings-dialog {
 }
 
 .btn-small {
-  border: 1px solid var(--pix3-border, #444);
+  border: 1px solid var(--line-1);
   background: transparent;
-  color: var(--pix3-text-primary, #eee);
-  border-radius: 3px;
+  color: var(--fg-1);
+  border-radius: var(--radius-1);
   padding: 0.2rem 0.45rem;
   cursor: pointer;
   font-size: 0.75rem;
@@ -160,19 +163,19 @@ pix3-project-settings-dialog {
 }
 
 .btn-small--danger:hover {
-  border-color: #dc6b6b;
-  color: #ffb0b0;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .autoload-error {
   grid-column: 1 / -1;
-  color: #ff8c8c;
+  color: var(--danger);
   font-size: 0.8rem;
 }
 
 .settings-field .hint {
   font-size: 0.8rem;
-  color: var(--pix3-text-muted, #777);
+  color: var(--fg-3);
   line-height: 1.4;
 }
 
@@ -185,27 +188,29 @@ pix3-project-settings-dialog {
 
 .dialog-actions button {
   padding: 0.6rem 1.2rem;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   font-size: 0.95rem;
   border: 1px solid transparent;
-  transition: all 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
 
 .btn-cancel {
   background: transparent;
-  color: var(--pix3-text-secondary, #ccc);
-  border-color: var(--pix3-border, #444);
+  color: var(--fg-1);
+  border-color: var(--line-1);
 }
 
 .btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .btn-save {
-  background: var(--pix3-accent-color, #ffcf33);
-  color: #000;
+  background: var(--accent);
+  color: var(--accent-fg);
   font-weight: 600;
 }
 

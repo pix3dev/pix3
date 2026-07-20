@@ -4,32 +4,28 @@ pix3-dropdown {
   justify-content: center;
   min-width: 2rem;
   padding: 0.4rem;
-  border-radius: 0.5rem;
-  background: var(--pix3-toolbar-button-background, rgba(60, 68, 82, 0.32));
-  color: var(--pix3-toolbar-button-foreground, rgba(245, 247, 250, 0.95));
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
   cursor: pointer;
   user-select: none;
   transition:
     background 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+    color 120ms ease;
 }
 
 pix3-dropdown:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.85);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 pix3-dropdown:hover {
-  background: rgba(82, 94, 114, 0.48);
-  transform: translateY(-1px);
+  background: var(--bg-3);
 }
 
 pix3-dropdown[disabled] {
   cursor: not-allowed;
   opacity: 0.55;
-  box-shadow: none;
-  transform: none;
 }
 
 .dropdown__trigger {
@@ -62,10 +58,10 @@ pix3-dropdown[icon-only] .dropdown__caret {
   display: none;
   min-width: 12rem;
   padding: 0.5rem 0;
-  background: var(--pix3-dropdown-background, rgba(26, 29, 35, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.4rem;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-pop);
 }
 
 .dropdown__menu--hidden {
@@ -79,21 +75,25 @@ pix3-dropdown[icon-only] .dropdown__caret {
   padding: 0.5rem 1rem;
   background: none;
   border: none;
-  color: var(--pix3-dropdown-item-foreground, rgba(245, 247, 250, 0.92));
+  color: var(--fg-1);
   font-size: 0.82rem;
   text-align: left;
   cursor: pointer;
-  transition: background 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
   gap: 0.5rem;
 }
 
 .dropdown__item:hover:not(.dropdown__item--disabled) {
-  background: rgba(var(--pix3-accent-rgb), 0.15);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .dropdown__item:focus-visible {
   outline: none;
-  background: rgba(var(--pix3-accent-rgb), 0.2);
+  background: var(--bg-2);
+  color: var(--fg-0);
 }
 
 .dropdown__item--disabled {
@@ -120,7 +120,7 @@ pix3-dropdown[icon-only] .dropdown__caret {
 .dropdown__divider {
   height: 1px;
   margin: 0.25rem 0;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--line-1);
 }
 
 /* Portal styles - rendered at document.body level */

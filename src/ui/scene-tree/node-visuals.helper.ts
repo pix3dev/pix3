@@ -25,9 +25,9 @@ import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
 import { AudioPlayer } from '@pix3/runtime';
 
-// Color constants for node types
-const NODE_2D_COLOR = '#96cbf6ff';
-const NODE_3D_COLOR = '#fe9ebeff';
+// Color constants for node types — aligned to the presence palette in src/index.css
+const NODE_2D_COLOR = '#1ebde3ff'; // --presence-5 (sky)
+const NODE_3D_COLOR = '#ff7f6cff'; // --presence-2 (coral)
 
 /**
  * Determines the visual representation (color and icon) for a scene node in the UI.
@@ -96,7 +96,7 @@ export function getNodeVisuals(node: NodeBase): { color: string; icon: string } 
     return { color: NODE_3D_COLOR, icon: 'sparkles' };
   }
   if (node instanceof AudioPlayer) {
-    return { color: '#7fd1b9ff', icon: 'volume-2' };
+    return { color: '#a5abffff', icon: 'volume-2' }; // --presence-3 (violet)
   }
   if (node instanceof GeometryMesh) {
     return { color: NODE_3D_COLOR, icon: 'box' };
@@ -109,5 +109,5 @@ export function getNodeVisuals(node: NodeBase): { color: string; icon: string } 
   }
 
   // Default for NodeBase or other types
-  return { color: '#fff', icon: 'box' };
+  return { color: '#c1c4c8', icon: 'box' }; // --fg-1
 }

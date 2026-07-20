@@ -225,8 +225,8 @@ describe('TransformTool2d', () => {
 
       tool.setActiveHandle('scale-ne', overlay);
 
-      // Color should be accent color (0xffcf33)
-      expect(material.color.getHex()).toBe(0xffcf33);
+      // Color should be active-drag color (0x1ebde3 = sky)
+      expect(material.color.getHex()).toBe(0x1ebde3);
 
       tool.clearActiveHandle(overlay);
 

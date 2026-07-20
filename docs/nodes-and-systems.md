@@ -109,9 +109,12 @@ effect. Registered in
 Most juice behaviors have a `triggerEvent` (a signal name) and/or `playOnStart`,
 so a keyframe **event track** or a script `emit()` can fire them.
 
-**GeometryMesh shader effects** (added via the inspector "Add Effect" picker or
-`mesh.attachEffect(id)`): `core:dissolve`, `core:rim`, `core:uv-scroll`,
-`core:flash`. Params are keyframe-animatable. See
+**Shader effects** (added via the inspector "Add Effect" picker or
+`node.attachEffect(id)`) attach to `GeometryMesh` (3D) and to `Sprite2D` /
+`AnimatedSprite2D` / `Button2D` skin (2D): `core:dissolve`, `core:rim`
+(3D-only), `core:uv-scroll`, `core:flash`, `core:adjust`
+(brightness/contrast/saturation), `core:grayscale`, `core:tint`. Params are
+keyframe-animatable. See
 [packages/pix3-runtime/src/shader-effects/](../packages/pix3-runtime/src/shader-effects/).
 
 ---
@@ -157,10 +160,20 @@ Spec §6.12; demo: [../samples/HelloWorld/demo-05-juice.pix3scene](../samples/He
 3-bus mixer (`master`/`music`/`sfx`) with named snapshots + auto-muffle under
 slow-mo. **Use from scripts:** `scene.audio.play('res://sfx/hit.ogg', { bus:'sfx', pitchVariation:0.1, volumeVariation:0.1 })`, `setBusVolume`, `applySnapshot`/`resetSnapshot`, `registerSnapshot`. **In the scene:** `AudioPlayer` node or `core:PlaySound` behavior (both take `bus`/`pitchVariation`/`volumeVariation`). node-types-reference "Buses, snapshots & scene.audio".
 
-### GeometryMesh shader effects
-Registry-backed material effects (dissolve/rim/uv-scroll/flash) with zero GPU cost
-while disabled. Params keyframe-animatable. **Use:** inspector "Add Effect", or
-`mesh.attachEffect('core:dissolve')` + set `fx.<key>.<param>`.
+### Shader effects (Construct 3-style, per-node)
+Registry-backed material effects with an `enabled` toggle (zero GPU cost while
+disabled — attached-but-disabled keeps its params) and typed params
+(number/color/vector2/boolean) exposed as `fx.<key>.<param>` — inspectable,
+keyframe-animatable, undoable. Hosts: `GeometryMesh` (standard material) and
+`Sprite2D`/`AnimatedSprite2D`/`Button2D` skin (basic material; an effected 2D
+mesh opts out of the quad batcher automatically). Built-ins: `core:dissolve`,
+`core:rim` (3D-only), `core:uv-scroll`, `core:flash`, `core:adjust`
+(brightness/contrast/saturation — e.g. dim a menu button, restore on hover),
+`core:grayscale`, `core:tint`. **Use:** inspector "Add Effect", or from scripts
+`node.attachEffect('core:adjust')` + `node.setEffectParam('adjust', 'brightness', 0.65)`
+(short key or full id) / `node.setEffectEnabled('core:adjust', false)`. Effects
+serialize with the node and render in the editor viewport too. Custom effects:
+`registerShaderEffect(info)` with GLSL chunks + `targets: ['basic'|'standard']`.
 
 ### Post-processing
 Add a `PostProcess` node to enable an EffectComposer pass (bloom / vignette /

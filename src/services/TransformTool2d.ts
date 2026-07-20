@@ -9,7 +9,7 @@
  */
 
 import * as THREE from 'three';
-import { Group2D, Node2D } from '@pix3/runtime';
+import { Node2D } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import {
   applyProportionalToNode,
@@ -94,15 +94,15 @@ export class TransformTool2d {
   /** Radius of handle corners in CSS pixels */
   private readonly handleCornerRadiusCssPx = 3;
 
-  // Handle colors
-  private readonly scaleHandleColor = 0x4e8df5;
+  // Handle colors — amber accent base (0xf5ae39 = --accent), sky (0x1ebde3) for active drag
+  private readonly scaleHandleColor = 0xf5ae39;
   private readonly scaleHandleBorderColor = 0xffffff; // White contrast border
   private readonly scaleHandleHoverColor = 0xffffff; // White for obvious hover
-  private readonly scaleHandleActiveColor = 0xffcf33; // Accent color for active drag
-  private readonly rotateHandleColor = 0xf5b64e;
+  private readonly scaleHandleActiveColor = 0x1ebde3; // Sky color for active drag
+  private readonly rotateHandleColor = 0xf5ae39;
   private readonly rotateHandleBorderColor = 0xffffff; // White contrast border
   private readonly rotateHandleHoverColor = 0xffffff; // White for obvious hover
-  private readonly rotateHandleActiveColor = 0xffcf33; // Accent color for active drag
+  private readonly rotateHandleActiveColor = 0x1ebde3; // Sky color for active drag
 
   // Currently hovered handle (for visual feedback)
   private hoveredHandle: TwoDHandle = 'idle';
@@ -283,7 +283,7 @@ export class TransformTool2d {
     // Top border
     const topGeometry = new THREE.PlaneGeometry(1, 1);
     const topMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4e8df5,
+      color: 0xf5ae39,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -300,7 +300,7 @@ export class TransformTool2d {
     // Bottom border
     const bottomGeometry = new THREE.PlaneGeometry(1, 1);
     const bottomMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4e8df5,
+      color: 0xf5ae39,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -317,7 +317,7 @@ export class TransformTool2d {
     // Left border
     const leftGeometry = new THREE.PlaneGeometry(1, 1);
     const leftMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4e8df5,
+      color: 0xf5ae39,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -334,7 +334,7 @@ export class TransformTool2d {
     // Right border
     const rightGeometry = new THREE.PlaneGeometry(1, 1);
     const rightMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4e8df5,
+      color: 0xf5ae39,
       transparent: true,
       opacity: 1,
       depthTest: false,
@@ -462,7 +462,7 @@ export class TransformTool2d {
         new THREE.Vector3(midX, max.y, z),
         new THREE.Vector3(rotationPos.x, rotationPos.y, z),
       ]);
-      const lineMat = new THREE.LineBasicMaterial({ color: 0xf5b64e, depthTest: false });
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xf5ae39, depthTest: false });
       const connector = new THREE.Line(lineGeom, lineMat);
       connector.renderOrder = 1050;
       connector.layers.set(1);
@@ -682,13 +682,16 @@ export class TransformTool2d {
       }
     }
 
-    // For a scale gesture, snapshot each selected Group2D's descendants so proportional resize can
-    // reapply from these base states every frame (idempotent, drift-free).
+    // For a scale gesture, snapshot each selected node's descendants so proportional resize can
+    // reapply from these base states every frame (idempotent, drift-free). Any size-bearing 2D node
+    // that parents other 2D nodes counts as a container here — not just Group2D — so resizing a
+    // sprite scales its child sprites too (Figma-style). A node with no eligible children yields an
+    // empty target set, so this stays a no-op for plain leaves.
     let childStartStates: Map<string, ProportionalBaseState> | undefined;
     if (handle.startsWith('scale-')) {
       for (const nodeId of nodeIds) {
         const node = sceneGraph.nodeMap.get(nodeId);
-        if (!(node instanceof Group2D)) continue;
+        if (!(node instanceof Node2D)) continue;
         for (const target of collectProportionalTargets(node)) {
           (childStartStates ??= new Map()).set(target.node.nodeId, captureProportionalBase(target));
         }

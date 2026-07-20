@@ -138,13 +138,18 @@ interface Node2DDims {
 }
 
 /**
- * Walk `group`'s subtree collecting the nodes proportional resize should touch, per the rule
+ * Walk `container`'s subtree collecting the nodes proportional resize should touch, per the rule
  * **"handled via width/height ⇒ recurse; handled via scale ⇒ stop"** (prevents double-scaling and
  * gives Figma-like results for arbitrary nesting). `layoutEnabled` (anchored) children — and their
- * subtrees — are skipped: the anchor system reflows them on group resize instead. Pre-order, so a
- * parent group always precedes its descendants.
+ * subtrees — are skipped: the anchor system reflows them on container resize instead. Pre-order, so a
+ * parent always precedes its descendants.
+ *
+ * `container` is any `Node2D` that gets resized, not only a `Group2D`: a Sprite2D (or any size-bearing
+ * node) parenting other 2D nodes is a "container for another object" too, so resizing it should scale
+ * its children the same way (e.g. a face sprite with a blinking-eye sprite child). A leaf with no
+ * eligible children just yields `[]` — a no-op.
  */
-export function collectProportionalTargets(group: Group2D): ProportionalTarget[] {
+export function collectProportionalTargets(container: Node2D): ProportionalTarget[] {
   const targets: ProportionalTarget[] = [];
   const visit = (parent: Node2D): void => {
     for (const child of parent.children) {
@@ -159,7 +164,7 @@ export function collectProportionalTargets(group: Group2D): ProportionalTarget[]
       }
     }
   };
-  visit(group);
+  visit(container);
   return targets;
 }
 

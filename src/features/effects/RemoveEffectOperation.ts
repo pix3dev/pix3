@@ -1,5 +1,6 @@
 /**
- * RemoveEffectOperation - detach a shader effect from a GeometryMesh.
+ * RemoveEffectOperation - detach a shader effect from any shader-effect host
+ * node (GeometryMesh, Sprite2D, AnimatedSprite2D, Button2D, ...).
  */
 import type {
   Operation,
@@ -7,7 +8,7 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { SceneManager, GeometryMesh } from '@pix3/runtime';
+import { SceneManager, isShaderEffectHost } from '@pix3/runtime';
 
 export interface RemoveEffectParams {
   nodeId: string;
@@ -42,12 +43,15 @@ export class RemoveEffectOperation implements Operation<OperationInvokeResult> {
     }
 
     const node = scene.nodeMap.get(this.params.nodeId);
-    if (!(node instanceof GeometryMesh)) {
-      console.error(`[RemoveEffectOperation] Node "${this.params.nodeId}" is not a GeometryMesh`);
+    if (!node || !isShaderEffectHost(node)) {
+      console.error(
+        `[RemoveEffectOperation] Node "${this.params.nodeId}" does not host shader effects`
+      );
       return { didMutate: false };
     }
 
-    const removed = node.detachEffect(this.params.effectType);
+    const stack = node.getShaderEffectStack();
+    const removed = stack.detach(this.params.effectType);
     if (!removed) {
       return { didMutate: false };
     }
@@ -68,11 +72,11 @@ export class RemoveEffectOperation implements Operation<OperationInvokeResult> {
       commit: {
         label: `Remove Effect ${this.params.effectType}`,
         undo: async () => {
-          node.attachEffect(this.params.effectType, restore);
+          stack.attach(this.params.effectType, restore);
           markDirty();
         },
         redo: async () => {
-          node.detachEffect(this.params.effectType);
+          stack.detach(this.params.effectType);
           markDirty();
         },
       },

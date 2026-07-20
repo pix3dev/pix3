@@ -3,29 +3,27 @@ pix3-viewport-visibility-popover {
   align-items: center;
   min-height: 32px;
   padding: 0 0.55rem;
-  border-radius: 0.5rem;
-  background: var(--pix3-toolbar-button-background, rgba(60, 68, 82, 0.32));
-  color: var(--pix3-toolbar-button-foreground, rgba(245, 247, 250, 0.95));
+  border-radius: var(--radius-2);
+  background: var(--pix3-toolbar-button-background, var(--bg-2));
+  color: var(--pix3-toolbar-button-foreground, var(--fg-1));
   cursor: pointer;
   user-select: none;
   transition:
     background 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
+    color 120ms ease;
 }
 
 pix3-viewport-visibility-popover:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb), 0.85);
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
 }
 
 pix3-viewport-visibility-popover:hover {
-  background: rgba(82, 94, 114, 0.48);
-  transform: translateY(-1px);
+  background: var(--bg-2);
 }
 
 pix3-viewport-visibility-popover:active {
-  transform: translateY(0);
+  background: var(--bg-3);
 }
 
 .visibility-popover__trigger {
@@ -45,10 +43,10 @@ pix3-viewport-visibility-popover:active {
   display: none;
   min-width: 18rem;
   padding: 0.5rem;
-  background: var(--pix3-dropdown-background, rgba(26, 29, 35, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.75rem;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
+  background: var(--pix3-dropdown-background, var(--bg-1));
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-pop);
 }
 
 .visibility-popover__menu--hidden {
@@ -65,10 +63,10 @@ pix3-viewport-visibility-popover:active {
 .visibility-popover__title {
   padding: 0.2rem 0.35rem 0.45rem;
   font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(245, 247, 250, 0.55);
+  color: var(--fg-1);
 }
 
 .visibility-popover__row {
@@ -79,9 +77,9 @@ pix3-viewport-visibility-popover:active {
   width: 100%;
   padding: 0.6rem 0.7rem;
   border: none;
-  border-radius: 0.65rem;
-  background: rgba(255, 255, 255, 0.02);
-  color: rgba(245, 247, 250, 0.92);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--fg-0);
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease;
@@ -90,7 +88,7 @@ pix3-viewport-visibility-popover:active {
 .visibility-popover__row:hover,
 .visibility-popover__row:focus-visible {
   outline: none;
-  background: rgba(var(--pix3-accent-rgb), 0.14);
+  background: var(--bg-2);
 }
 
 .visibility-popover__row-text {
@@ -107,7 +105,7 @@ pix3-viewport-visibility-popover:active {
 
 .visibility-popover__row-description {
   font-size: 0.72rem;
-  color: rgba(245, 247, 250, 0.58);
+  color: var(--fg-2);
 }
 
 .visibility-popover__switch {
@@ -115,13 +113,13 @@ pix3-viewport-visibility-popover:active {
   width: 2.15rem;
   height: 1.25rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--bg-4);
   flex-shrink: 0;
   transition: background 120ms ease;
 }
 
 .visibility-popover__switch.is-on {
-  background: rgba(var(--pix3-accent-rgb), 0.85);
+  background: var(--accent);
 }
 
 .visibility-popover__switch-thumb {
@@ -131,7 +129,7 @@ pix3-viewport-visibility-popover:active {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 50%;
-  background: #fff;
+  background: var(--fg-0);
   transition: transform 120ms ease;
 }
 

@@ -13,7 +13,8 @@ pix3-animation-timeline-panel .atl-root {
 }
 
 pix3-animation-timeline-panel .atl-root:focus-visible {
-  box-shadow: inset 0 0 0 1px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.35);
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
 }
 
 /* ------------------------------- toolbar ------------------------------- */
@@ -22,17 +23,17 @@ pix3-animation-timeline-panel .atl-toolbar-separator {
   width: 1px;
   height: 1.1rem;
   margin: 0 0.35rem;
-  background: var(--color-border, rgba(255, 255, 255, 0.12));
+  background: var(--line-1);
   flex: 0 0 auto;
 }
 
 pix3-animation-timeline-panel .atl-select,
 pix3-animation-timeline-panel .atl-input {
-  background: var(--color-input-bg, #1b1f27);
-  color: var(--color-text-primary, #f3f4f6);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
-  font-size: 0.75rem;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  font-size: 12px;
   padding: 0.15rem 0.35rem;
   height: 1.6rem;
 }
@@ -59,8 +60,8 @@ pix3-animation-timeline-panel .atl-field {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.7rem;
-  color: var(--color-text-secondary, #9ca3af);
+  font-size: 12px;
+  color: var(--fg-2);
   flex: 0 0 auto;
 }
 
@@ -68,14 +69,14 @@ pix3-animation-timeline-panel .atl-field {
 pix3-animation-timeline-panel
   pix3-toolbar[variant='panel']
   pix3-toolbar-button.atl-record[toggled] {
-  background: #ef4444;
-  color: #fff;
+  background: var(--danger);
+  color: var(--fg-0);
 }
 
 pix3-animation-timeline-panel
   pix3-toolbar[variant='panel']
   pix3-toolbar-button.atl-record[toggled]:hover:not([disabled]) {
-  background: #f87171;
+  background: var(--danger);
 }
 
 pix3-animation-timeline-panel pix3-toolbar-button.atl-record[toggled] .toolbar-icon svg {
@@ -83,9 +84,10 @@ pix3-animation-timeline-panel pix3-toolbar-button.atl-record[toggled] .toolbar-i
 }
 
 pix3-animation-timeline-panel .atl-time-readout {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary, #9ca3af);
+  font-size: 11px;
+  color: var(--fg-2);
   min-width: 3.6rem;
   text-align: center;
   flex: 0 0 auto;
@@ -101,23 +103,23 @@ pix3-animation-timeline-panel .atl-placeholder {
   gap: 0.5rem;
   flex: 1 1 auto;
   padding: 1rem;
-  color: var(--color-text-secondary, #9ca3af);
-  font-size: 0.8rem;
+  color: var(--fg-2);
+  font-size: 12px;
   text-align: center;
 }
 
 pix3-animation-timeline-panel .atl-primary-button {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.15);
-  color: var(--pix3-accent-color, #ffcf33);
-  border: 1px solid rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.5);
-  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
   padding: 0.35rem 0.9rem;
-  font-size: 0.8rem;
+  font-size: 12px;
   cursor: pointer;
 }
 
 pix3-animation-timeline-panel .atl-primary-button:hover {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.28);
+  background: var(--accent-line);
 }
 
 /* ------------------------------- timeline ------------------------------ */
@@ -141,9 +143,9 @@ pix3-animation-timeline-panel .atl-corner {
   top: 0;
   left: 0;
   z-index: 6;
-  background: var(--color-panel-bg, #161a21);
-  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
+  border-right: 1px solid var(--line-1);
   display: flex;
   align-items: center;
   padding: 0 0.35rem;
@@ -156,26 +158,26 @@ pix3-animation-timeline-panel .atl-add-track {
   gap: 0.3rem;
   background: transparent;
   border: none;
-  border-radius: 4px;
-  color: var(--color-text-primary, #f3f4f6);
-  font-size: 0.74rem;
+  border-radius: var(--radius-1);
+  color: var(--fg-0);
+  font-size: 12px;
   padding: 0.2rem 0.5rem;
   cursor: pointer;
   white-space: nowrap;
 }
 
 pix3-animation-timeline-panel .atl-add-track:hover {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
+  background: var(--accent-soft);
 }
 
 pix3-animation-timeline-panel .atl-add-track[aria-expanded='true'] {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.2);
+  background: var(--accent-soft);
 }
 
 pix3-animation-timeline-panel .atl-add-track-icon {
   display: inline-flex;
   align-items: center;
-  color: var(--pix3-accent-color, #ffcf33);
+  color: var(--accent);
 }
 
 pix3-animation-timeline-panel .atl-ruler {
@@ -183,8 +185,8 @@ pix3-animation-timeline-panel .atl-ruler {
   top: 0;
   z-index: 5;
   height: 1.75rem;
-  background: var(--color-panel-bg, #161a21);
-  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
   cursor: ew-resize;
   overflow: hidden;
   touch-action: none;
@@ -195,20 +197,22 @@ pix3-animation-timeline-panel .atl-tick {
   bottom: 0;
   width: 1px;
   height: 0.35rem;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--line-2);
   pointer-events: none;
 }
 
 pix3-animation-timeline-panel .atl-tick--major {
   height: 0.7rem;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--line-strong);
 }
 
 pix3-animation-timeline-panel .atl-tick-label {
   position: absolute;
   top: 0.1rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 0.62rem;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   pointer-events: none;
   user-select: none;
 }
@@ -219,10 +223,11 @@ pix3-animation-timeline-panel .atl-lane-overflow {
   top: 0;
   bottom: 0;
   right: 0;
+  /* functional out-of-range hatch, token-based */
   background: repeating-linear-gradient(
     -45deg,
-    rgba(255, 255, 255, 0.03),
-    rgba(255, 255, 255, 0.03) 4px,
+    oklch(1 0 0 / 0.03),
+    oklch(1 0 0 / 0.03) 4px,
     transparent 4px,
     transparent 8px
   );
@@ -234,7 +239,7 @@ pix3-animation-timeline-panel .atl-duration-marker {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--line-strong);
   pointer-events: none;
 }
 
@@ -246,7 +251,7 @@ pix3-animation-timeline-panel .atl-playhead-handle {
   transform: translateX(-5px);
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 7px solid var(--pix3-accent-color, #ffcf33);
+  border-top: 7px solid var(--accent);
   pointer-events: none;
 }
 
@@ -255,7 +260,7 @@ pix3-animation-timeline-panel .atl-playhead {
   top: 1.75rem;
   bottom: 0;
   width: 1px;
-  background: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent);
   opacity: 0.85;
   pointer-events: none;
   z-index: 4;
@@ -269,11 +274,11 @@ pix3-animation-timeline-panel .atl-track-label {
   align-items: center;
   gap: 0.35rem;
   padding: 0 0.4rem 0 0.6rem;
-  background: var(--color-panel-bg, #161a21);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  font-size: 0.74rem;
-  color: var(--color-text-primary, #f3f4f6);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
+  border-right: 1px solid var(--line-1);
+  font-size: 12px;
+  color: var(--fg-0);
   overflow: hidden;
 }
 
@@ -282,7 +287,7 @@ pix3-animation-timeline-panel .atl-track-label--muted .atl-track-name {
 }
 
 pix3-animation-timeline-panel .atl-track-label--empty {
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
 }
 
 pix3-animation-timeline-panel .atl-track-name {
@@ -300,12 +305,12 @@ pix3-animation-timeline-panel .atl-track-warning {
 }
 
 pix3-animation-timeline-panel .atl-track-warning {
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 pix3-animation-timeline-panel .atl-track-toggle {
   flex: 0 0 auto;
-  accent-color: var(--pix3-accent-color, #ffcf33);
+  accent-color: var(--accent);
 }
 
 pix3-animation-timeline-panel .atl-track-remove {
@@ -315,31 +320,31 @@ pix3-animation-timeline-panel .atl-track-remove {
   justify-content: center;
   background: transparent;
   border: none;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   cursor: pointer;
   padding: 0.1rem;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
 }
 
 pix3-animation-timeline-panel .atl-track-remove:hover {
-  color: #f87171;
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--danger);
+  background: var(--bg-3);
 }
 
 pix3-animation-timeline-panel .atl-lane {
   position: relative;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 8px 0 /
-    120px 100%;
+  border-bottom: 1px solid var(--line-1);
+  /* functional beat grid (per-frame gridlines), token-based */
+  background: linear-gradient(to right, oklch(1 0 0 / 0.04) 1px, transparent 1px) 8px 0 / 120px 100%;
   overflow: hidden;
 }
 
 pix3-animation-timeline-panel .atl-lane--audio {
-  background-color: rgba(96, 165, 250, 0.04);
+  background-color: color-mix(in oklab, var(--presence-5) 8%, transparent);
 }
 
 pix3-animation-timeline-panel .atl-lane--event {
-  background-color: rgba(245, 158, 11, 0.05);
+  background-color: color-mix(in oklab, var(--warn) 8%, transparent);
 }
 
 /* In-lane preview layer — value curves / color ramp / text chips, behind keys. */
@@ -362,7 +367,7 @@ pix3-animation-timeline-panel .atl-lane-text__chip {
   transform: translateY(-50%);
   padding-left: 9px;
   font-size: 0.62rem;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -374,8 +379,8 @@ pix3-animation-timeline-panel .atl-lane--empty {
 }
 
 pix3-animation-timeline-panel .atl-lane-hint {
-  font-size: 0.72rem;
-  color: var(--color-text-secondary, #9ca3af);
+  font-size: 12px;
+  color: var(--fg-2);
   padding-left: 0.75rem;
 }
 
@@ -387,26 +392,26 @@ pix3-animation-timeline-panel .atl-key {
   margin: 0;
   padding: 0;
   transform: translate(-50%, -50%) rotate(45deg);
-  background: #cbd5e1;
-  border: 1px solid #0f1115;
+  background: var(--fg-1);
+  border: 1px solid var(--bg-0);
   border-radius: 2px;
   cursor: grab;
   touch-action: none;
 }
 
 pix3-animation-timeline-panel .atl-key:hover {
-  background: #f1f5f9;
+  background: var(--fg-0);
 }
 
 /* Per-key glyph encodes the outgoing easing (After Effects idiom):
    filled diamond = eased, hollow diamond = linear, square = step. */
 pix3-animation-timeline-panel .atl-key--linear {
   background: transparent;
-  border-color: #cbd5e1;
+  border-color: var(--fg-1);
 }
 
 pix3-animation-timeline-panel .atl-key--linear:hover {
-  background: rgba(203, 213, 225, 0.3);
+  background: color-mix(in oklab, var(--fg-1) 30%, transparent);
 }
 
 pix3-animation-timeline-panel .atl-key--step {
@@ -415,41 +420,42 @@ pix3-animation-timeline-panel .atl-key--step {
 }
 
 pix3-animation-timeline-panel .atl-key--selected {
-  background: var(--pix3-accent-color, #ffcf33);
-  box-shadow: 0 0 0 2px rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.35);
+  background: var(--accent);
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
 }
 
 pix3-animation-timeline-panel .atl-key--audio {
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  background: #60a5fa;
+  background: var(--presence-5);
 }
 
 pix3-animation-timeline-panel .atl-key--audio.atl-key--selected {
-  background: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent);
 }
 
 /* Event keys: upright amber square, distinct from property diamonds and audio dots. */
 pix3-animation-timeline-panel .atl-key--event {
   transform: translate(-50%, -50%) rotate(0deg);
   border-radius: 2px;
-  background: #f59e0b;
+  background: var(--warn);
 }
 
 pix3-animation-timeline-panel .atl-key--event:hover {
-  background: #fbbf24;
+  background: var(--warn);
 }
 
 pix3-animation-timeline-panel .atl-key--event.atl-key--selected {
-  background: var(--pix3-accent-color, #ffcf33);
+  background: var(--accent);
 }
 
 /* Rubber-band (box) selection rectangle — fixed to the viewport. */
 .atl-marquee {
   position: fixed;
   z-index: 50;
-  border: 1px solid var(--pix3-accent-color, #ffcf33);
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.12);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
   pointer-events: none;
 }
 
@@ -467,10 +473,10 @@ pix3-animation-timeline-panel .atl-menu {
   position: fixed;
   display: flex;
   flex-direction: column;
-  background: var(--color-panel-bg, #1b1f27);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-pop);
   padding: 0.25rem;
   max-height: 320px;
   overflow-y: auto;
@@ -483,17 +489,17 @@ pix3-animation-timeline-panel .atl-menu {
   gap: 0.4rem;
   background: transparent;
   border: none;
-  color: var(--color-text-primary, #f3f4f6);
-  font-size: 0.78rem;
+  color: var(--fg-0);
+  font-size: 12px;
   text-align: left;
   padding: 0.3rem 0.75rem;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   cursor: pointer;
   white-space: nowrap;
 }
 
 .pix3-dropdown-portal .atl-menu button[role='menuitem']:hover:not(:disabled) {
-  background: rgba(var(--pix3-accent-rgb, 255, 207, 51), 0.14);
+  background: var(--accent-soft);
 }
 
 .pix3-dropdown-portal .atl-menu button[role='menuitem']:disabled {
@@ -502,37 +508,37 @@ pix3-animation-timeline-panel .atl-menu {
 }
 
 .pix3-dropdown-portal .atl-menu .atl-menu-danger:hover:not(:disabled) {
-  background: rgba(248, 113, 113, 0.15);
-  color: #f87171;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .pix3-dropdown-portal .atl-menu-separator {
   height: 1px;
   margin: 0.25rem 0;
-  background: var(--color-border, rgba(255, 255, 255, 0.12));
+  background: var(--line-1);
 }
 
 .pix3-dropdown-portal .atl-menu-heading {
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
   padding: 0.3rem 0.75rem 0.15rem;
 }
 
 .pix3-dropdown-portal .atl-menu-hint {
   margin-left: auto;
   font-size: 0.68rem;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
 }
 
 .pix3-dropdown-portal .atl-menu .atl-select,
 .pix3-dropdown-portal .atl-menu .atl-input {
   margin: 0.15rem 0.75rem 0.3rem;
-  background: var(--color-input-bg, #12151b);
-  color: var(--color-text-primary, #f3f4f6);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
   font-size: 0.75rem;
   padding: 0.2rem 0.35rem;
 }
@@ -551,8 +557,8 @@ pix3-animation-timeline-panel .atl-menu {
   align-items: center;
   gap: 0.4rem;
   padding: 0.2rem 0.75rem 0.3rem;
-  font-size: 0.78rem;
-  color: var(--color-text-primary, #f3f4f6);
+  font-size: 12px;
+  color: var(--fg-0);
 }
 
 .pix3-dropdown-portal .atl-menu-vector {
@@ -566,7 +572,7 @@ pix3-animation-timeline-panel .atl-menu {
   align-items: center;
   gap: 0.25rem;
   font-size: 0.7rem;
-  color: var(--color-text-secondary, #9ca3af);
+  color: var(--fg-2);
 }
 
 .pix3-dropdown-portal .atl-menu-vector .atl-input {
