@@ -14,6 +14,7 @@ import {
   coerceTextureResource,
   type TextureResourceRef,
 } from '../../core/TextureResource';
+import { getNaturalTextureSize } from '../../core/texture-natural-size';
 
 export interface Sprite3DProps extends Omit<Node3DProps, 'type'> {
   texture?: TextureResourceRef | null;
@@ -105,9 +106,13 @@ export class Sprite3D extends Node3D {
 
     // Capture the texture aspect ratio and original dimensions
     if (texture.image) {
-      const img = texture.image as any;
-      const w = img.naturalWidth ?? img.width;
-      const h = img.naturalHeight ?? img.height;
+      const img = texture.image as {
+        naturalWidth?: number;
+        naturalHeight?: number;
+        width?: number;
+        height?: number;
+      };
+      const { width: w, height: h } = getNaturalTextureSize(img);
 
       console.log(`[Sprite3D] Texture loaded: ${w}x${h} for node "${this.name}" (natural=${img.naturalWidth}x${img.naturalHeight})`);
 

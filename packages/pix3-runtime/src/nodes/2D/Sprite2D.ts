@@ -18,6 +18,7 @@ import {
   type TextureRegion,
 } from '../../core/texture-region';
 import { atlasSizeOf, baseRegionOf } from '../../core/atlas-frame-map';
+import { getNaturalTextureSize } from '../../core/texture-natural-size';
 import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 import { getActiveLocalization } from '../../core/localization/active-localization';
 
@@ -329,9 +330,9 @@ export class Sprite2D extends Node2D implements InstancePropertySchemaProvider, 
     // sheet dimensions.
     const atlasSize = atlasSizeOf(texture);
     if (atlasSize || texture.image) {
-      const img = (texture.image ?? {}) as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number };
-      const w = atlasSize?.width ?? img.naturalWidth ?? img.width;
-      const h = atlasSize?.height ?? img.naturalHeight ?? img.height;
+      const natural = getNaturalTextureSize(texture.image ?? {});
+      const w = atlasSize?.width ?? natural.width;
+      const h = atlasSize?.height ?? natural.height;
 
       if (w && h) {
         this.textureAspectRatio = w / h; // Store aspect ratio
