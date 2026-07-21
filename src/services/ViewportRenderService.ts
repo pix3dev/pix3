@@ -6224,11 +6224,7 @@ export class ViewportRendererService {
     if (node instanceof Button2D) {
       // Effective-normal: localized state key (preview locale), else the explicit
       // normal sprite, else the legacy single skin.
-      return (
-        node.getEffectiveStateTexturePath('normal') ??
-        node.texturePath ??
-        null
-      );
+      return node.getEffectiveStateTexturePath('normal') ?? node.texturePath ?? null;
     }
     return node.texturePath ?? null;
   }

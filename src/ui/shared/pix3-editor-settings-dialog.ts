@@ -563,12 +563,12 @@ export class EditorSettingsDialog extends ComponentBase {
             </div>
           </div>`
         : null}
-
       ${provider?.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID
         ? html`<div class="hint">
             The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
-            machine — manage it there (<code>pix3-agent-bridge provider set-key ${provider.id}
-            &lt;key&gt;</code>), not here.
+            machine — manage it there (<code
+              >pix3-agent-bridge provider set-key ${provider.id} &lt;key&gt;</code
+            >), not here.
           </div>`
         : html`<div class="settings-field">
             <span class="key-label">
@@ -608,10 +608,11 @@ export class EditorSettingsDialog extends ComponentBase {
                 : html`Paste your provider API
                   key${helpUrl
                     ? html` (get one from
-                        <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+                        <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a
+                        >)`
                     : ''}.
-                  Stored encrypted in this browser only — never synced, and only sent to the selected
-                  provider.`}
+                  Stored encrypted in this browser only — never synced, and only sent to the
+                  selected provider.`}
             </div>
           </div>`}
 
@@ -650,8 +651,8 @@ export class EditorSettingsDialog extends ComponentBase {
           </span>
         </h3>
         <div class="hint">
-          Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine so
-          keys never enter the browser. Gemini works without it. Start it with
+          Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine
+          so keys never enter the browser. Gemini works without it. Start it with
           <code>npx pix3-agent-bridge</code>, then paste the pairing token it prints below and add
           providers with <code>pix3-agent-bridge provider add openai --key sk-…</code>.
         </div>
@@ -708,9 +709,7 @@ export class EditorSettingsDialog extends ComponentBase {
         </div>
 
         ${connected && entries.length > 0
-          ? html`<div class="hint">
-              Serving: ${entries.map(e => e.label).join(', ')}.
-            </div>`
+          ? html`<div class="hint">Serving: ${entries.map(e => e.label).join(', ')}.</div>`
           : null}
       </div>
     `;

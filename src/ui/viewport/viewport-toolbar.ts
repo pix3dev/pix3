@@ -243,7 +243,6 @@ export function renderViewportToolbar(
             </div>
           `
         : null}
-
       ${renderAlignmentToolbarGroups(
         {
           showAlignmentTools: state.showAlignmentTools,

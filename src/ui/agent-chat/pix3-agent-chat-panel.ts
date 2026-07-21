@@ -970,7 +970,11 @@ export class AgentChatPanel extends ComponentBase {
       <div class="agent-reasoning-popover" role="listbox">
         ${this.renderReasoningRow(undefined, 'Auto', "The model's default effort")}
         ${efforts.map(effort =>
-          this.renderReasoningRow(effort, REASONING_EFFORT_LABELS[effort], reasoningEffortHint(effort))
+          this.renderReasoningRow(
+            effort,
+            REASONING_EFFORT_LABELS[effort],
+            reasoningEffortHint(effort)
+          )
         )}
       </div>
     `;

@@ -19,9 +19,7 @@ vi.mock('@/services', () => ({
 await import('./assets-content');
 type AssetsContentElement = HTMLElementTagNameMap['pix3-assets-content'];
 
-const createSnapshot = (
-  overrides: Partial<AssetsPreviewSnapshot> = {}
-): AssetsPreviewSnapshot => ({
+const createSnapshot = (overrides: Partial<AssetsPreviewSnapshot> = {}): AssetsPreviewSnapshot => ({
   selectedFolderPath: '.',
   displayPath: 'res://',
   isLoading: false,
@@ -74,18 +72,15 @@ describe('AssetsContent (Phase 3 header)', () => {
       events.push((event as CustomEvent<{ path: string }>).detail);
     });
 
-    panel.querySelector<HTMLButtonElement>('.crumb')?.dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
+    panel
+      .querySelector<HTMLButtonElement>('.crumb')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(events).toEqual([{ path: '.' }]);
   });
 
   it('renders the folder stats line from snapshot fields', async () => {
     const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
-    stubServices(
-      panel,
-      createSnapshot({ folderItemCount: 2, folderSizeBytes: 3072 })
-    );
+    stubServices(panel, createSnapshot({ folderItemCount: 2, folderSizeBytes: 3072 }));
 
     document.body.appendChild(panel);
     await panel.updateComplete;
