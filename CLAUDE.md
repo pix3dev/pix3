@@ -38,7 +38,7 @@ npx vitest src/services/ScriptExecutionService.spec.ts        # watch mode
 
 Node 24 is required (`engines: >=24.15.0 <25`). `npm install` runs a `postinstall` that copies `esbuild.wasm` into `public/` — needed for in-editor script compilation.
 
-Note: `vitest.config.ts` **excludes** a few known-broken specs from the suite (e.g. `SelectObjectCommand.spec.ts`, `ViewportRendererService.spec.ts`, `LoadSceneCommand.spec.ts`). Don't assume those run with the default suite.
+Note: `vitest.config.ts` runs every `*.spec.ts` under `src/` and `packages/pix3-runtime/src/` — there is no exclude list. (An older exclude block named three specs that no longer exist and has been removed.)
 
 ## Repository topology
 

@@ -1,16 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 
-// Exclude known outdated / failing specs so the test suite can run cleanly.
 export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.spec.ts', 'packages/pix3-runtime/src/**/*.spec.ts'],
-    exclude: [
-      'src/core/commands/SelectObjectCommand.spec.ts',
-      'src/core/rendering/ViewportRendererService.spec.ts',
-      'src/core/commands/LoadSceneCommand.spec.ts',
-    ],
   },
   resolve: {
     alias: {
