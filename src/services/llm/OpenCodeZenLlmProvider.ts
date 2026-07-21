@@ -63,9 +63,10 @@ class ZenMessagesLane extends AnthropicLlmProvider {
  * with models.dev metadata (capabilities, context, pricing; free = $0/$0).
  */
 export class OpenCodeZenLlmProvider extends OpenAICompatLlmProvider {
-  override readonly id = 'opencode-zen';
-  override readonly label = 'OpenCode Zen';
-  override readonly apiKeySecretId = 'ai-provider:opencode-zen:api-key';
+  override readonly id: string = 'opencode-zen';
+  override readonly label: string = 'OpenCode Zen';
+  // Widened to string (not the literal) so bridge-backed subclasses can override the secret id.
+  override readonly apiKeySecretId: string = 'ai-provider:opencode-zen:api-key';
   override readonly apiKeyHelpUrl = 'https://opencode.ai/auth';
   // Fixed hosted gateway — unlike the generic OpenAI-compatible lane, the user does not type a base URL.
   override readonly requiresBaseUrl = false;

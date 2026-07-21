@@ -10,6 +10,8 @@ import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { BRIDGE_TOKEN_SECRET_ID, DEFAULT_BRIDGE_URL } from '@/services/llm/BridgeProviders';
 import { formatPricingHint, type LlmModel } from '@/services/llm/LlmTypes';
 import { IconService, IconSize } from '@/services/IconService';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
@@ -89,6 +91,9 @@ export class EditorSettingsDialog extends ComponentBase {
   @inject(LlmModelCatalogService)
   private readonly llmModelCatalog!: LlmModelCatalogService;
 
+  @inject(BridgeConnectionService)
+  private readonly bridge!: BridgeConnectionService;
+
   @inject(IconService)
   private readonly icons!: IconService;
 
@@ -162,6 +167,25 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @state()
   private llmDebugMode = false;
+
+  // -- Pix3AgentBridge connection (serves the metered providers) --------------
+  @state()
+  private bridgeAvailable = false;
+
+  @state()
+  private bridgeUrlInput = '';
+
+  @state()
+  private bridgeTokenInput = '';
+
+  @state()
+  private bridgeTokenConfigured = false;
+
+  @state()
+  private bridgeBusy = false;
+
+  @state()
+  private bridgeMessage: string | null = null;
 
   // Advisor: a deliberately stronger model the agent consults via `ask_advisor`. Empty provider = off.
   @state()
@@ -249,9 +273,18 @@ export class EditorSettingsDialog extends ComponentBase {
     void this.refreshVisionKeyStatus();
     void this.refreshAssistantStatus();
 
+    this.bridgeUrlInput = agentPrefs.bridgeUrl;
+    this.bridgeAvailable = this.bridge.isAvailable();
+    void this.refreshBridgeStatus();
+
     // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
     this.disposeCatalogSubscription = this.llmModelCatalog.subscribe(() => {
       this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+      this.requestUpdate();
+    });
+    // Re-render when the bridge connects/disconnects (dynamic providers appear/disappear).
+    this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      this.bridgeAvailable = this.bridge.isAvailable();
       this.requestUpdate();
     });
   }
@@ -259,10 +292,18 @@ export class EditorSettingsDialog extends ComponentBase {
   disconnectedCallback(): void {
     this.disposeCatalogSubscription?.();
     this.disposeCatalogSubscription = undefined;
+    this.disposeBridgeSubscription?.();
+    this.disposeBridgeSubscription = undefined;
     super.disconnectedCallback();
   }
 
   private disposeCatalogSubscription?: () => void;
+  private disposeBridgeSubscription?: () => void;
+
+  private async refreshBridgeStatus(): Promise<void> {
+    this.bridgeTokenConfigured = await this.bridge.hasToken();
+    this.requestUpdate();
+  }
 
   /** A stored model not in the provider's (live or static) list is a hand-typed custom id. */
   private isLlmModelCustom(providerId: string, modelId: string): boolean {
@@ -447,6 +488,7 @@ export class EditorSettingsDialog extends ComponentBase {
     const helpUrl = provider?.apiKeyHelpUrl;
 
     return html`
+      ${this.renderBridgePanel()}
       <div class="settings-field">
         <label class="select-row">
           <span>Provider</span>
@@ -522,50 +564,56 @@ export class EditorSettingsDialog extends ComponentBase {
           </div>`
         : null}
 
-      <div class="settings-field">
-        <span class="key-label">
-          API Key
-          <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
-            ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
-          </span>
-        </span>
-        <div class="key-row">
-          <input
-            type="password"
-            autocomplete="off"
-            placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
-            .value=${this.llmKeyInput}
-            @input=${this.onLlmKeyInput}
-          />
-          <button
-            class="btn-key-save"
-            @click=${this.onSaveLlmKey}
-            ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
-          >
-            Save
-          </button>
-          ${this.llmKeyConfigured
-            ? html`<button
-                class="btn-key-clear"
-                @click=${this.onClearLlmKey}
-                ?disabled=${this.llmKeyBusy}
+      ${provider?.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID
+        ? html`<div class="hint">
+            The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
+            machine — manage it there (<code>pix3-agent-bridge provider set-key ${provider.id}
+            &lt;key&gt;</code>), not here.
+          </div>`
+        : html`<div class="settings-field">
+            <span class="key-label">
+              API Key
+              <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
+                ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
+              </span>
+            </span>
+            <div class="key-row">
+              <input
+                type="password"
+                autocomplete="off"
+                placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+                .value=${this.llmKeyInput}
+                @input=${this.onLlmKeyInput}
+              />
+              <button
+                class="btn-key-save"
+                @click=${this.onSaveLlmKey}
+                ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
               >
-                Clear
-              </button>`
-            : null}
-        </div>
-        <div class="hint">
-          ${this.llmKeyMessage
-            ? html`<span>${this.llmKeyMessage}</span>`
-            : html`Paste your provider API
-              key${helpUrl
-                ? html` (get one from
-                    <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
-                : ''}.
-              Stored encrypted in this browser only — never synced, and only sent to the selected
-              provider.`}
-        </div>
-      </div>
+                Save
+              </button>
+              ${this.llmKeyConfigured
+                ? html`<button
+                    class="btn-key-clear"
+                    @click=${this.onClearLlmKey}
+                    ?disabled=${this.llmKeyBusy}
+                  >
+                    Clear
+                  </button>`
+                : null}
+            </div>
+            <div class="hint">
+              ${this.llmKeyMessage
+                ? html`<span>${this.llmKeyMessage}</span>`
+                : html`Paste your provider API
+                  key${helpUrl
+                    ? html` (get one from
+                        <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+                    : ''}.
+                  Stored encrypted in this browser only — never synced, and only sent to the selected
+                  provider.`}
+            </div>
+          </div>`}
 
       <div class="settings-field">
         <label class="toggle-row">
@@ -584,6 +632,150 @@ export class EditorSettingsDialog extends ComponentBase {
       </div>
     `;
   }
+
+  /**
+   * Pix3AgentBridge connection panel: pairing token + optional URL override + live status and the
+   * list of providers the bridge currently serves. When the bridge is unreachable this is the setup
+   * call to action (the metered providers are simply absent from the pickers until it connects).
+   */
+  private renderBridgePanel() {
+    const entries = this.bridge.getEntries();
+    const connected = this.bridgeAvailable;
+    return html`
+      <div class="settings-section">
+        <h3 class="section-title">
+          Pix3AgentBridge
+          <span class="key-status ${connected ? 'is-set' : 'is-unset'}">
+            ${connected ? 'Connected' : 'Not running'}
+          </span>
+        </h3>
+        <div class="hint">
+          Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine so
+          keys never enter the browser. Gemini works without it. Start it with
+          <code>npx pix3-agent-bridge</code>, then paste the pairing token it prints below and add
+          providers with <code>pix3-agent-bridge provider add openai --key sk-…</code>.
+        </div>
+
+        <div class="settings-field">
+          <span class="key-label">
+            Pairing token
+            <span class="key-status ${this.bridgeTokenConfigured ? 'is-set' : 'is-unset'}">
+              ${this.bridgeTokenConfigured ? 'Configured' : 'Not set'}
+            </span>
+          </span>
+          <div class="key-row">
+            <input
+              type="password"
+              autocomplete="off"
+              placeholder=${this.bridgeTokenConfigured ? '•••••••• stored' : 'Paste pairing token'}
+              .value=${this.bridgeTokenInput}
+              @input=${this.onBridgeTokenInput}
+            />
+            <button
+              class="btn-key-save"
+              @click=${this.onSaveBridgeToken}
+              ?disabled=${!this.bridgeTokenInput.trim() || this.bridgeBusy}
+            >
+              Save
+            </button>
+            ${this.bridgeTokenConfigured
+              ? html`<button
+                  class="btn-key-clear"
+                  @click=${this.onClearBridgeToken}
+                  ?disabled=${this.bridgeBusy}
+                >
+                  Clear
+                </button>`
+              : null}
+            <button class="btn-key-save" @click=${this.onProbeBridge} ?disabled=${this.bridgeBusy}>
+              Recheck
+            </button>
+          </div>
+          ${this.bridgeMessage ? html`<div class="hint">${this.bridgeMessage}</div>` : null}
+        </div>
+
+        <div class="settings-field">
+          <label class="select-row">
+            <span>Bridge URL</span>
+            <input
+              type="text"
+              .value=${this.bridgeUrlInput}
+              @change=${this.onBridgeUrlChange}
+              placeholder=${DEFAULT_BRIDGE_URL}
+            />
+          </label>
+          <div class="hint">Only change this if you run the bridge on a non-default port.</div>
+        </div>
+
+        ${connected && entries.length > 0
+          ? html`<div class="hint">
+              Serving: ${entries.map(e => e.label).join(', ')}.
+            </div>`
+          : null}
+      </div>
+    `;
+  }
+
+  private onBridgeTokenInput = (event: Event): void => {
+    this.bridgeTokenInput = (event.target as HTMLInputElement).value;
+  };
+
+  private onSaveBridgeToken = async (): Promise<void> => {
+    const token = this.bridgeTokenInput.trim();
+    if (!token) return;
+    this.bridgeBusy = true;
+    this.bridgeMessage = null;
+    try {
+      await this.bridge.setToken(token);
+      this.bridgeTokenInput = '';
+      this.bridgeTokenConfigured = true;
+      this.bridgeAvailable = this.bridge.isAvailable();
+      this.bridgeMessage = this.bridgeAvailable
+        ? 'Connected to Pix3AgentBridge.'
+        : 'Token saved, but the bridge did not respond. Is it running?';
+    } catch (error) {
+      this.bridgeMessage = error instanceof Error ? error.message : 'Failed to save the token.';
+    } finally {
+      this.bridgeBusy = false;
+    }
+  };
+
+  private onClearBridgeToken = async (): Promise<void> => {
+    this.bridgeBusy = true;
+    try {
+      await this.bridge.setToken('');
+      this.bridgeTokenConfigured = false;
+      this.bridgeAvailable = false;
+      this.bridgeMessage = 'Pairing token cleared.';
+    } finally {
+      this.bridgeBusy = false;
+    }
+  };
+
+  private onBridgeUrlChange = async (event: Event): Promise<void> => {
+    this.bridgeUrlInput = (event.target as HTMLInputElement).value;
+    this.bridgeBusy = true;
+    try {
+      await this.bridge.setBridgeUrl(this.bridgeUrlInput);
+      this.bridgeAvailable = this.bridge.isAvailable();
+    } finally {
+      this.bridgeBusy = false;
+    }
+  };
+
+  private onProbeBridge = async (): Promise<void> => {
+    this.bridgeBusy = true;
+    this.bridgeMessage = null;
+    try {
+      await this.bridge.probe();
+      this.bridgeAvailable = this.bridge.isAvailable();
+      this.bridgeMessage = this.bridgeAvailable
+        ? `Connected — serving ${this.bridge.getEntries().length} provider(s).`
+        : 'Bridge not reachable. Run `npx pix3-agent-bridge` and check the token/URL.';
+    } finally {
+      this.bridgeBusy = false;
+    }
+  };
 
   private renderAgentAssistantsTab() {
     if (this.llmProviders.list().length === 0) {

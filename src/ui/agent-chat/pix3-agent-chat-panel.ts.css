@@ -1361,6 +1361,43 @@ pix3-agent-chat-panel .agent-mp-none {
   color: var(--fg-3);
 }
 
+pix3-agent-chat-panel .agent-mp-bridge-cta {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.5rem;
+  border: 1px dashed var(--pix3-accent-color, #f5ae39);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pix3-accent-color, #f5ae39) 8%, transparent);
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+pix3-agent-chat-panel .agent-mp-bridge-cta:hover {
+  background: color-mix(in srgb, var(--pix3-accent-color, #f5ae39) 16%, transparent);
+}
+
+pix3-agent-chat-panel .agent-mp-bridge-cta-icon {
+  color: var(--pix3-accent-color, #f5ae39);
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+}
+
+pix3-agent-chat-panel .agent-mp-bridge-cta strong {
+  display: block;
+  font-size: 0.78rem;
+}
+
+pix3-agent-chat-panel .agent-mp-bridge-cta-sub {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--fg-3);
+}
+
 pix3-agent-chat-panel .agent-mp-group {
   padding: 0.1rem 0 0.3rem;
 }

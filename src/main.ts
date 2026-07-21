@@ -47,6 +47,15 @@ container
   .getService<LibrarySyncService>(container.getOrCreateToken(LibrarySyncService))
   .initialize();
 
+// Probe the local Pix3AgentBridge and register its providers (OpenAI / Anthropic / OpenCode Zen /
+// custom + Claude Code MAX). Fire-and-forget: if the bridge isn't running the agent falls back to
+// Gemini and the model picker shows a setup call to action.
+import { BridgeConnectionService } from './services/llm/BridgeConnectionService';
+
+void container
+  .getService<BridgeConnectionService>(container.getOrCreateToken(BridgeConnectionService))
+  .initialize();
+
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';

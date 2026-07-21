@@ -15,6 +15,12 @@ export interface AgentPreferences {
   /** Base URL override for the OpenAI-compatible provider (OpenAI / Ollama / LM Studio). */
   customBaseUrl: string;
   /**
+   * Origin of the local Pix3AgentBridge that serves the metered providers (OpenAI / Anthropic /
+   * OpenCode Zen / custom). Empty falls back to the default `http://127.0.0.1:8484`. Only changed
+   * when the user runs the bridge on a non-default port.
+   */
+  bridgeUrl: string;
+  /**
    * Optional override for the vision-helper provider (used by `analyze_image` when the main model
    * can't see images). Empty = auto-resolve to the first provider with a key + a vision model.
    */
@@ -244,6 +250,7 @@ export class AgentSettingsService {
       modelByProvider: {},
       reasoningEffortByModel: {},
       customBaseUrl: '',
+      bridgeUrl: '',
       visionProviderId: '',
       visionModelId: '',
       advisorProviderId: '',
@@ -264,10 +271,13 @@ export class AgentSettingsService {
       if (!parsed || typeof parsed !== 'object') {
         return defaults;
       }
+      // Provider ids are kept as-is (not validated against the registry): bridge-backed providers
+      // register asynchronously after these prefs load, so validating here would reset a stored
+      // bridge selection to the default before the bridge probe runs. getSelectedProvider() already
+      // falls back to the default when an id doesn't resolve.
       return {
         selectedProviderId:
-          typeof parsed.selectedProviderId === 'string' &&
-          this.registry.get(parsed.selectedProviderId)
+          typeof parsed.selectedProviderId === 'string' && parsed.selectedProviderId
             ? parsed.selectedProviderId
             : defaults.selectedProviderId,
         modelByProvider:
@@ -277,15 +287,15 @@ export class AgentSettingsService {
         reasoningEffortByModel: sanitizeReasoningEffortMap(parsed.reasoningEffortByModel),
         customBaseUrl:
           typeof parsed.customBaseUrl === 'string' ? parsed.customBaseUrl : defaults.customBaseUrl,
+        bridgeUrl: typeof parsed.bridgeUrl === 'string' ? parsed.bridgeUrl : defaults.bridgeUrl,
         visionProviderId:
-          typeof parsed.visionProviderId === 'string' && this.registry.get(parsed.visionProviderId)
+          typeof parsed.visionProviderId === 'string'
             ? parsed.visionProviderId
             : defaults.visionProviderId,
         visionModelId:
           typeof parsed.visionModelId === 'string' ? parsed.visionModelId : defaults.visionModelId,
         advisorProviderId:
-          typeof parsed.advisorProviderId === 'string' &&
-          this.registry.get(parsed.advisorProviderId)
+          typeof parsed.advisorProviderId === 'string'
             ? parsed.advisorProviderId
             : defaults.advisorProviderId,
         advisorModelId:
