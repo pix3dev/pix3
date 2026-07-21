@@ -78,6 +78,8 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - `src/services/`: Injectable services (FileSystem, IconService, DialogService, ScriptCompiler).
 - `src/state/`: Valtio state definitions.
 
+**Imports**: `src/services` has no barrel — always deep-import a service directly (`@/services/FooService`). `src/state/index.ts` is a real module (it owns the `appState` singleton), so import state from `@/state`. `packages/pix3-runtime/src/index.ts` is a published package boundary and stays.
+
 ## Critical Rules for AI Agents
 
 1. **Mutation Gate**: Never mutate `appState` or `Node` properties directly. Use `CommandDispatcher`.

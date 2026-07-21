@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { ifDefined } from 'lit/directives/if-defined.js';
-import type { AssetActivation } from '@/services';
+import type { AssetActivation } from '@/services/AssetFileActivationService';
 import type { FileDescriptor } from '@/services/FileSystemAPIService';
 import { AssetsPreviewService } from '@/services/AssetsPreviewService';
 import { ProjectService } from '@/services/ProjectService';

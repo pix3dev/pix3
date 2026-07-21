@@ -1,14 +1,15 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import {
   AssetFileActivationService,
-  AssetsPreviewService,
-  IconService,
-  IconSize,
-  ProjectService,
   type AssetActivation,
+} from '@/services/AssetFileActivationService';
+import {
+  AssetsPreviewService,
   type AssetPreviewItem,
   type AssetsPreviewSnapshot,
-} from '@/services';
+} from '@/services/AssetsPreviewService';
+import { IconService, IconSize } from '@/services/IconService';
+import { ProjectService } from '@/services/ProjectService';
 import {
   ASSET_PATH_LIST_MIME,
   ASSET_PATH_MIME,

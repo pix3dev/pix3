@@ -4,12 +4,11 @@ import { subscribe } from 'valtio/vanilla';
 import { appState, type AssetBrowserViewMode } from '@/state';
 import {
   AssetFileActivationService,
-  AssetsPreviewService,
-  IconService,
-  IconSize,
   type AssetActivation,
-  CommandDispatcher,
-} from '@/services';
+} from '@/services/AssetFileActivationService';
+import { AssetsPreviewService } from '@/services/AssetsPreviewService';
+import { IconService, IconSize } from '@/services/IconService';
+import { CommandDispatcher } from '@/services/CommandDispatcher';
 import { AssetImportDialogService } from '@/services/AssetImportDialogService';
 import { DialogService } from '@/services/DialogService';
 import { ProjectService } from '@/services/ProjectService';

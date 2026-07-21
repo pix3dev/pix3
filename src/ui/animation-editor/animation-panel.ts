@@ -9,14 +9,12 @@ import {
   normalizeAnimationAssetPath,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import {
-  AnimationAutoSliceDialogService,
-  AnimationEditorService,
-  CommandDispatcher,
-  DialogService,
-  IconService,
-  ProjectStorageService,
-} from '@/services';
+import { AnimationAutoSliceDialogService } from '@/services/AnimationAutoSliceDialogService';
+import { AnimationEditorService } from '@/services/AnimationEditorService';
+import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { DialogService } from '@/services/DialogService';
+import { IconService } from '@/services/IconService';
+import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { OperationService } from '@/services/OperationService';
 import type {
   AnimationInspectorController,

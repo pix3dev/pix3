@@ -1,15 +1,11 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
-import {
-  AssetLibraryService,
-  LibraryInsertService,
-  LibrarySelectionService,
-  LibrarySyncService,
-  type LibrarySyncState,
-  PublishToLibraryService,
-  IconService,
-  IconSize,
-} from '@/services';
+import { AssetLibraryService } from '@/services/AssetLibraryService';
+import { LibraryInsertService } from '@/services/LibraryInsertService';
+import { LibrarySelectionService } from '@/services/library/LibrarySelectionService';
+import { LibrarySyncService, type LibrarySyncState } from '@/services/LibrarySyncService';
+import { PublishToLibraryService } from '@/services/PublishToLibraryService';
+import { IconService, IconSize } from '@/services/IconService';
 import {
   LIBRARY_SOURCES,
   addCustomCategory,
