@@ -3,6 +3,11 @@
   "version": "0.2.1",
   "description": "Local bridge for the Pix3 editor's in-editor agent: a Claude Agent SDK (Pro/MAX subscription) lane plus a credential-injecting proxy for OpenAI / Anthropic / OpenCode Zen / custom OpenAI-compatible providers. Keys stay on your machine.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pix3dev/pix3.git",
+    "directory": "tools/pix3-agent-bridge"
+  },
   "bin": {
     "pix3-agent-bridge": "dist/index.js"
   },
