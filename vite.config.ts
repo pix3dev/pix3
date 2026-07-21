@@ -6,6 +6,16 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const collabTarget = env.VITE_COLLAB_SERVER_URL || 'http://localhost:4001';
+  // Dev-only bundle inventory: `ANALYZE=1 npm run build` emits dist/stats.html (treemap).
+  // Never runs in a normal build — kept out of the default plugin list entirely.
+  const analyzePlugins = process.env.ANALYZE
+    ? [(await import('rollup-plugin-visualizer')).visualizer({
+        filename: 'dist/stats.html',
+        gzipSize: true,
+        brotliSize: true,
+        template: 'treemap',
+      })]
+    : [];
 
   // Enumerate rapier exports at config time so the runtime importmap shim
   // can re-export them without bundling rapier into the main chunk. We use
@@ -55,11 +65,17 @@ export default defineConfig(async ({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2,wasm,glb}'],
-          // Background-removal ONNX runtimes (~24 MB each) are an optional,
-          // lazily-loaded feature — not worth precaching for offline use.
-          globIgnores: ['**/ort-wasm*'],
-          // esbuild.wasm (~10 MB) and the three chunk (~19 MB, embeds runtime
-          // sources for playable export) must be precached to work offline.
+          // Background-removal ONNX runtimes (~24 MB each) are an optional, lazily-loaded
+          // feature — not worth precaching for offline use. Likewise `assets/export-vendor/**`
+          // is ~29 MB of vendor/runtime SOURCE TEXT embedded for playable export (see the
+          // `chunkFileNames` comment above) — it is fetched on demand only when the user
+          // actually exports a playable build, so precaching it for offline editing is wasted
+          // bandwidth/storage. No `runtimeCaching` is configured for it, so exporting a
+          // playable while genuinely offline (no network, no prior browser HTTP cache hit for
+          // these exact chunks) will fail — that's an accepted tradeoff, not "still works
+          // offline": export is expected to run online, unlike the rest of the editor shell.
+          globIgnores: ['**/ort-wasm*', '**/export-vendor/**'],
+          // esbuild.wasm (~11 MB) must be precached to work offline (in-editor script compile).
           maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
           // player.html carries session query params, so navigation to it must
@@ -67,6 +83,7 @@ export default defineConfig(async ({ mode }) => {
           navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/player\.html/],
         },
       }),
+      ...analyzePlugins,
     ],
     define: {
       __PIX3_RAPIER_EXPORT_KEYS__: JSON.stringify(rapierExportKeys),
@@ -95,6 +112,28 @@ export default defineConfig(async ({ mode }) => {
             if (id.includes('node_modules/three/')) return 'three';
             if (id.includes('packages/pix3-runtime/')) return 'pix3-runtime';
             return undefined;
+          },
+          // `PlayableHtmlBuildService` embeds ~1500 vendor/runtime SOURCE FILES as raw text
+          // (`?raw`/`?url` glob imports) for playable export — each becomes its own chunk but
+          // is never executed by the editor itself. Routing them into a dedicated folder lets
+          // the PWA precache glob below exclude the whole feature in one pattern instead of
+          // enumerating chunk names, which are content-hashed and change on every build.
+          // NARROW on the same source paths as the `manualChunks` guard above, not just the
+          // `?raw`/`?url` query suffix alone — `ProjectTemplateService`'s lazy template/agent-
+          // overlay/doc-reference globs use the same query suffix and must stay precached for
+          // offline "New Project" (they're unrelated content, not playable-export vendor code).
+          chunkFileNames(chunkInfo) {
+            const id = chunkInfo.facadeModuleId ?? '';
+            const isRawOrUrl = id.includes('?raw') || id.includes('?url');
+            const isPlayableExportVendorSource =
+              isRawOrUrl &&
+              (id.includes('node_modules/three/') ||
+                id.includes('node_modules/@dimforge/rapier3d-compat/') ||
+                id.includes('node_modules/yaml/') ||
+                id.includes('packages/pix3-runtime/'));
+            return isPlayableExportVendorSource
+              ? 'assets/export-vendor/[name]-[hash].js'
+              : 'assets/[name]-[hash].js';
           },
         },
       },

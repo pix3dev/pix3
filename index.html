@@ -19,7 +19,25 @@
       k = e.createElement(t), a = e.getElementsByTagName(t)[0], k.async = 1, k.src = r, a.parentNode.insertBefore(k, a)
     })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js?id=108438383', 'ym');
 
-    ym(108438383, 'init', { ssr: true, webvisor: true, clickmap: true, ecommerce: "dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce: true, trackLinks: true });
+    // `ym('init', ...)` only pushes onto the stub queue above (cheap) — the
+    // actual heavy work (webvisor DOM/session-recording setup, clickmap
+    // listeners) runs whenever tag.js finishes downloading and drains that
+    // queue, which otherwise races directly against the app's own cold-start
+    // rendering (profiled: ~247ms main-thread / 32ms forced reflow on the
+    // editor's critical path). Capture referrer/url now — before the app's
+    // client-side hash routing can rewrite location.hash — but defer the
+    // init call itself to idle time so it can't compete with first paint.
+    var pix3MetrikaInitArgs = {
+      ssr: true, webvisor: true, clickmap: true, ecommerce: "dataLayer",
+      referrer: document.referrer, url: location.href,
+      accurateTrackBounce: true, trackLinks: true,
+    };
+    var pix3RunMetrikaInit = function () { ym(108438383, 'init', pix3MetrikaInitArgs); };
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(pix3RunMetrikaInit, { timeout: 4000 });
+    } else {
+      window.addEventListener('load', pix3RunMetrikaInit);
+    }
   </script>
   <noscript>
     <div><img src="https://mc.yandex.ru/watch/108438383" style="position:absolute; left:-9999px;" alt="" /></div>

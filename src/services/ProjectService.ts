@@ -744,7 +744,8 @@ export class ProjectService {
     await this.saveProjectManifest(manifest);
 
     const projectName = name.trim() || 'Pix3 Project';
-    for (const [relativePath, contents] of template.textFiles) {
+    const templateTextFiles = await templateService.getTemplateTextFiles(template.id);
+    for (const [relativePath, contents] of templateTextFiles) {
       await this.ensureParentDirectories(relativePath, ensuredDirectories);
       await this.storage.writeTextFile(
         relativePath,
@@ -775,7 +776,7 @@ export class ProjectService {
       }
     }
 
-    for (const [relativePath, contents] of templateService.getAgentOverlayFiles()) {
+    for (const [relativePath, contents] of await templateService.getAgentOverlayFiles()) {
       await writeCompanionFile(relativePath, this.renderTemplateText(contents, projectName));
     }
 

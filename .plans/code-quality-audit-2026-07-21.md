@@ -113,3 +113,75 @@
 | P4 | Bundle-анализ + вывод по §5 | низ | S | я |
 
 **Следующий шаг:** обсудить §3/§4 и решить, запускаем ли P2/P3 сразу или сначала стратегию `ViewportRenderService` от Fable.
+
+---
+
+## 7. Прогресс исполнения (2026-07-21) — ветка `chore/code-quality-audit`
+
+Порядок: от дешёвого к дорогому. Все шаги верифицированы (tsc 0, тесты 1290 pass / 3 pre-existing fail, сборка зелёная).
+
+**Сделано и закоммичено:**
+- `ab0b5ac` — **чинена красная сборка** (P1). `npm run build` падал на 32 pre-existing tsc-ошибках (11 в исходниках + 21 в спек-фикстурах) ещё до `vite build`. Все 32 исправлены. + knip.json (scoped, samples/tools noise 41→0; unused files 53→1; pinned knip@6 devDep + `npm run knip`). + микро-dead-exports §1.2 (удалён мёртвый command-telemetry, isMac/isWindows/isLinux; export→local для transformOf/easingValueToY/escapeRegExp; убран лишний THEME_IDS/DEFAULT_THEME реэкспорт из барела state).
+- `bcb8e79` — **perf сборки** (§5): `manualChunks` по подстроке ловил `?raw`/`?url` glob-иды playable-export'а и вмерживал export-only исходники в eager-чанки `three`/`pix3-runtime`. Guard на query-суффикс. Итог: three-чанк 18.8MB→811KB, pix3-runtime 2.1MB→532KB, eager JS редактора ~21MB→~3.8MB. Playable-export не сломан (spec зелёный).
+- `6b45555` — **мёртвый vitest exclude** удалён: все 3 пути указывали на несуществующие файлы. `src/services/ViewportRenderService.spec.ts` (34 теста) на самом деле УЖЕ шёл и проходил. Правлена и стале-заметка в CLAUDE.md. → это **safety net для §3№1**.
+- `3a2c716` — **§1.1 / Item 2 барель**: `src/services/index.ts` удалён (502 deep-импорта vs 18 barrel-импортов в 15 файлах). 18 импортов → deep-path; 2 спека с `vi.mock('@/services')` перенацелены; политика в AGENTS.md. knip unused-exports 185→99. `src/state/index.ts` СОХРАНЁН (это не барель — владеет `appState`).
+
+**Ещё §5-наблюдение (не трогали):** PWA service worker прекэширует ~60MB, включая split export-only vendor-чанки — можно исключить из `globPatterns` (следствие, есть офлайн-импликации).
+
+---
+
+## 8. Стратегия Fable для отложенных элементов (готово к исполнению Opus)
+
+### Item 3 — дедуп 2D/3D спрайтов (§2.1) · effort M · нужен yalc-раунд в DeepCore
+Fable уточнил аудит: дублирование `уже` — общий только кадровый kernel в `tick()`. **Извлечь `FrameSequencePlayer`** (композиция, НЕ базовый класс/миксин — ноды наследуют разные базы, DeepCore полагается на `instanceof Sprite2D`).
+- Новый `packages/pix3-runtime/src/core/FrameSequencePlayer.ts` (без импорта three): владеет `timeAccumulator`, `direction` (ping-pong), `playing`; метод `advance(dt, clip, currentIndex) → {nextIndex, framesAdvanced[], finished}` (возвращает СПИСОК пройденных кадров — чтобы 2D мог эмитить frame-events по каждому пройденному кадру только на play-driven advance, не на scrub из сеттера `currentFrame`). Floor `Math.max(0.001, …)` и ping-pong-грани (`getNextFrameIndex`) переносятся дословно.
+- `finished:true` ровно один раз на non-loop конце; НОДА решает: 2D эмитит `'animation-finished'` с `clip.name`, 3D — без аргумента; оба потом свой `freeOnFinish→queueFree()`.
+- Ноды сохраняют ВСЕ публичные поля/аксессоры. **Caution:** превращение публичного поля `isPlaying`/`playing` в аксессор — единственное изменение формы; проверить, что никто не делает `Object.keys(node)`/spread по нему (grep в editor + DeepCore).
+- Опц. `core/texture-natural-size.ts` — вынести дублирующийся `naturalWidth??width` блок из `Sprite2D.setTexture`/`Sprite3D.setTexture`. НЕ делать общий «SpriteSizing» (2D scale-quad vs 3D rebuild-PlaneGeometry расходятся). `configure2DTexture()` НЕ двигается — остаётся в 2D-путях (mipmap-инвариант структурно защищён).
+- Шаги: (1) player + его spec; (2) переключить AnimatedSprite2D, гейт = `AnimatedSprite2DAnimation.spec.ts` (в `core/`!) + `AnimatedSprite2DFrameEvents.spec.ts` + `ViewportRenderService.spec.ts`; (3) AnimatedSprite3D (`pingPong:false`); (4) texture-natural-size; (5) `yalc:publish` → `yalc update` в DeepCore → tsc там; (6) НЕ экспортировать player из runtime index (внутренний).
+
+### Item 1 — декомпозиция `ViewportRenderService` (§3№1) · effort L · 13 коммитов
+Файл 8328 LOC, класс `ViewportRendererService` (имя файла≠класса, оставить), `@injectable()` singleton, инжектится в 45 файлах, ~45 публичных методов.
+**Подход: facade + owned collaborators (НЕ DI-сервисы).** Класс сохраняет DI-токен и все публичные методы (тонкие делегаты) → ноль изменений в 45 консюмерах. Кластеры стейта уезжают в `src/services/viewport/*` через узкий `viewport-render-context.ts` (живые геттеры на renderer/scene/camera + `requestRender()`/`markDirty()`).
+**Инварианты горячего пути (сохранить дословно):** (1) `requestRender()` рендерит СИНХРОННО если `animationId===undefined` (луп остановлен — pause/blur/hidden); (2) `renderLoopTick` скип если не dirty/не превью/не heartbeat≥500ms; (3) canvas-листенеры ставят `renderRequested=true` напрямую (без sync-render) — не трогать асимметрию; (4) `DefaultLoadingManager.onLoad→requestRender` (глобальный хук, один раз); (5) порядок `renderFrameBody`: mixers→тикеры→controls.update→billboards→AO→3D-pass→**`assign2DVisualRenderOrder(roots)` прямо перед 2D-pass**→clearDepth→2D-pass→inset→HUD; (6) `suppressGizmosForCapture`; (7) `isRenderingFrame` re-entrancy guard (screenshot зовёт renderFrame напрямую).
+**Порядок извлечения (по риску, каждый коммит зелёный):** Commit0 = safety-net (СДЕЛАНО, `6b45555`). 1) `ViewportGpuTimer`; 2) `viewport-framing-math` (чистые функции); 3) `ViewportScreenshotter`; 4) `ViewportSelection2DOverlayHud` (~1250 LOC, очень когезивный, крупнейший выигрыш); 5) `ViewportPreviewTicker`; 6–7) `Viewport2DProxyRegistry` (~2600 LOC, в 2 коммита — фабрики+`configureSpriteTexture`/`reapply2DTextureFiltering`+render-order, затем sync-ветки `updateNodeTransform`; ВЫСШИЙ риск, гейт = proxy-тесты + ручная проверка 2D paint-order); 8) `Viewport3DContentSync`; 9) `ViewportAdornments`; 10) `ViewportNavigation` (сверить с существующим `Navigation2DController`); 11) `ViewportPicking`; 12) `ViewportTransformSession`; 13) sweep + `docs/architecture.md`.
+Остаётся в фасаде НАВСЕГДА: `ensureInitialized` (+Valtio-подписки+focus-хэндлеры), весь loop (`requestRender`/`renderFrame`/`renderFrameBody`/`renderLoopTick`/pause/resume), `syncSceneContent`/`processNodeForRendering`, `updateSelection`/`updateNodeTransform` (тонкие диспетчеры), `dispose`. Финал фасада ≈900–1200 LOC. Commits 1–5 = ~3 дня, снимают ~2300 LOC, независимо шипабельны.
+
+### §4.3 (не разбирал детально) — 94 плоских сервиса: доменная группировка + аудит «логика в обход Command→Operation». Отдельная задача Fable при желании.
+
+---
+
+## 9. Оптимизация загрузки/бандла — ветка `perf/bundle-runtime` (2026-07-21, от смерженного `main`)
+
+Фокус сессии сменился на §5 (perf). Сделано и закоммичено:
+
+- `d0c56fe` — **PWA precache раздут**: `PlayableHtmlBuildService` эмбедит ~1500 vendor/runtime исходников как raw-текст (`?raw`/`?url` glob) для playable-export — никогда не исполняются редактором, но их контент-хэшированные имена чанков выглядели как обычные lazy-чанки и Workbox их прекэшировал. Завёл `chunkFileNames` в `vite.config.ts`, разводящий такие чанки в `assets/export-vendor/**`, и добавил `globIgnores: ['**/export-vendor/**']`. **Precache: 1732 записи (60.0MB) → 155 записей (36.7MB).** Реальные eager/lazy чанки редактора (main/editor.main/three/pix3-runtime/Monaco-воркеры/esbuild.wasm) подтверждены как остающиеся в прекэше.
+- `2a50854` — **bundle-инвентаризация**: `rollup-plugin-visualizer` добавлен dev-only за `process.env.ANALYZE` (`ANALYZE=1 npm run build` → `dist/stats.html`), в обычную сборку не попадает (проверено).
+- `17c7d4d` — **lazy-load контента шаблонов проекта**: `ProjectTemplateService` грузил КАЖДЫЙ файл каждого бандл-шаблона + агентский overlay (AGENTS.md/CLAUDE.md/skills) + 2 doc-справочника (`nodes-and-systems.md`, `node-types-reference.md`) эagerly (~150KB в `main`), хотя это нужно только в момент реального создания проекта, не при листинге шаблонов в диалоге (там нужны только метаданные из `template.yaml`). Глобы `TEMPLATE_TEXT_MODULES`/`AGENT_OVERLAY_MODULES`/`AGENT_DOC_REFERENCE_MODULES`/`AGENT_GITIGNORE_MODULES` переведены eager→lazy; добавлены `getTemplateTextFiles(id)`/асинхронный `getAgentOverlayFiles()` с кэшем, используются только в уже-`async` `ProjectService.createProjectStructure()`. Диалог создания проекта и `ProjectLifecycleService` трогали только метаданные — 0 изменений там. **`main`: 2514KB → 2408KB.** Верифицировано временным spec'ом (создан/прогнан/удалён, не закоммичен) — реальный контент резолвится корректно, кэшируется по identity.
+
+### Инвентаризация `main`-чанка (2.4MB) — что разобрано, что осталось на будущее
+
+Через `rollup-plugin-visualizer`, сгруппировано по вкладу в eager `main`:
+
+| Группа | Размер (несжато) | Вердикт |
+|---|---|---|
+| collab-стек (yjs + hocuspocus + lib0) | 414 KB | **НЕ быстрая правка.** `ProjectStorageService` импортирует `yjs` на верхнем уровне модуля безусловно (`Y.Doc`/asset-events используются даже вне cloud-бэкенда). Лени-загрузка требует переписать core project-storage/collab-код на async — архитектурная правка. |
+| golden-layout | 349 KB | Ядро докинг-шелла — нужен eagerly, не кандидат. |
+| Monaco IntelliSense libs (`monaco-runtime-libs.ts`) | 242 KB | **Проблема DI-связывания.** Панель code-editor уже лениво грузится (`LayoutManager` → `import('@/ui/code-editor/code-tab')`), но `ProjectDiagnosticsService` делает `@inject(MonacoIntelliSenseService)` — а `@inject()` в этой кодовой базе (`src/fw/di.ts`) требует статический импорт класса в месте инжекции → тянет Monaco lib-defs eagerly независимо от того, открыт ли редактор кода. Починка = либо lazy-resolve паттерн в самом DI-фреймворке, либо ручной `await import()` + ручное разрешение через контейнер в этом конкретном месте — отклонение от стандартной конвенции `@inject`, не конфиг-правка. |
+| feather-icons (весь набор) | 159 KB | `IconService` рендерит иконки повсюду — ожидаемо, не кандидат. |
+| `PlayableHtmlBuildService.ts` (сам код, БЕЗ export-vendor-раве-сорсов — те уже вынесены в п.1 выше) | 153 KB | Export — редкое действие по требованию, но та же DI-проблема: сервис инжектится в вещи, которые создаются eagerly. |
+| esbuild-wasm JS-glue | 125 KB | Нужен для in-editor компиляции скриптов — вероятно, действительно always-on; не проверял, отложена ли компиляция до первого реального открытия скрипта. |
+| `src/templates/**` + `docs/**` | 149 KB | ✅ **Сделано** (см. `17c7d4d` выше). |
+
+**Общий вывод для Fable:** большинство крупных eager-вкладов — не небрежность, а следствие DI-конвенции `@inject()` (требует статического импорта в месте инжекции). Чтобы вынести Monaco IntelliSense / `PlayableHtmlBuildService` в lazy без нарушения архитектуры, нужен **lazy-resolve паттерн в `src/fw/di.ts`** (например, `@injectLazy(ServiceClass)` возвращающий `() => Promise<T>`, резолвящий класс через динамический `import()` + контейнер только при первом обращении) — это системная правка DI-фреймворка, а не точечный фикс. Аналогично коллаб-стек (yjs/hocuspocus) зашит в `ProjectStorageService` на уровне архитектуры хранения, не только collab-фичи — вынесение потребует различать "CRDT-модель всегда в памяти" от "сетевой sync опционален", что тоже архитектурное решение, не рефактор.
+
+**Следующий шаг (не начат):** обсудить с Fable, стоит ли овчинка выделки — lazy-resolve DI паттерн даёт доступ к ~400KB (Monaco+PlayableHtmlBuildService) ценой усложнения `src/fw/di.ts` и потенциального размытия "прямого импорта = очевидная зависимость" читаемости кода. Альтернатива: оставить как есть, т.к. это одноразовая загрузка при холодном старте редактора (не хот-пасс), и 400KB из ~3.8MB eager JS — не доминирующий вклад.
+
+### Профилирование холодного старта — chrome-devtools MCP, продакшн-сборка (`vite preview`)
+
+Важный методологический момент: трейс через `npm run dev` НЕ репрезентативен (Vite отдаёт неминифицированные ESM-модули без наших чанк-оптимизаций) — профилировать нужно `vite preview` (реальный `dist/`).
+
+- `bb3fa29` — **Yandex.Metrika (index.html) блокировала холодный старт**: профиль показал Metrika как №1 источник forced-reflow (32мс) и №1 по main-thread времени среди 3rd-party скриптов (~247мс) внутри окна render-delay (~950-1050мс до LCP). Причина: `ym('init', …)` только кладёт вызов в очередь стаба — реальная тяжёлая работа (webvisor DOM/session-recording, clickmap-листенеры) выполняется, когда догрузится `tag.js` и разберёт очередь, что происходит конкурентно с холодным стартом редактора. Фикс: `referrer`/`url` захватываются синхронно как раньше (до того как клиентский hash-роутинг переписывает `location.hash`), а сам вызов `ym('init', …)` отложен на `requestIdleCallback` (фоллбэк — `window.load`). Поведение трекинга не меняется — те же данные, просто после критического пути. **Верифицировано повторным трейсом: вклад Metrika в forced-reflow на критическом пути 32мс→2мс** (суммарное время не изменилось — 283мс, ожидаемо: работу не убирали, только сдвинули).
+- Попутная находка при живом тестировании (реальный E2E прогон `17c7d4d` через chrome-devtools MCP на `vite preview`): создание нового проекта (шаблон Empty 3D, backend "In Browser"/OPFS) прошло без единой console-ошибки, сцена/AGENTS.md/CLAUDE.md/README.md/`.claude/skills/**` записались корректно — lazy-loaded аксессоры `ProjectTemplateService` работают в реальной проды-сборке, не только в юнит-тестах.
+- `runtime-panel-spawn-lag` (память) перепроверена: фикс (`pos` вынесен из хэша, императивная запись позиций через `syncPositions()`) уже **закоммичен** в истории (`044c4ef` и потомки) — ничего дополнительно делать не нужно, память была написана до того как это замержили.
+- Не успел/не начал: throttled-CPU трейс play-mode со спавнами (нужен реальный проект со спавнером типа SkyDefender, не 5-минутный Empty-3D); детальный breakdown `main-CGOBXrZh.js` внутренних функций (`_n`/`syncActiveState`/`scrollToBottom`), которые остались топ forced-reflow contributors ПОСЛЕ фикса Metrika — вероятно Golden Layout / вкладки, не проверял глубже.
