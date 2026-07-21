@@ -18,12 +18,16 @@
     "yalc:publish": "yalc publish --force"
   },
   "dependencies": {
-    "postprocessing": "^6.39.2",
-    "three": "^0.183.2",
     "yaml": "^2.3.4"
+  },
+  "peerDependencies": {
+    "postprocessing": ">=6.39.0",
+    "three": ">=0.183.0"
   },
   "devDependencies": {
     "@types/three": "^0.183.1",
+    "postprocessing": "^6.39.2",
+    "three": "^0.183.2",
     "typescript": "^5.2.2"
   }
 }

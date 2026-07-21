@@ -1,0 +1,75 @@
+name: Publish packages
+
+# Publishes the npm packages via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
+# Two ways to trigger:
+#   1. Manual: Actions -> "Publish packages" -> Run workflow -> pick a package.
+#   2. Tag push: `runtime-vX.Y.Z` publishes @pix3/runtime, `bridge-vX.Y.Z` publishes pix3-agent-bridge.
+# In both cases it publishes whatever version is in the package's package.json;
+# npm rejects a version that already exists, so re-runs are safe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which package to publish
+        type: choice
+        required: true
+        default: both
+        options:
+          - runtime
+          - bridge
+          - both
+  push:
+    tags:
+      - 'runtime-v*'
+      - 'bridge-v*'
+
+# Never run two publishes of the same ref concurrently.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-runtime:
+    name: Publish @pix3/runtime
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.package == 'runtime' || inputs.package == 'both')) ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'runtime-v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
+      - name: Publish
+        working-directory: packages/pix3-runtime
+        run: npm publish --access public
+
+  publish-bridge:
+    name: Publish pix3-agent-bridge
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.package == 'bridge' || inputs.package == 'both')) ||
+      (github.event_name == 'push' && startsWith(github.ref_name, 'bridge-v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
+        run: npm install -g npm@latest
+      - name: Publish
+        working-directory: tools/pix3-agent-bridge
+        run: npm publish --access public
