@@ -6,9 +6,10 @@ import {
   type ComponentItem,
   type ComponentItemConfig,
 } from 'golden-layout';
-import { injectable } from '@/fw/di';
+import { injectable, inject } from '@/fw/di';
 import { subscribe } from 'valtio/vanilla';
 import { appState, type AppState, type EditorTab, type PanelVisibilityState } from '@/state';
+import { IconService, IconSize } from '@/services/IconService';
 
 const PANEL_COMPONENT_TYPES = {
   sceneTree: 'scene-tree',
@@ -59,7 +60,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.animation]: 'Sprite Animation',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'Animation',
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
-  [PANEL_COMPONENT_TYPES.background]: 'Pix3',
+  [PANEL_COMPONENT_TYPES.background]: 'Home',
   [PANEL_COMPONENT_TYPES.game]: 'Game',
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
@@ -67,6 +68,20 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
   [PANEL_COMPONENT_TYPES.localization]: 'Localization',
+};
+
+/**
+ * Feather icon name shown at the left of each document tab so the tab type is readable at a glance.
+ * Only the component types that live in the editor (document) stack need an entry; anything without
+ * one falls back to a generic file icon.
+ */
+const EDITOR_TAB_ICON_BY_COMPONENT: Partial<Record<PanelComponentType, string>> = {
+  [PANEL_COMPONENT_TYPES.background]: 'home',
+  [PANEL_COMPONENT_TYPES.viewport]: 'film',
+  [PANEL_COMPONENT_TYPES.code]: 'code',
+  [PANEL_COMPONENT_TYPES.game]: 'play',
+  [PANEL_COMPONENT_TYPES.spriteEditor]: 'image',
+  [PANEL_COMPONENT_TYPES.animation]: 'activity',
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -205,6 +220,10 @@ export class LayoutManagerService {
   private editorTabFocusedListeners = new Set<(tabId: string) => void>();
   private editorTabCloseRequestedListeners = new Set<(tabId: string) => void>();
   private handleTabCloseClick?: (e: MouseEvent) => void;
+  private tabDecorationHandle: ReturnType<typeof setTimeout> | null = null;
+
+  @inject(IconService)
+  private readonly iconService!: IconService;
 
   constructor(state: AppState = appState) {
     this.state = state;
@@ -412,6 +431,9 @@ export class LayoutManagerService {
           this.focusEditorTab(tab.id);
         }, 50);
       }
+
+      // Adding a tab rebuilds the header, so re-apply icons/dirty markers to every tab.
+      this.scheduleEditorTabDecorations();
     } catch (error) {
       console.error('[LayoutManager] Failed to add editor tab', error);
     }
@@ -436,6 +458,9 @@ export class LayoutManagerService {
     }
     this.editorTabItems.delete(tabId);
     this.editorTabContainers.delete(tabId);
+
+    // Removing a tab rebuilds the header for the survivors; re-decorate them.
+    this.scheduleEditorTabDecorations();
   }
 
   focusEditorTab(tabId: string): void {
@@ -774,6 +799,11 @@ export class LayoutManagerService {
   }
 
   updateEditorTabTitle(tabId: string, title: string): void {
+    // Always re-run decorations: dirty state may have flipped even when the title text is unchanged
+    // (unsaved edits no longer alter the title). Schedule first so the early-return path below can't
+    // skip it.
+    this.scheduleEditorTabDecorations();
+
     const container = this.editorTabContainers.get(tabId);
     if (container) {
       try {
@@ -796,6 +826,70 @@ export class LayoutManagerService {
     }
   }
 
+  /**
+   * Re-derive the type icon + unsaved (dirty) indicator on every document tab. Golden Layout owns
+   * the tab DOM and rebuilds it whenever the header re-renders (tab add/remove), so we re-apply the
+   * decorations wholesale rather than tracking incremental diffs. The pass is idempotent and cheap.
+   */
+  refreshEditorTabDecorations(): void {
+    this.ensureEditorStack();
+    const stack = this.editorStack;
+    const items = stack?.contentItems;
+    if (!items) return;
+
+    for (const contentItem of items) {
+      const ci = contentItem as ContentItem & {
+        type?: string;
+        componentType?: PanelComponentType;
+        container?: { state?: { tabId?: string } };
+        tab?: { element?: HTMLElement };
+      };
+      if (ci.type !== 'component') continue;
+
+      const tabEl = ci.tab?.element;
+      if (!tabEl) continue;
+
+      const iconName =
+        EDITOR_TAB_ICON_BY_COMPONENT[ci.componentType as PanelComponentType] ?? 'file';
+      const tabId = ci.container?.state?.tabId;
+      const isDirty = tabId
+        ? (appState.tabs.tabs.find(t => t.id === tabId)?.isDirty ?? false)
+        : false;
+
+      this.applyTabDecoration(tabEl, iconName, isDirty);
+    }
+  }
+
+  /** Debounced wrapper so bursts of title/dirty updates coalesce into one DOM pass next tick. */
+  private scheduleEditorTabDecorations(): void {
+    if (this.tabDecorationHandle !== null) return;
+    this.tabDecorationHandle = setTimeout(() => {
+      this.tabDecorationHandle = null;
+      try {
+        this.refreshEditorTabDecorations();
+      } catch (error) {
+        console.error('[LayoutManager] Failed to refresh editor tab decorations', error);
+      }
+    }, 0);
+  }
+
+  private applyTabDecoration(tabEl: HTMLElement, iconName: string, isDirty: boolean): void {
+    let iconEl = tabEl.querySelector<HTMLElement>('.pix3-tab-icon');
+    if (!iconEl) {
+      iconEl = document.createElement('span');
+      iconEl.className = 'pix3-tab-icon';
+      iconEl.setAttribute('aria-hidden', 'true');
+      const titleEl = tabEl.querySelector('.lm_title');
+      tabEl.insertBefore(iconEl, titleEl);
+    }
+    if (iconEl.dataset.icon !== iconName) {
+      iconEl.innerHTML = this.iconService.getIconSvg(iconName, IconSize.SMALL);
+      iconEl.dataset.icon = iconName;
+    }
+
+    tabEl.classList.toggle('pix3-tab-dirty', isDirty);
+  }
+
   private async loadDefaultLayout(): Promise<void> {
     if (!this.layout) {
       throw new Error('LayoutManager has not been initialized');
@@ -804,6 +898,9 @@ export class LayoutManagerService {
     this.layout.loadLayout(DEFAULT_LAYOUT_CONFIG);
 
     this.ensureEditorStack();
+
+    // Decorate the initial Home tab (and any tabs restored into the default layout).
+    this.scheduleEditorTabDecorations();
 
     // Track active editor tab focus changes.
     try {
@@ -903,6 +1000,10 @@ export class LayoutManagerService {
   dispose(): void {
     this.disposePlaySubscription?.();
     this.disposePlaySubscription = undefined;
+    if (this.tabDecorationHandle !== null) {
+      clearTimeout(this.tabDecorationHandle);
+      this.tabDecorationHandle = null;
+    }
     if (this.container && this.handleTabCloseClick) {
       this.container.removeEventListener('mousedown', this.handleTabCloseClick, true);
       this.handleTabCloseClick = undefined;

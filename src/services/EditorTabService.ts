@@ -300,7 +300,8 @@ export class EditorTabService {
         ...tab,
         id: nextTabId,
         resourceId: nextResourceId,
-        title: tab.isDirty ? `*${nextTitleBase}` : nextTitleBase,
+        // Dirty state is surfaced by a dot on the tab (LayoutManager decorations), not a `*` prefix.
+        title: nextTitleBase,
       };
 
       if (tab.id !== nextTabId) {
@@ -805,7 +806,8 @@ export class EditorTabService {
 
       const fileTitle = this.deriveTitle(descriptor.filePath);
       const treatAsClean = appState.project.backend === 'cloud' && tab.type !== 'code';
-      const title = treatAsClean ? fileTitle : descriptor.isDirty ? `*${fileTitle}` : fileTitle;
+      // Dirty state is surfaced by a dot on the tab (LayoutManager decorations), not a `*` prefix.
+      const title = fileTitle;
       const isDirty = treatAsClean ? false : descriptor.isDirty;
 
       if (tab.title !== title || tab.isDirty !== isDirty) {

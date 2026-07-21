@@ -365,14 +365,43 @@ body > pix3-editor {
   display: none;
 }
 
-/* Hide the background tab header when other tabs are present in the editor stack */
-.lm_tabs:has(.lm_tab:nth-child(2)) .lm_tab[title='Pix3'] {
+/* The Home tab (background panel) is always visible and never closable. */
+.lm_tab[title='Home'] .lm_close_tab {
   display: none !important;
 }
 
-/* Ensure the background tab doesn't show a close button even if hovered */
-.lm_tab[title='Pix3'] .lm_close_tab {
-  display: none !important;
+/* Document-tab type icon (§4.2): a small vector glyph left of the tab title so the tab type
+   (scene / code / game / sprite editor / home) reads at a glance. Injected by LayoutManager. */
+.lm_header .lm_tab .pix3-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.lm_header .lm_tab.lm_active .pix3-tab-icon {
+  opacity: 1;
+}
+
+.lm_header .lm_tab .pix3-tab-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* Unsaved-changes indicator: a dot immediately left of the title (the close button stays put on
+   the right). Drawn as a shape rather than a glyph so it honours the theme and scales cleanly. */
+.lm_header .lm_tab.pix3-tab-dirty .lm_title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
 }
 
 .lm_splitter {

@@ -91,7 +91,8 @@ describe('EditorTabService (code tabs)', () => {
 
     setDocument({ isDirty: true });
     expect(appState.tabs.tabs[0]?.isDirty).toBe(true);
-    expect(appState.tabs.tabs[0]?.title.startsWith('*')).toBe(true);
+    // Dirty state is shown by a tab dot now, not a `*` title prefix — the title stays clean.
+    expect(appState.tabs.tabs[0]?.title).toBe('player.ts');
 
     await service.saveActiveTab();
     expect(appState.tabs.tabs[0]?.isDirty).toBe(false);
