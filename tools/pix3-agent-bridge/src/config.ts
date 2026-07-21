@@ -16,6 +16,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+/**
+ * Provider ids the bridge reserves for its own intrinsic lanes (e.g. the Agent-SDK lane exposed as
+ * `claude-bridge` in discovery). The CLI rejects adding a provider under one of these so `GET
+ * /v1/providers` can never emit duplicate ids.
+ */
+export const RESERVED_PROVIDER_IDS = ['claude-bridge'] as const;
+
 /** Upstream auth scheme: how the bridge presents the stored key to the provider. */
 export type ProviderKind = 'openai' | 'anthropic';
 

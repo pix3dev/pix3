@@ -15,6 +15,7 @@
 
 import {
   PROVIDER_PRESETS,
+  RESERVED_PROVIDER_IDS,
   configPath,
   loadConfig,
   saveConfig,
@@ -89,6 +90,13 @@ const addProvider = (
   id: string,
   flags: Record<string, string>
 ): void => {
+  if ((RESERVED_PROVIDER_IDS as readonly string[]).includes(id)) {
+    console.error(
+      `Provider id "${id}" is reserved by the bridge and cannot be added. Pick a different id.`
+    );
+    process.exitCode = 1;
+    return;
+  }
   const preset = PROVIDER_PRESETS[id];
   const baseUrl = (flags['base-url'] ?? preset?.baseUrl ?? '').replace(/\/$/, '');
   if (!baseUrl) {

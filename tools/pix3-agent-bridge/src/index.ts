@@ -40,7 +40,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { SessionManager } from './sessions.ts';
 import { HttpError, parseMessagesRequest } from './wire.ts';
-import { loadConfig, type BridgeConfig } from './config.ts';
+import { loadConfig, RESERVED_PROVIDER_IDS, type BridgeConfig } from './config.ts';
 import { runProviderCommand, usage } from './cli.ts';
 import { forwardToProvider } from './proxy.ts';
 
@@ -48,7 +48,7 @@ const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
 /** Discovery entry for the intrinsic Agent-SDK (subscription) lane — not part of the provider table. */
 const AGENT_SDK_PROVIDER = {
-  id: 'claude-bridge',
+  id: RESERVED_PROVIDER_IDS[0],
   label: 'Claude Code (MAX)',
   kind: 'agent-sdk' as const,
 };
