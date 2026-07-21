@@ -41,7 +41,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.animation]: 'pix3-animation-panel',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'pix3-animation-timeline-panel',
   [PANEL_COMPONENT_TYPES.logs]: 'pix3-logs-panel',
-  [PANEL_COMPONENT_TYPES.background]: 'pix3-background',
+  [PANEL_COMPONENT_TYPES.background]: 'pix3-project-home',
   [PANEL_COMPONENT_TYPES.game]: 'pix3-game-tab',
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
@@ -561,6 +561,20 @@ export class LayoutManagerService {
   }
 
   /**
+   * Activate the pinned Project Home tab (the `background` slot, always first in
+   * the editor document stack) and ask it to refresh. Used by the
+   * `editor.open-project-home` command (Mod+1).
+   */
+  focusHomeTab(): void {
+    this.focusPanel(PANEL_COMPONENT_TYPES.background);
+    try {
+      window.dispatchEvent(new CustomEvent('pix3-project-home:activate'));
+    } catch {
+      // ignore in non-DOM environments
+    }
+  }
+
+  /**
    * Reveal the Agent chat panel. It lives as a docked column to the right of the viewport in the
    * default layout, so normally this just brings it to the front of its stack. If the user closed
    * the panel, re-add it as a new column before the Inspector (falling back to Golden Layout's
@@ -1045,6 +1059,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.assets) {
           void import('@/ui/assets/assets-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.background) {
+          void import('@/ui/home/pix3-project-home');
         }
 
         const tabId = (container.state as { tabId?: string } | undefined)?.tabId;

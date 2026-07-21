@@ -71,6 +71,7 @@ import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFold
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenSpriteEditorCommand } from '@/features/editor/OpenSpriteEditorCommand';
 import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
+import { OpenProjectHomeCommand } from '@/features/editor/OpenProjectHomeCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
 import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
@@ -126,7 +127,7 @@ import './shared/pix3-node-type-picker';
 import './shared/pix3-playable-export-dialog';
 import './shared/pix3-playable-export-progress-dialog';
 import './shared/pix3-status-bar';
-import './shared/pix3-background';
+import './home/pix3-project-home';
 import './collab/collab-participants-strip';
 import './collab/pix3-share-dialog';
 import './welcome/pix3-welcome';
@@ -373,6 +374,7 @@ export class Pix3EditorShell extends ComponentBase {
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
     const openAgentChatCommand = new OpenAgentChatCommand();
+    const openProjectHomeCommand = new OpenProjectHomeCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
     const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
@@ -424,6 +426,7 @@ export class Pix3EditorShell extends ComponentBase {
       editorSettingsCommand,
       openSpriteEditorCommand,
       openAgentChatCommand,
+      openProjectHomeCommand,
       bakeAOCommand,
       clearAOCommand,
       focusAnimationTimelineCommand,

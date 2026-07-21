@@ -112,6 +112,18 @@ export {
   type AssetsPreviewSnapshot,
 } from './AssetsPreviewService';
 export { ThumbnailCacheService } from './ThumbnailCacheService';
+export {
+  ProjectHomeService,
+  type ProjectHomeData,
+  type HomeSceneEntry,
+  type HomeChecklistItem,
+  type HomeGddInfo,
+  type GddSection,
+  type GddSectionStatus,
+  type HomeAtAGlance,
+  type HomeActivityEntry,
+  type ChecklistAction,
+} from './ProjectHomeService';
 export { ThumbnailGenerator } from './ThumbnailGenerator';
 export { SceneThumbnailGenerator } from './SceneThumbnailGenerator';
 export {
