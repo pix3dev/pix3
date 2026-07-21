@@ -5,5 +5,3 @@ projectType: 3d
 targetPlatform: mobile
 viewport: { width: 1080, height: 1920 }
 order: 30
-directories:
-  - src/assets/models

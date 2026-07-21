@@ -54,7 +54,7 @@ root:
         type: Sprite2D
         name: Logo Sprite
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/pix3-logo.png' }
+          texture: { type: 'texture', url: 'res://sprites/pix3-logo.png' }
           width: 96
           height: 96
           transform:

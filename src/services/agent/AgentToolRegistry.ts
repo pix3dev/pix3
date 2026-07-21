@@ -832,7 +832,7 @@ export class AgentToolRegistry {
             name: {
               type: 'string',
               description:
-                'Target file name or relative path (e.g. "src/assets/textures/car.png"); the extension is added automatically when missing.',
+                'Target file name or relative path (e.g. "sprites/car.png"); the extension is added automatically when missing.',
             },
             transparent: {
               type: 'boolean',
@@ -984,7 +984,7 @@ export class AgentToolRegistry {
     if (this.sceneManager.getActiveSceneGraph()) {
       return;
     }
-    const startupPath = 'src/assets/scenes/main.pix3scene';
+    const startupPath = 'scenes/main.pix3scene';
     const stripPrefix = (p: string): string => p.replace(/^res:\/\//i, '').replace(/^\/+/, '');
     const descriptorPaths = Object.values(appState.scenes.descriptors).map(d => d.filePath ?? '');
     const startupDescriptor = descriptorPaths.find(p => stripPrefix(p) === startupPath);

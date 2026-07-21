@@ -2,7 +2,7 @@
 # Settings window prefab: a centered modal panel with Music/SFX checkboxes
 # (wired to the audio buses by user:SettingsWindow) and a CLOSE button.
 # Instance it from any scene:
-#   { id: settings-window, instance: res://src/assets/scenes/settings-window.pix3scene }
+#   { id: settings-window, instance: res://scenes/settings-window.pix3scene }
 version: 1.0.0
 metadata:
   author: Pix3 Template

@@ -6,5 +6,5 @@ targetPlatform: universal
 viewport: { width: 1920, height: 1080 }
 # The build/full-run entry scene (Project Settings → Default Export Scene Path).
 # The menu boots first; PLAY transitions to main.pix3scene (the game).
-entryScene: src/assets/scenes/menu.pix3scene
+entryScene: scenes/menu.pix3scene
 order: 50

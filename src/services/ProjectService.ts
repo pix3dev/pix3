@@ -79,7 +79,7 @@ export interface ActivateProjectOptions {
 
 @injectable()
 export class ProjectService {
-  static readonly STARTUP_SCENE_PATH = 'src/assets/scenes/main.pix3scene';
+  static readonly STARTUP_SCENE_PATH = 'scenes/main.pix3scene';
   static readonly STARTUP_SCENE_RESOURCE_PATH = `res://${ProjectService.STARTUP_SCENE_PATH}`;
 
   private readonly fs = resolveFileSystemAPIService();
@@ -725,13 +725,14 @@ export class ProjectService {
 
     // Core structure: a failure here genuinely breaks the project, so it aborts
     // creation with the underlying cause in the error.
+    // Flat, user-friendly base layout. Other asset-type folders (models, fonts,
+    // …) are created on demand as those assets are added.
     const directories = new Set<string>([
-      'src',
+      'design',
+      'scenes',
+      'sprites',
       'scripts',
-      'src/scripts',
-      'src/assets',
-      'src/assets/scenes',
-      'src/assets/textures',
+      'audio',
       ...template.directories,
     ]);
 

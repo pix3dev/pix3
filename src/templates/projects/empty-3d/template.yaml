@@ -5,5 +5,3 @@ projectType: 3d
 targetPlatform: universal
 viewport: { width: 1920, height: 1080 }
 order: 10
-directories:
-  - src/assets/models

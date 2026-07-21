@@ -19,11 +19,11 @@ as an exported single-file HTML.
 
 | Path | What it is |
 |---|---|
-| `design/` | The game design document and visual references — **read these first** |
+| `design/` | The game design document and reference images — **read these first** |
 | `pix3project.yaml` | Project manifest (viewport size, platform, quality, autoloads) — don't edit unless asked |
-| `src/assets/scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the editor's startup scene (opened first, and what you iterate on). A build boots the **entry scene** = Project Settings → Default Export Scene Path, which may be a separate menu scene |
+| `scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the editor's startup scene (opened first, and what you iterate on). A build boots the **entry scene** = Project Settings → Default Export Scene Path, which may be a separate menu scene |
 | `scripts/*.ts` | Game scripts: `export class X extends Script` → referenced in scenes as `type: user:X` |
-| `src/assets/textures/`, `src/assets/models/` | Art assets, referenced as `res://src/assets/...` |
+| `sprites/`, `audio/` | Art and sound assets, referenced as `res://sprites/...` / `res://audio/...`. Other asset-type folders (`models/`, fonts, …) are created as you add those assets |
 | `.claude/skills/` | Your skills: `pix3-game-dev` (engine capabilities, how to write scenes/scripts), `pix3-remote-preview` (running and debugging the game) |
 | `.pix3/` | Editor metadata (template/version info) — do not edit |
 
@@ -42,7 +42,7 @@ as an exported single-file HTML.
    `this.scene` / `this.input` / `this.node`. Attach them in scene YAML under
    `components:` as `type: user:<ClassName>`. To move between scenes at runtime
    (menu → game → results), call
-   `this.scene.changeScene('res://src/assets/scenes/<name>.pix3scene', { transition: 'fade' })`.
+   `this.scene.changeScene('res://scenes/<name>.pix3scene', { transition: 'fade' })`.
 4. **Asset paths** always use the `res://` scheme relative to the project root.
 5. **Missing art?** Use colored primitives (`ColorRect2D`, `GeometryMesh` with a
    material color) or the bundled logo as placeholders the user can swap later;

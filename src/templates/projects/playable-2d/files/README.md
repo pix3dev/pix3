@@ -11,7 +11,9 @@ A Pix3 project created from the **Playable 2D** template — a portrait playable
 
 ## Project structure
 
-- `design/` — put your game design document and visual references here
+- `design/` — game design document and reference images
+- `scenes/` — scene files; `main.pix3scene` is the startup scene
+- `sprites/` — images and textures
 - `scripts/` — game scripts (`export class X extends Script`, used as `user:X`)
-- `src/assets/scenes/` — scene files; `main.pix3scene` is the startup scene
+- `audio/` — music and sound effects
 - `AGENTS.md` — rules and pointers for AI agents working on this project
