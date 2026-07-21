@@ -70,8 +70,10 @@ export default defineConfig(async ({ mode }) => {
           // is ~29 MB of vendor/runtime SOURCE TEXT embedded for playable export (see the
           // `chunkFileNames` comment above) — it is fetched on demand only when the user
           // actually exports a playable build, so precaching it for offline editing is wasted
-          // bandwidth/storage. The export flow still works offline-first-run since it's a
-          // regular network fetch, just not pre-warmed.
+          // bandwidth/storage. No `runtimeCaching` is configured for it, so exporting a
+          // playable while genuinely offline (no network, no prior browser HTTP cache hit for
+          // these exact chunks) will fail — that's an accepted tradeoff, not "still works
+          // offline": export is expected to run online, unlike the rest of the editor shell.
           globIgnores: ['**/ort-wasm*', '**/export-vendor/**'],
           // esbuild.wasm (~11 MB) must be precached to work offline (in-editor script compile).
           maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
@@ -116,10 +118,22 @@ export default defineConfig(async ({ mode }) => {
           // is never executed by the editor itself. Routing them into a dedicated folder lets
           // the PWA precache glob below exclude the whole feature in one pattern instead of
           // enumerating chunk names, which are content-hashed and change on every build.
+          // NARROW on the same source paths as the `manualChunks` guard above, not just the
+          // `?raw`/`?url` query suffix alone — `ProjectTemplateService`'s lazy template/agent-
+          // overlay/doc-reference globs use the same query suffix and must stay precached for
+          // offline "New Project" (they're unrelated content, not playable-export vendor code).
           chunkFileNames(chunkInfo) {
-            const isExportVendorSource =
-              chunkInfo.facadeModuleId?.includes('?raw') || chunkInfo.facadeModuleId?.includes('?url');
-            return isExportVendorSource ? 'assets/export-vendor/[name]-[hash].js' : 'assets/[name]-[hash].js';
+            const id = chunkInfo.facadeModuleId ?? '';
+            const isRawOrUrl = id.includes('?raw') || id.includes('?url');
+            const isPlayableExportVendorSource =
+              isRawOrUrl &&
+              (id.includes('node_modules/three/') ||
+                id.includes('node_modules/@dimforge/rapier3d-compat/') ||
+                id.includes('node_modules/yaml/') ||
+                id.includes('packages/pix3-runtime/'));
+            return isPlayableExportVendorSource
+              ? 'assets/export-vendor/[name]-[hash].js'
+              : 'assets/[name]-[hash].js';
           },
         },
       },

@@ -184,7 +184,7 @@ export class ProjectTemplateService {
   }
 
   private async loadTemplateTextFiles(id: string): Promise<ReadonlyMap<string, string>> {
-    const files = new Map<string, string>();
+    const entries: Array<[string, () => Promise<string>]> = [];
     for (const [modulePath, loader] of Object.entries(TEMPLATE_TEXT_MODULES)) {
       if (extractTemplateId(modulePath) !== id) {
         continue;
@@ -193,9 +193,10 @@ export class ProjectTemplateService {
       if (!relativePath) {
         continue;
       }
-      files.set(relativePath, await loader());
+      entries.push([relativePath, loader]);
     }
-    return files;
+    const contents = await Promise.all(entries.map(([, loader]) => loader()));
+    return new Map(entries.map(([relativePath], index) => [relativePath, contents[index]]));
   }
 
   private buildTemplates(): ProjectTemplate[] {
@@ -276,7 +277,7 @@ export class ProjectTemplateService {
   }
 
   private async loadAgentOverlayFiles(): Promise<ReadonlyMap<string, string>> {
-    const files = new Map<string, string>();
+    const entries: Array<[string, () => Promise<string>]> = [];
 
     for (const [modulePath, loader] of Object.entries(AGENT_OVERLAY_MODULES)) {
       const markerIndex = modulePath.indexOf(AGENT_OVERLAY_MARKER);
@@ -287,18 +288,21 @@ export class ProjectTemplateService {
       const targetPath = relativePath.startsWith(AGENT_SKILLS_PREFIX)
         ? AGENT_SKILLS_TARGET_PREFIX + relativePath.slice(AGENT_SKILLS_PREFIX.length)
         : relativePath;
-      files.set(targetPath, await loader());
+      entries.push([targetPath, loader]);
     }
 
     for (const [modulePath, loader] of Object.entries(AGENT_DOC_REFERENCE_MODULES)) {
       const fileName = modulePath.slice(modulePath.lastIndexOf('/') + 1);
-      files.set(AGENT_DOC_REFERENCES_TARGET + fileName, await loader());
+      entries.push([AGENT_DOC_REFERENCES_TARGET + fileName, loader]);
     }
 
     for (const loader of Object.values(AGENT_GITIGNORE_MODULES)) {
-      files.set('.gitignore', await loader());
+      entries.push(['.gitignore', loader]);
     }
 
+    const contents = await Promise.all(entries.map(([, loader]) => loader()));
+    const files = new Map<string, string>();
+    entries.forEach(([targetPath], index) => files.set(targetPath, contents[index]));
     return files;
   }
 
