@@ -2,7 +2,43 @@ pix3-playable-export-progress-dialog {
   display: contents;
 }
 
-.playable-export-progress-dialog {
+pix3-playable-export-progress-dialog .dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+  z-index: var(--pix3-z-modal);
+}
+
+pix3-playable-export-progress-dialog .dialog-content {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  padding: 1.5rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+}
+
+pix3-playable-export-progress-dialog .dialog-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--fg-0);
+}
+
+pix3-playable-export-progress-dialog .dialog-message {
+  margin: 0;
+  color: var(--fg-1);
+  line-height: 1.5;
+}
+
+pix3-playable-export-progress-dialog .playable-export-progress-dialog {
   width: min(92vw, 440px);
   display: grid;
   gap: 0.85rem;
@@ -10,7 +46,7 @@ pix3-playable-export-progress-dialog {
   text-align: center;
 }
 
-.playable-export-progress__spinner {
+pix3-playable-export-progress-dialog .playable-export-progress__spinner {
   width: 42px;
   height: 42px;
   border-radius: 999px;
@@ -19,7 +55,7 @@ pix3-playable-export-progress-dialog {
   animation: playable-export-progress-spin 0.9s linear infinite;
 }
 
-.playable-export-progress__hint {
+pix3-playable-export-progress-dialog .playable-export-progress__hint {
   font-size: 12px;
   line-height: 1.5;
   color: var(--fg-2);

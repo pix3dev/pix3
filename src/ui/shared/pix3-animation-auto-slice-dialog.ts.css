@@ -1,4 +1,4 @@
-.dialog-backdrop {
+pix3-animation-auto-slice-dialog .dialog-backdrop {
   position: fixed;
   inset: 0;
   display: flex;
@@ -9,7 +9,7 @@
   z-index: 1200;
 }
 
-.dialog-content {
+pix3-animation-auto-slice-dialog .dialog-content {
   width: min(64rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
   overflow: auto;
@@ -21,56 +21,56 @@
   box-shadow: var(--shadow-float);
 }
 
-.dialog-title {
+pix3-animation-auto-slice-dialog .dialog-title {
   margin: 0 0 0.5rem;
   font-size: 1.1rem;
 }
 
-.dialog-copy {
+pix3-animation-auto-slice-dialog .dialog-copy {
   margin: 0 0 1rem;
   color: var(--fg-1);
   line-height: 1.5;
 }
 
-.dialog-copy--compact {
+pix3-animation-auto-slice-dialog .dialog-copy--compact {
   margin-bottom: 0.35rem;
 }
 
-.dialog-copy--path {
+pix3-animation-auto-slice-dialog .dialog-copy--path {
   margin-bottom: 0;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
-.dialog-highlight {
+pix3-animation-auto-slice-dialog .dialog-highlight {
   font-family: var(--font-mono);
   font-size: 0.82rem;
   color: var(--accent);
 }
 
-.dialog-layout {
+pix3-animation-auto-slice-dialog .dialog-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(18rem, 0.9fr);
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
-.preview-panel,
-.controls-panel {
+pix3-animation-auto-slice-dialog .preview-panel,
+pix3-animation-auto-slice-dialog .controls-panel {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
 }
 
-.preview-header {
+pix3-animation-auto-slice-dialog .preview-header {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
   align-items: flex-start;
 }
 
-.preview-stat {
+pix3-animation-auto-slice-dialog .preview-stat {
   display: inline-flex;
   align-items: center;
   min-height: 2rem;
@@ -82,7 +82,7 @@
   color: var(--fg-1);
 }
 
-.preview-surface {
+pix3-animation-auto-slice-dialog .preview-surface {
   position: relative;
   min-height: 20rem;
   border-radius: var(--radius-2);
@@ -103,7 +103,7 @@
   background-color: oklch(0.27 0.008 250);
 }
 
-.preview-image {
+pix3-animation-auto-slice-dialog .preview-image {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -112,7 +112,7 @@
   image-rendering: pixelated;
 }
 
-.preview-grid {
+pix3-animation-auto-slice-dialog .preview-grid {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -124,7 +124,7 @@
     100% calc(100% / var(--slice-rows));
 }
 
-.preview-placeholder {
+pix3-animation-auto-slice-dialog .preview-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,25 +134,25 @@
   color: var(--fg-2);
 }
 
-.form-grid {
+pix3-animation-auto-slice-dialog .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-.field {
+pix3-animation-auto-slice-dialog .field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.field label {
+pix3-animation-auto-slice-dialog .field label {
   font-size: 0.8rem;
   color: var(--fg-2);
 }
 
-.field input {
+pix3-animation-auto-slice-dialog .field input {
   width: 100%;
   min-width: 0;
   padding: 0.55rem 0.65rem;
@@ -162,24 +162,24 @@
   color: var(--fg-0);
 }
 
-.field input:focus {
+pix3-animation-auto-slice-dialog .field input:focus {
   outline: none;
   border-color: var(--accent);
 }
 
-.dialog-note {
+pix3-animation-auto-slice-dialog .dialog-note {
   margin: 0 0 1rem;
   font-size: 0.8rem;
   color: var(--fg-2);
 }
 
-.preview-stats-grid {
+pix3-animation-auto-slice-dialog .preview-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.preview-stats-grid > div {
+pix3-animation-auto-slice-dialog .preview-stats-grid > div {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -189,55 +189,55 @@
   background: var(--bg-2);
 }
 
-.stats-label {
+pix3-animation-auto-slice-dialog .stats-label {
   font-size: 0.74rem;
   color: var(--fg-2);
 }
 
-.dialog-actions {
+pix3-animation-auto-slice-dialog .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.6rem;
 }
 
-.btn-secondary,
-.btn-primary {
+pix3-animation-auto-slice-dialog .btn-secondary,
+pix3-animation-auto-slice-dialog .btn-primary {
   padding: 0.55rem 0.8rem;
   border-radius: var(--radius-2);
   border: 1px solid var(--line-1);
   cursor: pointer;
 }
 
-.btn-secondary {
+pix3-animation-auto-slice-dialog .btn-secondary {
   background: var(--bg-2);
   color: var(--fg-0);
 }
 
-.btn-primary {
+pix3-animation-auto-slice-dialog .btn-primary {
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-.btn-primary:disabled {
+pix3-animation-auto-slice-dialog .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 @media (max-width: 640px) {
-  .dialog-layout,
-  .preview-header,
-  .dialog-actions {
+  pix3-animation-auto-slice-dialog .dialog-layout,
+  pix3-animation-auto-slice-dialog .preview-header,
+  pix3-animation-auto-slice-dialog .dialog-actions {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
 
-  .form-grid {
+  pix3-animation-auto-slice-dialog .form-grid {
     grid-template-columns: 1fr;
   }
 
-  .preview-stats-grid {
+  pix3-animation-auto-slice-dialog .preview-stats-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -2,7 +2,7 @@ pix3-project-settings-dialog {
   display: contents;
 }
 
-.dialog-backdrop {
+pix3-project-settings-dialog .dialog-backdrop {
   position: fixed;
   top: 0;
   left: 0;
@@ -16,7 +16,7 @@ pix3-project-settings-dialog {
   z-index: var(--pix3-z-modal);
 }
 
-.dialog-content {
+pix3-project-settings-dialog .dialog-content {
   background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-3);
@@ -28,27 +28,27 @@ pix3-project-settings-dialog {
   box-shadow: var(--shadow-float);
 }
 
-.dialog-title {
+pix3-project-settings-dialog .dialog-title {
   margin: 0 0 1.5rem 0;
   font-size: 1.4rem;
   font-weight: 500;
   color: var(--fg-0);
 }
 
-.settings-form {
+pix3-project-settings-dialog .settings-form {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;
 }
 
-.settings-tabs {
+pix3-project-settings-dialog .settings-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 1rem;
   border-bottom: 1px solid var(--line-1);
 }
 
-.settings-tab {
+pix3-project-settings-dialog .settings-tab {
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
@@ -58,23 +58,23 @@ pix3-project-settings-dialog {
   cursor: pointer;
 }
 
-.settings-tab--active {
+pix3-project-settings-dialog .settings-tab--active {
   color: var(--fg-0);
   border-bottom-color: var(--accent);
 }
 
-.settings-field {
+pix3-project-settings-dialog .settings-field {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.settings-field label {
+pix3-project-settings-dialog .settings-field label {
   font-size: 0.9rem;
   color: var(--fg-2);
 }
 
-.settings-field input {
+pix3-project-settings-dialog .settings-field input {
   padding: 0.6rem 0.8rem;
   background: var(--bg-2);
   border: 1px solid var(--line-1);
@@ -83,25 +83,25 @@ pix3-project-settings-dialog {
   font-size: 1rem;
 }
 
-.settings-field input:focus {
+pix3-project-settings-dialog .settings-field input:focus {
   outline: none;
   border-color: var(--accent);
 }
 
-.settings-grid-2col {
+pix3-project-settings-dialog .settings-grid-2col {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.autoload-form {
+pix3-project-settings-dialog .autoload-form {
   display: grid;
   grid-template-columns: 1fr 1fr auto auto;
   gap: 0.75rem;
   align-items: end;
 }
 
-.autoload-enabled-label {
+pix3-project-settings-dialog .autoload-enabled-label {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -109,7 +109,7 @@ pix3-project-settings-dialog {
   font-size: 0.9rem;
 }
 
-.autoload-table {
+pix3-project-settings-dialog .autoload-table {
   grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
@@ -117,7 +117,7 @@ pix3-project-settings-dialog {
   margin-top: 0.5rem;
 }
 
-.autoload-row {
+pix3-project-settings-dialog .autoload-row {
   display: grid;
   grid-template-columns: 32px 72px 160px 1fr 160px;
   gap: 8px;
@@ -127,27 +127,27 @@ pix3-project-settings-dialog {
   padding: 0.35rem 0.5rem;
 }
 
-.autoload-row--header {
+pix3-project-settings-dialog .autoload-row--header {
   font-size: 0.76rem;
   color: var(--fg-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.autoload-path {
+pix3-project-settings-dialog .autoload-path {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
   color: var(--fg-1);
 }
 
-.autoload-actions {
+pix3-project-settings-dialog .autoload-actions {
   display: inline-flex;
   gap: 4px;
   justify-content: flex-end;
 }
 
-.btn-small {
+pix3-project-settings-dialog .btn-small {
   border: 1px solid var(--line-1);
   background: transparent;
   color: var(--fg-1);
@@ -157,36 +157,36 @@ pix3-project-settings-dialog {
   font-size: 0.75rem;
 }
 
-.btn-small:disabled {
+pix3-project-settings-dialog .btn-small:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.btn-small--danger:hover {
+pix3-project-settings-dialog .btn-small--danger:hover {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-.autoload-error {
+pix3-project-settings-dialog .autoload-error {
   grid-column: 1 / -1;
   color: var(--danger);
   font-size: 0.8rem;
 }
 
-.settings-field .hint {
+pix3-project-settings-dialog .settings-field .hint {
   font-size: 0.8rem;
   color: var(--fg-3);
   line-height: 1.4;
 }
 
-.dialog-actions {
+pix3-project-settings-dialog .dialog-actions {
   display: flex;
   gap: 0.75rem;
   justify-content: flex-end;
   margin-top: 2rem;
 }
 
-.dialog-actions button {
+pix3-project-settings-dialog .dialog-actions button {
   padding: 0.6rem 1.2rem;
   border-radius: var(--radius-2);
   cursor: pointer;
@@ -197,23 +197,23 @@ pix3-project-settings-dialog {
     color 0.2s;
 }
 
-.btn-cancel {
+pix3-project-settings-dialog .btn-cancel {
   background: transparent;
   color: var(--fg-1);
   border-color: var(--line-1);
 }
 
-.btn-cancel:hover {
+pix3-project-settings-dialog .btn-cancel:hover {
   background: var(--bg-2);
   color: var(--fg-0);
 }
 
-.btn-save {
+pix3-project-settings-dialog .btn-save {
   background: var(--accent);
   color: var(--accent-fg);
   font-weight: 600;
 }
 
-.btn-save:hover {
+pix3-project-settings-dialog .btn-save:hover {
   filter: brightness(1.1);
 }

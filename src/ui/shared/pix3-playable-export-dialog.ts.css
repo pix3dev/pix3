@@ -1,15 +1,55 @@
-.playable-export-dialog-content {
+pix3-playable-export-dialog {
+  display: contents;
+}
+
+pix3-playable-export-dialog .dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+  z-index: var(--pix3-z-modal);
+}
+
+pix3-playable-export-dialog .dialog-content {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  padding: 1.5rem;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+}
+
+pix3-playable-export-dialog .dialog-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--fg-0);
+}
+
+pix3-playable-export-dialog .dialog-message {
+  margin: 0;
+  color: var(--fg-1);
+  line-height: 1.5;
+}
+
+pix3-playable-export-dialog .playable-export-dialog-content {
   width: min(92vw, 520px);
 }
 
-.dialog-field {
+pix3-playable-export-dialog .dialog-field {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-top: 18px;
 }
 
-.dialog-field__label {
+pix3-playable-export-dialog .dialog-field__label {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -17,7 +57,7 @@
   color: var(--fg-1);
 }
 
-.dialog-field__select {
+pix3-playable-export-dialog .dialog-field__select {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
@@ -28,6 +68,44 @@
   font: inherit;
 }
 
-.dialog-field__select:focus {
+pix3-playable-export-dialog .dialog-field__select:focus {
   border-color: var(--accent);
+}
+
+pix3-playable-export-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
+
+pix3-playable-export-dialog .btn-secondary,
+pix3-playable-export-dialog .btn-primary {
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  cursor: pointer;
+  font: inherit;
+}
+
+pix3-playable-export-dialog .btn-secondary {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-playable-export-dialog .btn-secondary:hover:not(:disabled) {
+  border-color: var(--line-2);
+}
+
+pix3-playable-export-dialog .btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+pix3-playable-export-dialog .btn-primary:disabled,
+pix3-playable-export-dialog .btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

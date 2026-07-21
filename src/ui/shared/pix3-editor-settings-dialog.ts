@@ -187,6 +187,10 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private bridgeMessage: string | null = null;
 
+  /** The command text most recently copied to the clipboard (drives the transient "Copied" glyph). */
+  @state()
+  private copiedCommand: string | null = null;
+
   // Advisor: a deliberately stronger model the agent consults via `ask_advisor`. Empty provider = off.
   @state()
   private advisorProviderId = '';
@@ -564,11 +568,14 @@ export class EditorSettingsDialog extends ComponentBase {
           </div>`
         : null}
       ${provider?.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID
-        ? html`<div class="hint">
-            The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
-            machine — manage it there (<code
-              >pix3-agent-bridge provider set-key ${provider.id} &lt;key&gt;</code
-            >), not here.
+        ? html`<div class="settings-field">
+            <div class="hint">
+              The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
+              machine — manage it there, not here:
+            </div>
+            ${this.renderCommandBlock(
+              `pix3-agent-bridge provider set-key ${provider.id} <key>`
+            )}
           </div>`
         : html`<div class="settings-field">
             <span class="key-label">
@@ -639,6 +646,38 @@ export class EditorSettingsDialog extends ComponentBase {
    * list of providers the bridge currently serves. When the bridge is unreachable this is the setup
    * call to action (the metered providers are simply absent from the pickers until it connects).
    */
+  /** A monospaced, one-line command with a copy-to-clipboard button on the right. */
+  private renderCommandBlock(command: string) {
+    const copied = this.copiedCommand === command;
+    return html`
+      <div class="command-block">
+        <code>${command}</code>
+        <button
+          class="command-copy ${copied ? 'is-copied' : ''}"
+          aria-label=${copied ? 'Copied' : 'Copy command'}
+          title=${copied ? 'Copied' : 'Copy'}
+          @click=${() => void this.copyCommand(command)}
+        >
+          ${this.icons.getIcon(copied ? 'check' : 'copy', IconSize.SMALL)}
+        </button>
+      </div>
+    `;
+  }
+
+  private copyCommand = async (command: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      return;
+    }
+    this.copiedCommand = command;
+    window.setTimeout(() => {
+      if (this.copiedCommand === command) {
+        this.copiedCommand = null;
+      }
+    }, 1400);
+  };
+
   private renderBridgePanel() {
     const entries = this.bridge.getEntries();
     const connected = this.bridgeAvailable;
@@ -652,10 +691,11 @@ export class EditorSettingsDialog extends ComponentBase {
         </h3>
         <div class="hint">
           Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine
-          so keys never enter the browser. Gemini works without it. Start it with
-          <code>npx @pix3/agent-bridge</code>, then paste the pairing token it prints below and add
-          providers with <code>npx @pix3/agent-bridge provider add openai --key sk-…</code>.
+          so keys never enter the browser. Gemini works without it. Start it, then paste the pairing
+          token it prints below and add providers:
         </div>
+        ${this.renderCommandBlock('npx @pix3/agent-bridge')}
+        ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}
 
         <div class="settings-field">
           <span class="key-label">
