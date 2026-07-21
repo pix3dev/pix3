@@ -5,6 +5,7 @@ import {
   coerceTextureResource,
   type TextureResourceRef,
 } from '../../core/TextureResource';
+import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 
 export interface AnimatedSprite3DProps extends Omit<Node3DProps, 'type'> {
   frames?: (TextureResourceRef | null)[];
@@ -31,7 +32,7 @@ export class AnimatedSprite3D extends Node3D {
   billboard: boolean;
 
   private _currentFrame: number = 0;
-  private timeAccumulator: number = 0;
+  private readonly frameSequencePlayer = new FrameSequencePlayer();
 
   private mesh: Mesh;
   private geometry: PlaneGeometry;
@@ -127,30 +128,35 @@ export class AnimatedSprite3D extends Node3D {
   tick(dt: number): void {
     super.tick(dt);
 
-    if (!this.playing || this.frames.length <= 1) return;
+    if (!this.playing || this.frames.length <= 1 || this.fps <= 0) return;
 
-    this.timeAccumulator += dt;
-    const frameDuration = 1 / this.fps;
+    const result = this.frameSequencePlayer.advance(
+      dt,
+      {
+        frameCount: this.frames.length,
+        fps: this.fps,
+        loop: this.loop,
+        playbackMode: 'linear',
+      },
+      this._currentFrame
+    );
 
-    if (this.timeAccumulator >= frameDuration) {
-      this.timeAccumulator -= frameDuration;
-      let nextFrame = this._currentFrame + 1;
-      
-      if (nextFrame >= this.frames.length) {
-        if (this.loop) {
-          nextFrame = 0;
-        } else {
-          nextFrame = this.frames.length - 1;
-          this.playing = false;
-          // One-shot end: fire once on the transition. VFX can self-free via the
-          // `freeOnFinish` flag below or a `core:FreeOnSignal` on this signal.
-          this.emit('animation-finished');
-          if (this.freeOnFinish) {
-            this.queueFree();
-          }
-        }
+    // Repaint each frame this advance landed on (catch-up on large `dt` now
+    // crosses multiple frames in one tick — the shared kernel's while-loop —
+    // instead of the old single-step advance). 3D has no per-frame events.
+    for (const frameIndex of result.framesAdvanced) {
+      this.currentFrame = frameIndex; // setter clamps + updates texture
+    }
+
+    if (result.finished) {
+      // The node owns the `playing` flag; flip it off on the non-loop end.
+      this.playing = false;
+      // One-shot end: fire once on the transition (no args, unlike 2D). VFX can
+      // self-free via the `freeOnFinish` flag below or a `core:FreeOnSignal`.
+      this.emit('animation-finished');
+      if (this.freeOnFinish) {
+        this.queueFree();
       }
-      this.currentFrame = nextFrame;
     }
   }
 
