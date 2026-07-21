@@ -37,13 +37,12 @@
     "reflect-metadata": "^0.2.2",
     "three": "^0.183.2",
     "valtio": "^2.1.8",
-    "y-indexeddb": "^9.0.12",
     "yaml": "^2.6.0",
     "yjs": "^13.6.0"
   },
   "devDependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
-    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/js": "^9.36.0",
     "@types/feather-icons": "^4.29.4",
     "@types/node": "^24.5.2",
     "@types/qrcode": "^1.5.6",
