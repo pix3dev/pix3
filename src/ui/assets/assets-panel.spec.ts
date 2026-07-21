@@ -130,12 +130,15 @@ describe('AssetsPanel (Phase 4)', () => {
     document.body.appendChild(panel);
     await panel.updateComplete;
 
-    panel.querySelector<HTMLElement>('.tree-root-row')?.dispatchEvent(
-      new MouseEvent('click', { bubbles: true })
-    );
+    panel
+      .querySelector<HTMLElement>('.tree-root-row')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
     expect(tree(panel).clearSelection).toHaveBeenCalledTimes(1);
-    expect(stubs.assetsPreviewService.syncFromAssetSelection).toHaveBeenCalledWith('.', 'directory');
+    expect(stubs.assetsPreviewService.syncFromAssetSelection).toHaveBeenCalledWith(
+      '.',
+      'directory'
+    );
   });
 
   it('routes assets-preview:reveal-path window events to the tree', async () => {

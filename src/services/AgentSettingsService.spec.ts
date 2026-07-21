@@ -1,6 +1,52 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AgentSettingsService } from './AgentSettingsService';
 import { LlmProviderRegistry } from './llm/LlmProviderRegistry';
+import type { LlmProvider } from './llm/LlmTypes';
+
+/**
+ * Bridge-backed provider stubs mirroring what BridgeConnectionService registers at runtime. Only
+ * Gemini is a real static provider; the rest are registered dynamically, so the tests inject a
+ * representative set to exercise id resolution (base URL, live-catalog passthrough, key delegation).
+ */
+const bridgeStubs = (): LlmProvider[] => [
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    models: [],
+    apiKeySecretId: 'ai-provider:pix3-bridge:token',
+    getModel: () => undefined,
+    chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+  },
+  {
+    id: 'openai-compat',
+    label: 'OpenAI',
+    models: [],
+    apiKeySecretId: 'ai-provider:pix3-bridge:token',
+    requiresBaseUrl: false,
+    defaultBaseUrl: 'http://127.0.0.1:8484/providers/openai-compat',
+    getModel: () => undefined,
+    listModels: async () => [],
+    chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+  },
+  {
+    id: 'opencode-zen',
+    label: 'OpenCode Zen',
+    models: [],
+    apiKeySecretId: 'ai-provider:pix3-bridge:token',
+    getModel: () => undefined,
+    listModels: async () => [],
+    chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    models: [],
+    apiKeySecretId: 'ai-provider:pix3-bridge:token',
+    getModel: () => undefined,
+    listModels: async () => [],
+    chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+  },
+];
 
 /** In-memory stand-in for SecretStorageService (no IndexedDB in happy-dom). */
 class FakeSecretStorage {
@@ -22,10 +68,9 @@ class FakeSecretStorage {
 /** Build a service with fakes injected in place of the DI-resolved dependencies. */
 const buildService = (secrets = new FakeSecretStorage()): AgentSettingsService => {
   const service = new AgentSettingsService();
-  Object.defineProperty(service, 'registry', {
-    value: new LlmProviderRegistry(),
-    configurable: true,
-  });
+  const registry = new LlmProviderRegistry();
+  registry.setBridgeProviders(bridgeStubs());
+  Object.defineProperty(service, 'registry', { value: registry, configurable: true });
   Object.defineProperty(service, 'secrets', { value: secrets, configurable: true });
   return service;
 };
@@ -136,11 +181,13 @@ describe('AgentSettingsService', () => {
     expect(service.getReasoningEffort('e', 'f')).toBeUndefined();
   });
 
-  it('returns the custom base URL only for the provider that requires one', () => {
+  it('resolves a base URL from the provider default (bridge path) and none for direct Gemini', () => {
     const service = buildService();
-    service.updatePreferences({ customBaseUrl: 'http://localhost:1234/v1' });
-    expect(service.getBaseUrl('openai-compat')).toBe('http://localhost:1234/v1');
-    // Gemini has no default base URL and ignores the custom one.
+    // Bridge-backed providers carry their default base URL (the bridge proxy path); no user override.
+    expect(service.getBaseUrl('openai-compat')).toBe(
+      'http://127.0.0.1:8484/providers/openai-compat'
+    );
+    // Gemini has no base URL — it is called directly.
     expect(service.getBaseUrl('gemini')).toBeUndefined();
   });
 
@@ -158,11 +205,17 @@ describe('AgentSettingsService', () => {
   it('delegates API keys to secret storage keyed by the provider secret id', async () => {
     const secrets = new FakeSecretStorage();
     const service = buildService(secrets);
-    await service.setApiKey('anthropic', 'sk-ant-123');
-    expect(secrets.store.get('ai-provider:anthropic:api-key')).toBe('sk-ant-123');
-    expect(await service.hasApiKey('anthropic')).toBe(true);
-    expect(await service.getApiKey('anthropic')).toBe('sk-ant-123');
-    await service.clearApiKey('anthropic');
-    expect(await service.hasApiKey('anthropic')).toBe(false);
+    // Gemini keeps its own per-provider key (the direct, no-bridge path).
+    await service.setApiKey('gemini', 'gm-123');
+    expect(secrets.store.get('ai-provider:gemini:api-key')).toBe('gm-123');
+    expect(await service.hasApiKey('gemini')).toBe(true);
+    expect(await service.getApiKey('gemini')).toBe('gm-123');
+    await service.clearApiKey('gemini');
+    expect(await service.hasApiKey('gemini')).toBe(false);
+
+    // Bridge-backed providers all resolve to the single shared pairing-token secret.
+    await service.setApiKey('anthropic', 'bridge-token');
+    expect(secrets.store.get('ai-provider:pix3-bridge:token')).toBe('bridge-token');
+    expect(await service.getApiKey('opencode-zen')).toBe('bridge-token');
   });
 });

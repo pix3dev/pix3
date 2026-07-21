@@ -44,9 +44,7 @@ describe('AssetTree', () => {
     expect(rows[0].querySelector('.node-meta')?.textContent?.trim()).toBe('3.0 KB');
 
     // No file (e.g. hero.png) renders as a tree row.
-    const names = Array.from(tree.querySelectorAll('.node-name')).map(el =>
-      el.textContent?.trim()
-    );
+    const names = Array.from(tree.querySelectorAll('.node-name')).map(el => el.textContent?.trim());
     expect(names).not.toContain('hero.png');
   });
 

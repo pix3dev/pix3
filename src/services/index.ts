@@ -150,6 +150,15 @@ export {
   type UpdateCheckListener,
 } from './UpdateCheckService';
 export { LlmProviderRegistry } from './llm/LlmProviderRegistry';
+export { LlmModelCatalogService } from './llm/LlmModelCatalogService';
+export { BridgeConnectionService } from './llm/BridgeConnectionService';
+export {
+  BRIDGE_TOKEN_SECRET_ID,
+  DEFAULT_BRIDGE_URL,
+  createBridgeProvider,
+  type BridgeProviderEntry,
+  type BridgeProviderKind,
+} from './llm/BridgeProviders';
 export {
   LlmError,
   formatPricingHint,

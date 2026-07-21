@@ -13,7 +13,7 @@ export class MenuFlow extends Script {
     super(id, type);
     this.config = {
       // res:// path of the scene PLAY transitions to.
-      gameScene: 'res://src/assets/scenes/main.pix3scene',
+      gameScene: 'res://scenes/main.pix3scene',
       // Node id/name of the settings-window prefab instance to toggle.
       settingsNode: 'settings-window',
       playButton: 'play-button',

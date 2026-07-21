@@ -7,7 +7,7 @@ import {
 } from './LlmTypes';
 
 /**
- * Default endpoint of the local bridge (`tools/claude-bridge`). The bridge binds to 127.0.0.1 and
+ * Default endpoint of the local bridge (`tools/pix3-agent-bridge`). The bridge binds to 127.0.0.1 and
  * serves the Anthropic Messages wire shape, so this provider is a thin identity/auth override on
  * top of {@link AnthropicLlmProvider} — the same pattern as OpenCode Zen's Claude lane. Override
  * the host with `VITE_CLAUDE_BRIDGE_URL` when running the bridge on a non-default port.
@@ -19,7 +19,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * Personal/dev provider: routes the agent through a locally running `pix3-claude-bridge`, which
+ * Personal/dev provider: routes the agent through a locally running `pix3-agent-bridge`, which
  * serves each request from a Claude Agent SDK (Claude Code) session authenticated with the user's
  * own Claude subscription. No Anthropic credentials ever enter the browser — the "API key" here is
  * the bridge's pairing token (printed by the bridge on startup), which only authorizes talking to
@@ -30,9 +30,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * usage draws from the subscription's limits, not a metered key.
  */
 export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
-  override readonly id = 'claude-bridge';
-  override readonly label = 'Claude Code (local bridge)';
-  override readonly apiKeySecretId = 'ai-provider:claude-bridge:api-key';
+  override readonly id: string = 'claude-bridge';
+  override readonly label: string = 'Claude Code (local bridge)';
+  override readonly apiKeySecretId: string = 'ai-provider:claude-bridge:api-key';
   /** The bridge's health page explains where the pairing token comes from. */
   override readonly apiKeyHelpUrl = `${CLAUDE_BRIDGE_BASE_URL.replace(/\/v1\/?$/, '')}/health`;
   // Fixed local endpoint: not user-typed (the shared customBaseUrl pref belongs to openai-compat).
@@ -40,7 +40,7 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
   override readonly defaultBaseUrl = CLAUDE_BRIDGE_BASE_URL;
 
   protected override readonly missingKeyMessage =
-    'No bridge pairing token configured. Start pix3-claude-bridge and paste the token it prints.';
+    'No bridge pairing token configured. Start pix3-agent-bridge and paste the token it prints.';
 
   override readonly models: readonly LlmModel[] = [
     {
@@ -125,7 +125,7 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
     } catch (error) {
       throw new LlmError(
         'network',
-        'Could not reach the local Claude bridge. Is pix3-claude-bridge running?',
+        'Could not reach the local Claude bridge. Is pix3-agent-bridge running?',
         undefined,
         { cause: error }
       );

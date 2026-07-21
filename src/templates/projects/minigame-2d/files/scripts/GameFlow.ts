@@ -3,7 +3,7 @@
  *
  * Attach to the game scene root. Wires the MENU button to transition back to the
  * menu scene via a fade. Extend this with your win/lose flow — call
- * `this.scene.changeScene('res://src/assets/scenes/menu.pix3scene')` on game over
+ * `this.scene.changeScene('res://scenes/menu.pix3scene')` on game over
  * to return to the menu, or transition to a results scene of your own.
  */
 import { Script, type PropertySchema } from '@pix3/runtime';
@@ -13,7 +13,7 @@ export class GameFlow extends Script {
     super(id, type);
     this.config = {
       // res:// path of the scene the MENU button transitions to.
-      menuScene: 'res://src/assets/scenes/menu.pix3scene',
+      menuScene: 'res://scenes/menu.pix3scene',
       // Node id/name of the button that returns to the menu.
       menuButton: 'menu-button',
     };

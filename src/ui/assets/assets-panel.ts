@@ -514,7 +514,9 @@ export class ${singletonName} extends Script {
       return;
     }
     const delta = event.clientX - this.splitterStartX;
-    const maxWidth = this.splitEl ? Math.max(MIN_TREE_PANE_WIDTH, this.splitEl.clientWidth * 0.5) : 400;
+    const maxWidth = this.splitEl
+      ? Math.max(MIN_TREE_PANE_WIDTH, this.splitEl.clientWidth * 0.5)
+      : 400;
     const next = Math.min(maxWidth, Math.max(MIN_TREE_PANE_WIDTH, this.splitterStartWidth + delta));
     this.treePaneWidth = Math.round(next);
   };
@@ -580,7 +582,9 @@ export class ${singletonName} extends Script {
               @dragover=${this.onRootDragOver}
               @drop=${this.onRootDrop}
             >
-              <span class="icon folder">${this.iconService.getIcon('folder-solid', IconSize.MEDIUM)}</span>
+              <span class="icon folder"
+                >${this.iconService.getIcon('folder-solid', IconSize.MEDIUM)}</span
+              >
               <span class="root-label" title=${rootLabel}>${rootLabel}</span>
               <span class="root-actions" @click=${(e: Event) => e.stopPropagation()}>
                 <pix3-dropdown-button

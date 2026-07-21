@@ -22,7 +22,11 @@ vi.mock('./ApiClient', () => mockApiClient);
 
 const { LibrarySyncService } = await import('./LibrarySyncService');
 
-function manifest(id: string, updatedAt: number, files: string[] = ['item.json']): LibraryItemManifest {
+function manifest(
+  id: string,
+  updatedAt: number,
+  files: string[] = ['item.json']
+): LibraryItemManifest {
   return {
     id,
     slug: id,
@@ -91,7 +95,15 @@ describe('LibrarySyncService', () => {
   it('pulls a remote-only item', async () => {
     const { service, library } = createService();
     mockApiClient.getLibraryIndex.mockResolvedValue({
-      items: [{ id: 'a', visibility: 'private', manifest: manifest('a', 100, ['pic.png']), updatedAt: 100, deleted: false }],
+      items: [
+        {
+          id: 'a',
+          visibility: 'private',
+          manifest: manifest('a', 100, ['pic.png']),
+          updatedAt: 100,
+          deleted: false,
+        },
+      ],
     });
     await service.syncNow();
     expect(mockApiClient.downloadLibraryFile).toHaveBeenCalledWith('a', 'pic.png');
@@ -120,7 +132,15 @@ describe('LibrarySyncService', () => {
       files: new Map([['item.json', new Blob(['{}'])]]),
     });
     mockApiClient.getLibraryIndex.mockResolvedValue({
-      items: [{ id: 'a', visibility: 'private', manifest: manifest('a', 100), updatedAt: 100, deleted: false }],
+      items: [
+        {
+          id: 'a',
+          visibility: 'private',
+          manifest: manifest('a', 100),
+          updatedAt: 100,
+          deleted: false,
+        },
+      ],
     });
     await service.syncNow();
     expect(mockApiClient.uploadLibraryItem).toHaveBeenCalledTimes(1);
@@ -131,7 +151,15 @@ describe('LibrarySyncService', () => {
     const { service, library } = createService();
     library.listUserItems.mockResolvedValue([item('a', 100)]);
     mockApiClient.getLibraryIndex.mockResolvedValue({
-      items: [{ id: 'a', visibility: 'private', manifest: manifest('a', 200), updatedAt: 200, deleted: false }],
+      items: [
+        {
+          id: 'a',
+          visibility: 'private',
+          manifest: manifest('a', 200),
+          updatedAt: 200,
+          deleted: false,
+        },
+      ],
     });
     await service.syncNow();
     expect(library.storeUserItemFromCloud).toHaveBeenCalledTimes(1);
@@ -153,7 +181,15 @@ describe('LibrarySyncService', () => {
     const { service, library } = createService();
     library.listUserTombstones.mockResolvedValue([{ id: 'a', deletedAt: 200 }]);
     mockApiClient.getLibraryIndex.mockResolvedValue({
-      items: [{ id: 'a', visibility: 'private', manifest: manifest('a', 100), updatedAt: 100, deleted: false }],
+      items: [
+        {
+          id: 'a',
+          visibility: 'private',
+          manifest: manifest('a', 100),
+          updatedAt: 100,
+          deleted: false,
+        },
+      ],
     });
     await service.syncNow();
     expect(mockApiClient.deleteLibraryItem).toHaveBeenCalledWith('a', 200);

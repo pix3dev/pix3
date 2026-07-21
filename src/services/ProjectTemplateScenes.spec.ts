@@ -21,7 +21,7 @@ import {
  */
 
 const TEMPLATES_ROOT = resolve(process.cwd(), 'src/templates/projects');
-const STARTUP_SCENE = 'files/src/assets/scenes/main.pix3scene';
+const STARTUP_SCENE = 'files/scenes/main.pix3scene';
 
 function listTemplateDirs(): string[] {
   return readdirSync(TEMPLATES_ROOT).filter(entry =>
@@ -130,7 +130,7 @@ describe('bundled project templates', () => {
         const rendered = yaml.replaceAll('{{PROJECT_NAME}}', 'Test Project');
         const loader = createLoader(collectTextureUrls(rendered), join(templateDir, 'files'));
         const graph = await loader.parseScene(rendered, {
-          filePath: 'res://src/assets/scenes/spec.pix3scene',
+          filePath: 'res://scenes/spec.pix3scene',
         });
         expect(graph.rootNodes.length).toBeGreaterThan(0);
       }

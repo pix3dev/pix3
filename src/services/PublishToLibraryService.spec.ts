@@ -27,7 +27,10 @@ function makeStorage(files: Record<string, string | Blob>) {
     },
     async listDirectory(dir: string) {
       const prefix = dir === '.' || dir === '' ? '' : `${dir.replace(/\/$/, '')}/`;
-      const children = new Map<string, { name: string; kind: 'file' | 'directory'; path: string }>();
+      const children = new Map<
+        string,
+        { name: string; kind: 'file' | 'directory'; path: string }
+      >();
       for (const p of paths()) {
         if (prefix && !p.startsWith(prefix)) {
           continue;

@@ -32,7 +32,7 @@ to **reach for them** and wire them correctly, not to reimplement them.
    - Cinematic (letterbox + input-lock + skip) → `scene.cutscene.playCinematic`.
    - Sound, music, mixing → `scene.audio` (buses: master/music/sfx) / `AudioPlayer` / `core:PlaySound`.
    - Store CTA / game end (playables) → `playable.openStore(url)` / `playable.gameEnd()` from `@pix3/runtime`.
-   - Switch scenes (menu → game → results) → `await scene.changeScene('res://src/assets/scenes/main.pix3scene', { transition: 'fade' })`.
+   - Switch scenes (menu → game → results) → `await scene.changeScene('res://scenes/main.pix3scene', { transition: 'fade' })`.
    - Cross-node events → `node.connect('signal', target, handler)` / `node.emit('signal')`.
      Buttons emit `pressed` / `released` / `click`.
    - Fixed-step logic (physics/AI/spawning) → an ECS system.
@@ -45,7 +45,7 @@ to **reach for them** and wire them correctly, not to reimplement them.
        type: Sprite2D            # or instance: res://path/to/prefab.pix3scene
        name: My Node
        properties:
-         texture: { type: 'texture', url: 'res://src/assets/textures/foo.png' }
+         texture: { type: 'texture', url: 'res://sprites/foo.png' }
          width: 128
          height: 128
          transform: { position: [0, 0], scale: [1, 1], rotation: 0 }

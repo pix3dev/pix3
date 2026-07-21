@@ -24,7 +24,7 @@ root:
         type: user:GameFlow
         enabled: true
         config:
-          menuScene: res://src/assets/scenes/menu.pix3scene
+          menuScene: res://scenes/menu.pix3scene
           menuButton: menu-button
     children:
       - id: game-background

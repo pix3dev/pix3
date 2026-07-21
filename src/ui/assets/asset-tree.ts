@@ -1100,9 +1100,11 @@ export class AssetTree extends ComponentBase {
     const metaLabel = isCategory ? null : this.getNodeMetaLabel(node);
     // Only directories with subdirectories are expandable in the folders-only tree.
     // Folder mode: `hasChildDirectories` (computed at build). Grouped mode: derived
-    // from `children`. Categories are always expandable containers.
+    // from `children`. A category is expandable only when it has child rows — a
+    // category that compacted a lone folder holding just files (shown in the content
+    // grid, not the tree) has no subfolders, so it gets no expand arrow.
     const isExpandable = isCategory
-      ? true
+      ? (node.children?.length ?? 0) > 0
       : node.kind === 'directory' &&
         (node.hasChildDirectories ?? ((node.children?.length ?? 0) > 0 || node.children === null));
     const nameContent =

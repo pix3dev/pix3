@@ -79,7 +79,8 @@ function makeService(bundle: LibraryBundle, existing: Record<string, string> = {
 }
 
 const ENEMY_SCENE = 'root:\n  - type: Sprite2D\n    texture: res://assets/sprites/e.png\n';
-const ENEMY_SCRIPT = "export class Enemy extends Script {\n  a() { return 'res://assets/sfx/x.mp3'; }\n}\n";
+const ENEMY_SCRIPT =
+  "export class Enemy extends Script {\n  a() { return 'res://assets/sfx/x.mp3'; }\n}\n";
 
 describe('LibraryInsertService — bucket partition', () => {
   it('namespaces scene files (remapped) and restores original-path scripts verbatim', async () => {

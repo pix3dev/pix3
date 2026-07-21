@@ -8,6 +8,8 @@ import {
 import { AgentSettingsService } from '@/services/AgentSettingsService';
 import { IconService, IconSize } from '@/services/IconService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { EditorSettingsService } from '@/services/EditorSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
   formatPricingHint,
@@ -524,6 +526,12 @@ export class AgentChatPanel extends ComponentBase {
   @inject(LlmModelCatalogService)
   private readonly modelCatalog!: LlmModelCatalogService;
 
+  @inject(BridgeConnectionService)
+  private readonly bridge!: BridgeConnectionService;
+
+  @inject(EditorSettingsService)
+  private readonly editorSettings!: EditorSettingsService;
+
   @inject(IconService)
   private readonly icons!: IconService;
 
@@ -574,6 +582,7 @@ export class AgentChatPanel extends ComponentBase {
   private disposeSettingsSubscription?: () => void;
   private disposeComposeSubscription?: () => void;
   private disposeCatalogSubscription?: () => void;
+  private disposeBridgeSubscription?: () => void;
   private readonly messagesRef = createRef<HTMLDivElement>();
   private readonly fileInputRef = createRef<HTMLInputElement>();
   private shouldStickToBottom = true;
@@ -611,6 +620,10 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeCatalogSubscription = this.modelCatalog.subscribe(() => {
       this.requestUpdate();
     });
+    // Re-render when the bridge connects/disconnects so its providers appear/disappear in the picker.
+    this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      this.requestUpdate();
+    });
 
     void this.chat.ensureLoaded();
   }
@@ -624,6 +637,8 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeSettingsSubscription = undefined;
     this.disposeCatalogSubscription?.();
     this.disposeCatalogSubscription = undefined;
+    this.disposeBridgeSubscription?.();
+    this.disposeBridgeSubscription = undefined;
     this.closeModelPicker();
     this.closeReasoningPicker();
     super.disconnectedCallback();
@@ -955,7 +970,11 @@ export class AgentChatPanel extends ComponentBase {
       <div class="agent-reasoning-popover" role="listbox">
         ${this.renderReasoningRow(undefined, 'Auto', "The model's default effort")}
         ${efforts.map(effort =>
-          this.renderReasoningRow(effort, REASONING_EFFORT_LABELS[effort], reasoningEffortHint(effort))
+          this.renderReasoningRow(
+            effort,
+            REASONING_EFFORT_LABELS[effort],
+            reasoningEffortHint(effort)
+          )
         )}
       </div>
     `;
@@ -1023,10 +1042,32 @@ export class AgentChatPanel extends ComponentBase {
           ${groups.length === 0
             ? html`<div class="agent-mp-empty">No models match “${this.modelPickerQuery}”.</div>`
             : groups.map(g => this.renderModelPickerGroup(g.provider, g.models))}
+          ${!this.bridge.isAvailable() && this.modelPickerQuery.trim() === ''
+            ? html`<button
+                type="button"
+                class="agent-mp-bridge-cta"
+                @click=${this.onOpenBridgeSetup}
+              >
+                <span class="agent-mp-bridge-cta-icon"
+                  >${this.icons.getIcon('zap', IconSize.SMALL)}</span
+                >
+                <span>
+                  <strong>Add OpenAI, Anthropic, Zen &amp; more</strong>
+                  <span class="agent-mp-bridge-cta-sub"
+                    >Run Pix3AgentBridge to unlock advanced providers — click to set up</span
+                  >
+                </span>
+              </button>`
+            : null}
         </div>
       </div>
     `;
   }
+
+  private onOpenBridgeSetup = (): void => {
+    this.closeModelPicker();
+    void this.editorSettings.showSettings('agent');
+  };
 
   private renderModelPickerGroup(provider: LlmProvider, models: readonly LlmModel[]) {
     const hasKey = this.providerKeys[provider.id] ?? false;

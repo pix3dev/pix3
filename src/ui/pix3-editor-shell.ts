@@ -1250,9 +1250,7 @@ export class Pix3EditorShell extends ComponentBase {
 
   private renderProjectNameLabel() {
     return html`
-      <span class="project-name-label"
-        >${appState.project.projectName ?? 'No project open'}</span
-      >
+      <span class="project-name-label">${appState.project.projectName ?? 'No project open'}</span>
     `;
   }
 

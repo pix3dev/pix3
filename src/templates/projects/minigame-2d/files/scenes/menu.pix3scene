@@ -24,7 +24,7 @@ root:
         type: user:MenuFlow
         enabled: true
         config:
-          gameScene: res://src/assets/scenes/main.pix3scene
+          gameScene: res://scenes/main.pix3scene
           settingsNode: settings-window
           playButton: play-button
           settingsButton: settings-button
@@ -108,4 +108,4 @@ root:
         children: []
       - id: settings-window
         name: Settings Window
-        instance: res://src/assets/scenes/settings-window.pix3scene
+        instance: res://scenes/settings-window.pix3scene
