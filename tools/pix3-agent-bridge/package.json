@@ -1,12 +1,14 @@
 {
   "name": "@pix3/agent-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local bridge for the Pix3 editor's in-editor agent: a Claude Agent SDK (Pro/MAX subscription) lane plus a credential-injecting proxy for OpenAI / Anthropic / OpenCode Zen / custom OpenAI-compatible providers. Keys stay on your machine.",
   "type": "module",
   "bin": {
-    "pix3-agent-bridge": "src/index.ts"
+    "pix3-agent-bridge": "dist/index.js"
   },
+  "main": "dist/index.js",
   "files": [
+    "dist",
     "src",
     "tsconfig.json",
     "README.md"
@@ -15,8 +17,10 @@
     "node": ">=24"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "start": "node src/index.ts",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "pix3",

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    // src imports use explicit `.ts` extensions; rewrite them to `.js` in the emit
+    // so the compiled output resolves at runtime (also lifts the allowImportingTsExtensions
+    // "noEmit-only" restriction).
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": true,
+    "declaration": false
+  }
+}

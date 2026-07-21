@@ -70,6 +70,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
         run: npm install -g npm@latest
+      - name: Install deps
+        working-directory: tools/pix3-agent-bridge
+        run: npm ci
+      - name: Build
+        working-directory: tools/pix3-agent-bridge
+        run: npm run build
       - name: Publish
         working-directory: tools/pix3-agent-bridge
         run: npm publish --access public
