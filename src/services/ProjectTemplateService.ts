@@ -28,14 +28,17 @@ const TEMPLATE_META_MODULES = import.meta.glob('../templates/projects/*/template
   eager: true,
 }) as Record<string, string>;
 
+// Lazy (not eager): template file CONTENTS are only needed at project-creation
+// time (`ProjectService.createProjectStructure`), never for the template
+// picker list — eagerly bundling every template's every file into the main
+// chunk cost ~85 KB for a feature most sessions never touch.
 const TEMPLATE_TEXT_MODULES = import.meta.glob(
   '../templates/projects/*/files/**/*.{pix3scene,ts,md,yaml,yml,json,txt}',
   {
     query: '?raw',
     import: 'default',
-    eager: true,
   }
-) as Record<string, string>;
+) as Record<string, () => Promise<string>>;
 
 const TEMPLATE_BINARY_MODULES = import.meta.glob(
   '../templates/projects/*/files/**/*.{png,jpg,jpeg,webp,glb,gltf,mp3,ogg,wav}',
@@ -58,11 +61,11 @@ const TEMPLATE_COVER_MODULES = import.meta.glob('../templates/projects/*/cover.p
  * `src/templates/agent/` — glob patterns cannot match dot-directories, so the
  * skills tree is stored as `agent/skills/**` and remapped to `.claude/skills/**`.
  */
+// Lazy: only read at project-creation time via `getAgentOverlayFiles()`.
 const AGENT_OVERLAY_MODULES = import.meta.glob('../templates/agent/**/*.{md,json}', {
   query: '?raw',
   import: 'default',
-  eager: true,
-}) as Record<string, string>;
+}) as Record<string, () => Promise<string>>;
 
 /**
  * Same dot-file limitation as the skills tree: the project .gitignore is
@@ -74,18 +77,19 @@ const AGENT_OVERLAY_MODULES = import.meta.glob('../templates/agent/**/*.{md,json
 const AGENT_GITIGNORE_MODULES = import.meta.glob('../templates/agent/gitignore*', {
   query: '?raw',
   import: 'default',
-  eager: true,
-}) as Record<string, string>;
+}) as Record<string, () => Promise<string>>;
 
-/** Engine capability docs bundled into projects so agents can work offline. */
+/**
+ * Engine capability docs bundled into projects so agents can work offline.
+ * Lazy: these are ~65 KB of markdown only needed at project-creation time.
+ */
 const AGENT_DOC_REFERENCE_MODULES = import.meta.glob(
   '../../docs/{nodes-and-systems,node-types-reference}.md',
   {
     query: '?raw',
     import: 'default',
-    eager: true,
   }
-) as Record<string, string>;
+) as Record<string, () => Promise<string>>;
 
 const AGENT_OVERLAY_MARKER = '/templates/agent/';
 const AGENT_SKILLS_PREFIX = 'skills/';
@@ -110,8 +114,6 @@ export interface ProjectTemplate {
   readonly entryScenePath?: string;
   /** Extra empty directories to create (bundles cannot carry empty folders). */
   readonly directories: readonly string[];
-  /** Project-relative path → file contents. */
-  readonly textFiles: ReadonlyMap<string, string>;
   /** Project-relative path → bundled asset URL (fetched at copy time). */
   readonly binaryFiles: ReadonlyMap<string, string>;
 }
@@ -140,6 +142,11 @@ const asPositiveInt = (value: unknown, fallback: number): number => {
 @injectable()
 export class ProjectTemplateService {
   private templates: ProjectTemplate[] | null = null;
+  private readonly templateTextFilesCache = new Map<
+    string,
+    Promise<ReadonlyMap<string, string>>
+  >();
+  private agentOverlayFilesPromise: Promise<ReadonlyMap<string, string>> | null = null;
 
   getTemplates(): readonly ProjectTemplate[] {
     if (!this.templates) {
@@ -162,8 +169,36 @@ export class ProjectTemplateService {
     return fallback;
   }
 
+  /**
+   * Project-relative path → file contents for a template's `files/**` tree.
+   * Lazy-loaded and cached per template id — only needed when the template is
+   * actually applied to a new project, not when listing templates.
+   */
+  async getTemplateTextFiles(id: string): Promise<ReadonlyMap<string, string>> {
+    let cached = this.templateTextFilesCache.get(id);
+    if (!cached) {
+      cached = this.loadTemplateTextFiles(id);
+      this.templateTextFilesCache.set(id, cached);
+    }
+    return cached;
+  }
+
+  private async loadTemplateTextFiles(id: string): Promise<ReadonlyMap<string, string>> {
+    const files = new Map<string, string>();
+    for (const [modulePath, loader] of Object.entries(TEMPLATE_TEXT_MODULES)) {
+      if (extractTemplateId(modulePath) !== id) {
+        continue;
+      }
+      const relativePath = extractProjectRelativePath(modulePath);
+      if (!relativePath) {
+        continue;
+      }
+      files.set(relativePath, await loader());
+    }
+    return files;
+  }
+
   private buildTemplates(): ProjectTemplate[] {
-    const textByTemplate = this.groupFilesByTemplate(TEMPLATE_TEXT_MODULES);
     const binaryByTemplate = this.groupFilesByTemplate(TEMPLATE_BINARY_MODULES);
     const coversByTemplate = new Map<string, string>();
     for (const [modulePath, url] of Object.entries(TEMPLATE_COVER_MODULES)) {
@@ -220,7 +255,6 @@ export class ProjectTemplateService {
         order: asPositiveInt(meta.order, 1000),
         entryScenePath,
         directories,
-        textFiles: textByTemplate.get(id) ?? new Map(),
         binaryFiles: binaryByTemplate.get(id) ?? new Map(),
       });
     }
@@ -232,11 +266,19 @@ export class ProjectTemplateService {
   /**
    * Project-relative path → contents for the agent overlay written into every
    * new project (AGENTS.md, CLAUDE.md, design/README.md, .claude/skills/**).
+   * Lazy-loaded and cached — only needed at project-creation time.
    */
-  getAgentOverlayFiles(): ReadonlyMap<string, string> {
+  async getAgentOverlayFiles(): Promise<ReadonlyMap<string, string>> {
+    if (!this.agentOverlayFilesPromise) {
+      this.agentOverlayFilesPromise = this.loadAgentOverlayFiles();
+    }
+    return this.agentOverlayFilesPromise;
+  }
+
+  private async loadAgentOverlayFiles(): Promise<ReadonlyMap<string, string>> {
     const files = new Map<string, string>();
 
-    for (const [modulePath, contents] of Object.entries(AGENT_OVERLAY_MODULES)) {
+    for (const [modulePath, loader] of Object.entries(AGENT_OVERLAY_MODULES)) {
       const markerIndex = modulePath.indexOf(AGENT_OVERLAY_MARKER);
       if (markerIndex < 0) {
         continue;
@@ -245,16 +287,16 @@ export class ProjectTemplateService {
       const targetPath = relativePath.startsWith(AGENT_SKILLS_PREFIX)
         ? AGENT_SKILLS_TARGET_PREFIX + relativePath.slice(AGENT_SKILLS_PREFIX.length)
         : relativePath;
-      files.set(targetPath, contents);
+      files.set(targetPath, await loader());
     }
 
-    for (const [modulePath, contents] of Object.entries(AGENT_DOC_REFERENCE_MODULES)) {
+    for (const [modulePath, loader] of Object.entries(AGENT_DOC_REFERENCE_MODULES)) {
       const fileName = modulePath.slice(modulePath.lastIndexOf('/') + 1);
-      files.set(AGENT_DOC_REFERENCES_TARGET + fileName, contents);
+      files.set(AGENT_DOC_REFERENCES_TARGET + fileName, await loader());
     }
 
-    for (const contents of Object.values(AGENT_GITIGNORE_MODULES)) {
-      files.set('.gitignore', contents);
+    for (const loader of Object.values(AGENT_GITIGNORE_MODULES)) {
+      files.set('.gitignore', await loader());
     }
 
     return files;
