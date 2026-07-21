@@ -9,6 +9,7 @@ import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
+import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
 
 interface CommandMeta {
   metadata: { id: string; title: string; menuPath?: string };
@@ -63,6 +64,7 @@ describe('AgentToolRegistry', () => {
         'find_nodes',
         'get_selection',
         'set_property',
+        'move_node',
         'list_component_types',
         'add_component',
         'set_component_property',
@@ -798,6 +800,7 @@ describe('AgentToolRegistry', () => {
       expect(await registry.execute('fs_read', { path: 'scripts/a.ts' })).toEqual({
         path: 'scripts/a.ts',
         content: 'export const x = 1;',
+        totalLines: 1,
       });
       expect(await registry.execute('fs_read', { path: 'art/icon.png' })).toEqual({
         path: 'art/icon.png',
@@ -807,11 +810,136 @@ describe('AgentToolRegistry', () => {
       });
     });
 
+    it('fs_read returns a line range with offset/limit', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/big.ts', 'l1\nl2\nl3\nl4\nl5');
+      const registry = buildRegistry({ storage });
+      expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 2, limit: 2 })).toEqual(
+        {
+          path: 'scripts/big.ts',
+          content: 'l2\nl3',
+          totalLines: 5,
+          startLine: 2,
+          endLine: 3,
+          hasMore: true,
+        }
+      );
+      // Reading to the end reports hasMore:false.
+      expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 4 })).toEqual({
+        path: 'scripts/big.ts',
+        content: 'l4\nl5',
+        totalLines: 5,
+        startLine: 4,
+        endLine: 5,
+        hasMore: false,
+      });
+    });
+
     it('fs_list maps directory entries', async () => {
       const registry = buildRegistry({ storage: makeStorage() });
       expect(await registry.execute('fs_list', { path: 'scenes' })).toEqual([
         { name: 'main.pix3scene', kind: 'file', path: 'scenes/main.pix3scene', size: 42 },
       ]);
+    });
+  });
+
+  describe('move_node', () => {
+    /** Parent "P" with children [A, Effects(n1), B]; n1 is the node under test. */
+    const makeReorderScene = () => {
+      const a = makeNode({ nodeId: 'a', name: 'A' });
+      const b = makeNode({ nodeId: 'b', name: 'B' });
+      const n1 = makeNode({ nodeId: 'n1', name: 'Effects' });
+      const p = makeNode({ nodeId: 'P', name: 'Parent', children: [a, n1, b] });
+      // parentNode is a getter-only on NodeBase.prototype — shadow it with an own data property.
+      Object.defineProperty(n1, 'parentNode', { value: p, configurable: true });
+      const graph = {
+        rootNodes: [p],
+        nodeMap: new Map([
+          ['a', a],
+          ['b', b],
+          ['n1', n1],
+          ['P', p],
+        ]),
+      };
+      return { graph, sceneManager: { getActiveSceneGraph: () => graph } };
+    };
+
+    /** Read the private params off the dispatched ReparentNodeCommand. */
+    const reparentParams = (cmd: unknown) =>
+      (cmd as unknown as { params: { newParentId: string | null; newIndex: number } }).params;
+
+    const run = async (args: Record<string, unknown>) => {
+      appState.project.status = 'ready';
+      const { sceneManager } = makeReorderScene();
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const registry = buildRegistry({ dispatcher, sceneManager });
+      const result = (await registry.execute('move_node', args)) as Record<string, unknown>;
+      return { result, dispatcher };
+    };
+
+    it('placement:"front" reorders to the last index among siblings (on top for 2D)', async () => {
+      const { result, dispatcher } = await run({ nodeId: 'n1', placement: 'front' });
+      expect(result.ok).toBe(true);
+      const cmd = dispatcher.execute.mock.calls[0][0];
+      expect(cmd).toBeInstanceOf(ReparentNodeCommand);
+      // Siblings excluding n1 are [A, B] → front = index 2, parent unchanged.
+      expect(reparentParams(cmd)).toMatchObject({ newParentId: 'P', newIndex: 2 });
+    });
+
+    it('placement:"back" reorders to index 0 (behind for 2D)', async () => {
+      const { dispatcher } = await run({ nodeId: 'n1', placement: 'back' });
+      expect(reparentParams(dispatcher.execute.mock.calls[0][0])).toMatchObject({
+        newParentId: 'P',
+        newIndex: 0,
+      });
+    });
+
+    it('afterSiblingId places the node just after that sibling', async () => {
+      const { dispatcher } = await run({ nodeId: 'n1', afterSiblingId: 'a' });
+      // siblings [A, B]; after A → index 1.
+      expect(reparentParams(dispatcher.execute.mock.calls[0][0])).toMatchObject({
+        newParentId: 'P',
+        newIndex: 1,
+      });
+    });
+
+    it('beforeSiblingId places the node just before that sibling', async () => {
+      const { dispatcher } = await run({ nodeId: 'n1', beforeSiblingId: 'b' });
+      // siblings [A, B]; before B → index 1.
+      expect(reparentParams(dispatcher.execute.mock.calls[0][0])).toMatchObject({
+        newParentId: 'P',
+        newIndex: 1,
+      });
+    });
+
+    it('an explicit index is clamped to the sibling count', async () => {
+      const { dispatcher } = await run({ nodeId: 'n1', index: 99 });
+      expect(reparentParams(dispatcher.execute.mock.calls[0][0])).toMatchObject({
+        newParentId: 'P',
+        newIndex: 2,
+      });
+    });
+
+    it('toRoot moves the node to the scene root', async () => {
+      const { dispatcher } = await run({ nodeId: 'n1', toRoot: true });
+      // Root siblings excluding n1 are [P] → append at index 1.
+      expect(reparentParams(dispatcher.execute.mock.calls[0][0])).toMatchObject({
+        newParentId: null,
+        newIndex: 1,
+      });
+    });
+
+    it('errors on an unknown afterSiblingId without dispatching', async () => {
+      const { result, dispatcher } = await run({ nodeId: 'n1', afterSiblingId: 'ghost' });
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/afterSiblingId/);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('errors when the node does not exist', async () => {
+      const { result, dispatcher } = await run({ nodeId: 'nope', placement: 'front' });
+      expect(result.ok).toBe(false);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
     });
   });
 

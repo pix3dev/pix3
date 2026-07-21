@@ -46,6 +46,7 @@ import {
   type CreateNodeOptions,
 } from '@/services/agent/create-node-registry';
 import { ConvertNodeTypeCommand } from '@/features/scene/ConvertNodeTypeCommand';
+import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
@@ -418,6 +419,48 @@ export class AgentToolRegistry {
         handler: args => this.convertNodeType(args),
       },
       {
+        name: 'move_node',
+        description:
+          'Move a node to a new parent AND/OR change its order among its siblings (undoable). This is the correct, gateway-safe way to fix draw order — NEVER hand-edit the .pix3scene to reorder nodes. For 2D nodes, paint order follows sibling order: a LATER sibling draws ON TOP (Godot-like). So to put an effects layer above enemies, move it AFTER them (placement:"front" or afterSiblingId). To reparent, pass parentId (or toRoot:true for the top level); omit both to reorder within the current parent. Choose ONE ordering input: placement ("front"=on top/last, "back"=behind/first), beforeSiblingId, afterSiblingId, or an explicit 0-based index (0=behind, last=on top); omit all to append (on top). Returns the resulting siblingOrder so you can verify without another call.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeId: { type: 'string', description: 'Node to move/reorder.' },
+            parentId: {
+              type: 'string',
+              description:
+                'New parent node id. Omit to keep the current parent (pure reorder). Ignored when toRoot is true.',
+            },
+            toRoot: {
+              type: 'boolean',
+              description: 'Move the node to the scene root (top level) instead of a parent node.',
+            },
+            index: {
+              type: 'integer',
+              description:
+                "0-based position among the target parent's children after the move. 0 = first (drawn behind, for 2D); the last index = on top. Omit to append (on top).",
+            },
+            beforeSiblingId: {
+              type: 'string',
+              description: 'Place immediately before this sibling (drawn just behind it, for 2D).',
+            },
+            afterSiblingId: {
+              type: 'string',
+              description: 'Place immediately after this sibling (drawn just on top of it, for 2D).',
+            },
+            placement: {
+              type: 'string',
+              enum: ['front', 'back'],
+              description:
+                'Shortcut: "front" = on top (last child), "back" = behind (first child).',
+            },
+          },
+          required: ['nodeId'],
+          additionalProperties: false,
+        },
+        handler: args => this.moveNode(args),
+      },
+      {
         name: 'list_component_types',
         description:
           'List every script/behaviour component type that can be attached to a node: built-ins ("core:*", e.g. core:Rotate) and this project\'s user scripts ("user:*"). Each entry includes its configurable properties (name + type). Call this before add_component so you use a real type id and valid config keys.',
@@ -527,14 +570,29 @@ export class AgentToolRegistry {
       {
         name: 'fs_read',
         description:
-          'Read a project file. Text files return their content; binary files return metadata (size, mimeType) only.',
+          'Read a project file. Text files return their content plus `totalLines`; binary files return metadata (size, mimeType) only. For LARGE files (e.g. a big .pix3scene) read a RANGE with `offset` (1-based start line) and `limit` (line count) — the result then also reports `startLine`, `endLine` and `hasMore`. Reading an exact range is the reliable way to copy text verbatim for a str_replace edit on a big file (a full read may be truncated in transit).',
         inputSchema: {
           type: 'object',
-          properties: { path: { type: 'string' } },
+          properties: {
+            path: { type: 'string' },
+            offset: {
+              type: 'integer',
+              description: '1-based line to start reading from. Omit to read from the beginning.',
+            },
+            limit: {
+              type: 'integer',
+              description: 'Maximum number of lines to return from `offset`. Omit to read to the end.',
+            },
+          },
           required: ['path'],
           additionalProperties: false,
         },
-        handler: args => this.fsRead(asString(args.path)),
+        handler: args =>
+          this.fsRead(
+            asString(args.path),
+            args.offset === undefined ? undefined : asInt(args.offset, 1),
+            args.limit === undefined ? undefined : asInt(args.limit, 0)
+          ),
       },
       {
         name: 'fs_write',
@@ -1186,6 +1244,116 @@ export class AgentToolRegistry {
   }
 
   /**
+   * Move a node to a new parent and/or change its sibling order (z-order for 2D), via the
+   * ReparentNodeCommand gateway so it is undoable. The insertion index is computed against the
+   * target parent's children EXCLUDING the moved node — matching ReparentNodeOperation, which
+   * detaches the node before splicing it back in (so index 0 = first/behind, siblings.length =
+   * last/on-top for 2D paint order).
+   */
+  private async moveNode(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot move a node.' };
+    }
+    await this.ensureActiveScene();
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) {
+      return { ok: false, error: 'No active scene — open a scene first.' };
+    }
+    const nodeId = asString(args.nodeId);
+    const node = graph.nodeMap.get(nodeId);
+    if (!(node instanceof NodeBase)) {
+      return { ok: false, error: `Node "${nodeId}" not found in the active scene.` };
+    }
+
+    const currentParentId = node.parentNode instanceof NodeBase ? node.parentNode.nodeId : null;
+
+    // Resolve the target parent: toRoot wins, then an explicit parentId, else keep the current one.
+    let targetParentId: string | null;
+    if (args.toRoot === true) {
+      targetParentId = null;
+    } else if (typeof args.parentId === 'string' && args.parentId.length > 0) {
+      targetParentId = args.parentId;
+      const parent = graph.nodeMap.get(targetParentId);
+      if (!(parent instanceof NodeBase)) {
+        return { ok: false, error: `Parent "${targetParentId}" not found in the active scene.` };
+      }
+    } else {
+      targetParentId = currentParentId;
+    }
+
+    // Siblings of the target parent, EXCLUDING the node itself (the index space the operation uses).
+    const targetChildrenRaw =
+      targetParentId === null
+        ? graph.rootNodes
+        : (graph.nodeMap.get(targetParentId) as NodeBase).children;
+    const siblings = targetChildrenRaw.filter(
+      (child): child is NodeBase => child instanceof NodeBase && child.nodeId !== nodeId
+    );
+
+    // Resolve the insertion position. 0 = behind/first, siblings.length = on-top/last (2D order).
+    const placement = typeof args.placement === 'string' ? args.placement : undefined;
+    const beforeId = typeof args.beforeSiblingId === 'string' ? args.beforeSiblingId : undefined;
+    const afterId = typeof args.afterSiblingId === 'string' ? args.afterSiblingId : undefined;
+    let index: number;
+    if (beforeId !== undefined) {
+      const at = siblings.findIndex(s => s.nodeId === beforeId);
+      if (at === -1) {
+        return {
+          ok: false,
+          error: `beforeSiblingId "${beforeId}" is not a child of the target parent.`,
+        };
+      }
+      index = at;
+    } else if (afterId !== undefined) {
+      const at = siblings.findIndex(s => s.nodeId === afterId);
+      if (at === -1) {
+        return {
+          ok: false,
+          error: `afterSiblingId "${afterId}" is not a child of the target parent.`,
+        };
+      }
+      index = at + 1;
+    } else if (placement === 'back') {
+      index = 0;
+    } else if (placement === 'front') {
+      index = siblings.length;
+    } else if (args.index !== undefined) {
+      index = Math.max(0, Math.min(asInt(args.index, siblings.length), siblings.length));
+    } else {
+      index = siblings.length; // default: append = on top for 2D
+    }
+
+    const didMutate = await this.dispatcher.execute(
+      new ReparentNodeCommand({ nodeId, newParentId: targetParentId, newIndex: index })
+    );
+    if (!didMutate) {
+      return {
+        ok: false,
+        error:
+          'The move did not apply — the target is invalid (e.g. moving a node into its own descendant, or a parent that cannot accept this node type).',
+      };
+    }
+    await this.saveActiveSceneBestEffort();
+
+    // Report the resulting order so the caller can verify z-order without another round-trip.
+    const freshGraph = this.sceneManager.getActiveSceneGraph();
+    const finalChildren =
+      (targetParentId === null
+        ? freshGraph?.rootNodes
+        : (freshGraph?.nodeMap.get(targetParentId) as NodeBase | undefined)?.children) ?? [];
+    const siblingOrder = finalChildren
+      .filter((c): c is NodeBase => c instanceof NodeBase)
+      .map(c => ({ nodeId: c.nodeId, name: c.name }));
+    return {
+      ok: true,
+      nodeId,
+      parentId: targetParentId,
+      index: siblingOrder.findIndex(o => o.nodeId === nodeId),
+      siblingOrder,
+    };
+  }
+
+  /**
    * Coerce/validate an agent-supplied property value against the node's schema. Only vector types
    * are touched (the observed silent-no-op class): an array of the right arity is coerced to the
    * {x,y[,z[,w]]} object the setter expects, an already-valid object passes through, and any other
@@ -1422,15 +1590,44 @@ export class AgentToolRegistry {
   }
 
   private async fsRead(
-    path: string
+    path: string,
+    offset?: number,
+    limit?: number
   ): Promise<
-    | { path: string; content: string }
+    | { path: string; content: string; totalLines: number }
+    | {
+        path: string;
+        content: string;
+        totalLines: number;
+        startLine: number;
+        endLine: number;
+        hasMore: boolean;
+      }
     | { path: string; binary: true; mimeType: string; size: number }
   > {
     const safe = this.safePath(path);
     if (isTextPath(safe)) {
       const content = await this.storage.readTextFile(safe);
-      return { path: safe, content };
+      // Splitting on '\n' and re-joining keeps any '\r' with its line, so a returned range is a
+      // byte-exact substring of the file — safe to copy verbatim into a str_replace old_string.
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+      if (offset === undefined && limit === undefined) {
+        return { path: safe, content, totalLines };
+      }
+      const startLine = Math.min(Math.max(1, offset ?? 1), totalLines);
+      const startIdx = startLine - 1;
+      const count = limit !== undefined && limit > 0 ? limit : totalLines - startIdx;
+      const slice = lines.slice(startIdx, startIdx + count);
+      const endLine = startIdx + slice.length;
+      return {
+        path: safe,
+        content: slice.join('\n'),
+        totalLines,
+        startLine,
+        endLine,
+        hasMore: endLine < totalLines,
+      };
     }
     const blob = await this.storage.readBlob(safe);
     return {

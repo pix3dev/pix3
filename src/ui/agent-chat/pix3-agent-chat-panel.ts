@@ -361,6 +361,18 @@ const describeToolCall = (call: LlmToolUseBlock): string => {
       const to = asArgString(input.toType);
       return node && to ? `${node} → ${to}` : (to ?? node ?? '');
     }
+    case 'move_node': {
+      const node = asArgString(input.nodeId) ?? '';
+      const before = asArgString(input.beforeSiblingId);
+      const after = asArgString(input.afterSiblingId);
+      const parent = asArgString(input.parentId);
+      let where = asArgString(input.placement) ?? '';
+      if (!where && before) where = `before ${before}`;
+      if (!where && after) where = `after ${after}`;
+      if (!where && input.toRoot === true) where = 'to root';
+      if (!where && parent) where = `→ ${parent}`;
+      return where ? `${node} · ${where}` : node;
+    }
     case 'add_component':
     case 'remove_component':
       return asArgString(input.componentType) ?? asArgString(input.componentId) ?? '';
@@ -428,7 +440,7 @@ const toolCategory = (name: string): ToolCategory => {
   if (/^(str_replace|fs_write|fs_delete)$/.test(name)) return 'edit-file';
   if (/^(find_nodes|node_inspect)$/.test(name)) return 'inspect';
   if (
-    /^(create_node|convert_node_type|add_component|remove_component|set_property|set_component_property)$/.test(
+    /^(create_node|convert_node_type|move_node|add_component|remove_component|set_property|set_component_property)$/.test(
       name
     )
   ) {
