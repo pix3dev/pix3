@@ -258,7 +258,7 @@ root:
                   width: 210
                   height: 55
                   initiallyVisible: false
-                  visible: false
+                  visible: true
                   transform:
                     position: [-215, -0.5]
                     scale: [1, 1]
@@ -510,7 +510,7 @@ root:
                   height: 36
                   initiallyVisible: false
                   transform:
-                    position: [-124, 26]
+                    position: [-238.52845766210035, 5.981126287363117]
                     scale: [1, 1]
                     rotation: 0
                 components:
@@ -534,21 +534,7 @@ root:
                       width: 9
                       height: 27
                       transform:
-                        position: [0, -10]
-                        scale: [1.4, 1.4]
-                        rotation: 0
-                    children: []
-                  - id: turret-tr1-barrel
-                    type: Sprite2D
-                    name: Turret Barrel
-                    properties:
-                      texture:
-                        type: texture
-                        url: res://src/assets/textures/castle/castle_gun.png
-                      width: 24
-                      height: 9
-                      transform:
-                        position: [0, 5]
+                        position: [-0.98787872295037, -10.987883245127918]
                         scale: [1.4, 1.4]
                         rotation: 0
                     children: []
@@ -563,9 +549,26 @@ root:
                       height: 7
                       initiallyVisible: false
                       transform:
-                        position: [0, 0]
+                        position: [5.36, -10.570368359361026]
                         scale: [1, 1]
+                        rotation: -0
+                    children: []
+                  - id: turret-tr1-barrel
+                    type: Sprite2D
+                    name: Turret Barrel
+                    properties:
+                      texture:
+                        type: texture
+                        url: res://src/assets/textures/castle/castle_gun.png
+                      width: 24
+                      height: 9
+                      transform:
+                        position: [4.53, -11.497672352306047]
+                        scale: [1.4, 1.4]
                         rotation: 0
+                      anchor:
+                        - 0.22
+                        - 0.5
                     children: []
               - id: turret-tr2
                 type: Group2D
@@ -707,7 +710,6 @@ root:
                 position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
-            children: []
           - id: enemies
             type: Group2D
             name: Enemies
@@ -718,7 +720,6 @@ root:
                 position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
-            children: []
           - id: cannonballs
             type: Group2D
             name: Cannonballs
@@ -850,26 +851,6 @@ root:
                     scale: [1, 1]
                     rotation: 0
                 children: []
-          - id: enemies
-            type: Group2D
-            name: Enemies
-            properties:
-              width: 854
-              height: 480
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-          - id: effects
-            type: Group2D
-            name: Effects
-            properties:
-              width: 854
-              height: 480
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
           - id: clouds-front
             type: Group2D
             name: Clouds Front

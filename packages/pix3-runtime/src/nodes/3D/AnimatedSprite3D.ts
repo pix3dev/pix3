@@ -14,6 +14,8 @@ export interface AnimatedSprite3DProps extends Omit<Node3DProps, 'type'> {
   fps?: number;
   playing?: boolean;
   loop?: boolean;
+  /** Free the node (`queueFree`) when a non-looping sequence finishes. */
+  freeOnFinish?: boolean;
   billboard?: boolean;
 }
 
@@ -25,8 +27,9 @@ export class AnimatedSprite3D extends Node3D {
   fps: number;
   playing: boolean;
   loop: boolean;
+  freeOnFinish: boolean;
   billboard: boolean;
-  
+
   private _currentFrame: number = 0;
   private timeAccumulator: number = 0;
 
@@ -48,6 +51,7 @@ export class AnimatedSprite3D extends Node3D {
     this.fps = props.fps ?? 10;
     this.playing = props.playing ?? true;
     this.loop = props.loop ?? true;
+    this.freeOnFinish = props.freeOnFinish ?? false;
     this.billboard = props.billboard ?? true;
 
     this.geometry = new PlaneGeometry(this.width, this.height);
@@ -138,6 +142,12 @@ export class AnimatedSprite3D extends Node3D {
         } else {
           nextFrame = this.frames.length - 1;
           this.playing = false;
+          // One-shot end: fire once on the transition. VFX can self-free via the
+          // `freeOnFinish` flag below or a `core:FreeOnSignal` on this signal.
+          this.emit('animation-finished');
+          if (this.freeOnFinish) {
+            this.queueFree();
+          }
         }
       }
       this.currentFrame = nextFrame;
@@ -209,6 +219,19 @@ export class AnimatedSprite3D extends Node3D {
           getValue: (node: unknown) => (node as AnimatedSprite3D).loop,
           setValue: (node: unknown, value: unknown) => {
             (node as AnimatedSprite3D).loop = Boolean(value);
+          },
+        },
+        {
+          name: 'freeOnFinish',
+          type: 'boolean',
+          ui: {
+            label: 'Free on Finish',
+            description: 'Destroy this node when a non-looping sequence finishes (one-shot VFX)',
+            group: 'Animation',
+          },
+          getValue: (node: unknown) => (node as AnimatedSprite3D).freeOnFinish,
+          setValue: (node: unknown, value: unknown) => {
+            (node as AnimatedSprite3D).freeOnFinish = Boolean(value);
           },
         },
         {

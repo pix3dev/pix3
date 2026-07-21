@@ -28,6 +28,12 @@ capability inventory is the catalog — start there every time.
      `scene.time` or the `core:Shake` / `core:PunchScale` / `core:PopIn` presets.
    - Timeline animation, camera moves, scripted beats → `core:AnimationPlayer`
      clips (property + event tracks).
+   - Frame/flipbook sprite animation (numbered frame files, a spritesheet, or "a
+     sprite that swaps textures over time") → `AnimatedSprite2D` / `AnimatedSprite3D`
+     + a hand-written `.pix3anim` JSON next to the frames (recipe in the catalog).
+     One-shot VFX (impact flash, poof, muzzle burst): `loop: false` +
+     `freeOnFinish: true` (the node self-destructs when the clip ends — no
+     component). **Never** a Script that `setTexture()`s frames on a timer.
    - Camera follow / cut / blend → `Camera3D` + `core:CameraBrain` +
      `VirtualCamera3D` (priority-driven). Programmatic blend:
      `brain.overrideNextBlend`.
@@ -36,6 +42,20 @@ capability inventory is the catalog — start there every time.
    - Material FX → GeometryMesh shader effects; screen FX → `PostProcess` node.
    - Cross-node events → `node.connect` / `emit` (signals).
    - Fixed-step logic (physics/AI/spawning) → an ECS system.
+
+   **The script gate — before you create any new `Script` class:** name the
+   catalog entry (node / `core:*` behavior / system) that covers the ask. If one
+   exists, wire it instead. If none does, write the reason as the first line of
+   the script's doc comment — `/** engine-check: no built-in covers <X> because
+   <reason> */` — then write code. A script that duplicates a catalog capability
+   without that line is a defect (reviewers grep for it). **Reimplementation
+   smells** — if your draft contains one of these, stop, a built-in exists:
+   - `setTexture(...)` on a timer / a frame counter → `AnimatedSprite2D` + `.pix3anim`
+   - hand-lerping opacity / scale / position over time → `core:Fade` / `core:PopIn` /
+     `core:PunchScale` / `core:AnimationPlayer`
+   - a time-accumulator whose only job is to `queueFree()` at the end → `core:FreeOnSignal`
+   - manual camera chase, `new Audio(...)`, per-play volume/pitch math →
+     `core:CameraBrain`, `scene.audio` / `core:PlaySound`
 
 4. **Use the right build path** (catalog §1):
    - **In-editor user script** — `export class X extends Script` in `scripts/`,

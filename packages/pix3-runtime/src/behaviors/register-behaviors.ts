@@ -14,6 +14,7 @@ import { FollowBehavior } from './FollowBehavior';
 import { FadeBehavior } from './FadeBehavior';
 import { RadialProgressBehavior } from './RadialProgressBehavior';
 import { PlaySoundBehavior } from './PlaySoundBehavior';
+import { FreeOnSignalBehavior } from './FreeOnSignalBehavior';
 import { ShakeBehavior } from './ShakeBehavior';
 import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
@@ -105,6 +106,15 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Audio',
     componentClass: PlaySoundBehavior,
     keywords: ['audio', 'sound', 'sfx', 'trigger', 'event'],
+  });
+
+  registry.registerComponent({
+    id: 'core:FreeOnSignal',
+    displayName: 'Free on Signal',
+    description: 'Frees this node when a signal fires on it (e.g. animation-finished) — one-shot VFX lifecycle',
+    category: 'Lifecycle',
+    componentClass: FreeOnSignalBehavior,
+    keywords: ['free', 'destroy', 'despawn', 'queuefree', 'one-shot', 'lifecycle', 'signal', 'vfx', 'finished'],
   });
 
   registry.registerComponent({

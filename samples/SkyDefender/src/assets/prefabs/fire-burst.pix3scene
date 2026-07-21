@@ -1,0 +1,24 @@
+# Small impact flame (fireb sequence). Spawned by GunController at the point a
+# player projectile hits an enemy unit. Pure engine node, zero components: an
+# AnimatedSprite2D plays the one-shot `burst` clip (loop:false) and frees itself
+# via `freeOnFinish` when the clip ends.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Projectile impact fire burst (prefab)
+root:
+  - id: fire-burst
+    type: AnimatedSprite2D
+    name: Fire Burst
+    properties:
+      animationResourcePath: res://src/assets/textures/sfx/fireb/fireb.pix3anim
+      currentClip: burst
+      isPlaying: true
+      freeOnFinish: true
+      width: 32
+      height: 32
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children: []

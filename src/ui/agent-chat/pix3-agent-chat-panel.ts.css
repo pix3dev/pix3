@@ -961,28 +961,102 @@ pix3-agent-chat-panel .agent-tool-detail pre {
 
 /* ── Running / banners ──────────────────────────────────────────────────── */
 
-pix3-agent-chat-panel .agent-running {
+/* K.I.T.T.-style LED scanner (Knight Rider), centered, themed to the accent.
+   A soft glow blob sweeps left↔right; a repeating mask carves it into discrete
+   LED segments so several light up with a distance falloff, KITT-style. */
+pix3-agent-chat-panel .agent-running-center {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.45rem;
-  align-self: flex-start;
+  gap: 0.4rem;
+  align-self: center;
+  padding: 0.35rem 0.1rem;
+}
+
+pix3-agent-chat-panel .agent-running-label {
   color: var(--fg-2);
   font-size: 0.72rem;
-  padding: 0.2rem 0.1rem;
+  text-align: center;
 }
 
-pix3-agent-chat-panel .agent-running-spinner {
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 50%;
-  border: 2px solid var(--accent-soft);
-  border-top-color: var(--accent);
-  animation: pix3-agent-spin 0.8s linear infinite;
+pix3-agent-chat-panel .agent-kitt {
+  --kitt-seg: 6px; /* lit LED width */
+  --kitt-gap: 3px; /* dark gap between LEDs */
+  position: relative;
+  width: 132px;
+  height: 9px;
+  border-radius: 3px;
+  overflow: hidden;
+  /* Dark LED housing: a dim accent tint per segment. */
+  background: repeating-linear-gradient(
+    to right,
+    rgba(var(--pix3-accent-rgb), 0.16) 0,
+    rgba(var(--pix3-accent-rgb), 0.16) var(--kitt-seg),
+    transparent var(--kitt-seg),
+    transparent calc(var(--kitt-seg) + var(--kitt-gap))
+  );
 }
 
-@keyframes pix3-agent-spin {
+pix3-agent-chat-panel .agent-kitt-sweep {
+  position: absolute;
+  inset: 0;
+  /* The moving light: a HORIZONTAL gradient (uniform vertically — no lens/ellipse),
+     with hard-stepped brightness bands so each LED it crosses reads as a discrete
+     on-level rather than a smooth blob. Symmetric so the head/tail trail evenly. */
+  background-image: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(var(--pix3-accent-rgb), 0.12) 18%,
+    rgba(var(--pix3-accent-rgb), 0.12) 30%,
+    rgba(var(--pix3-accent-rgb), 0.4) 30%,
+    rgba(var(--pix3-accent-rgb), 0.4) 42%,
+    rgba(var(--pix3-accent-rgb), 0.85) 42%,
+    var(--accent) 50%,
+    rgba(var(--pix3-accent-rgb), 0.85) 58%,
+    rgba(var(--pix3-accent-rgb), 0.4) 58%,
+    rgba(var(--pix3-accent-rgb), 0.4) 70%,
+    rgba(var(--pix3-accent-rgb), 0.12) 70%,
+    rgba(var(--pix3-accent-rgb), 0.12) 82%,
+    transparent 100%
+  );
+  background-size: 62% 100%;
+  background-repeat: no-repeat;
+  /* Horizontal-only bloom bleeding into neighbouring gaps; clipped vertically by the
+     parent's overflow:hidden so no halo above/below the bar. */
+  filter: drop-shadow(0 0 4px rgba(var(--pix3-accent-rgb), 0.85));
+  /* Carve the glow into the same LED grid as the housing so it reads as segments. */
+  -webkit-mask: repeating-linear-gradient(
+    to right,
+    #000 0,
+    #000 var(--kitt-seg),
+    transparent var(--kitt-seg),
+    transparent calc(var(--kitt-seg) + var(--kitt-gap))
+  );
+  mask: repeating-linear-gradient(
+    to right,
+    #000 0,
+    #000 var(--kitt-seg),
+    transparent var(--kitt-seg),
+    transparent calc(var(--kitt-seg) + var(--kitt-gap))
+  );
+  animation: pix3-agent-kitt 1.15s ease-in-out infinite alternate;
+}
+
+@keyframes pix3-agent-kitt {
+  from {
+    /* Overshoot both ends so the bright core sweeps edge-to-edge (the tail runs
+       off-canvas), instead of only crossing the middle third. */
+    background-position: -70% center;
+  }
   to {
-    transform: rotate(360deg);
+    background-position: 170% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  pix3-agent-chat-panel .agent-kitt-sweep {
+    animation: none;
+    background-position: center;
   }
 }
 

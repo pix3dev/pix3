@@ -64,6 +64,18 @@ tables: [node-types-reference.md](node-types-reference.md).
 - UI controls: `Button2D`, `Label2D`, `Slider2D`, `Joystick2D`, `Checkbox2D`, `Bar2D`, `ScrollContainer2D`, `InventorySlot2D`.
   `Label2D` is multiline: a fixed `width` word-wraps, `labelAlign`/`labelVAlign` align inside the box, and `typewriterSpeed` + `setText()`/`skipTypewriter()`/`'typewriter-complete'` give a per-character reveal.
 - `Camera2D` — pan/zoom/limits/shake for the 2D pass. `CanvasLayer2D` — fixed HUD layer, unaffected by Camera2D.
+- `AnimatedSprite2D` (and `AnimatedSprite3D`) play a flipbook from a **`.pix3anim`** resource — see the recipe below. A non-looping clip emits **`animation-finished`** (clip name as arg) when it stops on the last frame. For self-freeing one-shot VFX set **`freeOnFinish: true`** on the node (destroys itself when the clip ends — no component); use `core:FreeOnSignal` only when the trigger is some *other* signal.
+
+**Flipbook animation (`.pix3anim`)** — hand-author it; the file is plain JSON and `SceneLoader` auto-loads the resource + every frame texture (also when the node arrives via `scene.instantiate` of a prefab). Every omitted field is defaulted on load (fps 12, loop true, `playbackMode` normal, anchor 0.5/0.5, `durationMultiplier` 1). Save it next to the frames, point the node at it. **Sequence mode** (one image per frame — the common case, e.g. an impact flash):
+```json
+{ "version": "1.0.0", "texturePath": "",
+  "clips": [{ "name": "burst", "fps": 30, "loop": false, "frames": [
+    { "texturePath": "res://.../fireb0001.png" },
+    { "texturePath": "res://.../fireb0002.png" }
+    /* … one entry per frame … */
+  ]}]}
+```
+**Spritesheet mode** instead: set top-level `texturePath` and give each frame a UV rect `offset:{x,y}` + `repeat:{x,y}` (these default to 0 → sample nothing, so they're required here). Frames may carry `durationMultiplier` and `events:[{signal,args}]` (fired on play-driven frame entry). Node wiring: `type: AnimatedSprite2D`, properties `animationResourcePath`, `currentClip`, `isPlaying`, `freeOnFinish` (one-shot self-destruct), `width`/`height`. First spawn of a runtime-instantiated clip warms its texture cache; if the first play must be pixel-perfect, spawn one invisible warm-up at level start. Authoring GUI: the editor's animation panel produces the same file.
 
 **3D content**
 - `GeometryMesh` — primitive/standard-material mesh; supports **shader effects** (§4) and baked/realtime AO.
@@ -100,6 +112,7 @@ effect. Registered in
 | `core:RadialProgress` | Circular progress mask on a Sprite2D |
 | `core:AnimationPlayer` | Play keyframe clips on this node + descendants (§4) |
 | `core:PlaySound` | Play a sound when a node signal fires |
+| `core:FreeOnSignal` | `queueFree` this node when a signal fires on it (e.g. `animation-finished`), after an optional delay — one-shot VFX lifecycle |
 | `core:Shake` | Additive positional shake (juice) |
 | `core:PunchScale` | Squash-and-stretch scale punch (juice) |
 | `core:PopIn` | Spawn pop-in scale with overshoot (juice) |
@@ -371,6 +384,7 @@ play-mode hook, so the editor keeps running.
 
 ## 7. Correct-usage checklist for a new user script
 
+0. **The script gate (do this first).** Name the node / `core:*` behavior / system above that covers the ask. If one exists, wire it — don't write a script. If none does, put the reason as the first doc-comment line: `/** engine-check: no built-in covers <X> because <reason> */`. A script duplicating a catalog capability without that line is a defect. Smells that mean "stop, a built-in exists": `setTexture()` on a timer → `AnimatedSprite2D` + `.pix3anim`; hand-lerped opacity/scale/position → `core:Fade`/`core:PopIn`/`core:PunchScale`/`core:AnimationPlayer`; a timer that only ends in `queueFree()` → `core:FreeOnSignal`; manual camera chase / `new Audio()` → `core:CameraBrain` / `scene.audio`.
 1. Create `scripts/<Name>.ts`: `export class <Name> extends Script { … }` importing from `@pix3/runtime`.
 2. Set defaults in the constructor's `this.config = { … }`; expose them via `static getPropertySchema()`.
 3. Read the engine through `this.scene` / `this.input` / `this.node` — guard `this.scene` for previews.

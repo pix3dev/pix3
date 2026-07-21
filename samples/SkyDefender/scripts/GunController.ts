@@ -4,6 +4,7 @@ import { Vector3 } from 'three';
 import { session } from './SdSession';
 
 const CANNONBALL_PREFAB = 'res://src/assets/prefabs/cannonball.pix3scene';
+const FIRE_BURST_PREFAB = 'res://src/assets/prefabs/fire-burst.pix3scene';
 const SFX_SELECT = 'res://src/assets/audio/gui/ingame/ing_select_weapon.mp3';
 const SFX_DRY = 'res://src/assets/audio/guns/main/out_of_ammo.mp3';
 
@@ -564,7 +565,12 @@ export class GunController extends Script {
     let beamLocalLength = BEAM_RECT_LENGTH;
     if (hit) {
       hit.node.emit('damaged', this.effectiveDamage(def));
-      beamLocalLength = (hit.distance ?? rayLength) / worldScale;
+      const dist = hit.distance ?? rayLength;
+      beamLocalLength = dist / worldScale;
+      // Impact flame at the ray hit point, converted world → stage-local
+      // (the `effects` group shares the stage transform, so `worldScale`
+      // is the stage scale as long as the pivot's local scale is 1).
+      this.spawnFireBurst((x1 + cos * dist) / worldScale, (y1 + sin * dist) / worldScale);
     }
 
     if (this.beam) {
@@ -639,6 +645,9 @@ export class GunController extends Script {
       const hits = this.scene.collision2d.overlapCircle(world.x, world.y, worldRadius, targetGroup);
       if (hits.length > 0) {
         hits[0].node.emit('damaged', ball.damage);
+        // Impact flame at the hit point (ball position is stage-local, which is
+        // interchangeable with the `effects` group — they share the stage transform).
+        this.spawnFireBurst(ball.node.position.x, ball.node.position.y);
         this.recycle(ball);
       }
     }
@@ -647,6 +656,24 @@ export class GunController extends Script {
   private recycle(ball: Cannonball): void {
     ball.active = false;
     ball.node.visible = false;
+  }
+
+  /**
+   * Spawn the fireb impact flame at a stage-local point. Parented to
+   * `cannonballs` (a stage sibling that paints AFTER `enemies`, so the burst
+   * shows in FRONT of the unit it hit — `effects` sits behind the enemies).
+   * `cannonballs` shares the stage transform (scale 1), same coord space.
+   */
+  private spawnFireBurst(x: number, y: number): void {
+    void this.scene
+      ?.instantiate(FIRE_BURST_PREFAB, { parent: 'cannonballs' })
+      .then(fx => {
+        fx.position.set(x, y, 0);
+        // Random spin so repeated hits don't look identical. The prefab handles
+        // playback (AnimatedSprite2D) and cleanup (core:FreeOnSignal) itself.
+        fx.rotation.z = Math.random() * Math.PI * 2;
+      })
+      .catch(() => undefined);
   }
 
   private static readonly scratch = new Vector3();

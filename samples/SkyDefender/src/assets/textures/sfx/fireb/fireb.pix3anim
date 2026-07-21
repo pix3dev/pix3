@@ -1,0 +1,23 @@
+{
+  "version": "1.0.0",
+  "texturePath": "",
+  "clips": [
+    {
+      "name": "burst",
+      "fps": 30,
+      "loop": false,
+      "playbackMode": "normal",
+      "frames": [
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0001.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0002.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0003.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0004.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0005.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0006.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0007.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0008.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fireb/fireb0009.png" }
+      ]
+    }
+  ]
+}

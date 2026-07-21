@@ -1053,6 +1053,7 @@ export class SceneLoader {
           animationResourcePath,
           currentClip: typeof props.currentClip === 'string' ? props.currentClip : undefined,
           isPlaying: typeof props.isPlaying === 'boolean' ? props.isPlaying : undefined,
+          freeOnFinish: typeof props.freeOnFinish === 'boolean' ? props.freeOnFinish : undefined,
           currentFrame: typeof props.currentFrame === 'number' ? props.currentFrame : undefined,
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
@@ -1911,6 +1912,7 @@ export class SceneLoader {
           fps: typeof props.fps === 'number' ? props.fps : undefined,
           playing: typeof props.playing === 'boolean' ? props.playing : undefined,
           loop: typeof props.loop === 'boolean' ? props.loop : undefined,
+          freeOnFinish: typeof props.freeOnFinish === 'boolean' ? props.freeOnFinish : undefined,
           billboard: typeof props.billboard === 'boolean' ? props.billboard : false,
           opacity: this.asNumber(props.opacity, undefined),
         });

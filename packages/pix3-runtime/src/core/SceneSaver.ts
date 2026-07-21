@@ -452,6 +452,11 @@ export class SceneSaver {
       }
 
       props.isPlaying = node.isPlaying;
+      if (node.freeOnFinish) {
+        props.freeOnFinish = true;
+      } else {
+        delete props.freeOnFinish;
+      }
       props.currentFrame = node.currentFrame;
       props.width = node.width;
       props.height = node.height;

@@ -1425,10 +1425,11 @@ export class AgentChatPanel extends ComponentBase {
     // Show what the running tool is acting on (file/node/command), pulled from the pending call.
     const descriptor = activeTool ? this.activeToolDescriptor(activeTool) : '';
     return html`
-      <div class="agent-left-row">
-        <span class="agent-avatar-gutter"></span>
-        <div class="agent-running">
-          <span class="agent-running-spinner"></span>
+      <div class="agent-running-center">
+        <div class="agent-kitt" aria-hidden="true">
+          <span class="agent-kitt-sweep"></span>
+        </div>
+        <div class="agent-running-label">
           ${activeTool
             ? html`Running <code>${activeTool}</code>${descriptor
                   ? html` <span class="agent-row-arg">${descriptor}</span>`

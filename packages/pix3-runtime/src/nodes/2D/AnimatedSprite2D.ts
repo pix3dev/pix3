@@ -31,6 +31,8 @@ export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   currentClip?: string;
   isPlaying?: boolean;
   currentFrame?: number;
+  /** Free the node (`queueFree`) when a non-looping clip finishes. */
+  freeOnFinish?: boolean;
   width?: number;
   height?: number;
   color?: string;
@@ -45,6 +47,7 @@ export class AnimatedSprite2D
   animationResourcePath: string | null;
   currentClip: string;
   isPlaying: boolean;
+  freeOnFinish: boolean;
   width: number;
   height: number;
   color: string;
@@ -72,6 +75,7 @@ export class AnimatedSprite2D
         : null;
     this.currentClip = typeof props.currentClip === 'string' ? props.currentClip.trim() : '';
     this.isPlaying = props.isPlaying ?? true;
+    this.freeOnFinish = props.freeOnFinish ?? false;
     this.width = props.width ?? 64;
     this.height = props.height ?? 64;
     this.color = props.color ?? '#ffffff';
@@ -85,6 +89,9 @@ export class AnimatedSprite2D
       this.properties.currentClip = this.currentClip;
     }
     this.properties.isPlaying = this.isPlaying;
+    if (this.freeOnFinish) {
+      this.properties.freeOnFinish = true;
+    }
     this.properties.currentFrame = this._currentFrame;
 
     this.material = new MeshBasicMaterial({
@@ -240,6 +247,17 @@ export class AnimatedSprite2D
 
       if (!this.isPlaying) {
         this.timeAccumulator = 0;
+        // A non-looping clip just reached its end (getNextFrameIndex flipped
+        // isPlaying off). Fire once on that transition — play-driven only, same
+        // discipline as emitFrameEvents — so one-shot VFX can self-free via a
+        // `core:FreeOnSignal` on `animation-finished` (Godot's animation_finished).
+        this.emit('animation-finished', clip.name);
+        // Optional self-destruct for one-shot VFX — zero-component. Runs only
+        // here (play-driven tick), so it never fires in the editor/preview,
+        // which render proxy visuals and drive frames via the setter, not tick.
+        if (this.freeOnFinish) {
+          this.queueFree();
+        }
         break;
       }
     }
@@ -348,6 +366,25 @@ export class AnimatedSprite2D
           getValue: (node: unknown) => (node as AnimatedSprite2D).currentFrame,
           setValue: (node: unknown, value: unknown) => {
             (node as AnimatedSprite2D).currentFrame = Number(value);
+          },
+        },
+        {
+          name: 'freeOnFinish',
+          type: 'boolean',
+          ui: {
+            label: 'Free on Finish',
+            description: 'Destroy this node when a non-looping clip finishes (one-shot VFX)',
+            group: 'Animation',
+          },
+          getValue: (node: unknown) => (node as AnimatedSprite2D).freeOnFinish,
+          setValue: (node: unknown, value: unknown) => {
+            const sprite = node as AnimatedSprite2D;
+            sprite.freeOnFinish = Boolean(value);
+            if (sprite.freeOnFinish) {
+              sprite.properties.freeOnFinish = true;
+            } else {
+              delete sprite.properties.freeOnFinish;
+            }
           },
         },
       ],
