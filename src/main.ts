@@ -56,6 +56,11 @@ void container
   .getService<BridgeConnectionService>(container.getOrCreateToken(BridgeConnectionService))
   .initialize();
 
+// Reflect the active project name in the browser tab title.
+import { installDocumentTitleSync } from './core/document-title';
+
+installDocumentTitleSync();
+
 import './ui/scene-tree/scene-tree-panel';
 import './ui/viewport/editor-tab';
 import './ui/object-inspector/inspector-panel';
