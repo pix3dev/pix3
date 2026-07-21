@@ -18,6 +18,7 @@ const TEST_RESOURCE: AnimationResource = {
       name: 'idle',
       fps: 4,
       loop: true,
+      playbackMode: 'normal',
       frames: [
         {
           textureIndex: 0,

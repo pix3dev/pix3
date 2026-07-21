@@ -1480,6 +1480,8 @@ export class Pix3EditorShell extends ComponentBase {
 
     if (
       typeof dialogId !== 'string' ||
+      typeof columns !== 'number' ||
+      typeof rows !== 'number' ||
       !Number.isFinite(columns) ||
       !Number.isFinite(rows) ||
       columns <= 0 ||

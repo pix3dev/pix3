@@ -29,7 +29,7 @@ describe('OpenAIImageProvider', () => {
     );
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`${BASE}/images/generations`);
     expect(init.method).toBe('POST');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-test');
@@ -56,10 +56,9 @@ describe('OpenAIImageProvider', () => {
       { apiKey: 'k', modelId: 'gpt-image-1.5', baseUrl: BASE, fetchImpl }
     );
 
-    const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string) as Record<
-      string,
-      unknown
-    >;
+    const body = JSON.parse(
+      (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as string
+    ) as Record<string, unknown>;
     expect(body.size).toBe('1024x1024');
     expect('background' in body).toBe(false);
     expect('quality' in body).toBe(false); // no quality passed
@@ -77,7 +76,7 @@ describe('OpenAIImageProvider', () => {
       { apiKey: 'k', modelId: 'gpt-image-1.5', baseUrl: BASE, fetchImpl }
     );
 
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`${BASE}/images/edits`);
     // Must NOT set Content-Type manually — the browser adds the multipart boundary.
     expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();

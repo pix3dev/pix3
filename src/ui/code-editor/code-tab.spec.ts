@@ -264,6 +264,7 @@ function createMonacoMock(): {
   editor: {
     create: ReturnType<typeof vi.fn>;
     createModel: ReturnType<typeof vi.fn>;
+    getModel: ReturnType<typeof vi.fn>;
   };
   Selection: new (
     startLineNumber: number,

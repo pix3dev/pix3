@@ -4271,7 +4271,7 @@ ${textPreview?.content || 'Empty file'}</pre
         aria-label=${`${axis} ${option}`}
         @click=${() => this.applyAnchorMode(axis, option)}
       >
-        ${this.renderAnchorModeIcon(axis, option, label)}
+        ${this.renderAnchorModeIcon(axis, option, label ?? option)}
       </button>
     `;
   }

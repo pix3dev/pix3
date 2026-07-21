@@ -36,7 +36,7 @@ describe('asset-drag-drop', () => {
       },
     };
 
-    expect(getDroppedAssetResourcePath(transfer as DataTransfer)).toBe(
+    expect(getDroppedAssetResourcePath(transfer as unknown as DataTransfer)).toBe(
       'res://assets/walk.pix3anim'
     );
   });
@@ -53,7 +53,9 @@ describe('asset-drag-drop', () => {
       },
     };
 
-    expect(getDroppedAssetResourcePath(transfer as DataTransfer)).toBe('res://assets/hero.png');
+    expect(getDroppedAssetResourcePath(transfer as unknown as DataTransfer)).toBe(
+      'res://assets/hero.png'
+    );
   });
 
   it('detects asset drags from dataTransfer.types before drop data is readable', () => {
@@ -62,7 +64,7 @@ describe('asset-drag-drop', () => {
       getData: () => '',
     };
 
-    expect(hasAssetDragData(transfer as DataTransfer)).toBe(true);
+    expect(hasAssetDragData(transfer as unknown as DataTransfer)).toBe(true);
   });
 
   it('treats uri-list payloads as asset drags during dragover', () => {
@@ -71,7 +73,7 @@ describe('asset-drag-drop', () => {
       getData: () => '',
     };
 
-    expect(hasAssetDragData(transfer as DataTransfer)).toBe(true);
+    expect(hasAssetDragData(transfer as unknown as DataTransfer)).toBe(true);
   });
 
   it('round-trips a generation drag payload through the data transfer', () => {

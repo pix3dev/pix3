@@ -2056,18 +2056,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     });
   }
 
-  private async onTextureDrop(event: DragEvent): Promise<void> {
-    event.preventDefault();
-    this.isTextureDragOver = false;
-
-    const texturePaths = this.getDroppedTextureResources(event);
-    if (texturePaths.length === 0) {
-      return;
-    }
-
-    await this.onAddFrameTextures(texturePaths);
-  }
-
   private async onUpdateTexturePath(nextTexturePath: string): Promise<void> {
     const trimmedTexturePath = nextTexturePath.trim();
     const currentResource = this.resource;
@@ -2107,15 +2095,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     this.slicerColumns = result.columns;
     this.slicerRows = result.rows;
     await this.onAddFramesFromGrid(result.columns, result.rows);
-  }
-
-  private getAssetTitle(): string {
-    if (!this.assetPath) {
-      return 'Animation';
-    }
-
-    const segments = this.assetPath.replace(/\\/g, '/').split('/').filter(Boolean);
-    return segments[segments.length - 1] ?? this.assetPath;
   }
 
   private getStoredActiveClipName(): string {

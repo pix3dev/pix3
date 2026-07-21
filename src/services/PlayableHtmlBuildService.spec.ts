@@ -85,10 +85,8 @@ describe('PlayableHtmlBuildService', () => {
       entryScenePath: 'scenes/main.pix3scene',
     });
 
-    const [bundlerFiles, bundleOptions] = scriptCompiler.bundleVirtualProject.mock.calls[0] as [
-      Map<string, string>,
-      Record<string, unknown>,
-    ];
+    const [bundlerFiles, bundleOptions] = scriptCompiler.bundleVirtualProject.mock
+      .calls[0] as unknown as [Map<string, string>, Record<string, unknown>];
     expect(bundlerFiles.get('src/register-project-scripts.ts')).toContain(
       "import * as module_0 from '../scripts/bootstrap';"
     );

@@ -370,7 +370,7 @@ describe('ProjectBuildService', () => {
         id: 'main',
         filePath: 'src/assets/scenes/main.pix3scene',
       },
-    } as CommandContext['state']['scenes']['descriptors'];
+    } as unknown as CommandContext['state']['scenes']['descriptors'];
 
     await service.buildFromTemplates(context);
 
@@ -406,7 +406,7 @@ describe('ProjectBuildService', () => {
         id: 'main',
         filePath: 'src/assets/scenes/main.pix3scene',
       },
-    } as CommandContext['state']['scenes']['descriptors'];
+    } as unknown as CommandContext['state']['scenes']['descriptors'];
 
     await service.buildFromTemplates(context, {
       entryScenePath: 'res://src/assets/scenes/intro.pix3scene',
@@ -437,7 +437,7 @@ describe('ProjectBuildService', () => {
         id: 'scene1',
         filePath: 'scenes/main.pix3scene',
       },
-    } as CommandContext['state']['scenes']['descriptors'];
+    } as unknown as CommandContext['state']['scenes']['descriptors'];
 
     const model = await service.buildRuntimeProjectModel(context, {
       entryScenePath: 'scenes/missing.pix3scene',

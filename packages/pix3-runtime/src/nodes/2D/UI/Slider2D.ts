@@ -121,7 +121,6 @@ export class Slider2D extends UIControl2D {
         if (!pointerWorld) return;
 
         const pointerWorldX = pointerWorld.x;
-        const pointerWorldY = pointerWorld.y;
 
         if (!this.isPressed && isDown && this.isPointInBounds(pointerWorld) && this.enabled) {
             this.isDragging = true;

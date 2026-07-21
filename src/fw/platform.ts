@@ -42,27 +42,6 @@ export function getCurrentPlatform(): Platform {
 }
 
 /**
- * Returns true if the current platform is macOS.
- */
-export function isMac(): boolean {
-  return getCurrentPlatform() === 'mac';
-}
-
-/**
- * Returns true if the current platform is Windows.
- */
-export function isWindows(): boolean {
-  return getCurrentPlatform() === 'windows';
-}
-
-/**
- * Returns true if the current platform is Linux.
- */
-export function isLinux(): boolean {
-  return getCurrentPlatform() === 'linux';
-}
-
-/**
  * Clears the cached platform detection result.
  * Primarily for testing purposes.
  * @internal
