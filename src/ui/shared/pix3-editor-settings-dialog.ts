@@ -653,8 +653,8 @@ export class EditorSettingsDialog extends ComponentBase {
         <div class="hint">
           Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine
           so keys never enter the browser. Gemini works without it. Start it with
-          <code>npx pix3-agent-bridge</code>, then paste the pairing token it prints below and add
-          providers with <code>pix3-agent-bridge provider add openai --key sk-…</code>.
+          <code>npx @pix3/agent-bridge</code>, then paste the pairing token it prints below and add
+          providers with <code>npx @pix3/agent-bridge provider add openai --key sk-…</code>.
         </div>
 
         <div class="settings-field">
@@ -770,7 +770,7 @@ export class EditorSettingsDialog extends ComponentBase {
       this.bridgeAvailable = this.bridge.isAvailable();
       this.bridgeMessage = this.bridgeAvailable
         ? `Connected — serving ${this.bridge.getEntries().length} provider(s).`
-        : 'Bridge not reachable. Run `npx pix3-agent-bridge` and check the token/URL.';
+        : 'Bridge not reachable. Run `npx @pix3/agent-bridge` and check the token/URL.';
     } finally {
       this.bridgeBusy = false;
     }

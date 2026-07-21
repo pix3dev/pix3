@@ -24,7 +24,7 @@ unlocks the other providers.
 ## Run
 
 ```bash
-npx pix3-agent-bridge
+npx @pix3/agent-bridge
 ```
 
 On start it prints a **pairing token**. In the editor: **Settings → AI Agent**, paste the token.
@@ -36,19 +36,19 @@ Options: `--port <n>` (default 8484), `--origin <url>` (repeatable — extra all
 
 ```bash
 # Built-in presets — just supply a key:
-npx pix3-agent-bridge provider add openai        --key sk-...
-npx pix3-agent-bridge provider add anthropic     --key sk-ant-...
-npx pix3-agent-bridge provider add opencode-zen  --key ...
+npx @pix3/agent-bridge provider add openai        --key sk-...
+npx @pix3/agent-bridge provider add anthropic     --key sk-ant-...
+npx @pix3/agent-bridge provider add opencode-zen  --key ...
 
 # A custom OpenAI-compatible endpoint (arbitrary id + explicit base URL):
-npx pix3-agent-bridge provider add my-router \
+npx @pix3/agent-bridge provider add my-router \
   --base-url https://openrouter.ai/api/v1 --key sk-or-... --kind openai --label OpenRouter
 
-npx pix3-agent-bridge provider list
-npx pix3-agent-bridge provider disable openai
-npx pix3-agent-bridge provider enable  openai
-npx pix3-agent-bridge provider set-key openai sk-...
-npx pix3-agent-bridge provider remove  my-router
+npx @pix3/agent-bridge provider list
+npx @pix3/agent-bridge provider disable openai
+npx @pix3/agent-bridge provider enable  openai
+npx @pix3/agent-bridge provider set-key openai sk-...
+npx @pix3/agent-bridge provider remove  my-router
 ```
 
 `--kind openai` forwards `Authorization: Bearer <key>` (OpenAI Chat Completions, gateways, local

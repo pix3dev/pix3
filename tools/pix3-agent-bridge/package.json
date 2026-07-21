@@ -1,5 +1,5 @@
 {
-  "name": "pix3-agent-bridge",
+  "name": "@pix3/agent-bridge",
   "version": "0.2.0",
   "description": "Local bridge for the Pix3 editor's in-editor agent: a Claude Agent SDK (Pro/MAX subscription) lane plus a credential-injecting proxy for OpenAI / Anthropic / OpenCode Zen / custom OpenAI-compatible providers. Keys stay on your machine.",
   "type": "module",

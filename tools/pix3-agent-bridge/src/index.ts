@@ -19,8 +19,8 @@
  *        pix3-agent-bridge provider list
  *
  * Usage:
- *   npx pix3-agent-bridge                        (requires a `claude login`-ed Claude Code for lane 1)
- *   npx pix3-agent-bridge provider add openai --key sk-...
+ *   npx @pix3/agent-bridge                       (requires a `claude login`-ed Claude Code for lane 1)
+ *   npx @pix3/agent-bridge provider add openai --key sk-...
  *   Options: --port <n> (default 8484), --origin <url> (repeatable, extra allowed origins)
  *
  * Security model (defense in depth for a localhost service):

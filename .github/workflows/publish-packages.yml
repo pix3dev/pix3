@@ -3,7 +3,7 @@ name: Publish packages
 # Publishes the npm packages via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
 # Two ways to trigger:
 #   1. Manual: Actions -> "Publish packages" -> Run workflow -> pick a package.
-#   2. Tag push: `runtime-vX.Y.Z` publishes @pix3/runtime, `bridge-vX.Y.Z` publishes pix3-agent-bridge.
+#   2. Tag push: `runtime-vX.Y.Z` publishes @pix3/runtime, `bridge-vX.Y.Z` publishes @pix3/agent-bridge.
 # In both cases it publishes whatever version is in the package's package.json;
 # npm rejects a version that already exists, so re-runs are safe.
 
@@ -53,7 +53,7 @@ jobs:
         run: npm publish --access public
 
   publish-bridge:
-    name: Publish pix3-agent-bridge
+    name: Publish @pix3/agent-bridge
     if: >-
       (github.event_name == 'workflow_dispatch' &&
         (inputs.package == 'bridge' || inputs.package == 'both')) ||
