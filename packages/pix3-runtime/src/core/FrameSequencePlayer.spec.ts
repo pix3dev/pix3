@@ -206,6 +206,26 @@ describe('FrameSequencePlayer', () => {
     expect(r.framesAdvanced).toEqual([1]);
   });
 
+  it('treats a caller-changed currentIndex after finish as an implicit reset', () => {
+    const player = new FrameSequencePlayer();
+    let r = player.advance(10, linearOnce, 0); // finish at index 2
+    expect(r.finished).toBe(true);
+    expect(r.nextIndex).toBe(2);
+
+    // Still at the finished-at index: stays latched.
+    r = player.advance(0.1, linearOnce, 2);
+    expect(r.finished).toBe(false);
+    expect(r.framesAdvanced).toEqual([]);
+
+    // Caller scrubbed back to frame 0 and re-enabled playback without calling
+    // reset() explicitly (e.g. AnimatedSprite2D/3D's currentFrame setter does
+    // not call reset()) — the player should resume rather than stay stuck.
+    r = player.advance(0.1, linearOnce, 0);
+    expect(r.finished).toBe(false);
+    expect(r.nextIndex).toBe(1);
+    expect(r.framesAdvanced).toEqual([1]);
+  });
+
   it('is a no-op guard-friendly kernel: fps<=0 / frameCount<=1 handled by the caller', () => {
     // The player assumes valid input (nodes guard frameCount<=1 / fps<=0 before
     // calling), but a defensive check: a single-frame linear loop never moves.

@@ -41,7 +41,9 @@ export interface FrameSequenceAdvanceResult {
   framesAdvanced: number[];
   /**
    * `true` exactly once — on the call where a non-looping sequence reaches its
-   * end. Subsequent calls return `false` (the player latches) until `reset()`.
+   * end. Subsequent calls return `false` (the player latches) until `reset()`
+   * — or until the caller passes a `currentIndex` different from the index it
+   * finished at, which is treated as an implicit reset (see `advance`).
    */
   finished: boolean;
 }
@@ -52,6 +54,7 @@ export class FrameSequencePlayer {
   private timeAccumulator = 0;
   private direction: 1 | -1 = 1;
   private finished = false;
+  private finishedAtIndex: number | null = null;
 
   /**
    * Advance the play-clock by `dt` and report how far the sequence moved.
@@ -66,9 +69,19 @@ export class FrameSequencePlayer {
   ): FrameSequenceAdvanceResult {
     const framesAdvanced: number[] = [];
 
-    // Once a non-looping sequence has finished, stay put until reset().
     if (this.finished) {
-      return { nextIndex: currentIndex, framesAdvanced, finished: false };
+      if (currentIndex === this.finishedAtIndex) {
+        // Still sitting at the frame it finished on — stay put until reset().
+        return { nextIndex: currentIndex, framesAdvanced, finished: false };
+      }
+      // The caller moved the frame index externally (e.g. scrubbed back to 0
+      // and flipped `isPlaying`/`playing` back on to replay a one-shot clip,
+      // without the node explicitly calling reset()). Treat that as an
+      // implicit reset so playback resumes without extra node wiring.
+      this.finished = false;
+      this.finishedAtIndex = null;
+      this.timeAccumulator = 0;
+      this.direction = 1;
     }
 
     const { frameCount, fps, loop } = descriptor;
@@ -102,6 +115,7 @@ export class FrameSequencePlayer {
       if (step.finished) {
         finishedNow = true;
         this.finished = true;
+        this.finishedAtIndex = index;
         this.timeAccumulator = 0;
         break;
       }
@@ -115,6 +129,7 @@ export class FrameSequencePlayer {
     this.timeAccumulator = 0;
     this.direction = 1;
     this.finished = false;
+    this.finishedAtIndex = null;
   }
 
   private computeNextIndex(

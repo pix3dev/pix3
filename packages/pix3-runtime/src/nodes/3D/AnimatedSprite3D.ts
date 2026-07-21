@@ -141,11 +141,11 @@ export class AnimatedSprite3D extends Node3D {
       this._currentFrame
     );
 
-    // Repaint each frame this advance landed on (catch-up on large `dt` now
-    // crosses multiple frames in one tick — the shared kernel's while-loop —
-    // instead of the old single-step advance). 3D has no per-frame events.
-    for (const frameIndex of result.framesAdvanced) {
-      this.currentFrame = frameIndex; // setter clamps + updates texture
+    // 3D has no per-frame events, so only the final landed frame matters
+    // visually — apply just `nextIndex` instead of every intermediate index in
+    // `framesAdvanced`, even though a large `dt` may have crossed several.
+    if (result.framesAdvanced.length > 0) {
+      this.currentFrame = result.nextIndex; // setter clamps + updates texture
     }
 
     if (result.finished) {
