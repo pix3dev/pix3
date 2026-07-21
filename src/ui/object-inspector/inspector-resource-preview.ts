@@ -166,7 +166,9 @@ export class InspectorResourcePreview {
     return this.hasSupportedExtension(path, IMAGE_EXTENSIONS);
   }
 
-  getTextureMetadata(textureUrl: string): { width: number; height: number; size: number } | undefined {
+  getTextureMetadata(
+    textureUrl: string
+  ): { width: number; height: number; size: number } | undefined {
     return this.texturePreviewMetadata.get(textureUrl.trim());
   }
 

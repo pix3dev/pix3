@@ -602,8 +602,10 @@ ${textPreview?.content || 'Empty file'}</pre
     // property overrides are stored under, so lock it. The instance root keeps an
     // editable name (it is serialized on the `instance:` definition).
     const nameReadOnly =
-      this.host.isPropertyReadOnly(nameProp?.ui?.readOnly, this.host.primaryNode) ||
-      isPrefabChildNode(this.host.primaryNode);
+      this.host.propertyRenderers.isPropertyReadOnly(
+        nameProp?.ui?.readOnly,
+        this.host.primaryNode
+      ) || isPrefabChildNode(this.host.primaryNode);
 
     return html`
       <div class="inspector-summary">
@@ -982,7 +984,9 @@ ${textPreview?.content || 'Empty file'}</pre
           return html`
             <div class="script-prop-group">
               <div class="script-prop-group-title">${label}</div>
-              ${visibleProps.map(prop => this.host.renderComponentPropertyInput(component, prop))}
+              ${visibleProps.map(prop =>
+                this.host.propertyRenderers.renderComponentPropertyInput(component, prop)
+              )}
             </div>
           `;
         })}
@@ -1112,7 +1116,7 @@ ${textPreview?.content || 'Empty file'}</pre
                 </div>
                 ${params.length > 0
                   ? html`<div class="script-props">
-                      ${params.map(p => this.host.renderPropertyInput(p))}
+                      ${params.map(p => this.host.propertyRenderers.renderPropertyInput(p))}
                     </div>`
                   : html`<div class="script-props-empty">No editable properties</div>`}
               </div>
