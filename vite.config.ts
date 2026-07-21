@@ -6,6 +6,16 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const collabTarget = env.VITE_COLLAB_SERVER_URL || 'http://localhost:4001';
+  // Dev-only bundle inventory: `ANALYZE=1 npm run build` emits dist/stats.html (treemap).
+  // Never runs in a normal build — kept out of the default plugin list entirely.
+  const analyzePlugins = process.env.ANALYZE
+    ? [(await import('rollup-plugin-visualizer')).visualizer({
+        filename: 'dist/stats.html',
+        gzipSize: true,
+        brotliSize: true,
+        template: 'treemap',
+      })]
+    : [];
 
   // Enumerate rapier exports at config time so the runtime importmap shim
   // can re-export them without bundling rapier into the main chunk. We use
@@ -71,6 +81,7 @@ export default defineConfig(async ({ mode }) => {
           navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/player\.html/],
         },
       }),
+      ...analyzePlugins,
     ],
     define: {
       __PIX3_RAPIER_EXPORT_KEYS__: JSON.stringify(rapierExportKeys),
