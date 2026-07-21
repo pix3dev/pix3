@@ -697,6 +697,28 @@ root:
                         scale: [1, 1]
                         rotation: 0
                     children: []
+          - id: effects
+            type: Group2D
+            name: Effects
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: enemies
+            type: Group2D
+            name: Enemies
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
           - id: cannonballs
             type: Group2D
             name: Cannonballs
