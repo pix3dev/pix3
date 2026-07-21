@@ -25,6 +25,7 @@ import {
   type AnimationFrame,
   type AnimationResource,
 } from '../../core/AnimationResource';
+import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 
 export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   animationResourcePath?: string | null;
@@ -53,8 +54,7 @@ export class AnimatedSprite2D
   color: string;
 
   private _currentFrame: number;
-  private timeAccumulator = 0;
-  private playbackDirection = 1;
+  private readonly frameSequencePlayer = new FrameSequencePlayer();
   private animationResource: AnimationResource | null = null;
   private activeClip: AnimationClip | null = null;
   private spritesheetTexture: Texture | null = null;
@@ -219,46 +219,43 @@ export class AnimatedSprite2D
       return;
     }
 
-    this.timeAccumulator += dt;
+    const result = this.frameSequencePlayer.advance(
+      dt,
+      {
+        frameCount: clip.frames.length,
+        fps: clip.fps,
+        loop: clip.loop,
+        playbackMode: clip.playbackMode === 'ping-pong' ? 'ping-pong' : 'linear',
+        frameDurationMultiplier: index => clip.frames[index]?.durationMultiplier ?? 1,
+      },
+      this._currentFrame
+    );
 
-    while (true) {
-      const activeFrame = this.getCurrentFrameData();
-      const frameDuration = Math.max(
-        0.001,
-        (1 / clip.fps) * (activeFrame?.durationMultiplier ?? 1)
-      );
-      if (this.timeAccumulator < frameDuration) {
-        break;
-      }
+    // Repaint + fire per-frame events for every frame this advance landed on
+    // (in order). The catch-up loop can cross multiple frames on a large `dt`
+    // (tab-throttle / stutter) — firing events for each passed frame, not just
+    // the final one, matches the "play-driven advance only" intent. Events are
+    // never fired from the currentFrame setter (inspector scrub / syncActiveClip
+    // / editor proxy) — only here, on a real play-driven advance.
+    for (const frameIndex of result.framesAdvanced) {
+      this.currentFrame = frameIndex; // setter clamps + refreshes presentation
+      this.emitFrameEvents(frameIndex);
+    }
 
-      this.timeAccumulator -= frameDuration;
-
-      const prevFrame = this._currentFrame;
-      const nextFrame = this.getNextFrameIndex(clip);
-
-      this.currentFrame = nextFrame;
-
-      // Fire per-frame events only on a real play-driven advance — never from the
-      // currentFrame setter, which the inspector scrub / syncActiveClip / editor
-      // proxy also call and would spuriously fire.
-      if (this._currentFrame !== prevFrame) {
-        this.emitFrameEvents(this._currentFrame);
-      }
-
-      if (!this.isPlaying) {
-        this.timeAccumulator = 0;
-        // A non-looping clip just reached its end (getNextFrameIndex flipped
-        // isPlaying off). Fire once on that transition — play-driven only, same
-        // discipline as emitFrameEvents — so one-shot VFX can self-free via a
-        // `core:FreeOnSignal` on `animation-finished` (Godot's animation_finished).
-        this.emit('animation-finished', clip.name);
-        // Optional self-destruct for one-shot VFX — zero-component. Runs only
-        // here (play-driven tick), so it never fires in the editor/preview,
-        // which render proxy visuals and drive frames via the setter, not tick.
-        if (this.freeOnFinish) {
-          this.queueFree();
-        }
-        break;
+    if (result.finished) {
+      // A non-looping clip just reached its end. The node — not the player —
+      // owns the `isPlaying` flag, so flip it off here.
+      this.isPlaying = false;
+      this.properties.isPlaying = false;
+      // Fire once on that transition — play-driven only, same discipline as
+      // emitFrameEvents — so one-shot VFX can self-free via a `core:FreeOnSignal`
+      // on `animation-finished` (Godot's animation_finished).
+      this.emit('animation-finished', clip.name);
+      // Optional self-destruct for one-shot VFX — zero-component. Runs only
+      // here (play-driven tick), so it never fires in the editor/preview,
+      // which render proxy visuals and drive frames via the setter, not tick.
+      if (this.freeOnFinish) {
+        this.queueFree();
       }
     }
   }
@@ -464,8 +461,7 @@ export class AnimatedSprite2D
     if (resetFrame && previousClipName !== this.activeClip?.name) {
       this._currentFrame = 0;
       this.properties.currentFrame = this._currentFrame;
-      this.timeAccumulator = 0;
-      this.playbackDirection = 1;
+      this.frameSequencePlayer.reset();
     }
 
     const frameCount = this.activeClip?.frames.length ?? 0;
@@ -475,51 +471,10 @@ export class AnimatedSprite2D
     } else {
       this._currentFrame = Math.max(0, this._currentFrame);
       this.properties.currentFrame = this._currentFrame;
-      this.timeAccumulator = 0;
-      this.playbackDirection = 1;
+      this.frameSequencePlayer.reset();
     }
 
     this.refreshTexturePresentation();
-  }
-
-  private getNextFrameIndex(clip: AnimationClip): number {
-    if (clip.playbackMode === 'ping-pong' && clip.frames.length > 1) {
-      let nextFrame = this._currentFrame + this.playbackDirection;
-      if (nextFrame >= clip.frames.length) {
-        if (!clip.loop) {
-          this.isPlaying = false;
-          this.properties.isPlaying = false;
-          return clip.frames.length - 1;
-        }
-
-        this.playbackDirection = -1;
-        nextFrame = Math.max(0, clip.frames.length - 2);
-      } else if (nextFrame < 0) {
-        if (!clip.loop) {
-          this.isPlaying = false;
-          this.properties.isPlaying = false;
-          return 0;
-        }
-
-        this.playbackDirection = 1;
-        nextFrame = Math.min(clip.frames.length - 1, 1);
-      }
-
-      return nextFrame;
-    }
-
-    const nextFrame = this._currentFrame + 1;
-    if (nextFrame < clip.frames.length) {
-      return nextFrame;
-    }
-
-    if (clip.loop) {
-      return 0;
-    }
-
-    this.isPlaying = false;
-    this.properties.isPlaying = false;
-    return clip.frames.length - 1;
   }
 
   private cloneTexture(texture: Texture): Texture {
