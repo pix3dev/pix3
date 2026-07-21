@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { ProjectStorageService } from '@/services';
+import { ProjectStorageService } from '@/services/ProjectStorageService';
 import './pix3-animation-auto-slice-dialog.ts.css';
 
 @customElement('pix3-animation-auto-slice-dialog')

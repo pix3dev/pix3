@@ -65,6 +65,7 @@ describe('AnimationPanel', () => {
           name: 'idle',
           fps: 12,
           loop: true,
+          playbackMode: 'normal',
           frames: [],
         },
       ],
@@ -145,12 +146,14 @@ describe('AnimationPanel', () => {
           name: 'idle',
           fps: 12,
           loop: true,
+          playbackMode: 'normal',
           frames: [],
         },
         {
           name: 'run',
           fps: 16,
           loop: true,
+          playbackMode: 'normal',
           frames: [],
         },
       ],
@@ -164,7 +167,7 @@ describe('AnimationPanel', () => {
   it('accepts texture drops from the asset browser', async () => {
     const panel = new AnimationPanel();
     const panelState = panel as unknown as {
-      onTextureDrop: (event: DragEvent) => Promise<void>;
+      onEditorDrop: (event: DragEvent) => Promise<void>;
     };
     const addFrameTextures = vi.fn().mockResolvedValue(undefined);
 
@@ -178,13 +181,14 @@ describe('AnimationPanel', () => {
     const event = {
       preventDefault: vi.fn(),
       dataTransfer: {
+        types: ['application/x-pix3-asset-resource'],
         getData: vi.fn((type: string) =>
           type === 'application/x-pix3-asset-resource' ? 'res://textures/player.png' : ''
         ),
       },
     } as unknown as DragEvent;
 
-    await panelState.onTextureDrop(event);
+    await panelState.onEditorDrop(event);
 
     expect(addFrameTextures).toHaveBeenCalledWith(['res://textures/player.png']);
   });

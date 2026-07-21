@@ -32,14 +32,13 @@ import { ScriptRegistry } from '@pix3/runtime';
 import { IconService } from '@/services/IconService';
 import { DialogService } from '@/services/DialogService';
 import { FileSystemAPIService } from '@/services/FileSystemAPIService';
+import { AnimationEditorService } from '@/services/AnimationEditorService';
+import { AssetsPreviewService, type AssetPreviewItem } from '@/services/AssetsPreviewService';
+import { ProjectStorageService } from '@/services/ProjectStorageService';
 import {
-  AnimationEditorService,
-  AssetsPreviewService,
-  ProjectStorageService,
   LibrarySelectionService,
-  type AssetPreviewItem,
   type LibrarySelection,
-} from '@/services';
+} from '@/services/library/LibrarySelectionService';
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
@@ -4271,7 +4270,7 @@ ${textPreview?.content || 'Empty file'}</pre
         aria-label=${`${axis} ${option}`}
         @click=${() => this.applyAnchorMode(axis, option)}
       >
-        ${this.renderAnchorModeIcon(axis, option, label)}
+        ${this.renderAnchorModeIcon(axis, option, label ?? option)}
       </button>
     `;
   }

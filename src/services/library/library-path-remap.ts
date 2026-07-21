@@ -15,7 +15,7 @@
 export const LIBRARY_INSERT_ROOT = 'assets/library';
 
 /** Escape a string for use as a literal inside a RegExp. */
-export function escapeRegExp(value: string): string {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

@@ -5,13 +5,15 @@ import {
   type ProfilerFrameImpactEntrySnapshot,
   type ProfilerFrameImpactSnapshot,
   ProfilerSessionService,
-  RemotePreviewTelemetryService,
-  type RemotePlayerTelemetry,
   type ProfilerCountersSnapshot,
   type ProfilerHistorySnapshot,
   type ProfilerPerformanceSnapshot,
   type ProfilerSessionSnapshot,
-} from '@/services';
+} from '@/services/ProfilerSessionService';
+import {
+  RemotePreviewTelemetryService,
+  type RemotePlayerTelemetry,
+} from '@/services/RemotePreviewTelemetryService';
 import './profiler-panel.ts.css';
 import '../shared/pix3-panel';
 

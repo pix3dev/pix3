@@ -57,7 +57,7 @@ function createAnimationOperationContext(): OperationContext {
       getService: <T>(): T => {
         throw new Error('No services are required for UpdateAnimationDocumentOperation test');
       },
-    } as OperationContext['container'],
+    } as unknown as OperationContext['container'],
     requestedAt: Date.now(),
   } as OperationContext;
 }

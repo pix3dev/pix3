@@ -19,6 +19,7 @@ import {
 } from '@/core/ProjectManifest';
 import { ProjectService } from '@/services/ProjectService';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
+import type { ProjectBackend } from '@/state';
 
 export interface UpdateProjectSettingsParams {
   projectName?: string;
@@ -61,7 +62,7 @@ const cloneManifest = (manifest: ProjectManifestSnapshotLike): ProjectManifest =
 function persistRecentProject(entry: {
   id?: string;
   name: string;
-  backend: 'local' | 'cloud';
+  backend: ProjectBackend;
   localAbsolutePath?: string;
   linkedCloudProjectId?: string;
   linkedLocalSessionId?: string;

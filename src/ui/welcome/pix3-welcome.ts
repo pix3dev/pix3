@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
 import './pix3-welcome.ts.css';
-import { ProjectService } from '@/services';
+import { ProjectService } from '@/services/ProjectService';
 import { IconService } from '@/services/IconService';
 import { CloudProjectService } from '@/services/CloudProjectService';
 import { DialogService } from '@/services/DialogService';

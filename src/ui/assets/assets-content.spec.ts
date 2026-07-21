@@ -1,19 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AssetPreviewItem, AssetsPreviewSnapshot } from '@/services/AssetsPreviewService';
 import type {
-  AssetFileActivationService,
+  AssetPreviewItem,
+  AssetsPreviewSnapshot,
   AssetsPreviewService,
-  IconService,
-  ProjectService,
-} from '@/services';
+} from '@/services/AssetsPreviewService';
+import type { AssetFileActivationService } from '@/services/AssetFileActivationService';
+import type { IconService } from '@/services/IconService';
+import type { ProjectService } from '@/services/ProjectService';
 
-vi.mock('@/services', () => ({
+vi.mock('@/services/AssetFileActivationService', () => ({
   AssetFileActivationService: class AssetFileActivationService {},
+}));
+vi.mock('@/services/AssetsPreviewService', () => ({
   AssetsPreviewService: class AssetsPreviewService {},
+}));
+vi.mock('@/services/IconService', () => ({
   IconService: class IconService {},
-  ProjectService: class ProjectService {},
   IconSize: { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 24 },
+}));
+vi.mock('@/services/ProjectService', () => ({
+  ProjectService: class ProjectService {},
 }));
 
 await import('./assets-content');

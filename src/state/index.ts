@@ -30,8 +30,6 @@ export const resetAppState = (): void => {
 };
 
 export {
-  DEFAULT_THEME,
-  THEME_IDS,
   createInitialAppState,
   createInitialHybridSyncState,
   createInitialProjectOpenProgressState,

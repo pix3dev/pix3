@@ -124,7 +124,7 @@ export interface CapturedError {
 // Node → DTO
 // ---------------------------------------------------------------------------
 
-export function transformOf(node: NodeBase): TransformDTO {
+function transformOf(node: NodeBase): TransformDTO {
   return {
     position: { x: node.position.x, y: node.position.y, z: node.position.z },
     rotation: { x: node.rotation.x, y: node.rotation.y, z: node.rotation.z },

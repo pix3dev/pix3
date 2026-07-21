@@ -512,6 +512,7 @@ function createAudioPlayback(
   return {
     id: overrides.id,
     label: overrides.label ?? 'Unknown',
+    bus: overrides.bus ?? 'sfx',
     resourcePath: overrides.resourcePath ?? null,
     startedAtMs: overrides.startedAtMs ?? 0,
     elapsedMs: overrides.elapsedMs ?? 0,

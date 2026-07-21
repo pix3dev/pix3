@@ -9,14 +9,12 @@ import {
   normalizeAnimationAssetPath,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import {
-  AnimationAutoSliceDialogService,
-  AnimationEditorService,
-  CommandDispatcher,
-  DialogService,
-  IconService,
-  ProjectStorageService,
-} from '@/services';
+import { AnimationAutoSliceDialogService } from '@/services/AnimationAutoSliceDialogService';
+import { AnimationEditorService } from '@/services/AnimationEditorService';
+import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { DialogService } from '@/services/DialogService';
+import { IconService } from '@/services/IconService';
+import { ProjectStorageService } from '@/services/ProjectStorageService';
 import { OperationService } from '@/services/OperationService';
 import type {
   AnimationInspectorController,
@@ -2056,18 +2054,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     });
   }
 
-  private async onTextureDrop(event: DragEvent): Promise<void> {
-    event.preventDefault();
-    this.isTextureDragOver = false;
-
-    const texturePaths = this.getDroppedTextureResources(event);
-    if (texturePaths.length === 0) {
-      return;
-    }
-
-    await this.onAddFrameTextures(texturePaths);
-  }
-
   private async onUpdateTexturePath(nextTexturePath: string): Promise<void> {
     const trimmedTexturePath = nextTexturePath.trim();
     const currentResource = this.resource;
@@ -2107,15 +2093,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     this.slicerColumns = result.columns;
     this.slicerRows = result.rows;
     await this.onAddFramesFromGrid(result.columns, result.rows);
-  }
-
-  private getAssetTitle(): string {
-    if (!this.assetPath) {
-      return 'Animation';
-    }
-
-    const segments = this.assetPath.replace(/\\/g, '/').split('/').filter(Boolean);
-    return segments[segments.length - 1] ?? this.assetPath;
   }
 
   private getStoredActiveClipName(): string {

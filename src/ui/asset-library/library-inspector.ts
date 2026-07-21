@@ -1,13 +1,12 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { nothing } from 'lit';
+import { AssetLibraryService } from '@/services/AssetLibraryService';
+import { LibraryInsertService } from '@/services/LibraryInsertService';
 import {
-  AssetLibraryService,
-  LibraryInsertService,
   LibrarySelectionService,
-  IconService,
-  IconSize,
   type LibrarySelection,
-} from '@/services';
+} from '@/services/library/LibrarySelectionService';
+import { IconService, IconSize } from '@/services/IconService';
 import { DialogService } from '@/services/DialogService';
 import { categoriesForSource, itemsForSource } from '@/services/library/library-sources';
 import {

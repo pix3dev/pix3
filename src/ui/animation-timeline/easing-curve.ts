@@ -62,7 +62,7 @@ export function easingDomain(easing: KeyframeEasing): readonly [number, number] 
 }
 
 /** Map an easing value to a Y pixel inside a [pad, h-pad] box (top = high). */
-export function easingValueToY(
+function easingValueToY(
   value: number,
   height: number,
   pad: number,

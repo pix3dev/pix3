@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "project": ["src/**/*.{ts,js}", "packages/pix3-runtime/src/**/*.ts"],
+  "entry": [
+    "src/player/player-main.ts",
+    "src/services/bg-removal/bg-removal.worker.ts",
+    "packages/pix3-runtime/src/index.ts"
+  ]
+}

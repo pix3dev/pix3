@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { resetAppState } from '@/state';
-import type { FileDescriptor } from '@/services';
+import type { FileDescriptor } from '@/services/FileSystemAPIService';
 import { ASSET_PATH_LIST_MIME } from '@/ui/shared/asset-drag-drop';
 
 const { AssetTree } = await import('./asset-tree');

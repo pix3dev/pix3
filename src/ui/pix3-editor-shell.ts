@@ -8,9 +8,18 @@ import { CommandRegistry } from '@/services/CommandRegistry';
 import { KeybindingService } from '@/services/KeybindingService';
 import { FileWatchService } from '@/services/FileWatchService';
 import { DialogService, type DialogInstance } from '@/services/DialogService';
-import { AnimationAutoSliceDialogService, type AnimationAutoSliceDialogInstance } from '@/services';
-import { AssetImportDialogService, type AssetImportDialogInstance } from '@/services';
-import { SaveGeneratedAssetDialogService, type SaveGeneratedAssetDialogInstance } from '@/services';
+import {
+  AnimationAutoSliceDialogService,
+  type AnimationAutoSliceDialogInstance,
+} from '@/services/AnimationAutoSliceDialogService';
+import {
+  AssetImportDialogService,
+  type AssetImportDialogInstance,
+} from '@/services/AssetImportDialogService';
+import {
+  SaveGeneratedAssetDialogService,
+  type SaveGeneratedAssetDialogInstance,
+} from '@/services/SaveGeneratedAssetDialogService';
 import {
   BehaviorPickerService,
   type ComponentPickerInstance,
@@ -95,7 +104,7 @@ import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigatio
 import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
 import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
-import { ProjectService } from '@/services';
+import { ProjectService } from '@/services/ProjectService';
 import { GamePlaySessionService } from '@/services/GamePlaySessionService';
 import { LocalizationEditorService } from '@/services/LocalizationEditorService';
 import { EditorTabService } from '@/services/EditorTabService';
@@ -1480,6 +1489,8 @@ export class Pix3EditorShell extends ComponentBase {
 
     if (
       typeof dialogId !== 'string' ||
+      typeof columns !== 'number' ||
+      typeof rows !== 'number' ||
       !Number.isFinite(columns) ||
       !Number.isFinite(rows) ||
       columns <= 0 ||

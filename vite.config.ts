@@ -87,6 +87,10 @@ export default defineConfig(async ({ mode }) => {
         },
         output: {
           manualChunks(id) {
+            // `?raw`/`?url` glob imports (playable-export vendor sources) are lazy and must NOT
+            // be merged into the eagerly-loaded engine chunks below — their ids still contain
+            // `node_modules/three/` etc., so guard on the query suffix first.
+            if (id.includes('?raw') || id.includes('?url')) return undefined;
             if (id.includes('node_modules/@dimforge/rapier3d')) return 'rapier';
             if (id.includes('node_modules/three/')) return 'three';
             if (id.includes('packages/pix3-runtime/')) return 'pix3-runtime';

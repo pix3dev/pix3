@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProfilerSessionService, ProfilerSessionSnapshot } from '@/services';
+import type {
+  ProfilerSessionService,
+  ProfilerSessionSnapshot,
+} from '@/services/ProfilerSessionService';
 
-vi.mock('@/services', () => ({
+vi.mock('@/services/ProfilerSessionService', () => ({
   ProfilerSessionService: class ProfilerSessionService {},
+}));
+vi.mock('@/services/RemotePreviewTelemetryService', () => ({
   RemotePreviewTelemetryService: class RemotePreviewTelemetryService {},
 }));
 
@@ -307,7 +312,8 @@ describe('ProfilerPanel', () => {
       createSnapshot({
         status: 'running',
         audio: {
-          instances: [],
+          files: [],
+          activeInstanceCount: 0,
         },
       })
     );
@@ -492,6 +498,7 @@ function createAudioPlayback(
   return {
     id: overrides.id,
     label: overrides.label ?? 'Unknown',
+    bus: overrides.bus ?? 'sfx',
     resourcePath: overrides.resourcePath ?? null,
     startedAtMs: overrides.startedAtMs ?? 0,
     elapsedMs: overrides.elapsedMs ?? 0,
