@@ -2,6 +2,11 @@
   "name": "@pix3/runtime",
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pix3dev/pix3.git",
+    "directory": "packages/pix3-runtime"
+  },
   "engines": {
     "node": ">=24.15.0 <25"
   },
