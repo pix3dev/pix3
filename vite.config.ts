@@ -55,11 +55,15 @@ export default defineConfig(async ({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2,wasm,glb}'],
-          // Background-removal ONNX runtimes (~24 MB each) are an optional,
-          // lazily-loaded feature — not worth precaching for offline use.
-          globIgnores: ['**/ort-wasm*'],
-          // esbuild.wasm (~10 MB) and the three chunk (~19 MB, embeds runtime
-          // sources for playable export) must be precached to work offline.
+          // Background-removal ONNX runtimes (~24 MB each) are an optional, lazily-loaded
+          // feature — not worth precaching for offline use. Likewise `assets/export-vendor/**`
+          // is ~29 MB of vendor/runtime SOURCE TEXT embedded for playable export (see the
+          // `chunkFileNames` comment above) — it is fetched on demand only when the user
+          // actually exports a playable build, so precaching it for offline editing is wasted
+          // bandwidth/storage. The export flow still works offline-first-run since it's a
+          // regular network fetch, just not pre-warmed.
+          globIgnores: ['**/ort-wasm*', '**/export-vendor/**'],
+          // esbuild.wasm (~11 MB) must be precached to work offline (in-editor script compile).
           maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
           // player.html carries session query params, so navigation to it must
@@ -95,6 +99,16 @@ export default defineConfig(async ({ mode }) => {
             if (id.includes('node_modules/three/')) return 'three';
             if (id.includes('packages/pix3-runtime/')) return 'pix3-runtime';
             return undefined;
+          },
+          // `PlayableHtmlBuildService` embeds ~1500 vendor/runtime SOURCE FILES as raw text
+          // (`?raw`/`?url` glob imports) for playable export — each becomes its own chunk but
+          // is never executed by the editor itself. Routing them into a dedicated folder lets
+          // the PWA precache glob below exclude the whole feature in one pattern instead of
+          // enumerating chunk names, which are content-hashed and change on every build.
+          chunkFileNames(chunkInfo) {
+            const isExportVendorSource =
+              chunkInfo.facadeModuleId?.includes('?raw') || chunkInfo.facadeModuleId?.includes('?url');
+            return isExportVendorSource ? 'assets/export-vendor/[name]-[hash].js' : 'assets/[name]-[hash].js';
           },
         },
       },
