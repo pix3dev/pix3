@@ -1255,7 +1255,7 @@ describe('AgentToolRegistry', () => {
     const registry = buildRegistry({ dispatcher, sceneManager, editorTabs: { focusOrOpenScene } });
 
     expect(await registry.execute('play_start')).toEqual({ ok: true });
-    expect(focusOrOpenScene).toHaveBeenCalledWith('res://src/assets/scenes/main.pix3scene');
+    expect(focusOrOpenScene).toHaveBeenCalledWith('res://scenes/main.pix3scene');
     expect(dispatcher.executeById).toHaveBeenCalledWith('game.start');
   });
 

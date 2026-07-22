@@ -84,14 +84,11 @@ describe('LayoutManagerService', () => {
       root: { content: Array<{ content?: Array<{ componentType?: string }> }> };
     };
 
-    // Agent chat is its own column to the right of the viewport, before the Inspector sidebar.
-    const agentColumn = config.root.content[2];
-    expect(agentColumn.content?.map(item => item.componentType)).toEqual(['agent-chat']);
-
-    const rightSidebar = config.root.content[3];
+    // Inspector, Profiler and Agent chat share the right sidebar stack.
+    const rightSidebar = config.root.content[2];
     const componentTypes = rightSidebar.content?.map(item => item.componentType);
 
-    expect(componentTypes).toEqual(['inspector', 'profiler']);
+    expect(componentTypes).toEqual(['inspector', 'profiler', 'agent-chat']);
   });
 
   it('registers profiler panel component', async () => {

@@ -63,12 +63,14 @@ describe('UpdateCheckService', () => {
   });
 
   it('reports update-available when remote semver is newer', async () => {
+    const [major, minor, patch] = CURRENT_EDITOR_VERSION.version.split('.').map(Number);
+    const newerVersion = `${major}.${minor}.${patch + 1}`;
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        version: '0.0.2',
+        version: newerVersion,
         build: 0,
-        displayVersion: 'v0.0.2 (build 0)',
+        displayVersion: `v${newerVersion} (build 0)`,
       }),
     }) as typeof fetch;
 
@@ -76,7 +78,7 @@ describe('UpdateCheckService', () => {
     const state = await service.checkForUpdates();
 
     expect(state.status).toBe('update-available');
-    expect(state.latestVersion?.version).toBe('0.0.2');
+    expect(state.latestVersion?.version).toBe(newerVersion);
   });
 
   it('reports up-to-date when remote version matches local', async () => {
