@@ -11,6 +11,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { MathUtils } from 'three';
 import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
 import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
+import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOverlayHud';
 import {
   computeFallbackFramingBounds,
   computeOrtho2DFitZoom,
@@ -68,7 +69,6 @@ import {
   getProjectTextureFiltering,
   reportScriptError,
 } from '@pix3/runtime';
-import type { PropertyDefinition } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
 import { SceneManager, InputService } from '@pix3/runtime';
 import { OperationService } from '@/services/OperationService';
@@ -104,7 +104,6 @@ import {
   type Transform2DUpdateOptions,
   type Selection2DOverlay,
 } from '@/services/TransformTool2d';
-import { getNodeVisuals } from '@/ui/scene-tree/node-visuals.helper';
 import { isDocumentActive } from './page-activity';
 
 export type TransformMode = 'select' | 'translate' | 'rotate' | 'scale';
@@ -148,21 +147,6 @@ const MAX_PREVIEW_DELTA_S = 0.1;
 // Re-exported for backward compat: this type now lives with the GPU timer it
 // describes; consumers still import it from here.
 export type { ViewportPerfSample } from './viewport/ViewportGpuTimer';
-
-/**
- * A screen-space anchor for a 2D selection HUD badge: the projected edge
- * position, the outward/tangent directions used to push the badge clear of the
- * selection, and the badge's on-screen rotation.
- */
-interface Selection2DOverlayHudAnchor {
-  x: number;
-  y: number;
-  directionX: number;
-  directionY: number;
-  tangentX: number;
-  tangentY: number;
-  rotationDeg: number;
-}
 
 /** Options for {@link ViewportRendererService.frameNodes}. */
 export interface FrameNodesOptions {
@@ -238,11 +222,6 @@ export class ViewportRendererService {
   private labelMeasureCtx: CanvasRenderingContext2D | null = null;
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
-  private selection2DOverlayHud?: {
-    root: HTMLDivElement;
-    top: HTMLDivElement;
-    bottom: HTMLDivElement;
-  };
   private active2DTransform?: Active2DTransform;
   // Hover preview frame for 2D nodes (before selection)
   private hoverPreview2D?: { nodeId: string; frame: THREE.Group };
@@ -320,6 +299,21 @@ export class ViewportRendererService {
     setSuppressGizmosForCapture: value => {
       this.suppressGizmosForCapture = value;
     },
+  });
+  // Owns the DOM badge HUD that floats near a 2D selection. Wired via closures
+  // because the overlay/camera/viewport/canvas host and the active 2D transform
+  // are recreated/reassigned over this object's lifetime, and the borrowed
+  // methods (projectWorldToOverlay, rotateVectorZ, getIconSvg) stay on the facade.
+  private readonly selection2DHud = new ViewportSelection2DOverlayHud({
+    getSelection2DOverlay: () => this.selection2DOverlay,
+    getOrthographicCamera: () => this.orthographicCamera,
+    getViewportSize: () => this.viewportSize,
+    getActive2DTransformHandle: () => this.active2DTransform?.handle,
+    getCanvasHost: () => this.canvasHost,
+    getSceneGraph: sceneId => this.sceneManager.getSceneGraph(sceneId),
+    projectWorldToOverlay: world => this.projectWorldToOverlay(world),
+    rotateVectorZ: (vector, angle) => this.rotateVectorZ(vector, angle),
+    getIconSvg: (name, size) => this.iconService.getIconSvg(name, size),
   });
   /**
    * Editor appearance overrides a script pushed via `setAppearanceOverride`,
@@ -698,7 +692,7 @@ export class ViewportRendererService {
       } catch {
         // ignore
       }
-      this.attachSelection2DOverlayHud();
+      this.selection2DHud.attach();
     }
 
     // Ensure controls point at the active dom element.
@@ -1681,7 +1675,7 @@ export class ViewportRendererService {
     // Sync all 2D visuals after layout recalculation
     this.syncAll2DVisuals();
     this.syncBaseViewportFrame();
-    this.updateSelection2DOverlayHud();
+    this.selection2DHud.update();
 
     if (!hadMeasuredViewport && appState.scenes.activeSceneId) {
       this.restoreZoomFromState();
@@ -2142,7 +2136,7 @@ export class ViewportRendererService {
     // camera. On-demand only: no repaint (idle) means no reposition, and the
     // guards inside skip it whenever no 2D selection badge is shown.
     if (appState.ui.navigationMode === '2d' && this.selection2DOverlay) {
-      this.repositionSelection2DOverlayHud();
+      this.selection2DHud.reposition();
     }
   }
 
@@ -2345,7 +2339,7 @@ export class ViewportRendererService {
       );
     }
 
-    this.updateSelection2DOverlayHud();
+    this.selection2DHud.update();
   }
 
   private createBaseViewportFrame(width: number, height: number): THREE.Group {
@@ -6300,7 +6294,7 @@ export class ViewportRendererService {
   private clear2DSelectionOverlay(): void {
     if (!this.selection2DOverlay || !this.scene) {
       this.selection2DOverlay = undefined;
-      this.hideSelection2DOverlayHud();
+      this.selection2DHud.hide();
       return;
     }
 
@@ -6321,7 +6315,7 @@ export class ViewportRendererService {
     this.selection2DOverlay = undefined;
     this.active2DTransform = undefined;
     this.end2DInteraction();
-    this.hideSelection2DOverlayHud();
+    this.selection2DHud.hide();
     console.debug('[ViewportRenderer] cleared 2D overlay');
   }
 
@@ -6560,7 +6554,7 @@ export class ViewportRendererService {
 
     // Apply zoom compensation immediately so handles have the correct screen-space size.
     this.refreshGizmoPositions();
-    this.updateSelection2DOverlayHud();
+    this.selection2DHud.update();
   }
 
   private refreshGizmoPositions(): void {
@@ -6604,575 +6598,6 @@ export class ViewportRendererService {
     this.sync2DServiceFrameThickness();
   }
 
-  private attachSelection2DOverlayHud(): void {
-    if (!this.canvasHost) {
-      return;
-    }
-
-    if (!this.selection2DOverlayHud) {
-      const root = document.createElement('div');
-      root.dataset.pix3OverlayHud = 'selection-2d';
-      Object.assign(root.style, {
-        position: 'absolute',
-        inset: '0',
-        pointerEvents: 'none',
-        overflow: 'hidden',
-        zIndex: '4',
-      } satisfies Partial<CSSStyleDeclaration>);
-
-      const top = this.createSelection2DOverlayHudBadge();
-      const bottom = this.createSelection2DOverlayHudBadge();
-      root.append(top, bottom);
-
-      this.selection2DOverlayHud = { root, top, bottom };
-    }
-
-    if (this.selection2DOverlayHud.root.parentElement !== this.canvasHost) {
-      this.canvasHost.appendChild(this.selection2DOverlayHud.root);
-    }
-  }
-
-  private createSelection2DOverlayHudBadge(): HTMLDivElement {
-    const badge = document.createElement('div');
-    Object.assign(badge.style, {
-      position: 'absolute',
-      left: '0',
-      top: '0',
-      display: 'none',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '6px',
-      padding: '4px 10px',
-      borderRadius: '8px',
-      border: '1px solid rgba(255, 255, 255, 0.16)',
-      background: 'rgba(78, 141, 245, 0.96)',
-      boxShadow: '0 10px 20px rgba(0, 0, 0, 0.24)',
-      color: '#ffffff',
-      fontFamily:
-        '"Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif',
-      fontSize: '12px',
-      fontWeight: '700',
-      lineHeight: '1.2',
-      whiteSpace: 'nowrap',
-      transformOrigin: 'center center',
-      transform: 'translate(-50%, -50%)',
-    } satisfies Partial<CSSStyleDeclaration>);
-    return badge;
-  }
-
-  private getSelection2DOverlayLocalBounds(overlay: Selection2DOverlay): THREE.Box3 {
-    if (overlay.localBounds) {
-      return overlay.localBounds;
-    }
-
-    return overlay.combinedBounds.clone().translate(overlay.centerWorld.clone().multiplyScalar(-1));
-  }
-
-  private normalizeSelection2DOverlayHudRotation(rotationDeg: number): number {
-    let normalized = ((rotationDeg % 360) + 360) % 360;
-    if (normalized > 180) {
-      normalized -= 360;
-    }
-    if (normalized > 90) {
-      normalized -= 180;
-    } else if (normalized < -90) {
-      normalized += 180;
-    }
-    return normalized;
-  }
-
-  private getSelection2DOverlayHudAnchor(edge: 'top' | 'bottom' | 'left' | 'right'): {
-    x: number;
-    y: number;
-    directionX: number;
-    directionY: number;
-    tangentX: number;
-    tangentY: number;
-    rotationDeg: number;
-  } | null {
-    const overlay = this.selection2DOverlay;
-    if (!overlay) {
-      return null;
-    }
-
-    const localBounds = this.getSelection2DOverlayLocalBounds(overlay);
-    const centerX = (localBounds.min.x + localBounds.max.x) / 2;
-    const centerY = (localBounds.min.y + localBounds.max.y) / 2;
-    const z = (localBounds.min.z + localBounds.max.z) / 2;
-    const rotationZ = overlay.worldRotationZ ?? 0;
-    let anchorLocal = new THREE.Vector3(centerX, localBounds.max.y, z);
-    let outwardLocal = new THREE.Vector3(0, 1, 0);
-    let tangentLocal = new THREE.Vector3(1, 0, 0);
-
-    if (edge === 'bottom') {
-      anchorLocal = new THREE.Vector3(centerX, localBounds.min.y, z);
-      outwardLocal = new THREE.Vector3(0, -1, 0);
-    } else if (edge === 'left') {
-      anchorLocal = new THREE.Vector3(localBounds.min.x, centerY, z);
-      outwardLocal = new THREE.Vector3(-1, 0, 0);
-      tangentLocal = new THREE.Vector3(0, 1, 0);
-    } else if (edge === 'right') {
-      anchorLocal = new THREE.Vector3(localBounds.max.x, centerY, z);
-      outwardLocal = new THREE.Vector3(1, 0, 0);
-      tangentLocal = new THREE.Vector3(0, 1, 0);
-    }
-
-    const anchorWorld = this.rotateVectorZ(anchorLocal, rotationZ).add(overlay.centerWorld);
-    const outwardWorld = this.rotateVectorZ(outwardLocal, rotationZ).multiplyScalar(10);
-    const tangentWorld = this.rotateVectorZ(tangentLocal, rotationZ).multiplyScalar(10);
-    const anchorScreen = this.projectWorldToOverlay(anchorWorld);
-    if (!anchorScreen) {
-      return null;
-    }
-
-    const outwardScreen = this.projectWorldToOverlay(anchorWorld.clone().add(outwardWorld));
-    const tangentScreen = this.projectWorldToOverlay(anchorWorld.clone().add(tangentWorld));
-    let directionX = 0;
-    let directionY = edge === 'top' ? -1 : 1;
-    let tangentX = 1;
-    let tangentY = 0;
-
-    if (outwardScreen) {
-      const deltaX = outwardScreen.x - anchorScreen.x;
-      const deltaY = outwardScreen.y - anchorScreen.y;
-      const length = Math.hypot(deltaX, deltaY);
-      if (length > 0.0001) {
-        directionX = deltaX / length;
-        directionY = deltaY / length;
-      }
-    }
-
-    if (tangentScreen) {
-      const deltaX = tangentScreen.x - anchorScreen.x;
-      const deltaY = tangentScreen.y - anchorScreen.y;
-      const length = Math.hypot(deltaX, deltaY);
-      if (length > 0.0001) {
-        tangentX = deltaX / length;
-        tangentY = deltaY / length;
-      }
-    }
-
-    return {
-      x: anchorScreen.x,
-      y: anchorScreen.y,
-      directionX,
-      directionY,
-      tangentX,
-      tangentY,
-      rotationDeg: this.normalizeSelection2DOverlayHudRotation(
-        MathUtils.radToDeg(Math.atan2(tangentY, tangentX))
-      ),
-    };
-  }
-
-  private getSelection2DOverlayHudAnchors(): {
-    top: {
-      x: number;
-      y: number;
-      directionX: number;
-      directionY: number;
-      tangentX: number;
-      tangentY: number;
-      rotationDeg: number;
-    };
-    bottom: {
-      x: number;
-      y: number;
-      directionX: number;
-      directionY: number;
-      tangentX: number;
-      tangentY: number;
-      rotationDeg: number;
-    };
-  } | null {
-    const anchors = (['top', 'bottom', 'left', 'right'] as const)
-      .map(edge => this.getSelection2DOverlayHudAnchor(edge))
-      .filter(
-        (
-          anchor
-        ): anchor is {
-          x: number;
-          y: number;
-          directionX: number;
-          directionY: number;
-          tangentX: number;
-          tangentY: number;
-          rotationDeg: number;
-        } => Boolean(anchor)
-      );
-
-    if (anchors.length === 0) {
-      return null;
-    }
-
-    let top = anchors[0];
-    let bottom = anchors[0];
-    for (const anchor of anchors) {
-      if (anchor.y < top.y) {
-        top = anchor;
-      }
-      if (anchor.y > bottom.y) {
-        bottom = anchor;
-      }
-    }
-
-    return { top, bottom };
-  }
-
-  private positionSelection2DOverlayHudBadge(
-    badge: HTMLDivElement,
-    anchor: {
-      x: number;
-      y: number;
-      directionX: number;
-      directionY: number;
-      tangentX: number;
-      tangentY: number;
-      rotationDeg: number;
-    },
-    offsetPx: number
-  ): void {
-    const x = Math.min(
-      this.viewportSize.width - 14,
-      Math.max(14, anchor.x + anchor.directionX * offsetPx)
-    );
-    const y = Math.min(
-      this.viewportSize.height - 14,
-      Math.max(14, anchor.y + anchor.directionY * offsetPx)
-    );
-
-    badge.style.left = `${x}px`;
-    badge.style.top = `${y}px`;
-    badge.style.transform = `translate(-50%, -50%) rotate(${anchor.rotationDeg}deg)`;
-  }
-
-  private getSelection2DOverlayHudBadgeOffset(
-    badge: HTMLDivElement,
-    anchor: {
-      x: number;
-      y: number;
-      directionX: number;
-      directionY: number;
-      tangentX: number;
-      tangentY: number;
-      rotationDeg: number;
-    },
-    rotateHandleScreen: { x: number; y: number } | null,
-    baseOffsetPx: number
-  ): number {
-    if (!rotateHandleScreen) {
-      return baseOffsetPx;
-    }
-
-    const projectedDistance =
-      (rotateHandleScreen.x - anchor.x) * anchor.directionX +
-      (rotateHandleScreen.y - anchor.y) * anchor.directionY;
-    if (projectedDistance <= 0) {
-      return baseOffsetPx;
-    }
-
-    return Math.max(baseOffsetPx, projectedDistance + badge.offsetHeight / 2 + 12);
-  }
-
-  private updateSelection2DOverlayHud(): void {
-    this.attachSelection2DOverlayHud();
-
-    // Keep the HUD alive during resize/rotate: a plain move surfaces nothing,
-    // a resize keeps the live size badge, and a rotate swaps that badge for a
-    // live angle readout (the size is hidden until the pointer is released).
-    const activeHandle = this.active2DTransform?.handle;
-    const isMoving = activeHandle === 'move';
-    const isRotating = activeHandle === 'rotate';
-
-    if (
-      !this.selection2DOverlay ||
-      !this.selection2DOverlayHud ||
-      !this.orthographicCamera ||
-      this.viewportSize.width <= 0 ||
-      this.viewportSize.height <= 0 ||
-      isMoving
-    ) {
-      this.hideSelection2DOverlayHud();
-      return;
-    }
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) {
-      this.hideSelection2DOverlayHud();
-      return;
-    }
-
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) {
-      this.hideSelection2DOverlayHud();
-      return;
-    }
-
-    const bounds = this.getSelection2DOverlayLocalBounds(this.selection2DOverlay);
-    const size = bounds.getSize(new THREE.Vector3());
-    const anchors = this.getSelection2DOverlayHudAnchors();
-    if (!anchors) {
-      this.hideSelection2DOverlayHud();
-      return;
-    }
-    const { top: topAnchor, bottom: bottomAnchor } = anchors;
-
-    const topBadgeData = this.getSelection2DOverlayTopBadgeData(
-      this.selection2DOverlay.nodeIds,
-      sceneGraph.nodeMap
-    );
-    const bottomBadgeText = isRotating
-      ? this.getSelection2DOverlayAngleText(
-          this.selection2DOverlay.nodeIds,
-          sceneGraph.nodeMap,
-          this.selection2DOverlay.worldRotationZ ?? 0
-        )
-      : this.getSelection2DOverlaySizeText(
-          this.selection2DOverlay.nodeIds,
-          sceneGraph.nodeMap,
-          size
-        );
-
-    this.renderSelection2DOverlayHudBadge(
-      this.selection2DOverlayHud.top,
-      topBadgeData.iconName,
-      topBadgeData.label,
-      topBadgeData.backgroundColor,
-      `${topBadgeData.label}${topBadgeData.typeLabel ? ` · ${topBadgeData.typeLabel}` : ''}`
-    );
-    this.renderSelection2DOverlayHudBadge(
-      this.selection2DOverlayHud.bottom,
-      null,
-      bottomBadgeText.text,
-      '#4e8df5',
-      bottomBadgeText.text
-    );
-
-    this.applySelection2DOverlayHudBadgePositions(topAnchor, bottomAnchor);
-  }
-
-  /**
-   * Reproject the HUD badge anchors against the current camera and lay the
-   * badges out, without rebuilding their content. Called every painted frame
-   * while a 2D selection is shown so the badges stay glued to the object as the
-   * camera pans/zooms: the WebGL selection frame and transform handles are
-   * world-space meshes that follow the camera on their own, but these DOM badges
-   * are positioned in screen space and would otherwise stay put during a pan.
-   */
-  private repositionSelection2DOverlayHud(): void {
-    const hud = this.selection2DOverlayHud;
-    if (
-      !this.selection2DOverlay ||
-      !hud ||
-      !this.orthographicCamera ||
-      this.viewportSize.width <= 0 ||
-      this.viewportSize.height <= 0
-    ) {
-      return;
-    }
-
-    // Nothing is currently shown (no selection, or hidden mid-move):
-    // updateSelection2DOverlayHud() owns the show/hide decision, so bail here.
-    if (hud.top.style.display === 'none' && hud.bottom.style.display === 'none') {
-      return;
-    }
-
-    const anchors = this.getSelection2DOverlayHudAnchors();
-    if (!anchors) {
-      return;
-    }
-
-    this.applySelection2DOverlayHudBadgePositions(anchors.top, anchors.bottom);
-  }
-
-  private applySelection2DOverlayHudBadgePositions(
-    topAnchor: Selection2DOverlayHudAnchor,
-    bottomAnchor: Selection2DOverlayHudAnchor
-  ): void {
-    const hud = this.selection2DOverlayHud;
-    if (!hud) {
-      return;
-    }
-
-    const rotateHandleScreen = this.getSelection2DOverlayRotateHandleScreenPosition();
-    const topOffset = this.getSelection2DOverlayHudBadgeOffset(
-      hud.top,
-      topAnchor,
-      rotateHandleScreen,
-      18
-    );
-    const bottomOffset = this.getSelection2DOverlayHudBadgeOffset(
-      hud.bottom,
-      bottomAnchor,
-      rotateHandleScreen,
-      18
-    );
-
-    this.positionSelection2DOverlayHudBadge(hud.top, topAnchor, topOffset);
-    this.positionSelection2DOverlayHudBadge(hud.bottom, bottomAnchor, bottomOffset);
-  }
-
-  private hideSelection2DOverlayHud(): void {
-    if (!this.selection2DOverlayHud) {
-      return;
-    }
-
-    this.selection2DOverlayHud.top.style.display = 'none';
-    this.selection2DOverlayHud.bottom.style.display = 'none';
-  }
-
-  private renderSelection2DOverlayHudBadge(
-    badge: HTMLDivElement,
-    iconName: string | null,
-    label: string,
-    backgroundColor: string,
-    title: string
-  ): void {
-    badge.replaceChildren();
-    badge.style.display = 'inline-flex';
-    badge.style.background = backgroundColor;
-    badge.title = title;
-
-    if (iconName) {
-      const icon = document.createElement('span');
-      icon.setAttribute('aria-hidden', 'true');
-      Object.assign(icon.style, {
-        width: '12px',
-        height: '12px',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        lineHeight: '0',
-        flex: '0 0 auto',
-      } satisfies Partial<CSSStyleDeclaration>);
-      icon.innerHTML = this.iconService.getIconSvg(iconName, 12);
-      badge.appendChild(icon);
-    }
-
-    const text = document.createElement('span');
-    text.textContent = label;
-    badge.appendChild(text);
-  }
-
-  private getSelection2DOverlayTopBadgeData(
-    nodeIds: string[],
-    nodeMap: Map<string, NodeBase>
-  ): {
-    iconName: string;
-    label: string;
-    backgroundColor: string;
-    typeLabel: string | null;
-  } {
-    if (nodeIds.length === 1) {
-      const node = nodeMap.get(nodeIds[0]);
-      if (node) {
-        const visuals = getNodeVisuals(node);
-        return {
-          iconName: visuals.icon,
-          label: node.name,
-          backgroundColor: '#4e8df5',
-          typeLabel: node.type,
-        };
-      }
-    }
-
-    return {
-      iconName: 'layers',
-      label: `${nodeIds.length} selected`,
-      backgroundColor: '#4e8df5',
-      typeLabel: null,
-    };
-  }
-
-  private getSelection2DOverlayRotateHandleScreenPosition(): { x: number; y: number } | null {
-    const rotationHandle = this.selection2DOverlay?.rotationHandle;
-    if (!rotationHandle) {
-      return null;
-    }
-
-    const worldPosition = rotationHandle.getWorldPosition(new THREE.Vector3());
-    return this.projectWorldToOverlay(worldPosition);
-  }
-
-  private getSelection2DOverlaySizeText(
-    nodeIds: string[],
-    nodeMap: Map<string, NodeBase>,
-    fallbackBoundsSize: THREE.Vector3
-  ): { text: string } {
-    if (nodeIds.length === 1) {
-      const node = nodeMap.get(nodeIds[0]);
-      if (node instanceof Node2D) {
-        const nodeSize = this.getNodeInspectorSize(node);
-        if (nodeSize) {
-          return {
-            text: `${this.formatOverlayDimension(nodeSize.width, nodeSize.widthPrecision)} x ${this.formatOverlayDimension(nodeSize.height, nodeSize.heightPrecision)}`,
-          };
-        }
-      }
-    }
-
-    return {
-      text: `${this.formatOverlayDimension(fallbackBoundsSize.x)} x ${this.formatOverlayDimension(fallbackBoundsSize.y)}`,
-    };
-  }
-
-  private getSelection2DOverlayAngleText(
-    nodeIds: string[],
-    nodeMap: Map<string, NodeBase>,
-    fallbackRotationZ: number
-  ): { text: string } {
-    let radians = fallbackRotationZ;
-    if (nodeIds.length === 1) {
-      const node = nodeMap.get(nodeIds[0]);
-      if (node instanceof Node2D) {
-        radians = node.rotation.z;
-      }
-    }
-
-    // Normalize to (-180, 180] for a readable live readout.
-    let degrees = MathUtils.radToDeg(radians) % 360;
-    if (degrees > 180) {
-      degrees -= 360;
-    } else if (degrees <= -180) {
-      degrees += 360;
-    }
-    if (Object.is(degrees, -0)) {
-      degrees = 0;
-    }
-
-    return { text: `${this.formatOverlayDimension(degrees, 1)}°` };
-  }
-
-  private getNodeInspectorSize(node: Node2D): {
-    width: number;
-    height: number;
-    widthPrecision: number;
-    heightPrecision: number;
-  } | null {
-    const sizedNode = node as Node2D & { width?: number; height?: number };
-    if (typeof sizedNode.width !== 'number' || typeof sizedNode.height !== 'number') {
-      return null;
-    }
-
-    const schemaGetter = (
-      node.constructor as { getPropertySchema?: () => { properties: PropertyDefinition[] } }
-    ).getPropertySchema;
-    const schema = typeof schemaGetter === 'function' ? schemaGetter() : null;
-    const widthPrecision =
-      schema?.properties.find((property: PropertyDefinition) => property.name === 'width')?.ui
-        ?.precision ?? 0;
-    const heightPrecision =
-      schema?.properties.find((property: PropertyDefinition) => property.name === 'height')?.ui
-        ?.precision ?? 0;
-
-    return {
-      width: sizedNode.width,
-      height: sizedNode.height,
-      widthPrecision,
-      heightPrecision,
-    };
-  }
-
   private projectWorldToOverlay(world: THREE.Vector3): { x: number; y: number } | null {
     if (!this.orthographicCamera || this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
       return null;
@@ -7185,14 +6610,23 @@ export class ViewportRendererService {
     };
   }
 
-  private formatOverlayDimension(value: number, precision: number = 1): string {
-    const safePrecision = Math.max(0, precision);
-    const rounded = Number(value.toFixed(safePrecision));
-    if (safePrecision === 0) {
-      return String(Math.round(rounded));
-    }
+  // --- Test-only compatibility surface for the extracted 2D selection HUD ---
+  // ViewportRenderService.spec.ts drives the HUD through these members. They
+  // delegate to `selection2DHud`; production code calls the collaborator
+  // directly. Not `private` because TS would flag them unused (the spec reaches
+  // them through a cast). Keep in sync with ViewportSelection2DOverlayHud.
+  updateSelection2DOverlayHud(): void {
+    this.selection2DHud.update();
+  }
 
-    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(safePrecision);
+  repositionSelection2DOverlayHud(): void {
+    this.selection2DHud.reposition();
+  }
+
+  get selection2DOverlayHud():
+    | { root: HTMLDivElement; top: HTMLDivElement; bottom: HTMLDivElement }
+    | undefined {
+    return this.selection2DHud.badges;
   }
 
   private create2DFrame(bounds: THREE.Box3): THREE.Group {
@@ -7505,7 +6939,7 @@ export class ViewportRendererService {
       this.begin2DInteraction();
       // Reflect the correct HUD state from the first frame: move hides it,
       // resize keeps the live size badge, rotate shows the live angle badge.
-      this.updateSelection2DOverlayHud();
+      this.selection2DHud.update();
       console.debug('[ViewportRenderer] start 2D transform', {
         handle,
         nodeIds: this.active2DTransform.nodeIds,
@@ -8059,8 +7493,7 @@ export class ViewportRendererService {
     this.lampIconTexture?.dispose();
     this.cameraIconTexture = undefined;
     this.lampIconTexture = undefined;
-    this.selection2DOverlayHud?.root.remove();
-    this.selection2DOverlayHud = undefined;
+    this.selection2DHud.dispose();
 
     // Dispose subscriptions
     this.disposers.forEach(dispose => dispose());
