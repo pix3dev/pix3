@@ -11,7 +11,7 @@ import {
   type SetPreviewCameraParams,
 } from './SetPreviewCameraOperation';
 
-export class SetPreviewCameraCommand extends CommandBase<void, void> {
+class SetPreviewCameraCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'viewport.set-preview-camera',
     title: 'Set Preview Camera',

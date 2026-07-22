@@ -8,9 +8,9 @@ import type { KeybindingDescriptor } from '@/core/keybinding';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 
 /** Step in world units for a normal arrow-key nudge. */
-export const NUDGE_STEP = 1;
+const NUDGE_STEP = 1;
 /** Larger step used when Shift is held. */
-export const NUDGE_STEP_LARGE = 10;
+const NUDGE_STEP_LARGE = 10;
 
 export type NudgeDirection = 'up' | 'down' | 'left' | 'right';
 

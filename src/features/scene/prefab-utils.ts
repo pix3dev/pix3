@@ -71,7 +71,7 @@ export const findPrefabInstanceRoot = (node: NodeBase): NodeBase | null => {
  * itself rewrites the root's position on resize. 3D roots never expose these
  * names, so listing them is harmless there.
  */
-export const INSTANCE_PLACEMENT_PROPERTY_NAMES: ReadonlySet<string> = new Set([
+const INSTANCE_PLACEMENT_PROPERTY_NAMES: ReadonlySet<string> = new Set([
   'name',
   'position',
   'rotation',

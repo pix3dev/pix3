@@ -9,7 +9,7 @@ import type { EditorCameraProjection } from '@/state';
 import { OperationService } from '@/services/OperationService';
 import { SetEditorCameraProjectionOperation } from './SetEditorCameraProjectionOperation';
 
-export class SetEditorCameraProjectionCommand extends CommandBase<void, void> {
+class SetEditorCameraProjectionCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'viewport.set-editor-camera-projection',
     title: 'Set Editor Camera Projection',

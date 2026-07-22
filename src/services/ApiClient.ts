@@ -235,10 +235,6 @@ export function removeAllNonOwnerProjectMembers(
 
 // --- Storage ---
 
-export function getManifest(projectId: string): Promise<{ files: ManifestEntry[] }> {
-  return request(`/api/projects/${encodeURIComponent(projectId)}/manifest`);
-}
-
 export function getManifestWithAccess(
   projectId: string,
   shareToken?: string
@@ -383,10 +379,6 @@ export function deleteLibraryItem(
     method: 'DELETE',
     body: JSON.stringify({ deletedAt }),
   });
-}
-
-export function getBaseUrl(): string {
-  return BASE_URL || SERVER_BASE_URL;
 }
 
 export { ApiClientError };

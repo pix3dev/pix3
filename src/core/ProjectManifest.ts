@@ -64,9 +64,9 @@ export interface ProjectManifest {
   metadata?: Record<string, unknown>;
 }
 
-export const DEFAULT_PROJECT_MANIFEST_VERSION = '1.0.0';
-export const DEFAULT_AMBIENT_OCCLUSION: ProjectAODefault = 'baked';
-export const DEFAULT_TEXTURE_FILTERING: TextureFiltering = 'linear';
+const DEFAULT_PROJECT_MANIFEST_VERSION = '1.0.0';
+const DEFAULT_AMBIENT_OCCLUSION: ProjectAODefault = 'baked';
+const DEFAULT_TEXTURE_FILTERING: TextureFiltering = 'linear';
 export const DEFAULT_VIEWPORT_BASE_WIDTH = 1920;
 export const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
 export const DEFAULT_PROJECT_TYPE: ProjectType = '3d';

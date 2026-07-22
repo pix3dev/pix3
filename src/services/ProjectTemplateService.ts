@@ -118,7 +118,7 @@ export interface ProjectTemplate {
   readonly binaryFiles: ReadonlyMap<string, string>;
 }
 
-export const DEFAULT_PROJECT_TEMPLATE_ID = 'empty-3d';
+const DEFAULT_PROJECT_TEMPLATE_ID = 'empty-3d';
 
 const TEMPLATE_DIR_PATTERN = /\/projects\/([^/]+)\//;
 const TEMPLATE_FILES_MARKER = '/files/';
@@ -142,10 +142,7 @@ const asPositiveInt = (value: unknown, fallback: number): number => {
 @injectable()
 export class ProjectTemplateService {
   private templates: ProjectTemplate[] | null = null;
-  private readonly templateTextFilesCache = new Map<
-    string,
-    Promise<ReadonlyMap<string, string>>
-  >();
+  private readonly templateTextFilesCache = new Map<string, Promise<ReadonlyMap<string, string>>>();
   private agentOverlayFilesPromise: Promise<ReadonlyMap<string, string>> | null = null;
 
   getTemplates(): readonly ProjectTemplate[] {

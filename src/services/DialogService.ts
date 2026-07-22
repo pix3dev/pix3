@@ -1,4 +1,4 @@
-import { injectable, ServiceContainer } from '@/fw/di';
+import { injectable } from '@/fw/di';
 
 export interface DialogExpandableSection {
   title: string;
@@ -167,9 +167,4 @@ export class DialogService {
     this.dialogs.clear();
     this.listeners.clear();
   }
-}
-
-export function resolveDialogService(): DialogService {
-  const container = ServiceContainer.getInstance();
-  return container.getService(container.getOrCreateToken(DialogService)) as DialogService;
 }

@@ -3,8 +3,6 @@ import { injectable } from '@/fw/di';
 import type { BinaryTemplateDescriptor, SceneTemplateDescriptor } from './template-data';
 import { binaryTemplates, sceneTemplates } from './template-data';
 
-export type TemplateScheme = 'templ';
-
 @injectable()
 export class TemplateService {
   private readonly sceneTemplateMap = new Map<string, SceneTemplateDescriptor>();
@@ -60,7 +58,3 @@ export class TemplateService {
 }
 
 export const DEFAULT_TEMPLATE_SCENE_ID = 'startup-scene';
-
-export type TemplateLookupError = Error & {
-  readonly code: 'TEMPLATE_NOT_FOUND' | 'INVALID_TEMPLATE_URI';
-};

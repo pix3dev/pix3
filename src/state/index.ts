@@ -29,11 +29,7 @@ export const resetAppState = (): void => {
   appState.router = defaults.router;
 };
 
-export {
-  createInitialAppState,
-  createInitialHybridSyncState,
-  createInitialProjectOpenProgressState,
-} from './AppState';
+export { createInitialHybridSyncState, createInitialProjectOpenProgressState } from './AppState';
 
 export type {
   AnimationDescriptor,

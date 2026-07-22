@@ -59,7 +59,7 @@ function generateSessionId(): string {
   return randomBytes(9).toString('base64url');
 }
 
-export class PreviewSessionService {
+class PreviewSessionService {
   private readonly sessions = new Map<string, PreviewSession>();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private readonly pendingAcks = new Map<string, PendingAck>();

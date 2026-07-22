@@ -1,4 +1,4 @@
-import { Node2D, Node3D } from '@pix3/runtime';
+import { Node2D } from '@pix3/runtime';
 import type { NodeBase } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import { isPrefabChildNode, isPrefabNode } from '@/features/scene/prefab-utils';
@@ -6,15 +6,8 @@ import { isPrefabChildNode, isPrefabNode } from '@/features/scene/prefab-utils';
 /**
  * Determines if a node is a 2D node (Node2D or its subclasses)
  */
-export function is2DNode(node: NodeBase): boolean {
+function is2DNode(node: NodeBase): boolean {
   return node instanceof Node2D;
-}
-
-/**
- * Determines if a node is a 3D node (Node3D or its subclasses)
- */
-export function is3DNode(node: NodeBase): boolean {
-  return node instanceof Node3D;
 }
 
 /**

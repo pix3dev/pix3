@@ -1,4 +1,4 @@
-import { injectable, ServiceContainer } from '@/fw/di';
+import { injectable } from '@/fw/di';
 import type { ManifestEntry } from './ApiClient';
 
 const DATABASE_NAME = 'pix3-cloud-cache';
@@ -510,10 +510,3 @@ export class CloudProjectCacheService {
     }
   }
 }
-
-export const resolveCloudProjectCacheService = (): CloudProjectCacheService => {
-  const container = ServiceContainer.getInstance();
-  return container.getService<CloudProjectCacheService>(
-    container.getOrCreateToken(CloudProjectCacheService)
-  );
-};

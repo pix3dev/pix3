@@ -76,6 +76,3 @@ export class GroupSelectedNodesCommand extends CommandBase<void, void> {
     return { didMutate: pushed, payload: undefined };
   }
 }
-
-export const groupSelectedNodes = () => new GroupSelectedNodesCommand();
-export const groupNodes = (nodeIds: string[]) => new GroupSelectedNodesCommand({ nodeIds });

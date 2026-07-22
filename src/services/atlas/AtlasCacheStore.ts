@@ -1,4 +1,4 @@
-import { ServiceContainer, injectable } from '@/fw/di';
+import { injectable } from '@/fw/di';
 import type { AtlasManifest } from '@pix3/runtime';
 
 const DATABASE_NAME = 'pix3-atlas-cache';
@@ -149,9 +149,4 @@ export class AtlasCacheStore {
     }
     return this.databasePromise;
   }
-}
-
-export function resolveAtlasCacheStore(): AtlasCacheStore {
-  const container = ServiceContainer.getInstance();
-  return container.getService<AtlasCacheStore>(container.getOrCreateToken(AtlasCacheStore));
 }

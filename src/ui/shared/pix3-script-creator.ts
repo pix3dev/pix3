@@ -1,10 +1,6 @@
 import { ComponentBase, customElement, html, property, state } from '@/fw';
 import './pix3-script-creator.ts.css';
 
-export interface ScriptCreationOptions {
-  defaultName: string;
-}
-
 @customElement('pix3-script-creator')
 export class ScriptCreator extends ComponentBase {
   @property({ type: String, reflect: true })

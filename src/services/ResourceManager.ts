@@ -1,11 +1,11 @@
 import { inject, injectable } from '@/fw/di';
-import { ResourceManager as RuntimeResourceManager, type ReadResourceOptions } from '@pix3/runtime';
+import { ResourceManager as RuntimeResourceManager } from '@pix3/runtime';
 import { ProjectStorageService } from './ProjectStorageService';
 
 const RES_SCHEME = 'res';
 
 @injectable()
-export class EditorResourceManager extends RuntimeResourceManager {
+class EditorResourceManager extends RuntimeResourceManager {
   @inject(ProjectStorageService)
   private readonly storage!: ProjectStorageService;
 
@@ -63,4 +63,4 @@ export class EditorResourceManager extends RuntimeResourceManager {
 }
 
 // Re-export as ResourceManager for the rest of the app
-export { EditorResourceManager as ResourceManager, type ReadResourceOptions };
+export { EditorResourceManager as ResourceManager };
