@@ -5,6 +5,13 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.spec.ts', 'packages/pix3-runtime/src/**/*.spec.ts'],
+    // The default 'forks' pool reports "No test suite found" for every spec on
+    // win32-arm64 (vitest 4.x); the threads pool runs them fine everywhere.
+    pool: 'threads',
+    // Uncapped, one worker per core exhausts memory on high-core machines and every
+    // file fails with the same "No test suite found" error. Four is plenty: the run
+    // is import/environment-bound, not test-bound.
+    maxWorkers: 4,
   },
   resolve: {
     alias: {
