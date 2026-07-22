@@ -7,7 +7,7 @@ import type {
 } from '@/core/Operation';
 import { SceneManager } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface Transform2DState {
   position?: { x: number; y: number };

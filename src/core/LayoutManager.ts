@@ -9,7 +9,7 @@ import {
 import { injectable, inject } from '@/fw/di';
 import { subscribe } from 'valtio/vanilla';
 import { appState, type AppState, type EditorTab, type PanelVisibilityState } from '@/state';
-import { IconService, IconSize } from '@/services/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 
 const PANEL_COMPONENT_TYPES = {
   sceneTree: 'scene-tree',

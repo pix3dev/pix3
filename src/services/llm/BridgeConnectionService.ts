@@ -1,6 +1,6 @@
 import { inject, injectable } from '@/fw/di';
-import { SecretStorageService } from '@/services/SecretStorageService';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { SecretStorageService } from '@/services/core/SecretStorageService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { LlmProviderRegistry } from './LlmProviderRegistry';
 import {
   BRIDGE_TOKEN_SECRET_ID,

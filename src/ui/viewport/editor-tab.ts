@@ -4,10 +4,13 @@ import { appState, type EditorCameraProjection, type NavigationMode } from '@/st
 import styles from './editor-tab.ts.css?raw';
 import dropdownButtonStyles from '@/ui/shared/pix3-dropdown-button.ts.css?raw';
 import visibilityPopoverStyles from './viewport-visibility-popover.ts.css?raw';
-import { ViewportRendererService, type TransformMode } from '@/services/ViewportRenderService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { IconService } from '@/services/IconService';
-import { Navigation2DController } from '@/services/Navigation2DController';
+import {
+  ViewportRendererService,
+  type TransformMode,
+} from '@/services/viewport/ViewportRenderService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { IconService } from '@/services/editor/IconService';
+import { Navigation2DController } from '@/services/viewport/Navigation2DController';
 import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { Vector2, Vector3 } from 'three';
 import {
@@ -40,7 +43,7 @@ import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
 import type { Align2DActionId } from '@/features/alignment/types';
 import { SetPreviewLocaleCommand } from '@/features/localization/SetPreviewLocaleCommand';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 import {
   classifySceneCreateAssetResource,
   deriveAssetNodeName,
@@ -49,7 +52,7 @@ import {
   hasAssetDragData,
   hasLibraryItemDragData,
 } from '@/ui/shared/asset-drag-drop';
-import { LibraryInsertService } from '@/services/LibraryInsertService';
+import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import {
   renderTransformToolbarOverlay,
   renderViewportToolbar,

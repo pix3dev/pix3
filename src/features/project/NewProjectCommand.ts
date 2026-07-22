@@ -1,6 +1,6 @@
 import { inject } from '@/fw/di';
 import { CommandBase, type CommandExecutionResult, type CommandMetadata } from '@/core/command';
-import { ProjectLifecycleService } from '@/services/ProjectLifecycleService';
+import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
 
 export class NewProjectCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

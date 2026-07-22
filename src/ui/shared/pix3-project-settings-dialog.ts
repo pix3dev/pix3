@@ -1,7 +1,7 @@
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
 import { appState } from '@/state';
-import { ProjectSettingsService } from '@/services/ProjectSettingsService';
-import { OperationService } from '@/services/OperationService';
+import { ProjectSettingsService } from '@/services/project/ProjectSettingsService';
+import { OperationService } from '@/services/core/OperationService';
 import { UpdateProjectSettingsOperation } from '@/features/project/UpdateProjectSettingsOperation';
 import {
   PROJECT_AO_MODES,
@@ -9,7 +9,7 @@ import {
   type ProjectAODefault,
   type TextureFiltering,
 } from '@/core/ProjectManifest';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { AddAutoloadCommand } from '@/features/project/AddAutoloadCommand';
 import { RemoveAutoloadCommand } from '@/features/project/RemoveAutoloadCommand';
 import { ToggleAutoloadEnabledCommand } from '@/features/project/ToggleAutoloadEnabledCommand';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createInitialAppState } from '@/state/AppState';
 import { createDefaultProjectManifest } from '@/core/ProjectManifest';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { Group2D, Node3D, NodeBase, SceneManager, Sprite2D } from '@pix3/runtime';
 import { Vector2 } from 'three';
 import { Nudge2DNodesOperation } from './Nudge2DNodesOperation';

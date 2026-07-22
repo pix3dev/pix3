@@ -5,8 +5,8 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
+import { OperationService } from '@/services/core/OperationService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
 import { AddAutoloadOperation, type AddAutoloadParams } from './AddAutoloadOperation';
 
 const SINGLETON_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;

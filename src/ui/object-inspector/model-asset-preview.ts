@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, property, state } from '@/fw';
-import { resolveProjectStorageService } from '@/services/ProjectStorageService';
+import { resolveProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
   ACESFilmicToneMapping,
   AmbientLight,
@@ -18,7 +18,7 @@ import {
   disposeObject3DResources,
   framePerspectiveCameraToObject,
   loadGltfFromBlob,
-} from '@/services/GltfBlobLoader';
+} from '@/services/assets/GltfBlobLoader';
 import './model-asset-preview.ts.css';
 
 type InteractivePreviewState = 'idle' | 'loading' | 'ready' | 'error';

@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
-import { IconService, IconSize } from '@/services/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { DropdownPortal } from './dropdown-portal';
 import './pix3-dropdown-button.ts.css';
 

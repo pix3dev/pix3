@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
 import { ScriptRegistry, type ComponentTypeInfo } from '@pix3/runtime';
-import { IconService } from '@/services/IconService';
+import { IconService } from '@/services/editor/IconService';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import './pix3-behavior-picker.ts.css';

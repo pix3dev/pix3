@@ -7,7 +7,7 @@ import type {
 } from '@/core/Operation';
 import { Node3D } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface TransformState {
   position?: { x: number; y: number; z: number };

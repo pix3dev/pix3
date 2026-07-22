@@ -4,7 +4,7 @@ import {
   type CommandExecutionResult,
   type CommandMetadata,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { AddComponentOperation } from '@/features/scripts/AddComponentOperation';
 import { createDefaultClip, SceneManager } from '@pix3/runtime';
 import { ANIMATION_PLAYER_COMPONENT_TYPE } from './UpdateAnimationPlayerClipsOperation';

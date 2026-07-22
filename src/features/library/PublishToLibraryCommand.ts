@@ -6,7 +6,7 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { SceneManager } from '@pix3/runtime';
-import { PublishToLibraryService } from '@/services/PublishToLibraryService';
+import { PublishToLibraryService } from '@/services/library/PublishToLibraryService';
 
 export interface PublishToLibraryCommandParams {
   /** Node to publish; defaults to the primary selection. */

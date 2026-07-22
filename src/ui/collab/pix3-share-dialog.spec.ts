@@ -2,9 +2,9 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ServiceContainer } from '@/fw/di';
 import { appState, resetAppState } from '@/state';
-import { CloudProjectService } from '@/services/CloudProjectService';
-import { CollabSessionService } from '@/services/CollabSessionService';
-import { DialogService } from '@/services/DialogService';
+import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { CollabSessionService } from '@/services/collab/CollabSessionService';
+import { DialogService } from '@/services/editor/DialogService';
 
 type TestShareDialogElement = HTMLElement & {
   updateComplete: Promise<unknown>;

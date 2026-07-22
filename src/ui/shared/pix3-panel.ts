@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, property, state, css, unsafeCSS } from '@/fw';
 import { ifDefined } from 'lit/directives/if-defined.js';
-import { FocusRingService } from '@/services/FocusRingService';
+import { FocusRingService } from '@/services/editor/FocusRingService';
 import styles from './pix3-panel.ts.css?raw';
 
 let panelCounter = 0;

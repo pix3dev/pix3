@@ -4,9 +4,12 @@ import {
   ProjectAuthRequiredError,
   ProjectLifecycleService,
   type CreateProjectParams,
-} from '@/services/ProjectLifecycleService';
-import { BrowserProjectStorageService } from '@/services/BrowserProjectStorageService';
-import { ProjectTemplateService, type ProjectTemplate } from '@/services/ProjectTemplateService';
+} from '@/services/project/ProjectLifecycleService';
+import { BrowserProjectStorageService } from '@/services/project/BrowserProjectStorageService';
+import {
+  ProjectTemplateService,
+  type ProjectTemplate,
+} from '@/services/project/ProjectTemplateService';
 import type { TargetPlatform } from '@/core/ProjectManifest';
 import './pix3-create-project-dialog.ts.css';
 

@@ -1,4 +1,4 @@
-import { analyzeAudioBlob } from '@/services/audio-preview-utils';
+import { analyzeAudioBlob } from '@/services/assets/audio-preview-utils';
 import type { InspectorPanel } from './inspector-panel';
 
 interface TextureResourceValue {

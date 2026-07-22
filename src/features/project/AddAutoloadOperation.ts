@@ -10,7 +10,7 @@ import {
   type AutoloadConfig,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
-import { ProjectService } from '@/services/ProjectService';
+import { ProjectService } from '@/services/project/ProjectService';
 
 export interface AddAutoloadParams {
   scriptPath: string;

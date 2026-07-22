@@ -4,22 +4,22 @@ import type {
   AssetPreviewItem,
   AssetsPreviewSnapshot,
   AssetsPreviewService,
-} from '@/services/AssetsPreviewService';
-import type { AssetFileActivationService } from '@/services/AssetFileActivationService';
-import type { IconService } from '@/services/IconService';
-import type { ProjectService } from '@/services/ProjectService';
+} from '@/services/assets/AssetsPreviewService';
+import type { AssetFileActivationService } from '@/services/assets/AssetFileActivationService';
+import type { IconService } from '@/services/editor/IconService';
+import type { ProjectService } from '@/services/project/ProjectService';
 
-vi.mock('@/services/AssetFileActivationService', () => ({
+vi.mock('@/services/assets/AssetFileActivationService', () => ({
   AssetFileActivationService: class AssetFileActivationService {},
 }));
-vi.mock('@/services/AssetsPreviewService', () => ({
+vi.mock('@/services/assets/AssetsPreviewService', () => ({
   AssetsPreviewService: class AssetsPreviewService {},
 }));
-vi.mock('@/services/IconService', () => ({
+vi.mock('@/services/editor/IconService', () => ({
   IconService: class IconService {},
   IconSize: { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 24 },
 }));
-vi.mock('@/services/ProjectService', () => ({
+vi.mock('@/services/project/ProjectService', () => ({
   ProjectService: class ProjectService {},
 }));
 

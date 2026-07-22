@@ -5,7 +5,7 @@ import {
   type CommandContext,
 } from '@/core/command';
 import type { KeybindingDescriptor } from '@/core/keybinding';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 /** Step in world units for a normal arrow-key nudge. */
 const NUDGE_STEP = 1;

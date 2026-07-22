@@ -5,11 +5,11 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   LocalizationEditorService,
   type LocaleTableSection,
-} from '@/services/LocalizationEditorService';
+} from '@/services/localization/LocalizationEditorService';
 import { RenameLocalizationKeyOperation } from './RenameLocalizationKeyOperation';
 
 export interface RenameLocalizationKeyCommandParams {

@@ -5,7 +5,7 @@ import {
   type CommandContext,
 } from '@/core/command';
 import type { Operation, OperationInvokeResult } from '@/core/Operation';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   getCreatedNodeIdFromSelection,
   requireActiveScene,

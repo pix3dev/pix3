@@ -6,8 +6,8 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { SceneManager } from '@pix3/runtime';
-import { EditorTabService } from '@/services/EditorTabService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { selectObject } from '@/features/selection/SelectObjectCommand';
 
 export interface OpenPrefabCommandParams {

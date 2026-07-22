@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CommandContext } from '@/core/command';
-import type { DialogOptions } from '@/services/DialogService';
-import type { PlayableHtmlBuildArtifact } from '@/services/PlayableHtmlBuildService';
+import type { DialogOptions } from '@/services/editor/DialogService';
+import type { PlayableHtmlBuildArtifact } from '@/services/export/PlayableHtmlBuildService';
 
 import { ExportPlayableHtmlCommand } from './ExportPlayableHtmlCommand';
 

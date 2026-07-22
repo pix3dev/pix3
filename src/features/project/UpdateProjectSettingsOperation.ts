@@ -17,8 +17,8 @@ import {
   type ProjectAODefault,
   type TextureFiltering,
 } from '@/core/ProjectManifest';
-import { ProjectService } from '@/services/ProjectService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import type { ProjectBackend } from '@/state';
 
 export interface UpdateProjectSettingsParams {

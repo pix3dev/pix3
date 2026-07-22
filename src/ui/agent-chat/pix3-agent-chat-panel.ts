@@ -5,11 +5,11 @@ import {
   type AgentChatState,
   type AgentTurnMetric,
 } from '@/services/agent/AgentChatService';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
-import { IconService, IconSize } from '@/services/IconService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
-import { EditorSettingsService } from '@/services/EditorSettingsService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
   formatPricingHint,

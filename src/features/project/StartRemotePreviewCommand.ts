@@ -7,9 +7,9 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { LayoutManagerService } from '@/core/LayoutManager';
-import { EditorTabService } from '@/services/EditorTabService';
-import { LoggingService } from '@/services/LoggingService';
-import { PreviewHostService } from '@/services/PreviewHostService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { PreviewHostService } from '@/services/play/PreviewHostService';
 
 /**
  * Starts (or re-opens) a live remote preview session: creates the relay

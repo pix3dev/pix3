@@ -3,8 +3,8 @@ import type { DropdownItem } from '@/ui/shared/pix3-dropdown-button';
 import type { Align2DActionId } from '@/features/alignment/types';
 
 import type { EditorCameraProjection, NavigationMode } from '@/state';
-import type { IconService } from '@/services/IconService';
-import type { TransformMode } from '@/services/ViewportRenderService';
+import type { IconService } from '@/services/editor/IconService';
+import type { TransformMode } from '@/services/viewport/ViewportRenderService';
 
 export interface ViewportToolbarState {
   readonly transformMode: TransformMode | null;

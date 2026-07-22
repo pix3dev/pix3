@@ -5,7 +5,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { AddNodeToGroupOperation, type AddNodeToGroupParams } from './AddNodeToGroupOperation';
 import { requireActiveScene } from './scene-command-utils';
 

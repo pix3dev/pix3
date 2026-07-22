@@ -1,8 +1,8 @@
 import { customElement, html, inject, property, state, ComponentBase } from '@/fw';
 import { appState, type CodeEditorContextState, type CodeEditorSelectionState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
-import { CodeDocumentService } from '@/services/CodeDocumentService';
-import { MonacoIntelliSenseService } from '@/services/MonacoIntelliSenseService';
+import { CodeDocumentService } from '@/services/scripting/CodeDocumentService';
+import { MonacoIntelliSenseService } from '@/services/scripting/MonacoIntelliSenseService';
 import './code-tab.ts.css';
 import { ensureMonacoLoaded } from './monaco-loader';
 

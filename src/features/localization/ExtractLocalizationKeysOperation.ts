@@ -4,7 +4,7 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 
 export interface ExtractLocalizationKeysParams {
   /** Precomputed seed plan: keys to add as `""` placeholders per non-default locale. */

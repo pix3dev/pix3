@@ -1,4 +1,4 @@
-import { ResourceManager } from '@/services/ResourceManager';
+import { ResourceManager } from '@/services/assets/ResourceManager';
 import { SceneManager } from '@pix3/runtime';
 import { SceneValidationError } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';

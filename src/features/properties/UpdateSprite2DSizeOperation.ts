@@ -5,7 +5,7 @@ import type {
   OperationMetadata,
 } from '@/core/Operation';
 import { SceneManager, Sprite2D } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface UpdateSprite2DSizeParams {
   nodeId: string;

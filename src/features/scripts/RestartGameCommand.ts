@@ -5,7 +5,7 @@ import {
   type CommandPreconditionResult,
   type CommandMetadata,
 } from '@/core/command';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 
 export class RestartGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

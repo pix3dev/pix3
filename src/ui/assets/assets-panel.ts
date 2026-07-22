@@ -5,14 +5,14 @@ import { appState, type AssetBrowserViewMode } from '@/state';
 import {
   AssetFileActivationService,
   type AssetActivation,
-} from '@/services/AssetFileActivationService';
-import { AssetsPreviewService } from '@/services/AssetsPreviewService';
-import { IconService, IconSize } from '@/services/IconService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { AssetImportDialogService } from '@/services/AssetImportDialogService';
-import { DialogService } from '@/services/DialogService';
-import { ProjectService } from '@/services/ProjectService';
-import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
+} from '@/services/assets/AssetFileActivationService';
+import { AssetsPreviewService } from '@/services/assets/AssetsPreviewService';
+import { IconService, IconSize } from '@/services/editor/IconService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { AssetImportDialogService } from '@/services/assets/AssetImportDialogService';
+import { DialogService } from '@/services/editor/DialogService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 import { AddAutoloadCommand } from '@/features/project/AddAutoloadCommand';
 import type { AssetTree } from './asset-tree';
 

@@ -9,7 +9,7 @@ import {
   normalizeProjectManifest,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
-import { ProjectService } from '@/services/ProjectService';
+import { ProjectService } from '@/services/project/ProjectService';
 
 export interface RemoveAutoloadParams {
   singleton: string;

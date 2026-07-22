@@ -6,7 +6,7 @@ import type {
 } from '@/core/Operation';
 import { GeometryMesh, SceneManager } from '@pix3/runtime';
 import type { MeshStandardMaterial, Texture } from 'three';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 /** One node's freshly-baked AO assignment (texture already built + PNG saved). */
 export interface BakedAOEntry {

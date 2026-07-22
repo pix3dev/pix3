@@ -6,9 +6,9 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { ProjectBuildService } from '@/services/ProjectBuildService';
-import { DialogService } from '@/services/DialogService';
-import { LoggingService } from '@/services/LoggingService';
+import { ProjectBuildService } from '@/services/export/ProjectBuildService';
+import { DialogService } from '@/services/editor/DialogService';
+import { LoggingService } from '@/services/core/LoggingService';
 
 export class BuildProjectCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

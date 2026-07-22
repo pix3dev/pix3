@@ -1,8 +1,8 @@
 import { inject } from '@/fw/di';
 import { CommandBase, type CommandExecutionResult, type CommandMetadata } from '@/core/command';
 import { LayoutManagerService } from '@/core/LayoutManager';
-import { LoggingService } from '@/services/LoggingService';
-import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { ProjectDiagnosticsService } from '@/services/scripting/ProjectDiagnosticsService';
 
 /**
  * Type-checks every project script and reports the results — with

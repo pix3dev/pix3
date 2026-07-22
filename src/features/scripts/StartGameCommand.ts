@@ -5,9 +5,9 @@ import {
   type CommandPreconditionResult,
   type CommandMetadata,
 } from '@/core/command';
-import { EditorTabService } from '@/services/EditorTabService';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
-import { OperationService } from '@/services/OperationService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
+import { OperationService } from '@/services/core/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 
 export class StartGameCommand extends CommandBase<void, void> {

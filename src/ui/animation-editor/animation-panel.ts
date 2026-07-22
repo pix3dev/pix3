@@ -9,17 +9,17 @@ import {
   normalizeAnimationAssetPath,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import { AnimationAutoSliceDialogService } from '@/services/AnimationAutoSliceDialogService';
-import { AnimationEditorService } from '@/services/AnimationEditorService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { DialogService } from '@/services/DialogService';
-import { IconService } from '@/services/IconService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { OperationService } from '@/services/OperationService';
+import { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
+import { AnimationEditorService } from '@/services/animation/AnimationEditorService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { DialogService } from '@/services/editor/DialogService';
+import { IconService } from '@/services/editor/IconService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { OperationService } from '@/services/core/OperationService';
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
-} from '@/services/AnimationEditorService';
+} from '@/services/animation/AnimationEditorService';
 import {
   AnimatedSprite2D,
   SceneManager,

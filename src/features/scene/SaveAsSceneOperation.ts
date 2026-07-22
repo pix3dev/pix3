@@ -6,10 +6,10 @@ import type {
 } from '@/core/Operation';
 import { SceneManager } from '@pix3/runtime';
 import { getAppStateSnapshot } from '@/state';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
-import { FileWatchService } from '@/services/FileWatchService';
-import { LoggingService } from '@/services/LoggingService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { FileWatchService } from '@/services/project/FileWatchService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ref } from 'valtio/vanilla';
 
 export interface SaveAsSceneOperationParams {

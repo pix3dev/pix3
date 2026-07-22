@@ -11,7 +11,7 @@ import {
   type Transform2DState,
 } from '@/features/properties/Transform2DCompleteOperation';
 import { DEFAULT_VIEWPORT_BASE_HEIGHT, DEFAULT_VIEWPORT_BASE_WIDTH } from '@/core/ProjectManifest';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { Node2D, type NodeBase, SceneManager } from '@pix3/runtime';
 import type { Align2DActionId } from './types';
 

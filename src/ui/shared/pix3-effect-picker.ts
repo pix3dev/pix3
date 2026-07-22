@@ -5,7 +5,7 @@ import {
   type ShaderEffectTarget,
   type ShaderEffectTypeInfo,
 } from '@pix3/runtime';
-import { IconService } from '@/services/IconService';
+import { IconService } from '@/services/editor/IconService';
 // Reuse the behavior picker's styles (same modal/grid layout).
 import './pix3-behavior-picker.ts.css';
 

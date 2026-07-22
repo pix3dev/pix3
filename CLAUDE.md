@@ -31,9 +31,9 @@ npm run format         # Prettier write over src
 Single test / focused runs (Vitest):
 
 ```bash
-npx vitest run src/services/ScriptExecutionService.spec.ts   # one file
+npx vitest run src/services/play/ScriptExecutionService.spec.ts   # one file
 npx vitest run -t "creates a box"                            # by test name
-npx vitest src/services/ScriptExecutionService.spec.ts        # watch mode
+npx vitest src/services/play/ScriptExecutionService.spec.ts        # watch mode
 ```
 
 Node 24 is required (`engines: >=24.15.0 <25`). `npm install` runs a `postinstall` that copies `esbuild.wasm` into `public/` — needed for in-editor script compilation.
@@ -66,7 +66,7 @@ The mental model that spans many files:
    - `appState` (Valtio proxy, `src/state/AppState.ts`) holds **only** UI state, scene metadata (paths/names), selection (node **IDs**), and undo/redo bookkeeping. UI subscribes via `subscribe(appState.section, cb)` and disposes in `disconnectedCallback`.
    - Actual nodes are Three.js `Object3D` subclasses living in the `SceneGraph` owned by `SceneManager`. They are **NOT reactive** — operations mutate them imperatively. Selection bridges the two by ID.
 
-3. **Dependency injection** (`src/fw/di.ts`): `@injectable()` services registered in `ServiceContainer` (singletons by default), injected via `@inject(ServiceClass)`. Requires `reflect-metadata` (imported first in `main.ts`) and `experimentalDecorators`. Services holding subscriptions/resources implement `dispose()`. There are ~85 services in `src/services/`.
+3. **Dependency injection** (`src/fw/di.ts`): `@injectable()` services registered in `ServiceContainer` (singletons by default), injected via `@inject(ServiceClass)`. Requires `reflect-metadata` (imported first in `main.ts`) and `experimentalDecorators`. Services holding subscriptions/resources implement `dispose()`. The ~85 services in `src/services/` are grouped into domain subdirectories (`core`, `scene`, `project`, `cloud`, `collab`, `assets`, `scripting`, `play`, `export`, `editor`, `animation`, `localization`, `image-gen`, `bg-removal`, `library`, `viewport`, `agent`, `llm`, `ao-bake`, `atlas`) — deep-import from the domain folder (`@/services/<domain>/FooService`); no loose files sit at the `src/services/` root.
 
 4. **Property schema system** (Godot-inspired): node and `Script` classes implement `static getPropertySchema()` returning typed `PropertyDefinition`s with `getValue`/`setValue` closures. The Inspector renders editors dynamically from these; all edits go through `UpdateObjectPropertyOperation`. See `docs/property-schema-*.md`.
 
@@ -94,7 +94,7 @@ The `ViewportRenderService` rAF loop does **not** paint every frame. A frame ren
 - **No `any`.** ESLint flags it (`@typescript-eslint/no-explicit-any: warn`); `strict`, `noUnusedLocals/Parameters`, `noUncheckedSideEffectImports` are all on. Prefix intentionally-unused vars/args with `_`.
 - **Lit components** extend `ComponentBase` from `@/fw`, default to Light DOM, and split styles into a sibling `[component].ts.css` (imported directly for Light DOM, or `?raw` for Shadow DOM). Lit a11y/html ESLint rules are enforced.
 - **Theming** via CSS custom properties — accent is `--pix3-accent-color` (#ffcf33) / `--pix3-accent-rgb`; avoid hardcoded colors.
-- **Icons are vector, never emoji.** Every icon/affordance (buttons, status glyphs, list markers) renders through `IconService` (`@/services/IconService`) — inject it and call `getIcon(name, IconSize.SMALL|MEDIUM|LARGE)`, which returns an inline `currentColor` SVG (Feather names + custom SVGs registered there). Do **not** paste emoji (📎 🔑 ✕ ✓ 📄) or Unicode symbol glyphs (↻ ● ⏸) into templates as UI icons — they ignore the theme, render inconsistently across platforms, and don't scale. If the icon you need isn't in Feather, register a custom SVG in `IconService.registerCustomIcons()` rather than reaching for a glyph. (Emoji are fine only inside user-authored *content* — chat text, asset names — never chrome.) See the `pix3-ui-conventions` skill.
+- **Icons are vector, never emoji.** Every icon/affordance (buttons, status glyphs, list markers) renders through `IconService` (`@/services/editor/IconService`) — inject it and call `getIcon(name, IconSize.SMALL|MEDIUM|LARGE)`, which returns an inline `currentColor` SVG (Feather names + custom SVGs registered there). Do **not** paste emoji (📎 🔑 ✕ ✓ 📄) or Unicode symbol glyphs (↻ ● ⏸) into templates as UI icons — they ignore the theme, render inconsistently across platforms, and don't scale. If the icon you need isn't in Feather, register a custom SVG in `IconService.registerCustomIcons()` rather than reaching for a glyph. (Emoji are fine only inside user-authored *content* — chat text, asset names — never chrome.) See the `pix3-ui-conventions` skill.
 - **Docs policy** (from AGENTS.md): maintain `README.md`, `AGENTS.md`, and `docs/pix3-specification.md`; don't spawn new feature-specific `.md` files.
 
 ## Engine vs Game feature decision

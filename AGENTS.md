@@ -33,6 +33,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 ### State Management (Valtio)
 
 - **Global State**: `appState` proxy in `src/state/AppState.ts`. **Never mutate directly**.
+- **Gateway scope**: The Command→Operation gateway governs **document state** — the scene graph, node properties, and project files, i.e. anything undoable/saveable. **Session/UI/infrastructure state** in `appState` (auth, collab connection/presence, router, project open/close lifecycle, script-load status, error surfacing, tab management, refresh signals) is owned by its dedicated service and may be written by that service directly, outside the gateway. (Audit 2026-07-22: every current direct `appState` writer falls in this second category.)
 - **Nodes & State**: Nodes live in `SceneGraph` (managed by `SceneManager`), **not in reactive state**.
 - **Sync**: State tracks node IDs for selection and hierarchy. UI subscribes via `subscribe(appState.section, callback)`.
 - **Cleanup**: Always dispose subscriptions in `disconnectedCallback` or `dispose`.
@@ -75,10 +76,10 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 ### UI & Services
 
 - `src/ui/`: Lit components organized by panel (viewport, inspector, assets, etc.).
-- `src/services/`: Injectable services (FileSystem, IconService, DialogService, ScriptCompiler).
+- `src/services/`: Injectable services, grouped into domain subdirectories: `core`, `scene`, `project`, `cloud`, `collab`, `assets`, `scripting`, `play`, `export`, `editor`, `animation`, `localization`, `image-gen`, `bg-removal`, `library`, `viewport`, `agent`, `llm`, `ao-bake`, `atlas`. A new service goes into the fitting domain folder; there are no loose files at the `src/services/` root.
 - `src/state/`: Valtio state definitions.
 
-**Imports**: `src/services` has no barrel — always deep-import a service directly (`@/services/FooService`). `src/state/index.ts` is a real module (it owns the `appState` singleton), so import state from `@/state`. `packages/pix3-runtime/src/index.ts` is a published package boundary and stays.
+**Imports**: `src/services` has no barrel — always deep-import a service directly from its domain folder (`@/services/<domain>/FooService`). `src/state/index.ts` is a real module (it owns the `appState` singleton), so import state from `@/state`. `packages/pix3-runtime/src/index.ts` is a published package boundary and stays.
 
 ## Critical Rules for AI Agents
 

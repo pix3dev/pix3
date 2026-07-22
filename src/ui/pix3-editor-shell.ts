@@ -2,55 +2,64 @@ import { subscribe } from 'valtio/vanilla';
 
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { LayoutManagerService } from '@/core/LayoutManager';
-import { OperationService } from '@/services/OperationService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { CommandRegistry } from '@/services/CommandRegistry';
-import { KeybindingService } from '@/services/KeybindingService';
-import { FileWatchService } from '@/services/FileWatchService';
-import { DialogService, type DialogInstance } from '@/services/DialogService';
+import { OperationService } from '@/services/core/OperationService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { CommandRegistry } from '@/services/core/CommandRegistry';
+import { KeybindingService } from '@/services/editor/KeybindingService';
+import { FileWatchService } from '@/services/project/FileWatchService';
+import { DialogService, type DialogInstance } from '@/services/editor/DialogService';
 import {
   AnimationAutoSliceDialogService,
   type AnimationAutoSliceDialogInstance,
-} from '@/services/AnimationAutoSliceDialogService';
+} from '@/services/animation/AnimationAutoSliceDialogService';
 import {
   AssetImportDialogService,
   type AssetImportDialogInstance,
-} from '@/services/AssetImportDialogService';
+} from '@/services/assets/AssetImportDialogService';
 import {
   SaveGeneratedAssetDialogService,
   type SaveGeneratedAssetDialogInstance,
-} from '@/services/SaveGeneratedAssetDialogService';
+} from '@/services/image-gen/SaveGeneratedAssetDialogService';
 import {
   BehaviorPickerService,
   type ComponentPickerInstance,
-} from '@/services/BehaviorPickerService';
-import { EffectPickerService, type EffectPickerInstance } from '@/services/EffectPickerService';
-import { ScriptCreatorService, type ScriptCreationInstance } from '@/services/ScriptCreatorService';
+} from '@/services/editor/BehaviorPickerService';
+import {
+  EffectPickerService,
+  type EffectPickerInstance,
+} from '@/services/editor/EffectPickerService';
+import {
+  ScriptCreatorService,
+  type ScriptCreationInstance,
+} from '@/services/scripting/ScriptCreatorService';
 import {
   ProjectSettingsService,
   type ProjectSettingsDialogInstance,
-} from '@/services/ProjectSettingsService';
-import { ProjectSyncService, type ProjectSyncDialogInstance } from '@/services/ProjectSyncService';
+} from '@/services/project/ProjectSettingsService';
+import {
+  ProjectSyncService,
+  type ProjectSyncDialogInstance,
+} from '@/services/project/ProjectSyncService';
 import {
   EditorSettingsService,
   type EditorSettingsDialogInstance,
-} from '@/services/EditorSettingsService';
+} from '@/services/editor/EditorSettingsService';
 import {
   NodeTypePickerService,
   type NodeTypePickerInstance,
-} from '@/services/NodeTypePickerService';
+} from '@/services/editor/NodeTypePickerService';
 import {
   PlayableExportDialogService,
   type PlayableExportDialogInstance,
-} from '@/services/PlayableExportDialogService';
+} from '@/services/export/PlayableExportDialogService';
 import {
   PlayableExportProgressDialogService,
   type PlayableExportProgressDialogInstance,
-} from '@/services/PlayableExportProgressDialogService';
-import { ScriptExecutionService } from '@/services/ScriptExecutionService';
-import { AutoloadService } from '@/services/AutoloadService';
-import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
-import { ScriptCompilerService } from '@/services/ScriptCompilerService';
+} from '@/services/export/PlayableExportProgressDialogService';
+import { ScriptExecutionService } from '@/services/play/ScriptExecutionService';
+import { AutoloadService } from '@/services/project/AutoloadService';
+import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
+import { ScriptCompilerService } from '@/services/scripting/ScriptCompilerService';
 import { SaveActiveResourceCommand } from '@/features/editor/SaveActiveResourceCommand';
 import { SaveAsSceneCommand } from '@/features/scene/SaveAsSceneCommand';
 import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
@@ -104,18 +113,18 @@ import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigatio
 import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
 import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
-import { ProjectService } from '@/services/ProjectService';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
-import { EditorTabService } from '@/services/EditorTabService';
-import { RouterService } from '@/services/RouterService';
-import { AuthService } from '@/services/AuthService';
-import { CloudProjectService } from '@/services/CloudProjectService';
-import { UpdateCheckService } from '@/services/UpdateCheckService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { RouterService } from '@/services/core/RouterService';
+import { AuthService } from '@/services/cloud/AuthService';
+import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { UpdateCheckService } from '@/services/editor/UpdateCheckService';
 import {
   ProjectLifecycleService,
   type CreateProjectDialogInstance,
-} from '@/services/ProjectLifecycleService';
+} from '@/services/project/ProjectLifecycleService';
 import './shared/pix3-toolbar';
 import './shared/pix3-toolbar-button';
 import './shared/pix3-dropdown-button';

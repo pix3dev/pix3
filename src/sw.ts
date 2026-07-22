@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { binaryTemplates, sceneTemplates } from './services/template-data';
+import { binaryTemplates, sceneTemplates } from '@/services/project/template-data';
 
 declare const self: ServiceWorkerGlobalScope;
 

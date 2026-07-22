@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { IconService } from '@/services/IconService';
-import { NodeRegistry, type NodeTypeInfo } from '@/services/NodeRegistry';
+import { IconService } from '@/services/editor/IconService';
+import { NodeRegistry, type NodeTypeInfo } from '@/services/scene/NodeRegistry';
 import './pix3-node-type-picker.ts.css';
 
 interface NodeTypeGroup {

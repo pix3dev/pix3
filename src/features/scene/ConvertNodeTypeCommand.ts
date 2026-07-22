@@ -4,7 +4,7 @@ import {
   type CommandExecutionResult,
   type CommandMetadata,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { requireActiveScene } from '@/features/scene/scene-command-utils';
 import {
   ConvertNodeTypeOperation,

@@ -7,7 +7,7 @@ import type {
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { insertNodeAtIndex, removeNodeFromSceneGraph } from '@/features/scene/node-placement';
 import { isPrefabNode } from '@/features/scene/prefab-utils';
-import { ResourceManager } from '@/services/ResourceManager';
+import { ResourceManager } from '@/services/assets/ResourceManager';
 import {
   AssetLoader,
   NodeBase,

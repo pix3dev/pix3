@@ -1,16 +1,16 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { ifDefined } from 'lit/directives/if-defined.js';
-import type { AssetActivation } from '@/services/AssetFileActivationService';
-import type { FileDescriptor } from '@/services/FileSystemAPIService';
-import { AssetsPreviewService } from '@/services/AssetsPreviewService';
-import { ProjectService } from '@/services/ProjectService';
-import { TemplateService, DEFAULT_TEMPLATE_SCENE_ID } from '@/services/TemplateService';
-import { DialogService } from '@/services/DialogService';
-import { IconService } from '@/services/IconService';
-import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
-import { LibraryInsertService } from '@/services/LibraryInsertService';
-import { computeDirectoryStats } from '@/services/asset-folder-stats';
-import { isDocumentActive } from '@/services/page-activity';
+import type { AssetActivation } from '@/services/assets/AssetFileActivationService';
+import type { FileDescriptor } from '@/services/project/FileSystemAPIService';
+import { AssetsPreviewService } from '@/services/assets/AssetsPreviewService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { TemplateService, DEFAULT_TEMPLATE_SCENE_ID } from '@/services/project/TemplateService';
+import { DialogService } from '@/services/editor/DialogService';
+import { IconService } from '@/services/editor/IconService';
+import { GeneratedAssetDropService } from '@/services/image-gen/GeneratedAssetDropService';
+import { LibraryInsertService } from '@/services/library/LibraryInsertService';
+import { computeDirectoryStats } from '@/services/assets/asset-folder-stats';
+import { isDocumentActive } from '@/services/core/page-activity';
 import {
   ASSET_PATH_LIST_MIME,
   getLibraryItemDragData,

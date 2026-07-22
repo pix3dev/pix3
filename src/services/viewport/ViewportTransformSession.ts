@@ -9,7 +9,7 @@ import type { Camera3D } from '@pix3/runtime';
 import type { DirectionalLightNode } from '@pix3/runtime';
 import type { SpotLightNode } from '@pix3/runtime';
 import { appState } from '@/state';
-import type { OperationService } from '@/services/OperationService';
+import type { OperationService } from '@/services/core/OperationService';
 import {
   TransformCompleteOperation,
   type TransformState,
@@ -26,8 +26,8 @@ import type {
   Active2DTransform,
   Transform2DUpdateOptions,
   Selection2DOverlay,
-} from '@/services/TransformTool2d';
-import type { TransformMode } from '../ViewportRenderService';
+} from '@/services/viewport/TransformTool2d';
+import type { TransformMode } from '@/services/viewport/ViewportRenderService';
 
 /**
  * Dependencies the transform session borrows from {@link ViewportRendererService}.

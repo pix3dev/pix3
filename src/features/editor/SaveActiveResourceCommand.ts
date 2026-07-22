@@ -5,7 +5,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { EditorTabService } from '@/services/EditorTabService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 
 export class SaveActiveResourceCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

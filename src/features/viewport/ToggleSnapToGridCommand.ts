@@ -5,7 +5,7 @@ import {
   type CommandContext,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 
 export class ToggleSnapToGridCommand extends CommandBase<void, void> {

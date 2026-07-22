@@ -2,14 +2,14 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import {
   AssetFileActivationService,
   type AssetActivation,
-} from '@/services/AssetFileActivationService';
+} from '@/services/assets/AssetFileActivationService';
 import {
   AssetsPreviewService,
   type AssetPreviewItem,
   type AssetsPreviewSnapshot,
-} from '@/services/AssetsPreviewService';
-import { IconService, IconSize } from '@/services/IconService';
-import { ProjectService } from '@/services/ProjectService';
+} from '@/services/assets/AssetsPreviewService';
+import { IconService, IconSize } from '@/services/editor/IconService';
+import { ProjectService } from '@/services/project/ProjectService';
 import {
   ASSET_PATH_LIST_MIME,
   ASSET_PATH_MIME,
@@ -20,9 +20,9 @@ import {
   hasLibraryItemDragData,
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
-import { EditorTabService } from '@/services/EditorTabService';
-import { GeneratedAssetDropService } from '@/services/GeneratedAssetDropService';
-import { LibraryInsertService } from '@/services/LibraryInsertService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { GeneratedAssetDropService } from '@/services/image-gen/GeneratedAssetDropService';
+import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';

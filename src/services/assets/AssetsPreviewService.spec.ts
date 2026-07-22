@@ -1,0 +1,375 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { appState, resetAppState } from '@/state';
+import type { FileDescriptor } from '@/services/project/FileSystemAPIService';
+import type { AssetsPreviewSnapshot } from '@/services/assets/AssetsPreviewService';
+
+const mockProjectService = {
+  listDirectory: vi.fn(),
+};
+
+const mockProjectStorageService = {
+  readBlob: vi.fn(),
+};
+
+const mockThumbnailCacheService = {
+  get: vi.fn(),
+  set: vi.fn(),
+};
+
+const mockThumbnailGenerator = {
+  generate: vi.fn(),
+};
+
+const mockSceneThumbnailGenerator = {
+  generate: vi.fn(),
+};
+
+const mockDecodeAudioData = vi.fn();
+
+class MockAudioContext {
+  decodeAudioData = mockDecodeAudioData;
+}
+
+vi.mock('@/services/project/ProjectService', () => ({
+  ProjectService: class ProjectService {},
+  resolveProjectService: () => mockProjectService,
+}));
+
+vi.mock('@/services/project/ProjectStorageService', () => ({
+  ProjectStorageService: class ProjectStorageService {},
+  resolveProjectStorageService: () => mockProjectStorageService,
+}));
+
+vi.mock('@/services/assets/ThumbnailCacheService', () => ({
+  ThumbnailCacheService: class ThumbnailCacheService {},
+  resolveThumbnailCacheService: () => mockThumbnailCacheService,
+}));
+
+vi.mock('@/services/assets/ThumbnailGenerator', () => ({
+  ThumbnailGenerator: class ThumbnailGenerator {},
+  resolveThumbnailGenerator: () => mockThumbnailGenerator,
+}));
+
+vi.mock('@/services/scene/SceneThumbnailGenerator', () => ({
+  SceneThumbnailGenerator: class SceneThumbnailGenerator {},
+  resolveSceneThumbnailGenerator: () => mockSceneThumbnailGenerator,
+}));
+
+const { AssetsPreviewService } = await import('@/services/assets/AssetsPreviewService');
+
+describe('AssetsPreviewService', () => {
+  beforeEach(() => {
+    resetAppState();
+    appState.project.status = 'ready';
+
+    mockProjectService.listDirectory.mockReset();
+    mockProjectStorageService.readBlob.mockReset();
+    mockThumbnailCacheService.get.mockReset();
+    mockThumbnailCacheService.set.mockReset();
+    mockThumbnailGenerator.generate.mockReset();
+    mockSceneThumbnailGenerator.generate.mockReset();
+    mockDecodeAudioData.mockReset();
+
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal('AudioContext', MockAudioContext as unknown as typeof AudioContext);
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:audio-preview'),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetAppState();
+  });
+
+  it('hydrates cached model thumbnails without invoking the generator', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'crate.glb', path: 'models/crate.glb', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile('crate.glb', 'cached-model', 'model/gltf-binary', 42)
+    );
+    mockThumbnailCacheService.get.mockResolvedValue('data:image/webp;base64,cached');
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('model');
+      expect(item.thumbnailStatus).toBe('ready');
+      expect(item.thumbnailUrl).toBe('data:image/webp;base64,cached');
+      expect(mockThumbnailGenerator.generate).not.toHaveBeenCalled();
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('generates and caches missing model thumbnails in the background', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'crate.glb', path: 'models/crate.glb', kind: 'file' },
+    ]);
+
+    const file = createFile('crate.glb', 'uncached-model', 'model/gltf-binary', 77);
+    mockProjectStorageService.readBlob.mockResolvedValue(file);
+    mockThumbnailCacheService.get.mockResolvedValue(null);
+    mockThumbnailGenerator.generate.mockResolvedValue('data:image/webp;base64,generated');
+
+    const service = new AssetsPreviewService();
+    const snapshots: AssetsPreviewSnapshot[] = [];
+    const unsubscribe = service.subscribe(snapshot => {
+      snapshots.push(snapshot);
+    });
+
+    try {
+      await vi.waitFor(() => {
+        const currentItem = service.getSnapshot().items[0];
+        expect(currentItem?.thumbnailStatus).toBe('ready');
+      });
+
+      const [item] = service.getSnapshot().items;
+      expect(item.thumbnailUrl).toBe('data:image/webp;base64,generated');
+      expect(mockThumbnailGenerator.generate).toHaveBeenCalledWith(file, 'models/crate.glb');
+      expect(mockThumbnailCacheService.set).toHaveBeenCalledWith(
+        expect.stringContaining('models/crate.glb'),
+        'data:image/webp;base64,generated'
+      );
+      expect(snapshots.some(snapshot => snapshot.items[0]?.thumbnailStatus === 'loading')).toBe(
+        true
+      );
+    } finally {
+      unsubscribe();
+      service.dispose();
+    }
+  });
+
+  it('generates and caches missing scene thumbnails via the scene generator', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'main.pix3scene', path: 'scenes/main.pix3scene', kind: 'file' },
+    ]);
+
+    const file = createFile('main.pix3scene', 'version: "1"\nroot: []', 'text/yaml', 512);
+    mockProjectStorageService.readBlob.mockResolvedValue(file);
+    mockThumbnailCacheService.get.mockResolvedValue(null);
+    mockSceneThumbnailGenerator.generate.mockResolvedValue('data:image/webp;base64,scene');
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => {
+        const currentItem = service.getSnapshot().items[0];
+        expect(currentItem?.thumbnailStatus).toBe('ready');
+      });
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('scene');
+      expect(item.thumbnailUrl).toBe('data:image/webp;base64,scene');
+      expect(mockSceneThumbnailGenerator.generate).toHaveBeenCalledWith(
+        file,
+        'scenes/main.pix3scene'
+      );
+      expect(mockThumbnailGenerator.generate).not.toHaveBeenCalled();
+      expect(mockThumbnailCacheService.set).toHaveBeenCalledWith(
+        expect.stringContaining('scenes/main.pix3scene'),
+        'data:image/webp;base64,scene'
+      );
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('builds waveform previews and metadata for audio assets', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'click.wav', path: 'audio/click.wav', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile('click.wav', 'audio-data', 'audio/wav', 88)
+    );
+    mockDecodeAudioData.mockResolvedValue(createAudioBufferMock());
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('audio');
+      expect(item.thumbnailStatus).toBe('ready');
+      expect(item.thumbnailUrl).toContain('data:image/svg+xml');
+      expect(item.previewUrl).toBe('blob:audio-preview');
+      expect(item.durationSeconds).toBe(1.75);
+      expect(item.channelCount).toBe(2);
+      expect(item.sampleRate).toBe(44100);
+      expect(mockDecodeAudioData).toHaveBeenCalledOnce();
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('selects files in the current folder without reloading the preview folder', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'config.json', path: 'config.json', kind: 'file' },
+      { name: 'notes.md', path: 'notes.md', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockImplementation(async (path: string) => {
+      if (path === 'config.json') {
+        return createFile('config.json', '{"name":"pix3"}', 'application/json', 11);
+      }
+      return createFile('notes.md', '# Notes', 'text/markdown', 12);
+    });
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(2));
+      // Wait for the background folder-stats walk (an extra listDirectory) to settle.
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).not.toBeNull());
+      const callsAfterLoad = mockProjectService.listDirectory.mock.calls.length;
+
+      await service.syncFromAssetSelection('notes.md', 'file');
+
+      // Selecting a file already in the current folder must not reload the folder.
+      expect(mockProjectService.listDirectory).toHaveBeenCalledTimes(callsAfterLoad);
+      expect(service.getSnapshot().selectedItemPath).toBe('notes.md');
+      expect(service.getSnapshot().selectedItem?.path).toBe('notes.md');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('builds text previews for code and content files', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'scene.yaml', path: 'configs/scene.yaml', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile(
+        'scene.yaml',
+        'name: Example\ncomponents:\n  - camera\n  - light\n  - mesh',
+        'application/yaml',
+        90
+      )
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('text');
+      expect(item.previewText).toContain('name: Example');
+      expect(item.previewText).toContain('components:');
+      expect(item.thumbnailStatus).toBe('ready');
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('computes recursive folder stats after a folder loads', async () => {
+    mockProjectService.listDirectory.mockImplementation(async (path = '.') => {
+      if (path === '.') {
+        return [
+          { name: 'a.bin', path: 'a.bin', kind: 'file', size: 100 },
+          { name: 'sub', path: 'sub', kind: 'directory' },
+        ];
+      }
+      if (path === 'sub') {
+        return [{ name: 'b.bin', path: 'sub/b.bin', kind: 'file', size: 200 }];
+      }
+      return [];
+    });
+    mockProjectStorageService.readBlob.mockImplementation(async (path: string) =>
+      createFile(path, 'data', 'application/octet-stream', 7)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      // Root: a.bin (file) + sub (dir → b.bin) = 3 nested items, 300 bytes total.
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).toBe(3));
+      expect(service.getSnapshot().folderSizeBytes).toBe(300);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('version-guards folder stats against a newer folder selection', async () => {
+    const slow: { resolve: ((entries: FileDescriptor[]) => void) | null } = { resolve: null };
+    mockProjectService.listDirectory.mockImplementation(async (path = '.') => {
+      if (path === '.') {
+        return [{ name: 'slow', path: 'slow', kind: 'directory' }];
+      }
+      if (path === 'slow') {
+        // The root folder's stats walk hangs here until we release it.
+        return new Promise<FileDescriptor[]>(resolve => {
+          slow.resolve = resolve;
+        });
+      }
+      if (path === 'fast') {
+        return [{ name: 'x.bin', path: 'fast/x.bin', kind: 'file', size: 50 }];
+      }
+      return [];
+    });
+    mockProjectStorageService.readBlob.mockImplementation(async (path: string) =>
+      createFile(path, 'data', 'application/octet-stream', 7)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      // Wait until the (hanging) root stats walk has reached the `slow` directory.
+      await vi.waitFor(() => expect(slow.resolve).not.toBeNull());
+
+      // Advance the selection before the root stats resolve.
+      await service.syncFromAssetSelection('fast', 'directory');
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).toBe(1));
+      expect(service.getSnapshot().folderSizeBytes).toBe(50);
+
+      // Releasing the stale root walk must NOT clobber the newer folder's stats.
+      slow.resolve?.([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(service.getSnapshot().folderItemCount).toBe(1);
+      expect(service.getSnapshot().folderSizeBytes).toBe(50);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it('shows a code icon instead of a code preview for script files', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'GameManager.ts', path: 'scripts/GameManager.ts', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile('GameManager.ts', 'export class GameManager {}', 'text/plain', 27)
+    );
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+
+      const [item] = service.getSnapshot().items;
+      expect(item.previewType).toBe('icon');
+      expect(item.iconName).toBe('code');
+      expect(item.previewText).toBeNull();
+    } finally {
+      service.dispose();
+    }
+  });
+});
+
+function createFile(name: string, content: string, type: string, lastModified: number): File {
+  return new File([content], name, { type, lastModified });
+}
+
+function createAudioBufferMock(): AudioBuffer {
+  const channelA = new Float32Array([0, 0.2, -0.4, 0.8, -0.6, 0.1]);
+  const channelB = new Float32Array([0.1, -0.3, 0.5, -0.7, 0.4, -0.2]);
+
+  return {
+    duration: 1.75,
+    numberOfChannels: 2,
+    sampleRate: 44100,
+    getChannelData(index: number) {
+      return index === 0 ? channelA : channelB;
+    },
+  } as unknown as AudioBuffer;
+}

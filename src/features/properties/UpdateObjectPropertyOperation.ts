@@ -9,7 +9,7 @@ import { Node2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { getNodePropertySchema } from '@pix3/runtime';
 import { getRuntimeLivePropertySink } from '@pix3/runtime';
 import type { PropertyDefinition } from '@/fw';

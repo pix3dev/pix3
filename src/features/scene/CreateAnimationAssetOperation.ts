@@ -5,7 +5,7 @@ import type {
   OperationMetadata,
 } from '@/core/Operation';
 import { getAppStateSnapshot } from '@/state';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import type { AnimationResource } from '@pix3/runtime';
 import {
   createDefaultAnimationResource,

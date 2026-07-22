@@ -5,8 +5,8 @@ import type {
   OperationMetadata,
 } from '@/core/Operation';
 import { getAppStateSnapshot } from '@/state';
-import { LoggingService } from '@/services/LoggingService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { serializeAnimationResource } from './animation-asset-utils';
 
 export interface SaveAnimationOperationParams {

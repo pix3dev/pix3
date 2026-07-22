@@ -4,8 +4,8 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface RemoveLocaleParams {
   locale: string;

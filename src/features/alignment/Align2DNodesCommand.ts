@@ -5,7 +5,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { requireActiveScene } from '@/features/scene/scene-command-utils';
 import { Align2DNodesOperation, type Align2DNodesOperationParams } from './Align2DNodesOperation';
 import type { Align2DActionId } from './types';

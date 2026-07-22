@@ -1,9 +1,9 @@
 import { inject } from '@/fw/di';
-import { ResourceManager } from '@/services/ResourceManager';
-import { OperationService } from '@/services/OperationService';
+import { ResourceManager } from '@/services/assets/ResourceManager';
+import { OperationService } from '@/services/core/OperationService';
 import { SceneManager } from '@pix3/runtime';
 import { SceneValidationError } from '@pix3/runtime';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import type { SceneGraph } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';
 import {

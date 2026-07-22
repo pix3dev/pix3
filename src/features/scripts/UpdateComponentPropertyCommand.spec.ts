@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandContext } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { UpdateComponentPropertyCommand } from './UpdateComponentPropertyCommand';
 import { UpdateComponentPropertyOperation } from './UpdateComponentPropertyOperation';
 

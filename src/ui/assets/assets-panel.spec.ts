@@ -10,12 +10,12 @@ vi.mock('@/services', () => ({
   CommandDispatcher: class CommandDispatcher {},
   IconSize: { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 24 },
 }));
-vi.mock('@/services/AssetImportDialogService', () => ({
+vi.mock('@/services/assets/AssetImportDialogService', () => ({
   AssetImportDialogService: class AssetImportDialogService {},
 }));
-vi.mock('@/services/DialogService', () => ({ DialogService: class DialogService {} }));
-vi.mock('@/services/ProjectService', () => ({ ProjectService: class ProjectService {} }));
-vi.mock('@/services/ProjectScriptLoaderService', () => ({
+vi.mock('@/services/editor/DialogService', () => ({ DialogService: class DialogService {} }));
+vi.mock('@/services/project/ProjectService', () => ({ ProjectService: class ProjectService {} }));
+vi.mock('@/services/scripting/ProjectScriptLoaderService', () => ({
   ProjectScriptLoaderService: class ProjectScriptLoaderService {},
 }));
 vi.mock('@/features/project/AddAutoloadCommand', () => ({

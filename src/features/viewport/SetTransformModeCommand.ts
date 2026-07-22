@@ -5,7 +5,10 @@ import {
   type CommandContext,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { ViewportRendererService, type TransformMode } from '@/services/ViewportRenderService';
+import {
+  ViewportRendererService,
+  type TransformMode,
+} from '@/services/viewport/ViewportRenderService';
 import { ServiceContainer } from '@/fw/di';
 
 /**

@@ -1,7 +1,7 @@
 import { CanvasTexture } from 'three';
 import { parse as parseYaml } from 'yaml';
 import { injectable, inject } from '@/fw/di';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { AtlasCacheStore } from '@/services/atlas/AtlasCacheStore';
 import { packMaxRects, type PackItem } from '@/services/atlas/MaxRectsPacker';
 import { sha256Hex } from '@/core/remote-preview/protocol';

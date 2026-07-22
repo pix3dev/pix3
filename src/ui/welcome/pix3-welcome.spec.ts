@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ServiceContainer } from '@/fw/di';
-import { CloudProjectService } from '@/services/CloudProjectService';
-import { DialogService } from '@/services/DialogService';
-import { IconService } from '@/services/IconService';
-import { ProjectLifecycleService } from '@/services/ProjectLifecycleService';
-import { ProjectService } from '@/services/ProjectService';
-import { type ApiProject } from '@/services/ApiClient';
+import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { DialogService } from '@/services/editor/DialogService';
+import { IconService } from '@/services/editor/IconService';
+import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { type ApiProject } from '@/services/cloud/ApiClient';
 import { appState, resetAppState } from '@/state';
 
 type TestWelcomeElement = HTMLElement & { updateComplete: Promise<unknown> };

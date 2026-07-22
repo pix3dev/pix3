@@ -1,11 +1,14 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { appState } from '@/state';
-import { EditorSettingsService, type EditorSettingsTab } from '@/services/EditorSettingsService';
-import { OperationService } from '@/services/OperationService';
+import {
+  EditorSettingsService,
+  type EditorSettingsTab,
+} from '@/services/editor/EditorSettingsService';
+import { OperationService } from '@/services/core/OperationService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
-import { AiImageSettingsService } from '@/services/AiImageSettingsService';
+import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
@@ -13,7 +16,7 @@ import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { BRIDGE_TOKEN_SECRET_ID, DEFAULT_BRIDGE_URL } from '@/services/llm/BridgeProviders';
 import { formatPricingHint, type LlmModel } from '@/services/llm/LlmTypes';
-import { IconService, IconSize } from '@/services/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
 import './pix3-editor-settings-dialog.ts.css';
@@ -573,9 +576,7 @@ export class EditorSettingsDialog extends ComponentBase {
               The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
               machine — manage it there, not here:
             </div>
-            ${this.renderCommandBlock(
-              `pix3-agent-bridge provider set-key ${provider.id} <key>`
-            )}
+            ${this.renderCommandBlock(`pix3-agent-bridge provider set-key ${provider.id} <key>`)}
           </div>`
         : html`<div class="settings-field">
             <span class="key-label">

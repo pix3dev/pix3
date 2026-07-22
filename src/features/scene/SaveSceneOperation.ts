@@ -6,9 +6,9 @@ import type {
 } from '@/core/Operation';
 import { SceneManager } from '@pix3/runtime';
 import { getAppStateSnapshot } from '@/state';
-import { LoggingService } from '@/services/LoggingService';
-import { FileWatchService } from '@/services/FileWatchService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { FileWatchService } from '@/services/project/FileWatchService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 
 export interface SaveSceneOperationParams {
   /** Optional scene id to save (defaults to active scene). */
