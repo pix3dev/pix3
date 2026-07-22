@@ -13,6 +13,7 @@ import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGp
 import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
 import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOverlayHud';
 import { ViewportPreviewTicker } from './viewport/ViewportPreviewTicker';
+import { Viewport3DContentSync } from './viewport/Viewport3DContentSync';
 import {
   Viewport2DProxyRegistry,
   configureSpriteTexture,
@@ -187,9 +188,6 @@ export class ViewportRendererService {
    * active). Editor previews the 3D band through it; 2D content and adornments
    * are drawn clean on top. Null when no effects are enabled. */
   private postFx: PostProcessingPipeline | null = null;
-  private sprite3DTexturePaths = new Map<string, string | null>();
-  private particles3DTexturePaths = new Map<string, string | null>();
-  private geometryMeshMapPaths = new Map<string, string | null>();
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
   private active2DTransform?: Active2DTransform;
@@ -308,6 +306,14 @@ export class ViewportRendererService {
     installProxyEffects: (node, material) => this.installProxyEffects(node, material),
     disposeObject3D: root => this.disposeObject3D(root),
     getOrthographicCamera: () => this.orthographicCamera,
+  });
+  // Owns the editor-viewport texture/billboard sync for the 3D node types
+  // (Sprite3D, Particles3D, GeometryMesh). Wired via closures because the
+  // resource manager is injected lazily.
+  private readonly contentSync3D = new Viewport3DContentSync({
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    readBlob: path => this.resourceManager.readBlob(path),
+    requestRender: () => this.requestRender(),
   });
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
@@ -1876,7 +1882,7 @@ export class ViewportRendererService {
       this.orbitControls?.update();
     }
 
-    this.syncSprite3DBillboarding(this.camera);
+    this.contentSync3D.syncSprite3DBillboarding(this.camera);
 
     // Render main scene with perspective camera (3D layer and gizmos).
     //
@@ -3290,15 +3296,15 @@ export class ViewportRendererService {
       }
 
       if (node instanceof Sprite3D) {
-        this.syncSprite3DTexture(node);
+        this.contentSync3D.syncSprite3DTexture(node);
       }
 
       if (node instanceof Particles3D) {
-        this.syncParticles3DTexture(node);
+        this.contentSync3D.syncParticles3DTexture(node);
       }
 
       if (node instanceof GeometryMesh) {
-        this.syncGeometryMeshMap(node);
+        this.contentSync3D.syncGeometryMeshMap(node);
       }
     } else if (node instanceof Group2D) {
       const visualRoot = this.proxyRegistry.group2DVisuals.get(node.nodeId);
@@ -3808,9 +3814,7 @@ export class ViewportRendererService {
         this.disposeObject3D(visual);
       }
       this.proxyRegistry.tiledSprite2DVisuals.clear();
-      this.sprite3DTexturePaths.clear();
-      this.particles3DTexturePaths.clear();
-      this.geometryMeshMapPaths.clear();
+      this.contentSync3D.clearTexturePaths();
 
       for (const visual of this.proxyRegistry.uiControl2DVisuals.values()) {
         if (visual.parent) {
@@ -3893,15 +3897,15 @@ export class ViewportRendererService {
     }
 
     if (node instanceof Sprite3D) {
-      this.syncSprite3DTexture(node);
+      this.contentSync3D.syncSprite3DTexture(node);
     }
 
     if (node instanceof Particles3D) {
-      this.syncParticles3DTexture(node);
+      this.contentSync3D.syncParticles3DTexture(node);
     }
 
     if (node instanceof GeometryMesh) {
-      this.syncGeometryMeshMap(node);
+      this.contentSync3D.syncGeometryMeshMap(node);
     }
 
     let current2DVisualRoot = parent2DVisualRoot;
@@ -4361,201 +4365,6 @@ export class ViewportRendererService {
     };
 
     visit(sceneGraph.rootNodes);
-  }
-
-  private syncSprite3DBillboarding(camera: THREE.Camera): void {
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      return;
-    }
-
-    const cameraQuaternion = camera.getWorldQuaternion(new THREE.Quaternion());
-    const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
-    const visit = (nodes: NodeBase[]) => {
-      for (const node of nodes) {
-        if (node instanceof Sprite3D) {
-          node.applyBillboard(cameraQuaternion);
-        } else if (node instanceof Particles3D) {
-          // Camera position drives trail ribbons; world-space compensation latches here too.
-          node.syncRenderState(cameraQuaternion, cameraPosition);
-        }
-        if (node.children.length > 0) {
-          visit(node.children);
-        }
-      }
-    };
-
-    visit(sceneGraph.rootNodes);
-  }
-
-  private syncSprite3DTexture(node: Sprite3D): void {
-    const currentTexturePath = node.texturePath ?? null;
-    const previousTexturePath = this.sprite3DTexturePaths.get(node.nodeId) ?? null;
-    if (currentTexturePath === previousTexturePath) {
-      return;
-    }
-
-    this.sprite3DTexturePaths.set(node.nodeId, currentTexturePath);
-    if (!currentTexturePath) {
-      node.clearTexture();
-      return;
-    }
-
-    const textureLoader = new THREE.TextureLoader();
-    void (async () => {
-      try {
-        const blob = await this.resourceManager.readBlob(currentTexturePath);
-        const blobUrl = URL.createObjectURL(blob);
-        textureLoader.load(
-          blobUrl,
-          texture => {
-            try {
-              configureSpriteTexture(texture);
-              node.setTexture(texture);
-            } finally {
-              URL.revokeObjectURL(blobUrl);
-            }
-          },
-          undefined,
-          () => {
-            URL.revokeObjectURL(blobUrl);
-          }
-        );
-        return;
-      } catch {
-        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(currentTexturePath);
-        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
-        if (scheme === 'http' || scheme === 'https' || scheme === '') {
-          const texture = textureLoader.load(currentTexturePath, undefined, undefined, () => {
-            console.warn('[ViewportRenderer] Failed to load Sprite3D texture', currentTexturePath);
-          });
-          configureSpriteTexture(texture);
-          node.setTexture(texture);
-          return;
-        }
-      }
-
-      console.warn(
-        '[ViewportRenderer] Skipping Sprite3D texture load for scheme',
-        currentTexturePath
-      );
-    })();
-  }
-
-  private syncParticles3DTexture(node: Particles3D): void {
-    const currentTexturePath = node.texturePath ?? null;
-    const previousTexturePath = this.particles3DTexturePaths.get(node.nodeId) ?? null;
-    if (currentTexturePath === previousTexturePath) {
-      return;
-    }
-
-    this.particles3DTexturePaths.set(node.nodeId, currentTexturePath);
-    if (!currentTexturePath) {
-      node.clearTexture();
-      return;
-    }
-
-    const textureLoader = new THREE.TextureLoader();
-    void (async () => {
-      try {
-        const blob = await this.resourceManager.readBlob(currentTexturePath);
-        const blobUrl = URL.createObjectURL(blob);
-        textureLoader.load(
-          blobUrl,
-          texture => {
-            try {
-              configureSpriteTexture(texture);
-              node.setTexture(texture);
-            } finally {
-              URL.revokeObjectURL(blobUrl);
-            }
-          },
-          undefined,
-          () => {
-            URL.revokeObjectURL(blobUrl);
-          }
-        );
-        return;
-      } catch {
-        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(currentTexturePath);
-        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
-        if (scheme === 'http' || scheme === 'https' || scheme === '') {
-          const texture = textureLoader.load(currentTexturePath, undefined, undefined, () => {
-            console.warn(
-              '[ViewportRenderer] Failed to load Particles3D texture',
-              currentTexturePath
-            );
-          });
-          configureSpriteTexture(texture);
-          node.setTexture(texture);
-          return;
-        }
-      }
-
-      console.warn(
-        '[ViewportRenderer] Skipping Particles3D texture load for scheme',
-        currentTexturePath
-      );
-    })();
-  }
-
-  /**
-   * Load & assign a GeometryMesh's albedo map in the editor viewport when its
-   * res:// path changes (the runtime node only tracks the path; the loader does
-   * this at scene-load / play time). 3D textures keep mipmaps, so — unlike the
-   * 2D sprite path — we do NOT run it through configureSpriteTexture; setMap
-   * forces the colour space and leaves mipmapping on.
-   */
-  private syncGeometryMeshMap(node: GeometryMesh): void {
-    const currentMapPath = node.mapSrc || null;
-    const previousMapPath = this.geometryMeshMapPaths.get(node.nodeId) ?? null;
-    if (currentMapPath === previousMapPath) {
-      return;
-    }
-
-    this.geometryMeshMapPaths.set(node.nodeId, currentMapPath);
-    if (!currentMapPath) {
-      node.setMap(null);
-      this.requestRender();
-      return;
-    }
-
-    const textureLoader = new THREE.TextureLoader();
-    void (async () => {
-      try {
-        const blob = await this.resourceManager.readBlob(currentMapPath);
-        const blobUrl = URL.createObjectURL(blob);
-        textureLoader.load(
-          blobUrl,
-          texture => {
-            try {
-              node.setMap(texture);
-              this.requestRender();
-            } finally {
-              URL.revokeObjectURL(blobUrl);
-            }
-          },
-          undefined,
-          () => {
-            URL.revokeObjectURL(blobUrl);
-          }
-        );
-        return;
-      } catch {
-        const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(currentMapPath);
-        const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
-        if (scheme === 'http' || scheme === 'https' || scheme === '') {
-          const texture = textureLoader.load(currentMapPath, undefined, undefined, () => {
-            console.warn('[ViewportRenderer] Failed to load GeometryMesh map', currentMapPath);
-          });
-          node.setMap(texture);
-          this.requestRender();
-          return;
-        }
-      }
-
-      console.warn('[ViewportRenderer] Skipping GeometryMesh map load for scheme', currentMapPath);
-    })();
   }
 
   private findNodeById(nodeId: string, nodes: NodeBase[]): NodeBase | null {
@@ -5730,9 +5539,7 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.proxyRegistry.tiledSprite2DVisuals.clear();
-    this.sprite3DTexturePaths.clear();
-    this.particles3DTexturePaths.clear();
-    this.geometryMeshMapPaths.clear();
+    this.contentSync3D.clearTexturePaths();
 
     for (const visual of this.proxyRegistry.uiControl2DVisuals.values()) {
       this.disposeObject3D(visual);
