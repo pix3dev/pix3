@@ -10,6 +10,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MathUtils } from 'three';
 import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
+import {
+  computeFallbackFramingBounds,
+  computeOrtho2DFitZoom,
+  computeOrtho3DFitZoom,
+  computePerspectiveFitDistance,
+  resolvePreservedViewDirection,
+} from './viewport/viewport-framing-math';
 import type { AnimationResource } from '@pix3/runtime';
 import { AnimatedSprite2D } from '@pix3/runtime';
 import { NodeBase } from '@pix3/runtime';
@@ -1389,18 +1396,16 @@ export class ViewportRendererService {
 
     // Preserve the current view direction; fall back to the default diagonal only
     // when the camera sits exactly on its target.
-    const direction = this.camera.position.clone().sub(this.orbitControls.target);
-    if (direction.lengthSq() < 1e-8) {
-      direction.set(1, 1, 1);
-    }
-    direction.normalize();
+    const direction = resolvePreservedViewDirection(this.camera.position, this.orbitControls.target);
 
     if (this.camera instanceof THREE.PerspectiveCamera) {
-      const vFov = (this.camera.fov * Math.PI) / 180;
-      const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-      const fitFov = Math.max(Math.min(vFov, hFov), 1e-3);
-      let distance = (sphereRadius * paddingMultiplier) / Math.sin(fitFov / 2);
-      distance = Math.max(distance, this.camera.near * 2);
+      const distance = computePerspectiveFitDistance(
+        sphereRadius,
+        paddingMultiplier,
+        this.camera.fov,
+        this.camera.aspect,
+        this.camera.near
+      );
       this.camera.position.copy(center).add(direction.multiplyScalar(distance));
     } else {
       const distance = Math.max(
@@ -1409,13 +1414,14 @@ export class ViewportRendererService {
       );
       this.camera.position.copy(center).add(direction.multiplyScalar(distance));
 
-      const viewHeight = EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT;
-      const viewWidth =
-        viewHeight * Math.max(this.viewportSize.width / this.viewportSize.height, 1);
-      const targetZoom =
-        Math.max(0.1, Math.min(viewWidth / Math.max(size.x, 1), viewHeight / Math.max(size.y, 1))) /
-        paddingMultiplier;
-      this.camera.zoom = targetZoom;
+      this.camera.zoom = computeOrtho3DFitZoom(
+        size.x,
+        size.y,
+        paddingMultiplier,
+        this.viewportSize.width,
+        this.viewportSize.height,
+        EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT
+      );
       this.camera.updateProjectionMatrix();
     }
 
@@ -1589,8 +1595,14 @@ export class ViewportRendererService {
     if (bounds.isEmpty() || this.isDegenerateBounds(bounds)) {
       const anchor = new THREE.Vector3();
       nodes[0].getWorldPosition(anchor);
-      const half = dim === '2d' ? FRAME_FALLBACK_HALF_EXTENT_2D : FRAME_FALLBACK_HALF_EXTENT_3D;
-      bounds.setFromCenterAndSize(anchor, new THREE.Vector3(half * 2, half * 2, half * 2));
+      bounds.copy(
+        computeFallbackFramingBounds(
+          anchor,
+          dim,
+          FRAME_FALLBACK_HALF_EXTENT_2D,
+          FRAME_FALLBACK_HALF_EXTENT_3D
+        )
+      );
     }
 
     return { bounds, dim };
@@ -1617,19 +1629,14 @@ export class ViewportRendererService {
       return 1;
     }
 
-    const size = bounds.getSize(new THREE.Vector3());
-    const paddedWidth = Math.max(size.x * paddingMultiplier, 1);
-    const paddedHeight = Math.max(size.y * paddingMultiplier, 1);
-    const baseWidth = Math.max(
-      Math.abs(this.orthographicCamera.right - this.orthographicCamera.left),
-      1
+    return computeOrtho2DFitZoom(
+      bounds.getSize(new THREE.Vector3()),
+      paddingMultiplier,
+      this.orthographicCamera.left,
+      this.orthographicCamera.right,
+      this.orthographicCamera.top,
+      this.orthographicCamera.bottom
     );
-    const baseHeight = Math.max(
-      Math.abs(this.orthographicCamera.top - this.orthographicCamera.bottom),
-      1
-    );
-
-    return Math.max(0.1, Math.min(baseWidth / paddedWidth, baseHeight / paddedHeight));
   }
 
   private getDefault2DViewState(): { center: THREE.Vector3; zoom: number } {
