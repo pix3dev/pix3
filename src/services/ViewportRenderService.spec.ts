@@ -25,7 +25,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createSprite2DVisual?: (s: Sprite2D) => THREE.Group;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => THREE.Group };
     };
 
     const sprite = new Sprite2D({
@@ -35,7 +35,7 @@ describe('ViewportRendererService', () => {
       anchor: { x: 0, y: 1 },
     });
 
-    const visualRoot = svc.createSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const mesh = visualRoot?.userData.spriteMesh as THREE.Mesh;
@@ -47,7 +47,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createSprite2DVisual?: (s: Sprite2D) => THREE.Group;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => THREE.Group };
     };
 
     const sprite = new Sprite2D({
@@ -57,7 +57,7 @@ describe('ViewportRendererService', () => {
       anchor: { x: 0.25, y: 0.75 },
     });
 
-    const visualRoot = svc.createSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const anchorMarker = visualRoot?.userData.anchorMarker as THREE.Group;
@@ -76,7 +76,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createAnimatedSprite2DVisual?: (s: AnimatedSprite2D) => THREE.Group;
+      proxyRegistry: { createAnimatedSprite2DVisual: (s: AnimatedSprite2D) => THREE.Group };
       getNodeOnlyBounds?: (s: AnimatedSprite2D) => THREE.Box3;
     };
 
@@ -87,7 +87,7 @@ describe('ViewportRendererService', () => {
       color: '#ffffff',
     });
 
-    const visualRoot = svc.createAnimatedSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createAnimatedSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const sizeGroup = visualRoot?.userData.sizeGroup as THREE.Group;
@@ -114,7 +114,7 @@ describe('ViewportRendererService', () => {
     // Minimal stubs for dependencies used by createSprite2DVisual
     const svc = service as unknown as {
       scene?: { add: (...args: unknown[]) => void };
-      createSprite2DVisual?: (s: Sprite2D) => unknown;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => unknown };
     };
     svc.scene = { add: vi.fn() };
 
@@ -122,7 +122,7 @@ describe('ViewportRendererService', () => {
     const sprite = new Sprite2D({ id: 'test-sprite', texturePath: 'templ://pix3-logo.png' });
 
     // Call private method reflectively
-    const mesh = svc.createSprite2DVisual?.(sprite);
+    const mesh = svc.proxyRegistry.createSprite2DVisual(sprite);
 
     expect(mesh).toBeDefined();
 
@@ -153,12 +153,12 @@ describe('ViewportRendererService', () => {
 
     const svc = service as unknown as {
       scene?: { add: (...args: unknown[]) => void };
-      createSprite2DVisual?: (s: Sprite2D) => unknown;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => unknown };
     };
     svc.scene = { add: vi.fn() };
 
     const sprite = new Sprite2D({ id: 'test-sprite-2', texturePath: 'templ://pix3-logo.png' });
-    svc.createSprite2DVisual?.(sprite);
+    svc.proxyRegistry.createSprite2DVisual(sprite);
 
     // Wait a tick to run async failure handler
     await Promise.resolve();
@@ -227,7 +227,7 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 
@@ -274,7 +274,7 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
       [[rotatedSprite.nodeId, new THREE.Group()]]
     );
 
@@ -309,7 +309,7 @@ describe('ViewportRendererService', () => {
       configurable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 
