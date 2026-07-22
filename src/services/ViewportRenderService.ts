@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MathUtils } from 'three';
+import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
 import type { AnimationResource } from '@pix3/runtime';
 import { AnimatedSprite2D } from '@pix3/runtime';
 import { NodeBase } from '@pix3/runtime';
@@ -140,23 +141,9 @@ const IDLE_RENDER_INTERVAL_MS = 500;
 // heartbeat gap doesn't fast-forward mixers/particles in one jump.
 const MAX_PREVIEW_DELTA_S = 0.1;
 
-/**
- * Minimal shape of the `EXT_disjoint_timer_query_webgl2` extension (not in the
- * TS DOM lib). Used to measure real GPU frame time for the status-bar load
- * readout; absent on backends that don't expose it (then GPU timing is null).
- */
-interface DisjointTimerQueryExt {
-  readonly TIME_ELAPSED_EXT: number;
-  readonly GPU_DISJOINT_EXT: number;
-}
-
-/** Per-frame viewport cost sample surfaced to the tab-performance readout. */
-export interface ViewportPerfSample {
-  /** Wall-clock time spent in the render body (CPU-side), in ms. */
-  readonly cpuMs: number;
-  /** GPU frame time from a WebGL2 timer query, in ms; null when unsupported. */
-  readonly gpuMs: number | null;
-}
+// Re-exported for backward compat: this type now lives with the GPU timer it
+// describes; consumers still import it from here.
+export type { ViewportPerfSample } from './viewport/ViewportGpuTimer';
 
 /**
  * A screen-space anchor for a 2D selection HUD badge: the projected edge
@@ -316,14 +303,9 @@ export class ViewportRendererService {
   private activeComponentPreviewCount = 0;
 
   // --- Viewport performance sampling (for the status-bar tab-load readout) ---
-  // CPU-side wall time of the last render body, and the last resolved GPU frame
-  // time (via a WebGL2 timer query). `gpuTimer` is undefined until first probed;
-  // `null` ext means the backend doesn't support timer queries.
-  private lastRenderCpuMs = 0;
-  private lastRenderGpuMs: number | null = null;
-  private gpuTimer:
-    | { ext: DisjointTimerQueryExt | null; query: WebGLQuery | null; inFlight: boolean }
-    | undefined;
+  // Owns the GPU/CPU frame-timing concern. Reads the *current* renderer via a
+  // getter since it's created lazily and can be re-created on viewport re-init.
+  private readonly gpuTimer = new ViewportGpuTimer(() => this.renderer);
   /**
    * Editor appearance overrides a script pushed via `setAppearanceOverride`,
    * keyed by nodeId. `stamp` is the preview frame it was last pushed on;
@@ -2098,14 +2080,14 @@ export class ViewportRendererService {
     this.lastRenderedAt = performance.now();
     // Resolve the previous frame's GPU timer before opening a new one (only one
     // TIME_ELAPSED query can be in flight at a time).
-    this.resolveGpuTimer();
-    const gpuStarted = this.beginGpuTimer();
+    this.gpuTimer.resolve();
+    const gpuStarted = this.gpuTimer.beginFrame();
     const cpuStart = performance.now();
     try {
       this.renderFrameBody();
     } finally {
-      this.lastRenderCpuMs = performance.now() - cpuStart;
-      this.endGpuTimer(gpuStarted);
+      this.gpuTimer.recordCpuMs(performance.now() - cpuStart);
+      this.gpuTimer.endFrame(gpuStarted);
       this.isRenderingFrame = false;
     }
   }
@@ -2116,83 +2098,7 @@ export class ViewportRendererService {
    * is idle (no new frames). `gpuMs` is null when timer queries are unsupported.
    */
   getViewportPerfSample(): ViewportPerfSample {
-    this.resolveGpuTimer();
-    return { cpuMs: this.lastRenderCpuMs, gpuMs: this.lastRenderGpuMs };
-  }
-
-  /** Lazily resolve the WebGL2 timer-query extension (null if unsupported). */
-  private ensureGpuTimer(): {
-    ext: DisjointTimerQueryExt | null;
-    query: WebGLQuery | null;
-    inFlight: boolean;
-  } {
-    if (this.gpuTimer) return this.gpuTimer;
-    let ext: DisjointTimerQueryExt | null = null;
-    try {
-      const gl = this.renderer?.getContext();
-      // Timer queries are a WebGL2 feature (core beginQuery/endQuery + the ext enums).
-      if (gl && typeof (gl as WebGL2RenderingContext).createQuery === 'function') {
-        ext = gl.getExtension('EXT_disjoint_timer_query_webgl2') as DisjointTimerQueryExt | null;
-      }
-    } catch {
-      ext = null;
-    }
-    this.gpuTimer = { ext, query: null, inFlight: false };
-    return this.gpuTimer;
-  }
-
-  /** Open a GPU timer query around the coming render. Returns false if it couldn't. */
-  private beginGpuTimer(): boolean {
-    const timer = this.ensureGpuTimer();
-    if (!timer.ext || timer.inFlight) return false;
-    const gl = this.renderer?.getContext() as WebGL2RenderingContext | undefined;
-    if (!gl) return false;
-    try {
-      if (!timer.query) {
-        timer.query = gl.createQuery();
-      }
-      if (!timer.query) return false;
-      gl.beginQuery(timer.ext.TIME_ELAPSED_EXT, timer.query);
-      timer.inFlight = true;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private endGpuTimer(started: boolean): void {
-    if (!started) return;
-    const timer = this.gpuTimer;
-    if (!timer?.ext) return;
-    const gl = this.renderer?.getContext() as WebGL2RenderingContext | undefined;
-    if (!gl) return;
-    try {
-      gl.endQuery(timer.ext.TIME_ELAPSED_EXT);
-    } catch {
-      timer.inFlight = false;
-    }
-  }
-
-  /** Read back the GPU time once the driver reports the query as available. */
-  private resolveGpuTimer(): void {
-    const timer = this.gpuTimer;
-    if (!timer?.ext || !timer.inFlight || !timer.query) return;
-    const gl = this.renderer?.getContext() as WebGL2RenderingContext | undefined;
-    if (!gl) return;
-    try {
-      const available = gl.getQueryParameter(timer.query, gl.QUERY_RESULT_AVAILABLE) as boolean;
-      const disjoint = gl.getParameter(timer.ext.GPU_DISJOINT_EXT) as boolean;
-      if (!available) return;
-      timer.inFlight = false;
-      if (disjoint) {
-        // Timing was interrupted (e.g. context switch) — discard this sample.
-        return;
-      }
-      const elapsedNs = gl.getQueryParameter(timer.query, gl.QUERY_RESULT) as number;
-      this.lastRenderGpuMs = elapsedNs / 1e6;
-    } catch {
-      timer.inFlight = false;
-    }
+    return this.gpuTimer.getSample();
   }
 
   private renderFrameBody(): void {
