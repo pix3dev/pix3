@@ -2,6 +2,7 @@ import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { resolveSoul } from '@/services/agent/AgentSouls';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
@@ -783,8 +784,22 @@ export class AgentChatService {
     advisorAvailable = false,
     scripts: readonly ScriptInventoryEntry[] = []
   ): { text: string; stableChars: number } {
+    const soul = resolveSoul(this.settings.getPreferences());
+
     const lines: string[] = [
-      'You are Pix3 Agent, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).',
+      `You are ${soul.name}, an AI assistant embedded in the Pix3 editor (a browser-based editor for HTML5 games mixing 2D and 3D).`,
+    ];
+
+    if (soul.prompt) {
+      lines.push(
+        '',
+        'Personality:',
+        soul.prompt,
+        "Stay in character in every chat reply and match the user's language. Keep quips to a sentence or two — the persona shapes HOW you talk, never WHAT you do: tool calls, code quality, technical accuracy and warnings always come first and stay factual."
+      );
+    }
+
+    lines.push(
       '',
       'Rules:',
       '- Use the provided tools to inspect and change the project; never guess scene or file contents you can read.',
@@ -798,8 +813,8 @@ export class AgentChatService {
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
       "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",
-      '- Be concise. Reply in the language the user writes in.',
-    ];
+      '- Be concise. Reply in the language the user writes in.'
+    );
 
     if (advisorAvailable) {
       lines.push(

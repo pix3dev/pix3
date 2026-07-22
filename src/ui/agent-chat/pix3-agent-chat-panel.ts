@@ -6,6 +6,7 @@ import {
   type AgentTurnMetric,
 } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { resolveSoul } from '@/services/agent/AgentSouls';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
@@ -556,6 +557,8 @@ export class AgentChatPanel extends ComponentBase {
   @state() private customBaseUrl = '';
   /** Whether the current provider has a key (drives the model-picker button tint + empty-state). */
   @state() private keyConfigured = false;
+  /** The active soul's display name (shown in the empty-state header). */
+  @state() private agentName = 'Pix3 Agent';
   /** Draft key text while an inline per-provider key editor is open. */
   @state() private keyDraft = '';
   /** Whether the Copilot-style model picker dropdown is open. */
@@ -618,6 +621,7 @@ export class AgentChatPanel extends ComponentBase {
       this.modelId = this.settings.getSelectedModelId(prefs.selectedProviderId) ?? '';
       this.reasoningEffort = this.settings.getReasoningEffort(this.providerId, this.modelId);
       this.customBaseUrl = prefs.customBaseUrl;
+      this.agentName = resolveSoul(prefs).name;
       this.debugMode = prefs.debugMode;
       if (!prefs.debugMode) {
         this.debugView = 'none';
@@ -1203,7 +1207,7 @@ export class AgentChatPanel extends ComponentBase {
   private renderEmptyState() {
     return html`
       <div class="agent-empty">
-        <h3>Pix3 Agent</h3>
+        <h3>${this.agentName}</h3>
         <p>
           An AI assistant with tools for this project: it inspects the scene, edits scripts and
           assets, runs commands (undoable), and verifies its work in play mode.

@@ -9,6 +9,7 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { SOUL_PRESETS, CUSTOM_SOUL_ID, type AgentSoul } from '@/services/agent/AgentSouls';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
@@ -51,6 +52,7 @@ const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     subtabs: [
       { id: 'model', label: 'Model & Key' },
       { id: 'assistants', label: 'Assistants' },
+      { id: 'souls', label: 'Souls' },
     ],
   },
   {
@@ -171,6 +173,16 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private llmDebugMode = false;
 
+  // Souls: the agent's name + personality preset (or a user-authored custom soul).
+  @state()
+  private soulId = '';
+
+  @state()
+  private customSoulName = '';
+
+  @state()
+  private customSoulPrompt = '';
+
   // -- Pix3AgentBridge connection (serves the metered providers) --------------
   @state()
   private bridgeAvailable = false;
@@ -270,6 +282,9 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
     this.llmDebugMode = agentPrefs.debugMode;
+    this.soulId = agentPrefs.soulId;
+    this.customSoulName = agentPrefs.customSoulName;
+    this.customSoulPrompt = agentPrefs.customSoulPrompt;
     void this.refreshLlmKeyStatus();
 
     this.advisorProviderId = agentPrefs.advisorProviderId;
@@ -389,9 +404,13 @@ export class EditorSettingsDialog extends ComponentBase {
       case 'general':
         return this.renderGeneralTab();
       case 'agent':
-        return this.activeSubtab === 'assistants'
-          ? this.renderAgentAssistantsTab()
-          : this.renderAgentModelTab();
+        if (this.activeSubtab === 'assistants') {
+          return this.renderAgentAssistantsTab();
+        }
+        if (this.activeSubtab === 'souls') {
+          return this.renderAgentSoulsTab();
+        }
+        return this.renderAgentModelTab();
       case 'images':
         return this.activeSubtab === 'background'
           ? this.renderImagesBackgroundTab()
@@ -1159,6 +1178,90 @@ export class EditorSettingsDialog extends ComponentBase {
   private onLlmDebugModeChange(e: Event): void {
     this.llmDebugMode = (e.target as HTMLInputElement).checked;
     this.agentSettings.updatePreferences({ debugMode: this.llmDebugMode });
+  }
+
+  // ── Souls (agent name + personality) ──────────────────────────────────────
+
+  private renderAgentSoulsTab() {
+    const customSelected = this.soulId === CUSTOM_SOUL_ID;
+    return html`
+      <div class="hint">
+        Give the agent a name and a character. The soul only changes how it talks — not what it does.
+      </div>
+
+      <div class="soul-grid">
+        ${SOUL_PRESETS.map(soul => this.renderSoulCard(soul, soul.id === this.soulId))}
+        ${this.renderSoulCard(
+          {
+            id: CUSTOM_SOUL_ID,
+            name: 'Custom',
+            tagline: 'Write your own name and personality.',
+            sample: '',
+            prompt: '',
+          },
+          customSelected
+        )}
+      </div>
+
+      ${customSelected
+        ? html`<div class="soul-custom">
+            <div class="settings-field">
+              <label class="select-row">
+                <span>Name</span>
+                <input
+                  type="text"
+                  class="soul-custom-name"
+                  .value=${this.customSoulName}
+                  @input=${this.onCustomSoulNameInput}
+                  placeholder="e.g. Brobot"
+                />
+              </label>
+            </div>
+            <div class="settings-field">
+              <label class="select-row">
+                <span>Personality prompt</span>
+                <textarea
+                  class="soul-custom-prompt"
+                  rows="6"
+                  .value=${this.customSoulPrompt}
+                  @input=${this.onCustomSoulPromptInput}
+                  placeholder="Describe who the agent is and how it talks. Short beats long."
+                ></textarea>
+              </label>
+            </div>
+          </div>`
+        : null}
+    `;
+  }
+
+  private renderSoulCard(soul: AgentSoul, selected: boolean) {
+    return html`
+      <button
+        type="button"
+        class="soul-card ${selected ? 'is-selected' : ''}"
+        aria-pressed=${selected}
+        @click=${() => this.onSelectSoul(soul.id)}
+      >
+        <span class="soul-name">${soul.name}</span>
+        <span class="soul-tagline">${soul.tagline}</span>
+        ${soul.sample ? html`<span class="soul-sample">“${soul.sample}”</span>` : null}
+      </button>
+    `;
+  }
+
+  private onSelectSoul(soulId: string): void {
+    this.soulId = soulId;
+    this.agentSettings.updatePreferences({ soulId });
+  }
+
+  private onCustomSoulNameInput(e: Event): void {
+    this.customSoulName = (e.target as HTMLInputElement).value;
+    this.agentSettings.updatePreferences({ customSoulName: this.customSoulName });
+  }
+
+  private onCustomSoulPromptInput(e: Event): void {
+    this.customSoulPrompt = (e.target as HTMLTextAreaElement).value;
+    this.agentSettings.updatePreferences({ customSoulPrompt: this.customSoulPrompt });
   }
 
   private renderImagesGenerationTab() {

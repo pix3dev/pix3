@@ -1,5 +1,6 @@
 import { inject, injectable } from '@/fw/di';
 import { SecretStorageService } from '@/services/core/SecretStorageService';
+import { DEFAULT_SOUL_ID } from '@/services/agent/AgentSouls';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { REASONING_EFFORTS, type LlmProvider, type ReasoningEffort } from '@/services/llm/LlmTypes';
 
@@ -43,6 +44,16 @@ export interface AgentPreferences {
    * request and response to the browser devtools console.
    */
   debugMode: boolean;
+  /**
+   * The agent's "soul": a personality preset id (see {@link import('./AgentSouls').SOUL_PRESETS}) or
+   * `'custom'` for the user-authored soul. Shapes HOW the agent talks (name + tone), never what it
+   * does. Missing/invalid on load falls back to {@link import('./AgentSouls').DEFAULT_SOUL_ID}.
+   */
+  soulId: string;
+  /** Display name for the custom soul (used only when `soulId === 'custom'`). */
+  customSoulName: string;
+  /** Personality prompt for the custom soul (used only when `soulId === 'custom'`). */
+  customSoulPrompt: string;
 }
 
 const STORAGE_KEY = 'pix3.agentSettings:v1';
@@ -257,6 +268,9 @@ export class AgentSettingsService {
       advisorModelId: '',
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
       debugMode: false,
+      soulId: DEFAULT_SOUL_ID,
+      customSoulName: '',
+      customSoulPrompt: '',
     };
   }
 
@@ -309,6 +323,15 @@ export class AgentSettingsService {
             ? Math.min(Math.round(parsed.maxToolIterations), 100)
             : defaults.maxToolIterations,
         debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,
+        soulId: typeof parsed.soulId === 'string' && parsed.soulId ? parsed.soulId : defaults.soulId,
+        customSoulName:
+          typeof parsed.customSoulName === 'string'
+            ? parsed.customSoulName
+            : defaults.customSoulName,
+        customSoulPrompt:
+          typeof parsed.customSoulPrompt === 'string'
+            ? parsed.customSoulPrompt
+            : defaults.customSoulPrompt,
       };
     } catch {
       return defaults;

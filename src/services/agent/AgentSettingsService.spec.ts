@@ -89,6 +89,37 @@ describe('AgentSettingsService', () => {
     expect(prefs.debugMode).toBe(false);
   });
 
+  it('defaults the soul to Brobot with empty custom fields', () => {
+    const prefs = buildService().getPreferences();
+    expect(prefs.soulId).toBe('brobot');
+    expect(prefs.customSoulName).toBe('');
+    expect(prefs.customSoulPrompt).toBe('');
+  });
+
+  it('round-trips the soul fields through localStorage', () => {
+    const service = buildService();
+    service.updatePreferences({
+      soulId: 'custom',
+      customSoulName: 'Kevin',
+      customSoulPrompt: 'You are Kevin, a duck.',
+    });
+    const reloaded = buildService().getPreferences();
+    expect(reloaded.soulId).toBe('custom');
+    expect(reloaded.customSoulName).toBe('Kevin');
+    expect(reloaded.customSoulPrompt).toBe('You are Kevin, a duck.');
+  });
+
+  it('loads older prefs without a soulId as Brobot (backfilled default)', () => {
+    localStorage.setItem(
+      'pix3.agentSettings:v1',
+      JSON.stringify({ selectedProviderId: 'anthropic' })
+    );
+    const prefs = buildService().getPreferences();
+    expect(prefs.soulId).toBe('brobot');
+    expect(prefs.customSoulName).toBe('');
+    expect(prefs.customSoulPrompt).toBe('');
+  });
+
   it('persists the debug-mode flag', () => {
     const service = buildService();
     service.updatePreferences({ debugMode: true });

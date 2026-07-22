@@ -30,6 +30,10 @@ interface Fakes {
   supportsImages?: boolean;
   /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */
   advisorAvailable?: boolean;
+  /** Soul preferences shaping the system-prompt persona. Defaults to the Brobot preset. */
+  soulId?: string;
+  customSoulName?: string;
+  customSoulPrompt?: string;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -49,6 +53,9 @@ const buildService = (fakes: Fakes): AgentChatService => {
         customBaseUrl: '',
         maxToolIterations: fakes.maxToolIterations ?? 5,
         debugMode: fakes.debugMode ?? false,
+        soulId: fakes.soulId ?? 'brobot',
+        customSoulName: fakes.customSoulName ?? '',
+        customSoulPrompt: fakes.customSoulPrompt ?? '',
       }),
     },
     modelCatalog: {
@@ -586,6 +593,46 @@ describe('AgentChatService', () => {
     expect(system).toContain('Always answer like a pirate.');
     // previewSystemPrompt resolves the same content for the debug viewer.
     expect(await service.previewSystemPrompt()).toContain('Always answer like a pirate.');
+  });
+
+  it('gives the agent the Brobot persona by default', async () => {
+    const chat = vi.fn().mockResolvedValue(textResult('ok'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+    await service.send('hi');
+    const system = (chat.mock.calls[0][0] as { system: string }).system;
+    expect(system.startsWith('You are Brobot')).toBe(true);
+    expect(system).toContain('Personality:');
+  });
+
+  it("drops the persona block for the 'professional' soul (name Pix3 Agent)", async () => {
+    const chat = vi.fn().mockResolvedValue(textResult('ok'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      soulId: 'professional',
+    });
+    await service.send('hi');
+    const system = (chat.mock.calls[0][0] as { system: string }).system;
+    expect(system.startsWith('You are Pix3 Agent')).toBe(true);
+    expect(system).not.toContain('Personality:');
+  });
+
+  it('injects a custom soul name and prompt into the system prompt', async () => {
+    const chat = vi.fn().mockResolvedValue(textResult('ok'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      soulId: 'custom',
+      customSoulName: 'Kevin',
+      customSoulPrompt: 'You are Kevin, a duck.',
+    });
+    await service.send('hi');
+    const system = (chat.mock.calls[0][0] as { system: string }).system;
+    expect(system.startsWith('You are Kevin')).toBe(true);
+    expect(system).toContain('Personality:');
+    expect(system).toContain('You are Kevin, a duck.');
   });
 
   it('mentions ask_advisor in the system prompt only when an advisor is configured', async () => {

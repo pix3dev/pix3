@@ -429,6 +429,83 @@ pix3-editor-settings-dialog .command-block .command-copy svg {
   height: 0.9rem;
 }
 
+/* Souls: agent name + personality preset cards. */
+pix3-editor-settings-dialog .soul-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.65rem;
+}
+
+pix3-editor-settings-dialog .soul-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+pix3-editor-settings-dialog .soul-card:hover {
+  background: var(--bg-1);
+  border-color: var(--line-2);
+}
+
+pix3-editor-settings-dialog .soul-card.is-selected {
+  border-color: var(--pix3-accent-color);
+  background: var(--accent-soft);
+}
+
+pix3-editor-settings-dialog .soul-card .soul-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-editor-settings-dialog .soul-card.is-selected .soul-name {
+  color: var(--pix3-accent-color);
+}
+
+pix3-editor-settings-dialog .soul-card .soul-tagline {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+
+pix3-editor-settings-dialog .soul-card .soul-sample {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--fg-2);
+}
+
+pix3-editor-settings-dialog .soul-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+pix3-editor-settings-dialog .soul-custom .soul-custom-name,
+pix3-editor-settings-dialog .soul-custom .soul-custom-prompt {
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+pix3-editor-settings-dialog .soul-custom .soul-custom-prompt {
+  resize: vertical;
+  line-height: 1.45;
+}
+
 pix3-editor-settings-dialog .dialog-actions {
   display: flex;
   gap: 0.5rem;
