@@ -815,15 +815,21 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     if (isPlaying) {
-      const focusedPanelId = appState.ui.focusedPanelId;
-      this.returnPanelAfterPlay =
-        focusedPanelId === 'inspector' || focusedPanelId === 'profiler'
-          ? focusedPanelId
-          : 'inspector';
-      this.layoutManager.focusPanel('profiler');
+      // If the user has the Agent (or any tab other than Inspector/Profiler) fronted in the
+      // Inspector/Profiler/Agent stack, leave it be — don't yank focus to the Profiler on play and
+      // break their flow. Only auto-front the Profiler when Inspector or Profiler is already active.
+      const activeInStack = this.layoutManager.getActivePanelInStackOf('profiler');
+      if (activeInStack !== 'inspector' && activeInStack !== 'profiler') {
+        this.returnPanelAfterPlay = null;
+      } else {
+        this.returnPanelAfterPlay = activeInStack;
+        this.layoutManager.focusPanel('profiler');
+      }
     } else {
-      const panelToRestore = this.returnPanelAfterPlay ?? 'inspector';
-      this.layoutManager.focusPanel(panelToRestore);
+      // Only restore focus if play actually stole it; otherwise leave the user's tab (e.g. Agent).
+      if (this.returnPanelAfterPlay) {
+        this.layoutManager.focusPanel(this.returnPanelAfterPlay);
+      }
       this.returnPanelAfterPlay = null;
     }
 

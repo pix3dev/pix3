@@ -18,10 +18,10 @@ export type { NodeActivity, WatchLogEntry } from '@/services/agent/NodeWatchReco
  * so a model can aim at what it reads from `scene_tree`/`node_inspect`.
  */
 export interface GameInputStep {
-  type: 'tap' | 'key' | 'keys' | 'drag' | 'wait';
-  /** tap/drag: node name or nodeId to aim at (projected to its live position). */
+  type: 'tap' | 'key' | 'keys' | 'drag' | 'wait' | 'hover';
+  /** tap/drag/hover: node name or nodeId to aim at (projected to its live position). */
   target?: string;
-  /** tap/drag: explicit 2D world coordinates (used when no target given). */
+  /** tap/drag/hover: explicit 2D world coordinates (used when no target given). */
   x?: number;
   y?: number;
   /** drag: destination (world coords or another node). */
@@ -30,7 +30,7 @@ export interface GameInputStep {
   code?: string;
   /** keys: several codes held together (chord). */
   codes?: string[];
-  /** Duration in ms: key/keys hold time, drag movement time, or wait time. */
+  /** Duration in ms: key/keys hold time, drag movement time, hover hold time, or wait time. */
   ms?: number;
   /** tap: how long the pointer stays down (default 700 — Button2D needs a real press). */
   holdMs?: number;
@@ -47,6 +47,14 @@ export interface LiveNodeSnapshot {
   /** World position — what actually moved on screen. */
   worldPosition: { x: number; y: number; z: number };
   rotationZ: number;
+  /** Local scale — what PunchScale/PopIn/hover-scale animate (round3). */
+  scale: { x: number; y: number; z: number };
+  /**
+   * Local opacity (0..1, round3). Present only for nodes that expose it
+   * (Node2D/Node3D subclasses); the value is LOCAL — a parent fade does not
+   * show here, observe the node that fades.
+   */
+  opacity?: number;
   /**
    * Direct child count. A spawner/pool container never MOVES — this (and
    * `visibleChildCount`) is how you tell it "did something".
@@ -98,6 +106,17 @@ export interface ObservedNodeDelta {
   directionNote?: string;
   /** True when childCount or visibleChildCount differs between endpoints. */
   childrenChanged?: boolean;
+  /**
+   * Endpoint scale change (after − before per axis) plus `ratio` — the axis
+   * ratio farthest from 1 (a 1.08 hover-scale reads as ratio≈1.08). `ratio` is
+   * omitted when the before-scale on that axis is ~0 (PopIn from 0). Present
+   * whenever both endpoints resolved.
+   */
+  scaleDelta?: { x: number; y: number; z: number; ratio?: number };
+  /** True when any scale axis changed by more than 1% between endpoints. */
+  scaled?: boolean;
+  /** Opacity change (after − before, round3); present only when both endpoints expose opacity. */
+  opacityDelta?: number;
   /**
    * What the node did DURING the window — spawns, visible-child bursts, child
    * motion, state changes — captured by sampling, not just the endpoints. This
@@ -165,8 +184,13 @@ const MAX_SAMPLE_MS = 5_000;
 const DEFAULT_TAP_HOLD_MS = 700;
 const DEFAULT_KEY_HOLD_MS = 500;
 const DEFAULT_DRAG_MS = 300;
+const DEFAULT_HOVER_MS = 800;
 const DEFAULT_SETTLE_MS = 300;
 const MOVED_THRESHOLD = 0.5;
+/** Per-axis scale change that counts as "scaled" (1% — hover-scale presets are 5-10%). */
+const SCALE_EPS = 0.01;
+/** Opacity change that counts as a fade (5% — below that is float noise / trailing lerp). */
+const OPACITY_EPS = 0.05;
 /** Dot-product floor for an `expect` verdict to pass (≈ within 45° of the axis). */
 const DIRECTION_ALIGN_MIN = 0.7;
 /** Distinctive id so synthetic gestures never collide with a real pointer. */
@@ -440,6 +464,8 @@ export class GameInputService {
         return Math.max(0, step.ms ?? DEFAULT_KEY_HOLD_MS);
       case 'drag':
         return Math.max(0, step.ms ?? DEFAULT_DRAG_MS);
+      case 'hover':
+        return Math.max(0, step.ms ?? DEFAULT_HOVER_MS);
       case 'wait':
         return Math.max(0, step.ms ?? 0);
       default:
@@ -470,6 +496,13 @@ export class GameInputService {
         this.dispatchPointer(runtime.canvas, 'pointerup', point);
         return null;
       }
+      case 'hover': {
+        const point = this.resolveClientPoint(runtime, step.target, step.x, step.y);
+        if (typeof point === 'string') return point;
+        this.dispatchPointer(runtime.canvas, 'pointermove', point, { buttons: 0 });
+        await sleep(this.stepDurationMs(step));
+        return null;
+      }
       case 'drag': {
         const from = this.resolveClientPoint(runtime, step.target, step.x, step.y);
         if (typeof from === 'string') return from;
@@ -489,7 +522,7 @@ export class GameInputService {
         return null;
       }
       default:
-        return `Unknown step type "${String(step.type)}". Use tap | key | keys | drag | wait.`;
+        return `Unknown step type "${String(step.type)}". Use tap | hover | key | keys | drag | wait.`;
     }
   }
 
@@ -521,7 +554,8 @@ export class GameInputService {
   private dispatchPointer(
     canvas: HTMLCanvasElement,
     type: 'pointerdown' | 'pointermove' | 'pointerup',
-    client: { x: number; y: number }
+    client: { x: number; y: number },
+    options?: { buttons?: number }
   ): void {
     const init = {
       pointerId: SYNTHETIC_POINTER_ID,
@@ -530,7 +564,7 @@ export class GameInputService {
       clientX: client.x,
       clientY: client.y,
       button: 0,
-      buttons: type === 'pointerup' ? 0 : 1,
+      buttons: options?.buttons ?? (type === 'pointerup' ? 0 : 1),
       bubbles: true,
       cancelable: true,
     };
@@ -610,6 +644,7 @@ export class GameInputService {
     }
     const world = node.getWorldPosition(GameInputService.scratchWorld);
     const children = node.children ?? [];
+    const opacity = (node as { opacity?: unknown }).opacity;
     return {
       nodeId: node.nodeId,
       name: node.name,
@@ -618,6 +653,8 @@ export class GameInputService {
       position: { x: node.position.x, y: node.position.y, z: node.position.z },
       worldPosition: { x: world.x, y: world.y, z: world.z },
       rotationZ: node.rotation.z,
+      scale: { x: round3(node.scale.x), y: round3(node.scale.y), z: round3(node.scale.z) },
+      ...(typeof opacity === 'number' ? { opacity: round3(opacity) } : {}),
       childCount: children.length,
       visibleChildCount: children.reduce((n, child) => n + (child.visible !== false ? 1 : 0), 0),
     };
@@ -652,6 +689,27 @@ export class GameInputService {
         before.childCount !== after.childCount ||
         before.visibleChildCount !== after.visibleChildCount,
     };
+    const sdx = after.scale.x - before.scale.x;
+    const sdy = after.scale.y - before.scale.y;
+    const sdz = after.scale.z - before.scale.z;
+    // Ratio on the axis that moved the most, guarded against a ~0 base (PopIn).
+    const axes: Array<[number, number]> = [
+      [sdx, before.scale.x],
+      [sdy, before.scale.y],
+      [sdz, before.scale.z],
+    ];
+    const [dMax, bMax] = axes.reduce((acc, cur) => (Math.abs(cur[0]) > Math.abs(acc[0]) ? cur : acc));
+    base.scaleDelta = {
+      x: round3(sdx),
+      y: round3(sdy),
+      z: round3(sdz),
+      ...(Math.abs(bMax) > 1e-3 ? { ratio: round3((bMax + dMax) / bMax) } : {}),
+    };
+    base.scaled = Math.max(Math.abs(sdx), Math.abs(sdy), Math.abs(sdz)) > SCALE_EPS;
+    if (typeof before.opacity === 'number' && typeof after.opacity === 'number') {
+      const od = round3(after.opacity - before.opacity);
+      if (Math.abs(od) > OPACITY_EPS) base.opacityDelta = od;
+    }
     // Direction-of-travel relative to the node's facing. three.js rotates the
     // local +Y ("nose") axis by rotation.z to world (-sin, cos) and +X ("right")
     // to (cos, sin); dotting the unit travel vector with those tells forward vs
@@ -704,7 +762,12 @@ export class GameInputService {
       case 'activity': {
         // For spawners/shooters/pools/HUD: reacting means ANY channel fired, not motion.
         const act = d.activity;
-        const reacted = act?.active === true || moved || d.childrenChanged === true;
+        const reacted =
+          act?.active === true ||
+          moved ||
+          d.childrenChanged === true ||
+          d.scaled === true ||
+          d.opacityDelta !== undefined;
         return { ok: reacted, note: reacted ? this.describeActivity(d) : 'no activity detected' };
       }
       default:
@@ -726,12 +789,19 @@ export class GameInputService {
       if (act.maxChildDistance > MOVED_THRESHOLD) {
         bits.push(`child moved ${Math.round(act.maxChildDistance)}u`);
       }
+      if (act.maxScaleDelta > SCALE_EPS) {
+        bits.push(`scaled ±${round3(act.maxScaleDelta)} (peak)`);
+      }
+      if (act.opacityRange) {
+        bits.push(`opacity ${act.opacityRange.min}..${act.opacityRange.max}`);
+      }
       if (act.stateChanges) {
         const keys = Object.keys(act.stateChanges).slice(0, 3);
         bits.push(`state ${keys.join(', ')}`);
       }
-    } else if (d.childrenChanged) {
-      bits.push('children changed');
+    } else {
+      if (d.scaled) bits.push(`scale ×${d.scaleDelta?.ratio ?? '?'}`);
+      if (d.childrenChanged) bits.push('children changed');
     }
     return bits.length ? bits.join(', ') : 'reacted';
   }
@@ -792,7 +862,11 @@ export class GameInputService {
 
     for (const [query, delta] of Object.entries(observed)) {
       const reacted =
-        delta.moved === true || delta.childrenChanged === true || delta.activity?.active === true;
+        delta.moved === true ||
+        delta.childrenChanged === true ||
+        delta.scaled === true ||
+        delta.opacityDelta !== undefined ||
+        delta.activity?.active === true;
       if (reacted) {
         anyActivity = true;
         parts.push(`${query}: ${this.describeActivity(delta)}`);
@@ -824,7 +898,7 @@ export class GameInputService {
       return `GAMEPLAY REACTED: ${parts.join('; ')}.${tail}${dropped}`;
     }
     const errs = newErrorCount > 0 ? `${newErrorCount} new error(s)` : 'no new errors';
-    return `NO ACTIVITY: no watched node moved, no children spawned/shown, no component or game state changed, ${errs}. If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
+    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no component or game state changed, ${errs}. If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */

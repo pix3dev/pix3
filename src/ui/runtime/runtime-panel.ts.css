@@ -207,7 +207,7 @@ pix3-runtime-panel .runtime-name {
   font-style: italic;
 }
 
-pix3-runtime-panel .runtime-pos {
+pix3-runtime-panel .runtime-childcount {
   margin-left: auto;
   padding-left: 0.6rem;
   color: var(--fg-3);

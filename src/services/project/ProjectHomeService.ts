@@ -174,7 +174,10 @@ export class ProjectHomeService {
    * and only renders a fresh one on a miss, so repeated Home refreshes are cheap.
    */
   async getSceneThumbnail(scene: HomeSceneEntry): Promise<string | null> {
-    const key = `${scene.path.replace(/\\/g, '/')}::${scene.modifiedAt}::${scene.sizeBytes}`;
+    // Namespace the cache key by project id so two projects with a same-named scene (same relative
+    // path, and coincidentally the same mtime/size) can never share a cached thumbnail.
+    const projectId = appState.project.id ?? 'no-project';
+    const key = `${projectId}::${scene.path.replace(/\\/g, '/')}::${scene.modifiedAt}::${scene.sizeBytes}`;
     const inMem = this.thumbnailMem.get(key);
     if (inMem) return inMem;
     try {
@@ -239,7 +242,12 @@ export class ProjectHomeService {
       });
     }
 
-    entries.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    // Pin the main/export scene first (it also carries the "Main" badge); the rest fall in by
+    // most-recently edited.
+    entries.sort((a, b) => {
+      if (a.isMain !== b.isMain) return a.isMain ? -1 : 1;
+      return b.modifiedAt - a.modifiedAt;
+    });
     return entries;
   }
 

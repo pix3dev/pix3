@@ -31,11 +31,15 @@ const MAX_LOG_ENTRIES = 10;
 const MAX_STATE_CHANGES = 10;
 /** World distance a node/child must travel to count as motion (matches GameInputService). */
 const MOVE_EPS = 0.5;
+/** Per-axis scale change that counts as "scaled" (matches GameInputService; duplicated by design). */
+const SCALE_EPS = 0.01;
+/** Opacity change that counts as a fade (matches GameInputService; duplicated by design). */
+const OPACITY_EPS = 0.05;
 
 export interface WatchLogEntry {
   /** ms since the watch window started. */
   at: number;
-  kind: 'spawn' | 'despawn' | 'show' | 'hide' | 'state';
+  kind: 'spawn' | 'despawn' | 'show' | 'hide' | 'state' | 'scale' | 'fade';
   note: string;
 }
 
@@ -53,6 +57,14 @@ export interface NodeActivity {
   maxDistanceFromStart: number;
   /** Peak world displacement of any tracked direct child (projectiles fly; the pool doesn't). */
   maxChildDistance: number;
+  /**
+   * Peak per-axis |scale − startScale| of the node itself during the window
+   * (absolute units, not a ratio — robust to a PopIn that starts at scale 0).
+   * A PunchScale that pulses and returns to rest still registers here.
+   */
+  maxScaleDelta: number;
+  /** Opacity extremes seen during the window; present only when the node exposes opacity. */
+  opacityRange?: { min: number; max: number };
   /** Scalar component fields that changed over the window: 'GunController.mag' -> [3, 0]. */
   stateChanges?: Record<string, [Json, Json]>;
   /** Sparse changelog, entries only on a change (capped). */
@@ -73,6 +85,8 @@ export interface WatchChildLike {
 export interface WatchNodeLike {
   nodeId?: string;
   visible?: boolean;
+  scale?: { x: number; y: number; z: number };
+  opacity?: number;
   children: readonly WatchChildLike[];
   components?: readonly unknown[];
   getWorldPosition(target: Vector3): { x: number; y: number; z: number };
@@ -95,6 +109,12 @@ interface Tracked {
   visibleChildPeak: number;
   maxDistanceFromStart: number;
   maxChildDistance: number;
+  startScale: Vec3;
+  maxScaleDelta: number;
+  opacityMin: number | null;
+  opacityMax: number | null;
+  scaleLogged: boolean;
+  fadeLogged: boolean;
   spawned: number;
   removed: number;
   lastVisibleCount: number;
@@ -206,6 +226,12 @@ export class NodeWatchRecorder {
       visibleChildPeak: visible,
       maxDistanceFromStart: 0,
       maxChildDistance: 0,
+      startScale: node.scale ? copyVec(node.scale) : { x: 1, y: 1, z: 1 },
+      maxScaleDelta: 0,
+      opacityMin: typeof node.opacity === 'number' ? node.opacity : null,
+      opacityMax: typeof node.opacity === 'number' ? node.opacity : null,
+      scaleLogged: false,
+      fadeLogged: false,
       spawned: 0,
       removed: 0,
       lastVisibleCount: visible,
@@ -257,6 +283,33 @@ export class NodeWatchRecorder {
 
       const pos = t.node.getWorldPosition(scratch);
       t.maxDistanceFromStart = Math.max(t.maxDistanceFromStart, dist(pos, t.startPos));
+
+      const s = t.node.scale;
+      if (s) {
+        const d = Math.max(
+          Math.abs(s.x - t.startScale.x),
+          Math.abs(s.y - t.startScale.y),
+          Math.abs(s.z - t.startScale.z)
+        );
+        if (d > t.maxScaleDelta) t.maxScaleDelta = d;
+        if (!t.scaleLogged && d > SCALE_EPS) {
+          t.scaleLogged = true;
+          this.pushLog(
+            t,
+            'scale',
+            `scale ${round3(s.x)}×${round3(s.y)} (was ${round3(t.startScale.x)}×${round3(t.startScale.y)})`
+          );
+        }
+      }
+      const op = t.node.opacity;
+      if (typeof op === 'number' && t.opacityMin !== null && t.opacityMax !== null) {
+        t.opacityMin = Math.min(t.opacityMin, op);
+        t.opacityMax = Math.max(t.opacityMax, op);
+        if (!t.fadeLogged && t.opacityMax - t.opacityMin > OPACITY_EPS) {
+          t.fadeLogged = true;
+          this.pushLog(t, 'fade', `opacity ${round3(t.opacityMin)}..${round3(t.opacityMax)}`);
+        }
+      }
 
       t.childCountPeak = Math.max(t.childCountPeak, children.length);
       const visible = countVisible(children);
@@ -323,6 +376,10 @@ export class NodeWatchRecorder {
       }
     }
     const hasState = stateCount > 0;
+    const fadeRange =
+      t.opacityMin !== null && t.opacityMax !== null && t.opacityMax - t.opacityMin > OPACITY_EPS
+        ? { min: round3(t.opacityMin), max: round3(t.opacityMax) }
+        : undefined;
     const active =
       t.spawned > 0 ||
       t.removed > 0 ||
@@ -330,6 +387,8 @@ export class NodeWatchRecorder {
       t.visibleChildPeak > t.startVisibleChildCount ||
       t.maxDistanceFromStart > MOVE_EPS ||
       t.maxChildDistance > MOVE_EPS ||
+      t.maxScaleDelta > SCALE_EPS ||
+      fadeRange !== undefined ||
       hasState;
     const activity: NodeActivity = {
       spawned: t.spawned,
@@ -338,6 +397,8 @@ export class NodeWatchRecorder {
       visibleChildPeak: t.visibleChildPeak,
       maxDistanceFromStart: round3(t.maxDistanceFromStart),
       maxChildDistance: round3(t.maxChildDistance),
+      maxScaleDelta: round3(t.maxScaleDelta),
+      ...(fadeRange ? { opacityRange: fadeRange } : {}),
       active,
     };
     if (hasState) activity.stateChanges = stateChanges;

@@ -21,6 +21,8 @@ interface FakeLiveNode {
   visible: boolean;
   position: { x: number; y: number; z: number };
   rotation: { z: number };
+  scale: { x: number; y: number; z: number };
+  opacity?: number;
   children: FakeChild[];
   getWorldPosition(target: { set(x: number, y: number, z: number): unknown }): {
     x: number;
@@ -48,6 +50,7 @@ const makeLiveNode = (over: Partial<FakeLiveNode> = {}): FakeLiveNode => {
     visible: true,
     position: { x: 0, y: 0, z: 0 },
     rotation: { z: 0 },
+    scale: { x: 1, y: 1, z: 1 },
     children: [],
     getWorldPosition(target) {
       target.set(node.position.x, node.position.y, node.position.z);
@@ -343,6 +346,79 @@ describe('GameInputService', () => {
     } finally {
       dispose();
     }
+  });
+
+  it('snapshot carries scale and delta reports scaled/ratio for a hover-scale', async () => {
+    const node = makeLiveNode({ scale: { x: 1, y: 1, z: 1 } });
+    const runtime = makeRuntime([node]);
+    const { service } = buildService(runtime);
+
+    // Grow the node while the window is open and keep it grown (endpoint reads the new scale).
+    const grow = setInterval(() => {
+      node.scale = { x: 1.08, y: 1.08, z: 1 };
+    }, 5);
+    const result = await service.run([{ type: 'wait', ms: 40 }], {
+      observe: ['Player'],
+      settleMs: 0,
+    });
+    clearInterval(grow);
+
+    expect(result.observed?.Player.before?.scale).toEqual({ x: 1, y: 1, z: 1 });
+    expect(result.observed?.Player.after?.scale.x).toBeCloseTo(1.08, 3);
+    expect(result.observed?.Player.scaled).toBe(true);
+    expect(result.observed?.Player.scaleDelta?.ratio).toBeCloseTo(1.08, 2);
+  });
+
+  it('omits opacity for a plain node that does not expose it', async () => {
+    const node = makeLiveNode();
+    const runtime = makeRuntime([node]);
+    const { service } = buildService(runtime);
+
+    const result = await service.observe(['Player'], 0);
+    expect(result.nodes?.Player?.scale).toEqual({ x: 1, y: 1, z: 1 });
+    expect(result.nodes?.Player?.opacity).toBeUndefined();
+  });
+
+  it('hover dispatches exactly one buttons:0 pointermove (no down/up), default 800ms', async () => {
+    const button = makeLiveNode({ nodeId: 'btn', name: 'PlayButton' });
+    const runtime = makeRuntime([button]);
+    const { service } = buildService(runtime);
+
+    const events: Array<{ type: string; buttons: number }> = [];
+    const record = (e: Event) => events.push({ type: e.type, buttons: (e as PointerEvent).buttons });
+    runtime.canvas.addEventListener('pointerdown', record);
+    runtime.canvas.addEventListener('pointermove', record);
+    runtime.canvas.addEventListener('pointerup', record);
+
+    const start = Date.now();
+    const result = await service.run([{ type: 'hover', target: 'PlayButton' }], { settleMs: 0 });
+    const elapsed = Date.now() - start;
+
+    expect(result.ok).toBe(true);
+    expect(events).toEqual([{ type: 'pointermove', buttons: 0 }]);
+    // Default hover hold is 800ms — the call cannot have finished much sooner.
+    expect(elapsed).toBeGreaterThanOrEqual(700);
+  });
+
+  it('hover + expect activity proves a hover-scale end-to-end', async () => {
+    const button = makeLiveNode({ nodeId: 'btn', name: 'PlayButton', scale: { x: 1, y: 1, z: 1 } });
+    const runtime = makeRuntime([button]);
+    const { service } = buildService(runtime);
+
+    // Simulate a hover-scale: the pointer moving over the canvas grows the node.
+    runtime.canvas.addEventListener('pointermove', () => {
+      button.scale = { x: 1.08, y: 1.08, z: 1 };
+    });
+
+    const result = await service.run([{ type: 'hover', target: 'PlayButton', ms: 60 }], {
+      expect: { PlayButton: 'activity' },
+      settleMs: 20,
+    });
+
+    expect(result.observed?.PlayButton.scaled).toBe(true);
+    expect(result.observed?.PlayButton.directionOk).toBe(true);
+    expect(result.observed?.PlayButton.activity?.maxScaleDelta).toBeGreaterThan(0.05);
+    expect(result.verdict).toMatch(/GAMEPLAY REACTED/);
   });
 
   it('verdict says NO ACTIVITY when a watched node does nothing', async () => {

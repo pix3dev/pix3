@@ -1,5 +1,7 @@
-import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
+import { ComponentBase, customElement, html, inject, property, state, subscribe } from '@/fw';
 import { createRef, ref } from 'lit/directives/ref.js';
+import { appState } from '@/state';
+import { SceneManager, NodeBase } from '@pix3/runtime';
 import {
   AgentChatService,
   type AgentChatState,
@@ -56,6 +58,9 @@ const reasoningEffortHint = (effort: ReasoningEffort): string => {
 
 /** Diff previews clamp to this many rendered lines, with an overflow note below. */
 const DIFF_LINE_CAP = 24;
+
+/** Max selected nodes shown as individual context chips; the rest collapse into a "+N" chip. */
+const CONTEXT_SELECTION_CAP = 6;
 
 /** A file staged in the composer before it is sent (pasted, dropped, or picked). */
 type ComposerAttachment =
@@ -548,6 +553,9 @@ export class AgentChatPanel extends ComponentBase {
   @inject(IconService)
   private readonly icons!: IconService;
 
+  @inject(SceneManager)
+  private readonly sceneManager!: SceneManager;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -593,7 +601,18 @@ export class AgentChatPanel extends ComponentBase {
    */
   @state() private toggledGroups = new Set<string>();
 
+  /**
+   * Live editor context the agent is given on every turn (via its system prompt) — surfaced here so
+   * the user can *see* what "the button" / "this scene" resolves to. Reflects the active scene and
+   * the current selection; updated reactively from {@link appState}.
+   */
+  @state() private ctxScene: string | null = null;
+  @state() private ctxSelection: Array<{ id: string; label: string }> = [];
+  @state() private ctxSelectionExtra = 0;
+
   private disposeChatSubscription?: () => void;
+  private disposeSceneContextSub?: () => void;
+  private disposeSelectionContextSub?: () => void;
   private disposeSettingsSubscription?: () => void;
   private disposeComposeSubscription?: () => void;
   private disposeCatalogSubscription?: () => void;
@@ -641,6 +660,14 @@ export class AgentChatPanel extends ComponentBase {
       this.requestUpdate();
     });
 
+    // Mirror the live editor context (active scene + selection) into the composer chips. The agent
+    // already receives this in its system prompt; the chips just make it visible to the user.
+    this.refreshEditorContext();
+    this.disposeSceneContextSub = subscribe(appState.scenes, () => this.refreshEditorContext());
+    this.disposeSelectionContextSub = subscribe(appState.selection, () =>
+      this.refreshEditorContext()
+    );
+
     void this.chat.ensureLoaded();
   }
 
@@ -655,6 +682,10 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeCatalogSubscription = undefined;
     this.disposeBridgeSubscription?.();
     this.disposeBridgeSubscription = undefined;
+    this.disposeSceneContextSub?.();
+    this.disposeSceneContextSub = undefined;
+    this.disposeSelectionContextSub?.();
+    this.disposeSelectionContextSub = undefined;
     this.closeModelPicker();
     this.closeReasoningPicker();
     super.disconnectedCallback();
@@ -1540,7 +1571,7 @@ export class AgentChatPanel extends ComponentBase {
         ${this.dragActive
           ? html`<div class="agent-drop-hint">Drop images or text files to attach</div>`
           : null}
-        ${this.renderContextMeter()} ${this.renderAttachments()}
+        ${this.renderContextChips()} ${this.renderContextMeter()} ${this.renderAttachments()}
         <div class="agent-input-box">
           <textarea
             class="agent-input"
@@ -1612,6 +1643,63 @@ export class AgentChatPanel extends ComponentBase {
                 Sys
               </button>
             </div>`
+          : null}
+      </div>
+    `;
+  }
+
+  /** Recompute the editor-context chips from the active scene + current selection. */
+  private refreshEditorContext(): void {
+    const activeSceneId = appState.scenes.activeSceneId;
+    const descriptor = activeSceneId ? appState.scenes.descriptors[activeSceneId] : undefined;
+    this.ctxScene = descriptor?.name ?? null;
+
+    const graph = this.sceneManager.getActiveSceneGraph();
+    const ids = appState.selection.nodeIds;
+    const shown = ids.slice(0, CONTEXT_SELECTION_CAP);
+    this.ctxSelection = shown.map(id => {
+      const node = graph?.nodeMap.get(id);
+      const label = node instanceof NodeBase ? `${node.name} · ${node.type}` : id;
+      return { id, label };
+    });
+    this.ctxSelectionExtra = Math.max(0, ids.length - shown.length);
+  }
+
+  /**
+   * A compact, read-only strip above the composer that shows the context the agent is handed on
+   * every turn: the active scene and the current selection (node name · type). It makes prompts like
+   * "add an animation to the button" unambiguous — the user can see the button chip the agent will
+   * resolve. Renders nothing when there is no scene and no selection.
+   */
+  private renderContextChips() {
+    const hasScene = Boolean(this.ctxScene);
+    const hasSelection = this.ctxSelection.length > 0;
+    if (!hasScene && !hasSelection) {
+      return null;
+    }
+    return html`
+      <div
+        class="agent-ctx"
+        title="Context the agent is given this turn (active scene + selection)"
+      >
+        <span class="agent-ctx-lead">${this.icons.getIcon('at-sign', IconSize.SMALL)}</span>
+        ${hasScene
+          ? html`<span class="agent-ctx-chip agent-ctx-chip--scene" title="Active scene">
+              <span class="agent-ctx-chip-icon">${this.icons.getIcon('film', IconSize.SMALL)}</span>
+              <span class="agent-ctx-chip-text">${this.ctxScene}</span>
+            </span>`
+          : null}
+        ${this.ctxSelection.map(
+          sel =>
+            html`<span class="agent-ctx-chip agent-ctx-chip--node" title="Selected node ${sel.id}">
+              <span class="agent-ctx-chip-icon">${this.icons.getIcon('box', IconSize.SMALL)}</span>
+              <span class="agent-ctx-chip-text">${sel.label}</span>
+            </span>`
+        )}
+        ${this.ctxSelectionExtra > 0
+          ? html`<span class="agent-ctx-chip agent-ctx-chip--more"
+              >+${this.ctxSelectionExtra}</span
+            >`
           : null}
       </div>
     `;

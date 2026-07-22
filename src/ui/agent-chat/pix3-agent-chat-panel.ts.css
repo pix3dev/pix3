@@ -1872,3 +1872,69 @@ pix3-agent-chat-panel .agent-attachment-warning {
   font-size: 0.66rem;
   color: var(--warn);
 }
+
+/*
+ * Editor-context strip: read-only chips above the composer showing the active scene + current
+ * selection the agent is handed each turn. Purely informational — no controls.
+ */
+pix3-agent-chat-panel .agent-ctx {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+pix3-agent-chat-panel .agent-ctx-lead {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-2);
+}
+
+pix3-agent-chat-panel .agent-ctx-lead svg {
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+pix3-agent-chat-panel .agent-ctx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 12rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+
+pix3-agent-chat-panel .agent-ctx-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-2);
+}
+
+pix3-agent-chat-panel .agent-ctx-chip-icon svg {
+  width: 0.72rem;
+  height: 0.72rem;
+}
+
+pix3-agent-chat-panel .agent-ctx-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-ctx-chip--scene {
+  border-color: rgba(var(--pix3-accent-rgb), 0.4);
+  background: rgba(var(--pix3-accent-rgb), 0.12);
+}
+
+pix3-agent-chat-panel .agent-ctx-chip--scene .agent-ctx-chip-icon {
+  color: var(--pix3-accent-color, #f5ae39);
+}
+
+pix3-agent-chat-panel .agent-ctx-chip--more {
+  color: var(--fg-2);
+}

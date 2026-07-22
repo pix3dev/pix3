@@ -32,6 +32,8 @@ class FakeNode implements WatchNodeLike {
   visible = true;
   wx = 0;
   wy = 0;
+  scale?: { x: number; y: number; z: number };
+  opacity?: number;
   children: FakeChild[] = [];
   components: unknown[] = [];
   private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
@@ -140,6 +142,53 @@ describe('NodeWatchRecorder', () => {
     expect(activity.spawned).toBe(0);
     expect(activity.removed).toBe(0);
     expect(activity.maxChildDistance).toBe(0);
+    expect(activity.active).toBe(false);
+  });
+
+  it('registers a scale pulse that fires AND returns to rest inside the window', async () => {
+    // A PunchScale/hover-scale that pulses up and settles back — the endpoints alone
+    // (1 -> 1) would miss it; the peak metric catches it.
+    const node = new FakeNode('button');
+    node.scale = { x: 1, y: 1, z: 1 };
+    const recorder = recorderFor(node, ['button'], 5);
+    recorder.start();
+    node.scale = { x: 1.08, y: 1.08, z: 1 };
+    await sleep(30);
+    node.scale = { x: 1, y: 1, z: 1 }; // back to rest before the window ends
+    await sleep(20);
+    const activity = recorder.stop().get('button')!;
+
+    expect(activity.maxScaleDelta).toBeGreaterThan(0.05);
+    expect(activity.active).toBe(true);
+    expect(activity.log?.some(e => e.kind === 'scale')).toBe(true);
+  });
+
+  it('captures an opacity dip via opacityRange', async () => {
+    const node = new FakeNode('fader');
+    node.opacity = 1;
+    const recorder = recorderFor(node, ['fader'], 5);
+    recorder.start();
+    node.opacity = 0.3;
+    await sleep(30);
+    node.opacity = 1;
+    await sleep(20);
+    const activity = recorder.stop().get('fader')!;
+
+    expect(activity.opacityRange).toBeDefined();
+    expect(activity.opacityRange!.min).toBeLessThanOrEqual(0.3);
+    expect(activity.opacityRange!.max).toBeGreaterThanOrEqual(1);
+    expect(activity.active).toBe(true);
+    expect(activity.log?.some(e => e.kind === 'fade')).toBe(true);
+  });
+
+  it('handles a node without scale/opacity fields (fakes stay valid)', () => {
+    const node = new FakeNode('plain');
+    const recorder = recorderFor(node, ['plain']);
+    recorder.start();
+    const activity = recorder.stop().get('plain')!;
+
+    expect(activity.maxScaleDelta).toBe(0);
+    expect(activity.opacityRange).toBeUndefined();
     expect(activity.active).toBe(false);
   });
 

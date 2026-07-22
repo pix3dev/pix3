@@ -713,7 +713,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -723,8 +723,11 @@ export class AgentToolRegistry {
               items: {
                 type: 'object',
                 properties: {
-                  type: { type: 'string', enum: ['tap', 'key', 'keys', 'drag', 'wait'] },
-                  target: { type: 'string', description: 'Node name or nodeId to tap/drag from.' },
+                  type: { type: 'string', enum: ['tap', 'key', 'keys', 'drag', 'wait', 'hover'] },
+                  target: {
+                    type: 'string',
+                    description: 'Node name or nodeId to tap/hover/drag from.',
+                  },
                   x: { type: 'number' },
                   y: { type: 'number' },
                   to: {
@@ -739,7 +742,7 @@ export class AgentToolRegistry {
                   },
                   code: { type: 'string', description: "KeyboardEvent.code, e.g. 'KeyW'." },
                   codes: { type: 'array', items: { type: 'string' } },
-                  ms: { type: 'number', description: 'Hold/drag/wait duration in ms.' },
+                  ms: { type: 'number', description: 'Hold/drag/wait/hover duration in ms.' },
                   holdMs: {
                     type: 'number',
                     description: 'Tap press duration (default 700 — UI buttons need a real press).',
@@ -753,7 +756,7 @@ export class AgentToolRegistry {
               type: 'array',
               items: { type: 'string' },
               description:
-                'Node names/ids to watch over the window: transform (moved, alignForward/alignRight), children (childCount/visibleChildCount), and `activity` (spawned/removed, visibleChildPeak, maxChildDistance, stateChanges). Watch the container of a spawner/pool (e.g. "Cannonballs"), not just the player. Max 8 tracked.',
+                'Node names/ids to watch over the window: transform (moved, alignForward/alignRight), children (childCount/visibleChildCount), and `activity` (spawned/removed, visibleChildPeak, maxChildDistance, stateChanges, maxScaleDelta/opacityRange — scale/fade effects, even ones that return to rest). Watch the container of a spawner/pool (e.g. "Cannonballs"), not just the player. Max 8 tracked.',
             },
             expect: {
               type: 'object',
@@ -785,7 +788,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
         inputSchema: {
           type: 'object',
           properties: {

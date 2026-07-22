@@ -52,7 +52,6 @@ interface RuntimeNode {
   type: string;
   name: string;
   visible: boolean;
-  pos: { x: number; y: number; z: number } | null;
   renderOrder: number;
   instances: number | null;
   droppable: boolean;
@@ -143,8 +142,14 @@ export class RuntimePanel extends ComponentBase {
   @state()
   private rootTypeFilter: RootTypeFilter = 'all';
 
+  /**
+   * Uuids the user has toggled *away* from their default expansion. The default is derived per node
+   * in {@link isExpanded}: authored NodeBase clones (they carry a `nodeId`) start expanded so the
+   * game's node structure is visible at a glance, while the "native" THREE objects underneath them
+   * (meshes, groups, helpers — no `nodeId`) start collapsed until the user drills in.
+   */
   @state()
-  private collapsed = new Set<string>();
+  private userToggled = new Set<string>();
 
   @state()
   private selectedUuid: string | null = null;
@@ -157,18 +162,13 @@ export class RuntimePanel extends ComponentBase {
 
   private refreshTimer: number | null = null;
   private disposeUiSubscription?: () => void;
-  /** Fingerprint of the last DTO tree pushed to Lit — see {@link refreshTree}. */
-  private lastTreeHash: number | null = null;
   /**
-   * Live world-position text per object uuid, rebuilt on every walk. Positions
-   * are deliberately NOT part of the tree fingerprint and NOT a Lit binding: in
-   * a running game something moves every frame, so hashing positions made every
-   * 350 ms tick re-render the whole tree (20-60 ms main-thread tasks = dropped
-   * game frames). Instead the `.runtime-pos` spans render empty and are filled
-   * imperatively by {@link syncPositions} — a few hundred dirty-checked
-   * `textContent` writes, no template diff.
+   * Fingerprint of the last DTO tree pushed to Lit — see {@link refreshTree}. The walk hashes only
+   * *structural* fields (never positions), so a running game where things merely move costs the DTO
+   * walk but no template re-render. Live coordinates are shown for the selected object only, in the
+   * detail pane ({@link refreshSelection}), so there is nothing per-row to keep in sync every frame.
    */
-  private readonly posByUuid = new Map<string, string>();
+  private lastTreeHash: number | null = null;
 
   /** Box3 highlight drawn into the running scene for the selected object. */
   private highlight?: THREE.Box3Helper;
@@ -234,30 +234,23 @@ export class RuntimePanel extends ComponentBase {
       this.roots = [];
       this.nodeCount = 0;
       this.lastTreeHash = null;
-      this.posByUuid.clear();
       return;
     }
     const counter = { n: 0, hash: 17 };
     // Show the scene root's children as top-level rows (the root itself is just a Scene).
     const children = Array.isArray(root.children) ? root.children : [];
-    this.posByUuid.clear();
     const nextRoots = children
       .filter(child => !isHelperObject(child))
       .slice(0, MAX_CHILDREN_PER_NODE)
       .map(child => this.toNode(child, MAX_DEPTH, counter));
 
-    // Only push a new tree into Lit when something actually changed: the walk
-    // hashes every rendered field EXCEPT positions (see {@link posByUuid}), so a
-    // scene where things merely move costs the DTO walk + imperative position
-    // writes but no template re-render (the dominant cost for 400+ rows).
+    // Only push a new tree into Lit when something actually changed: the walk hashes only
+    // *structural* fields (never positions), so a scene where things merely move costs the DTO walk
+    // but no template re-render (the dominant cost for 400+ rows).
     if (counter.hash !== this.lastTreeHash || counter.n !== this.nodeCount) {
       this.lastTreeHash = counter.hash;
       this.roots = nextRoots;
       this.nodeCount = counter.n;
-      // Positions land via syncPositions() in updated(), after Lit commits the
-      // new rows (the spans render empty — writing now would hit stale DOM).
-    } else {
-      this.syncPositions();
     }
 
     // Keep the detail + highlight in sync with the live object (it may have
@@ -273,9 +266,6 @@ export class RuntimePanel extends ComponentBase {
     counter: { n: number; hash: number }
   ): RuntimeNode {
     counter.n += 1;
-    const m = obj.matrixWorld?.elements;
-    const pos =
-      m && m.length >= 15 ? { x: round2(m[12]), y: round2(m[13]), z: round2(m[14]) } : null;
     const ud = obj.userData ?? {};
     const rawChildren = Array.isArray(obj.children)
       ? obj.children.filter(child => !isHelperObject(child))
@@ -295,7 +285,6 @@ export class RuntimePanel extends ComponentBase {
       type: obj.type || 'Object3D',
       name: obj.name || '',
       visible: obj.visible !== false,
-      pos,
       renderOrder: obj.renderOrder ?? 0,
       instances: obj.isInstancedMesh ? (obj.count ?? null) : null,
       droppable: !!ud && 'droppableItemRef' in ud,
@@ -305,47 +294,19 @@ export class RuntimePanel extends ComponentBase {
       children,
     };
 
-    if (pos) {
-      this.posByUuid.set(node.uuid, `${pos.x}, ${pos.y}, ${pos.z}`);
-    }
-
-    // Fold every rendered field into the walk fingerprint so refreshTree can
-    // skip the Lit re-render when nothing visible changed. Positions stay OUT
-    // of the hash (only their presence, which decides whether the span exists):
-    // they change every frame in a running game, and hashing them forced a full
-    // tree re-render on every tick — see {@link posByUuid}.
+    // Fold every *structural* rendered field into the walk fingerprint so refreshTree can skip the
+    // Lit re-render when nothing visible changed. Positions are deliberately excluded — they change
+    // every frame in a running game and are surfaced for the selected object only (detail pane).
     counter.hash = hashString(
       counter.hash,
       `${node.uuid}|${node.name}|${node.type}|${node.visible ? 1 : 0}|${
-        node.pos ? 'p' : '-'
-      }|${node.instances ?? ''}|${node.droppable ? 1 : 0}|${node.gizmo ? 1 : 0}|${
-        node.childCount
-      }|${node.truncatedChildren}`
+        node.instances ?? ''
+      }|${node.droppable ? 1 : 0}|${node.gizmo ? 1 : 0}|${node.childCount}|${
+        node.truncatedChildren
+      }`
     );
 
     return node;
-  }
-
-  /**
-   * Write the live world positions into the rendered `.runtime-pos` spans.
-   * The spans render empty and Lit never binds their content, so this owns
-   * them outright; `textContent` is only touched when the value changed.
-   * Runs from `updated()` (fresh DOM after a tree re-render) and from the
-   * 350 ms tick when the walk found only movement (no re-render).
-   */
-  private syncPositions(): void {
-    const spans = this.querySelectorAll<HTMLSpanElement>('.runtime-pos[data-uuid]');
-    for (const span of spans) {
-      const text = this.posByUuid.get(span.dataset.uuid ?? '');
-      if (text !== undefined && span.textContent !== text) {
-        span.textContent = text;
-      }
-    }
-  }
-
-  protected updated(changed: Map<PropertyKey, unknown>): void {
-    super.updated(changed);
-    this.syncPositions();
   }
 
   private onFilterInput(event: Event): void {
@@ -363,16 +324,33 @@ export class RuntimePanel extends ComponentBase {
     this.rootTypeFilter = filter;
   }
 
-  private toggleCollapse(uuid: string): void {
-    const next = new Set(this.collapsed);
-    if (next.has(uuid)) {
-      next.delete(uuid);
-    } else {
-      next.add(uuid);
-    }
-    this.collapsed = next;
+  /**
+   * A node defaults to open only when it holds *authored* NodeBase children — that's the structure
+   * worth seeing at a glance. A node whose children are all raw THREE objects (a mesh-only Button2D,
+   * a Camera3D over its PerspectiveCamera) stays closed by default; its `Mesh, Mesh, …` internals
+   * aren't interesting until the user drills in.
+   */
+  private defaultOpen(node: RuntimeNode): boolean {
+    return node.children.some(child => child.nodeId !== null);
   }
 
+  /** Whether a node is expanded — {@link defaultOpen}, flipped by any manual toggle. */
+  private isExpanded(node: RuntimeNode): boolean {
+    const open = this.defaultOpen(node);
+    return this.userToggled.has(node.uuid) ? !open : open;
+  }
+
+  private toggleCollapse(node: RuntimeNode): void {
+    const next = new Set(this.userToggled);
+    if (next.has(node.uuid)) {
+      next.delete(node.uuid);
+    } else {
+      next.add(node.uuid);
+    }
+    this.userToggled = next;
+  }
+
+  /** Force every node closed: toggle default-open (NodeBase) nodes shut; drop any manual expands. */
   private collapseAll(): void {
     const next = new Set<string>();
     const stack = [...this.roots];
@@ -381,12 +359,14 @@ export class RuntimePanel extends ComponentBase {
       if (!node) {
         continue;
       }
-      if (node.children.length > 0) {
+      // Only default-open nodes (those with NodeBase children) need a toggle to become collapsed;
+      // mesh-only nodes are already closed by default, so leaving them untoggled keeps them closed.
+      if (this.defaultOpen(node)) {
         next.add(node.uuid);
-        stack.push(...node.children);
       }
+      stack.push(...node.children);
     }
-    this.collapsed = next;
+    this.userToggled = next;
   }
 
   private onRowClick(node: RuntimeNode): void {
@@ -626,7 +606,7 @@ export class RuntimePanel extends ComponentBase {
       return null;
     }
 
-    const isCollapsed = this.collapsed.has(node.uuid);
+    const isCollapsed = !this.isExpanded(node);
     const hasChildren = node.children.length > 0;
     const matched = this.filter !== '' && this.nodeMatches(node);
 
@@ -645,7 +625,7 @@ export class RuntimePanel extends ComponentBase {
             class="runtime-twisty ${hasChildren ? '' : 'is-leaf'}"
             @click=${(e: Event) => {
               e.stopPropagation();
-              if (hasChildren) this.toggleCollapse(node.uuid);
+              if (hasChildren) this.toggleCollapse(node);
             }}
             aria-label=${isCollapsed ? 'Expand' : 'Collapse'}
           >
@@ -659,7 +639,11 @@ export class RuntimePanel extends ComponentBase {
             : null}
           ${node.gizmo ? html`<span class="runtime-badge badge-gizmo">gizmo</span>` : null}
           ${!node.visible ? html`<span class="runtime-badge badge-hidden">hidden</span>` : null}
-          ${node.pos ? html`<span class="runtime-pos" data-uuid=${node.uuid}></span>` : null}
+          ${node.childCount > 0
+            ? html`<span class="runtime-childcount" title="${node.childCount} child object(s)"
+                >${node.childCount}</span
+              >`
+            : null}
         </div>
         ${hasChildren && !isCollapsed
           ? html`<div class="runtime-children">

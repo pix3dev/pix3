@@ -33,6 +33,20 @@ declare a feature done without running it.
      count of shots in flight, not position), `maxChildDistance` (a projectile flew while the
      spawner sat at 0,0). Transients that spawn AND die inside the window are caught by the window
      recorder — endpoints alone would miss them.
+   - **Transient / interaction-gated visual effects** (hover states, hover-scale, press
+     effects, `core:PunchScale`, `core:PopIn`, fades, flashes, shakes): verify by STATE, never
+     by a separate screenshot. A `viewport_screenshot` taken after `game_input` returns ALWAYS
+     shows the resting state — the gesture ended and the effect lerped back before the
+     screenshot call even started. Reshooting will not fix this; it is structural.
+     Instead, trigger and measure in ONE `game_input` call:
+     `{steps:[{type:'hover',target:'Play Button',ms:900}],expect:{'Play Button':'activity'}}`
+     → read `observed['Play Button'].scaleDelta.ratio` (endpoint, e.g. ≈1.08 for a hover-scale)
+     and `activity.maxScaleDelta` / `activity.opacityRange` (window peaks — these catch a
+     PunchScale/PopIn/flash that fired AND settled back inside the window). For press effects
+     use a `tap` with a generous `holdMs` and read the same fields. Hover persists after the
+     call (the synthetic pointer stays put), so to prove the return-to-rest half, hover away —
+     `{type:'hover',x:<empty area>,y:<empty area>}` — and check scale returns to base.
+     Screenshots are for STATIC properties only: layout, colors, placement.
    - **Game state**: when a GameDebugProvider is registered the result carries `game.changed`
      (ammo/score/wave diff) — often the clearest proof of all. If your game has none, register one
      (see the game-prototype skill) so gameplay is legible to state, not screenshots.
@@ -44,6 +58,10 @@ declare a feature done without running it.
    never moves the user's camera. If your model can't see images, use `analyze_image` with
    `source:"viewport"` (same auto-routing) — ask e.g. "are the menu buttons visible and inside
    the screen?".
+   Do NOT use screenshots to verify transient/hover/press effects — see 2b: by the time a
+   separate screenshot runs, the effect is back at rest, and reshooting in a loop proves
+   nothing. (Exception: a hover state deliberately left active by the last `hover` step is
+   still on screen and MAY be screenshotted for a visual once the state delta already passed.)
 4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.
 
 ## Common runtime problems and fixes
@@ -78,6 +96,12 @@ declare a feature done without running it.
 - **A button does nothing** — buttons emit `pressed`/`released`/`click` signals; something must
   `node.connect('pressed', target, handler)`. Check the flow script is attached to a node that
   exists and references the right node ids/names.
+- **A hover/press/juice effect "doesn't work" but screenshots look normal** — screenshots taken
+  after `game_input` always show the resting state (transient effects reset when the gesture
+  ends). Verify with a state delta instead: `hover` (or `tap` with `holdMs`) the node and read
+  `scaleDelta`/`scaled`/`opacityDelta` + `activity.maxScaleDelta`/`activity.opacityRange` in the
+  result. If those are flat, the effect really didn't fire — check the script is attached and
+  reads `isHovering`/signals, and `read_errors` for an auto-disabled component.
 - **Sprite looks wrong** (semi-transparent, box background, huge) — an art problem, not code.
   Reprocess the texture with `process_asset` (preset `sprite`). See the `asset-generation` skill.
 - **Scene didn't update after editing a `.pix3scene` file** — the editor watches the active

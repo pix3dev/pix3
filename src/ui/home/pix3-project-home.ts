@@ -80,6 +80,8 @@ export class Pix3ProjectHome extends ComponentBase {
 
   private disposeProject?: () => void;
   private disposeScenes?: () => void;
+  /** Project id the current thumbnails belong to; a change clears the stale cache. */
+  private lastProjectId: string | null | undefined = undefined;
   private refreshInFlight = false;
   private refreshQueued = false;
   private thumbsInFlight = false;
@@ -111,6 +113,15 @@ export class Pix3ProjectHome extends ComponentBase {
   }
 
   private async refresh(): Promise<void> {
+    // This Home tab is pinned in the always-present `background` slot, so the same instance is
+    // reused across project switches. Thumbnails are keyed by scene path, so a new project whose
+    // scene shares a relative path with the previous one would otherwise show the old thumbnail —
+    // drop the cache whenever the project id changes.
+    const projectId = appState.project.id ?? null;
+    if (projectId !== this.lastProjectId) {
+      this.lastProjectId = projectId;
+      this.thumbs = {};
+    }
     if (this.refreshInFlight) {
       this.refreshQueued = true;
       return;
@@ -386,7 +397,11 @@ export class Pix3ProjectHome extends ComponentBase {
         <h2 class="ph-h2">Scenes</h2>
         <span class="ph-count mono">${data.scenes.length}</span>
         ${data.scenes.length > 0
-          ? html`<span class="ph-section-head__note">sorted by last edited</span>`
+          ? html`<span class="ph-section-head__note"
+              >${data.scenes.some(s => s.isMain)
+                ? 'main scene first, then last edited'
+                : 'sorted by last edited'}</span
+            >`
           : nothing}
       </div>
       ${data.scenes.length === 0

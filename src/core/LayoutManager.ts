@@ -561,6 +561,28 @@ export class LayoutManagerService {
   }
 
   /**
+   * The `componentType` of the currently-active tab in the stack that hosts `componentType` — e.g.
+   * pass `profiler` to learn which of {Inspector, Profiler, Agent} is front-most in that shared
+   * stack. Returns null when the panel or its stack can't be found. Used to decide whether play/stop
+   * should be allowed to steal focus from a tab the user has deliberately fronted (e.g. the Agent).
+   */
+  getActivePanelInStackOf(componentType: PanelComponentType): string | null {
+    if (!this.layout) {
+      return null;
+    }
+    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
+    const item = this.findPanelByComponentType(rootItem, componentType);
+    if (!item) {
+      return null;
+    }
+    const stack = this.findClosestStack(item) as
+      | (Stack & { getActiveComponentItem?: () => ContentItem | undefined })
+      | null;
+    const active = stack?.getActiveComponentItem?.() as { componentType?: unknown } | undefined;
+    return typeof active?.componentType === 'string' ? active.componentType : null;
+  }
+
+  /**
    * Activate the pinned Project Home tab (the `background` slot, always first in
    * the editor document stack) and ask it to refresh. Used by the
    * `editor.open-project-home` command (Mod+1).

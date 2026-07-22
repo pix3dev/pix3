@@ -65,6 +65,9 @@ signal to the mechanic:
 - **Game state**: register a `GameDebugProvider` (`registerGameDebug({name, snapshot})` exposing
   ammo/score/wave/health) — then every `game_input`/`game_observe` result carries `game.changed`,
   the clearest proof of all and the way to verify by state instead of screenshots.
+- **Transient visual effects** (hover, `core:PunchScale`, `core:PopIn`, fades): use a `hover` step
+  and read scale/opacity peaks (`scaleDelta`/`activity.maxScaleDelta`/`activity.opacityRange`) — a
+  separate screenshot always shows the resting state.
 Tap UI buttons by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long
 press — don't shorten `holdMs`). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
 For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to read baseline
