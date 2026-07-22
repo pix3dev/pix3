@@ -1,5 +1,5 @@
-import * as Y from 'yjs';
-import { HocuspocusProvider } from '@hocuspocus/provider';
+import type * as Y from 'yjs';
+import type { HocuspocusProvider } from '@hocuspocus/provider';
 import { injectable } from '@/fw/di';
 import { appState } from '@/state';
 import type { CollabAuthSource, CollabRole } from '@/state/AppState';
@@ -30,6 +30,7 @@ export class CollaborationService {
   private undoManager: Y.UndoManager | null = null;
   private statusListeners = new Set<(status: CollabConnectionStatus) => void>();
   private disposeSelectionSubscription: (() => void) | null = null;
+  private connectEpoch = 0;
 
   connectionStatus: CollabConnectionStatus = 'disconnected';
 
@@ -50,17 +51,32 @@ export class CollaborationService {
     return wsUrl.toString();
   }
 
-  connect(
+  async connect(
     projectId: string,
     _sceneId: string,
     userName: string,
     userColor: string,
     options: CollaborationConnectOptions = {}
-  ): void {
-    // Clean up any existing connection
+  ): Promise<void> {
+    // Clean up any existing connection before awaiting so rapid reconnects don't stack.
     this.disconnect();
 
-    this.ydoc = new Y.Doc();
+    // Guard against a double-connect race: capture the epoch before the lazy
+    // imports and abort silently if another connect()/disconnect() intervened.
+    const epoch = ++this.connectEpoch;
+
+    // Lazy-load the CRDT stack (yjs + hocuspocus) on first connect. Solo/local
+    // sessions never reach here, keeping the stack out of the eager main chunk.
+    const [{ Doc, UndoManager }, { HocuspocusProvider }] = await Promise.all([
+      import('yjs'),
+      import('@hocuspocus/provider'),
+    ]);
+
+    if (epoch !== this.connectEpoch) {
+      return;
+    }
+
+    this.ydoc = new Doc();
     const roomName = `project:${projectId}`;
     appState.collaboration.roomName = roomName;
     appState.collaboration.remoteUsers = [];
@@ -111,7 +127,7 @@ export class CollaborationService {
 
     // Track project-scoped scene changes in a single collaboration document.
     const scenesMap = this.ydoc.getMap('scenes');
-    this.undoManager = new Y.UndoManager([scenesMap], {
+    this.undoManager = new UndoManager([scenesMap], {
       trackedOrigins: new Set([this.getLocalOrigin()]),
       captureTimeout: 500,
     });
@@ -124,6 +140,8 @@ export class CollaborationService {
   }
 
   disconnect(): void {
+    // Invalidate any in-flight connect() awaiting the lazy CRDT import.
+    this.connectEpoch++;
     this.undoManager?.destroy();
     this.undoManager = null;
     this.disposeSelectionSubscription?.();

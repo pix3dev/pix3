@@ -549,7 +549,7 @@ export class CloudProjectService {
         : `Guest ${Math.floor(Math.random() * 1000)}`;
     const color = access.access_mode === 'view' ? '#1ebde3' : '#f5ae39'; // --presence-5 (sky) / --presence-1 (amber)
 
-    collabService.connect(
+    await collabService.connect(
       projectId,
       appState.scenes.activeSceneId ?? 'shared-scene',
       username,

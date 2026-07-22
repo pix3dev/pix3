@@ -2,7 +2,7 @@ import { injectable, inject } from '@/fw/di';
 import { ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
-import * as Y from 'yjs';
+import type * as Y from 'yjs';
 import { FileSystemAPIService, type FileDescriptor } from '@/services/project/FileSystemAPIService';
 import { CloudProjectCacheService } from '@/services/cloud/CloudProjectCacheService';
 import { CollaborationService } from '@/services/collab/CollaborationService';

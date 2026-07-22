@@ -1,10 +1,10 @@
 import { injectable, ServiceContainer } from '@/fw/di';
-import * as Y from 'yjs';
+import type * as Y from 'yjs';
 import { appState } from '@/state';
 import { SceneManager } from '@pix3/runtime';
 import { CollaborationService } from '@/services/collab/CollaborationService';
 import { OperationService } from '@/services/core/OperationService';
-import { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
+import type { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
 import * as ApiClient from '@/services/cloud/ApiClient';
 
 const HOST_COLOR = '#f5ae39'; // --presence-1 (amber, you)
@@ -22,6 +22,7 @@ export class CollabSessionService {
     const collabService = container.getService<CollaborationService>(
       container.getOrCreateToken(CollaborationService)
     );
+    const { SceneCRDTBinding } = await import('@/services/collab/SceneCRDTBinding');
     const binding = container.getService<SceneCRDTBinding>(
       container.getOrCreateToken(SceneCRDTBinding)
     );
@@ -36,7 +37,7 @@ export class CollabSessionService {
     const existingRoomName = appState.collaboration.roomName;
 
     if (!collabService.isConnected() || existingRoomName !== roomName) {
-      collabService.connect(projectId, sceneId, this.getHostName(), HOST_COLOR, {
+      await collabService.connect(projectId, sceneId, this.getHostName(), HOST_COLOR, {
         role: appState.collaboration.role,
         authSource: appState.collaboration.authSource,
         isReadOnly: appState.collaboration.isReadOnly,
@@ -60,7 +61,8 @@ export class CollabSessionService {
     const existingFilePath = binding.getSceneFilePath(ydoc, sceneId);
     const descriptor = appState.scenes.descriptors[sceneId];
     const sceneEntry = ydoc.getMap<Y.Map<unknown>>('scenes').get(sceneId);
-    const snapshot = sceneEntry instanceof Y.Map ? sceneEntry.get('snapshot') : undefined;
+    const { Map: YMap } = await import('yjs');
+    const snapshot = sceneEntry instanceof YMap ? sceneEntry.get('snapshot') : undefined;
     if (typeof snapshot !== 'string' || !snapshot.trim()) {
       ydoc.transact(() => {
         binding.initializeYDocFromScene(
