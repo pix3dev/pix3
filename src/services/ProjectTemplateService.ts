@@ -142,10 +142,7 @@ const asPositiveInt = (value: unknown, fallback: number): number => {
 @injectable()
 export class ProjectTemplateService {
   private templates: ProjectTemplate[] | null = null;
-  private readonly templateTextFilesCache = new Map<
-    string,
-    Promise<ReadonlyMap<string, string>>
-  >();
+  private readonly templateTextFilesCache = new Map<string, Promise<ReadonlyMap<string, string>>>();
   private agentOverlayFilesPromise: Promise<ReadonlyMap<string, string>> | null = null;
 
   getTemplates(): readonly ProjectTemplate[] {
