@@ -2,7 +2,6 @@ import { ServiceContainer, ServiceLifetime } from '@/fw/di';
 import { ResourceManager } from '@/services/assets/ResourceManager';
 import { CollaborationService } from '@/services/collab/CollaborationService';
 import { AssetUploadService } from '@/services/cloud/AssetUploadService';
-import { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
 import { CollabViewportOverlayService } from '@/services/collab/CollabViewportOverlayService';
 import {
   AssetLoader,
@@ -123,14 +122,11 @@ export function registerRuntimeServices(): void {
     ServiceLifetime.Singleton
   );
 
-  // 8. SceneCRDTBinding
-  container.addService(
-    container.getOrCreateToken(SceneCRDTBinding),
-    SceneCRDTBinding,
-    ServiceLifetime.Singleton
-  );
-
-  // 9. CollabViewportOverlayService
+  // 8. CollabViewportOverlayService
+  // Note: SceneCRDTBinding is intentionally NOT registered here. It carries
+  // @injectable() (registers itself on module load) and is reached only via
+  // dynamic import() from the collab join/session flows, which keeps the eager
+  // yjs value import it holds out of the main bundle chunk.
   container.addService(
     container.getOrCreateToken(CollabViewportOverlayService),
     CollabViewportOverlayService,

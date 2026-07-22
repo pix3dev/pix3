@@ -30,6 +30,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - **Container**: Register services in `ServiceContainer` (singleton by default).
 - **Lifecycle**: Services must implement `dispose()` if they hold resources or subscriptions.
 - **Lazy injection**: `@injectLazy(() => import('…').then(m => m.ServiceClass))` makes the property a `LazyService<T>` async accessor — the module is `import()`-ed once (cached), and the service is resolved through the container on every `await this.foo()` call, so re-registration is observed and singleton/transient lifetimes behave exactly like `@inject`. Keeps heavy modules out of the eager bundle. Use **sparingly** for heavy, rarely-used services whose consumers only touch them inside async flows (e.g. Monaco IntelliSense, playable export); `@inject` remains the default.
+- **Collab CRDT stack is lazy**: the ~140 KB `yjs`/`@hocuspocus/provider` stack loads only when `CollaborationService.connect()` runs (`connect()` is `async` and `import()`s it on first collab connect), so solo/local sessions never pull it — new code must NOT add eager top-level `yjs`/`@hocuspocus` value imports anywhere except `src/services/collab/SceneCRDTBinding.ts` (itself reached only via dynamic `import()`); use `import type` for CRDT types elsewhere.
 
 ### State Management (Valtio)
 

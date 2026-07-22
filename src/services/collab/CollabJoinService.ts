@@ -1,7 +1,7 @@
 import { injectable, ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
 import { CollaborationService } from '@/services/collab/CollaborationService';
-import { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
+import type { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
 import { OperationService } from '@/services/core/OperationService';
 import { SceneManager, type SceneGraph } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';
@@ -61,6 +61,7 @@ export class CollabJoinService {
       return false;
     }
 
+    const { SceneCRDTBinding } = await import('@/services/collab/SceneCRDTBinding');
     const crdtBinding = container.getService<SceneCRDTBinding>(
       container.getOrCreateToken(SceneCRDTBinding)
     );
