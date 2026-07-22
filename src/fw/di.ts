@@ -165,3 +165,62 @@ export function inject<T>(serviceType?: Constructor<T>) {
     Object.defineProperty(target, propertyKey, descriptor);
   };
 }
+
+/** Async accessor for a lazily-loaded service. */
+export type LazyService<T> = () => Promise<T>;
+
+/**
+ * Like {@link inject}, but the service class is loaded via dynamic `import()` on
+ * first access, keeping heavy modules out of the eager bundle. The decorated
+ * property becomes a `LazyService<T>` — call `await this.foo()` to resolve.
+ *
+ * Only the module import is cached; the service is resolved through the
+ * container on every accessor call, so re-registration is observed and
+ * lifetimes (singleton/transient) behave exactly like `@inject`. The loader
+ * must return the service CLASS (registered via `@injectable` in its own
+ * module). Use sparingly: `@inject` remains the default. Reach for this only
+ * when the service is heavy AND its consumers only touch it inside async flows
+ * (e.g. Monaco IntelliSense, playable export).
+ */
+export function injectLazy<T>(load: () => Promise<Constructor<T>>) {
+  return function (target: object, propertyKey: string | symbol) {
+    let modulePromise: Promise<Constructor<T>> | undefined;
+    Object.defineProperty(target, propertyKey, {
+      get: function (this: object): LazyService<T> {
+        return () => {
+          if (!modulePromise) {
+            modulePromise = load();
+            // A failed load must not latch: clear the cache so the next call
+            // retries. The `.catch` here only observes the rejection to avoid
+            // an unhandled-rejection warning; callers still see the original
+            // error via the promise returned below.
+            modulePromise.catch(() => {
+              modulePromise = undefined;
+            });
+          }
+          return modulePromise.then(ctor => {
+            const container = ServiceContainer.getInstance();
+            try {
+              if (typeof ctor !== 'function') {
+                throw new Error(
+                  'Loader did not resolve to a class constructor (check the named export in the import()).'
+                );
+              }
+              return container.getService<T>(container.getOrCreateToken(ctor));
+            } catch (error) {
+              const hostName =
+                (this as { constructor?: { name?: string } }).constructor?.name ?? 'UnknownHost';
+              const dependencyName =
+                typeof ctor === 'function' && ctor.name ? ctor.name : String(propertyKey);
+              const message = `Failed to lazily inject "${dependencyName}" into "${hostName}.${String(propertyKey)}".`;
+              const cause = error instanceof Error ? error.message : String(error);
+              throw new Error(`${message} ${cause}`);
+            }
+          });
+        };
+      },
+      enumerable: true,
+      configurable: true,
+    });
+  };
+}

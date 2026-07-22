@@ -1,12 +1,12 @@
 import type * as Monaco from 'monaco-editor';
 
-import { injectable, inject } from '@/fw/di';
+import { injectable, inject, injectLazy, type LazyService } from '@/fw/di';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 
 import { LoggingService } from '@/services/core/LoggingService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
-import { MonacoIntelliSenseService } from '@/services/scripting/MonacoIntelliSenseService';
+import type { MonacoIntelliSenseService } from '@/services/scripting/MonacoIntelliSenseService';
 import { ensureMonacoLoaded, isMonacoLoaded } from '@/ui/code-editor/monaco-loader';
 import {
   flattenDiagnosticMessage,
@@ -73,8 +73,10 @@ export class ProjectDiagnosticsService {
   @inject(ProjectScriptLoaderService)
   private readonly scriptLoader!: ProjectScriptLoaderService;
 
-  @inject(MonacoIntelliSenseService)
-  private readonly intelliSense!: MonacoIntelliSenseService;
+  @injectLazy(() =>
+    import('@/services/scripting/MonacoIntelliSenseService').then(m => m.MonacoIntelliSenseService)
+  )
+  private readonly intelliSense!: LazyService<MonacoIntelliSenseService>;
 
   private initialized = false;
   private running: Promise<ScriptDiagnosticsSummary> | null = null;
@@ -174,7 +176,8 @@ export class ProjectDiagnosticsService {
     }
 
     const monaco = await ensureMonacoLoaded();
-    await this.intelliSense.ensureConfigured(monaco);
+    const intelliSense = await this.intelliSense();
+    await intelliSense.ensureConfigured(monaco);
 
     // Materialise a model for every project script. Reuse a model if one already
     // exists (an open editor tab); otherwise create a temporary one to dispose.
@@ -192,7 +195,7 @@ export class ProjectDiagnosticsService {
 
     // Our new models now shadow the sibling-mirror extra libs; drop the mirrors
     // so the worker doesn't see the same declarations twice (TS2300/TS2440).
-    this.intelliSense.refreshNow();
+    intelliSense.refreshNow();
 
     try {
       // On a cold Monaco load the engine type libs (@pix3/runtime, three) are
@@ -249,7 +252,7 @@ export class ProjectDiagnosticsService {
         model.dispose();
       }
       // Restore the sibling mirrors for the models we removed.
-      this.intelliSense.refreshNow();
+      intelliSense.refreshNow();
     }
   }
 
