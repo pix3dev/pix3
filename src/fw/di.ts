@@ -201,11 +201,17 @@ export function injectLazy<T>(load: () => Promise<Constructor<T>>) {
           return modulePromise.then(ctor => {
             const container = ServiceContainer.getInstance();
             try {
+              if (typeof ctor !== 'function') {
+                throw new Error(
+                  'Loader did not resolve to a class constructor (check the named export in the import()).'
+                );
+              }
               return container.getService<T>(container.getOrCreateToken(ctor));
             } catch (error) {
               const hostName =
                 (this as { constructor?: { name?: string } }).constructor?.name ?? 'UnknownHost';
-              const dependencyName = ctor.name || String(propertyKey);
+              const dependencyName =
+                typeof ctor === 'function' && ctor.name ? ctor.name : String(propertyKey);
               const message = `Failed to lazily inject "${dependencyName}" into "${hostName}.${String(propertyKey)}".`;
               const cause = error instanceof Error ? error.message : String(error);
               throw new Error(`${message} ${cause}`);
