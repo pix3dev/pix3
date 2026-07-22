@@ -1,4 +1,4 @@
-import { inject } from '@/fw/di';
+import { inject, injectLazy, type LazyService } from '@/fw/di';
 import {
   CommandBase,
   type CommandContext,
@@ -10,10 +10,10 @@ import { DialogService, type DialogExpandableSection } from '@/services/editor/D
 import { LoggingService } from '@/services/core/LoggingService';
 import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
-import {
+import type {
   PlayableHtmlBuildService,
-  type PlayableHtmlBuildArtifact,
-  type PlayableHtmlBundleSizeReport,
+  PlayableHtmlBuildArtifact,
+  PlayableHtmlBundleSizeReport,
 } from '@/services/export/PlayableHtmlBuildService';
 
 type SaveFilePickerFn = (options?: unknown) => Promise<FileSystemFileHandle>;
@@ -34,8 +34,10 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     keywords: ['export', 'html', 'playable', 'build', 'project'],
   };
 
-  @inject(PlayableHtmlBuildService)
-  private readonly playableHtmlBuildService!: PlayableHtmlBuildService;
+  @injectLazy(() =>
+    import('@/services/export/PlayableHtmlBuildService').then(m => m.PlayableHtmlBuildService)
+  )
+  private readonly playableHtmlBuildService!: LazyService<PlayableHtmlBuildService>;
 
   @inject(DialogService)
   private readonly dialogService!: DialogService;
@@ -176,7 +178,8 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     await this.waitForProgressDialogPaint();
 
     try {
-      return await this.playableHtmlBuildService.buildPlayableHtml(context, options);
+      const playableHtmlBuildService = await this.playableHtmlBuildService();
+      return await playableHtmlBuildService.buildPlayableHtml(context, options);
     } finally {
       this.playableExportProgressDialogService.close();
     }

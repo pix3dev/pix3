@@ -1,4 +1,4 @@
-import { inject } from '@/fw/di';
+import { inject, injectLazy, type LazyService } from '@/fw/di';
 import {
   CommandBase,
   type CommandContext,
@@ -10,9 +10,9 @@ import { DialogService } from '@/services/editor/DialogService';
 import { LoggingService } from '@/services/core/LoggingService';
 import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
-import {
+import type {
   PlayableHtmlBuildService,
-  type PlayableZipBuildArtifact,
+  PlayableZipBuildArtifact,
 } from '@/services/export/PlayableHtmlBuildService';
 
 type SaveFilePickerFn = (options?: unknown) => Promise<FileSystemFileHandle>;
@@ -36,8 +36,10 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
     keywords: ['export', 'zip', 'archive', 'html', 'assets', 'build', 'project'],
   };
 
-  @inject(PlayableHtmlBuildService)
-  private readonly playableHtmlBuildService!: PlayableHtmlBuildService;
+  @injectLazy(() =>
+    import('@/services/export/PlayableHtmlBuildService').then(m => m.PlayableHtmlBuildService)
+  )
+  private readonly playableHtmlBuildService!: LazyService<PlayableHtmlBuildService>;
 
   @inject(DialogService)
   private readonly dialogService!: DialogService;
@@ -89,7 +91,8 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
 
       let artifact: PlayableZipBuildArtifact;
       try {
-        artifact = await this.playableHtmlBuildService.buildPlayableZip(context, {
+        const playableHtmlBuildService = await this.playableHtmlBuildService();
+        artifact = await playableHtmlBuildService.buildPlayableZip(context, {
           title: projectName,
           entryScenePath,
         });

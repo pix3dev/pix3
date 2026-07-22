@@ -126,7 +126,7 @@ describe('ExportPlayableHtmlCommand', () => {
     });
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
@@ -242,7 +242,7 @@ describe('ExportPlayableHtmlCommand', () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
@@ -319,7 +319,7 @@ describe('ExportPlayableHtmlCommand', () => {
     });
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
@@ -397,7 +397,7 @@ describe('ExportPlayableHtmlCommand', () => {
     });
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
@@ -464,7 +464,7 @@ describe('ExportPlayableHtmlCommand', () => {
     };
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
@@ -540,7 +540,7 @@ describe('ExportPlayableHtmlCommand', () => {
     };
 
     Object.defineProperty(command, 'playableHtmlBuildService', {
-      value: buildService,
+      value: async () => buildService,
       configurable: true,
     });
     Object.defineProperty(command, 'dialogService', {
