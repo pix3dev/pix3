@@ -1,5 +1,5 @@
 import { inject } from '@/fw/di';
-import { ProjectSyncService } from '@/services/ProjectSyncService';
+import { ProjectSyncService } from '@/services/project/ProjectSyncService';
 import {
   CommandBase,
   type CommandContext,

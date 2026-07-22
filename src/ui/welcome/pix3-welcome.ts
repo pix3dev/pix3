@@ -1,13 +1,13 @@
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
 import './pix3-welcome.ts.css';
-import { ProjectService } from '@/services/ProjectService';
-import { IconService } from '@/services/IconService';
-import { CloudProjectService } from '@/services/CloudProjectService';
-import { DialogService } from '@/services/DialogService';
-import type { ApiProject } from '@/services/ApiClient';
+import { ProjectService } from '@/services/project/ProjectService';
+import { IconService } from '@/services/editor/IconService';
+import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { DialogService } from '@/services/editor/DialogService';
+import type { ApiProject } from '@/services/cloud/ApiClient';
 import { appState } from '@/state';
-import type { RecentProjectEntry } from '@/services/ProjectService';
-import { ProjectLifecycleService } from '@/services/ProjectLifecycleService';
+import type { RecentProjectEntry } from '@/services/project/ProjectService';
+import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 
 @customElement('pix3-welcome')

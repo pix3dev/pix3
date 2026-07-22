@@ -4,7 +4,7 @@ import {
   type CommandMetadata,
   type CommandContext,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   SelectObjectOperation,
   type SelectObjectParams,

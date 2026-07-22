@@ -5,8 +5,8 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
-import type { LocaleTableSection } from '@/services/LocalizationEditorService';
+import { OperationService } from '@/services/core/OperationService';
+import type { LocaleTableSection } from '@/services/localization/LocalizationEditorService';
 import { UpdateLocaleEntryOperation } from './UpdateLocaleEntryOperation';
 
 export interface UpdateLocaleEntryCommandParams {

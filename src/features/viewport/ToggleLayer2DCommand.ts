@@ -5,7 +5,7 @@ import {
   type CommandContext,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { SceneManager } from '@pix3/runtime';
 import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 import { deriveSceneLayerCapabilities, isMixedScene } from './scene-layer-capabilities';

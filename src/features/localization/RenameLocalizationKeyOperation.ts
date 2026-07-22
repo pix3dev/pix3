@@ -8,8 +8,8 @@ import { SceneManager, getNodePropertySchema } from '@pix3/runtime';
 import {
   LocalizationEditorService,
   type LocaleTableSection,
-} from '@/services/LocalizationEditorService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+} from '@/services/localization/LocalizationEditorService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface RenameLocalizationKeyParams {
   oldKey: string;

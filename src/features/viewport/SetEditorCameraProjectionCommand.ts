@@ -6,7 +6,7 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import type { EditorCameraProjection } from '@/state';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { SetEditorCameraProjectionOperation } from './SetEditorCameraProjectionOperation';
 
 class SetEditorCameraProjectionCommand extends CommandBase<void, void> {

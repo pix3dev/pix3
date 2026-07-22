@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { AuthService } from '@/services/AuthService';
+import { AuthService } from '@/services/cloud/AuthService';
 import './pix3-auth-screen.ts.css';
 
 @customElement('pix3-auth-screen')

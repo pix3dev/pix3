@@ -1,6 +1,6 @@
 import { inject } from '@/fw/di';
-import { DialogService } from '@/services/DialogService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { DialogService } from '@/services/editor/DialogService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { OpenProjectSettingsCommand } from './OpenProjectSettingsCommand';
 import {
   CommandBase,

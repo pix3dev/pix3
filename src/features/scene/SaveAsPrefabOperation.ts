@@ -8,7 +8,7 @@ import type {
 } from '@/core/Operation';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { SceneManager, NodeBase, type SceneNodeDefinition } from '@pix3/runtime';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
 
 export interface SaveAsPrefabOperationParams {
   nodeId: string;

@@ -1,5 +1,5 @@
 import { inject } from '@/fw/di';
-import { EditorSettingsService } from '@/services/EditorSettingsService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '@/core/command';
 
 export class OpenEditorSettingsCommand extends CommandBase<void, void> {

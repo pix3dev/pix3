@@ -10,7 +10,7 @@ import {
   type Transform2DCompleteParams,
 } from '@/features/properties/Transform2DCompleteOperation';
 import { buildProportionalResizePlans } from '@/features/scene/group2d-resize-utils';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { Group2D, SceneManager } from '@pix3/runtime';
 
 export interface ResizeGroup2DParams {

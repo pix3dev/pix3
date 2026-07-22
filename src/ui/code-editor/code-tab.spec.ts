@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ServiceContainer } from '@/fw/di';
-import { CodeDocumentService } from '@/services/CodeDocumentService';
-import { MonacoIntelliSenseService } from '@/services/MonacoIntelliSenseService';
+import { CodeDocumentService } from '@/services/scripting/CodeDocumentService';
+import { MonacoIntelliSenseService } from '@/services/scripting/MonacoIntelliSenseService';
 import { appState, resetAppState, type EditorTab } from '@/state';
 
 type MonacoSelectionLike = {

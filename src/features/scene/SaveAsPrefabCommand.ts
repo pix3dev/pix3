@@ -5,8 +5,8 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
+import { OperationService } from '@/services/core/OperationService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
 import { SaveAsPrefabOperation } from '@/features/scene/SaveAsPrefabOperation';
 import { SceneManager } from '@pix3/runtime';
 

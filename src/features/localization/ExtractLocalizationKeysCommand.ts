@@ -5,9 +5,9 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
-import { LocalizationExtractionService } from '@/services/LocalizationExtractionService';
+import { OperationService } from '@/services/core/OperationService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
+import { LocalizationExtractionService } from '@/services/localization/LocalizationExtractionService';
 import { ExtractLocalizationKeysOperation } from './ExtractLocalizationKeysOperation';
 
 /**

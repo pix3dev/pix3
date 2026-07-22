@@ -2,7 +2,10 @@ import { html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ComponentBase } from '@/fw/component-base';
 import { ServiceContainer } from '@/fw/di';
-import { CollaborationService, type CollabConnectionStatus } from '@/services/CollaborationService';
+import {
+  CollaborationService,
+  type CollabConnectionStatus,
+} from '@/services/collab/CollaborationService';
 import { appState, type CollabRemoteUser } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import './collab-status-bar.ts.css';

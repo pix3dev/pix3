@@ -36,10 +36,10 @@ import {
   type ScriptComponent,
   type TrackValueType,
 } from '@pix3/runtime';
-import { OperationService, type OperationEvent } from '@/services/OperationService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { IconService } from '@/services/IconService';
-import { AnimationTimelinePreviewService } from '@/services/AnimationTimelinePreviewService';
+import { OperationService, type OperationEvent } from '@/services/core/OperationService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { IconService } from '@/services/editor/IconService';
+import { AnimationTimelinePreviewService } from '@/services/animation/AnimationTimelinePreviewService';
 import {
   ANIMATION_PLAYER_COMPONENT_TYPE,
   UPDATE_ANIMATION_CLIPS_OPERATION_ID,

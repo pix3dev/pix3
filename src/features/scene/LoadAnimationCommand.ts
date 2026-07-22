@@ -1,5 +1,5 @@
 import { inject } from '@/fw/di';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
   CommandBase,
   type CommandContext,

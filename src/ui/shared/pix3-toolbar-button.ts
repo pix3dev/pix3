@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, property, inject } from '@/fw';
-import { IconService, IconSize } from '@/services/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import './pix3-toolbar-button.ts.css';
 
 @customElement('pix3-toolbar-button')

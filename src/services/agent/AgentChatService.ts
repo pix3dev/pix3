@@ -1,9 +1,9 @@
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { SceneManager, NodeBase } from '@pix3/runtime';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';

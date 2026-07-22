@@ -5,7 +5,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   SetPreviewCameraOperation,
   type SetPreviewCameraParams,

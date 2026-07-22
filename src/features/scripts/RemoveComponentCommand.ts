@@ -9,7 +9,7 @@ import {
   type CommandContext,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   PREFAB_COMPONENT_LOCK_REASON,
   isPrefabInstanceNode,

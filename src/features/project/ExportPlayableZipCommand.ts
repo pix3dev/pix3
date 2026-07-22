@@ -6,14 +6,14 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { DialogService } from '@/services/DialogService';
-import { LoggingService } from '@/services/LoggingService';
-import { PlayableExportDialogService } from '@/services/PlayableExportDialogService';
-import { PlayableExportProgressDialogService } from '@/services/PlayableExportProgressDialogService';
+import { DialogService } from '@/services/editor/DialogService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
+import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
 import {
   PlayableHtmlBuildService,
   type PlayableZipBuildArtifact,
-} from '@/services/PlayableHtmlBuildService';
+} from '@/services/export/PlayableHtmlBuildService';
 
 type SaveFilePickerFn = (options?: unknown) => Promise<FileSystemFileHandle>;
 type WindowWithSavePicker = Window & {

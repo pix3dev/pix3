@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ServiceContainer } from '@/fw/di';
-import { DialogService } from '@/services/DialogService';
-import { LoggingService } from '@/services/LoggingService';
-import { UpdateCheckService, type UpdateCheckState } from '@/services/UpdateCheckService';
+import { DialogService } from '@/services/editor/DialogService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { UpdateCheckService, type UpdateCheckState } from '@/services/editor/UpdateCheckService';
 import { appState, resetAppState } from '@/state';
 
 type TestStatusBarElement = HTMLElement & { updateComplete: Promise<unknown> };

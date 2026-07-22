@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
-import { IconService } from '@/services/IconService';
+import { IconService } from '@/services/editor/IconService';
 import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import './viewport-visibility-popover.ts.css';
 

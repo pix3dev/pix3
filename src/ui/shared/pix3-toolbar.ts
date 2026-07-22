@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, inject, property, css, unsafeCSS } from '@/fw';
-import { FocusRingService } from '@/services/FocusRingService';
+import { FocusRingService } from '@/services/editor/FocusRingService';
 import styles from './pix3-toolbar.ts.css?raw';
 
 @customElement('pix3-toolbar')

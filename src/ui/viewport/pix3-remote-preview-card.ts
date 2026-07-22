@@ -1,12 +1,12 @@
 import { ComponentBase, customElement, html, inject, state, css, unsafeCSS } from '@/fw';
 import QRCode from 'qrcode';
 import { appState } from '@/state';
-import { PreviewHostService, type PreviewHostState } from '@/services/PreviewHostService';
+import { PreviewHostService, type PreviewHostState } from '@/services/play/PreviewHostService';
 import {
   RemotePreviewTelemetryService,
   type RemotePlayerTelemetry,
-} from '@/services/RemotePreviewTelemetryService';
-import { EditorTabService } from '@/services/EditorTabService';
+} from '@/services/play/RemotePreviewTelemetryService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 import styles from './pix3-remote-preview-card.ts.css?raw';
 
 const GAME_TAB_ID = 'game:game-view-instance';

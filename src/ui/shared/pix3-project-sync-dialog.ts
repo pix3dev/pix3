@@ -2,8 +2,8 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
 import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
-import { LocalSyncService } from '@/services/LocalSyncService';
-import { ProjectSyncService } from '@/services/ProjectSyncService';
+import { LocalSyncService } from '@/services/project/LocalSyncService';
+import { ProjectSyncService } from '@/services/project/ProjectSyncService';
 import './pix3-project-sync-dialog.ts.css';
 
 @customElement('pix3-project-sync-dialog')

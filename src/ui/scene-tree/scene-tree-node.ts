@@ -5,8 +5,8 @@ import { repeat } from 'lit/directives/repeat.js';
 
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
 import { appState } from '@/state';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { IconService, IconSize } from '@/services/IconService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { ServiceContainer } from '@/fw/di';
 import { SceneManager } from '@pix3/runtime';
 import { canDropNode } from '@/fw/hierarchy-validation';

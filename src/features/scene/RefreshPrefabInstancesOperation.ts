@@ -6,9 +6,9 @@ import {
   type OperationContext,
   type OperationInvokeResult,
 } from '@/core/Operation';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { PrefabRefreshTracker } from '@/services/PrefabRefreshTracker';
-import { OperationService } from '@/services/OperationService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { PrefabRefreshTracker } from '@/services/scene/PrefabRefreshTracker';
+import { OperationService } from '@/services/core/OperationService';
 
 export interface RefreshPrefabInstancesOperationParams {
   sceneId: string;

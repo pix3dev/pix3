@@ -1,5 +1,5 @@
 import { CommandBase, type CommandContext, type CommandExecutionResult } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import { SceneManager, Node3D } from '@pix3/runtime';
 import { SelectObjectOperation } from '@/features/selection/SelectObjectOperation';
 import type { NavigationMode } from '@/state';

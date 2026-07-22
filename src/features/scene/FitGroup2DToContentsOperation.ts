@@ -6,7 +6,7 @@ import type {
 } from '@/core/Operation';
 import { BulkOperationBuilder } from '@/core/BulkOperation';
 import { Transform2DCompleteOperation } from '@/features/properties/Transform2DCompleteOperation';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { Group2D, SceneManager } from '@pix3/runtime';
 import { buildFitPlans, computeContentsLocalRect } from './group2d-resize-utils';
 

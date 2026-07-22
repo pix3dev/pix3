@@ -1,13 +1,13 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { nothing } from 'lit';
-import { AssetLibraryService } from '@/services/AssetLibraryService';
-import { LibraryInsertService } from '@/services/LibraryInsertService';
+import { AssetLibraryService } from '@/services/library/AssetLibraryService';
+import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import {
   LibrarySelectionService,
   type LibrarySelection,
 } from '@/services/library/LibrarySelectionService';
-import { IconService, IconSize } from '@/services/IconService';
-import { DialogService } from '@/services/DialogService';
+import { IconService, IconSize } from '@/services/editor/IconService';
+import { DialogService } from '@/services/editor/DialogService';
 import { categoriesForSource, itemsForSource } from '@/services/library/library-sources';
 import {
   assetFileCount,

@@ -1,5 +1,5 @@
 import { inject, injectable } from '@/fw/di';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { LlmProviderRegistry } from './LlmProviderRegistry';
 import { isRecord, type LlmModel } from './LlmTypes';
 

@@ -1,7 +1,7 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { createRef, ref } from 'lit/directives/ref.js';
-import { AssetImportService } from '@/services/AssetImportService';
-import { IconService, IconSize } from '@/services/IconService';
+import { AssetImportService } from '@/services/assets/AssetImportService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import './pix3-asset-import-dialog.ts.css';
 
 interface StagedFile {

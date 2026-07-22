@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { SceneManager } from '@pix3/runtime';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { PrefabRefreshTracker } from '@/services/PrefabRefreshTracker';
-import { OperationService } from '@/services/OperationService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { PrefabRefreshTracker } from '@/services/scene/PrefabRefreshTracker';
+import { OperationService } from '@/services/core/OperationService';
 import { createInitialAppState } from '@/state/AppState';
 import { RefreshPrefabInstancesOperation } from './RefreshPrefabInstancesOperation';
 

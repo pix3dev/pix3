@@ -1,11 +1,11 @@
 import { ComponentBase, customElement, html, inject, state, unsafeCSS } from '@/fw';
 import { createCommandContext } from '@/core/command';
 import { ServiceContainer } from '@/fw/di';
-import { CommandRegistry } from '@/services/CommandRegistry';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { NodeRegistry } from '@/services/NodeRegistry';
-import { NodeTypePickerService } from '@/services/NodeTypePickerService';
-import { IconService, IconSize } from '@/services/IconService';
+import { CommandRegistry } from '@/services/core/CommandRegistry';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { NodeRegistry } from '@/services/scene/NodeRegistry';
+import { NodeTypePickerService } from '@/services/editor/NodeTypePickerService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { appState, getAppStateSnapshot } from '@/state';
 import styles from './pix3-main-menu.ts.css?raw';
 

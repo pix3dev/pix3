@@ -1,9 +1,9 @@
 import { ServiceContainer, ServiceLifetime } from '@/fw/di';
-import { ResourceManager } from '@/services/ResourceManager';
-import { CollaborationService } from '@/services/CollaborationService';
-import { AssetUploadService } from '@/services/AssetUploadService';
-import { SceneCRDTBinding } from '@/services/SceneCRDTBinding';
-import { CollabViewportOverlayService } from '@/services/CollabViewportOverlayService';
+import { ResourceManager } from '@/services/assets/ResourceManager';
+import { CollaborationService } from '@/services/collab/CollaborationService';
+import { AssetUploadService } from '@/services/cloud/AssetUploadService';
+import { SceneCRDTBinding } from '@/services/collab/SceneCRDTBinding';
+import { CollabViewportOverlayService } from '@/services/collab/CollabViewportOverlayService';
 import {
   AssetLoader,
   AudioService,

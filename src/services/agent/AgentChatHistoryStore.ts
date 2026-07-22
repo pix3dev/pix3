@@ -30,7 +30,7 @@ export interface AgentConversationMeta {
  * button starts another one instead of wiping the old. Content is plain JSON (text / tool-use /
  * tool-result blocks); tool images are not persisted.
  *
- * Mirrors the IndexedDB access pattern of {@link import('../GenerationHistoryService').GenerationHistoryService}.
+ * Mirrors the IndexedDB access pattern of {@link import('@/services/image-gen/GenerationHistoryService').GenerationHistoryService}.
  * When IndexedDB is unavailable (tests / private mode quirks) every method degrades to a no-op / empty
  * result and the active conversation lives in memory only. The v1→v2 upgrade migrates the old
  * single-per-project records (keyed by projectId) into the new multi-conversation store.

@@ -1,18 +1,21 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
-import { DialogService } from '@/services/DialogService';
-import { LoggingService } from '@/services/LoggingService';
+import { DialogService } from '@/services/editor/DialogService';
+import { LoggingService } from '@/services/core/LoggingService';
 import {
   BundleSizeService,
   formatByteSize,
   type BundleSizeReport,
   type BundleSizeCategory,
-} from '@/services/BundleSizeService';
-import { UpdateCheckService, type UpdateCheckState } from '@/services/UpdateCheckService';
+} from '@/services/export/BundleSizeService';
+import { UpdateCheckService, type UpdateCheckState } from '@/services/editor/UpdateCheckService';
 import {
   ProjectDiagnosticsService,
   type ScriptDiagnosticsSummary,
-} from '@/services/ProjectDiagnosticsService';
-import { TabPerformanceService, type TabPerformanceSample } from '@/services/TabPerformanceService';
+} from '@/services/scripting/ProjectDiagnosticsService';
+import {
+  TabPerformanceService,
+  type TabPerformanceSample,
+} from '@/services/editor/TabPerformanceService';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';

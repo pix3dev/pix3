@@ -2,11 +2,11 @@ import { ComponentBase, customElement, html, inject, state, subscribe } from '@/
 import { nothing } from 'lit';
 import './pix3-project-home.ts.css';
 import { appState } from '@/state';
-import { IconService } from '@/services/IconService';
-import { EditorTabService } from '@/services/EditorTabService';
+import { IconService } from '@/services/editor/IconService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 import { LayoutManagerService } from '@/core/LayoutManager';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
-import { DialogService } from '@/services/DialogService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { DialogService } from '@/services/editor/DialogService';
 import { AgentChatService } from '@/services/agent/AgentChatService';
 import {
   ProjectHomeService,
@@ -14,7 +14,7 @@ import {
   type HomeSceneEntry,
   type HomeChecklistItem,
   type ChecklistAction,
-} from '@/services/ProjectHomeService';
+} from '@/services/project/ProjectHomeService';
 
 const AGENT_CHIPS = [
   'Set up the main game loop',

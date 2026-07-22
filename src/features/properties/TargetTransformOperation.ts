@@ -10,7 +10,7 @@ import { Camera3D } from '@pix3/runtime';
 import { DirectionalLightNode } from '@pix3/runtime';
 import { SpotLightNode } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface TargetTransformParams {
   nodeId: string;

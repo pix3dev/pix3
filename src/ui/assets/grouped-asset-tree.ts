@@ -1,4 +1,4 @@
-import type { FileDescriptor } from '@/services/FileSystemAPIService';
+import type { FileDescriptor } from '@/services/project/FileSystemAPIService';
 import {
   ASSET_CATEGORIES,
   ASSET_CATEGORY_BY_ID,

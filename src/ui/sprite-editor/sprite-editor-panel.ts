@@ -2,24 +2,24 @@ import { ComponentBase, customElement, html, inject, property, state } from '@/f
 import { createRef, ref } from 'lit/directives/ref.js';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
-import { AiImageSettingsService } from '@/services/AiImageSettingsService';
+import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { ImageGenError, type AspectRatio } from '@/services/image-gen/ImageGenTypes';
 import {
   GenerationHistoryService,
   type GenerationRecord,
-} from '@/services/GenerationHistoryService';
+} from '@/services/image-gen/GenerationHistoryService';
 import {
   BackgroundRemovalService,
   type BgRemovalEngine,
   type BgRemovalProgress,
   type BgRemovalQuality,
-} from '@/services/BackgroundRemovalService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { EditorSettingsService } from '@/services/EditorSettingsService';
-import { IconService, IconSize } from '@/services/IconService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { AssetLibraryService } from '@/services/AssetLibraryService';
+} from '@/services/bg-removal/BackgroundRemovalService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { IconService, IconSize } from '@/services/editor/IconService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { AssetLibraryService } from '@/services/library/AssetLibraryService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import {
   getDroppedAssetResourcePath,

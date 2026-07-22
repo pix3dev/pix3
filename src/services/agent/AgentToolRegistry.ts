@@ -9,15 +9,18 @@ import {
   type NodeDTO,
   type NodeSummary,
 } from '@/core/agent-introspection';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { EditorTabService } from '@/services/EditorTabService';
-import { ProjectScriptLoaderService } from '@/services/ProjectScriptLoaderService';
-import { ScriptCompilerService, type CompilationError } from '@/services/ScriptCompilerService';
-import { CommandRegistry } from '@/services/CommandRegistry';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { LoggingService } from '@/services/LoggingService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
-import { AssetGenService, type AssetPostProcessPreset } from '@/services/AssetGenService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
+import {
+  ScriptCompilerService,
+  type CompilationError,
+} from '@/services/scripting/ScriptCompilerService';
+import { CommandRegistry } from '@/services/core/CommandRegistry';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { LoggingService } from '@/services/core/LoggingService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { AssetGenService, type AssetPostProcessPreset } from '@/services/image-gen/AssetGenService';
 import type { AlphaStats } from '@/services/image-gen/image-ops';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import {
@@ -25,11 +28,11 @@ import {
   type GameInputStep,
   type GameInputExpectation,
 } from '@/services/agent/GameInputService';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import type { CanvasScreenshot } from '@/core/canvas-screenshot';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
-import { ProjectDiagnosticsService } from '@/services/ProjectDiagnosticsService';
+import { ProjectDiagnosticsService } from '@/services/scripting/ProjectDiagnosticsService';
 import type { LlmImageBlock } from '@/services/llm/LlmTypes';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
@@ -446,7 +449,8 @@ export class AgentToolRegistry {
             },
             afterSiblingId: {
               type: 'string',
-              description: 'Place immediately after this sibling (drawn just on top of it, for 2D).',
+              description:
+                'Place immediately after this sibling (drawn just on top of it, for 2D).',
             },
             placement: {
               type: 'string',
@@ -581,7 +585,8 @@ export class AgentToolRegistry {
             },
             limit: {
               type: 'integer',
-              description: 'Maximum number of lines to return from `offset`. Omit to read to the end.',
+              description:
+                'Maximum number of lines to return from `offset`. Omit to read to the end.',
             },
           },
           required: ['path'],

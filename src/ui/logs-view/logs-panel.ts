@@ -1,6 +1,6 @@
 import { ComponentBase, customElement, html, inject, state, css, unsafeCSS } from '@/fw';
-import { LoggingService, type LogLevel, type LogEntry } from '@/services/LoggingService';
-import { IconService, IconSize } from '@/services/IconService';
+import { LoggingService, type LogLevel, type LogEntry } from '@/services/core/LoggingService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { AgentChatService } from '@/services/agent/AgentChatService';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import styles from './logs-panel.ts.css?raw';

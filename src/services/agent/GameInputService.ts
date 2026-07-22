@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { injectable, inject } from '@/fw/di';
 import { appState } from '@/state';
 import { errors as capturedErrors, safeSerialize, type Json } from '@/core/agent-introspection';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { NodeBase, getGameDebug, type SceneRunner } from '@pix3/runtime';
 import {
   NodeWatchRecorder,

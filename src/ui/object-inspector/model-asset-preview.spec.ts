@@ -11,12 +11,12 @@ const mockDisposeObject3DResources = vi.fn();
 const mockFramePerspectiveCameraToObject = vi.fn(() => ({ focusTargetY: 0, distance: 1 }));
 const mockLoadGltfFromBlob = vi.fn();
 
-vi.mock('@/services/ProjectStorageService', () => ({
+vi.mock('@/services/project/ProjectStorageService', () => ({
   ProjectStorageService: class ProjectStorageService {},
   resolveProjectStorageService: () => mockProjectStorageService,
 }));
 
-vi.mock('@/services/GltfBlobLoader', () => ({
+vi.mock('@/services/assets/GltfBlobLoader', () => ({
   createCenteredPreviewRoot: mockCreateCenteredPreviewRoot,
   disposeObject3DResources: mockDisposeObject3DResources,
   framePerspectiveCameraToObject: mockFramePerspectiveCameraToObject,

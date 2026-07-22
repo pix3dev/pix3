@@ -24,7 +24,7 @@ registerBuiltInScripts(registry);
 
 // Bridge runtime script/uncaught errors into the Logs panel and Game tab from
 // app start, so a broken script surfaces its error instead of failing silently.
-import { RuntimeErrorBridgeService } from './services/RuntimeErrorBridgeService';
+import { RuntimeErrorBridgeService } from '@/services/play/RuntimeErrorBridgeService';
 
 container
   .getService<RuntimeErrorBridgeService>(container.getOrCreateToken(RuntimeErrorBridgeService))
@@ -33,7 +33,7 @@ container
 // Type-check project scripts and surface errors (with file + line) in the Logs
 // panel — automatically after compiles / on play once the code editor is loaded,
 // and on demand via the `scripts.check` command.
-import { ProjectDiagnosticsService } from './services/ProjectDiagnosticsService';
+import { ProjectDiagnosticsService } from '@/services/scripting/ProjectDiagnosticsService';
 
 container
   .getService<ProjectDiagnosticsService>(container.getOrCreateToken(ProjectDiagnosticsService))
@@ -41,7 +41,7 @@ container
 
 // Keep the personal Asset Library mirrored to the cloud (sign-in, local edits, tab-focus).
 // Boot eagerly so sync runs even before the Library panel is opened.
-import { LibrarySyncService } from './services/LibrarySyncService';
+import { LibrarySyncService } from '@/services/library/LibrarySyncService';
 
 container
   .getService<LibrarySyncService>(container.getOrCreateToken(LibrarySyncService))

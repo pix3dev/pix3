@@ -1,5 +1,5 @@
 import { ComponentBase, customElement, html, property, state } from '@/fw';
-import type { DialogExpandableSection } from '@/services/DialogService';
+import type { DialogExpandableSection } from '@/services/editor/DialogService';
 import './pix3-confirm-dialog.ts.css';
 
 @customElement('pix3-confirm-dialog')

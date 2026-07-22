@@ -12,18 +12,21 @@ import type { PropertySchema, PropertyDefinition } from '@/fw';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { UpdateSprite2DSizeCommand } from '@/features/properties/UpdateSprite2DSizeCommand';
 import { CreateAndBindAnimationAssetCommand } from '@/features/scene/CreateAndBindAnimationAssetCommand';
-import { LocalizationEditorService } from '@/services/LocalizationEditorService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
-import { BehaviorPickerService } from '@/services/BehaviorPickerService';
-import { EffectPickerService } from '@/services/EffectPickerService';
-import { ScriptCreatorService } from '@/services/ScriptCreatorService';
+import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { BehaviorPickerService } from '@/services/editor/BehaviorPickerService';
+import { EffectPickerService } from '@/services/editor/EffectPickerService';
+import { ScriptCreatorService } from '@/services/scripting/ScriptCreatorService';
 import { ScriptRegistry } from '@pix3/runtime';
-import { IconService } from '@/services/IconService';
-import { DialogService } from '@/services/DialogService';
-import { FileSystemAPIService } from '@/services/FileSystemAPIService';
-import { AnimationEditorService } from '@/services/AnimationEditorService';
-import { AssetsPreviewService, type AssetPreviewItem } from '@/services/AssetsPreviewService';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
+import { IconService } from '@/services/editor/IconService';
+import { DialogService } from '@/services/editor/DialogService';
+import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { AnimationEditorService } from '@/services/animation/AnimationEditorService';
+import {
+  AssetsPreviewService,
+  type AssetPreviewItem,
+} from '@/services/assets/AssetsPreviewService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
   LibrarySelectionService,
   type LibrarySelection,
@@ -31,9 +34,9 @@ import {
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
-} from '@/services/AnimationEditorService';
-import { EditorTabService } from '@/services/EditorTabService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+} from '@/services/animation/AnimationEditorService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { normalizeAnimationAssetPath } from '@/features/scene/animation-asset-utils';

@@ -9,11 +9,11 @@ import {
   type ProfilerHistorySnapshot,
   type ProfilerPerformanceSnapshot,
   type ProfilerSessionSnapshot,
-} from '@/services/ProfilerSessionService';
+} from '@/services/play/ProfilerSessionService';
 import {
   RemotePreviewTelemetryService,
   type RemotePlayerTelemetry,
-} from '@/services/RemotePreviewTelemetryService';
+} from '@/services/play/RemotePreviewTelemetryService';
 import './profiler-panel.ts.css';
 import '../shared/pix3-panel';
 

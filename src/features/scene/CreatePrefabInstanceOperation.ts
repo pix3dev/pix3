@@ -8,7 +8,7 @@ import {
   type SceneNodeDefinition,
 } from '@pix3/runtime';
 import { Box3, Vector3 } from 'three';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { stringify } from 'yaml';
 
 export interface CreatePrefabInstanceOperationParams {

@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ProfilerSessionService,
   ProfilerSessionSnapshot,
-} from '@/services/ProfilerSessionService';
+} from '@/services/play/ProfilerSessionService';
 
-vi.mock('@/services/ProfilerSessionService', () => ({
+vi.mock('@/services/play/ProfilerSessionService', () => ({
   ProfilerSessionService: class ProfilerSessionService {},
 }));
-vi.mock('@/services/RemotePreviewTelemetryService', () => ({
+vi.mock('@/services/play/RemotePreviewTelemetryService', () => ({
   RemotePreviewTelemetryService: class RemotePreviewTelemetryService {},
 }));
 

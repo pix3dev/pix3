@@ -1,5 +1,5 @@
 import { CommandBase, type CommandExecutionResult, type CommandMetadata } from '@/core/command';
-import { GamePlaySessionService } from '@/services/GamePlaySessionService';
+import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 
 export class OpenGamePopoutWindowCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

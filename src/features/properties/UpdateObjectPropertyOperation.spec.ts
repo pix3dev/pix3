@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createInitialAppState } from '@/state/AppState';
 import { NodeBase, SceneManager, Sprite2D, registerRuntimeLivePropertySink } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { UpdateObjectPropertyOperation } from './UpdateObjectPropertyOperation';
 
 const createOperationContext = (node: NodeBase) => {

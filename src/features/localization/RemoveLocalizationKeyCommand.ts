@@ -5,8 +5,8 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { OperationService } from '@/services/OperationService';
-import type { LocaleTableSection } from '@/services/LocalizationEditorService';
+import { OperationService } from '@/services/core/OperationService';
+import type { LocaleTableSection } from '@/services/localization/LocalizationEditorService';
 import { RemoveLocalizationKeyOperation } from './RemoveLocalizationKeyOperation';
 
 export interface RemoveLocalizationKeyCommandParams {

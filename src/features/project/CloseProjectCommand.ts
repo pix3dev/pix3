@@ -6,7 +6,7 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { ProjectLifecycleService } from '@/services/ProjectLifecycleService';
+import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
 
 export class CloseProjectCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {

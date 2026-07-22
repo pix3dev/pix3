@@ -6,9 +6,9 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { DialogService } from '@/services/DialogService';
-import { LoggingService } from '@/services/LoggingService';
-import { ProjectLifecycleService } from '@/services/ProjectLifecycleService';
+import { DialogService } from '@/services/editor/DialogService';
+import { LoggingService } from '@/services/core/LoggingService';
+import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
 
 /**
  * Promotes an in-browser (OPFS) project to a real folder on disk, so a quick

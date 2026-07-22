@@ -6,7 +6,7 @@ import {
   type CanvasScreenshot,
   type CanvasScreenshotOptions,
 } from '@/core/canvas-screenshot';
-import type { FrameNodesOptions } from '../ViewportRenderService';
+import type { FrameNodesOptions } from '@/services/viewport/ViewportRenderService';
 
 /** Saved editor camera state for transient framed captures (see captureFramedScreenshot). */
 interface EditorCameraSnapshot {

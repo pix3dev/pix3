@@ -2,15 +2,15 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { query } from 'lit/decorators.js';
 import { nothing } from 'lit';
 import { appState } from '@/state';
-import { CollabSessionService } from '@/services/CollabSessionService';
-import { CloudProjectService } from '@/services/CloudProjectService';
-import { DialogService } from '@/services/DialogService';
-import * as ApiClient from '@/services/ApiClient';
+import { CollabSessionService } from '@/services/collab/CollabSessionService';
+import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { DialogService } from '@/services/editor/DialogService';
+import * as ApiClient from '@/services/cloud/ApiClient';
 import type {
   ApiAssignableProjectMemberRole,
   ApiProjectMember,
   ApiProjectUserSuggestion,
-} from '@/services/ApiClient';
+} from '@/services/cloud/ApiClient';
 import { subscribe } from 'valtio/vanilla';
 import './pix3-share-dialog.ts.css';
 

@@ -9,8 +9,8 @@ import { Texture } from 'three';
 import { GeometryMesh, SceneManager } from '@pix3/runtime';
 import type { Mesh } from 'three';
 import { appState } from '@/state';
-import { ProjectService } from '@/services/ProjectService';
-import { OperationService } from '@/services/OperationService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { OperationService } from '@/services/core/OperationService';
 import { AOBakeService, type AOBakeTarget } from '@/services/ao-bake/AOBakeService';
 import {
   BakeAmbientOcclusionOperation,

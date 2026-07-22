@@ -1,5 +1,5 @@
 import { inject } from '@/fw/di';
-import { EditorTabService } from '@/services/EditorTabService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '@/core/command';
 
 /**

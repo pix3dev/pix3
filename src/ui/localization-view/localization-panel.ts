@@ -3,17 +3,17 @@ import { repeat } from 'lit/directives/repeat.js';
 
 import { ComponentBase, customElement, html, state, inject } from '@/fw';
 import { appState } from '@/state';
-import { IconService, IconSize } from '@/services/IconService';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { IconService, IconSize } from '@/services/editor/IconService';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import {
   LocalizationEditorService,
   type LocaleTableSection,
-} from '@/services/LocalizationEditorService';
+} from '@/services/localization/LocalizationEditorService';
 import {
   LocalizationExtractionService,
   type MissingScriptKey,
   type UnlocalizedSceneLabel,
-} from '@/services/LocalizationExtractionService';
+} from '@/services/localization/LocalizationExtractionService';
 import { UpdateLocaleEntryCommand } from '@/features/localization/UpdateLocaleEntryCommand';
 import { RemoveLocalizationKeyCommand } from '@/features/localization/RemoveLocalizationKeyCommand';
 import { AddLocaleCommand } from '@/features/localization/AddLocaleCommand';

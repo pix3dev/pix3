@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createDefaultProjectManifest } from '@/core/ProjectManifest';
 import { createInitialAppState } from '@/state/AppState';
-import { ProjectService } from '@/services/ProjectService';
+import { ProjectService } from '@/services/project/ProjectService';
 import { UpdateProjectSettingsOperation } from './UpdateProjectSettingsOperation';
 
 describe('UpdateProjectSettingsOperation', () => {

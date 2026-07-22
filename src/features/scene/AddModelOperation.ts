@@ -6,7 +6,7 @@ import type {
 } from '@/core/Operation';
 import { AssetLoader, MeshInstance, Node3D, SceneManager } from '@pix3/runtime';
 import { Box3, Vector3 } from 'three';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import {
   insertNodeAtIndex,
   removeNodeFromSceneGraph,

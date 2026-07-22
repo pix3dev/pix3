@@ -6,8 +6,8 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { appState } from '@/state';
-import { ProjectService } from '@/services/ProjectService';
-import { OperationService } from '@/services/OperationService';
+import { ProjectService } from '@/services/project/ProjectService';
+import { OperationService } from '@/services/core/OperationService';
 import { ClearAmbientOcclusionOperation } from '@/features/render/ClearAmbientOcclusionOperation';
 
 /**

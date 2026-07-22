@@ -5,7 +5,7 @@ import {
   type CommandMetadata,
 } from '@/core/command';
 import { SceneManager } from '@pix3/runtime';
-import { OperationService } from '@/services/OperationService';
+import { OperationService } from '@/services/core/OperationService';
 import {
   UpdateSprite2DSizeOperation,
   type UpdateSprite2DSizeParams,

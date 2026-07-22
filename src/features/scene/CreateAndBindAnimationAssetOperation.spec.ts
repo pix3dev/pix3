@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OperationContext } from '@/core/Operation';
 import { createInitialAppState } from '@/state/AppState';
 import { AnimatedSprite2D, SceneManager } from '@pix3/runtime';
-import { ProjectStorageService } from '@/services/ProjectStorageService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { CreateAndBindAnimationAssetOperation } from './CreateAndBindAnimationAssetOperation';
 
 const PLAYER_ANIMATION_PATH = 'res://animations/player/player.pix3anim';

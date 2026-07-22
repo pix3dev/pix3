@@ -22,13 +22,13 @@
  */
 import { ServiceContainer } from '@/fw/di';
 import { appState } from '@/state';
-import { resolveCommandDispatcher } from '@/services/CommandDispatcher';
+import { resolveCommandDispatcher } from '@/services/core/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
-import { AssetGenService } from '@/services/AssetGenService';
+import { AssetGenService } from '@/services/image-gen/AssetGenService';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
-import { AgentSettingsService } from '@/services/AgentSettingsService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { AgentVisionService, type VisionHelperInfo } from '@/services/agent/AgentVisionService';
 import { AgentAdvisorService, type AdvisorInfo } from '@/services/agent/AgentAdvisorService';
 import { toBlocks, type LlmMessage } from '@/services/llm/LlmTypes';
@@ -41,7 +41,7 @@ import type {
   AssetGenSaveResult,
   AssetGenStatus,
   AssetImageMeta,
-} from '@/services/AssetGenService';
+} from '@/services/image-gen/AssetGenService';
 import type { CropRectPixels } from '@/services/image-gen/image-ops';
 import {
   clearErrors,

@@ -5,7 +5,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import { ComponentBase, customElement, html, state, inject } from '@/fw';
 import { appState } from '@/state';
 import { getRuntimeSceneRoot, SceneManager } from '@pix3/runtime';
-import { CommandDispatcher } from '@/services/CommandDispatcher';
+import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { selectObject } from '@/features/selection/SelectObjectCommand';
 
 import '../shared/pix3-panel';

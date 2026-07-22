@@ -7,8 +7,8 @@ import type {
 import {
   LocalizationEditorService,
   type LocaleTableSection,
-} from '@/services/LocalizationEditorService';
-import { ViewportRendererService } from '@/services/ViewportRenderService';
+} from '@/services/localization/LocalizationEditorService';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface RemoveLocalizationKeyParams {
   key: string;
