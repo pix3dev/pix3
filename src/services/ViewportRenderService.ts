@@ -10,6 +10,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { MathUtils } from 'three';
 import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
+import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
 import {
   computeFallbackFramingBounds,
   computeOrtho2DFitZoom,
@@ -80,11 +81,7 @@ import {
   parseAnimationResourceText,
 } from '@/features/scene/animation-asset-utils';
 import { resolveViewportClick } from '@/features/selection/SelectionScopeResolver';
-import {
-  encodeCanvasScreenshot,
-  type CanvasScreenshot,
-  type CanvasScreenshotOptions,
-} from '@/core/canvas-screenshot';
+import { type CanvasScreenshot, type CanvasScreenshotOptions } from '@/core/canvas-screenshot';
 import {
   TransformCompleteOperation,
   type TransformState,
@@ -184,17 +181,6 @@ export interface FrameNodesOptions {
    * (both render passes always run, so cross-mode capture works regardless).
    */
   switchNavigationMode?: boolean;
-}
-
-/** Saved editor camera state for transient framed captures (see captureFramedScreenshot). */
-interface EditorCameraSnapshot {
-  mainPos: THREE.Vector3;
-  mainQuat: THREE.Quaternion;
-  mainZoom: number;
-  orbitTarget?: THREE.Vector3;
-  orthoPos?: THREE.Vector3;
-  orthoZoom?: number;
-  orthoTarget?: THREE.Vector3;
 }
 
 @injectable()
@@ -313,6 +299,28 @@ export class ViewportRendererService {
   // Owns the GPU/CPU frame-timing concern. Reads the *current* renderer via a
   // getter since it's created lazily and can be re-created on viewport re-init.
   private readonly gpuTimer = new ViewportGpuTimer(() => this.renderer);
+  // Owns the screenshot / framed-capture concern. Wired via closures because the
+  // renderer/canvas/scene/camera are created lazily (viewport re-init) and the
+  // called methods (renderFrame, frameNodes, isVisibleInHierarchy,
+  // get2DVisualRoot, resolveSelectedFrameNodes) are used elsewhere and stay here.
+  private readonly screenshotter = new ViewportScreenshotter({
+    getRenderer: () => this.renderer,
+    getCanvas: () => this.canvas,
+    getScene: () => this.scene,
+    getCamera: () => this.camera,
+    getOrbitControls: () => this.orbitControls,
+    getOrthographicCamera: () => this.orthographicCamera,
+    getOrthographicControls: () => this.orthographicControls,
+    renderFrame: () => this.renderFrame(),
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    resolveSelectedFrameNodes: () => this.resolveSelectedFrameNodes(),
+    isVisibleInHierarchy: object => this.isVisibleInHierarchy(object),
+    frameNodes: (nodes, opts) => this.frameNodes(nodes, opts),
+    get2DVisualRoot: nodeId => this.get2DVisualRoot(nodeId),
+    setSuppressGizmosForCapture: value => {
+      this.suppressGizmosForCapture = value;
+    },
+  });
   /**
    * Editor appearance overrides a script pushed via `setAppearanceOverride`,
    * keyed by nodeId. `stamp` is the preview frame it was last pushed on;
@@ -656,32 +664,12 @@ export class ViewportRendererService {
     return this.canvas;
   }
 
-  /**
-   * Render one frame synchronously and copy the viewport canvas into an encoded image. The copy
-   * must happen in the same task as the render — the WebGL drawing buffer is not preserved across
-   * compositing (`preserveDrawingBuffer` is off), so reading the canvas later yields blank pixels.
-   * Returns null when the viewport is not initialized (no project / canvas yet).
-   */
+  /** Delegates to {@link ViewportScreenshotter.captureScreenshot}. */
   captureScreenshot(options: CanvasScreenshotOptions = {}): CanvasScreenshot | null {
-    if (!this.renderer || !this.canvas || !this.scene || !this.camera) {
-      return null;
-    }
-
-    this.renderFrame();
-    return encodeCanvasScreenshot(this.canvas, options);
+    return this.screenshotter.captureScreenshot(options);
   }
 
-  /**
-   * Capture the editor viewport with the camera transiently aimed at scene
-   * content, a selection, or a single node — then RESTORE the user's camera so a
-   * watching human's view is never disturbed. Framing, gizmo suppression and
-   * optional occluder isolation all happen inside one synchronous task (before the
-   * browser composites) so there is no visible flicker, even in a background tab.
-   *
-   * Returns a `{ error }` object for actionable failures (node not found /
-   * hidden / no frameable bounds), a `CanvasScreenshot` on success, or null when
-   * the viewport is not initialized.
-   */
+  /** Delegates to {@link ViewportScreenshotter.captureFramedScreenshot}. */
   captureFramedScreenshot(opts: {
     maxSize?: number;
     frame: 'all' | 'selection' | 'node';
@@ -689,159 +677,7 @@ export class ViewportRendererService {
     isolate?: boolean;
     paddingMultiplier?: number;
   }): CanvasScreenshot | { error: string } | null {
-    if (!this.renderer || !this.canvas || !this.scene || !this.camera) {
-      return null;
-    }
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      return { error: 'No active scene — open a scene first.' };
-    }
-
-    // Resolve the nodes to frame.
-    let targetNodes: NodeBase[];
-    if (opts.frame === 'all') {
-      targetNodes = sceneGraph.rootNodes.filter((n): n is NodeBase => n instanceof NodeBase);
-      if (targetNodes.length === 0) {
-        return { error: 'The scene is empty — nothing to frame.' };
-      }
-    } else if (opts.frame === 'selection') {
-      targetNodes = this.resolveSelectedFrameNodes();
-      if (targetNodes.length === 0) {
-        return { error: 'Nothing is selected — select a node or pass a nodeId.' };
-      }
-    } else {
-      const nodeId = opts.nodeId ?? '';
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (!(node instanceof NodeBase)) {
-        return { error: `No node with id "${nodeId}" (use find_nodes / scene_tree to get ids).` };
-      }
-      targetNodes = [node];
-    }
-
-    // A framed shot of a fully hidden node is blank pixels — say so instead.
-    if (opts.frame !== 'all' && !targetNodes.some(n => this.isVisibleInHierarchy(n))) {
-      return {
-        error: 'The target node is hidden (visible:false) — nothing would be captured.',
-      };
-    }
-
-    const snapshot = this.snapshotEditorCameras();
-    this.suppressGizmosForCapture = true;
-    try {
-      const framed = this.frameNodes(targetNodes, {
-        persist: false,
-        paddingMultiplier: opts.paddingMultiplier,
-      });
-      if (!framed) {
-        return { error: 'Could not compute bounds for the target(s).' };
-      }
-
-      const renderAndEncode = (): CanvasScreenshot | { error: string } => {
-        this.renderFrame();
-        const shot = encodeCanvasScreenshot(this.canvas!, { maxSize: opts.maxSize });
-        return shot ?? { error: 'Failed to encode the viewport image.' };
-      };
-
-      if (opts.isolate && opts.frame !== 'all') {
-        return this.withNodeIsolation(targetNodes, renderAndEncode);
-      }
-      return renderAndEncode();
-    } finally {
-      this.suppressGizmosForCapture = false;
-      this.restoreEditorCameras(snapshot);
-      // Repaint the restored view now so the framed frame never lingers on screen.
-      this.renderFrame();
-    }
-  }
-
-  private snapshotEditorCameras(): EditorCameraSnapshot {
-    return {
-      mainPos: this.camera!.position.clone(),
-      mainQuat: this.camera!.quaternion.clone(),
-      mainZoom: this.camera!.zoom,
-      orbitTarget: this.orbitControls?.target.clone(),
-      orthoPos: this.orthographicCamera?.position.clone(),
-      orthoZoom: this.orthographicCamera?.zoom,
-      orthoTarget: this.orthographicControls?.target.clone(),
-    };
-  }
-
-  private restoreEditorCameras(s: EditorCameraSnapshot): void {
-    if (this.camera) {
-      this.camera.position.copy(s.mainPos);
-      this.camera.quaternion.copy(s.mainQuat);
-      this.camera.zoom = s.mainZoom;
-      this.camera.updateProjectionMatrix();
-    }
-    if (this.orbitControls && s.orbitTarget) {
-      this.orbitControls.target.copy(s.orbitTarget);
-      this.orbitControls.update();
-    }
-    if (this.orthographicCamera && s.orthoPos && s.orthoZoom !== undefined) {
-      this.orthographicCamera.position.copy(s.orthoPos);
-      this.orthographicCamera.zoom = s.orthoZoom;
-      this.orthographicCamera.updateProjectionMatrix();
-    }
-    if (this.orthographicControls && s.orthoTarget) {
-      this.orthographicControls.target.copy(s.orthoTarget);
-    }
-  }
-
-  /**
-   * Run `fn` with every node OUTSIDE the keep-set (the targets, their descendants
-   * and their ancestors) hidden, then restore original visibility. Used to capture
-   * a node unobstructed by foreground content. 3D nodes are hidden by their own
-   * `visible` flag (hides the subtree); 2D nodes by hiding their proxy visual root
-   * (the editor draws proxies, not the runtime nodes). Ancestors stay visible so
-   * inherited transforms and nested 2D visual roots survive.
-   */
-  private withNodeIsolation<T>(keepNodes: readonly NodeBase[], fn: () => T): T {
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) return fn();
-
-    const keep = new Set<NodeBase>();
-    const addSubtree = (node: NodeBase): void => {
-      keep.add(node);
-      for (const child of node.children) {
-        if (child instanceof NodeBase) addSubtree(child);
-      }
-    };
-    const ancestors = new Set<NodeBase>();
-    for (const node of keepNodes) {
-      addSubtree(node);
-      let parent = node.parent;
-      while (parent instanceof NodeBase) {
-        ancestors.add(parent);
-        parent = parent.parent;
-      }
-    }
-
-    const saved = new Map<THREE.Object3D, boolean>();
-    const hide = (obj: THREE.Object3D): void => {
-      if (!saved.has(obj)) saved.set(obj, obj.visible);
-      obj.visible = false;
-    };
-
-    for (const node of sceneGraph.nodeMap.values()) {
-      if (!(node instanceof NodeBase) || keep.has(node) || ancestors.has(node)) {
-        continue;
-      }
-      // 3D subtree hides via inherited visibility on the node object itself.
-      hide(node);
-      // 2D nodes render as separate proxy visuals — hide the proxy root too.
-      if (node instanceof Node2D) {
-        const visualRoot = this.get2DVisualRoot(node.nodeId);
-        if (visualRoot) hide(visualRoot);
-      }
-    }
-
-    try {
-      return fn();
-    } finally {
-      for (const [obj, visible] of saved) {
-        obj.visible = visible;
-      }
-    }
+    return this.screenshotter.captureFramedScreenshot(opts);
   }
 
   /**
