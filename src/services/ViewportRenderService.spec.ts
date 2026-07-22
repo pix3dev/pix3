@@ -351,17 +351,18 @@ describe('ViewportRendererService', () => {
       configurable: true,
     });
 
-    (service as unknown as { nodeIcons: Map<string, THREE.Sprite> }).nodeIcons.set(
-      cameraNode.nodeId,
-      icon
-    );
+    const adornments = (
+      service as unknown as {
+        adornments: {
+          nodeIcons: Map<string, THREE.Sprite>;
+          updateNodeIconVisibility: () => void;
+        };
+      }
+    ).adornments;
+    adornments.nodeIcons.set(cameraNode.nodeId, icon);
     appState.selection.nodeIds = [cameraNode.nodeId];
 
-    (
-      service as unknown as {
-        updateNodeIconVisibility: () => void;
-      }
-    ).updateNodeIconVisibility();
+    adornments.updateNodeIconVisibility();
 
     expect(icon.visible).toBe(true);
     expect((icon.material as THREE.SpriteMaterial).opacity).toBeLessThan(0.95);
@@ -933,14 +934,16 @@ describe('ViewportRendererService', () => {
     });
 
     const updateNodeTransform = vi.spyOn(service, 'updateNodeTransform');
-    const updateNodeIconPositions = vi.spyOn(
-      service as unknown as { updateNodeIconPositions: () => void },
-      'updateNodeIconPositions'
-    );
-    const updateNodeIconVisibility = vi.spyOn(
-      service as unknown as { updateNodeIconVisibility: () => void },
-      'updateNodeIconVisibility'
-    );
+    const adornments = (
+      service as unknown as {
+        adornments: {
+          updateNodeIconPositions: () => void;
+          updateNodeIconVisibility: () => void;
+        };
+      }
+    ).adornments;
+    const updateNodeIconPositions = vi.spyOn(adornments, 'updateNodeIconPositions');
+    const updateNodeIconVisibility = vi.spyOn(adornments, 'updateNodeIconVisibility');
 
     (
       service as unknown as {

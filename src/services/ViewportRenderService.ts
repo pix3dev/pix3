@@ -14,9 +14,9 @@ import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
 import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOverlayHud';
 import { ViewportPreviewTicker } from './viewport/ViewportPreviewTicker';
 import { Viewport3DContentSync } from './viewport/Viewport3DContentSync';
+import { ViewportAdornments } from './viewport/ViewportAdornments';
 import {
   Viewport2DProxyRegistry,
-  configureSpriteTexture,
   getFrameThicknessWorldPx,
 } from './viewport/Viewport2DProxyRegistry';
 import {
@@ -91,7 +91,6 @@ const EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT = 12;
 const LAYER_3D = 0;
 const LAYER_2D = 1;
 const LAYER_GIZMOS = 2;
-const TARGET_DIRECTION_RAY_LENGTH = 500;
 /** sRGB of the canvas backdrop token oklch(0.13 0.008 250) — keep in sync with src/index.css .viewport-grid. */
 const VIEWPORT_BACKGROUND_COLOR = 0x05080a;
 /** sRGB of the accent token oklch(0.8 0.15 75) — keep in sync with --accent in src/index.css. */
@@ -101,8 +100,6 @@ const DEFAULT_VIEWPORT_BASE_HEIGHT = 1080;
 const DEFAULT_3D_CAMERA_POSITION = new THREE.Vector3(5, 5, 5);
 const DEFAULT_3D_CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
 const DEFAULT_2D_CAMERA_Z = 100;
-const DEFAULT_NODE_ICON_OPACITY = 0.95;
-const SELECTED_NODE_ICON_OPACITY = 0.38;
 const MIN_WORLD_BOUNDS_SIZE = 0.0001;
 const TWO_D_DEFAULT_VIEW_PADDING_MULTIPLIER = 1.25;
 const TWO_D_FIT_PADDING_MULTIPLIER = 1.15;
@@ -180,9 +177,6 @@ export class ViewportRendererService {
   private transformGizmo?: THREE.Object3D;
   private currentTransformMode: TransformMode = 'select';
   private selectedObjects = new Set<THREE.Object3D>();
-  private selectionBoxes = new Map<string, THREE.Box3Helper>();
-  private selectionGizmos = new Map<string, THREE.Object3D>();
-  private targetGizmos = new Map<string, THREE.Object3D>();
   private previewCamera: THREE.Camera | null = null;
   /** Lazily created post-processing composer (only while a PostProcess node is
    * active). Editor previews the 3D band through it; 2D content and adornments
@@ -201,10 +195,6 @@ export class ViewportRendererService {
   private gridHelper?: THREE.GridHelper;
   private editorAmbientLight?: THREE.AmbientLight;
   private editorDirectionalLight?: THREE.DirectionalLight;
-  private nodeIcons = new Map<string, THREE.Sprite>();
-  private cameraIconTexture?: THREE.Texture;
-  private lampIconTexture?: THREE.Texture;
-  private particlesIconTexture?: THREE.Texture;
   private transformStartStates = new Map<
     string,
     { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }
@@ -314,6 +304,19 @@ export class ViewportRendererService {
     getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
     readBlob: path => this.resourceManager.readBlob(path),
     requestRender: () => this.requestRender(),
+  });
+  // Owns the 3D editor gizmo/icon subsystem: selection boxes, per-type selection
+  // gizmos, camera/light target gizmos, and camera/light/particle billboard
+  // icons. Wired via closures so it never reaches back into the facade directly;
+  // its public maps are still read/written by the facade's selection dispatchers.
+  private readonly adornments = new ViewportAdornments({
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    getScene: () => this.scene,
+    isLayer3DVisible: () => this.isLayer3DVisible(),
+    shouldKeepSelectedNodeIcon: node => this.shouldKeepSelectedNodeIcon(node),
+    getActiveTargetNodeId: () => this.activeTargetNodeId,
+    getActiveTargetDragNodeId: () => this.activeTargetDragNodeId,
+    getTransformControlObject: () => this.transformControls?.object,
   });
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
@@ -561,7 +564,7 @@ export class ViewportRendererService {
       this.syncLighting();
       this.syncEditorCameraProjection();
       this.syncBaseViewportFrame();
-      this.updateNodeIconVisibility();
+      this.adornments.updateNodeIconVisibility();
       this.handleFocusPause();
       this.requestRender();
     });
@@ -724,7 +727,7 @@ export class ViewportRendererService {
           }
         });
         this.transformControls.addEventListener('objectChange', () => {
-          this.updateSelectionBoxes();
+          this.adornments.updateSelectionBoxes();
           this.updateTargetTransformFromControl();
         });
         this.transformControls.addEventListener('mouseUp', () => {
@@ -965,7 +968,7 @@ export class ViewportRendererService {
     });
 
     this.transformControls.addEventListener('objectChange', () => {
-      this.updateSelectionBoxes();
+      this.adornments.updateSelectionBoxes();
       this.updateTargetTransformFromControl();
     });
 
@@ -1098,52 +1101,6 @@ export class ViewportRendererService {
       node instanceof AmbientLightNode ||
       node instanceof HemisphereLightNode
     );
-  }
-
-  private ensureNodeIconTextures(): void {
-    if (!this.cameraIconTexture) {
-      new THREE.TextureLoader().load('/cam.png', texture => {
-        configureSpriteTexture(texture);
-        this.cameraIconTexture = texture;
-        this.refreshNodeIconMaterials('camera');
-      });
-    }
-    if (!this.lampIconTexture) {
-      new THREE.TextureLoader().load('/lamp.png', texture => {
-        configureSpriteTexture(texture);
-        this.lampIconTexture = texture;
-        this.refreshNodeIconMaterials('light');
-      });
-    }
-    if (!this.particlesIconTexture) {
-      new THREE.TextureLoader().load('/particles.png', texture => {
-        configureSpriteTexture(texture);
-        this.particlesIconTexture = texture;
-        this.refreshNodeIconMaterials('particles');
-      });
-    }
-  }
-
-  private refreshNodeIconMaterials(kind: 'camera' | 'light' | 'particles'): void {
-    for (const icon of this.nodeIcons.values()) {
-      const iconKind =
-        (icon.userData.iconKind as 'camera' | 'light' | 'particles' | undefined) ?? undefined;
-      if (iconKind !== kind) {
-        continue;
-      }
-
-      if (icon.material instanceof THREE.SpriteMaterial) {
-        if (kind === 'camera') {
-          icon.material.map = this.cameraIconTexture ?? null;
-        } else if (kind === 'light') {
-          icon.material.map = this.lampIconTexture ?? null;
-        } else {
-          icon.material.map = this.particlesIconTexture ?? null;
-        }
-        icon.material.opacity = DEFAULT_NODE_ICON_OPACITY;
-        icon.material.needsUpdate = true;
-      }
-    }
   }
 
   zoomDefault(): void {
@@ -3001,7 +2958,7 @@ export class ViewportRendererService {
   }
 
   private raycastNodeIcon(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.nodeIcons.size === 0 || !this.isLayer3DVisible()) {
+    if (!this.camera || this.adornments.nodeIcons.size === 0 || !this.isLayer3DVisible()) {
       return null;
     }
 
@@ -3013,7 +2970,7 @@ export class ViewportRendererService {
     mouse.y = -(screenY * 2 - 1);
     raycaster.setFromCamera(mouse, this.camera);
 
-    const icons = Array.from(this.nodeIcons.values()).filter(icon => icon.visible);
+    const icons = Array.from(this.adornments.nodeIcons.values()).filter(icon => icon.visible);
     if (!icons.length) {
       return null;
     }
@@ -3028,7 +2985,7 @@ export class ViewportRendererService {
   }
 
   private raycastTargetSphere(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.targetGizmos.size === 0 || !this.isLayer3DVisible()) {
+    if (!this.camera || this.adornments.targetGizmos.size === 0 || !this.isLayer3DVisible()) {
       return null;
     }
 
@@ -3041,7 +2998,7 @@ export class ViewportRendererService {
     raycaster.setFromCamera(mouse, this.camera);
 
     const targetSpheres: THREE.Object3D[] = [];
-    for (const gizmo of this.targetGizmos.values()) {
+    for (const gizmo of this.adornments.targetGizmos.values()) {
       gizmo.traverse(child => {
         if (child.userData.isTargetSphere && child.visible) {
           targetSpheres.push(child);
@@ -3277,7 +3234,7 @@ export class ViewportRendererService {
       }
 
       // Update gizmo if it exists
-      const gizmo = this.selectionGizmos.get(node.nodeId);
+      const gizmo = this.adornments.selectionGizmos.get(node.nodeId);
       if (gizmo) {
         node.updateMatrixWorld(true);
 
@@ -3514,7 +3471,7 @@ export class ViewportRendererService {
     }
 
     // Clear previous selection boxes and dispose their Three.js resources
-    for (const box of this.selectionBoxes.values()) {
+    for (const box of this.adornments.selectionBoxes.values()) {
       if (this.scene) {
         this.scene.remove(box);
       }
@@ -3524,10 +3481,10 @@ export class ViewportRendererService {
         box.material.dispose();
       }
     }
-    this.selectionBoxes.clear();
+    this.adornments.selectionBoxes.clear();
 
     // Clear previous selection gizmos
-    for (const gizmo of this.selectionGizmos.values()) {
+    for (const gizmo of this.adornments.selectionGizmos.values()) {
       if (this.scene) {
         this.scene.remove(gizmo);
       }
@@ -3540,10 +3497,10 @@ export class ViewportRendererService {
         }
       });
     }
-    this.selectionGizmos.clear();
+    this.adornments.selectionGizmos.clear();
 
     // Clear previous target gizmos
-    for (const gizmo of this.targetGizmos.values()) {
+    for (const gizmo of this.adornments.targetGizmos.values()) {
       if (this.scene) {
         this.scene.remove(gizmo);
       }
@@ -3556,7 +3513,7 @@ export class ViewportRendererService {
         }
       });
     }
-    this.targetGizmos.clear();
+    this.adornments.targetGizmos.clear();
 
     // Extra safety: remove any lingering selection boxes from the scene
     // (in case of reference mismatches)
@@ -3630,30 +3587,30 @@ export class ViewportRendererService {
           helper.traverse(child => {
             child.layers.set(LAYER_GIZMOS);
           });
-          this.selectionBoxes.set(nodeId, helper);
+          this.adornments.selectionBoxes.set(nodeId, helper);
           this.scene?.add(helper);
         }
 
         // Create custom gizmos for specific node types
-        const gizmo = this.createNodeGizmo(node);
+        const gizmo = this.adornments.createNodeGizmo(node);
         if (gizmo) {
           gizmo.userData.isSelectionGizmo = true;
           gizmo.layers.set(LAYER_GIZMOS);
           gizmo.traverse(child => {
             child.layers.set(LAYER_GIZMOS);
           });
-          this.selectionGizmos.set(nodeId, gizmo);
+          this.adornments.selectionGizmos.set(nodeId, gizmo);
           this.scene?.add(gizmo);
         }
 
         // Create target gizmos for cameras and directional lights
-        const targetGizmo = this.createTargetGizmo(node);
+        const targetGizmo = this.adornments.createTargetGizmo(node);
         if (targetGizmo) {
           targetGizmo.userData.isTargetGizmo = true;
           targetGizmo.traverse(child => {
             child.layers.set(LAYER_GIZMOS);
           });
-          this.targetGizmos.set(nodeId, targetGizmo);
+          this.adornments.targetGizmos.set(nodeId, targetGizmo);
           this.scene?.add(targetGizmo);
         }
       } else if (node && node instanceof Node2D) {
@@ -3668,7 +3625,7 @@ export class ViewportRendererService {
     } else {
       this.clear2DSelectionOverlay();
     }
-    this.updateNodeIconVisibility();
+    this.adornments.updateNodeIconVisibility();
     this.proxyRegistry.updateSprite2DAnchorMarkerVisibility();
 
     this.attachTransformControlsForSelection(firstSelectedNode);
@@ -3711,7 +3668,7 @@ export class ViewportRendererService {
         nodeToAttach instanceof SpotLightNode);
 
     if (shouldAttachTarget) {
-      const targetSphere = this.getTargetSphere(nodeToAttach.nodeId);
+      const targetSphere = this.adornments.getTargetSphere(nodeToAttach.nodeId);
       if (targetSphere) {
         transformObject = targetSphere;
       } else {
@@ -3823,7 +3780,7 @@ export class ViewportRendererService {
         this.disposeObject3D(visual);
       }
       this.proxyRegistry.uiControl2DVisuals.clear();
-      this.clearNodeIcons();
+      this.adornments.clearNodeIcons();
 
       // Remove all root nodes from scene (except lights and helpers)
       const objectsToRemove: THREE.Object3D[] = [];
@@ -3842,7 +3799,7 @@ export class ViewportRendererService {
       });
       this.syncLighting();
       this.syncBaseViewportFrame();
-      this.buildNodeIcons(sceneGraph.rootNodes);
+      this.adornments.buildNodeIcons(sceneGraph.rootNodes);
 
       this.updateSelection();
 
@@ -3871,8 +3828,8 @@ export class ViewportRendererService {
     };
 
     visit(sceneGraph.rootNodes);
-    this.updateNodeIconPositions();
-    this.updateNodeIconVisibility();
+    this.adornments.updateNodeIconPositions();
+    this.adornments.updateNodeIconVisibility();
   }
 
   /**
@@ -3959,393 +3916,6 @@ export class ViewportRendererService {
     }
   }
 
-  private clearNodeIcons(): void {
-    for (const icon of this.nodeIcons.values()) {
-      if (icon.parent) {
-        icon.parent.remove(icon);
-      }
-      if (icon.material instanceof THREE.SpriteMaterial) {
-        icon.material.dispose();
-      }
-    }
-    this.nodeIcons.clear();
-  }
-
-  private buildNodeIcons(nodes: NodeBase[]): void {
-    if (!this.scene) {
-      return;
-    }
-
-    this.ensureNodeIconTextures();
-
-    const addIconForNode = (node: NodeBase) => {
-      if (!(node instanceof Node3D)) {
-        return;
-      }
-
-      const isCamera = node instanceof Camera3D || node instanceof VirtualCamera3D;
-      const isLight =
-        node instanceof DirectionalLightNode ||
-        node instanceof PointLightNode ||
-        node instanceof SpotLightNode;
-      const isParticles = node instanceof Particles3D;
-
-      if (!isCamera && !isLight && !isParticles) {
-        return;
-      }
-
-      const material = new THREE.SpriteMaterial({
-        map: isCamera
-          ? (this.cameraIconTexture ?? null)
-          : isLight
-            ? (this.lampIconTexture ?? null)
-            : (this.particlesIconTexture ?? null),
-        color: 0xffffff,
-        transparent: true,
-        opacity: DEFAULT_NODE_ICON_OPACITY,
-        depthTest: false,
-        depthWrite: false,
-        sizeAttenuation: false,
-      });
-
-      const icon = new THREE.Sprite(material);
-      icon.scale.set(0.15, 0.15, 0.15);
-      icon.layers.set(LAYER_GIZMOS);
-      icon.renderOrder = 999;
-      icon.userData.nodeId = node.nodeId;
-      icon.userData.iconKind = isCamera ? 'camera' : isLight ? 'light' : 'particles';
-      this.nodeIcons.set(node.nodeId, icon);
-      this.scene?.add(icon);
-    };
-
-    const traverse = (roots: NodeBase[]) => {
-      for (const node of roots) {
-        addIconForNode(node);
-        if (node.children.length > 0) {
-          const childNodes = node.children.filter(
-            (child): child is NodeBase => child instanceof NodeBase
-          );
-          traverse(childNodes);
-        }
-      }
-    };
-
-    traverse(nodes);
-    this.updateNodeIconPositions();
-    this.updateNodeIconVisibility();
-  }
-
-  private updateNodeIconPositions(): void {
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      return;
-    }
-
-    const worldPos = new THREE.Vector3();
-    for (const [nodeId, icon] of this.nodeIcons.entries()) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (!(node instanceof Node3D)) {
-        icon.visible = false;
-        continue;
-      }
-      node.updateMatrixWorld(true);
-      node.getWorldPosition(worldPos);
-      icon.position.copy(worldPos);
-    }
-  }
-
-  private updateNodeIconVisibility(): void {
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      return;
-    }
-
-    const selectedNodeIds = new Set(appState.selection.nodeIds);
-    for (const [nodeId, icon] of this.nodeIcons.entries()) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      const isSelected = selectedNodeIds.has(nodeId);
-      const keepVisibleWhenSelected =
-        node instanceof Node3D && this.shouldKeepSelectedNodeIcon(node);
-      const shouldShow =
-        this.isLayer3DVisible() &&
-        node instanceof Node3D &&
-        node.visible &&
-        (!isSelected || keepVisibleWhenSelected);
-
-      icon.visible = shouldShow;
-
-      if (icon.material instanceof THREE.SpriteMaterial) {
-        icon.material.opacity =
-          isSelected && keepVisibleWhenSelected
-            ? SELECTED_NODE_ICON_OPACITY
-            : DEFAULT_NODE_ICON_OPACITY;
-        icon.material.needsUpdate = true;
-      }
-    }
-  }
-
-  private createNodeGizmo(node: Node3D): THREE.Object3D | null {
-    if (node instanceof Camera3D) {
-      return this.createCameraGizmo(node);
-    } else if (node instanceof DirectionalLightNode) {
-      return this.createDirectionalLightGizmo(node);
-    } else if (node instanceof PointLightNode) {
-      return this.createPointLightGizmo(node);
-    } else if (node instanceof SpotLightNode) {
-      return this.createSpotLightGizmo(node);
-    }
-    return null;
-  }
-
-  private createCameraGizmo(node: Camera3D): THREE.Object3D {
-    const helper = new THREE.CameraHelper(node.camera);
-    helper.update();
-    return helper;
-  }
-
-  private createDirectionalLightGizmo(node: DirectionalLightNode): THREE.Object3D {
-    const helper = new THREE.DirectionalLightHelper(node.light, 1);
-    helper.update();
-    return helper;
-  }
-
-  private createPointLightGizmo(node: PointLightNode): THREE.Object3D {
-    const helper = new THREE.PointLightHelper(node.light, 0.5);
-    node.updateMatrixWorld(true);
-    node.getWorldPosition(helper.position);
-    helper.update();
-    return helper;
-  }
-
-  private createSpotLightGizmo(node: SpotLightNode): THREE.Object3D {
-    const helper = new THREE.SpotLightHelper(node.light);
-    helper.update();
-    return helper;
-  }
-
-  private createTargetGizmo(node: Node3D): THREE.Object3D | null {
-    if (node instanceof Camera3D) {
-      return this.createCameraTargetGizmo(node);
-    } else if (node instanceof DirectionalLightNode || node instanceof SpotLightNode) {
-      return this.createLightTargetGizmo(node);
-    }
-    return null;
-  }
-
-  private createCameraTargetGizmo(node: Camera3D): THREE.Object3D {
-    const targetPos = node.getTargetPosition();
-    const nodeWorldPos = node.getWorldPosition(new THREE.Vector3());
-    const rawDirection = targetPos.clone().sub(nodeWorldPos);
-    const direction =
-      rawDirection.lengthSq() > 1e-8
-        ? rawDirection.normalize()
-        : new THREE.Vector3(0, 0, -1).applyQuaternion(
-            node.getWorldQuaternion(new THREE.Quaternion())
-          );
-    const farPos = nodeWorldPos.clone().add(direction.multiplyScalar(TARGET_DIRECTION_RAY_LENGTH));
-    const gizmo = new THREE.Group();
-    gizmo.userData.isTargetGizmo = true;
-    gizmo.userData.parentNodeId = node.nodeId;
-
-    const sphere = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2, 16, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.8,
-      })
-    );
-    sphere.position.copy(targetPos);
-    sphere.userData.isTargetSphere = true;
-    sphere.userData.parentNodeId = node.nodeId;
-    gizmo.add(sphere);
-
-    const outline = new THREE.Mesh(
-      new THREE.SphereGeometry(0.24, 16, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        wireframe: true,
-        visible: false,
-      })
-    );
-    outline.position.copy(targetPos);
-    outline.userData.isTargetOutline = true;
-    gizmo.add(outline);
-
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([nodeWorldPos, farPos]),
-      new THREE.LineBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.5,
-      })
-    );
-    line.userData.isTargetLine = true;
-    line.userData.parentNodeId = node.nodeId;
-    line.userData.rayLength = TARGET_DIRECTION_RAY_LENGTH;
-    gizmo.add(line);
-
-    this.updateTargetGizmoSelectionState(gizmo, node.nodeId);
-    return gizmo;
-  }
-
-  private createLightTargetGizmo(node: DirectionalLightNode | SpotLightNode): THREE.Object3D {
-    const targetPos = node.getTargetPosition();
-    const nodeWorldPos = node.getWorldPosition(new THREE.Vector3());
-    const rawDirection = targetPos.clone().sub(nodeWorldPos);
-    const direction =
-      rawDirection.lengthSq() > 1e-8
-        ? rawDirection.normalize()
-        : new THREE.Vector3(0, 0, -1).applyQuaternion(
-            node.getWorldQuaternion(new THREE.Quaternion())
-          );
-    const farPos = nodeWorldPos.clone().add(direction.multiplyScalar(TARGET_DIRECTION_RAY_LENGTH));
-    const gizmo = new THREE.Group();
-    gizmo.userData.isTargetGizmo = true;
-    gizmo.userData.parentNodeId = node.nodeId;
-
-    const sphere = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2, 16, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.8,
-      })
-    );
-    sphere.position.copy(targetPos);
-    sphere.userData.isTargetSphere = true;
-    sphere.userData.parentNodeId = node.nodeId;
-    gizmo.add(sphere);
-
-    const outline = new THREE.Mesh(
-      new THREE.SphereGeometry(0.24, 16, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffff,
-        wireframe: true,
-        visible: false,
-      })
-    );
-    outline.position.copy(targetPos);
-    outline.userData.isTargetOutline = true;
-    gizmo.add(outline);
-
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([nodeWorldPos, farPos]),
-      new THREE.LineBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 0.5,
-      })
-    );
-    line.userData.isTargetLine = true;
-    line.userData.parentNodeId = node.nodeId;
-    line.userData.rayLength = TARGET_DIRECTION_RAY_LENGTH;
-    gizmo.add(line);
-
-    this.updateTargetGizmoSelectionState(gizmo, node.nodeId);
-    return gizmo;
-  }
-
-  private updateTargetGizmo(node: Node3D, gizmo: THREE.Object3D): void {
-    let cameraNode: Camera3D | DirectionalLightNode | SpotLightNode | null = null;
-    if (node instanceof Camera3D) {
-      cameraNode = node;
-    } else if (node instanceof DirectionalLightNode || node instanceof SpotLightNode) {
-      cameraNode = node;
-    }
-    if (!cameraNode) return;
-
-    let targetPos = cameraNode.getTargetPosition();
-    if (
-      this.activeTargetDragNodeId === node.nodeId &&
-      this.transformControls?.object &&
-      this.getTargetNodeForObject(this.transformControls.object)?.nodeId === node.nodeId
-    ) {
-      targetPos = this.transformControls.object.getWorldPosition(new THREE.Vector3());
-    }
-    const nodeWorldPos = node.getWorldPosition(new THREE.Vector3());
-    const rawDirection = targetPos.clone().sub(nodeWorldPos);
-    const fallbackAxisZ = -1;
-    const direction =
-      rawDirection.lengthSq() > 1e-8
-        ? rawDirection.normalize()
-        : new THREE.Vector3(0, 0, fallbackAxisZ).applyQuaternion(
-            node.getWorldQuaternion(new THREE.Quaternion())
-          );
-
-    gizmo.traverse(child => {
-      if (child.userData.isTargetSphere || child.userData.isTargetOutline) {
-        child.position.copy(targetPos);
-      } else if (child.userData.isTargetLine) {
-        const rayLength = child.userData.rayLength as number | undefined;
-        const lineEndPos =
-          typeof rayLength === 'number'
-            ? nodeWorldPos.clone().add(direction.clone().multiplyScalar(rayLength))
-            : targetPos;
-        const positions = new Float32Array([
-          nodeWorldPos.x,
-          nodeWorldPos.y,
-          nodeWorldPos.z,
-          lineEndPos.x,
-          lineEndPos.y,
-          lineEndPos.z,
-        ]);
-        const geo = (child as THREE.Mesh).geometry as THREE.BufferGeometry;
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      }
-    });
-
-    this.updateTargetGizmoSelectionState(gizmo, node.nodeId);
-  }
-
-  private getTargetSphere(nodeId: string): THREE.Object3D | null {
-    const gizmo = this.targetGizmos.get(nodeId);
-    if (!gizmo) {
-      return null;
-    }
-
-    let sphere: THREE.Object3D | null = null;
-    gizmo.traverse(child => {
-      if (!sphere && child.userData.isTargetSphere) {
-        sphere = child;
-      }
-    });
-    return sphere;
-  }
-
-  private getTargetNodeForObject(
-    object: THREE.Object3D
-  ): Camera3D | DirectionalLightNode | SpotLightNode | null {
-    const parentNodeId = object.userData.parentNodeId;
-    if (typeof parentNodeId !== 'string') {
-      return null;
-    }
-
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      return null;
-    }
-
-    const node = sceneGraph.nodeMap.get(parentNodeId);
-    if (
-      node instanceof Camera3D ||
-      node instanceof DirectionalLightNode ||
-      node instanceof SpotLightNode
-    ) {
-      return node;
-    }
-    return null;
-  }
-
-  private updateTargetGizmoSelectionState(gizmo: THREE.Object3D, nodeId: string): void {
-    const isActive = this.activeTargetNodeId === nodeId;
-    gizmo.traverse(child => {
-      if (child.userData.isTargetOutline) {
-        child.visible = isActive;
-      }
-    });
-  }
-
   private syncAnimatedSprite2DVisuals(): void {
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
@@ -4378,28 +3948,6 @@ export class ViewportRendererService {
       }
     }
     return null;
-  }
-
-  private updateSelectionBoxes(): void {
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) return;
-
-    // Update all selection boxes to follow their objects during transform
-    for (const [nodeId, box] of this.selectionBoxes.entries()) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (node && node instanceof Node3D) {
-        const newBox = new THREE.Box3().setFromObject(node);
-        box.box.copy(newBox);
-      }
-    }
-
-    // Update all target gizmos to follow their objects during transform
-    for (const [nodeId, gizmo] of this.targetGizmos.entries()) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (node && node instanceof Node3D) {
-        this.updateTargetGizmo(node, gizmo);
-      }
-    }
   }
 
   private clear2DSelectionOverlay(): void {
@@ -5328,7 +4876,7 @@ export class ViewportRendererService {
   }
 
   private captureTransformStartState(obj: THREE.Object3D): void {
-    const targetNode = this.getTargetNodeForObject(obj);
+    const targetNode = this.adornments.getTargetNodeForObject(obj);
     if (targetNode) {
       this.targetTransformStartStates.set(targetNode.nodeId, targetNode.getTargetPosition());
       this.activeTargetDragNodeId = targetNode.nodeId;
@@ -5353,7 +4901,7 @@ export class ViewportRendererService {
       return;
     }
 
-    const targetNode = this.getTargetNodeForObject(transformedObject);
+    const targetNode = this.adornments.getTargetNodeForObject(transformedObject);
     if (!targetNode) {
       return;
     }
@@ -5371,7 +4919,7 @@ export class ViewportRendererService {
       return;
     }
 
-    const targetNode = this.getTargetNodeForObject(transformedObject);
+    const targetNode = this.adornments.getTargetNodeForObject(transformedObject);
     if (targetNode) {
       const startTargetPos = this.targetTransformStartStates.get(targetNode.nodeId);
       if (!startTargetPos) {
@@ -5506,13 +5054,13 @@ export class ViewportRendererService {
     this.postFx = null;
 
     // Dispose Three.js resources
-    this.selectionBoxes.forEach(box => {
+    this.adornments.selectionBoxes.forEach(box => {
       box.geometry.dispose();
       if (box.material instanceof THREE.Material) {
         box.material.dispose();
       }
     });
-    this.selectionBoxes.clear();
+    this.adornments.selectionBoxes.clear();
 
     for (const visual of this.proxyRegistry.group2DVisuals.values()) {
       this.disposeObject3D(visual);
@@ -5545,13 +5093,13 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.proxyRegistry.uiControl2DVisuals.clear();
-    this.clearNodeIcons();
+    this.adornments.clearNodeIcons();
 
     this.clear2DSelectionOverlay();
     this.clear2DHoverPreview();
     this.clear2DMarqueePreview();
 
-    for (const gizmo of this.targetGizmos.values()) {
+    for (const gizmo of this.adornments.targetGizmos.values()) {
       gizmo.traverse(child => {
         if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
           child.geometry.dispose();
@@ -5561,7 +5109,7 @@ export class ViewportRendererService {
         }
       });
     }
-    this.targetGizmos.clear();
+    this.adornments.targetGizmos.clear();
 
     if (this.scene) {
       this.scene.traverse(obj => {
@@ -5575,10 +5123,7 @@ export class ViewportRendererService {
     }
 
     this.renderer?.dispose();
-    this.cameraIconTexture?.dispose();
-    this.lampIconTexture?.dispose();
-    this.cameraIconTexture = undefined;
-    this.lampIconTexture = undefined;
+    this.adornments.disposeIconTextures();
     this.selection2DHud.dispose();
 
     // Dispose subscriptions
