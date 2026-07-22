@@ -17,7 +17,7 @@ the theme colour, render differently on every OS, don't align to text, and can't
 be sized. Use the shared icon service instead:
 
 ```ts
-import { IconService, IconSize } from '@/services/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 
 @inject(IconService)
 private readonly icons!: IconService;

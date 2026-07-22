@@ -399,6 +399,6 @@ play-mode hook, so the editor keeps running.
 - Runtime (nodes, systems, script APIs): `packages/pix3-runtime/src/` — public surface re-exported from its `index.ts`.
 - Built-in behaviors: `packages/pix3-runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
-- Asset Library: services `src/services/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
+- Asset Library: services `src/services/library/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.
 - Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [ecs-instancing.md](ecs-instancing.md), the `property-schema-*.md` set.
