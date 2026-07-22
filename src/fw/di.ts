@@ -165,3 +165,43 @@ export function inject<T>(serviceType?: Constructor<T>) {
     Object.defineProperty(target, propertyKey, descriptor);
   };
 }
+
+/** Async accessor for a lazily-loaded singleton service. */
+export type LazyService<T> = () => Promise<T>;
+
+/**
+ * Like {@link inject}, but the service class is loaded via dynamic `import()` on
+ * first access, keeping heavy modules out of the eager bundle. The decorated
+ * property becomes a `LazyService<T>` — call `await this.foo()` to resolve.
+ *
+ * Singleton services only. The loader must return the service CLASS (registered
+ * via `@injectable` in its own module). Use sparingly: `@inject` remains the
+ * default. Reach for this only when the service is heavy AND its consumers only
+ * touch it inside async flows (e.g. Monaco IntelliSense, playable export).
+ */
+export function injectLazy<T>(load: () => Promise<Constructor<T>>) {
+  return function (target: object, propertyKey: string | symbol) {
+    let resolved: Promise<T> | undefined;
+    const accessor: LazyService<T> = () => {
+      if (!resolved) {
+        resolved = load().then(ctor => {
+          const container = ServiceContainer.getInstance();
+          return container.getService<T>(container.getOrCreateToken(ctor));
+        });
+        // A failed load must not latch: clear the cache so the next call retries.
+        // The `.catch` here only observes the rejection to avoid an
+        // unhandled-rejection warning; callers still see the original error via
+        // the promise returned below.
+        resolved.catch(() => {
+          resolved = undefined;
+        });
+      }
+      return resolved;
+    };
+    Object.defineProperty(target, propertyKey, {
+      get: () => accessor,
+      enumerable: true,
+      configurable: true,
+    });
+  };
+}

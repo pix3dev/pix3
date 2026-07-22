@@ -29,6 +29,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - **Decorators**: Use `@injectable()` for services and `@inject(ServiceClass)` for injection.
 - **Container**: Register services in `ServiceContainer` (singleton by default).
 - **Lifecycle**: Services must implement `dispose()` if they hold resources or subscriptions.
+- **Lazy injection**: `@injectLazy(() => import('…').then(m => m.ServiceClass))` makes the property a `LazyService<T>` async accessor — the module is `import()`-ed and the singleton resolved from the container on first `await this.foo()`, keeping heavy modules out of the eager bundle. Singleton services only. Use **sparingly** for heavy, rarely-used services whose consumers only touch them inside async flows (e.g. Monaco IntelliSense, playable export); `@inject` remains the default.
 
 ### State Management (Valtio)
 
