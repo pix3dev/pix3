@@ -793,11 +793,9 @@ describe('ViewportRendererService', () => {
       configurable: true,
       writable: true,
     });
-    Object.defineProperty(service, 'active2DTransform', {
-      value: overrides.active2DTransform,
-      configurable: true,
-      writable: true,
-    });
+    (
+      service as unknown as { transformSession: { active2DTransform: unknown } }
+    ).transformSession.active2DTransform = overrides.active2DTransform;
     appState.scenes.activeSceneId = 'scene-1';
 
     (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();

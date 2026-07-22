@@ -8,7 +8,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import { MathUtils } from 'three';
 import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
 import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
 import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOverlayHud';
@@ -17,6 +16,7 @@ import { Viewport3DContentSync } from './viewport/Viewport3DContentSync';
 import { ViewportNavigation } from './viewport/ViewportNavigation';
 import { ViewportPicking } from './viewport/ViewportPicking';
 import { ViewportAdornments } from './viewport/ViewportAdornments';
+import { ViewportTransformSession } from './viewport/ViewportTransformSession';
 import {
   Viewport2DProxyRegistry,
   getFrameThicknessWorldPx,
@@ -62,17 +62,7 @@ import { IconService } from '@/services/IconService';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { type CanvasScreenshot, type CanvasScreenshotOptions } from '@/core/canvas-screenshot';
-import {
-  TransformCompleteOperation,
-  type TransformState,
-} from '@/features/properties/TransformCompleteOperation';
-import type {
-  Transform2DCompleteParams,
-  Transform2DState,
-} from '@/features/properties/Transform2DCompleteOperation';
-import { Transform2DBatchOperation } from '@/features/properties/Transform2DBatchOperation';
 import { Nudge2DNodesOperation } from '@/features/properties/Nudge2DNodesOperation';
-import { TargetTransformOperation } from '@/features/properties/TargetTransformOperation';
 import {
   deriveSceneLayerCapabilities,
   type SceneLayerCapabilities,
@@ -80,7 +70,6 @@ import {
 import {
   TransformTool2d,
   type TwoDHandle,
-  type Active2DTransform,
   type Transform2DUpdateOptions,
   type Selection2DOverlay,
 } from '@/services/TransformTool2d';
@@ -176,7 +165,6 @@ export class ViewportRendererService {
   private orthographicControls?: OrbitControls;
   private transformControls?: TransformControls;
   private transformGizmo?: THREE.Object3D;
-  private currentTransformMode: TransformMode = 'select';
   private selectedObjects = new Set<THREE.Object3D>();
   private previewCamera: THREE.Camera | null = null;
   /** Lazily created post-processing composer (only while a PostProcess node is
@@ -185,7 +173,6 @@ export class ViewportRendererService {
   private postFx: PostProcessingPipeline | null = null;
   private baseViewportFrame?: THREE.Group;
   private selection2DOverlay?: Selection2DOverlay;
-  private active2DTransform?: Active2DTransform;
   // Hover preview frame for 2D nodes (before selection)
   private hoverPreview2D?: { nodeId: string; frame: THREE.Group };
   private marqueePreview2DFrames = new Map<string, THREE.Group>();
@@ -196,13 +183,6 @@ export class ViewportRendererService {
   private gridHelper?: THREE.GridHelper;
   private editorAmbientLight?: THREE.AmbientLight;
   private editorDirectionalLight?: THREE.DirectionalLight;
-  private transformStartStates = new Map<
-    string,
-    { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }
-  >();
-  private targetTransformStartStates = new Map<string, THREE.Vector3>();
-  private activeTargetNodeId: string | null = null;
-  private activeTargetDragNodeId: string | null = null;
   private lastActiveSceneId: string | null = null;
   private lastNavigationMode = appState.ui.navigationMode;
   private lastNodeDataChangeSignal = appState.scenes.nodeDataChangeSignal;
@@ -261,7 +241,7 @@ export class ViewportRendererService {
     getSelection2DOverlay: () => this.selection2DOverlay,
     getOrthographicCamera: () => this.orthographicCamera,
     getViewportSize: () => this.viewportSize,
-    getActive2DTransformHandle: () => this.active2DTransform?.handle,
+    getActive2DTransformHandle: () => this.transformSession.active2DTransform?.handle,
     getCanvasHost: () => this.canvasHost,
     getSceneGraph: sceneId => this.sceneManager.getSceneGraph(sceneId),
     projectWorldToOverlay: world => this.projectWorldToOverlay(world),
@@ -333,8 +313,8 @@ export class ViewportRendererService {
     getScene: () => this.scene,
     isLayer3DVisible: () => this.isLayer3DVisible(),
     shouldKeepSelectedNodeIcon: node => this.shouldKeepSelectedNodeIcon(node),
-    getActiveTargetNodeId: () => this.activeTargetNodeId,
-    getActiveTargetDragNodeId: () => this.activeTargetDragNodeId,
+    getActiveTargetNodeId: () => this.transformSession.activeTargetNodeId,
+    getActiveTargetDragNodeId: () => this.transformSession.activeTargetDragNodeId,
     getTransformControlObject: () => this.transformControls?.object,
   });
   // Owns the pure pointer hit-testing math: 2D paint-order raycasting, 3D
@@ -358,6 +338,40 @@ export class ViewportRendererService {
     isVisibleInHierarchy: object => this.isVisibleInHierarchy(object),
     getNodeOnlyWorldCorners: node => this.getNodeOnlyWorldCorners(node),
     projectWorldToOverlay: world => this.projectWorldToOverlay(world),
+  });
+  // Owns the transform-session state (transform mode, target selection, per-drag
+  // start states, active 2D transform) and both commit paths: the 3D-gizmo drag
+  // completion (TransformControls-driven) and the 2D drag transform
+  // (TransformTool2d-driven). Wired via closures because the transform controls,
+  // transform gizmo, cameras, and 2D overlay/HUD are recreated/reassigned over
+  // this object's lifetime and the borrowed dispatch/commit helpers stay on the
+  // facade. Its public state fields are still read/written by the facade's
+  // selection/attach dispatchers, render-loop gizmo-mode checks, and teardown.
+  private readonly transformSession: ViewportTransformSession = new ViewportTransformSession({
+    getTransformControls: () => this.transformControls,
+    clearTransformGizmo: () => {
+      if (this.transformGizmo && this.scene) {
+        this.scene.remove(this.transformGizmo);
+        this.transformGizmo = undefined;
+      }
+    },
+    attachTransformControlsForSelection: node => this.attachTransformControlsForSelection(node),
+    updateSelection: () => this.updateSelection(),
+    getTargetNodeForObject: object => this.adornments.getTargetNodeForObject(object),
+    getOperationService: () => this.operationService,
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    getSceneGraph: sceneId => this.sceneManager.getSceneGraph(sceneId),
+    getSelection2DOverlay: () => this.selection2DOverlay,
+    getOrthographicCamera: () => this.orthographicCamera,
+    getTransformTool2d: () => this.transformTool2d,
+    getViewportSize: () => this.viewportSize,
+    begin2DInteraction: () => this.begin2DInteraction(),
+    end2DInteraction: () => this.end2DInteraction(),
+    updateSelection2DHud: () => this.selection2DHud.update(),
+    updateNodeTransform: node => this.updateNodeTransform(node),
+    syncAll2DVisuals: () => this.syncAll2DVisuals(),
+    update2DSelectionOverlayForNodes: nodeIds => this.update2DSelectionOverlayForNodes(nodeIds),
+    requestRender: () => this.requestRender(),
   });
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
@@ -744,9 +758,9 @@ export class ViewportRendererService {
       if (this.camera) {
         this.transformControls = new TransformControls(this.camera, this.renderer.domElement);
         const mode: 'translate' | 'rotate' | 'scale' =
-          this.currentTransformMode === 'rotate'
+          this.transformSession.currentTransformMode === 'rotate'
             ? 'rotate'
-            : this.currentTransformMode === 'scale'
+            : this.transformSession.currentTransformMode === 'scale'
               ? 'scale'
               : 'translate';
         this.transformControls.setMode(mode);
@@ -760,7 +774,7 @@ export class ViewportRendererService {
           if (event.value) {
             this.setOrbitEnabled(false);
             if (this.transformControls?.object) {
-              this.captureTransformStartState(this.transformControls.object);
+              this.transformSession.captureTransformStartState(this.transformControls.object);
             }
           } else {
             this.resetOrbitInternalState();
@@ -769,10 +783,10 @@ export class ViewportRendererService {
         });
         this.transformControls.addEventListener('objectChange', () => {
           this.adornments.updateSelectionBoxes();
-          this.updateTargetTransformFromControl();
+          this.transformSession.updateTargetTransformFromControl();
         });
         this.transformControls.addEventListener('mouseUp', () => {
-          this.handleTransformCompleted();
+          this.transformSession.handleTransformCompleted();
         });
 
         // TransformControls is a control object, not a Three.js object,
@@ -982,7 +996,7 @@ export class ViewportRendererService {
     }
 
     const attachedObject = this.transformControls?.object ?? null;
-    const existingMode = this.transformControls?.getMode() ?? this.currentTransformMode;
+    const existingMode = this.transformControls?.getMode() ?? this.transformSession.currentTransformMode;
 
     if (this.transformControls && this.scene) {
       this.scene.remove(this.transformControls as unknown as THREE.Object3D);
@@ -1000,7 +1014,7 @@ export class ViewportRendererService {
       if (event.value) {
         this.setOrbitEnabled(false);
         if (this.transformControls?.object) {
-          this.captureTransformStartState(this.transformControls.object);
+          this.transformSession.captureTransformStartState(this.transformControls.object);
         }
       } else {
         this.resetOrbitInternalState();
@@ -1010,18 +1024,18 @@ export class ViewportRendererService {
 
     this.transformControls.addEventListener('objectChange', () => {
       this.adornments.updateSelectionBoxes();
-      this.updateTargetTransformFromControl();
+      this.transformSession.updateTargetTransformFromControl();
     });
 
     this.transformControls.addEventListener('mouseUp', () => {
-      this.handleTransformCompleted();
+      this.transformSession.handleTransformCompleted();
     });
 
     if (attachedObject) {
       this.transformControls.attach(attachedObject);
     }
 
-    if (this.scene && this.currentTransformMode !== 'select' && this.transformControls.object) {
+    if (this.scene && this.transformSession.currentTransformMode !== 'select' && this.transformControls.object) {
       this.scene.add(this.transformControls as unknown as THREE.Object3D);
     }
   }
@@ -2540,24 +2554,7 @@ export class ViewportRendererService {
   }
 
   setTransformMode(mode: TransformMode): void {
-    // Set the transform mode for the gizmo
-    this.currentTransformMode = mode;
-
-    if (mode === 'select') {
-      // In select mode, hide the transform gizmo
-      if (this.transformGizmo && this.scene) {
-        this.scene.remove(this.transformGizmo);
-        this.transformGizmo = undefined;
-      }
-      // Detach from current object
-      if (this.transformControls) {
-        this.transformControls.detach();
-      }
-    } else if (this.transformControls) {
-      // In transform modes, set the mode on TransformControls
-      this.transformControls.setMode(mode);
-      this.attachTransformControlsForSelection();
-    }
+    this.transformSession.setTransformMode(mode);
   }
 
   /**
@@ -2592,13 +2589,13 @@ export class ViewportRendererService {
     }
 
     if (!layer3DEnabled || !this.camera) {
-      this.clearActiveTargetSelection();
+      this.transformSession.clearActiveTargetSelection();
       return null;
     }
 
     const targetNodeId = this.picking.raycastTargetSphere(screenX, screenY);
     if (targetNodeId) {
-      this.setActiveTargetSelection(targetNodeId);
+      this.transformSession.setActiveTargetSelection(targetNodeId);
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
       const node = sceneGraph?.nodeMap.get(targetNodeId);
       if (node instanceof NodeBase && node.visible && !node.properties.locked) {
@@ -2607,7 +2604,7 @@ export class ViewportRendererService {
       return null;
     }
 
-    this.clearActiveTargetSelection();
+    this.transformSession.clearActiveTargetSelection();
 
     const iconNodeId = this.picking.raycastNodeIcon(screenX, screenY);
     if (iconNodeId) {
@@ -2984,7 +2981,7 @@ export class ViewportRendererService {
 
   updateSelection(): void {
     // Don't update selection while a 2D transform is in progress
-    if (this.active2DTransform) {
+    if (this.transformSession.active2DTransform) {
       return;
     }
 
@@ -3061,8 +3058,11 @@ export class ViewportRendererService {
 
     // Get selected node IDs from app state
     const { nodeIds } = appState.selection;
-    if (this.activeTargetNodeId && !nodeIds.includes(this.activeTargetNodeId)) {
-      this.activeTargetNodeId = null;
+    if (
+      this.transformSession.activeTargetNodeId &&
+      !nodeIds.includes(this.transformSession.activeTargetNodeId)
+    ) {
+      this.transformSession.activeTargetNodeId = null;
     }
     const activeSceneId = appState.scenes.activeSceneId;
 
@@ -3161,7 +3161,11 @@ export class ViewportRendererService {
   }
 
   private attachTransformControlsForSelection(firstSelectedNode?: Node3D | null): void {
-    if (!this.transformControls || !this.scene || this.currentTransformMode === 'select') {
+    if (
+      !this.transformControls ||
+      !this.scene ||
+      this.transformSession.currentTransformMode === 'select'
+    ) {
       return;
     }
 
@@ -3190,8 +3194,8 @@ export class ViewportRendererService {
 
     let transformObject: THREE.Object3D = nodeToAttach;
     const shouldAttachTarget =
-      this.currentTransformMode === 'translate' &&
-      this.activeTargetNodeId === nodeToAttach.nodeId &&
+      this.transformSession.currentTransformMode === 'translate' &&
+      this.transformSession.activeTargetNodeId === nodeToAttach.nodeId &&
       (nodeToAttach instanceof Camera3D ||
         nodeToAttach instanceof DirectionalLightNode ||
         nodeToAttach instanceof SpotLightNode);
@@ -3201,7 +3205,7 @@ export class ViewportRendererService {
       if (targetSphere) {
         transformObject = targetSphere;
       } else {
-        this.activeTargetNodeId = null;
+        this.transformSession.activeTargetNodeId = null;
       }
     }
 
@@ -3214,22 +3218,6 @@ export class ViewportRendererService {
       child.layers.set(LAYER_GIZMOS);
     });
     this.scene.add(this.transformGizmo);
-  }
-
-  private setActiveTargetSelection(nodeId: string): void {
-    if (this.activeTargetNodeId === nodeId) {
-      return;
-    }
-    this.activeTargetNodeId = nodeId;
-    this.updateSelection();
-  }
-
-  private clearActiveTargetSelection(): void {
-    if (this.activeTargetNodeId === null) {
-      return;
-    }
-    this.activeTargetNodeId = null;
-    this.updateSelection();
   }
 
   private syncSceneContent(): void {
@@ -3501,7 +3489,7 @@ export class ViewportRendererService {
       }
     });
     this.selection2DOverlay = undefined;
-    this.active2DTransform = undefined;
+    this.transformSession.active2DTransform = undefined;
     this.end2DInteraction();
     this.selection2DHud.hide();
     console.debug('[ViewportRenderer] cleared 2D overlay');
@@ -3650,7 +3638,7 @@ export class ViewportRendererService {
 
   private update2DSelectionOverlayForNodes(nodeIds: string[]): void {
     // Don't recreate overlay during an active 2D transform - use refreshGizmoPositions instead
-    if (this.active2DTransform) {
+    if (this.transformSession.active2DTransform) {
       this.refreshGizmoPositions();
       return;
     }
@@ -3821,7 +3809,7 @@ export class ViewportRendererService {
   }
 
   has2DTransform(): boolean {
-    return this.active2DTransform !== undefined;
+    return this.transformSession.has2DTransform();
   }
 
   /**
@@ -3857,7 +3845,7 @@ export class ViewportRendererService {
     options: { deep?: boolean } = {}
   ): boolean {
     // Don't show hover preview during active transform or if selection overlay is being interacted with
-    if (this.active2DTransform) {
+    if (this.transformSession.active2DTransform) {
       return this.clear2DHoverPreview();
     }
 
@@ -4053,38 +4041,7 @@ export class ViewportRendererService {
   }
 
   start2DTransform(screenX: number, screenY: number, handle: TwoDHandle): void {
-    if (!this.selection2DOverlay || !this.orthographicCamera) {
-      return;
-    }
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) return;
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) return;
-
-    const transform = this.transformTool2d.startTransform(
-      screenX,
-      screenY,
-      handle,
-      this.selection2DOverlay,
-      sceneGraph,
-      this.orthographicCamera,
-      this.viewportSize
-    );
-
-    if (transform) {
-      this.active2DTransform = transform;
-      // Set active handle for visual feedback (accent color during drag)
-      this.transformTool2d.setActiveHandle(handle, this.selection2DOverlay);
-      this.begin2DInteraction();
-      // Reflect the correct HUD state from the first frame: move hides it,
-      // resize keeps the live size badge, rotate shows the live angle badge.
-      this.selection2DHud.update();
-      console.debug('[ViewportRenderer] start 2D transform', {
-        handle,
-        nodeIds: this.active2DTransform.nodeIds,
-      });
-    }
+    this.transformSession.start2DTransform(screenX, screenY, handle);
   }
 
   update2DTransform(
@@ -4092,127 +4049,11 @@ export class ViewportRendererService {
     screenY: number,
     options: Transform2DUpdateOptions = {}
   ): void {
-    if (!this.active2DTransform) {
-      return;
-    }
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) return;
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) return;
-
-    this.transformTool2d.updateTransform(
-      screenX,
-      screenY,
-      this.active2DTransform,
-      sceneGraph,
-      this.orthographicCamera!,
-      this.viewportSize,
-      options
-    );
-
-    // Update visuals for each transformed node
-    for (const nodeId of this.active2DTransform.nodeIds) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (node && node instanceof Node2D) {
-        this.updateNodeTransform(node);
-      }
-    }
-    // A container resize proportionally scales its descendants (in TransformTool2d) — repaint all 2D
-    // proxies once per frame so the child visuals track the drag. `childStartStates` is populated
-    // (scale gesture only) for any container with eligible children, Group2D or a sprite parenting
-    // other 2D nodes alike.
-    const resizingContainer = (this.active2DTransform.childStartStates?.size ?? 0) > 0;
-    if (resizingContainer) {
-      this.syncAll2DVisuals();
-    }
+    this.transformSession.update2DTransform(screenX, screenY, options);
   }
 
   async complete2DTransform(): Promise<void> {
-    if (!this.active2DTransform) {
-      return;
-    }
-
-    const { nodeIds, startStates, childStartStates, handle } = this.active2DTransform;
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      this.active2DTransform = undefined;
-      this.end2DInteraction();
-      return;
-    }
-
-    const plans: Transform2DCompleteParams[] = [];
-
-    for (const nodeId of nodeIds) {
-      const node = sceneGraph.nodeMap.get(nodeId);
-      if (!node || !(node instanceof Node2D)) continue;
-
-      const startState = startStates.get(nodeId);
-      if (!startState) continue;
-
-      const previousState: Transform2DState = {
-        position: { x: startState.position.x, y: startState.position.y },
-        rotation: MathUtils.radToDeg(startState.rotation),
-        scale: { x: startState.scale.x, y: startState.scale.y },
-        ...(typeof startState.width === 'number' ? { width: startState.width } : {}),
-        ...(typeof startState.height === 'number' ? { height: startState.height } : {}),
-      };
-
-      const dims = node as unknown as { width?: number; height?: number };
-      const currentState: Transform2DState = {
-        position: { x: node.position.x, y: node.position.y },
-        rotation: MathUtils.radToDeg(node.rotation.z),
-        scale: { x: node.scale.x, y: node.scale.y },
-        ...(typeof dims.width === 'number' ? { width: dims.width } : {}),
-        ...(typeof dims.height === 'number' ? { height: dims.height } : {}),
-      };
-
-      plans.push({ nodeId, previousState, currentState });
-    }
-
-    // Descendant plans for Group2D proportional resize — after the group plans so a container's
-    // anchor reflow runs before its explicit child plans on apply/undo/redo.
-    if (childStartStates) {
-      for (const [childId, base] of childStartStates) {
-        const child = sceneGraph.nodeMap.get(childId);
-        if (!(child instanceof Node2D)) continue;
-        const dims = child as Node2D & { width?: number; height?: number };
-        const previousState: Transform2DState = {
-          position: { x: base.position.x, y: base.position.y },
-        };
-        const currentState: Transform2DState = {
-          position: { x: child.position.x, y: child.position.y },
-        };
-        if (base.kind === 'size') {
-          previousState.width = base.width;
-          previousState.height = base.height;
-          currentState.width = dims.width;
-          currentState.height = dims.height;
-        } else {
-          previousState.scale = { x: base.scale.x, y: base.scale.y };
-          currentState.scale = { x: child.scale.x, y: child.scale.y };
-        }
-        plans.push({ nodeId: childId, previousState, currentState });
-      }
-    }
-
-    if (plans.length > 0) {
-      const label = handle.startsWith('scale-')
-        ? 'Resize 2D Nodes'
-        : handle === 'rotate'
-          ? 'Rotate 2D Nodes'
-          : 'Move 2D Nodes';
-      await this.operationService.invokeAndPush(new Transform2DBatchOperation({ plans, label }));
-    }
-
-    const savedNodeIds = [...nodeIds];
-    // Clear active handle visual feedback before clearing the transform
-    this.transformTool2d.clearActiveHandle(this.selection2DOverlay);
-    this.active2DTransform = undefined;
-    this.end2DInteraction();
-    this.update2DSelectionOverlayForNodes(savedNodeIds);
-    this.requestRender();
-    console.debug('[ViewportRenderer] complete 2D transform', { nodeIds });
+    await this.transformSession.complete2DTransform();
   }
 
   /**
@@ -4318,153 +4159,6 @@ export class ViewportRendererService {
     // Keep collaborative cloud documents visually live even when the browser
     // window is not focused, so remote CRDT updates appear immediately.
     return appState.collaboration.accessMode === 'local';
-  }
-
-  private captureTransformStartState(obj: THREE.Object3D): void {
-    const targetNode = this.adornments.getTargetNodeForObject(obj);
-    if (targetNode) {
-      this.targetTransformStartStates.set(targetNode.nodeId, targetNode.getTargetPosition());
-      this.activeTargetDragNodeId = targetNode.nodeId;
-      return;
-    }
-
-    if (!(obj instanceof Node3D)) {
-      return;
-    }
-
-    const nodeId = obj.nodeId;
-    this.transformStartStates.set(nodeId, {
-      position: obj.position.clone(),
-      rotation: obj.rotation.clone(),
-      scale: obj.scale.clone(),
-    });
-  }
-
-  private updateTargetTransformFromControl(): void {
-    const transformedObject = this.transformControls?.object;
-    if (!transformedObject) {
-      return;
-    }
-
-    const targetNode = this.adornments.getTargetNodeForObject(transformedObject);
-    if (!targetNode) {
-      return;
-    }
-
-    const targetPosition = transformedObject.getWorldPosition(new THREE.Vector3());
-    targetNode.setTargetPosition(targetPosition);
-  }
-
-  private async handleTransformCompleted(): Promise<void> {
-    const transformedObject = this.transformControls?.object;
-    if (!transformedObject) {
-      this.transformStartStates.clear();
-      this.targetTransformStartStates.clear();
-      this.activeTargetDragNodeId = null;
-      return;
-    }
-
-    const targetNode = this.adornments.getTargetNodeForObject(transformedObject);
-    if (targetNode) {
-      const startTargetPos = this.targetTransformStartStates.get(targetNode.nodeId);
-      if (!startTargetPos) {
-        this.transformStartStates.clear();
-        this.targetTransformStartStates.clear();
-        this.activeTargetDragNodeId = null;
-        return;
-      }
-
-      try {
-        const currentTargetPos = transformedObject.getWorldPosition(new THREE.Vector3());
-        const operation = new TargetTransformOperation({
-          nodeId: targetNode.nodeId,
-          previousTargetPos: {
-            x: startTargetPos.x,
-            y: startTargetPos.y,
-            z: startTargetPos.z,
-          },
-          currentTargetPos: {
-            x: currentTargetPos.x,
-            y: currentTargetPos.y,
-            z: currentTargetPos.z,
-          },
-        });
-
-        await this.operationService.invokeAndPush(operation);
-      } catch (error) {
-        console.error('[ViewportRenderer] Error handling target transform completion:', error);
-      } finally {
-        this.transformStartStates.clear();
-        this.targetTransformStartStates.clear();
-        this.activeTargetDragNodeId = null;
-      }
-      return;
-    }
-
-    if (!(transformedObject instanceof Node3D)) {
-      this.transformStartStates.clear();
-      this.targetTransformStartStates.clear();
-      this.activeTargetDragNodeId = null;
-      return;
-    }
-
-    const node = transformedObject;
-    const nodeId = node.nodeId;
-    const startState = this.transformStartStates.get(nodeId);
-
-    if (!startState) {
-      this.transformStartStates.clear();
-      this.targetTransformStartStates.clear();
-      this.activeTargetDragNodeId = null;
-      return;
-    }
-
-    try {
-      // Build current state
-      const currentState: TransformState = {
-        position: {
-          x: node.position.x,
-          y: node.position.y,
-          z: node.position.z,
-        },
-        rotation: {
-          x: MathUtils.radToDeg(node.rotation.x),
-          y: MathUtils.radToDeg(node.rotation.y),
-          z: MathUtils.radToDeg(node.rotation.z),
-        },
-        scale: {
-          x: node.scale.x,
-          y: node.scale.y,
-          z: node.scale.z,
-        },
-      };
-
-      // Convert start state rotation to degrees for comparison
-      const previousState: TransformState = {
-        position: startState.position,
-        rotation: {
-          x: MathUtils.radToDeg(startState.rotation.x),
-          y: MathUtils.radToDeg(startState.rotation.y),
-          z: MathUtils.radToDeg(startState.rotation.z),
-        },
-        scale: startState.scale,
-      };
-
-      // Create and push transform operation with before/after states
-      const operation = new TransformCompleteOperation({
-        nodeId,
-        previousState,
-        currentState,
-      });
-
-      await this.operationService.invokeAndPush(operation);
-    } catch (error) {
-      console.error('[ViewportRenderer] Error handling transform completion:', error);
-    } finally {
-      this.transformStartStates.clear();
-      this.targetTransformStartStates.clear();
-      this.activeTargetDragNodeId = null;
-    }
   }
 
   dispose(): void {
