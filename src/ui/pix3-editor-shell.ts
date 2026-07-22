@@ -88,6 +88,7 @@ import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFolderCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { OpenSpriteEditorCommand } from '@/features/editor/OpenSpriteEditorCommand';
+import { OpenModelLabCommand } from '@/features/editor/OpenModelLabCommand';
 import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
 import { OpenProjectHomeCommand } from '@/features/editor/OpenProjectHomeCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
@@ -391,6 +392,7 @@ export class Pix3EditorShell extends ComponentBase {
     const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
+    const openModelLabCommand = new OpenModelLabCommand();
     const openAgentChatCommand = new OpenAgentChatCommand();
     const openProjectHomeCommand = new OpenProjectHomeCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
@@ -443,6 +445,7 @@ export class Pix3EditorShell extends ComponentBase {
       openGamePopoutWindowCommand,
       editorSettingsCommand,
       openSpriteEditorCommand,
+      openModelLabCommand,
       openAgentChatCommand,
       openProjectHomeCommand,
       bakeAOCommand,

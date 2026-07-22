@@ -1,0 +1,225 @@
+pix3-model-lab-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+pix3-model-lab-panel .model-lab {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font-size: 0.9rem;
+}
+
+/* Sidebar --------------------------------------------------------------- */
+pix3-model-lab-panel .model-lab-sidebar {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-model-lab-panel .model-lab-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+pix3-model-lab-panel .model-lab-header-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+pix3-model-lab-panel .model-lab-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+pix3-model-lab-panel .model-lab-subtitle {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  color: var(--fg-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+pix3-model-lab-panel .model-lab-note {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+}
+
+pix3-model-lab-panel .model-lab-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+pix3-model-lab-panel .model-lab-section h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-1);
+}
+
+pix3-model-lab-panel .model-lab-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+pix3-model-lab-panel .model-lab-palette-item {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .model-lab-palette-item:hover {
+  border-color: var(--accent);
+}
+
+pix3-model-lab-panel .model-lab-palette-item.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+pix3-model-lab-panel .model-lab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--fg-1);
+}
+
+pix3-model-lab-panel .model-lab-field input {
+  padding: 0.4rem 0.55rem;
+  font-size: 0.85rem;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 5px;
+}
+
+pix3-model-lab-panel .model-lab-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+pix3-model-lab-panel .model-lab-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+pix3-model-lab-panel .model-lab-button {
+  flex: 1;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .model-lab-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+pix3-model-lab-panel .model-lab-button.is-primary {
+  color: var(--bg-0);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+pix3-model-lab-panel .model-lab-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+pix3-model-lab-panel .model-lab-status {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+pix3-model-lab-panel .model-lab-status.is-ok {
+  color: var(--fg-1);
+}
+
+pix3-model-lab-panel .model-lab-status.is-error {
+  color: oklch(0.7 0.17 25);
+}
+
+/* Viewport -------------------------------------------------------------- */
+pix3-model-lab-panel .model-lab-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+pix3-model-lab-panel .model-lab-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+pix3-model-lab-panel .checker-bg {
+  background-color: var(--bg-0);
+  background-image:
+    linear-gradient(45deg, oklch(1 0 0 / 0.03) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(1 0 0 / 0.03) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(1 0 0 / 0.03) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(1 0 0 / 0.03) 75%);
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+}
+
+pix3-model-lab-panel .model-lab-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+  color: var(--fg-1);
+  background: oklch(0 0 0 / 0.45);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+pix3-model-lab-panel .model-lab-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+  color: var(--fg-1);
+}

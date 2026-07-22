@@ -25,6 +25,7 @@ const PANEL_COMPONENT_TYPES = {
   code: 'code',
   runtime: 'runtime',
   spriteEditor: 'sprite-editor',
+  modelLab: 'model-lab',
   agentChat: 'agent-chat',
   library: 'library',
   localization: 'localization',
@@ -46,6 +47,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.code]: 'pix3-code-tab',
   [PANEL_COMPONENT_TYPES.runtime]: 'pix3-runtime-panel',
   [PANEL_COMPONENT_TYPES.spriteEditor]: 'pix3-sprite-editor-panel',
+  [PANEL_COMPONENT_TYPES.modelLab]: 'pix3-model-lab-panel',
   [PANEL_COMPONENT_TYPES.agentChat]: 'pix3-agent-chat-panel',
   [PANEL_COMPONENT_TYPES.library]: 'pix3-library-panel',
   [PANEL_COMPONENT_TYPES.localization]: 'pix3-localization-panel',
@@ -65,6 +67,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.code]: 'Code',
   [PANEL_COMPONENT_TYPES.runtime]: 'Runtime',
   [PANEL_COMPONENT_TYPES.spriteEditor]: 'Sprite Editor',
+  [PANEL_COMPONENT_TYPES.modelLab]: 'Model Lab',
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
   [PANEL_COMPONENT_TYPES.localization]: 'Localization',
@@ -81,6 +84,7 @@ const EDITOR_TAB_ICON_BY_COMPONENT: Partial<Record<PanelComponentType, string>> 
   [PANEL_COMPONENT_TYPES.code]: 'code',
   [PANEL_COMPONENT_TYPES.game]: 'play',
   [PANEL_COMPONENT_TYPES.spriteEditor]: 'image',
+  [PANEL_COMPONENT_TYPES.modelLab]: 'box',
   [PANEL_COMPONENT_TYPES.animation]: 'activity',
 };
 
@@ -375,7 +379,9 @@ export class LayoutManagerService {
                 ? PANEL_COMPONENT_TYPES.code
                 : tab.type === 'sprite-editor'
                   ? PANEL_COMPONENT_TYPES.spriteEditor
-                  : PANEL_COMPONENT_TYPES.viewport,
+                  : tab.type === 'model-lab'
+                    ? PANEL_COMPONENT_TYPES.modelLab
+                    : PANEL_COMPONENT_TYPES.viewport,
         title: tab.title,
         isClosable: true,
         // PREVENT DRAGGING to enforce Single Document Interface
@@ -781,7 +787,8 @@ export class LayoutManagerService {
       componentType === PANEL_COMPONENT_TYPES.animation ||
       componentType === PANEL_COMPONENT_TYPES.game ||
       componentType === PANEL_COMPONENT_TYPES.code ||
-      componentType === PANEL_COMPONENT_TYPES.spriteEditor
+      componentType === PANEL_COMPONENT_TYPES.spriteEditor ||
+      componentType === PANEL_COMPONENT_TYPES.modelLab
     );
   }
 
@@ -1044,6 +1051,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.spriteEditor) {
           void import('@/ui/sprite-editor/sprite-editor-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.modelLab) {
+          void import('@/ui/model-lab/pix3-model-lab-panel');
         }
         if (componentType === PANEL_COMPONENT_TYPES.agentChat) {
           void import('@/ui/agent-chat/pix3-agent-chat-panel');

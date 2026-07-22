@@ -101,7 +101,10 @@ export class EditorTabService {
 
         const filteredTabs = appState.tabs.tabs.filter(
           t =>
-            !t.resourceId.startsWith('templ://') && t.type !== 'game' && t.type !== 'sprite-editor'
+            !t.resourceId.startsWith('templ://') &&
+            t.type !== 'game' &&
+            t.type !== 'sprite-editor' &&
+            t.type !== 'model-lab'
         );
 
         let savedActiveTabId = appState.tabs.activeTabId;
@@ -112,7 +115,8 @@ export class EditorTabService {
           activeTab &&
           (activeTab.resourceId.startsWith('templ://') ||
             activeTab.type === 'game' ||
-            activeTab.type === 'sprite-editor')
+            activeTab.type === 'sprite-editor' ||
+            activeTab.type === 'model-lab')
         ) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
@@ -267,6 +271,15 @@ export class EditorTabService {
   }
 
   /**
+   * Reveal Model Lab. Like the Sprite Editor it is a single-instance editor tab with a synthetic
+   * resource id, so repeated opens re-focus the one instance instead of stacking tabs. It is not a
+   * project resource, so it is excluded from session persistence.
+   */
+  async focusOrOpenModelLab(): Promise<void> {
+    await this.openResourceTab('model-lab', 'model-lab://new', {}, true, 'Model Lab');
+  }
+
+  /**
    * Reveal the in-editor agent chat. It is a docked panel to the right of the viewport (not an
    * editor tab), so this focuses the existing panel or re-adds it if the user closed it.
    */
@@ -362,6 +375,7 @@ export class EditorTabService {
         if (t.resourceId.startsWith('templ://')) return false;
         if (t.type === 'game') return false;
         if (t.type === 'sprite-editor') return false;
+        if (t.type === 'model-lab') return false;
         // Legacy: pre-rename sessions persisted 'asset-generator' tabs; keep dropping them.
         if (t.type === 'asset-generator') return false;
         return true;
