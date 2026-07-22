@@ -15,6 +15,7 @@ import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOve
 import { ViewportPreviewTicker } from './viewport/ViewportPreviewTicker';
 import { Viewport3DContentSync } from './viewport/Viewport3DContentSync';
 import { ViewportNavigation } from './viewport/ViewportNavigation';
+import { ViewportPicking } from './viewport/ViewportPicking';
 import { ViewportAdornments } from './viewport/ViewportAdornments';
 import {
   Viewport2DProxyRegistry,
@@ -60,7 +61,6 @@ import { ResourceManager } from '@/services/ResourceManager';
 import { IconService } from '@/services/IconService';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
-import { resolveViewportClick } from '@/features/selection/SelectionScopeResolver';
 import { type CanvasScreenshot, type CanvasScreenshotOptions } from '@/core/canvas-screenshot';
 import {
   TransformCompleteOperation,
@@ -336,6 +336,28 @@ export class ViewportRendererService {
     getActiveTargetNodeId: () => this.activeTargetNodeId,
     getActiveTargetDragNodeId: () => this.activeTargetDragNodeId,
     getTransformControlObject: () => this.transformControls?.object,
+  });
+  // Owns the pure pointer hit-testing math: 2D paint-order raycasting, 3D
+  // gizmo/target-sphere/icon raycasting, marquee-rectangle hit testing, and
+  // screen↔NDC conversion. Wired via closures because the cameras/controls are
+  // recreated over this object's lifetime and the borrowed adornment maps, proxy
+  // registry, scene-graph lookup, and hierarchy/world-corner/overlay helpers stay
+  // on the facade. The click/hover dispatch that mutates target-selection state
+  // stays on the facade and drives these methods.
+  private readonly picking = new ViewportPicking({
+    getCamera: () => this.camera,
+    getOrthographicCamera: () => this.orthographicCamera,
+    getOrbitControls: () => this.orbitControls,
+    getViewportSize: () => this.viewportSize,
+    isLayer2DVisible: () => this.isLayer2DVisible(),
+    isLayer3DVisible: () => this.isLayer3DVisible(),
+    getSceneGraph: sceneId => this.sceneManager.getSceneGraph(sceneId),
+    getNodeIcons: () => this.adornments.nodeIcons,
+    getTargetGizmos: () => this.adornments.targetGizmos,
+    getProxyRegistry: () => this.proxyRegistry,
+    isVisibleInHierarchy: object => this.isVisibleInHierarchy(object),
+    getNodeOnlyWorldCorners: node => this.getNodeOnlyWorldCorners(node),
+    projectWorldToOverlay: world => this.projectWorldToOverlay(world),
   });
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
@@ -2480,9 +2502,9 @@ export class ViewportRendererService {
       return null;
     }
 
-    const ndc = this.toNdc(screenX, screenY);
+    const ndc = this.picking.toNdc(screenX, screenY);
     if (!ndc) {
-      return this.resolve3DAssetDropFallback(objectSize);
+      return this.picking.resolve3DAssetDropFallback(objectSize);
     }
 
     const raycaster = new THREE.Raycaster();
@@ -2494,7 +2516,7 @@ export class ViewportRendererService {
       return intersection;
     }
 
-    return this.resolve3DAssetDropFallback(objectSize);
+    return this.picking.resolve3DAssetDropFallback(objectSize);
   }
 
   /** Delegates to {@link ViewportNavigation.saveZoomToState}. */
@@ -2562,7 +2584,7 @@ export class ViewportRendererService {
     const pixelX = screenX * this.viewportSize.width;
     const pixelY = screenY * this.viewportSize.height;
     if (layer2DEnabled) {
-      const hit2D = this.raycast2D(pixelX, pixelY);
+      const hit2D = this.picking.raycast2D(pixelX, pixelY);
       if (hit2D) {
         console.debug('[ViewportRenderer] 2D hit', hit2D.nodeId, 'at', { pixelX, pixelY });
         return hit2D;
@@ -2574,7 +2596,7 @@ export class ViewportRendererService {
       return null;
     }
 
-    const targetNodeId = this.raycastTargetSphere(screenX, screenY);
+    const targetNodeId = this.picking.raycastTargetSphere(screenX, screenY);
     if (targetNodeId) {
       this.setActiveTargetSelection(targetNodeId);
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
@@ -2587,7 +2609,7 @@ export class ViewportRendererService {
 
     this.clearActiveTargetSelection();
 
-    const iconNodeId = this.raycastNodeIcon(screenX, screenY);
+    const iconNodeId = this.picking.raycastNodeIcon(screenX, screenY);
     if (iconNodeId) {
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
       const node = sceneGraph?.nodeMap.get(iconNodeId);
@@ -2650,46 +2672,14 @@ export class ViewportRendererService {
     return null;
   }
 
+  /** Delegates to {@link ViewportPicking.getSelectable2DNodeIdsInScreenRect}. */
   getSelectable2DNodeIdsInScreenRect(
     startX: number,
     startY: number,
     endX: number,
     endY: number
   ): string[] {
-    if (!this.orthographicCamera || !this.isLayer2DVisible()) {
-      return [];
-    }
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) {
-      return [];
-    }
-
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) {
-      return [];
-    }
-
-    const selectionRect = this.normalizeScreenRect(startX, startY, endX, endY);
-    const hitNodeIds: string[] = [];
-
-    const collectHits = (nodes: NodeBase[]): void => {
-      for (const node of nodes) {
-        if (this.isScreenRectSelectable2DNode(node)) {
-          const screenRect = this.getNode2DScreenRect(node);
-          if (screenRect && this.screenRectsIntersect(selectionRect, screenRect)) {
-            hitNodeIds.push(node.nodeId);
-          }
-        }
-
-        if (node.children.length > 0) {
-          collectHits(node.children);
-        }
-      }
-    };
-
-    collectHits(sceneGraph.rootNodes);
-    return hitNodeIds;
+    return this.picking.getSelectable2DNodeIdsInScreenRect(startX, startY, endX, endY);
   }
 
   set2DMarqueePreviewNodeIds(nodeIds: string[]): boolean {
@@ -2735,7 +2725,7 @@ export class ViewportRendererService {
         !(node instanceof Node2D) ||
         Boolean(node.properties.locked) ||
         !this.isVisibleInHierarchy(node) ||
-        !this.get2DVisual(node)
+        !this.picking.get2DVisual(node)
       ) {
         continue;
       }
@@ -2751,263 +2741,6 @@ export class ViewportRendererService {
     }
 
     return changed;
-  }
-
-  private raycastNodeIcon(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.adornments.nodeIcons.size === 0 || !this.isLayer3DVisible()) {
-      return null;
-    }
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.layers.set(LAYER_GIZMOS);
-
-    const mouse = new THREE.Vector2();
-    mouse.x = screenX * 2 - 1;
-    mouse.y = -(screenY * 2 - 1);
-    raycaster.setFromCamera(mouse, this.camera);
-
-    const icons = Array.from(this.adornments.nodeIcons.values()).filter(icon => icon.visible);
-    if (!icons.length) {
-      return null;
-    }
-
-    const hits = raycaster.intersectObjects(icons, false);
-    if (!hits.length) {
-      return null;
-    }
-
-    const hitNodeId = hits[0].object.userData.nodeId;
-    return typeof hitNodeId === 'string' ? hitNodeId : null;
-  }
-
-  private raycastTargetSphere(screenX: number, screenY: number): string | null {
-    if (!this.camera || this.adornments.targetGizmos.size === 0 || !this.isLayer3DVisible()) {
-      return null;
-    }
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.layers.set(LAYER_GIZMOS);
-
-    const mouse = new THREE.Vector2();
-    mouse.x = screenX * 2 - 1;
-    mouse.y = -(screenY * 2 - 1);
-    raycaster.setFromCamera(mouse, this.camera);
-
-    const targetSpheres: THREE.Object3D[] = [];
-    for (const gizmo of this.adornments.targetGizmos.values()) {
-      gizmo.traverse(child => {
-        if (child.userData.isTargetSphere && child.visible) {
-          targetSpheres.push(child);
-        }
-      });
-    }
-
-    if (!targetSpheres.length) {
-      return null;
-    }
-
-    const hits = raycaster.intersectObjects(targetSpheres, false);
-    if (!hits.length) {
-      return null;
-    }
-
-    const hitNodeId = hits[0].object.userData.parentNodeId;
-    return typeof hitNodeId === 'string' ? hitNodeId : null;
-  }
-
-  private raycast2D(pixelX: number, pixelY: number): NodeBase | null {
-    if (!this.orthographicCamera || !this.isLayer2DVisible()) {
-      return null;
-    }
-
-    const mouse = this.toNdc(pixelX, pixelY);
-    if (!mouse) {
-      return null;
-    }
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.params.Line.threshold = 0.5;
-    raycaster.layers.set(1);
-    raycaster.setFromCamera(mouse, this.orthographicCamera);
-
-    // Only hit-test rendered 2D visuals; transparent container groups are intentionally skipped
-    const candidates: THREE.Object3D[] = [
-      ...this.proxyRegistry.animatedSprite2DVisuals.values(),
-      ...this.proxyRegistry.sprite2DVisuals.values(),
-      ...this.proxyRegistry.colorRect2DVisuals.values(),
-      ...this.proxyRegistry.tiledSprite2DVisuals.values(),
-      ...this.proxyRegistry.uiControl2DVisuals.values(),
-    ];
-
-    // console.debug('[ViewportRenderer] 2D raycast candidates', {
-    //   count: candidates.length,
-    //   nodeIds: candidates.map(c => c.userData?.nodeId).filter(Boolean),
-    //   mouse,
-    // });
-
-    const intersects = raycaster
-      .intersectObjects(candidates, true)
-      .filter(intersection => this.isVisibleInHierarchy(intersection.object));
-    // console.debug(
-    //   '[ViewportRenderer] 2D raycast intersects',
-    //   intersects.map(i => ({
-    //     nodeId: i.object.userData?.nodeId,
-    //     distance: i.distance,
-    //     point: i.point,
-    //   }))
-    // );
-    if (!intersects.length) {
-      // console.debug('[ViewportRenderer] 2D raycast miss at', { pixelX, pixelY });
-      return null;
-    }
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) {
-      return null;
-    }
-
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) {
-      return null;
-    }
-
-    // In orthographic 2D all visuals share Z, so raycaster distance cannot order
-    // them. Paint order (hence "closest to the camera") is scene-tree DFS order —
-    // the exact walk `assign2DVisualRenderOrder` uses to rebase renderOrder — so a
-    // node visited later in DFS is drawn on top. Rank each hit by its owning
-    // node's DFS index and return the frontmost selectable one. Locked nodes are
-    // click-through, so we fall past them to the next-frontmost hit.
-    const paintOrder = this.build2DPaintOrderIndex(sceneGraph.rootNodes);
-    const ranked = intersects
-      .map(intersection => {
-        const nid = intersection.object.userData?.nodeId as string | undefined;
-        return nid ? { nodeId: nid, order: paintOrder.get(nid) ?? -1 } : null;
-      })
-      .filter((entry): entry is { nodeId: string; order: number } => entry !== null)
-      .sort((a, b) => b.order - a.order);
-
-    for (const entry of ranked) {
-      const node = sceneGraph.nodeMap.get(entry.nodeId);
-      if (!(node instanceof NodeBase)) {
-        continue;
-      }
-      if (Boolean(node.properties.locked)) {
-        continue;
-      }
-      return node;
-    }
-
-    return null;
-  }
-
-  /**
-   * Build a `nodeId → paint-order index` map using the same scene-tree DFS walk
-   * as {@link assign2DVisualRenderOrder}. A higher index means the node is
-   * painted later, i.e. closer to the camera in the 2D overlay — used to resolve
-   * the frontmost node under the pointer during 2D hit-testing.
-   */
-  private build2DPaintOrderIndex(rootNodes: readonly NodeBase[]): Map<string, number> {
-    const index = new Map<string, number>();
-    let next = 0;
-    const visit = (node: NodeBase): void => {
-      index.set(node.nodeId, next++);
-      for (const child of node.children) {
-        if (child instanceof NodeBase) {
-          visit(child);
-        }
-      }
-    };
-    for (const node of rootNodes) {
-      visit(node);
-    }
-    return index;
-  }
-
-  private normalizeScreenRect(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number
-  ): {
-    left: number;
-    right: number;
-    top: number;
-    bottom: number;
-  } {
-    return {
-      left: Math.min(startX, endX),
-      right: Math.max(startX, endX),
-      top: Math.min(startY, endY),
-      bottom: Math.max(startY, endY),
-    };
-  }
-
-  private screenRectsIntersect(
-    a: { left: number; right: number; top: number; bottom: number },
-    b: { left: number; right: number; top: number; bottom: number }
-  ): boolean {
-    return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
-  }
-
-  private getNode2DScreenRect(node: Node2D): {
-    left: number;
-    right: number;
-    top: number;
-    bottom: number;
-  } | null {
-    const projectedCorners = this.getNodeOnlyWorldCorners(node)
-      .map(corner => this.projectWorldToOverlay(corner))
-      .filter(
-        (
-          point
-        ): point is {
-          x: number;
-          y: number;
-        } => point !== null
-      );
-
-    if (projectedCorners.length === 0) {
-      return null;
-    }
-
-    let left = projectedCorners[0].x;
-    let right = projectedCorners[0].x;
-    let top = projectedCorners[0].y;
-    let bottom = projectedCorners[0].y;
-
-    for (let i = 1; i < projectedCorners.length; i += 1) {
-      const point = projectedCorners[i];
-      left = Math.min(left, point.x);
-      right = Math.max(right, point.x);
-      top = Math.min(top, point.y);
-      bottom = Math.max(bottom, point.y);
-    }
-
-    return { left, right, top, bottom };
-  }
-
-  private isScreenRectSelectable2DNode(node: NodeBase): node is Node2D {
-    if (!(node instanceof Node2D) || node instanceof Group2D) {
-      return false;
-    }
-
-    if (
-      !(
-        node instanceof AnimatedSprite2D ||
-        node instanceof Sprite2D ||
-        node instanceof ColorRect2D ||
-        node instanceof TiledSprite2D ||
-        node instanceof UIControl2D
-      )
-    ) {
-      return false;
-    }
-
-    if (Boolean(node.properties.locked) || !this.isVisibleInHierarchy(node)) {
-      return false;
-    }
-
-    return Boolean(this.get2DVisual(node));
   }
 
   private isVisibleInHierarchy(object: THREE.Object3D): boolean {
@@ -3952,7 +3685,7 @@ export class ViewportRendererService {
         continue;
       }
 
-      const visual = this.get2DVisual(node);
+      const visual = this.picking.get2DVisual(node);
       if (!visual) {
         console.debug('[ViewportRenderer] update2DOverlay: no visual for', nodeId);
         continue;
@@ -4113,35 +3846,6 @@ export class ViewportRendererService {
   }
 
   /**
-   * Resolve the node a click/hover should target from a raw hit leaf, applying
-   * the Figma-style isolation scope (`appState.selection.focusNodeId`). Shared
-   * with the click path (editor-tab) via {@link resolveViewportClick} so hover
-   * highlights exactly what a click would select. Returns `null` if nothing
-   * resolves or the candidate is not a live node.
-   */
-  private resolveScoped2DCandidateNode(leafId: string, deep: boolean): NodeBase | null {
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) {
-      return null;
-    }
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) {
-      return null;
-    }
-    const { candidateId } = resolveViewportClick(
-      id => sceneGraph.nodeMap.get(id) ?? null,
-      appState.selection.focusNodeId,
-      leafId,
-      { deep }
-    );
-    if (!candidateId) {
-      return null;
-    }
-    const node = sceneGraph.nodeMap.get(candidateId);
-    return node instanceof NodeBase ? node : null;
-  }
-
-  /**
    * Update 2D hover preview frame based on pointer position.
    * Shows a preview frame around the 2D node under the cursor.
    * Group2D nodes show in a different color.
@@ -4167,12 +3871,12 @@ export class ViewportRendererService {
 
     // Raycast to the raw frontmost leaf, then resolve what a click would select
     // (given the isolation scope + deep modifier) so hover matches the click.
-    const leaf = this.raycast2D(screenX, screenY);
+    const leaf = this.picking.raycast2D(screenX, screenY);
     if (!leaf) {
       return this.clear2DHoverPreview();
     }
 
-    const hit = this.resolveScoped2DCandidateNode(leaf.nodeId, Boolean(options.deep));
+    const hit = this.picking.resolveScoped2DCandidateNode(leaf.nodeId, Boolean(options.deep));
     if (!hit) {
       return this.clear2DHoverPreview();
     }
@@ -4544,72 +4248,17 @@ export class ViewportRendererService {
     return pushed;
   }
 
-  private toNdc(screenX: number, screenY: number): THREE.Vector2 | null {
-    const { width, height } = this.viewportSize;
-    if (width <= 0 || height <= 0) return null;
-    return new THREE.Vector2((screenX / width) * 2 - 1, -(screenY / height) * 2 + 1);
-  }
-
-  private resolve3DAssetDropFallback(objectSize?: THREE.Vector3 | null): THREE.Vector3 | null {
-    if (!this.camera) {
-      return null;
-    }
-
-    const forward = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
-    if (forward.lengthSq() === 0) {
-      forward.set(0, 0, -1);
-    }
-    forward.normalize();
-
-    if (this.camera instanceof THREE.PerspectiveCamera) {
-      const maxDim = Math.max(objectSize?.x ?? 1, objectSize?.y ?? 1, objectSize?.z ?? 1, 0.001);
-      const fov = MathUtils.degToRad(this.camera.fov);
-      const distance = Math.max((maxDim * 1.5) / Math.tan(fov / 2), this.camera.near + maxDim, 1);
-
-      return this.camera.position.clone().add(forward.multiplyScalar(distance));
-    }
-
-    const orbitDistance = this.orbitControls
-      ? this.camera.position.distanceTo(this.orbitControls.target)
-      : Math.max(objectSize?.length() ?? 1, 10);
-
-    return this.camera.position.clone().add(forward.multiplyScalar(Math.max(orbitDistance, 1)));
-  }
-
   private screenToWorld2D(screenX: number, screenY: number): THREE.Vector3 | null {
     if (!this.orthographicCamera) {
       return null;
     }
 
-    const ndc = this.toNdc(screenX, screenY);
+    const ndc = this.picking.toNdc(screenX, screenY);
     if (!ndc) {
       return null;
     }
 
     return new THREE.Vector3(ndc.x, ndc.y, 0).unproject(this.orthographicCamera);
-  }
-
-  private get2DVisual(node: Node2D): THREE.Object3D | undefined {
-    if (node instanceof Group2D) {
-      return this.proxyRegistry.group2DVisuals.get(node.nodeId);
-    }
-    if (node instanceof AnimatedSprite2D) {
-      return this.proxyRegistry.animatedSprite2DVisuals.get(node.nodeId);
-    }
-    if (node instanceof TiledSprite2D) {
-      return this.proxyRegistry.tiledSprite2DVisuals.get(node.nodeId);
-    }
-    if (node instanceof Sprite2D) {
-      return this.proxyRegistry.sprite2DVisuals.get(node.nodeId);
-    }
-    if (node instanceof ColorRect2D) {
-      return this.proxyRegistry.colorRect2DVisuals.get(node.nodeId);
-    }
-    if (node instanceof UIControl2D) {
-      return this.proxyRegistry.uiControl2DVisuals.get(node.nodeId);
-    }
-    return undefined;
   }
 
   private startRenderLoop(): void {
