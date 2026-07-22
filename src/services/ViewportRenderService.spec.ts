@@ -25,7 +25,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createSprite2DVisual?: (s: Sprite2D) => THREE.Group;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => THREE.Group };
     };
 
     const sprite = new Sprite2D({
@@ -35,7 +35,7 @@ describe('ViewportRendererService', () => {
       anchor: { x: 0, y: 1 },
     });
 
-    const visualRoot = svc.createSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const mesh = visualRoot?.userData.spriteMesh as THREE.Mesh;
@@ -47,7 +47,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createSprite2DVisual?: (s: Sprite2D) => THREE.Group;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => THREE.Group };
     };
 
     const sprite = new Sprite2D({
@@ -57,7 +57,7 @@ describe('ViewportRendererService', () => {
       anchor: { x: 0.25, y: 0.75 },
     });
 
-    const visualRoot = svc.createSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const anchorMarker = visualRoot?.userData.anchorMarker as THREE.Group;
@@ -76,7 +76,7 @@ describe('ViewportRendererService', () => {
     const service = new ViewportRendererService();
 
     const svc = service as unknown as {
-      createAnimatedSprite2DVisual?: (s: AnimatedSprite2D) => THREE.Group;
+      proxyRegistry: { createAnimatedSprite2DVisual: (s: AnimatedSprite2D) => THREE.Group };
       getNodeOnlyBounds?: (s: AnimatedSprite2D) => THREE.Box3;
     };
 
@@ -87,7 +87,7 @@ describe('ViewportRendererService', () => {
       color: '#ffffff',
     });
 
-    const visualRoot = svc.createAnimatedSprite2DVisual?.(sprite);
+    const visualRoot = svc.proxyRegistry.createAnimatedSprite2DVisual(sprite);
     expect(visualRoot).toBeDefined();
 
     const sizeGroup = visualRoot?.userData.sizeGroup as THREE.Group;
@@ -114,7 +114,7 @@ describe('ViewportRendererService', () => {
     // Minimal stubs for dependencies used by createSprite2DVisual
     const svc = service as unknown as {
       scene?: { add: (...args: unknown[]) => void };
-      createSprite2DVisual?: (s: Sprite2D) => unknown;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => unknown };
     };
     svc.scene = { add: vi.fn() };
 
@@ -122,7 +122,7 @@ describe('ViewportRendererService', () => {
     const sprite = new Sprite2D({ id: 'test-sprite', texturePath: 'templ://pix3-logo.png' });
 
     // Call private method reflectively
-    const mesh = svc.createSprite2DVisual?.(sprite);
+    const mesh = svc.proxyRegistry.createSprite2DVisual(sprite);
 
     expect(mesh).toBeDefined();
 
@@ -153,12 +153,12 @@ describe('ViewportRendererService', () => {
 
     const svc = service as unknown as {
       scene?: { add: (...args: unknown[]) => void };
-      createSprite2DVisual?: (s: Sprite2D) => unknown;
+      proxyRegistry: { createSprite2DVisual: (s: Sprite2D) => unknown };
     };
     svc.scene = { add: vi.fn() };
 
     const sprite = new Sprite2D({ id: 'test-sprite-2', texturePath: 'templ://pix3-logo.png' });
-    svc.createSprite2DVisual?.(sprite);
+    svc.proxyRegistry.createSprite2DVisual(sprite);
 
     // Wait a tick to run async failure handler
     await Promise.resolve();
@@ -227,7 +227,9 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 
@@ -274,9 +276,9 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
-      [[rotatedSprite.nodeId, new THREE.Group()]]
-    );
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map([[rotatedSprite.nodeId, new THREE.Group()]]);
 
     const hitNodeIds = service.getSelectable2DNodeIdsInScreenRect(230, 65, 300, 140);
 
@@ -309,7 +311,9 @@ describe('ViewportRendererService', () => {
       configurable: true,
     });
 
-    (service as unknown as { sprite2DVisuals: Map<string, THREE.Group> }).sprite2DVisuals = new Map(
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 
@@ -351,17 +355,18 @@ describe('ViewportRendererService', () => {
       configurable: true,
     });
 
-    (service as unknown as { nodeIcons: Map<string, THREE.Sprite> }).nodeIcons.set(
-      cameraNode.nodeId,
-      icon
-    );
+    const adornments = (
+      service as unknown as {
+        adornments: {
+          nodeIcons: Map<string, THREE.Sprite>;
+          updateNodeIconVisibility: () => void;
+        };
+      }
+    ).adornments;
+    adornments.nodeIcons.set(cameraNode.nodeId, icon);
     appState.selection.nodeIds = [cameraNode.nodeId];
 
-    (
-      service as unknown as {
-        updateNodeIconVisibility: () => void;
-      }
-    ).updateNodeIconVisibility();
+    adornments.updateNodeIconVisibility();
 
     expect(icon.visible).toBe(true);
     expect((icon.material as THREE.SpriteMaterial).opacity).toBeLessThan(0.95);
@@ -501,18 +506,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(hud?.top.textContent).toContain('Player');
     expect(hud?.top.title).toBe('Player · Sprite2D');
@@ -583,18 +583,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.bottom.style.top ?? '0')).toBeGreaterThan(215);
   });
@@ -655,18 +650,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(200, 0);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(200, 0);
@@ -732,18 +722,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeLessThan(190);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeGreaterThan(210);
@@ -812,24 +797,18 @@ describe('ViewportRendererService', () => {
       configurable: true,
       writable: true,
     });
-    Object.defineProperty(service, 'active2DTransform', {
-      value: overrides.active2DTransform,
-      configurable: true,
-      writable: true,
-    });
+    (
+      service as unknown as { transformSession: { active2DTransform: unknown } }
+    ).transformSession.active2DTransform = overrides.active2DTransform;
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     return (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
   };
 
   it('hides 2D overlay HUD badges while moving a 2D node', () => {
@@ -914,13 +893,15 @@ describe('ViewportRendererService', () => {
     appState.scenes.activeSceneId = 'scene-1';
 
     const api = service as unknown as {
-      updateSelection2DOverlayHud: () => void;
-      repositionSelection2DOverlayHud: () => void;
-      selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      selection2DHud: {
+        update: () => void;
+        reposition: () => void;
+        badges?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      };
     };
 
-    api.updateSelection2DOverlayHud();
-    const hud = api.selection2DOverlayHud;
+    api.selection2DHud.update();
+    const hud = api.selection2DHud.badges;
     const topLeftBefore = Number.parseFloat(hud?.top.style.left ?? '0');
     const bottomLeftBefore = Number.parseFloat(hud?.bottom.style.left ?? '0');
     const labelBefore = hud?.top.textContent;
@@ -933,7 +914,7 @@ describe('ViewportRendererService', () => {
     // screen, and the reposition pass must carry the badges along with it.
     camera.position.x += 100;
     camera.updateMatrixWorld(true);
-    api.repositionSelection2DOverlayHud();
+    api.selection2DHud.reposition();
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(topLeftBefore - 100, 0);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(bottomLeftBefore - 100, 0);
@@ -955,14 +936,16 @@ describe('ViewportRendererService', () => {
     });
 
     const updateNodeTransform = vi.spyOn(service, 'updateNodeTransform');
-    const updateNodeIconPositions = vi.spyOn(
-      service as unknown as { updateNodeIconPositions: () => void },
-      'updateNodeIconPositions'
-    );
-    const updateNodeIconVisibility = vi.spyOn(
-      service as unknown as { updateNodeIconVisibility: () => void },
-      'updateNodeIconVisibility'
-    );
+    const adornments = (
+      service as unknown as {
+        adornments: {
+          updateNodeIconPositions: () => void;
+          updateNodeIconVisibility: () => void;
+        };
+      }
+    ).adornments;
+    const updateNodeIconPositions = vi.spyOn(adornments, 'updateNodeIconPositions');
+    const updateNodeIconVisibility = vi.spyOn(adornments, 'updateNodeIconVisibility');
 
     (
       service as unknown as {
@@ -1423,9 +1406,9 @@ describe('ViewportRendererService', () => {
 
     (
       service as unknown as {
-        tickComponentPreview: (dt: number) => void;
+        previewTicker: { tickComponents: (dt: number) => void };
       }
-    ).tickComponentPreview(0.25);
+    ).previewTicker.tickComponents(0.25);
 
     expect(component.tickSpy).toHaveBeenCalledTimes(1);
     expect(component.tickSpy).toHaveBeenCalledWith(0.25);
@@ -1462,9 +1445,9 @@ describe('ViewportRendererService', () => {
 
     (
       service as unknown as {
-        tickComponentPreview: (dt: number) => void;
+        previewTicker: { tickComponents: (dt: number) => void };
       }
-    ).tickComponentPreview(0.25);
+    ).previewTicker.tickComponents(0.25);
 
     expect(component.tickSpy).not.toHaveBeenCalled();
   });

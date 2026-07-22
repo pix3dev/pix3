@@ -542,6 +542,10 @@ Additional components can be registered via `ScriptRegistry.registerComponent()`
 - **ViewportRenderService performance fix**: removed the 100ms active-scene polling loop and replaced it with reactive subscription-based scene sync.
 - **Subscription hygiene**: shell and status-bar components now store and dispose all Valtio/service subscriptions in `disconnectedCallback`, preventing listener accumulation across re-mounts/HMR.
 
+## ViewportRenderService decomposition (2026-07-22)
+
+`ViewportRenderService.ts` was an 8300+ LOC god-service. It's now a ~4.3k LOC facade over 10 owned collaborators under `src/services/viewport/*` (see the "UI Services" entry above for the full list and rationale). All ~45 consumers and the public API were unchanged — every extraction was a pure mechanical move verified against the existing `ViewportRenderService.spec.ts` (34 tests) plus `npm run type-check` and a full production `npm run build` at the end. No behavior change was intended or found. Render-loop invariants (dirty-tracking, the `assign2DVisualRenderOrder` call immediately before the 2D pass, mipmap-disabled 2D textures) are unchanged and still documented in `CLAUDE.md`'s "2D overlay rendering" / "Editor viewport renders on demand" sections.
+
 ## 2D/3D Navigation Mode
 
 Pix3 supports specialized navigation modes for 2D and 3D authoring, controlled via `appState.ui.navigationMode`.
@@ -599,7 +603,20 @@ Pix3 implements a comprehensive service layer providing core functionality:
 ### UI Services
 
 - **LayoutManager**: Manages Golden Layout panel configuration
-- **ViewportRenderService**: Handles Three.js rendering loop, resize, DPR, and navigation modes
+- **ViewportRenderService** (`ViewportRendererService`, `src/services/ViewportRenderService.ts`): Handles Three.js rendering loop, resize, DPR, and navigation modes. It is a **facade over owned collaborators** under `src/services/viewport/*` — each is a plain class (not `@injectable()`, not DI-registered), constructed once by the facade and wired via closures for whatever it borrows back from the facade (renderer/scene/camera getters, `requestRender()`, etc., since those are recreated over the viewport's lifetime). The facade keeps every public method's original signature (thin delegates where the body moved) so none of its ~45 consumers changed. Collaborators, roughly in the order they sit in the render/interaction pipeline:
+  - `ViewportGpuTimer` — WebGL2 timer-query GPU/CPU frame-cost sampling for the status-bar readout.
+  - `viewport-framing-math` — pure geometry functions backing camera framing/zoom (no class, just exported functions).
+  - `ViewportScreenshotter` — synchronous frame capture + transient framed/isolated captures for `captureScreenshot`/`captureFramedScreenshot`.
+  - `ViewportSelection2DOverlayHud` — the floating DOM name/size/angle badges next to a 2D selection.
+  - `ViewportPreviewTicker` — editor-only particle-preview and script-component-preview ticking (and the appearance overrides scripts push during preview).
+  - `Viewport2DProxyRegistry` — owns every 2D node type's proxy visual (Group2D/Sprite2D/ColorRect2D/AnimatedSprite2D/TiledSprite2D/UIControl2D): the six visual `Map`s are public fields (read/written directly by the facade's `processNodeForRendering`/`updateNodeTransform` dispatchers), plus the create/sync/texture/opacity/render-order helpers. `configureSpriteTexture`/`getFrameThicknessWorldPx` are plain exported functions since the facade's remaining 3D-texture-sync code calls them too.
+  - `Viewport3DContentSync` — Sprite3D/Particles3D/GeometryMesh texture sync and Sprite3D billboarding.
+  - `ViewportAdornments` — 3D editor gizmos: selection boxes, per-type selection gizmos, camera/light target gizmos, and camera/light/particle billboard icons (maps are public fields for the same reason as the 2D registry).
+  - `ViewportNavigation` — 2D camera pan/zoom/momentum state (the camera-state half; `Navigation2DController` is the separate, still-`@injectable()` input-gesture half that calls into this facade).
+  - `ViewportPicking` — 2D/3D raycasting and hit-testing (marquee-rect selection, gizmo/icon raycasts, NDC conversion).
+  - `ViewportTransformSession` — the in-progress 2D (`TransformTool2d`-driven) and 3D (`TransformControls`-driven) drag/transform state, and its commit to the undo stack via `OperationService`.
+
+  What stays directly on the facade: the render loop itself (`requestRender`/`renderFrame`/`renderFrameBody`/`renderLoopTick`), pause/resume, `ensureInitialized`/`attachToHost`/`dispose`, scene-content sync (`syncSceneContent`/`processNodeForRendering`/`updateNodeTransform`) — these read/write several collaborators' public maps directly rather than through a redesigned method API, since that dependency shape (many call sites across facade dispatchers touching the same maps) doesn't fit a cleaner encapsulation without much larger, riskier diffs. See `.plans/code-quality-audit-2026-07-21.md` §8 Item 1 for the extraction rationale and ordering.
 - **TransformTool2d**: 2D transform gizmo and interaction
 - **FocusRingService**: Manages keyboard focus within editor UI
 - **IconService**: Centralized management of SVG icons used across the UI
