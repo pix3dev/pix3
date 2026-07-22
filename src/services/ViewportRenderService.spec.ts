@@ -1401,9 +1401,9 @@ describe('ViewportRendererService', () => {
 
     (
       service as unknown as {
-        tickComponentPreview: (dt: number) => void;
+        previewTicker: { tickComponents: (dt: number) => void };
       }
-    ).tickComponentPreview(0.25);
+    ).previewTicker.tickComponents(0.25);
 
     expect(component.tickSpy).toHaveBeenCalledTimes(1);
     expect(component.tickSpy).toHaveBeenCalledWith(0.25);
@@ -1440,9 +1440,9 @@ describe('ViewportRendererService', () => {
 
     (
       service as unknown as {
-        tickComponentPreview: (dt: number) => void;
+        previewTicker: { tickComponents: (dt: number) => void };
       }
-    ).tickComponentPreview(0.25);
+    ).previewTicker.tickComponents(0.25);
 
     expect(component.tickSpy).not.toHaveBeenCalled();
   });

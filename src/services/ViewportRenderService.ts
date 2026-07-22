@@ -12,6 +12,7 @@ import { MathUtils } from 'three';
 import { ViewportGpuTimer, type ViewportPerfSample } from './viewport/ViewportGpuTimer';
 import { ViewportScreenshotter } from './viewport/ViewportScreenshotter';
 import { ViewportSelection2DOverlayHud } from './viewport/ViewportSelection2DOverlayHud';
+import { ViewportPreviewTicker } from './viewport/ViewportPreviewTicker';
 import {
   computeFallbackFramingBounds,
   computeOrtho2DFitZoom,
@@ -57,18 +58,8 @@ import { Particles3D } from '@pix3/runtime';
 import { AmbientLightNode } from '@pix3/runtime';
 import { HemisphereLightNode } from '@pix3/runtime';
 import { AssetLoader } from '@pix3/runtime';
-import type {
-  EditorAppearanceOverride,
-  EditorPreviewContext,
-  SceneGraph,
-  ScriptComponent,
-} from '@pix3/runtime';
-import {
-  applyTextureRegionToTexture,
-  describeThrown,
-  getProjectTextureFiltering,
-  reportScriptError,
-} from '@pix3/runtime';
+import type { SceneGraph } from '@pix3/runtime';
+import { applyTextureRegionToTexture, getProjectTextureFiltering } from '@pix3/runtime';
 import { injectable, inject } from '@/fw/di';
 import { SceneManager, InputService } from '@pix3/runtime';
 import { OperationService } from '@/services/OperationService';
@@ -271,8 +262,6 @@ export class ViewportRendererService {
   // selection boxes, node icons) so framed agent screenshots come out clean.
   private suppressGizmosForCapture = false;
   private lastRenderedAt = 0;
-  private activeParticlePreviewCount = 0;
-  private activeComponentPreviewCount = 0;
 
   // --- Viewport performance sampling (for the status-bar tab-load readout) ---
   // Owns the GPU/CPU frame-timing concern. Reads the *current* renderer via a
@@ -315,17 +304,18 @@ export class ViewportRendererService {
     rotateVectorZ: (vector, angle) => this.rotateVectorZ(vector, angle),
     getIconSvg: (name, size) => this.iconService.getIconSvg(name, size),
   });
-  /**
-   * Editor appearance overrides a script pushed via `setAppearanceOverride`,
-   * keyed by nodeId. `stamp` is the preview frame it was last pushed on;
-   * anything not re-pushed on the current frame is reverted and dropped. This is
-   * transient editor-only presentation state — never serialized, never in undo.
-   */
-  private readonly componentAppearanceOverrides = new Map<
-    string,
-    { override: EditorAppearanceOverride; stamp: number }
-  >();
-  private previewFrameStamp = 0;
+  // Owns the editor-only preview tickers (particle preview + script-component
+  // editor preview) and the transient appearance overrides those components
+  // push. Wired via closures because the scene graph, node lookups, 2D visual
+  // proxies, and asset loader are resolved lazily / can change over this
+  // object's lifetime, and the borrowed methods stay on the facade.
+  private readonly previewTicker = new ViewportPreviewTicker({
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    findNodeById: (nodeId, nodes) => this.findNodeById(nodeId, nodes),
+    get2DVisualRoot: nodeId => this.get2DVisualRoot(nodeId),
+    getAssetLoader: () => this.assetLoader,
+    requestRender: () => this.requestRender(),
+  });
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
   };
@@ -1948,8 +1938,8 @@ export class ViewportRendererService {
       mixer.update(delta);
     }
 
-    this.tickParticlePreview(delta);
-    this.tickComponentPreview(delta);
+    this.previewTicker.tickParticles(delta);
+    this.previewTicker.tickComponents(delta);
 
     // Update controls once before rendering if they exist
     const is2DMode = appState.ui.navigationMode === '2d';
@@ -3476,7 +3466,7 @@ export class ViewportRendererService {
           // appearance override, when active, is re-applied on top each preview
           // frame (flushComponentAppearanceOverrides), so skip here to avoid
           // fighting it.
-          if (mesh.material.map && !this.componentAppearanceOverrides.has(node.nodeId)) {
+          if (mesh.material.map && !this.previewTicker.hasOverride(node.nodeId)) {
             applyTextureRegionToTexture(mesh.material.map, node.textureRegion ?? null);
           }
         }
@@ -3875,7 +3865,7 @@ export class ViewportRendererService {
 
       // Proxies are about to be rebuilt with default (un-cropped) materials, and
       // nodeIds may be recycled — drop any stale editor appearance overrides.
-      this.componentAppearanceOverrides.clear();
+      this.previewTicker.resetOverrides();
 
       // Stop all preview animations and clean up mixers before rebuilding
       for (const action of this.previewAnimationActions.values()) {
@@ -5483,211 +5473,6 @@ export class ViewportRendererService {
     visit(sceneGraph.rootNodes);
   }
 
-  private tickParticlePreview(dt: number): void {
-    if (appState.ui.isPlaying) {
-      this.activeParticlePreviewCount = 0;
-      return;
-    }
-
-    if (dt <= 0) {
-      return;
-    }
-
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      this.activeParticlePreviewCount = 0;
-      return;
-    }
-
-    let active = 0;
-    const visit = (nodes: NodeBase[]) => {
-      for (const node of nodes) {
-        if (node instanceof Particles3D && node.preview) {
-          node.tick(dt);
-          active += 1;
-        }
-
-        if (node.children.length > 0) {
-          visit(node.children);
-        }
-      }
-    };
-
-    visit(sceneGraph.rootNodes);
-    this.activeParticlePreviewCount = active;
-  }
-
-  private tickComponentPreview(dt: number): void {
-    if (appState.ui.isPlaying) {
-      this.activeComponentPreviewCount = 0;
-      // Play mode owns rendering; drop any editor-preview overrides so the
-      // proxies (if still around) revert, and re-apply cleanly on return.
-      this.clearComponentAppearanceOverrides();
-      return;
-    }
-
-    if (dt <= 0) {
-      return;
-    }
-
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    if (!sceneGraph) {
-      this.activeComponentPreviewCount = 0;
-      this.clearComponentAppearanceOverrides();
-      return;
-    }
-
-    this.previewFrameStamp += 1;
-    const frameStamp = this.previewFrameStamp;
-
-    let active = 0;
-    const visit = (nodes: NodeBase[]) => {
-      for (const node of nodes) {
-        if (node.components && Array.isArray(node.components) && node.components.length > 0) {
-          // Per-node context: setAppearanceOverride records against this nodeId,
-          // last writer per frame wins.
-          const context: EditorPreviewContext = {
-            assetLoader: this.assetLoader,
-            requestRender: () => {
-              queueMicrotask(() => this.requestRender());
-            },
-            setAppearanceOverride: (override: EditorAppearanceOverride) => {
-              this.componentAppearanceOverrides.set(node.nodeId, { override, stamp: frameStamp });
-            },
-          };
-          for (const component of node.components) {
-            if (component.enabled && typeof component.tickEditorPreview === 'function') {
-              active += 1;
-            }
-            this.tickPreviewComponent(node, component, dt, context);
-          }
-        }
-
-        if (node.children && node.children.length > 0) {
-          visit(node.children);
-        }
-      }
-    };
-
-    visit(sceneGraph.rootNodes);
-    this.activeComponentPreviewCount = active;
-    this.flushComponentAppearanceOverrides(sceneGraph, frameStamp);
-  }
-
-  private tickPreviewComponent(
-    node: NodeBase,
-    component: ScriptComponent,
-    dt: number,
-    context: EditorPreviewContext
-  ): void {
-    if (!component.enabled || !component.tickEditorPreview) {
-      return;
-    }
-
-    // Error isolation: a throwing tickEditorPreview must not kill the frame or
-    // the editor. Disable the component and surface the failure the same way the
-    // runtime does for play-mode hooks (Logs panel / Game tab).
-    try {
-      component.tickEditorPreview(dt, context);
-    } catch (thrown) {
-      component.enabled = false;
-      const { message, stack } = describeThrown(thrown);
-      console.error(
-        `[ViewportRenderService] Script "${component.type}" threw in editor-preview on node "${node.name}" (disabled):`,
-        thrown
-      );
-      reportScriptError({
-        phase: 'update',
-        message,
-        stack,
-        nodeId: node.nodeId,
-        nodeName: node.name,
-        componentType: component.type,
-        componentId: component.id,
-      });
-    }
-  }
-
-  /**
-   * Apply the appearance overrides pushed this preview frame to their proxies,
-   * and revert + drop any that were not re-pushed (immediate-mode lifecycle).
-   */
-  private flushComponentAppearanceOverrides(sceneGraph: SceneGraph, frameStamp: number): void {
-    if (this.componentAppearanceOverrides.size === 0) {
-      return;
-    }
-
-    for (const [nodeId, entry] of this.componentAppearanceOverrides) {
-      const node = this.findNodeById(nodeId, sceneGraph.rootNodes);
-      if (entry.stamp === frameStamp) {
-        if (node) {
-          this.applyAppearanceOverrideToProxy(node, entry.override);
-        }
-      } else {
-        if (node) {
-          this.applyAppearanceOverrideToProxy(node, null);
-        }
-        this.componentAppearanceOverrides.delete(nodeId);
-      }
-    }
-  }
-
-  /** Revert every active appearance override and clear the map. */
-  private clearComponentAppearanceOverrides(): void {
-    if (this.componentAppearanceOverrides.size === 0) {
-      return;
-    }
-    const sceneGraph = this.sceneManager.getActiveSceneGraph();
-    for (const [nodeId] of this.componentAppearanceOverrides) {
-      const node = sceneGraph ? this.findNodeById(nodeId, sceneGraph.rootNodes) : null;
-      if (node) {
-        this.applyAppearanceOverrideToProxy(node, null);
-      }
-    }
-    this.componentAppearanceOverrides.clear();
-  }
-
-  /**
-   * Apply (or, when `override` is null, revert) a script-driven editor
-   * appearance override on a node's proxy visual. v1 supports Sprite2D proxies;
-   * `tint`/`visible` apply to any proxy with a root group and MeshBasicMaterial.
-   */
-  private applyAppearanceOverrideToProxy(
-    node: NodeBase,
-    override: EditorAppearanceOverride | null
-  ): void {
-    const visualRoot = this.get2DVisualRoot(node.nodeId);
-    if (!visualRoot) {
-      return;
-    }
-
-    // Visibility: fall back to the node's own visibility when not overridden.
-    const nodeVisible = node instanceof Node2D ? node.visible : true;
-    visualRoot.visible = override?.visible ?? nodeVisible;
-
-    const mesh = visualRoot.userData.spriteMesh as THREE.Mesh | undefined;
-    const material =
-      mesh && mesh.material instanceof THREE.MeshBasicMaterial ? mesh.material : undefined;
-    if (!material) {
-      return;
-    }
-
-    // Texture region (Sprite2D): override wins, else the node's own transient
-    // region, else the full texture.
-    if (material.map) {
-      const nodeRegion = node instanceof Sprite2D ? (node.textureRegion ?? null) : null;
-      applyTextureRegionToTexture(material.map, override?.textureRegion ?? nodeRegion);
-    }
-
-    // Tint: override color, else restore the material's authored base color
-    // (white when a texture is present, the placeholder grey otherwise).
-    if (override?.tint) {
-      material.color.set(override.tint);
-    } else {
-      material.color.set(material.map ? 0xffffff : 0xcccccc);
-    }
-  }
-
   private syncSprite3DTexture(node: Sprite3D): void {
     const currentTexturePath = node.texturePath ?? null;
     const previousTexturePath = this.sprite3DTexturePaths.get(node.nodeId) ?? null;
@@ -7203,11 +6988,7 @@ export class ViewportRendererService {
    * counts are refreshed by their tickers on every rendered frame.
    */
   private hasContinuousPreviewWork(): boolean {
-    return (
-      this.previewAnimationActions.size > 0 ||
-      this.activeParticlePreviewCount > 0 ||
-      this.activeComponentPreviewCount > 0
-    );
+    return this.previewAnimationActions.size > 0 || this.previewTicker.hasActivePreview();
   }
 
   private shouldPauseForWindowFocus(): boolean {
@@ -7376,7 +7157,7 @@ export class ViewportRendererService {
     // Cancel pan momentum animation
     this.cancelPanMomentum();
 
-    this.componentAppearanceOverrides.clear();
+    this.previewTicker.resetOverrides();
 
     // Stop and dispose animation mixers
     for (const action of this.previewAnimationActions.values()) {
