@@ -501,18 +501,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(hud?.top.textContent).toContain('Player');
     expect(hud?.top.title).toBe('Player · Sprite2D');
@@ -583,18 +578,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.bottom.style.top ?? '0')).toBeGreaterThan(215);
   });
@@ -655,18 +645,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(200, 0);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(200, 0);
@@ -732,18 +717,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     const hud = (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeLessThan(190);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeGreaterThan(210);
@@ -819,17 +799,13 @@ describe('ViewportRendererService', () => {
     });
     appState.scenes.activeSceneId = 'scene-1';
 
-    (
-      service as unknown as {
-        updateSelection2DOverlayHud: () => void;
-      }
-    ).updateSelection2DOverlayHud();
+    (service as unknown as { selection2DHud: { update: () => void } }).selection2DHud.update();
 
     return (
       service as unknown as {
-        selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+        selection2DHud: { badges?: { top: HTMLDivElement; bottom: HTMLDivElement } };
       }
-    ).selection2DOverlayHud;
+    ).selection2DHud.badges;
   };
 
   it('hides 2D overlay HUD badges while moving a 2D node', () => {
@@ -914,13 +890,15 @@ describe('ViewportRendererService', () => {
     appState.scenes.activeSceneId = 'scene-1';
 
     const api = service as unknown as {
-      updateSelection2DOverlayHud: () => void;
-      repositionSelection2DOverlayHud: () => void;
-      selection2DOverlayHud?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      selection2DHud: {
+        update: () => void;
+        reposition: () => void;
+        badges?: { top: HTMLDivElement; bottom: HTMLDivElement };
+      };
     };
 
-    api.updateSelection2DOverlayHud();
-    const hud = api.selection2DOverlayHud;
+    api.selection2DHud.update();
+    const hud = api.selection2DHud.badges;
     const topLeftBefore = Number.parseFloat(hud?.top.style.left ?? '0');
     const bottomLeftBefore = Number.parseFloat(hud?.bottom.style.left ?? '0');
     const labelBefore = hud?.top.textContent;
@@ -933,7 +911,7 @@ describe('ViewportRendererService', () => {
     // screen, and the reposition pass must carry the badges along with it.
     camera.position.x += 100;
     camera.updateMatrixWorld(true);
-    api.repositionSelection2DOverlayHud();
+    api.selection2DHud.reposition();
 
     expect(Number.parseFloat(hud?.top.style.left ?? '0')).toBeCloseTo(topLeftBefore - 100, 0);
     expect(Number.parseFloat(hud?.bottom.style.left ?? '0')).toBeCloseTo(bottomLeftBefore - 100, 0);

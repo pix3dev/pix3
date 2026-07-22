@@ -55,7 +55,7 @@ export class ViewportSelection2DOverlayHud {
 
   constructor(private readonly deps: ViewportSelection2DOverlayHudDeps) {}
 
-  /** The current badge DOM state (for the facade's test-facing surface). */
+  /** The current badge DOM state (read by tests reaching past the facade). */
   get badges(): { root: HTMLDivElement; top: HTMLDivElement; bottom: HTMLDivElement } | undefined {
     return this.hud;
   }

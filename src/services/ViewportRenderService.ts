@@ -6610,25 +6610,6 @@ export class ViewportRendererService {
     };
   }
 
-  // --- Test-only compatibility surface for the extracted 2D selection HUD ---
-  // ViewportRenderService.spec.ts drives the HUD through these members. They
-  // delegate to `selection2DHud`; production code calls the collaborator
-  // directly. Not `private` because TS would flag them unused (the spec reaches
-  // them through a cast). Keep in sync with ViewportSelection2DOverlayHud.
-  updateSelection2DOverlayHud(): void {
-    this.selection2DHud.update();
-  }
-
-  repositionSelection2DOverlayHud(): void {
-    this.selection2DHud.reposition();
-  }
-
-  get selection2DOverlayHud():
-    | { root: HTMLDivElement; top: HTMLDivElement; bottom: HTMLDivElement }
-    | undefined {
-    return this.selection2DHud.badges;
-  }
-
   private create2DFrame(bounds: THREE.Box3): THREE.Group {
     return this.transformTool2d.createFrame(bounds);
   }
