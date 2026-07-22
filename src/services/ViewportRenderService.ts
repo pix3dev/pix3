@@ -996,7 +996,8 @@ export class ViewportRendererService {
     }
 
     const attachedObject = this.transformControls?.object ?? null;
-    const existingMode = this.transformControls?.getMode() ?? this.transformSession.currentTransformMode;
+    const existingMode =
+      this.transformControls?.getMode() ?? this.transformSession.currentTransformMode;
 
     if (this.transformControls && this.scene) {
       this.scene.remove(this.transformControls as unknown as THREE.Object3D);
@@ -1035,7 +1036,11 @@ export class ViewportRendererService {
       this.transformControls.attach(attachedObject);
     }
 
-    if (this.scene && this.transformSession.currentTransformMode !== 'select' && this.transformControls.object) {
+    if (
+      this.scene &&
+      this.transformSession.currentTransformMode !== 'select' &&
+      this.transformControls.object
+    ) {
       this.scene.add(this.transformControls as unknown as THREE.Object3D);
     }
   }
@@ -1227,7 +1232,10 @@ export class ViewportRendererService {
 
     // Preserve the current view direction; fall back to the default diagonal only
     // when the camera sits exactly on its target.
-    const direction = resolvePreservedViewDirection(this.camera.position, this.orbitControls.target);
+    const direction = resolvePreservedViewDirection(
+      this.camera.position,
+      this.orbitControls.target
+    );
 
     if (this.camera instanceof THREE.PerspectiveCamera) {
       const distance = computePerspectiveFitDistance(

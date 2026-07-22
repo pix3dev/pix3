@@ -227,7 +227,9 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 
@@ -274,9 +276,9 @@ describe('ViewportRendererService', () => {
       writable: true,
     });
 
-    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
-      [[rotatedSprite.nodeId, new THREE.Group()]]
-    );
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map([[rotatedSprite.nodeId, new THREE.Group()]]);
 
     const hitNodeIds = service.getSelectable2DNodeIdsInScreenRect(230, 65, 300, 140);
 
@@ -309,7 +311,9 @@ describe('ViewportRendererService', () => {
       configurable: true,
     });
 
-    (service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }).proxyRegistry.sprite2DVisuals = new Map(
+    (
+      service as unknown as { proxyRegistry: { sprite2DVisuals: Map<string, THREE.Group> } }
+    ).proxyRegistry.sprite2DVisuals = new Map(
       rootNodes.map(node => [node.nodeId, new THREE.Group()])
     );
 

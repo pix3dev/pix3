@@ -254,7 +254,7 @@ export class ViewportPicking {
       if (!(node instanceof NodeBase)) {
         continue;
       }
-      if (Boolean(node.properties.locked)) {
+      if (node.properties.locked) {
         continue;
       }
       return node;
