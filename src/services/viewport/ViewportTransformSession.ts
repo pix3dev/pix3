@@ -163,10 +163,6 @@ export class ViewportTransformSession {
       // Reflect the correct HUD state from the first frame: move hides it,
       // resize keeps the live size badge, rotate shows the live angle badge.
       this.deps.updateSelection2DHud();
-      console.debug('[ViewportRenderer] start 2D transform', {
-        handle,
-        nodeIds: this.active2DTransform.nodeIds,
-      });
     }
   }
 
@@ -299,7 +295,6 @@ export class ViewportTransformSession {
     this.deps.end2DInteraction();
     this.deps.update2DSelectionOverlayForNodes(savedNodeIds);
     this.deps.requestRender();
-    console.debug('[ViewportRenderer] complete 2D transform', { nodeIds });
   }
 
   captureTransformStartState(obj: THREE.Object3D): void {

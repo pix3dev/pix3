@@ -429,16 +429,23 @@ export class ViewportAdornments {
           typeof rayLength === 'number'
             ? nodeWorldPos.clone().add(direction.clone().multiplyScalar(rayLength))
             : targetPos;
-        const positions = new Float32Array([
-          nodeWorldPos.x,
-          nodeWorldPos.y,
-          nodeWorldPos.z,
-          lineEndPos.x,
-          lineEndPos.y,
-          lineEndPos.z,
-        ]);
         const geo = (child as THREE.Mesh).geometry as THREE.BufferGeometry;
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const position = geo.getAttribute('position') as THREE.BufferAttribute | undefined;
+        if (position && position.count === 2) {
+          position.setXYZ(0, nodeWorldPos.x, nodeWorldPos.y, nodeWorldPos.z);
+          position.setXYZ(1, lineEndPos.x, lineEndPos.y, lineEndPos.z);
+          position.needsUpdate = true;
+        } else {
+          const positions = new Float32Array([
+            nodeWorldPos.x,
+            nodeWorldPos.y,
+            nodeWorldPos.z,
+            lineEndPos.x,
+            lineEndPos.y,
+            lineEndPos.z,
+          ]);
+          geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        }
       }
     });
 
