@@ -1081,7 +1081,7 @@ export class InspectorPropertyRenderers {
                     title="Revert prefab override"
                     @click=${(e: Event) => this.onRevertPropertyClick(e, prop)}
                   >
-                    ↺
+                    ${this.host.iconService.getIcon('rotate-ccw', 12)}
                   </button>
                 `
               : null}
@@ -1625,7 +1625,7 @@ export class InspectorPropertyRenderers {
                 title="Revert prefab override"
                 @click=${(e: Event) => this.onRevertPropertyClick(e, prop)}
               >
-                ↺
+                ${this.host.iconService.getIcon('rotate-ccw', 12)}
               </button>
             `
           : null}

@@ -639,7 +639,7 @@ ${textPreview?.content || 'Empty file'}</pre
                       title=${this.host.isLivePlayMode
                         ? 'Read-only live values from the running game (play mode)'
                         : 'Read-only during play mode — no live runtime counterpart for this node'}
-                      >${this.host.isLivePlayMode ? '● PLAY · LIVE' : 'PLAY · READ-ONLY'}</span
+                      >${this.host.isLivePlayMode ? 'PLAY · LIVE' : 'PLAY · READ-ONLY'}</span
                     >
                   `
                 : ''}
@@ -795,7 +795,9 @@ ${textPreview?.content || 'Empty file'}</pre
                   @click=${() => this.toggleAnimation(clip.name)}
                   title=${isActive ? 'Stop preview animation' : 'Play preview animation'}
                 >
-                  <span class="animation-play-icon">${isActive ? '⏹' : '▶'}</span>
+                  <span class="animation-play-icon"
+                    >${this.host.iconService.getIcon(isActive ? 'stop' : 'play', 12)}</span
+                  >
                   <span class="animation-name">${clip.name}</span>
                   <span class="animation-duration">${clip.duration.toFixed(2)}s</span>
                 </button>
@@ -898,7 +900,7 @@ ${textPreview?.content || 'Empty file'}</pre
           <div class="group-actions">
             <button
               class="btn-add-behavior"
-              @click=${this.onAddBehavior}
+              @click=${() => this.onAddBehavior()}
               ?disabled=${structureLocked}
               title=${structureLocked ? lockedTitle : 'Add Component'}
             >
