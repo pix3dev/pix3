@@ -43,7 +43,7 @@ export interface LibraryFilter {
 }
 
 /** Build the lower-cased searchable haystack for an item (name + tags + description + type). */
-export function itemHaystack(item: LibraryItem): string {
+function itemHaystack(item: LibraryItem): string {
   const { manifest } = item;
   return [manifest.name, manifest.type, manifest.description ?? '', ...manifest.tags]
     .join(' ')

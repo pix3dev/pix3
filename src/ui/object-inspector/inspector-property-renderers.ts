@@ -77,7 +77,7 @@ export function getComponentPropertyKey(componentId: string, propertyName: strin
  * Pixel-space transforms (position/size) scrub far faster than their small
  * keyboard step; scale/opacity stay fine. `0` lets the field derive from step.
  */
-export function getScrubSensitivity(prop: PropertyDefinition): number {
+function getScrubSensitivity(prop: PropertyDefinition): number {
   switch (prop.name) {
     case 'position':
     case 'width':

@@ -6,7 +6,7 @@
  * file. A lone image is the degenerate one-file bundle. See `.plans/asset-library.md`.
  */
 
-import { categorizeAssetPath, type AssetCategoryId } from '@/core/asset-categories';
+import { categorizeAssetPath } from '@/core/asset-categories';
 
 /** Where an item is stored. UI/search work over the aggregate and stay scope-agnostic. */
 export type LibraryScope = 'builtin' | 'user' | 'team';
@@ -109,22 +109,6 @@ export interface LibraryProvider {
   subscribe?(listener: () => void): () => void;
 }
 
-const CATEGORY_BY_ITEM_TYPE: Readonly<Record<LibraryItemType, AssetCategoryId>> = {
-  prefab: 'scenes',
-  scene: 'scenes',
-  image: 'images',
-  font: 'fonts',
-  audio: 'audio',
-  shader: 'other',
-  script: 'scripts',
-  material: 'other',
-};
-
-/** Map an item type to the canonical asset-browser category (for shared filter chips/icons). */
-export function categoryForItemType(type: LibraryItemType): AssetCategoryId {
-  return CATEGORY_BY_ITEM_TYPE[type];
-}
-
 /**
  * Best-effort item type for a file path, reusing the canonical classifier. `.pix3scene`
  * defaults to `prefab` (the common library case); callers with a known scene entry can
@@ -159,13 +143,3 @@ export const LIBRARY_ITEM_TYPES: readonly LibraryItemType[] = [
   'script',
   'material',
 ];
-
-/** All scopes, in display order. */
-export const LIBRARY_SCOPES: readonly LibraryScope[] = ['builtin', 'user', 'team'];
-
-/** Human labels for scopes (UI). */
-export const LIBRARY_SCOPE_LABELS: Readonly<Record<LibraryScope, string>> = {
-  builtin: 'Built-in',
-  user: 'My',
-  team: 'Team',
-};

@@ -1462,13 +1462,6 @@ export class AnimationResourceEditor extends ComponentBase {
   }
 }
 
-export interface SizeValue {
-  width: number;
-  height: number;
-  aspectRatioLocked?: boolean;
-  hasOriginalSize?: boolean;
-}
-
 /**
  * Size Editor - Displays width and height fields with aspect ratio lock and reset button
  */

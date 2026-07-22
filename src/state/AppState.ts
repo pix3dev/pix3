@@ -1,11 +1,9 @@
 import type { ProjectManifest } from '@/core/ProjectManifest';
 import type { AnimationResource } from '@pix3/runtime';
 
-export const THEME_IDS = ['dark', 'light', 'high-contrast'] as const;
+export type ThemeName = 'dark' | 'light' | 'high-contrast';
 
-export type ThemeName = (typeof THEME_IDS)[number];
-
-export const DEFAULT_THEME: ThemeName = 'dark';
+const DEFAULT_THEME: ThemeName = 'dark';
 
 export type SceneLoadState = 'idle' | 'loading' | 'ready' | 'error';
 export type AnimationLoadState = 'idle' | 'loading' | 'ready' | 'error';

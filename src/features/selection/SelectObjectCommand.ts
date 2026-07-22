@@ -39,8 +39,6 @@ export class SelectObjectCommand extends CommandBase<SelectObjectExecutePayload,
   }
 }
 
-export const createSelectObjectCommand = (params: SelectObjectParams) =>
-  new SelectObjectCommand(params);
 export const selectObject = (nodeId: string | null) => new SelectObjectCommand({ nodeId });
 export const selectObjects = (nodeIds: string[], primaryNodeId?: string | null) =>
   new SelectObjectCommand({ nodeIds, primaryNodeId: primaryNodeId ?? nodeIds[0] ?? null });

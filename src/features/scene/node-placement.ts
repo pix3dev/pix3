@@ -106,23 +106,3 @@ export const removeNodeFromSceneGraph = (sceneGraph: SceneGraph, node: NodeBase)
     sceneGraph.rootNodes.splice(rootIndex, 1);
   }
 };
-
-export const attachNode = (
-  sceneGraph: SceneGraph,
-  node: NodeBase,
-  parentNode: NodeBase | null
-): void => {
-  insertNodeAtIndex(sceneGraph, node, parentNode, -1);
-  sceneGraph.nodeMap.set(node.nodeId, node);
-};
-
-export const detachNode = (
-  sceneGraph: SceneGraph,
-  node: NodeBase,
-  parentNode: NodeBase | null
-): void => {
-  if (parentNode || !node.parentNode) {
-    removeNodeFromSceneGraph(sceneGraph, node);
-  }
-  sceneGraph.nodeMap.delete(node.nodeId);
-};

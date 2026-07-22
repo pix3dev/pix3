@@ -48,7 +48,7 @@ export interface AgentPreferences {
 const STORAGE_KEY = 'pix3.agentSettings:v1';
 
 /** Compose the {@link AgentPreferences.reasoningEffortByModel} key for a provider + model pair. */
-export const reasoningEffortKey = (providerId: string, modelId: string): string =>
+const reasoningEffortKey = (providerId: string, modelId: string): string =>
   `${providerId}::${modelId}`;
 
 const isReasoningEffort = (value: unknown): value is ReasoningEffort =>

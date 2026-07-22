@@ -7,8 +7,8 @@
 
 // TypeScript's DiagnosticCategory enum, as the Monaco worker reports it:
 // Warning = 0, Error = 1, Suggestion = 2, Message = 3.
-export const TS_CATEGORY_WARNING = 0;
-export const TS_CATEGORY_ERROR = 1;
+const TS_CATEGORY_WARNING = 0;
+const TS_CATEGORY_ERROR = 1;
 
 /** A TS diagnostic message, either a plain string or a nested message chain. */
 export interface DiagnosticMessageChainLike {

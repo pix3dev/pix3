@@ -12,7 +12,7 @@
  */
 
 /** Root folder (project-relative, no `res://`) under which inserted bundles live. */
-export const LIBRARY_INSERT_ROOT = 'assets/library';
+const LIBRARY_INSERT_ROOT = 'assets/library';
 
 /** Escape a string for use as a literal inside a RegExp. */
 function escapeRegExp(value: string): string {

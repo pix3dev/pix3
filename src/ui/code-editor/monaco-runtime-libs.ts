@@ -88,7 +88,7 @@ declare module '*.vert' {
 export const SCENE_NODES_LIB_PATH = 'file:///pix3/generated/scene-nodes.d.ts';
 
 /** Fixed virtual path of the ambient shims lib. */
-export const EDITOR_AMBIENT_LIB_PATH = 'file:///pix3/generated/editor-ambient.d.ts';
+const EDITOR_AMBIENT_LIB_PATH = 'file:///pix3/generated/editor-ambient.d.ts';
 
 const remapAfter = (key: string, marker: string, prefix: string): string => {
   const index = key.indexOf(marker);

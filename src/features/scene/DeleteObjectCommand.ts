@@ -67,8 +67,3 @@ export class DeleteObjectCommand extends CommandBase<void, void> {
     return { didMutate: pushed, payload: undefined };
   }
 }
-
-export const createDeleteObjectCommand = (params: DeleteObjectOperationParams) =>
-  new DeleteObjectCommand(params);
-export const deleteSelectedObjects = () => new DeleteObjectCommand();
-export const deleteObjects = (nodeIds: string[]) => new DeleteObjectCommand({ nodeIds });

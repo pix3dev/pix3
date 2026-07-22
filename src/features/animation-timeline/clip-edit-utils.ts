@@ -34,7 +34,7 @@ function sortKeysInPlace(track: ClipTrack): void {
   (track.keys as Array<{ time: number }>).sort((a, b) => a.time - b.time);
 }
 
-export function uniqueClipName(set: KeyframeAnimationSet, base: string): string {
+function uniqueClipName(set: KeyframeAnimationSet, base: string): string {
   const trimmed = base.trim() || 'clip';
   if (!set.clips.some(clip => clip.name === trimmed)) {
     return trimmed;

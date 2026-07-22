@@ -127,7 +127,7 @@ export async function loadGltfFromBlob(
  * at no visual cost. Mirrors the runtime's configure2DTexture() and the DeepCore
  * block-texture fix (configureBlockColorTexture).
  */
-export function configurePreviewTextures(root: Object3D): void {
+function configurePreviewTextures(root: Object3D): void {
   root.traverse(object => {
     const material = (object as Object3D & { material?: Material | Material[] }).material;
     if (!material) {

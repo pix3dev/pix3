@@ -499,11 +499,8 @@ export const base64ToBlob = (base64: string, mimeType: string): Blob => {
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
 
 /** File extension (no dot) for a mime type. */
-export const imageExtensionForMime = (mimeType: string): string =>
+const imageExtensionForMime = (mimeType: string): string =>
   mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
-
-/** Strip an image extension from a path/name if present. */
-export const stripImageExtension = (path: string): string => path.replace(IMAGE_EXT_RE, '');
 
 /** Normalise a user/agent-supplied save path: drop `res://`, back-slashes, leading slashes. */
 export const normalizeAssetPath = (path: string): string =>

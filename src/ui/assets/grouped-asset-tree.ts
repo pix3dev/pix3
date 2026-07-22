@@ -47,7 +47,7 @@ export type AssetTreeNode = {
   folderPath?: string;
 };
 
-export const CATEGORY_PATH_PREFIX = 'category:';
+const CATEGORY_PATH_PREFIX = 'category:';
 
 export const isCategoryPath = (path: string | null | undefined): boolean =>
   !!path && path.startsWith(CATEGORY_PATH_PREFIX);

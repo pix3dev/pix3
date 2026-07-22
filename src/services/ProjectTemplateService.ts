@@ -118,7 +118,7 @@ export interface ProjectTemplate {
   readonly binaryFiles: ReadonlyMap<string, string>;
 }
 
-export const DEFAULT_PROJECT_TEMPLATE_ID = 'empty-3d';
+const DEFAULT_PROJECT_TEMPLATE_ID = 'empty-3d';
 
 const TEMPLATE_DIR_PATTERN = /\/projects\/([^/]+)\//;
 const TEMPLATE_FILES_MARKER = '/files/';

@@ -30,7 +30,6 @@ export const resetAppState = (): void => {
 };
 
 export {
-  createInitialAppState,
   createInitialHybridSyncState,
   createInitialProjectOpenProgressState,
 } from './AppState';

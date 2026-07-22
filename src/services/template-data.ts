@@ -4,7 +4,6 @@ import pix3LogoUrl from '../templates/pix3-logo.png?url';
 
 export type SceneTemplateId = 'startup-scene' | 'default';
 export type BinaryTemplateId = 'Duck.glb' | 'pix3-logo.png';
-export type ImageTemplateId = 'pix3-logo.png';
 
 export interface SceneTemplateDescriptor {
   readonly id: SceneTemplateId;

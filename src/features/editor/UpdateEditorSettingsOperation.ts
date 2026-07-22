@@ -64,7 +64,7 @@ export const loadEditorSettings = (): Partial<EditorSettingsSnapshot> | null => 
   }
 };
 
-export const persistEditorSettings = (settings: EditorSettingsSnapshot): void => {
+const persistEditorSettings = (settings: EditorSettingsSnapshot): void => {
   try {
     localStorage.setItem(EDITOR_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   } catch {

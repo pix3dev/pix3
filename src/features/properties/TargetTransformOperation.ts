@@ -12,10 +12,6 @@ import { SpotLightNode } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/ViewportRenderService';
 
-export interface TargetTransformState {
-  position: { x: number; y: number; z: number };
-}
-
 export interface TargetTransformParams {
   nodeId: string;
   previousTargetPos: { x: number; y: number; z: number };

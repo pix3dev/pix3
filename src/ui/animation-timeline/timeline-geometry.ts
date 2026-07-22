@@ -4,10 +4,10 @@
 
 /** Horizontal pixels representing one second at zoom = 1. */
 export const BASE_PX_PER_SECOND = 120;
-export const MIN_ZOOM = 0.25;
-export const MAX_ZOOM = 8;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 8;
 /** Left padding inside timeline lanes before t=0, in pixels. */
-export const LANE_PADDING_LEFT = 8;
+const LANE_PADDING_LEFT = 8;
 
 export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
@@ -47,7 +47,7 @@ const TICK_STEPS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60];
 const MIN_MAJOR_SPACING_PX = 56;
 
 /** Pick a major tick step so labels stay readable at the given zoom. */
-export function getMajorTickStep(zoom: number): number {
+function getMajorTickStep(zoom: number): number {
   const pps = pxPerSecond(zoom);
   for (const step of TICK_STEPS) {
     if (step * pps >= MIN_MAJOR_SPACING_PX) {

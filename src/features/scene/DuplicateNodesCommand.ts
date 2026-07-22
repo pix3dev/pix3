@@ -77,6 +77,3 @@ export class DuplicateNodesCommand extends CommandBase<void, void> {
     return { didMutate: pushed, payload: undefined };
   }
 }
-
-export const duplicateSelectedNodes = () => new DuplicateNodesCommand();
-export const duplicateNodes = (nodeIds: string[]) => new DuplicateNodesCommand({ nodeIds });

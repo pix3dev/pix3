@@ -59,7 +59,7 @@ export const getGenerationDragData = (
  * The bundle itself is resolved by {@link AssetLibraryService}; the drag only carries the
  * item id so a drop target can copy it into the project and insert it.
  */
-export const LIBRARY_ITEM_DRAG_MIME = 'application/x-pix3-library-item';
+const LIBRARY_ITEM_DRAG_MIME = 'application/x-pix3-library-item';
 
 export interface LibraryItemDragPayload {
   /** AssetLibraryService item id. */
@@ -105,7 +105,7 @@ export const getLibraryItemDragData = (
   }
 };
 
-export const IMAGE_EXTENSIONS = new Set([
+const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',
   'jpeg',
@@ -118,9 +118,9 @@ export const IMAGE_EXTENSIONS = new Set([
   'avif',
 ]);
 
-export const ANIMATION_EXTENSIONS = new Set(['pix3anim']);
-export const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
-export const PREFAB_EXTENSIONS = new Set(['pix3scene']);
+const ANIMATION_EXTENSIONS = new Set(['pix3anim']);
+const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
+const PREFAB_EXTENSIONS = new Set(['pix3scene']);
 
 export type SceneCreateAssetKind = 'image' | 'animation' | 'model' | 'prefab';
 
@@ -133,7 +133,7 @@ export const toProjectResourcePath = (path: string): string => {
   return normalizedPath.length > 0 ? `res://${normalizedPath}` : 'res://';
 };
 
-export const normalizeDroppedAssetResourcePath = (
+const normalizeDroppedAssetResourcePath = (
   raw: string | null | undefined
 ): string | null => {
   if (!raw) {
@@ -182,7 +182,7 @@ export const hasAssetDragData = (dataTransfer: DataTransfer | null): boolean => 
   );
 };
 
-export const getAssetExtension = (resourcePath: string): string => {
+const getAssetExtension = (resourcePath: string): string => {
   const normalized = resourcePath.toLowerCase().split('?')[0].split('#')[0];
   return normalized.includes('.') ? (normalized.split('.').pop() ?? '') : '';
 };

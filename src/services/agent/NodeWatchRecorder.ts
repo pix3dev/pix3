@@ -24,7 +24,7 @@ import { componentToDTO, type Json } from '@/core/agent-introspection';
  */
 
 /** Default poll cadence while watching a running game. */
-export const WATCH_POLL_MS = 100;
+const WATCH_POLL_MS = 100;
 const MAX_WATCH_NODES = 8;
 const MAX_TRACKED_CHILDREN = 32;
 const MAX_LOG_ENTRIES = 10;

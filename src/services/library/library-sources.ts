@@ -100,10 +100,6 @@ export const LIBRARY_SOURCES: readonly LibrarySourceConfig[] = [
   },
 ];
 
-export function getLibrarySource(sourceId: string): LibrarySourceConfig | undefined {
-  return LIBRARY_SOURCES.find(source => source.id === sourceId);
-}
-
 /** Items belonging to a source: everything from its backing scope, or none for config-only sources. */
 export function itemsForSource(
   source: LibrarySourceConfig,
@@ -118,7 +114,7 @@ export function itemsForSource(
 const CUSTOM_CATEGORY_KEY = (sourceId: string) => `pix3.library.categories:${sourceId}`;
 
 /** Slugify a free-text category label into a stable id. */
-export function categorySlug(label: string): string {
+function categorySlug(label: string): string {
   return (
     label
       .trim()
@@ -129,7 +125,7 @@ export function categorySlug(label: string): string {
 }
 
 /** User-created (possibly empty) categories for an editable source, persisted per source. */
-export function loadCustomCategories(sourceId: string): LibrarySourceCategory[] {
+function loadCustomCategories(sourceId: string): LibrarySourceCategory[] {
   try {
     const raw = localStorage.getItem(CUSTOM_CATEGORY_KEY(sourceId));
     if (!raw) {
@@ -205,7 +201,7 @@ export function countItemsInCategory(
 }
 
 /** Best-effort human label from a category id when no explicit label was recorded. */
-export function labelForCategoryId(id: string): string {
+function labelForCategoryId(id: string): string {
   return id
     .split('-')
     .filter(Boolean)
