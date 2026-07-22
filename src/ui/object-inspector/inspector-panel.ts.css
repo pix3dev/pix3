@@ -61,6 +61,7 @@ pix3-panel {
 .inspector-live-badge {
   display: inline-flex;
   align-items: center;
+  gap: 0.3rem;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -71,6 +72,14 @@ pix3-panel {
   border-radius: 999px;
   padding: 0.04rem 0.4rem;
   white-space: nowrap;
+}
+
+.inspector-live-badge:not(.inspector-live-badge--static)::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .inspector-live-badge--static {
@@ -694,9 +703,10 @@ pix3-panel {
   background: var(--accent-soft);
   color: var(--accent);
   border-radius: 3px;
-  padding: 0 4px;
-  line-height: 1.2;
-  font-size: 0.7rem;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -1571,9 +1581,10 @@ pix3-panel {
 }
 
 .animation-play-icon {
-  font-size: 0.7rem;
   width: 14px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--fg-2);
   flex-shrink: 0;
 }
