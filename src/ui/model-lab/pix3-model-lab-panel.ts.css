@@ -221,6 +221,104 @@ pix3-model-lab-panel .ml-tab.is-active {
   background: var(--accent);
 }
 
+/* Lane switch (Model | Scene) ------------------------------------------- */
+pix3-model-lab-panel .ml-lane-switch {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+}
+
+pix3-model-lab-panel .ml-lane {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--fg-2);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .ml-lane:hover {
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-lane.is-active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+/* Scene reference strip -------------------------------------------------- */
+pix3-model-lab-panel .ml-ref-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-2);
+  border-radius: 6px;
+}
+
+pix3-model-lab-panel .ml-ref-strip.is-dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-model-lab-panel .ml-ref-thumb {
+  position: relative;
+  width: 4rem;
+  height: 4rem;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+}
+
+pix3-model-lab-panel .ml-ref-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+pix3-model-lab-panel .ml-ref-thumb .ml-thumb-remove {
+  top: 0.15rem;
+  right: 0.15rem;
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+pix3-model-lab-panel .ml-ref-add {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  width: 4rem;
+  height: 4rem;
+  font-size: 0.7rem;
+  color: var(--fg-2);
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .ml-ref-add:hover {
+  border-color: var(--accent);
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-ref-add svg {
+  display: block;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
 /* Field extras ---------------------------------------------------------- */
 pix3-model-lab-panel .ml-optional {
   font-weight: 400;
@@ -238,7 +336,8 @@ pix3-model-lab-panel .ml-coming-soon {
 }
 
 pix3-model-lab-panel .ml-select,
-pix3-model-lab-panel .ml-textarea {
+pix3-model-lab-panel .ml-textarea,
+pix3-model-lab-panel .ml-input {
   width: 100%;
   padding: 0.4rem 0.55rem;
   font-size: 0.85rem;
@@ -256,6 +355,7 @@ pix3-model-lab-panel .ml-textarea {
 
 pix3-model-lab-panel .ml-select:focus,
 pix3-model-lab-panel .ml-textarea:focus,
+pix3-model-lab-panel .ml-input:focus,
 pix3-model-lab-panel .model-lab-field input:focus {
   outline: none;
   border-color: var(--accent);
@@ -648,6 +748,49 @@ pix3-model-lab-panel .ml-review-rationale {
 pix3-model-lab-panel .ml-review-actions {
   display: flex;
   gap: 0.4rem;
+}
+
+/* Palette gaps (scene → model handoff) ---------------------------------- */
+pix3-model-lab-panel .ml-gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+pix3-model-lab-panel .ml-gaps-intro {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--fg-1);
+}
+
+pix3-model-lab-panel .ml-gaps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-model-lab-panel .ml-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+pix3-model-lab-panel .ml-gap-need {
+  font-size: 0.8rem;
+  color: var(--fg-0);
+  word-break: break-word;
+}
+
+pix3-model-lab-panel .ml-gap .model-lab-button {
+  flex: 0 0 auto;
 }
 
 /* Settings toggle ------------------------------------------------------- */

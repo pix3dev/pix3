@@ -212,6 +212,22 @@ debug:** `window.__PIX3_DEBUG__.model3d` (`generate` / `generateFromSpec` /
 `rebuild` / `history` / `openHistory`). Objects only — characters/organics are
 not supported yet. Lives in `src/services/model-gen/` + `src/ui/model-lab/`.
 
+Model Lab has a second **Scene lane** (a lane switch in the panel) that generates
+whole `.pix3scene` **levels** from a text brief, using the project's existing
+assets as a palette: scan inventory → `LevelSpec` (zones / lighting / camera
+intent + flagged palette gaps) → locked passes (layout → placement → dressing →
+lighting → polish) emitting declarative `.pix3scene` YAML, gated by the runtime
+`SceneManager.parseScene` PLUS an allow-list/asset-ref check (parseScene alone
+tolerates unknown types and missing refs), previewed as a live runtime scene from
+multiple viewpoints, and vision-reviewed against the brief. It can also EDIT an
+existing scene (dress/light passes over a loaded `.pix3scene`), expands a
+`type: Scatter` authoring-sugar node into deterministic seeded node clusters
+before the gate (never persisted), and flags "palette gaps" that hand off to the
+model lane. Output saves via `writeTextFile` and opens as a normal scene tab
+(`EditorTabService.focusOrOpenScene`). **Agent:** `generate_scene_3d` (`brief` +
+`name`, optional `references` / `baseScene`). **Debug:** `__PIX3_DEBUG__.scene3d`.
+Scene lane lives in `src/services/model-gen/scene/`.
+
 ### Localization (i18n)
 Per-locale JSON tables in the project's `locales/` directory
 (`locales/en.json`, `locales/ru.json`): a `strings` section (translation key →
@@ -419,6 +435,6 @@ play-mode hook, so the editor keeps running.
 - Built-in behaviors: `packages/pix3-runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
 - Asset Library: services `src/services/library/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
-- Model Lab (3D generation): orchestrator + pipeline in `src/services/model-gen/` (`Model3DGenService`, `SculptSpec`, `ModelPreviewRenderer`, `ComparisonSheet`, `Model3DGenHistoryService`, `prompts/`); panel `src/ui/model-lab/`; agent tool `generate_model_3d` (`src/services/agent/AgentToolRegistry.ts`); debug lane `__PIX3_DEBUG__.model3d` (`src/core/debug-bridge.ts`).
+- Model Lab (3D generation): orchestrator + pipeline in `src/services/model-gen/` (`Model3DGenService`, `SculptSpec`, `ModelPreviewRenderer`, `ComparisonSheet`, `Model3DGenHistoryService`, `prompts/`); scene lane in `src/services/model-gen/scene/` (`Scene3DGenService`, `LevelSpec`, `scene-validate`, `SceneInventoryService`, `ScenePreviewRenderer`, `scene-scatter`, `prompts`); panel `src/ui/model-lab/`; agent tools `generate_model_3d` / `generate_scene_3d` (`src/services/agent/AgentToolRegistry.ts`); debug lanes `__PIX3_DEBUG__.model3d` / `.scene3d` (`src/core/debug-bridge.ts`).
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.
 - Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [ecs-instancing.md](ecs-instancing.md), the `property-schema-*.md` set.

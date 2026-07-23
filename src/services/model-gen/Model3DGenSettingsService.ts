@@ -38,6 +38,12 @@ export interface ModelLabPreferences {
   mode: ModelGenMode;
   /** Project-relative folder GLBs are saved into by default. */
   saveFolder: string;
+  /**
+   * Project-relative folder generated `.pix3scene` levels (Scene lane) are saved into by default.
+   * Optional in the type only so pre-existing preference literals stay valid; {@link
+   * Model3DGenSettingsService.getPreferences} always returns it populated (defaults to `scenes`).
+   */
+  sceneSaveFolder?: string;
 }
 
 const STORAGE_KEY = 'pix3.modelLabSettings:v1';
@@ -68,6 +74,7 @@ const sanitizeReasoningEffortMap = (raw: unknown): Record<string, ReasoningEffor
 const DEFAULT_SCORE_THRESHOLD = 0.7;
 const DEFAULT_MAX_ITERATIONS_PER_PASS = 3;
 const DEFAULT_SAVE_FOLDER = 'models';
+const DEFAULT_SCENE_SAVE_FOLDER = 'scenes';
 
 @injectable()
 export class Model3DGenSettingsService {
@@ -155,6 +162,7 @@ export class Model3DGenSettingsService {
       pauseForReview: false,
       mode: 'quality',
       saveFolder: DEFAULT_SAVE_FOLDER,
+      sceneSaveFolder: DEFAULT_SCENE_SAVE_FOLDER,
     };
   }
 
@@ -207,6 +215,10 @@ export class Model3DGenSettingsService {
           typeof parsed.saveFolder === 'string' && parsed.saveFolder.trim()
             ? parsed.saveFolder
             : defaults.saveFolder,
+        sceneSaveFolder:
+          typeof parsed.sceneSaveFolder === 'string' && parsed.sceneSaveFolder.trim()
+            ? parsed.sceneSaveFolder
+            : defaults.sceneSaveFolder,
       };
     } catch {
       return defaults;

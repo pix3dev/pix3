@@ -6,21 +6,25 @@ import {
   GridHelper,
   Group,
   HemisphereLight,
+  type Object3D,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { SceneManager } from '@pix3/runtime';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   disposeObject3DResources,
   framePerspectiveCameraToObject,
 } from '@/services/assets/GltfBlobLoader';
 import { IconService, IconSize } from '@/services/editor/IconService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { Model3DExportService } from '@/services/model-gen/Model3DExportService';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
+import { Scene3DGenService } from '@/services/model-gen/scene/Scene3DGenService';
 import {
   Model3DGenHistoryService,
   type ModelGenRecord,
@@ -37,16 +41,26 @@ import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { TEST_MODELS, buildTestModel } from '@/services/model-gen/test-models';
 import type {
   ComplexityHint,
+  LlmUsageAggregate,
+  ModelGenLogEntry,
   ModelGenState,
   ModelGenStatus,
+  PassRecord,
   PassStatus,
+  PendingReview,
   ReferenceImageInput,
 } from '@/services/model-gen/model-gen-types';
+import type {
+  SceneGenState,
+  SceneGenStatus,
+} from '@/services/model-gen/scene/scene-gen-types';
+import type { PaletteGap } from '@/services/model-gen/scene/LevelSpec';
 import { appState } from '@/state';
 import './pix3-model-lab-panel.ts.css';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 type LabTab = 'generate' | 'settings';
+type GenLane = 'model' | 'scene';
 
 /** A reference image staged for generation. `dataUrl` drives the thumbnail; `base64` is prefix-free. */
 interface StagedReference {
@@ -55,7 +69,30 @@ interface StagedReference {
   dataUrl: string;
 }
 
+/**
+ * The subset of pipeline state the shared monitor renders. Both {@link ModelGenState} and
+ * {@link SceneGenState} are assignable to it (their `status` unions differ, but every other field
+ * these views read is identical), so the monitor / pass list / comparison sheet / review card are
+ * lane-agnostic — driven by whichever lane is active.
+ */
+interface MonitorView {
+  status: ModelGenStatus | SceneGenStatus;
+  stageLabel: string;
+  log: readonly ModelGenLogEntry[];
+  passes: readonly PassRecord[];
+  currentPassId: string | null;
+  pendingReview: PendingReview | null;
+  usage: LlmUsageAggregate;
+  error: string | null;
+}
+
+/** The review-gate contract shared by both lane services (accept / retry / stop). */
+interface ReviewDecider {
+  decideReview(decision: 'accept' | 'retry' | 'stop'): void;
+}
+
 const DEFAULT_SAVE_FOLDER = 'models';
+const DEFAULT_SCENE_SAVE_FOLDER = 'scenes';
 
 const DEFAULT_GEN_STATE: ModelGenState = {
   status: 'idle',
@@ -84,10 +121,28 @@ const DEFAULT_PREFS: ModelLabPreferences = {
   pauseForReview: false,
   mode: 'quality',
   saveFolder: DEFAULT_SAVE_FOLDER,
+  sceneSaveFolder: DEFAULT_SCENE_SAVE_FOLDER,
 };
 
-/** Map a pipeline status to a compact chip label + tone class. */
-function statusChip(status: ModelGenStatus): { label: string; tone: string } {
+const DEFAULT_SCENE_GEN_STATE: SceneGenState = {
+  status: 'idle',
+  stageLabel: '',
+  log: [],
+  levelSpec: null,
+  sceneYaml: null,
+  passes: [],
+  currentPassId: null,
+  pendingReview: null,
+  inventory: null,
+  sceneRevision: 0,
+  usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0 },
+  error: null,
+  canGenerate: true,
+  savedPath: null,
+};
+
+/** Map a pipeline status (either lane) to a compact chip label + tone class. */
+function statusChip(status: ModelGenStatus | SceneGenStatus): { label: string; tone: string } {
   switch (status) {
     case 'idle':
       return { label: 'Idle', tone: 'idle' };
@@ -95,10 +150,14 @@ function statusChip(status: ModelGenStatus): { label: string; tone: string } {
       return { label: 'Intake', tone: 'busy' };
     case 'assessing':
       return { label: 'Assessing', tone: 'busy' };
+    case 'inventory':
+      return { label: 'Inventory', tone: 'busy' };
     case 'speccing':
       return { label: 'Speccing', tone: 'busy' };
     case 'building':
       return { label: 'Building', tone: 'busy' };
+    case 'validating':
+      return { label: 'Validating', tone: 'busy' };
     case 'compiling':
       return { label: 'Compiling', tone: 'busy' };
     case 'rendering':
@@ -177,6 +236,15 @@ export class ModelLabPanel extends ComponentBase {
   @inject(Model3DGenService)
   private readonly genService!: Model3DGenService;
 
+  @inject(Scene3DGenService)
+  private readonly sceneGenService!: Scene3DGenService;
+
+  @inject(SceneManager)
+  private readonly sceneManager!: SceneManager;
+
+  @inject(EditorTabService)
+  private readonly editorTabs!: EditorTabService;
+
   @inject(Model3DGenHistoryService)
   private readonly history!: Model3DGenHistoryService;
 
@@ -193,15 +261,23 @@ export class ModelLabPanel extends ComponentBase {
   tabId = '';
 
   @state() private activeTab: LabTab = 'generate';
+  @state() private activeLane: GenLane = 'model';
 
-  // -- generation inputs -----------------------------------------------------
+  // -- model-lane generation inputs ------------------------------------------
   @state() private reference: StagedReference | null = null;
   @state() private prompt = '';
   @state() private complexity: ComplexityHint = 'moderate';
   @state() private isDragOver = false;
 
+  // -- scene-lane generation inputs ------------------------------------------
+  @state() private brief = '';
+  @state() private sceneReferences: StagedReference[] = [];
+  /** Optional `res://`/project path to an existing `.pix3scene` to EDIT instead of authoring fresh. */
+  @state() private sceneBasePath = '';
+
   // -- mirrored service state ------------------------------------------------
   @state() private gen: ModelGenState = DEFAULT_GEN_STATE;
+  @state() private sceneGen: SceneGenState = DEFAULT_SCENE_GEN_STATE;
   @state() private prefs: ModelLabPreferences = DEFAULT_PREFS;
   @state() private refreshingProviderId: string | null = null;
 
@@ -217,6 +293,14 @@ export class ModelLabPanel extends ComponentBase {
   @state() private saveState: SaveState = 'idle';
   @state() private statusMessage = '';
   @state() private lastSavedPath: string | null = null;
+
+  // -- scene-lane save -------------------------------------------------------
+  @state() private sceneSaveName = 'level';
+  @state() private sceneSaveFolder = DEFAULT_SCENE_SAVE_FOLDER;
+  @state() private sceneSaveState: SaveState = 'idle';
+  @state() private sceneStatusMessage = '';
+  @state() private sceneSavedPath: string | null = null;
+
   @state() private isRendererAvailable =
     typeof WebGLRenderingContext !== 'undefined' || typeof WebGL2RenderingContext !== 'undefined';
 
@@ -228,17 +312,22 @@ export class ModelLabPanel extends ComponentBase {
   private resizeObserver?: ResizeObserver;
   private previewRoot?: Group;
   private currentModel?: Group;
+  /** The scene-lane preview roots — remove-only on clear (they reference AssetLoader-cached resources). */
+  private currentSceneRoots: Object3D[] = [];
   private frameHandle?: number;
   private renderRequested = true;
 
   private readonly disposers: Array<() => void> = [];
   private lastModelRevision = 0;
+  private lastSceneRevision = 0;
   private lastLogCount = 0;
   private saveFolderSeeded = false;
+  private sceneSaveFolderSeeded = false;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.disposers.push(this.genService.subscribe(state => this.onGenState(state)));
+    this.disposers.push(this.sceneGenService.subscribe(state => this.onSceneGenState(state)));
     this.disposers.push(this.settings.subscribe(prefs => this.onPrefs(prefs)));
     this.disposers.push(this.catalog.subscribe(() => this.requestUpdate()));
     if (Model3DGenHistoryService.isSupported()) {
@@ -261,6 +350,7 @@ export class ModelLabPanel extends ComponentBase {
     }
     this.historyUrls.clear();
     this.disposeCurrentModel();
+    this.clearSceneRoots();
     this.controls?.dispose();
     this.controls = undefined;
     this.renderer?.dispose();
@@ -290,13 +380,23 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   protected updated(): void {
-    if (this.gen.log.length !== this.lastLogCount) {
-      this.lastLogCount = this.gen.log.length;
+    const logLength = this.activeMonitor().log.length;
+    if (logLength !== this.lastLogCount) {
+      this.lastLogCount = logLength;
       const log = this.querySelector<HTMLElement>('.ml-log');
       if (log) {
         log.scrollTop = log.scrollHeight;
       }
     }
+  }
+
+  /** The pipeline state driving the shared monitor — the currently-selected lane's. */
+  private activeMonitor(): MonitorView {
+    return this.activeLane === 'scene' ? this.sceneGen : this.gen;
+  }
+
+  private activeDecider(): ReviewDecider {
+    return this.activeLane === 'scene' ? this.sceneGenService : this.genService;
   }
 
   protected render() {
@@ -352,6 +452,43 @@ export class ModelLabPanel extends ComponentBase {
   // -- Generate tab ----------------------------------------------------------
 
   private renderGenerateTab() {
+    return html`
+      ${this.renderLaneSwitch()}
+      ${this.activeLane === 'model' ? this.renderModelInputs() : this.renderSceneInputs()}
+      ${this.renderMonitor(this.activeMonitor(), this.activeDecider())}
+      ${this.activeLane === 'scene' ? this.renderPaletteGaps() : null}
+      ${this.activeLane === 'model' ? this.renderSaveGroup() : this.renderSceneSaveGroup()}
+      ${this.activeLane === 'model'
+        ? html`${this.renderHistory()} ${this.renderTestModels()}`
+        : null}
+    `;
+  }
+
+  /** The Model | Scene lane selector at the top of the Generate tab. */
+  private renderLaneSwitch() {
+    return html`
+      <div class="ml-lane-switch" role="group" aria-label="Generation lane">
+        <button
+          type="button"
+          class="ml-lane ${this.activeLane === 'model' ? 'is-active' : ''}"
+          aria-pressed=${this.activeLane === 'model'}
+          @click=${() => this.setLane('model')}
+        >
+          Model
+        </button>
+        <button
+          type="button"
+          class="ml-lane ${this.activeLane === 'scene' ? 'is-active' : ''}"
+          aria-pressed=${this.activeLane === 'scene'}
+          @click=${() => this.setLane('scene')}
+        >
+          Scene
+        </button>
+      </div>
+    `;
+  }
+
+  private renderModelInputs() {
     const running = !this.gen.canGenerate;
     return html`
       <section class="model-lab-section">
@@ -443,14 +580,167 @@ export class ModelLabPanel extends ComponentBase {
           ? html`<p class="model-lab-status is-ok">Add a reference image to generate.</p>`
           : null}
       </section>
-
-      ${this.renderMonitor()} ${this.renderSaveGroup()} ${this.renderHistory()}
-      ${this.renderTestModels()}
     `;
   }
 
-  private renderMonitor() {
-    const gen = this.gen;
+  // -- Scene lane inputs -----------------------------------------------------
+
+  private renderSceneInputs() {
+    const running = !this.sceneGen.canGenerate;
+    const briefEmpty = !this.brief.trim();
+    const inventory = this.sceneGen.inventory;
+    return html`
+      <section class="model-lab-section">
+        <h3>Brief</h3>
+        <textarea
+          class="ml-textarea"
+          rows="4"
+          placeholder="a desert canyon arena with a central shrine, top-down camera…"
+          spellcheck="false"
+          .value=${this.brief}
+          @input=${(e: Event) => (this.brief = (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
+      </section>
+
+      <section class="model-lab-section">
+        <h3>Edit existing scene <span class="ml-optional">optional</span></h3>
+        <input
+          type="text"
+          class="ml-input"
+          placeholder="res://scenes/level1.pix3scene"
+          spellcheck="false"
+          .value=${this.sceneBasePath}
+          @input=${(e: Event) => (this.sceneBasePath = (e.target as HTMLInputElement).value)}
+        />
+        <p class="ml-field-note">
+          Leave empty to author a new level; set a path to dress/light an existing scene.
+        </p>
+      </section>
+
+      <section class="model-lab-section">
+        <h3>Reference images <span class="ml-optional">optional</span></h3>
+        <div
+          class="ml-ref-strip ${this.isDragOver ? 'is-dragover' : ''}"
+          @dragover=${this.onDragOver}
+          @dragleave=${this.onDragLeave}
+          @drop=${this.onSceneDrop}
+        >
+          ${this.sceneReferences.map(
+            (ref, index) => html`
+              <div class="ml-ref-thumb">
+                <img src=${ref.dataUrl} alt=${`Reference ${index + 1}`} />
+                <button
+                  type="button"
+                  class="ml-thumb-remove"
+                  aria-label="Remove reference image ${index + 1}"
+                  @click=${() => this.removeSceneReference(index)}
+                >
+                  ${this.icons.getIcon('x', IconSize.SMALL)}
+                </button>
+              </div>
+            `
+          )}
+          <button
+            type="button"
+            class="ml-ref-add"
+            aria-label="Add reference image"
+            @click=${() => this.querySelector<HTMLInputElement>('.ml-scene-file-input')?.click()}
+          >
+            ${this.icons.getIcon('image', IconSize.MEDIUM)}
+            <span>Add</span>
+          </button>
+        </div>
+        <input
+          type="file"
+          accept="image/*"
+          class="ml-scene-file-input"
+          hidden
+          multiple
+          @change=${this.onPickSceneFiles}
+        />
+      </section>
+
+      ${inventory
+        ? html`<p class="ml-field-note">
+            Palette: ${inventory.counts.model} models · ${inventory.counts.prefab} prefabs ·
+            ${inventory.counts.texture} textures
+          </p>`
+        : null}
+
+      <section class="model-lab-section">
+        ${running
+          ? html`<button
+              type="button"
+              class="model-lab-button is-danger with-icon"
+              @click=${() => this.onStopScene()}
+            >
+              <span>${this.icons.getIcon('stop-circle', IconSize.SMALL)}</span> Stop
+            </button>`
+          : html`<button
+              type="button"
+              class="model-lab-button is-primary with-icon"
+              ?disabled=${briefEmpty}
+              @click=${() => this.onGenerateScene()}
+            >
+              <span>${this.icons.getIcon('zap', IconSize.SMALL)}</span> Generate
+            </button>`}
+        ${!running && briefEmpty
+          ? html`<p class="model-lab-status is-ok">Describe the scene to generate.</p>`
+          : null}
+      </section>
+    `;
+  }
+
+  /**
+   * Advisory card (scene lane only): assets the brief implies that the project palette lacks. Each
+   * carries a ready-to-use model-lane prompt; the button hands it off to the model lane so the user
+   * can generate the missing asset, then dress the scene with it.
+   */
+  private renderPaletteGaps() {
+    const gaps = this.sceneGen.levelSpec?.paletteGaps;
+    if (!gaps || gaps.length === 0) {
+      return null;
+    }
+    return html`
+      <section class="model-lab-section">
+        <h3>Palette gaps</h3>
+        <div class="ml-gaps">
+          <p class="ml-gaps-intro">The brief calls for assets not in your project:</p>
+          <ul class="ml-gaps-list" aria-label="Palette gaps">
+            ${gaps.map(
+              gap => html`<li class="ml-gap">
+                <span class="ml-gap-need" title=${gap.need}>${gap.need}</span>
+                <button
+                  type="button"
+                  class="model-lab-button with-icon"
+                  @click=${() => this.onFillGapInModelLane(gap)}
+                >
+                  <span>${this.icons.getIcon('box', IconSize.SMALL)}</span> Generate in Model lane
+                </button>
+              </li>`
+            )}
+          </ul>
+        </div>
+      </section>
+    `;
+  }
+
+  /**
+   * Hand a palette gap to the model lane: seed the model-lane prompt, switch lanes (reusing
+   * {@link setLane} so the preview swaps correctly), then scroll the reference dropzone into view so
+   * the user knows to add a reference image.
+   */
+  private onFillGapInModelLane(gap: PaletteGap): void {
+    this.prompt = gap.suggestedPrompt;
+    this.setLane('model');
+    void this.updateComplete.then(() => {
+      this.querySelector('.ml-dropzone')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
+  // -- Shared pipeline monitor -----------------------------------------------
+
+  private renderMonitor(gen: MonitorView, decider: ReviewDecider) {
     if (
       gen.status === 'idle' &&
       gen.log.length === 0 &&
@@ -468,7 +758,8 @@ export class ModelLabPanel extends ComponentBase {
           ${gen.stageLabel ? html`<span class="ml-stage">${gen.stageLabel}</span>` : null}
         </div>
         ${gen.error ? html`<p class="ml-error" role="alert">${gen.error}</p>` : null}
-        ${this.renderReviewCard()} ${this.renderPassList()} ${this.renderComparisonSheet()}
+        ${this.renderReviewCard(gen, decider)} ${this.renderPassList(gen)}
+        ${this.renderComparisonSheet(gen)}
         ${gen.log.length
           ? html`<div class="ml-log" role="log" aria-live="polite">
               ${gen.log.map(
@@ -488,8 +779,8 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   /** Compact vertical list of the current job's passes with status glyph + score badge. */
-  private renderPassList() {
-    const { passes, currentPassId } = this.gen;
+  private renderPassList(gen: MonitorView) {
+    const { passes, currentPassId } = gen;
     if (passes.length === 0) {
       return null;
     }
@@ -523,8 +814,8 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   /** The current (or last) pass's reference|render comparison sheet, when one exists. */
-  private renderComparisonSheet() {
-    const { passes, currentPassId } = this.gen;
+  private renderComparisonSheet(gen: MonitorView) {
+    const { passes, currentPassId } = gen;
     const sheetPass =
       passes.find(pass => pass.id === currentPassId && pass.sheetDataUrl) ??
       [...passes].reverse().find(pass => pass.sheetDataUrl);
@@ -541,13 +832,13 @@ export class ModelLabPanel extends ComponentBase {
     `;
   }
 
-  /** The manual review gate — only rendered while a decision is awaited. */
-  private renderReviewCard() {
-    const review = this.gen.pendingReview;
+  /** The manual review gate — only rendered while a decision is awaited. Routes to the active lane. */
+  private renderReviewCard(gen: MonitorView, decider: ReviewDecider) {
+    const review = gen.pendingReview;
     if (!review) {
       return null;
     }
-    const passLabel = this.gen.passes.find(pass => pass.id === review.passId)?.label ?? review.passId;
+    const passLabel = gen.passes.find(pass => pass.id === review.passId)?.label ?? review.passId;
     return html`
       <div class="ml-review" role="group" aria-label="Manual review">
         <div class="ml-review-head">
@@ -563,21 +854,21 @@ export class ModelLabPanel extends ComponentBase {
           <button
             type="button"
             class="model-lab-button is-primary with-icon"
-            @click=${() => this.genService.decideReview('accept')}
+            @click=${() => decider.decideReview('accept')}
           >
             <span>${this.icons.getIcon('check', IconSize.SMALL)}</span> Accept
           </button>
           <button
             type="button"
             class="model-lab-button with-icon"
-            @click=${() => this.genService.decideReview('retry')}
+            @click=${() => decider.decideReview('retry')}
           >
             <span>${this.icons.getIcon('refresh-cw', IconSize.SMALL)}</span> Retry
           </button>
           <button
             type="button"
             class="model-lab-button is-danger with-icon"
-            @click=${() => this.genService.decideReview('stop')}
+            @click=${() => decider.decideReview('stop')}
           >
             <span>${this.icons.getIcon('stop-circle', IconSize.SMALL)}</span> Stop
           </button>
@@ -635,6 +926,63 @@ export class ModelLabPanel extends ComponentBase {
               aria-live="polite"
             >
               ${this.statusMessage}
+            </p>`
+          : null}
+      </section>
+    `;
+  }
+
+  /** Scene-lane save group: writes a `.pix3scene` document and opens it in an editor tab. */
+  private renderSceneSaveGroup() {
+    const hasScene = this.sceneGen.sceneYaml != null;
+    return html`
+      <section class="model-lab-section">
+        <h3>Save to project</h3>
+        <label class="model-lab-field">
+          <span>Folder</span>
+          <input
+            type="text"
+            .value=${this.sceneSaveFolder}
+            @input=${(e: Event) => {
+              this.sceneSaveFolder = (e.target as HTMLInputElement).value;
+              this.sceneSaveFolderSeeded = true;
+            }}
+            spellcheck="false"
+          />
+        </label>
+        <label class="model-lab-field">
+          <span>Name</span>
+          <input
+            type="text"
+            .value=${this.sceneSaveName}
+            @input=${(e: Event) => (this.sceneSaveName = (e.target as HTMLInputElement).value)}
+            spellcheck="false"
+          />
+        </label>
+        <div class="model-lab-actions">
+          <button
+            type="button"
+            class="model-lab-button is-primary"
+            ?disabled=${this.sceneSaveState === 'saving' || !hasScene}
+            @click=${() => void this.onSaveScene()}
+          >
+            ${this.sceneSaveState === 'saving' ? 'Saving…' : 'Save scene'}
+          </button>
+          <button
+            type="button"
+            class="model-lab-button"
+            ?disabled=${!this.sceneSavedPath || appState.project.status !== 'ready'}
+            @click=${() => void this.onOpenScene()}
+          >
+            Open in editor
+          </button>
+        </div>
+        ${this.sceneStatusMessage
+          ? html`<p
+              class="model-lab-status ${this.sceneSaveState === 'error' ? 'is-error' : 'is-ok'}"
+              aria-live="polite"
+            >
+              ${this.sceneStatusMessage}
             </p>`
           : null}
       </section>
@@ -904,6 +1252,19 @@ export class ModelLabPanel extends ComponentBase {
               })}
           />
         </label>
+        <label class="model-lab-field">
+          <span>Default scene folder</span>
+          <input
+            type="text"
+            spellcheck="false"
+            .value=${this.prefs.sceneSaveFolder ?? DEFAULT_SCENE_SAVE_FOLDER}
+            @change=${(e: Event) =>
+              this.settings.updatePreferences({
+                sceneSaveFolder:
+                  (e.target as HTMLInputElement).value.trim() || DEFAULT_SCENE_SAVE_FOLDER,
+              })}
+          />
+        </label>
       </section>
 
       <p class="model-lab-note">
@@ -1075,7 +1436,11 @@ export class ModelLabPanel extends ComponentBase {
         const file = item.getAsFile();
         if (file) {
           event.preventDefault();
-          void this.setReferenceFromFile(file);
+          if (this.activeLane === 'scene') {
+            void this.addSceneReference(file);
+          } else {
+            void this.setReferenceFromFile(file);
+          }
           return;
         }
       }
@@ -1112,6 +1477,51 @@ export class ModelLabPanel extends ComponentBase {
     this.reference = null;
   }
 
+  // -- scene-lane reference images -------------------------------------------
+
+  private onSceneDrop = (event: DragEvent): void => {
+    event.preventDefault();
+    this.isDragOver = false;
+    const files = event.dataTransfer?.files;
+    if (files) {
+      for (const file of files) {
+        void this.addSceneReference(file);
+      }
+    }
+  };
+
+  private onPickSceneFiles(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    if (files) {
+      for (const file of files) {
+        void this.addSceneReference(file);
+      }
+    }
+    input.value = '';
+  }
+
+  private async addSceneReference(file: File): Promise<void> {
+    if (!file.type.startsWith('image/')) {
+      this.sceneStatusMessage = 'Please choose an image file.';
+      this.sceneSaveState = 'error';
+      return;
+    }
+    try {
+      const dataUrl = await readAsDataUrl(file);
+      const comma = dataUrl.indexOf(',');
+      const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      this.sceneReferences = [...this.sceneReferences, { mimeType: file.type, base64, dataUrl }];
+    } catch {
+      this.sceneStatusMessage = 'Failed to read the image file.';
+      this.sceneSaveState = 'error';
+    }
+  }
+
+  private removeSceneReference(index: number): void {
+    this.sceneReferences = this.sceneReferences.filter((_, i) => i !== index);
+  }
+
   // -- generation ------------------------------------------------------------
 
   private onGenerate(): void {
@@ -1130,11 +1540,45 @@ export class ModelLabPanel extends ComponentBase {
     this.genService.cancel();
   }
 
+  private onGenerateScene(): void {
+    const brief = this.brief.trim();
+    if (!brief) {
+      return;
+    }
+    void this.sceneGenService.generate({
+      brief,
+      referenceImages: this.sceneReferences.map(ref => ({
+        mimeType: ref.mimeType,
+        base64: ref.base64,
+      })),
+      mode: this.prefs.mode,
+      baseScenePath: this.sceneBasePath.trim() || undefined,
+    });
+  }
+
+  private onStopScene(): void {
+    this.sceneGenService.cancel();
+  }
+
   private onGenState(state: ModelGenState): void {
     this.gen = state;
     if (state.modelRevision !== this.lastModelRevision) {
       this.lastModelRevision = state.modelRevision;
-      this.swapInGeneratedModel();
+      // Only hot-swap when the model lane owns the viewport.
+      if (this.activeLane === 'model') {
+        this.swapInGeneratedModel();
+      }
+    }
+  }
+
+  private onSceneGenState(state: SceneGenState): void {
+    this.sceneGen = state;
+    if (state.sceneRevision !== this.lastSceneRevision) {
+      this.lastSceneRevision = state.sceneRevision;
+      // Only hot-swap when the scene lane owns the viewport.
+      if (this.activeLane === 'scene') {
+        void this.swapInGeneratedScene();
+      }
     }
   }
 
@@ -1143,6 +1587,31 @@ export class ModelLabPanel extends ComponentBase {
     if (!this.saveFolderSeeded) {
       this.saveFolder = prefs.saveFolder;
       this.saveFolderSeeded = true;
+    }
+    if (!this.sceneSaveFolderSeeded) {
+      this.sceneSaveFolder = prefs.sceneSaveFolder ?? DEFAULT_SCENE_SAVE_FOLDER;
+      this.sceneSaveFolderSeeded = true;
+    }
+  }
+
+  /** Switch the active generation lane; hand the viewport to the incoming lane's preview. */
+  private setLane(lane: GenLane): void {
+    if (lane === this.activeLane) {
+      return;
+    }
+    this.activeLane = lane;
+    if (lane === 'scene') {
+      // Leaving the model lane: free its panel-owned Group, then show the scene (if any).
+      this.disposeCurrentModel();
+      void this.swapInGeneratedScene();
+    } else {
+      // Leaving the scene lane: remove (not dispose) its roots, then restore the model preview.
+      this.clearSceneRoots();
+      if (this.genService.getModel()) {
+        this.swapInGeneratedModel();
+      } else {
+        this.buildModel(this.selectedModelId || TEST_MODELS[0].id);
+      }
     }
   }
 
@@ -1166,6 +1635,47 @@ export class ModelLabPanel extends ComponentBase {
     this.saveName = slugify(this.gen.assessment?.objectClass ?? 'model');
     this.lastSavedPath = null;
     this.saveState = 'idle';
+    this.renderRequested = true;
+  }
+
+  /**
+   * Parse the latest scene YAML and swap its roots into the preview. Async (parse), so it re-checks
+   * `previewRoot` after the await in case the panel was disconnected meanwhile. Scene nodes reference
+   * AssetLoader-cached geometry/materials, so clearing is remove-only — never `disposeObject3DResources`.
+   */
+  private async swapInGeneratedScene(): Promise<void> {
+    if (!this.scene || !this.camera || !this.previewRoot) {
+      return;
+    }
+    const yaml = this.sceneGenService.getSceneYaml();
+    if (!yaml) {
+      return;
+    }
+    let rootNodes: Object3D[];
+    try {
+      const graph = await this.sceneManager.parseScene(yaml);
+      rootNodes = graph.rootNodes;
+    } catch (error) {
+      console.warn('[ModelLabPanel] Failed to parse the generated scene.', error);
+      return;
+    }
+    // The parse is async — bail if the panel was torn down (or lanes switched) while it ran.
+    if (!this.previewRoot || !this.camera || this.activeLane !== 'scene') {
+      return;
+    }
+    this.clearSceneRoots();
+    // `previewRoot` holds only content (grid + lights live on `scene`), so add the roots directly
+    // and frame the camera to the whole container.
+    for (const root of rootNodes) {
+      this.previewRoot.add(root);
+    }
+    this.currentSceneRoots = rootNodes;
+    this.previewRoot.updateMatrixWorld(true);
+    const framing = framePerspectiveCameraToObject(this.camera, this.previewRoot);
+    this.controls?.target.set(0, framing.focusTargetY, 0);
+    this.controls?.update();
+    this.sceneSavedPath = null;
+    this.sceneSaveState = 'idle';
     this.renderRequested = true;
   }
 
@@ -1259,6 +1769,56 @@ export class ModelLabPanel extends ComponentBase {
     }
   }
 
+  // -- scene-lane save -------------------------------------------------------
+
+  private async onSaveScene(): Promise<void> {
+    if (appState.project.status !== 'ready') {
+      this.sceneSaveState = 'error';
+      this.sceneStatusMessage = 'Open a project before saving.';
+      return;
+    }
+    if (!this.sceneGenService.getSceneYaml()) {
+      this.sceneSaveState = 'error';
+      this.sceneStatusMessage = 'Generate a scene before saving.';
+      return;
+    }
+    const folder = this.sceneSaveFolder.trim().replace(/^\/+|\/+$/g, '');
+    const name = this.sceneSaveName.trim();
+    if (!name) {
+      this.sceneSaveState = 'error';
+      this.sceneStatusMessage = 'A file name is required.';
+      return;
+    }
+    this.sceneSaveState = 'saving';
+    this.sceneStatusMessage = '';
+    try {
+      const path = folder ? `${folder}/${name}` : name;
+      const result = await this.sceneGenService.saveScene(path);
+      this.sceneSavedPath = result.path;
+      this.sceneSaveState = 'saved';
+      this.sceneStatusMessage = `Saved ${result.path}.`;
+    } catch (error) {
+      this.sceneSaveState = 'error';
+      this.sceneStatusMessage =
+        error instanceof Error ? error.message : 'Failed to save the scene.';
+    }
+  }
+
+  private async onOpenScene(): Promise<void> {
+    if (!this.sceneSavedPath) {
+      return;
+    }
+    try {
+      await this.editorTabs.focusOrOpenScene(`res://${this.sceneSavedPath}`);
+      this.sceneStatusMessage = `Opened ${this.sceneSavedPath} in the editor.`;
+      this.sceneSaveState = 'saved';
+    } catch (error) {
+      this.sceneSaveState = 'error';
+      this.sceneStatusMessage =
+        error instanceof Error ? error.message : 'Failed to open the scene in the editor.';
+    }
+  }
+
   // -- renderer lifecycle (Phase 1, preserved) -------------------------------
 
   private initializeRenderer(): void {
@@ -1314,6 +1874,21 @@ export class ModelLabPanel extends ComponentBase {
       this.renderer?.renderLists.dispose();
     }
     this.currentModel = undefined;
+    this.renderRequested = true;
+  }
+
+  /**
+   * Detach the scene-lane preview roots WITHOUT disposing their GPU resources — they are shared,
+   * AssetLoader-cached geometry/materials/textures that other views may still reference.
+   */
+  private clearSceneRoots(): void {
+    if (this.currentSceneRoots.length && this.previewRoot) {
+      for (const root of this.currentSceneRoots) {
+        this.previewRoot.remove(root);
+      }
+      this.renderer?.renderLists.dispose();
+    }
+    this.currentSceneRoots = [];
     this.renderRequested = true;
   }
 

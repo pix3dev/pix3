@@ -30,6 +30,8 @@ import { ProjectStorageService } from '@/services/project/ProjectStorageService'
 import { blobToBase64 } from '@/services/image-gen/image-ops';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import { Model3DGenHistoryService } from '@/services/model-gen/Model3DGenHistoryService';
+import { Scene3DGenService } from '@/services/model-gen/scene/Scene3DGenService';
+import type { SceneGenState } from '@/services/model-gen/scene/scene-gen-types';
 import type {
   ComplexityHint,
   ModelGenMode,
@@ -191,6 +193,43 @@ async function resolveModelReference(opts: Model3dRunOptions): Promise<Reference
     return { mimeType: opts.mimeType || 'image/png', base64: opts.referenceBase64 };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Model Lab (Scene lane) helpers
+// ---------------------------------------------------------------------------
+
+/** Options accepted by the `scene3d` lane for a run. */
+interface Scene3dRunOptions {
+  brief: string;
+  referencePaths?: string[];
+  baseScenePath?: string;
+  mode?: string;
+}
+
+/**
+ * Resolve a list of project asset paths into reference images for the Scene lane, best-effort: a path
+ * that cannot be read is skipped rather than failing the whole run (mirrors the agent tool).
+ */
+async function resolveSceneReferences(paths: string[] | undefined): Promise<ReferenceImageInput[]> {
+  if (!paths || paths.length === 0) {
+    return [];
+  }
+  const storage = service<ProjectStorageService>(ProjectStorageService);
+  const out: ReferenceImageInput[] = [];
+  for (const raw of paths) {
+    if (typeof raw !== 'string' || !raw.trim()) {
+      continue;
+    }
+    const path = raw.replace(/^res:\/\//i, '').replace(/^\/+/, '');
+    try {
+      const blob = await storage.readBlob(path);
+      out.push({ mimeType: blob.type || 'image/png', base64: await blobToBase64(blob) });
+    } catch {
+      // Best-effort: skip an unreadable reference.
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +543,30 @@ export interface Pix3DebugBridge {
     clearHistory(): Promise<void>;
   };
 
+  /**
+   * Model Lab (Scene lane) pipeline — generate (or edit) a whole `.pix3scene` LEVEL from a brief,
+   * using the project's existing assets as the palette. Every method returns JSON-safe data: the run
+   * method returns the final {@link SceneGenState} (no THREE objects / no Blobs). This drives the same
+   * {@link Scene3DGenService} the Model Lab Scene panel uses.
+   */
+  readonly scene3d: {
+    /** Current pipeline state (status, levelSpec, sceneYaml, passes, inventory, usage, error). */
+    state(): SceneGenState;
+    /**
+     * Run a full generation (autonomous) from a brief, resolving to the final state. `referencePaths`
+     * are project asset paths (best-effort); `baseScenePath` edits an existing scene instead.
+     */
+    generate(opts: Scene3dRunOptions): Promise<SceneGenState>;
+    /** The latest valid scene YAML, or null before the first successful pass. */
+    yaml(): string | null;
+    /** Save the current scene YAML into the project; resolves to the normalized path. */
+    save(path: string): Promise<{ path: string }>;
+    /** Abort a running job. */
+    cancel(): void;
+    /** Resolve a pending manual-review gate. */
+    decideReview(decision: 'accept' | 'retry' | 'stop'): void;
+  };
+
   // --- in-editor agent tool layer (same tools the Agent chat calls) ---
   readonly agentTools: {
     /** Names of all registered agent tools. */
@@ -575,7 +638,8 @@ export interface Pix3DebugBridge {
 function createBridge(): Pix3DebugBridge {
   return {
     // v6: added the `model3d` lane (Model Lab procedural 3D generation + history).
-    version: 6,
+    // v7: added the `scene3d` lane (Model Lab Scene lane — brief → `.pix3scene` level generation/edit).
+    version: 7,
 
     help() {
       return {
@@ -635,6 +699,14 @@ function createBridge(): Pix3DebugBridge {
           'Abort a running job / resolve a pending manual-review gate.',
         'model3d.history(limit) / openHistory(id) / clearHistory()':
           'Browse past jobs (JSON-safe rows), reopen one by rebuilding its factory, or clear the cache.',
+        'scene3d.state()':
+          'Model Lab Scene lane state (status, levelSpec, sceneYaml, passes, inventory, usage, error).',
+        'scene3d.generate({brief,referencePaths?,baseScenePath?,mode?})':
+          "Generate (or, with baseScenePath, edit) a whole `.pix3scene` LEVEL from a brief using the project's assets as the palette (autonomous). Resolves to the final state.",
+        'scene3d.yaml() / save(path)':
+          'The latest valid scene YAML / write it into the project (resolves to the normalized path).',
+        'scene3d.cancel() / decideReview("accept"|"retry"|"stop")':
+          'Abort a running job / resolve a pending manual-review gate.',
       };
     },
 
@@ -888,6 +960,38 @@ function createBridge(): Pix3DebugBridge {
       },
       clearHistory() {
         return service<Model3DGenHistoryService>(Model3DGenHistoryService).clear();
+      },
+    },
+
+    scene3d: {
+      state() {
+        return service<Scene3DGenService>(Scene3DGenService).getState();
+      },
+      async generate(opts) {
+        const gen = service<Scene3DGenService>(Scene3DGenService);
+        const referenceImages = await resolveSceneReferences(opts.referencePaths);
+        await gen.generate(
+          {
+            brief: opts.brief,
+            referenceImages,
+            mode: asMode(opts.mode),
+            baseScenePath: opts.baseScenePath,
+          },
+          { autonomous: true }
+        );
+        return gen.getState();
+      },
+      yaml() {
+        return service<Scene3DGenService>(Scene3DGenService).getSceneYaml();
+      },
+      save(path) {
+        return service<Scene3DGenService>(Scene3DGenService).saveScene(path);
+      },
+      cancel() {
+        service<Scene3DGenService>(Scene3DGenService).cancel();
+      },
+      decideReview(decision) {
+        service<Scene3DGenService>(Scene3DGenService).decideReview(decision);
       },
     },
 

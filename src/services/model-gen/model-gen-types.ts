@@ -42,7 +42,10 @@ export type ModelGenStatus =
   | 'error'
   | 'cancelled';
 
-/** One locked build pass. `form-material` is the `fast`-mode merge of form + material. */
+/**
+ * One locked build pass. The first block is the model lane (`form-material` is the `fast`-mode merge
+ * of form + material); the second block is the Scene lane (`lighting` is shared between the two).
+ */
 export type PassId =
   | 'blockout'
   | 'structure'
@@ -50,7 +53,12 @@ export type PassId =
   | 'material'
   | 'lighting'
   | 'optimization'
-  | 'form-material';
+  | 'form-material'
+  // Scene lane passes.
+  | 'layout'
+  | 'placement'
+  | 'dressing'
+  | 'polish';
 
 /** Per-pass lifecycle in the Phase-3 review loop. */
 export type PassStatus = 'pending' | 'running' | 'reviewing' | 'passed' | 'failed' | 'skipped';
