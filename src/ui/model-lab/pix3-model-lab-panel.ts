@@ -22,9 +22,14 @@ import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { Model3DExportService } from '@/services/model-gen/Model3DExportService';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import {
+  Model3DGenHistoryService,
+  type ModelGenRecord,
+} from '@/services/model-gen/Model3DGenHistoryService';
+import {
   Model3DGenSettingsService,
   type ModelLabPreferences,
 } from '@/services/model-gen/Model3DGenSettingsService';
+import { blobToBase64 } from '@/services/image-gen/image-ops';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { formatPricingHint, type ReasoningEffort } from '@/services/llm/LlmTypes';
@@ -34,6 +39,8 @@ import type {
   ComplexityHint,
   ModelGenState,
   ModelGenStatus,
+  PassStatus,
+  ReferenceImageInput,
 } from '@/services/model-gen/model-gen-types';
 import { appState } from '@/state';
 import './pix3-model-lab-panel.ts.css';
@@ -61,6 +68,9 @@ const DEFAULT_GEN_STATE: ModelGenState = {
   usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0 },
   error: null,
   canGenerate: true,
+  passes: [],
+  currentPassId: null,
+  pendingReview: null,
 };
 
 const DEFAULT_PREFS: ModelLabPreferences = {
@@ -71,6 +81,7 @@ const DEFAULT_PREFS: ModelLabPreferences = {
   reasoningEffortByModel: {},
   scoreThreshold: 0.7,
   maxIterationsPerPass: 3,
+  pauseForReview: false,
   mode: 'quality',
   saveFolder: DEFAULT_SAVE_FOLDER,
 };
@@ -90,6 +101,10 @@ function statusChip(status: ModelGenStatus): { label: string; tone: string } {
       return { label: 'Building', tone: 'busy' };
     case 'compiling':
       return { label: 'Compiling', tone: 'busy' };
+    case 'rendering':
+      return { label: 'Rendering', tone: 'busy' };
+    case 'reviewing':
+      return { label: 'Reviewing', tone: 'busy' };
     case 'done':
       return { label: 'Done', tone: 'ok' };
     case 'error':
@@ -101,17 +116,49 @@ function statusChip(status: ModelGenStatus): { label: string; tone: string } {
   }
 }
 
+/** Map a pass lifecycle status to an IconService glyph name + tone class + spin flag. */
+function passVisual(status: PassStatus): { icon: string; tone: string; spin: boolean } {
+  switch (status) {
+    case 'running':
+    case 'reviewing':
+      return { icon: 'loader', tone: 'accent', spin: true };
+    case 'passed':
+      return { icon: 'check-circle', tone: 'ok', spin: false };
+    case 'failed':
+      return { icon: 'x-circle', tone: 'danger', spin: false };
+    case 'skipped':
+      return { icon: 'minus-circle', tone: 'muted', spin: false };
+    case 'pending':
+    default:
+      return { icon: 'circle', tone: 'muted', spin: false };
+  }
+}
+
+/** A vision fidelity score in [0,1] is "ok" (green) at/above a rough bar, else "warn" (amber). */
+function scoreTone(score: number): 'ok' | 'warn' {
+  return score >= 0.7 ? 'ok' : 'warn';
+}
+
+/** Render a [0,1] score as a whole-percent badge label. */
+function formatScore(score: number): string {
+  return `${Math.round(score * 100)}%`;
+}
+
 /**
- * Model Lab — Phase 2 panel.
+ * Model Lab — Phase 3 panel.
  *
  * A two-tab (Generate · Settings) editor panel over the headless {@link Model3DGenService} pipeline.
  * The Generate tab stages a reference image (drop / pick / paste), an optional prompt, and a
  * complexity hint, then drives an intake → assess → spec → factory → compile job whose every state
- * emission streams into a live pipeline monitor. Each successful compile bumps `modelRevision`; the
- * panel hot-swaps the fresh `THREE.Group` into its OWN preview viewport (the same
- * dispose → add → frame path the test-model palette uses), making it the Save GLB / Add-to-scene
- * target. The Settings tab exposes the codegen + vision model pickers and loop knobs backed by
- * {@link Model3DGenSettingsService}.
+ * emission streams into a live pipeline monitor. Phase 3 makes that job a **pass-gated review loop**:
+ * each locked pass (blockout → structure → form → material → …) builds, renders a
+ * reference|render comparison sheet, and is vision-scored; the monitor surfaces the per-pass status
+ * list, the latest comparison sheet, and — when `pauseForReview` is on — a manual review card that
+ * steers the loop via {@link Model3DGenService.decideReview} (Accept / Retry / Stop). Each successful
+ * compile bumps `modelRevision`; the panel hot-swaps the fresh `THREE.Group` into its OWN preview
+ * viewport (the same dispose → add → frame path the test-model palette uses), making it the
+ * Save GLB / Add-to-scene target. The Settings tab exposes the codegen + vision model pickers, the
+ * review pause toggle + score threshold, and loop knobs backed by {@link Model3DGenSettingsService}.
  *
  * The owned `WebGLRenderer` + on-demand render loop from Phase 1 is preserved verbatim; the service
  * never disposes a Group it hands out, so this panel owns disposal via {@link disposeCurrentModel}.
@@ -129,6 +176,9 @@ export class ModelLabPanel extends ComponentBase {
 
   @inject(Model3DGenService)
   private readonly genService!: Model3DGenService;
+
+  @inject(Model3DGenHistoryService)
+  private readonly history!: Model3DGenHistoryService;
 
   @inject(Model3DGenSettingsService)
   private readonly settings!: Model3DGenSettingsService;
@@ -154,6 +204,11 @@ export class ModelLabPanel extends ComponentBase {
   @state() private gen: ModelGenState = DEFAULT_GEN_STATE;
   @state() private prefs: ModelLabPreferences = DEFAULT_PREFS;
   @state() private refreshingProviderId: string | null = null;
+
+  // -- job history -----------------------------------------------------------
+  @state() private historyRecords: ModelGenRecord[] = [];
+  /** Record id → object URL for its thumbnail; revoked on reload + disconnect. */
+  private readonly historyUrls = new Map<string, string>();
 
   // -- test-model palette + save ---------------------------------------------
   @state() private selectedModelId: string = TEST_MODELS[0].id;
@@ -186,6 +241,10 @@ export class ModelLabPanel extends ComponentBase {
     this.disposers.push(this.genService.subscribe(state => this.onGenState(state)));
     this.disposers.push(this.settings.subscribe(prefs => this.onPrefs(prefs)));
     this.disposers.push(this.catalog.subscribe(() => this.requestUpdate()));
+    if (Model3DGenHistoryService.isSupported()) {
+      this.disposers.push(this.history.subscribe(() => void this.reloadHistory()));
+      void this.reloadHistory();
+    }
     this.addEventListener('paste', this.onPaste);
   }
 
@@ -197,6 +256,10 @@ export class ModelLabPanel extends ComponentBase {
     this.stopRenderLoop();
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
+    for (const url of this.historyUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+    this.historyUrls.clear();
     this.disposeCurrentModel();
     this.controls?.dispose();
     this.controls = undefined;
@@ -381,13 +444,19 @@ export class ModelLabPanel extends ComponentBase {
           : null}
       </section>
 
-      ${this.renderMonitor()} ${this.renderSaveGroup()} ${this.renderTestModels()}
+      ${this.renderMonitor()} ${this.renderSaveGroup()} ${this.renderHistory()}
+      ${this.renderTestModels()}
     `;
   }
 
   private renderMonitor() {
     const gen = this.gen;
-    if (gen.status === 'idle' && gen.log.length === 0) {
+    if (
+      gen.status === 'idle' &&
+      gen.log.length === 0 &&
+      gen.passes.length === 0 &&
+      !gen.pendingReview
+    ) {
       return null;
     }
     const chip = statusChip(gen.status);
@@ -399,6 +468,7 @@ export class ModelLabPanel extends ComponentBase {
           ${gen.stageLabel ? html`<span class="ml-stage">${gen.stageLabel}</span>` : null}
         </div>
         ${gen.error ? html`<p class="ml-error" role="alert">${gen.error}</p>` : null}
+        ${this.renderReviewCard()} ${this.renderPassList()} ${this.renderComparisonSheet()}
         ${gen.log.length
           ? html`<div class="ml-log" role="log" aria-live="polite">
               ${gen.log.map(
@@ -414,6 +484,105 @@ export class ModelLabPanel extends ComponentBase {
             </p>`
           : null}
       </section>
+    `;
+  }
+
+  /** Compact vertical list of the current job's passes with status glyph + score badge. */
+  private renderPassList() {
+    const { passes, currentPassId } = this.gen;
+    if (passes.length === 0) {
+      return null;
+    }
+    return html`
+      <ul class="ml-pass-list" aria-label="Build passes">
+        ${passes.map(pass => {
+          const visual = passVisual(pass.status);
+          return html`<li class="ml-pass ${pass.id === currentPassId ? 'is-current' : ''}">
+            <span
+              class="ml-pass-icon ml-pass-icon--${visual.tone} ${visual.spin ? 'is-running' : ''}"
+            >
+              ${this.icons.getIcon(visual.icon, IconSize.SMALL)}
+            </span>
+            <div class="ml-pass-body">
+              <div class="ml-pass-head">
+                <span class="ml-pass-label">${pass.label}</span>
+                ${pass.score != null
+                  ? html`<span class="ml-score ml-score--${scoreTone(pass.score)}"
+                      >${formatScore(pass.score)}</span
+                    >`
+                  : null}
+              </div>
+              ${pass.rationale
+                ? html`<p class="ml-pass-rationale" title=${pass.rationale}>${pass.rationale}</p>`
+                : null}
+            </div>
+          </li>`;
+        })}
+      </ul>
+    `;
+  }
+
+  /** The current (or last) pass's reference|render comparison sheet, when one exists. */
+  private renderComparisonSheet() {
+    const { passes, currentPassId } = this.gen;
+    const sheetPass =
+      passes.find(pass => pass.id === currentPassId && pass.sheetDataUrl) ??
+      [...passes].reverse().find(pass => pass.sheetDataUrl);
+    if (!sheetPass || !sheetPass.sheetDataUrl) {
+      return null;
+    }
+    return html`
+      <figure class="ml-sheet">
+        <img src=${sheetPass.sheetDataUrl} alt="Reference vs render comparison for ${sheetPass.label}" />
+        <figcaption class="ml-sheet-caption">
+          ${sheetPass.label}${sheetPass.score != null ? html` · ${formatScore(sheetPass.score)}` : null}
+        </figcaption>
+      </figure>
+    `;
+  }
+
+  /** The manual review gate — only rendered while a decision is awaited. */
+  private renderReviewCard() {
+    const review = this.gen.pendingReview;
+    if (!review) {
+      return null;
+    }
+    const passLabel = this.gen.passes.find(pass => pass.id === review.passId)?.label ?? review.passId;
+    return html`
+      <div class="ml-review" role="group" aria-label="Manual review">
+        <div class="ml-review-head">
+          <span class="ml-review-title">Review · ${passLabel}</span>
+          <span class="ml-score ml-score--${scoreTone(review.score)}">${formatScore(review.score)}</span>
+        </div>
+        <p class="ml-review-suggested">Suggested: <strong>${review.decision}</strong></p>
+        ${review.rationale ? html`<p class="ml-review-rationale">${review.rationale}</p>` : null}
+        <figure class="ml-sheet">
+          <img src=${review.sheetDataUrl} alt="Reference vs render comparison for ${passLabel}" />
+        </figure>
+        <div class="ml-review-actions">
+          <button
+            type="button"
+            class="model-lab-button is-primary with-icon"
+            @click=${() => this.genService.decideReview('accept')}
+          >
+            <span>${this.icons.getIcon('check', IconSize.SMALL)}</span> Accept
+          </button>
+          <button
+            type="button"
+            class="model-lab-button with-icon"
+            @click=${() => this.genService.decideReview('retry')}
+          >
+            <span>${this.icons.getIcon('refresh-cw', IconSize.SMALL)}</span> Retry
+          </button>
+          <button
+            type="button"
+            class="model-lab-button is-danger with-icon"
+            @click=${() => this.genService.decideReview('stop')}
+          >
+            <span>${this.icons.getIcon('stop-circle', IconSize.SMALL)}</span> Stop
+          </button>
+        </div>
+      </div>
     `;
   }
 
@@ -500,6 +669,161 @@ export class ModelLabPanel extends ComponentBase {
     `;
   }
 
+  // -- Job history -----------------------------------------------------------
+
+  /** Past generation jobs, browseable to reopen (rebuild) or regenerate without re-paying codegen. */
+  private renderHistory() {
+    if (this.historyRecords.length === 0) {
+      return null;
+    }
+    const busy = !this.gen.canGenerate;
+    return html`
+      <details class="ml-history">
+        <summary>History (${this.historyRecords.length})</summary>
+        <div class="ml-history-head">
+          <p class="ml-history-note">Reopen a build or regenerate it from its saved spec.</p>
+          <button type="button" class="ml-history-clear" @click=${() => this.onClearHistory()}>
+            Clear all
+          </button>
+        </div>
+        <ul class="ml-history-list" aria-label="Generation history">
+          ${this.historyRecords.map(record => this.renderHistoryRow(record, busy))}
+        </ul>
+      </details>
+    `;
+  }
+
+  private renderHistoryRow(record: ModelGenRecord, busy: boolean) {
+    const url = this.historyUrls.get(record.id);
+    const label = record.objectClass || 'model';
+    return html`
+      <li class="ml-history-row">
+        <span class="ml-history-thumb">
+          ${url
+            ? html`<img src=${url} alt=${`Preview of ${label}`} />`
+            : html`<span class="ml-history-thumb-placeholder"
+                >${this.icons.getIcon('box', IconSize.SMALL)}</span
+              >`}
+        </span>
+        <div class="ml-history-body">
+          <div class="ml-history-title-row">
+            <span class="ml-history-title" title=${label}>${label}</span>
+            ${record.finalScore != null
+              ? html`<span class="ml-score ml-score--${scoreTone(record.finalScore)}"
+                  >${formatScore(record.finalScore)}</span
+                >`
+              : null}
+          </div>
+          <span class="ml-history-date">${formatShortDate(record.createdAt)}</span>
+        </div>
+        <div class="ml-history-actions">
+          <button
+            type="button"
+            class="ml-icon-button"
+            title="Open in preview"
+            aria-label="Open ${label} in preview"
+            ?disabled=${busy}
+            @click=${() => void this.onOpenHistory(record.id)}
+          >
+            ${this.icons.getIcon('eye', IconSize.SMALL)}
+          </button>
+          <button
+            type="button"
+            class="ml-icon-button"
+            title="Regenerate from saved spec"
+            aria-label="Regenerate ${label}"
+            ?disabled=${busy}
+            @click=${() => void this.onRegenerateHistory(record.id)}
+          >
+            ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
+          </button>
+          <button
+            type="button"
+            class="ml-icon-button"
+            title="Delete from history"
+            aria-label="Delete ${label} from history"
+            @click=${() => void this.onDeleteHistory(record.id)}
+          >
+            ${this.icons.getIcon('trash-2', IconSize.SMALL)}
+          </button>
+        </div>
+      </li>
+    `;
+  }
+
+  /**
+   * Reconcile object URLs with the current record set (revoking any no longer present, minting one
+   * per record with a stored thumbnail), then publish the list. Best-effort: an IndexedDB read
+   * failure just leaves the previous list in place.
+   */
+  private async reloadHistory(): Promise<void> {
+    if (!Model3DGenHistoryService.isSupported()) {
+      return;
+    }
+    let records: ModelGenRecord[];
+    try {
+      records = await this.history.list();
+    } catch {
+      return;
+    }
+    const liveIds = new Set(records.map(record => record.id));
+    for (const [id, url] of [...this.historyUrls]) {
+      if (!liveIds.has(id)) {
+        URL.revokeObjectURL(url);
+        this.historyUrls.delete(id);
+      }
+    }
+    for (const record of records) {
+      if (this.historyUrls.has(record.id)) {
+        continue;
+      }
+      const blob = record.thumb ?? record.referenceThumb;
+      if (blob) {
+        this.historyUrls.set(record.id, URL.createObjectURL(blob));
+      }
+    }
+    this.historyRecords = records;
+  }
+
+  /** Rebuild the saved factory into the preview (the service bumps `modelRevision` → hot-swap). */
+  private async onOpenHistory(id: string): Promise<void> {
+    const record = await this.history.get(id);
+    if (!record) {
+      return;
+    }
+    await this.genService.rebuildFromCode(record.factoryCode);
+    // `swapInGeneratedModel` (fired by the revision bump) defaulted the name to "model" — restore
+    // the record's object class here, after the swap has already run.
+    this.saveName = slugify(record.objectClass || 'model');
+  }
+
+  /** Re-run the pass loop from a saved spec (with its reference image when one was kept). */
+  private async onRegenerateHistory(id: string): Promise<void> {
+    const record = await this.history.get(id);
+    if (!record) {
+      return;
+    }
+    let referenceImage: ReferenceImageInput | null = null;
+    if (record.referenceThumb) {
+      const base64 = await blobToBase64(record.referenceThumb);
+      referenceImage = { mimeType: record.referenceThumb.type || 'image/png', base64 };
+    }
+    await this.genService.generateFromSpec(record.spec, {
+      referenceImage,
+      mode: record.mode,
+      prompt: record.prompt,
+      complexity: record.complexity,
+    });
+  }
+
+  private async onDeleteHistory(id: string): Promise<void> {
+    await this.history.delete(id);
+  }
+
+  private onClearHistory(): void {
+    void this.history.clear();
+  }
+
   // -- Settings tab ----------------------------------------------------------
 
   private renderSettingsTab() {
@@ -541,6 +865,31 @@ export class ModelLabPanel extends ComponentBase {
             step="1"
             .value=${String(this.prefs.maxIterationsPerPass)}
             @change=${(e: Event) => this.onIterationsChange(e)}
+          />
+        </label>
+        <label class="ml-check">
+          <input
+            type="checkbox"
+            .checked=${this.prefs.pauseForReview}
+            @change=${(e: Event) =>
+              this.settings.updatePreferences({
+                pauseForReview: (e.target as HTMLInputElement).checked,
+              })}
+          />
+          <span>Pause for manual review</span>
+        </label>
+        <p class="ml-field-note">
+          When on, the pipeline pauses after each pass so you can Accept / Retry / Stop.
+        </p>
+        <label class="model-lab-field">
+          <span>Vision score threshold</span>
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            .value=${String(this.prefs.scoreThreshold)}
+            @change=${(e: Event) => this.onThresholdChange(e)}
           />
         </label>
         <label class="model-lab-field">
@@ -672,6 +1021,14 @@ export class ModelLabPanel extends ComponentBase {
       return;
     }
     this.settings.updatePreferences({ maxIterationsPerPass: Math.min(raw, 20) });
+  }
+
+  private onThresholdChange(event: Event): void {
+    const raw = Number.parseFloat((event.target as HTMLInputElement).value);
+    if (!Number.isFinite(raw)) {
+      return;
+    }
+    this.settings.updatePreferences({ scoreThreshold: Math.min(Math.max(raw, 0), 1) });
   }
 
   private async refreshModels(providerId: string): Promise<void> {
@@ -861,10 +1218,24 @@ export class ModelLabPanel extends ComponentBase {
     this.statusMessage = '';
     try {
       const path = folder ? `${folder}/${name}` : name;
-      const result = await this.exporter.saveGlb(this.currentModel, path);
+      // A generated model carries a spec + factory to persist alongside the GLB; a test-model has
+      // neither, so pass no artifacts and only the GLB is written.
+      const artifacts =
+        this.gen.spec || this.gen.factoryCode
+          ? { spec: this.gen.spec, factoryCode: this.gen.factoryCode }
+          : undefined;
+      const result = await this.exporter.saveModel(this.currentModel, path, artifacts);
       this.lastSavedPath = result.path;
       this.saveState = 'saved';
-      this.statusMessage = `Saved ${result.path} (${formatBytes(result.bytes)}).`;
+      const extras: string[] = [];
+      if (result.sculptPath) {
+        extras.push('spec');
+      }
+      if (result.factoryPath) {
+        extras.push('factory');
+      }
+      const suffix = extras.length ? ` (+ ${extras.join(', ')})` : '';
+      this.statusMessage = `Saved ${result.path}${suffix} (${formatBytes(result.bytes)}).`;
     } catch (error) {
       this.saveState = 'error';
       this.statusMessage = error instanceof Error ? error.message : 'Failed to save the model.';
@@ -1001,6 +1372,27 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || 'model';
+}
+
+/** Compact relative-ish date for a history row: "just now", "3h ago", "5d ago", else a short date. */
+function formatShortDate(timestamp: number): string {
+  const deltaMs = Date.now() - timestamp;
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) {
+    return 'just now';
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function formatBytes(bytes: number): string {

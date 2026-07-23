@@ -36,9 +36,52 @@ export type ModelGenStatus =
   | 'speccing'
   | 'building'
   | 'compiling'
+  | 'rendering'
+  | 'reviewing'
   | 'done'
   | 'error'
   | 'cancelled';
+
+/** One locked build pass. `form-material` is the `fast`-mode merge of form + material. */
+export type PassId =
+  | 'blockout'
+  | 'structure'
+  | 'form'
+  | 'material'
+  | 'lighting'
+  | 'optimization'
+  | 'form-material';
+
+/** Per-pass lifecycle in the Phase-3 review loop. */
+export type PassStatus = 'pending' | 'running' | 'reviewing' | 'passed' | 'failed' | 'skipped';
+
+/** The observable record for one pass in {@link ModelGenState.passes}. */
+export interface PassRecord {
+  id: PassId;
+  label: string;
+  status: PassStatus;
+  /** Latest vision fidelity score in [0,1], or null before a review (or when review is disabled). */
+  score: number | null;
+  /** How many times this pass built its factory (initial build + refines). */
+  attempts: number;
+  /** The latest reference|render comparison sheet as a PNG data URL, or null. */
+  sheetDataUrl: string | null;
+  /** The latest review rationale, or null. */
+  rationale: string | null;
+}
+
+/** What the vision review (or a manual override) decided about a pass. */
+export type ReviewDecision = 'continue' | 'refine-code' | 'refine-spec' | 'stop';
+
+/** A review awaiting a manual decision (only present while `pauseForReview` is on). */
+export interface PendingReview {
+  passId: PassId;
+  score: number;
+  /** The vision model's own suggested decision (the manual gate may override it). */
+  decision: ReviewDecision;
+  rationale: string;
+  sheetDataUrl: string;
+}
 
 /** One line in the streaming pipeline log. */
 export interface ModelGenLogEntry {
@@ -71,4 +114,10 @@ export interface ModelGenState {
   error: string | null;
   /** `false` while a job runs. */
   canGenerate: boolean;
+  /** The pass records for the current/last job (empty before the first Phase-3 pass loop). */
+  passes: readonly PassRecord[];
+  /** The pass currently building/reviewing, or null when no pass is active. */
+  currentPassId: PassId | null;
+  /** A review awaiting the user's decision, or null. Only set while `pauseForReview` is on. */
+  pendingReview: PendingReview | null;
 }

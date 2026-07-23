@@ -21,7 +21,10 @@ import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { LoggingService } from '@/services/core/LoggingService';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/image-gen/AssetGenService';
-import type { AlphaStats } from '@/services/image-gen/image-ops';
+import { blobToBase64, type AlphaStats } from '@/services/image-gen/image-ops';
+import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
+import { Model3DExportService } from '@/services/model-gen/Model3DExportService';
+import type { ComplexityHint, ModelGenMode } from '@/services/model-gen/model-gen-types';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import {
   GameInputService,
@@ -170,6 +173,12 @@ export class AgentToolRegistry {
 
   @inject(AssetGenService)
   private readonly assetGen!: AssetGenService;
+
+  @inject(Model3DGenService)
+  private readonly model3dGen!: Model3DGenService;
+
+  @inject(Model3DExportService)
+  private readonly model3dExport!: Model3DExportService;
 
   @inject(AgentVisionService)
   private readonly vision!: AgentVisionService;
@@ -977,6 +986,43 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.processAsset(args),
+      },
+      {
+        name: 'generate_model_3d',
+        description:
+          'Reconstruct a 3D model PROCEDURALLY BY CODE from a reference image (Model Lab) — this is NOT neural image-to-mesh: a codegen model writes a procedural Three.js factory. It runs an autonomous loop (assess the image → design a sculpt spec → build the model in locked passes → render each pass and have a vision model score it against the reference), saves a self-contained `.glb` into the project (plus `.sculpt.json` / `.factory.ts` siblings so it can be regenerated), and returns the saved path, per-pass fidelity scores, and a preview image when available. For HARD-SURFACE objects only (props, vehicles, furniture, buildings) — organic characters are not supported. Slow and token-heavy (many LLM calls): use it deliberately, not for quick iteration.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            reference: {
+              type: 'string',
+              description:
+                'Project asset path to the reference image (res:// or project-relative). Required.',
+            },
+            name: {
+              type: 'string',
+              description:
+                'Target GLB path/name, e.g. "models/crate.glb"; the .glb extension is added when missing. Required.',
+            },
+            prompt: {
+              type: 'string',
+              description: 'Optional extra intent to steer the reconstruction.',
+            },
+            complexity: {
+              type: 'string',
+              enum: ['simple', 'moderate', 'complex'],
+              description: 'How involved the subject is (default "moderate").',
+            },
+            mode: {
+              type: 'string',
+              enum: ['fast', 'quality'],
+              description: 'fast = fewer passes; quality = the full pass pipeline.',
+            },
+          },
+          required: ['reference', 'name'],
+          additionalProperties: false,
+        },
+        handler: args => this.generateModel3d(args),
       },
     ];
   }
@@ -2165,6 +2211,107 @@ export class AgentToolRegistry {
       for (const id of handleIds) {
         this.assetGen.discard(id);
       }
+    }
+  }
+
+  // -- model lab (procedural 3D) ---------------------------------------------
+
+  /**
+   * Reconstruct a 3D model procedurally from a reference image via the Model Lab pipeline, save the
+   * resulting GLB (+ spec/factory siblings) into the project, and return a JSON-safe summary. The
+   * pipeline never throws — errors/cancellation surface through {@link Model3DGenService.getState};
+   * everything else is wrapped so no exception escapes the handler.
+   */
+  private async generateModel3d(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    try {
+      if (appState.project.status !== 'ready') {
+        return { ok: false, error: 'No project is open — cannot generate a model.' };
+      }
+      const reference = asString(args.reference);
+      const name = asString(args.name);
+      const prompt = typeof args.prompt === 'string' ? args.prompt : undefined;
+      const complexity: ComplexityHint =
+        args.complexity === 'simple' ||
+        args.complexity === 'moderate' ||
+        args.complexity === 'complex'
+          ? args.complexity
+          : 'moderate';
+      const mode: ModelGenMode | undefined =
+        args.mode === 'fast' || args.mode === 'quality' ? args.mode : undefined;
+
+      // Resolve the reference image into base64 (without the data: prefix) for the pipeline.
+      let base64: string;
+      let mimeType: string;
+      try {
+        const blob = await this.storage.readBlob(this.safePath(reference));
+        base64 = await blobToBase64(blob);
+        mimeType = blob.type || 'image/png';
+      } catch (error) {
+        return {
+          ok: false,
+          error: `Could not read reference image: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        };
+      }
+
+      await this.model3dGen.generate(
+        { referenceImage: { mimeType, base64 }, prompt, complexity, mode },
+        { autonomous: true }
+      );
+
+      const state = this.model3dGen.getState();
+      if (state.status === 'error') {
+        return { ok: false, error: state.error ?? 'generation failed' };
+      }
+      if (state.status === 'cancelled') {
+        return { ok: false, error: 'cancelled' };
+      }
+      const group = this.model3dGen.getModel();
+      if (!group) {
+        return { ok: false, error: 'no model produced' };
+      }
+
+      const saved = await this.model3dExport.saveModel(group, name, {
+        spec: state.spec,
+        factoryCode: state.factoryCode,
+      });
+
+      // The last passed pass's score is the headline fidelity (null when review was disabled).
+      const finalScore =
+        [...state.passes].reverse().find(pass => pass.status === 'passed')?.score ?? null;
+      // A previously-composited comparison sheet is a cheap, WebGL-free preview — attach it when one
+      // exists (reviews may have been disabled, in which case there is none).
+      const sheet = [...state.passes].reverse().find(pass => pass.sheetDataUrl)?.sheetDataUrl ?? null;
+      let images: Record<string, unknown> = {};
+      if (sheet) {
+        const block = dataUrlToImageBlock(sheet);
+        images = {
+          [AGENT_TOOL_IMAGES_KEY]: [
+            { mimeType: block.mimeType, data: block.data },
+          ] satisfies AgentToolImage[],
+        };
+      }
+
+      return {
+        ok: true,
+        saved: {
+          path: saved.path,
+          bytes: saved.bytes,
+          sculptPath: saved.sculptPath,
+          factoryPath: saved.factoryPath,
+        },
+        objectClass: state.assessment?.objectClass ?? state.spec?.objectClass ?? null,
+        passes: state.passes.map(pass => ({ label: pass.label, score: pass.score })),
+        finalScore,
+        usage: state.usage,
+        note: `Reconstructed "${saved.path}" procedurally from the reference image${
+          saved.sculptPath ? ' (with .sculpt.json / .factory.ts siblings)' : ''
+        }.`,
+        ...images,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

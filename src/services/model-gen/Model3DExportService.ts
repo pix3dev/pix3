@@ -1,13 +1,26 @@
 import { inject, injectable } from '@/fw/di';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import type { SculptSpec } from '@/services/model-gen/SculptSpec';
 import { appState } from '@/state';
 import type { Object3D } from 'three';
+
+/** Optional sibling artifacts written next to the GLB, so a saved model can be regenerated later. */
+export interface ModelArtifacts {
+  /** The sculpt spec that produced the model — written to `<base>.sculpt.json` when provided. */
+  spec?: SculptSpec | null;
+  /** The procedural factory source — written to `<base>.factory.ts` when provided. */
+  factoryCode?: string | null;
+}
 
 export interface Model3DSaveResult {
   /** Project-relative path the `.glb` was written to. */
   path: string;
   /** Byte size of the written binary. */
   bytes: number;
+  /** Path the `.sculpt.json` was written to, or null when no spec artifact was provided. */
+  sculptPath: string | null;
+  /** Path the `.factory.ts` was written to, or null when no factory artifact was provided. */
+  factoryPath: string | null;
 }
 
 /**
@@ -46,9 +59,24 @@ export class Model3DExportService {
 
   /**
    * Export `object` to GLB and write it into the project at `path` (a project-relative path or
-   * `res://…`). Parent directories are created as needed. Returns the normalized path + byte size.
+   * `res://…`). Parent directories are created as needed. Returns the normalized path + byte size
+   * (and null artifact paths — see {@link saveModel} to write the spec/factory siblings too).
    */
   async saveGlb(object: Object3D, path: string): Promise<Model3DSaveResult> {
+    return this.saveModel(object, path);
+  }
+
+  /**
+   * Export `object` to GLB and write it into the project at `path`, optionally saving the sculpt
+   * spec (`<base>.sculpt.json`) and procedural factory (`<base>.factory.ts`) as sibling files so the
+   * model can be regenerated later. `<base>` is `path` with its trailing `.glb` stripped. Returns
+   * the normalized GLB path + byte size and the artifact paths actually written (null when absent).
+   */
+  async saveModel(
+    object: Object3D,
+    path: string,
+    artifacts?: ModelArtifacts
+  ): Promise<Model3DSaveResult> {
     if (appState.project.status !== 'ready') {
       throw new Error('No project is open — cannot save.');
     }
@@ -59,7 +87,19 @@ export class Model3DExportService {
     const buffer = await this.exportGlb(object);
     await this.ensureParentDirectory(relativePath);
     await this.storage.writeBinaryFile(relativePath, buffer);
-    return { path: relativePath, bytes: buffer.byteLength };
+
+    const base = deriveArtifactBasePath(relativePath);
+    let sculptPath: string | null = null;
+    let factoryPath: string | null = null;
+    if (artifacts?.spec) {
+      sculptPath = `${base}.sculpt.json`;
+      await this.storage.writeTextFile(sculptPath, JSON.stringify(artifacts.spec, null, 2));
+    }
+    if (artifacts?.factoryCode) {
+      factoryPath = `${base}.factory.ts`;
+      await this.storage.writeTextFile(factoryPath, artifacts.factoryCode);
+    }
+    return { path: relativePath, bytes: buffer.byteLength, sculptPath, factoryPath };
   }
 
   private async ensureParentDirectory(relativePath: string): Promise<void> {
@@ -95,4 +135,9 @@ export function ensureGlbExtension(path: string): string {
     return path;
   }
   return /\.glb$/i.test(path) ? path : `${path}.glb`;
+}
+
+/** Strip a trailing `.glb` (case-insensitive) to get the shared base for sibling artifact paths. */
+export function deriveArtifactBasePath(glbPath: string): string {
+  return glbPath.replace(/\.glb$/i, '');
 }

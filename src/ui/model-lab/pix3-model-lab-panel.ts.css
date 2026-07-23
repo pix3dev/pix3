@@ -485,6 +485,189 @@ pix3-model-lab-panel .ml-usage {
   color: var(--fg-3);
 }
 
+/* Pass list ------------------------------------------------------------- */
+pix3-model-lab-panel .ml-pass-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-model-lab-panel .ml-pass {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+pix3-model-lab-panel .ml-pass.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-model-lab-panel .ml-pass-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+}
+
+pix3-model-lab-panel .ml-pass-icon svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+pix3-model-lab-panel .ml-pass-icon--muted {
+  color: var(--fg-3);
+}
+
+pix3-model-lab-panel .ml-pass-icon--accent {
+  color: var(--accent);
+}
+
+pix3-model-lab-panel .ml-pass-icon--ok {
+  color: var(--axis-y);
+}
+
+pix3-model-lab-panel .ml-pass-icon--danger {
+  color: var(--danger);
+}
+
+pix3-model-lab-panel .ml-pass-icon.is-running svg {
+  animation: ml-spin 0.8s linear infinite;
+}
+
+pix3-model-lab-panel .ml-pass-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-model-lab-panel .ml-pass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+pix3-model-lab-panel .ml-pass-label {
+  font-size: 0.8rem;
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-pass-rationale {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+
+pix3-model-lab-panel .ml-score {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--line-1);
+}
+
+pix3-model-lab-panel .ml-score--ok {
+  color: var(--accent-fg);
+  background: var(--axis-y);
+  border-color: var(--axis-y);
+}
+
+pix3-model-lab-panel .ml-score--warn {
+  color: var(--accent-fg);
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+/* Comparison sheet ------------------------------------------------------ */
+pix3-model-lab-panel .ml-sheet {
+  margin: 0;
+}
+
+pix3-model-lab-panel .ml-sheet img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--line-1);
+  border-radius: 5px;
+}
+
+pix3-model-lab-panel .ml-sheet-caption {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--fg-3);
+}
+
+/* Manual review card ---------------------------------------------------- */
+pix3-model-lab-panel .ml-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem 0.65rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+pix3-model-lab-panel .ml-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+pix3-model-lab-panel .ml-review-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-review-suggested {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--fg-1);
+}
+
+pix3-model-lab-panel .ml-review-suggested strong {
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-review-rationale {
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+
+pix3-model-lab-panel .ml-review-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* Settings toggle ------------------------------------------------------- */
+pix3-model-lab-panel .ml-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--fg-0);
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .ml-check input {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Test-model palette (secondary) --------------------------------------- */
 pix3-model-lab-panel .ml-test-models {
   border-top: 1px solid var(--line-1);
@@ -506,6 +689,141 @@ pix3-model-lab-panel .ml-test-models-note {
   font-size: 0.72rem;
   line-height: 1.4;
   color: var(--fg-3);
+}
+
+/* Job history ----------------------------------------------------------- */
+pix3-model-lab-panel .ml-history {
+  border-top: 1px solid var(--line-1);
+  padding-top: 0.75rem;
+}
+
+pix3-model-lab-panel .ml-history > summary {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+  cursor: pointer;
+  list-style: revert;
+}
+
+pix3-model-lab-panel .ml-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+pix3-model-lab-panel .ml-history-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--fg-3);
+}
+
+pix3-model-lab-panel .ml-history-clear {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.72rem;
+  color: var(--fg-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+pix3-model-lab-panel .ml-history-clear:hover {
+  color: var(--danger);
+}
+
+pix3-model-lab-panel .ml-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-model-lab-panel .ml-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.4rem;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+}
+
+pix3-model-lab-panel .ml-history-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  overflow: hidden;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: 5px;
+}
+
+pix3-model-lab-panel .ml-history-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+pix3-model-lab-panel .ml-history-thumb-placeholder {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+pix3-model-lab-panel .ml-history-thumb-placeholder svg {
+  display: block;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+pix3-model-lab-panel .ml-history-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+pix3-model-lab-panel .ml-history-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+pix3-model-lab-panel .ml-history-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--fg-0);
+}
+
+pix3-model-lab-panel .ml-history-date {
+  font-size: 0.7rem;
+  color: var(--fg-3);
+}
+
+pix3-model-lab-panel .ml-history-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.25rem;
+}
+
+pix3-model-lab-panel .ml-history-actions .ml-icon-button {
+  width: 1.7rem;
+  height: 1.7rem;
 }
 
 /* Viewport -------------------------------------------------------------- */

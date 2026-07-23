@@ -29,6 +29,11 @@ export interface ModelLabPreferences {
   scoreThreshold: number;
   /** Cap on codegen/refine iterations per pass. */
   maxIterationsPerPass: number;
+  /**
+   * When true, the pass loop pauses after each vision review and waits for a manual
+   * accept/retry/stop decision instead of applying the vision decision autonomously.
+   */
+  pauseForReview: boolean;
   /** Default generation depth. */
   mode: ModelGenMode;
   /** Project-relative folder GLBs are saved into by default. */
@@ -147,6 +152,7 @@ export class Model3DGenSettingsService {
       reasoningEffortByModel: {},
       scoreThreshold: DEFAULT_SCORE_THRESHOLD,
       maxIterationsPerPass: DEFAULT_MAX_ITERATIONS_PER_PASS,
+      pauseForReview: false,
       mode: 'quality',
       saveFolder: DEFAULT_SAVE_FOLDER,
     };
@@ -192,6 +198,10 @@ export class Model3DGenSettingsService {
           parsed.maxIterationsPerPass > 0
             ? Math.min(Math.round(parsed.maxIterationsPerPass), 20)
             : defaults.maxIterationsPerPass,
+        pauseForReview:
+          typeof parsed.pauseForReview === 'boolean'
+            ? parsed.pauseForReview
+            : defaults.pauseForReview,
         mode: isMode(parsed.mode) ? parsed.mode : defaults.mode,
         saveFolder:
           typeof parsed.saveFolder === 'string' && parsed.saveFolder.trim()

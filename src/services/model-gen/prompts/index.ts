@@ -8,6 +8,7 @@
  */
 
 import type { Assessment, SculptSpec } from '@/services/model-gen/SculptSpec';
+import type { ModelGenMode, PassId } from '@/services/model-gen/model-gen-types';
 
 const JSON_ONLY = 'Respond with only the JSON, no prose, no code fences.';
 
@@ -151,4 +152,153 @@ export function buildFactoryPrompt(
     'Output only the module source (a single `export function createModel(THREE)`).',
   ].join('\n');
   return { system: FACTORY_SYSTEM, systemStableChars: FACTORY_SYSTEM.length, user };
+}
+
+// -- Phase 3: locked-pass loop -----------------------------------------------
+
+/** One entry of a mode's ordered pass plan. */
+export interface PassPlanEntry {
+  id: PassId;
+  label: string;
+  /** The codegen instruction for this pass (what to add / refine). */
+  goal: string;
+  /** What the vision review judges for this pass. */
+  reviewRubric: string;
+}
+
+/** The `quality`-mode passes, in order. `fast` mode collapses form+material and drops structure. */
+const QUALITY_PASSES: readonly PassPlanEntry[] = [
+  {
+    id: 'blockout',
+    label: 'Blockout',
+    goal: 'Rough primitive massing only: place simple boxes/cylinders/spheres at the correct overall proportions, position and scale. No detail, no bevels, one plain material is fine.',
+    reviewRubric: 'Overall silhouette and proportions vs the reference — are the big masses the right size and in the right place?',
+  },
+  {
+    id: 'structure',
+    label: 'Structure',
+    goal: "Separate the blockout into the spec's distinct components with correct parent/child placement and relative scale. Still primitive shapes, but every listed component now exists as its own mesh.",
+    reviewRubric: 'Component breakdown vs the reference — are all the major parts present and correctly arranged?',
+  },
+  {
+    id: 'form',
+    label: 'Form',
+    goal: 'Refine the silhouette: add bevels, curves, chamfers, tapers and profile detail (ExtrudeGeometry/LatheGeometry/TubeGeometry where they help). Make edges read as manufactured, not blocky.',
+    reviewRubric: 'Silhouette fidelity and surface form vs the reference — do curves, bevels and contours match?',
+  },
+  {
+    id: 'material',
+    label: 'Material',
+    goal: "Apply PBR materials per the spec: base colors, metalness and roughness that match the reference, with CanvasTextures for grain/labels/wear where they add fidelity.",
+    reviewRubric: 'Material appearance vs the reference — color, metalness/roughness and surface finish per part.',
+  },
+  {
+    id: 'lighting',
+    label: 'Lighting',
+    goal: 'Bake read-friendly cues into geometry/materials (vertex colors, subtle ambient-occlusion tinting, emissive where the reference glows) so the model reads well under neutral studio light. Do NOT add lights to the group.',
+    reviewRubric: 'How the model reads under neutral light — depth, contrast and shading cues vs the reference.',
+  },
+  {
+    id: 'optimization',
+    label: 'Optimization',
+    goal: 'Clean up: merge redundant meshes, remove hidden/degenerate geometry, keep a sane poly budget, and ensure the group is centered and Y-up. Preserve the achieved look.',
+    reviewRubric: 'Final fidelity vs the reference with no regressions from the previous pass.',
+  },
+];
+
+/** The `fast`-mode passes, in order. */
+const FAST_PASSES: readonly PassPlanEntry[] = [
+  QUALITY_PASSES[0],
+  {
+    id: 'form-material',
+    label: 'Form & Material',
+    goal: 'In one pass, refine the silhouette (bevels/curves/profiles) AND apply PBR materials (base color, metalness, roughness, CanvasTextures) so the model matches the reference in both shape and finish.',
+    reviewRubric: 'Combined silhouette + material fidelity vs the reference.',
+  },
+];
+
+/** The ordered pass plan for a generation mode. */
+export function getPassPlan(mode: ModelGenMode): PassPlanEntry[] {
+  return mode === 'fast' ? [...FAST_PASSES] : [...QUALITY_PASSES];
+}
+
+/**
+ * Codegen of the procedural factory for ONE pass. The system half is the same stable code-contract
+ * prefix as {@link buildFactoryPrompt} (so the Anthropic cache prefix is identical across every
+ * codegen call of the job); the user half carries the spec, this pass's goal, the CURRENT factory
+ * code to EVOLVE (`previousCode`, null for the first pass), and any `feedback` (a compile error or a
+ * vision refine note). It must return the full `createModel(THREE)` module.
+ */
+export function buildPassFactoryPrompt(
+  spec: SculptSpec,
+  pass: PassPlanEntry,
+  previousCode: string | null,
+  feedback: string | null
+): { system: string; systemStableChars: number; user: string } {
+  const evolve = previousCode?.trim()
+    ? [
+        '',
+        `Current factory code (from the previous pass — EVOLVE it, do not start over):`,
+        previousCode.trim(),
+      ].join('\n')
+    : [
+        '',
+        'There is no previous code yet — this is the first pass. Write the module from scratch.',
+      ].join('\n');
+  const fix = feedback?.trim()
+    ? ['', 'Address this feedback (a compile error or a review note):', feedback.trim()].join('\n')
+    : '';
+  const user = [
+    `Build pass: ${pass.label}.`,
+    `Goal for this pass: ${pass.goal}`,
+    '',
+    'Sculpt spec:',
+    JSON.stringify(spec, null, 2),
+    evolve,
+    fix,
+    '',
+    'Output only the full module source (a single `export function createModel(THREE)`).',
+  ].join('\n');
+  return { system: FACTORY_SYSTEM, systemStableChars: FACTORY_SYSTEM.length, user };
+}
+
+const REVIEW_SYSTEM = [
+  'You are a meticulous 3D reconstruction reviewer. You are given a single comparison sheet with two',
+  'panels: the LEFT panel is the REFERENCE image; the RIGHT panel is a RENDER of a procedurally',
+  'generated Three.js model at the current build pass. Judge how faithfully the render reproduces the',
+  'reference for THIS pass only, using the rubric provided in the user message. Be honest and',
+  'calibrated — cheap approval is worse than useless. Ignore differences a later pass will address.',
+  '',
+  'Return a JSON object with exactly these fields:',
+  '  globalScore: number      — overall fidelity for this pass, 0.0 (unrecognizable) to 1.0 (matches)',
+  '  featureScores: Array<{ feature: string; score: number(0..1) }>  — per-feature breakdown',
+  '  decision: "continue" | "refine-code" | "refine-spec" | "stop"',
+  '  rationale: string        — one or two sentences justifying the score and decision',
+  '',
+  'decision meanings:',
+  '  "continue"    — good enough for this pass; advance to the next.',
+  '  "refine-code" — close but fixable by regenerating the factory code for this pass.',
+  '  "refine-spec" — the underlying plan is off; regenerate with plan-level feedback.',
+  '  "stop"        — a fundamental mismatch that more code will not fix.',
+  '',
+  JSON_ONLY,
+].join('\n');
+
+/**
+ * Vision review of the comparison sheet for one pass. System is stable (generic reviewer contract +
+ * JSON schema) so its cache prefix is shared across every review call; the per-pass rubric rides in
+ * the user half.
+ */
+export function buildReviewPrompt(
+  spec: SculptSpec,
+  pass: PassPlanEntry
+): { system: string; systemStableChars: number; user: string } {
+  const user = [
+    `Subject: ${spec.objectClass}.`,
+    `Build pass under review: ${pass.label}.`,
+    `Review rubric for this pass: ${pass.reviewRubric}`,
+    '',
+    'Compare the Reference (left) with the Render (right) and return the review JSON.',
+  ].join('\n');
+  return { system: REVIEW_SYSTEM, systemStableChars: REVIEW_SYSTEM.length, user };
 }

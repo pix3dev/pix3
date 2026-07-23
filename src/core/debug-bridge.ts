@@ -26,6 +26,17 @@ import { resolveCommandDispatcher } from '@/services/core/CommandDispatcher';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
 import { AssetGenService } from '@/services/image-gen/AssetGenService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { blobToBase64 } from '@/services/image-gen/image-ops';
+import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
+import { Model3DGenHistoryService } from '@/services/model-gen/Model3DGenHistoryService';
+import type {
+  ComplexityHint,
+  ModelGenMode,
+  ModelGenState,
+  ReferenceImageInput,
+} from '@/services/model-gen/model-gen-types';
+import type { SculptSpec } from '@/services/model-gen/SculptSpec';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
@@ -129,6 +140,57 @@ function findNodeSummaries(text: string): NodeSummary[] {
     }
   }
   return matches;
+}
+
+// ---------------------------------------------------------------------------
+// Model Lab (procedural 3D) helpers
+// ---------------------------------------------------------------------------
+
+/** Options accepted by the `model3d` lane for supplying a reference image + run knobs. */
+interface Model3dRunOptions {
+  referencePath?: string;
+  referenceBase64?: string;
+  mimeType?: string;
+  prompt?: string;
+  complexity?: string;
+  mode?: string;
+}
+
+/** A JSON-safe row of Model Lab history (Blobs in the record are intentionally dropped). */
+interface ModelGenHistoryRow {
+  id: string;
+  createdAt: number;
+  objectClass: string;
+  prompt: string | null;
+  complexity: ComplexityHint;
+  mode: ModelGenMode;
+  finalScore: number | null;
+  savedPath: string | null;
+  passes: Array<{ id: string; label: string; score: number | null }>;
+}
+
+const MODEL_COMPLEXITIES: readonly string[] = ['simple', 'moderate', 'complex'];
+
+const asComplexity = (value: string | undefined): ComplexityHint | undefined =>
+  value && MODEL_COMPLEXITIES.includes(value) ? (value as ComplexityHint) : undefined;
+
+const asMode = (value: string | undefined): ModelGenMode | undefined =>
+  value === 'fast' || value === 'quality' ? value : undefined;
+
+/**
+ * Resolve a reference image for the Model Lab pipeline: read a project asset when `referencePath` is
+ * given, else use an inline `referenceBase64` (+ `mimeType`), else null (spec-only / no-review run).
+ */
+async function resolveModelReference(opts: Model3dRunOptions): Promise<ReferenceImageInput | null> {
+  if (opts.referencePath) {
+    const path = opts.referencePath.replace(/^res:\/\//i, '').replace(/^\/+/, '');
+    const blob = await service<ProjectStorageService>(ProjectStorageService).readBlob(path);
+    return { mimeType: blob.type || 'image/png', base64: await blobToBase64(blob) };
+  }
+  if (opts.referenceBase64) {
+    return { mimeType: opts.mimeType || 'image/png', base64: opts.referenceBase64 };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +477,33 @@ export interface Pix3DebugBridge {
     clear(): void;
   };
 
+  /**
+   * Model Lab (procedural 3D) pipeline — reconstruct a hard-surface model FROM CODE against a
+   * reference image, browse/reopen past jobs. Every method returns JSON-safe data: the run methods
+   * return the final {@link ModelGenState} (no Blobs / no THREE objects), and {@link model3d.history}
+   * strips the record Blobs. This drives the same {@link Model3DGenService} the Model Lab panel uses.
+   */
+  readonly model3d: {
+    /** Current pipeline state (status, spec, passes, usage, error). */
+    state(): ModelGenState;
+    /** Run a full generation (autonomous) from a reference image; resolves to the final state. */
+    generate(opts: Model3dRunOptions): Promise<ModelGenState>;
+    /** Regenerate from a saved sculpt spec (autonomous); resolves to the final state. */
+    generateFromSpec(spec: SculptSpec, opts?: Model3dRunOptions): Promise<ModelGenState>;
+    /** Rebuild a saved procedural factory (no LLM); resolves to the final state. */
+    rebuild(factoryCode: string): Promise<ModelGenState>;
+    /** Abort a running job. */
+    cancel(): void;
+    /** Resolve a pending manual-review gate. */
+    decideReview(decision: 'accept' | 'retry' | 'stop'): void;
+    /** Recent jobs, newest first, JSON-safe (Blobs dropped). */
+    history(limit?: number): Promise<ModelGenHistoryRow[]>;
+    /** Reopen a past job by rebuilding its factory; resolves to the final state, or {ok:false}. */
+    openHistory(id: string): Promise<ModelGenState | { ok: false }>;
+    /** Clear all persisted jobs. */
+    clearHistory(): Promise<void>;
+  };
+
   // --- in-editor agent tool layer (same tools the Agent chat calls) ---
   readonly agentTools: {
     /** Names of all registered agent tools. */
@@ -485,7 +574,8 @@ export interface Pix3DebugBridge {
 
 function createBridge(): Pix3DebugBridge {
   return {
-    version: 5,
+    // v6: added the `model3d` lane (Model Lab procedural 3D generation + history).
+    version: 6,
 
     help() {
       return {
@@ -536,6 +626,15 @@ function createBridge(): Pix3DebugBridge {
         'assets.save(id,name,{maxSize,format,quality})':
           'Write a handle into the project (creates dirs, optional downscale).',
         'assets.list() / get(id) / history(limit) / discard(id) / clear()': 'Handle + cache mgmt.',
+        'model3d.state()': 'Model Lab pipeline state (status, spec, passes, usage, error).',
+        'model3d.generate({referencePath|referenceBase64,mimeType,prompt,complexity,mode})':
+          'Reconstruct a hard-surface 3D model procedurally from a reference image (autonomous). Resolves to the final state.',
+        'model3d.generateFromSpec(spec,opts?) / rebuild(factoryCode)':
+          'Regenerate from a saved sculpt spec, or rebuild a saved procedural factory (no LLM).',
+        'model3d.cancel() / decideReview("accept"|"retry"|"stop")':
+          'Abort a running job / resolve a pending manual-review gate.',
+        'model3d.history(limit) / openHistory(id) / clearHistory()':
+          'Browse past jobs (JSON-safe rows), reopen one by rebuilding its factory, or clear the cache.',
       };
     },
 
@@ -714,6 +813,81 @@ function createBridge(): Pix3DebugBridge {
       },
       clear() {
         service<AssetGenService>(AssetGenService).clear();
+      },
+    },
+
+    model3d: {
+      state() {
+        return service<Model3DGenService>(Model3DGenService).getState();
+      },
+      async generate(opts) {
+        const gen = service<Model3DGenService>(Model3DGenService);
+        const referenceImage = await resolveModelReference(opts);
+        await gen.generate(
+          {
+            referenceImage,
+            prompt: opts.prompt,
+            complexity: asComplexity(opts.complexity),
+            mode: asMode(opts.mode),
+          },
+          { autonomous: true }
+        );
+        return gen.getState();
+      },
+      async generateFromSpec(spec, opts) {
+        const gen = service<Model3DGenService>(Model3DGenService);
+        const referenceImage = await resolveModelReference(opts ?? {});
+        await gen.generateFromSpec(spec, {
+          referenceImage,
+          prompt: opts?.prompt,
+          complexity: asComplexity(opts?.complexity),
+          mode: asMode(opts?.mode),
+          autonomous: true,
+        });
+        return gen.getState();
+      },
+      async rebuild(factoryCode) {
+        const gen = service<Model3DGenService>(Model3DGenService);
+        await gen.rebuildFromCode(factoryCode);
+        return gen.getState();
+      },
+      cancel() {
+        service<Model3DGenService>(Model3DGenService).cancel();
+      },
+      decideReview(decision) {
+        service<Model3DGenService>(Model3DGenService).decideReview(decision);
+      },
+      async history(limit) {
+        const records = await service<Model3DGenHistoryService>(Model3DGenHistoryService).list(
+          limit
+        );
+        return records.map(record => ({
+          id: record.id,
+          createdAt: record.createdAt,
+          objectClass: record.objectClass,
+          prompt: record.prompt ?? null,
+          complexity: record.complexity,
+          mode: record.mode,
+          finalScore: record.finalScore,
+          savedPath: record.savedPath ?? null,
+          passes: record.passes.map(pass => ({
+            id: pass.id,
+            label: pass.label,
+            score: pass.score,
+          })),
+        }));
+      },
+      async openHistory(id) {
+        const gen = service<Model3DGenService>(Model3DGenService);
+        const record = await service<Model3DGenHistoryService>(Model3DGenHistoryService).get(id);
+        if (!record) {
+          return { ok: false as const };
+        }
+        await gen.rebuildFromCode(record.factoryCode);
+        return gen.getState();
+      },
+      clearHistory() {
+        return service<Model3DGenHistoryService>(Model3DGenHistoryService).clear();
       },
     },
 
