@@ -8,7 +8,8 @@ as an exported single-file HTML.
 - **The in-editor Pix3 Agent** (running inside the editor's Agent panel): work through your
   **tools**, not by hand-editing files — `add_component` / `set_property` for behaviour and
   properties, `fs_write` + `compile_scripts` for scripts, `generate_asset` / `process_asset`
-  for art, `play_start` + `read_errors` to verify. Call **`read_skill`** for the matching
+  for art, `play_start` + `read_errors` to verify — then `play_stop` when done (never leave
+  the game running in the background; a live play session keeps burning CPU/GPU). Call **`read_skill`** for the matching
   built-in skill (`game-prototype`, `asset-generation`, `verify-and-fix`) before starting a
   task. The file-format details below are background — prefer the tools.
 - **An external file-editing agent** (editing this folder directly): you author the
@@ -65,7 +66,10 @@ as an exported single-file HTML.
    note every placeholder you leave in your summary.
 6. **To run/verify the game**, follow `.claude/skills/pix3-remote-preview/` —
    if no preview session is available, ask the user to open the project in the
-   Pix3 editor and press Play, then report what to check.
+   Pix3 editor and press Play, then report what to check. **Stop the game when
+   you're done** — after gathering the debug data/verification you need, stop
+   play mode (`play_stop`, or the editor's Stop) so it doesn't keep running and
+   burning CPU/GPU in the background.
 
 ## Workflow for "build the game from the GDD"
 

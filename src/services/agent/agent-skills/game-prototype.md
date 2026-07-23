@@ -48,7 +48,10 @@ Order increments so the game is runnable as early as possible:
 4. **Feel & art** — juice, sound, then generated art (see the `asset-generation` skill).
 
 After each increment: `play_start`, then `play_status` and `read_errors`. Fix errors before
-moving on. Stop play mode (`play_stop`) before large edits. When an increment is verified,
+moving on. Stop play mode (`play_stop`) before large edits — and once the increment is
+verified and you're done running it, STOP it (`play_stop`) rather than leaving it running: a
+live play session keeps ticking (spawners, physics, audio) and burns CPU/GPU in the
+background. When an increment is verified,
 mark it `[x]` in `design/progress.md` — and add a Notes line for anything you tried that did
 NOT work (wrong property shape, a trap from §4½), so a resumed session does not repeat it.
 

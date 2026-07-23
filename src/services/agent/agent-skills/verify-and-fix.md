@@ -63,6 +63,11 @@ declare a feature done without running it.
    nothing. (Exception: a hover state deliberately left active by the last `hover` step is
    still on screen and MAY be screenshotted for a visual once the state delta already passed.)
 4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.
+5. **When you're done, STOP play mode (`play_stop`).** Once you've gathered the
+   verification you need (or finished iterating), never leave the game running —
+   a live play session keeps ticking in the background (spawners, physics,
+   audio, rAF) and burns CPU/GPU indefinitely. Confirm `play_status` reports it
+   stopped before you report back to the user.
 
 ## Common runtime problems and fixes
 

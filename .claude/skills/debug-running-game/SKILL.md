@@ -289,6 +289,11 @@ the recompile didn't take — hard-reload again.
   the serialiser truncates deep/large values (`[Object]`, `[Array(n)]`, `…`).
 - If a call returns `null`, the most common cause is **no active scene** —
   re-check preconditions before theorising about a bug.
+- **Stop play mode when you're done.** Once you've launched the game and
+  collected the debug data you needed, call `play.stop()` (or the `play_stop`
+  agent tool) — a running play mode keeps the rAF/game loop churning in the
+  background tab (spawners, physics, audio) and wastes CPU/GPU indefinitely.
+  Verify `play.status().isPlaying === false` and leave the editor stopped.
 
 ## 5. Extending the bridge
 

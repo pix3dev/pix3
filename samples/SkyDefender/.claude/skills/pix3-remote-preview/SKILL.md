@@ -105,3 +105,8 @@ work without it.
 - Commands return 409 when no player (or no host) is connected and 504 when the
   peer does not answer in time — surface that to the user instead of retrying
   blindly.
+- **Stop play mode when you're done.** After launching the game and collecting
+  the logs/metrics/screenshots you needed, stop play mode (`restart` leaves it
+  running — use the editor's Stop, or `play_stop` if driving the editor
+  directly) so the game loop doesn't keep churning in the background and burning
+  CPU/GPU. Don't leave a play session running once verification is complete.
