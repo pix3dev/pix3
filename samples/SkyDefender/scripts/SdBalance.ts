@@ -42,9 +42,10 @@ export interface ShopItem {
 }
 
 /**
- * All 24 positions of the original shop (reference: shop.jpg + conf.xml
- * <Shop> prices where the garbled labels could be mapped; the rest is the
- * remaster's v1 tuning on the same scale).
+ * All 24 positions of the original shop. Prices are the verified release
+ * `<Shop>` vector from design/original-data/release-v15/conf.xml, mapped
+ * row-major (6 per row) against references/screens/shop.jpg — no longer the
+ * remaster's tuning stubs. Every other field is unchanged.
  */
 export const SHOP_ITEMS: ShopItem[] = [
   // ── Tower column ──
@@ -53,31 +54,31 @@ export const SHOP_ITEMS: ShopItem[] = [
     desc: 'Your humble hut. Everything starts here.', effect: 'floor', tier: 1, startsOwned: true,
   },
   {
-    id: 'flag', name: 'Flag', price: 100, cell: [178, 94], icon: 'flag', requires: 'floor-1',
+    id: 'flag', name: 'Flag', price: 150, cell: [178, 94], icon: 'flag', requires: 'floor-1',
     desc: 'The flag of your Fatherland adds 100 Health Points.', effect: 'flag',
   },
   {
-    id: 'floor-2', name: 'Castle Floor 2', price: 150, cell: [103, 169], icon: 'floor2', requires: 'floor-1',
+    id: 'floor-2', name: 'Castle Floor 2', price: 550, cell: [103, 169], icon: 'floor2', requires: 'floor-1',
     desc: 'Raises Castle HP to 1000. The main gun moves up here.', effect: 'floor', tier: 2,
   },
   {
-    id: 'turret-1', name: 'Gun 1', price: 100, cell: [178, 169], icon: 'mortyr1', requires: 'floor-2',
+    id: 'turret-1', name: 'Gun 1', price: 750, cell: [178, 169], icon: 'mortyr1', requires: 'floor-2',
     desc: 'An automatic turret to compensate your fluffs.', effect: 'turret', tier: 1,
   },
   {
-    id: 'floor-3', name: 'Castle Floor 3', price: 200, cell: [103, 243], icon: 'floor3', requires: 'floor-2',
+    id: 'floor-3', name: 'Castle Floor 3', price: 3000, cell: [103, 243], icon: 'floor3', requires: 'floor-2',
     desc: 'Better accommodation: HP up to 1300 and one more gun slot.', effect: 'floor', tier: 3,
   },
   {
-    id: 'turret-2', name: 'Gun 2', price: 100, cell: [178, 243], icon: 'mortyr2', requires: 'floor-3',
+    id: 'turret-2', name: 'Gun 2', price: 950, cell: [178, 243], icon: 'mortyr2', requires: 'floor-3',
     desc: 'Perhaps in future you won’t have to shoot at all.', effect: 'turret', tier: 2,
   },
   {
-    id: 'floor-4', name: 'Castle Floor 4', price: 1000, cell: [103, 318], icon: 'floor4', requires: 'floor-3',
+    id: 'floor-4', name: 'Castle Floor 4', price: 4500, cell: [103, 318], icon: 'floor4', requires: 'floor-3',
     desc: 'No conservatory — an AA weapon platform. 1600 HP total.', effect: 'floor', tier: 4,
   },
   {
-    id: 'air-gun', name: 'Air Gun', price: 100, cell: [178, 318], icon: 'air_turrel', requires: 'floor-4',
+    id: 'air-gun', name: 'Air Gun', price: 1500, cell: [178, 318], icon: 'air_turrel', requires: 'floor-4',
     desc: 'Anti-aircraft weapon fires over the sights all by itself.', effect: 'turret', tier: 3,
   },
 
@@ -85,19 +86,19 @@ export const SHOP_ITEMS: ShopItem[] = [
   //    zont.png is actually the mineman portrait, plane.png the biplane;
   //    the original umbrella art only exists inside later SWFs) ──
   {
-    id: 'mine-defender', name: 'Crazy Mineman', price: 100, cell: [269, 94], icon: 'zont',
+    id: 'mine-defender', name: 'Crazy Mineman', price: 1550, cell: [269, 94], icon: 'zont',
     desc: 'Joe’s brother lays automatic mines on the bridge.', effect: 'mine-defender',
   },
   {
-    id: 'air-support', name: 'Air Support', price: 100, cell: [269, 169], icon: 'plane',
+    id: 'air-support', name: 'Air Support', price: 570, cell: [269, 169], icon: 'plane',
     desc: 'Royal Air Cavalry strikes every 30 s while HP is under 50%.', effect: 'air-support',
   },
   {
-    id: 'umbrella', name: 'Umbrella', price: 100, cell: [269, 243], icon: 'mine',
+    id: 'umbrella', name: 'Umbrella', price: 275, cell: [269, 243], icon: 'mine',
     desc: 'An invisible shield. Cuts damage while Castle HP is under 75%.', effect: 'umbrella',
   },
   {
-    id: 'repair', name: 'Repair', price: 150, cell: [269, 340], icon: 'repair', repeatable: true,
+    id: 'repair', name: 'Repair', price: 100, cell: [269, 340], icon: 'repair', repeatable: true,
     desc: 'Patch the walls: restores 400 Health Points.', effect: 'repair',
   },
 
@@ -107,47 +108,47 @@ export const SHOP_ITEMS: ShopItem[] = [
     desc: 'The Royal Armory classic. Better than nothing.', effect: 'weapon', weapon: 'gun', startsOwned: true,
   },
   {
-    id: 'gun-reload', name: 'Reload Speed', price: 100, cell: [437, 94], icon: 'pistol1', requires: 'gun',
+    id: 'gun-reload', name: 'Reload Speed', price: 270, cell: [437, 94], icon: 'pistol1', requires: 'gun',
     desc: 'Cleaned and oiled: the Gun reloads much faster.', effect: 'special', weapon: 'gun',
   },
   {
-    id: 'gun-power', name: 'Gun Power', price: 100, cell: [512, 94], icon: 'pistol2', requires: 'gun',
+    id: 'gun-power', name: 'Gun Power', price: 1000, cell: [512, 94], icon: 'pistol2', requires: 'gun',
     desc: 'Heavier cannonballs: 70 damage per hit.', effect: 'power', weapon: 'gun',
   },
   {
-    id: 'shotgun', name: 'Shotgun', price: 100, cell: [362, 169], icon: 'shotgun',
+    id: 'shotgun', name: 'Shotgun', price: 750, cell: [362, 169], icon: 'shotgun',
     desc: 'Strikes with a fan of cannon balls. A Royal shotgun, no kidding!', effect: 'weapon', weapon: 'shotgun',
   },
   {
-    id: 'fire-shells', name: 'Fire Shells', price: 100, cell: [437, 169], icon: 'shotgun1', requires: 'shotgun',
+    id: 'fire-shells', name: 'Fire Shells', price: 1500, cell: [437, 169], icon: 'shotgun1', requires: 'shotgun',
     desc: 'Fargo found fire balls somewhere. High detonation, more damage.', effect: 'special', weapon: 'shotgun',
   },
   {
-    id: 'shotgun-power', name: 'Shotgun Power', price: 100, cell: [512, 169], icon: 'shotgun2', requires: 'shotgun',
+    id: 'shotgun-power', name: 'Shotgun Power', price: 3000, cell: [512, 169], icon: 'shotgun2', requires: 'shotgun',
     desc: 'Tighter charges: every pellet hits harder.', effect: 'power', weapon: 'shotgun',
   },
   {
-    id: 'minigun', name: 'Minigun', price: 100, cell: [362, 243], icon: 'minigun',
+    id: 'minigun', name: 'Minigun', price: 3000, cell: [362, 243], icon: 'minigun',
     desc: 'Four shells in four barrels, 100 bullets in the clip. A dream!', effect: 'weapon', weapon: 'minigun',
   },
   {
-    id: 'minigun-reload', name: 'Reload Speed', price: 100, cell: [437, 243], icon: 'minigun1', requires: 'minigun',
+    id: 'minigun-reload', name: 'Reload Speed', price: 4000, cell: [437, 243], icon: 'minigun1', requires: 'minigun',
     desc: 'A trained loader crew keeps the drums coming.', effect: 'special', weapon: 'minigun',
   },
   {
-    id: 'minigun-power', name: 'Minigun Power', price: 100, cell: [512, 243], icon: 'minigun2', requires: 'minigun',
+    id: 'minigun-power', name: 'Minigun Power', price: 5000, cell: [512, 243], icon: 'minigun2', requires: 'minigun',
     desc: 'Hardened rounds: 70 damage per shell.', effect: 'power', weapon: 'minigun',
   },
   {
-    id: 'rifle', name: 'Sniper Rifle', price: 100, cell: [362, 318], icon: 'sniper',
+    id: 'rifle', name: 'Sniper Rifle', price: 4000, cell: [362, 318], icon: 'sniper',
     desc: 'One shot — one corpse. Powerful, accurate, slow to recharge.', effect: 'weapon', weapon: 'rifle',
   },
   {
-    id: 'rail-gun', name: 'Rail Gun', price: 2000, cell: [437, 318], icon: 'sniper1', requires: 'rifle',
+    id: 'rail-gun', name: 'Rail Gun', price: 5000, cell: [437, 318], icon: 'sniper1', requires: 'rifle',
     desc: 'If only I had this from the beginning… the war would be over.', effect: 'special', weapon: 'rifle',
   },
   {
-    id: 'rifle-power', name: 'Rifle Power', price: 200, cell: [512, 318], icon: 'sniper2', requires: 'rifle',
+    id: 'rifle-power', name: 'Rifle Power', price: 6000, cell: [512, 318], icon: 'sniper2', requires: 'rifle',
     desc: 'Match-grade rounds for the long barrel.', effect: 'power', weapon: 'rifle',
   },
 ];
@@ -167,6 +168,25 @@ export const WEAPON_DAMAGE: Record<string, { base: [number, number]; special?: [
 
 /** Reload-speed special (gun/minigun): reload time multiplier. */
 export const RELOAD_SPECIAL_FACTOR = 0.55;
+
+// ── Ammo (conf.xml <AMMO>: X_M = magazine count, X_A = rounds per magazine) ──
+//
+// magSize = _A (rounds loaded); reserve = (_M − 1) × _A (rounds behind the mag).
+// The tier-2 specials swap the whole weapon to the ShotGun2 / Rifle2 vector:
+//   ShotGun1 M3/A8  → ShotGun2 M1/A15 ; Rifle1 M3/A7 → Rifle2 M2/A3.
+// gun/minigun have no `special` ammo entry (their special is Reload Speed, which
+// changes reload time — see RELOAD_SPECIAL_FACTOR — not the ammo layout).
+
+/** ammo[special?] — special = fire shells (shotgun) / rail gun (rifle) variant. */
+export const WEAPON_AMMO: Record<
+  string,
+  { base: { magSize: number; reserve: number }; special?: { magSize: number; reserve: number } }
+> = {
+  gun: { base: { magSize: 50, reserve: 100 } },
+  shotgun: { base: { magSize: 8, reserve: 16 }, special: { magSize: 15, reserve: 0 } },
+  minigun: { base: { magSize: 70, reserve: 0 } },
+  rifle: { base: { magSize: 7, reserve: 14 }, special: { magSize: 3, reserve: 3 } },
+};
 
 // ── Castle (conf.xml: floors 700/1000/1300/1600, flag +100) ─────────────────
 
@@ -217,8 +237,11 @@ export const BRIDGE = {
   stagger: 1.7,
 };
 
-/** Crazy Mineman (shop): numbers from the original shop text (v10.18). */
-export const DECK_MINE = { damage: 555, respawnSec: 10, radius: 60, x: -20 };
+// Crazy Mineman (shop). damage = release <EWETEG> uron (was 555, from the v10.18
+// shop text; the release value takes priority per spec §7.7). respawnSec/radius/x
+// stay as remaster tuning. The other <EWETEG> fields (hpostova/tormoz/lechilka)
+// have unresolved semantics and are deliberately left unmapped.
+export const DECK_MINE = { damage: 300, respawnSec: 10, radius: 60, x: -20 };
 
 // ── Units (v15 release registry: FN_addMob id scheme 1-84) ─────────────
 // Stats from SdV15 (conf.xml <Mob>); speed = original px/frame @30fps x30. Air
@@ -431,6 +454,10 @@ export interface MissionEntry {
   y: number;
   /** Original attack x (640-wide screen coords); 0 = fly through. */
   a: number;
+  /** Behaviour variant (original `tip`): ground 13 = ram-and-self-destruct. */
+  tip: number;
+  /** Extra spawn parameter (original `dop`). */
+  dop: number;
 }
 
 export interface MissionDef {
@@ -443,9 +470,9 @@ export interface MissionDef {
 function buildMission(levelIdx: number): MissionDef {
   const entries: MissionEntry[] = [];
   const ground: MissionEntry[] = [];
-  for (const [t, id, y, a] of V15_CAMPAIGN[levelIdx]) {
+  for (const [t, id, y, a, tip, dop] of V15_CAMPAIGN[levelIdx]) {
     const u = UNITS[id];
-    const e: MissionEntry = { t, id, y, a };
+    const e: MissionEntry = { t, id, y, a, tip, dop };
     if (u?.ground) ground.push(e);
     else entries.push(e);
   }

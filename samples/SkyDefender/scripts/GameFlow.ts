@@ -227,6 +227,7 @@ export class GameFlow extends Script {
       name: 'skydefender',
       version: 2,
       snapshot: () => this.debugSnapshot(),
+      inspect: (query, args) => this.debugInspect(query, args),
       action: (name, args) => this.debugAction(name, args),
     });
   }
@@ -274,6 +275,66 @@ export class GameFlow extends Script {
         return { ok: false, error: `unknown action: ${name}` };
     }
   }
+
+  /**
+   * Dev-only live read queries for the debug bridge (`__PIX3_DEBUG__.game.inspect`).
+   * `entities` walks the `enemies` + `effects` containers and reports each live
+   * node's REAL world position (getWorldPosition — unlike the editor `liveScene`
+   * snapshot, which reports 0,0 in play) plus the config of its behaviour/shell
+   * component and its child node names. This is how the harness verifies unit
+   * behaviour (arc vs torpedo shells, park-and-shoot firing, compound no-ram)
+   * from state instead of guessing off screenshots.
+   */
+  private debugInspect(query: string, args?: unknown): unknown {
+    switch (query) {
+      case 'entities': {
+        const which = String((args as { group?: string } | undefined)?.group ?? 'all');
+        const out: Record<string, unknown> = {};
+        if (which === 'all' || which === 'enemies') out.enemies = this.inspectContainer('enemies');
+        if (which === 'all' || which === 'effects') out.effects = this.inspectContainer('effects');
+        return out;
+      }
+      default:
+        return { ok: false, error: `unknown query: ${query}` };
+    }
+  }
+
+  /** Config fields worth reporting per behaviour/projectile component type. */
+  private static readonly INSPECT_FIELDS: Record<string, string[]> = {
+    'user:EnemyShell': ['mode', 'vx', 'vy', 'gravity', 'damage'],
+    'user:EnemyBalloon': ['stopX', 'attackDamage', 'attackPeriod', 'gunType', 'castleDamage', 'bomber'],
+    'user:CompoundBalloon': ['stopX', 'attackDamage', 'weaponClass', 'castleDamage'],
+    'user:GroundVehicle': ['tip', 'stopX', 'attackDamage'],
+  };
+
+  private inspectContainer(name: string): Array<Record<string, unknown>> {
+    const container = this.findNode(name) as NodeBase | null;
+    if (!container) return [];
+    return container.children.map(child => this.describeEntity(child as NodeBase));
+  }
+
+  private describeEntity(node: NodeBase): Record<string, unknown> {
+    const wp = node.getWorldPosition(GameFlow.inspectScratch);
+    const comps: Record<string, Record<string, unknown>> = {};
+    for (const c of node.components) {
+      const type = (c as { type?: string }).type ?? '';
+      const fields = GameFlow.INSPECT_FIELDS[type];
+      if (!fields) continue;
+      const cfg = (c as { config?: Record<string, unknown> }).config ?? {};
+      const picked: Record<string, unknown> = {};
+      for (const f of fields) picked[f] = cfg[f];
+      comps[type] = picked;
+    }
+    return {
+      name: node.name,
+      visible: node.visible,
+      pos: [Math.round(wp.x), Math.round(wp.y)],
+      comps,
+      kids: node.children.map(k => (k as NodeBase).name),
+    };
+  }
+
+  private static readonly inspectScratch = new Vector3();
 
   onDetach(): void {
     this.disposeDebug?.();

@@ -168,8 +168,8 @@ export class WaveSpawner extends Script {
     const level = V15_SURVIVAL[Math.min(n, V15_SURVIVAL.length) - 1] ?? [];
     const entries: MissionEntry[] = [];
     const ground: MissionEntry[] = [];
-    for (const [t, id, y, a] of level) {
-      const e: MissionEntry = { t, id, y, a };
+    for (const [t, id, y, a, tip, dop] of level) {
+      const e: MissionEntry = { t, id, y, a, tip, dop };
       if (UNITS[id]?.ground) ground.push(e);
       else entries.push(e);
     }
@@ -318,6 +318,12 @@ export class WaveSpawner extends Script {
     logic.config.speed = unit.speed;
     logic.config.score = unit.score;
     logic.config.stopX = toStopX(entry.a);
+    // Air units never ram (see CompoundBalloon): they park-and-shoot from `a`
+    // or drift through. Unik (35-42) = arc cannon, Urik (43-48) = torpedo.
+    logic.config.castleDamage = 0;
+    logic.config.attackDamage = unit.attackDamage ?? 0;
+    logic.config.attackPeriod = unit.attackPeriod ?? 2;
+    logic.config.weaponClass = entry.id >= 43 && entry.id <= 48 ? 'torpedo' : 'arc';
   }
 
   /** Per-id stats for ground vehicles. */
@@ -330,5 +336,7 @@ export class WaveSpawner extends Script {
     logic.config.stopX = toStopX(entry.a);
     logic.config.attackDamage = unit.attackDamage ?? 0;
     logic.config.attackPeriod = unit.attackPeriod ?? 5;
+    // Behaviour variant: tip 13 = ram-and-self-destruct; else park-and-shoot.
+    logic.config.tip = entry.tip;
   }
 }

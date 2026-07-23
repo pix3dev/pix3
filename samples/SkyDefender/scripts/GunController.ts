@@ -130,6 +130,8 @@ export class GunController extends Script {
   private gameOver = false;
   private balls: Cannonball[] = [];
   private ammo: AmmoState[] = [];
+  /** Ammo layout (magSize/reserve) last applied per weapon — re-init on tier change. */
+  private appliedAmmo: { magSize: number; reserve: number }[] = [];
   private weaponIndex = 0;
   private reloadLeft = 0;
   private cooldownLeft = 0;
@@ -222,6 +224,28 @@ export class GunController extends Script {
     return def.reloadSec * session.weaponReloadFactor(def.key);
   }
 
+  /** Magazine + reserve with the shop's tier (special) upgrade applied. */
+  private effectiveAmmo(def: WeaponDef): { magSize: number; reserve: number } {
+    const ammo = session.weaponAmmo(def.key);
+    return ammo.magSize > 0 ? ammo : { magSize: def.magSize, reserve: def.reserve };
+  }
+
+  /**
+   * Re-init the ammo of any weapon whose tier (special) layout changed — fired
+   * on the shop's `purchase` signal so buying Fire Shells / Rail Gun mid-run
+   * refills that weapon's magazine and reserve to the new vector. Weapons whose
+   * layout is unchanged (unrelated buys, power/reload upgrades) are left alone.
+   */
+  private refreshPurchasedAmmo(): void {
+    WEAPONS.forEach((w, i) => {
+      const next = this.effectiveAmmo(w);
+      const prev = this.appliedAmmo[i];
+      if (prev && prev.magSize === next.magSize && prev.reserve === next.reserve) return;
+      this.appliedAmmo[i] = next;
+      this.ammo[i] = { mag: next.magSize, reserve: next.reserve };
+    });
+  }
+
   selectWeapon(index: number): void {
     const next = Math.min(WEAPONS.length - 1, Math.max(0, Math.floor(index)));
     if (next === this.weaponIndex || this.gameOver) return;
@@ -308,7 +332,14 @@ export class GunController extends Script {
       if (!victory) this.onGameOver();
     });
 
-    this.ammo = WEAPONS.map(w => ({ mag: w.magSize, reserve: w.reserve }));
+    // A shop buy can swap a weapon's ammo tier (Fire Shells / Rail Gun) mid-run.
+    this.findNode('game-root')?.connect('purchase', this, () => this.refreshPurchasedAmmo());
+
+    this.ammo = WEAPONS.map(w => {
+      const a = this.effectiveAmmo(w);
+      return { mag: a.magSize, reserve: a.reserve };
+    });
+    this.appliedAmmo = WEAPONS.map(w => this.effectiveAmmo(w));
 
     // Projectile pool: adopt the authored seed balls. The pool grows from the
     // prefab on the first update — `scene.instantiate` needs the runner to be
@@ -456,10 +487,11 @@ export class GunController extends Script {
     this.reloadLeft = 0;
     const state = this.ammo[this.weaponIndex];
     const def = this.currentWeapon;
+    const magSize = this.effectiveAmmo(def).magSize;
     if (state.reserve < 0) {
-      state.mag = def.magSize;
+      state.mag = magSize;
     } else {
-      const take = Math.min(def.magSize - state.mag, state.reserve);
+      const take = Math.min(magSize - state.mag, state.reserve);
       state.mag += take;
       state.reserve -= take;
     }

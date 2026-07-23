@@ -1,6 +1,7 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
-import { Vector3 } from 'three';
+import { AdditiveBlending, Vector3 } from 'three';
+import type { Mesh, MeshBasicMaterial } from 'three';
 import { BurningWreck } from './BurningWreck';
 
 const HIT_SOUNDS = [
@@ -10,9 +11,29 @@ const HIT_SOUNDS = [
 ];
 const BODY_DEATH_SOUND = 'res://src/assets/audio/explosions/big_explosion.mp3';
 const PART_DEATH_SOUND = 'res://src/assets/audio/explosions/light_explosion.mp3';
-const CRASH_SOUND = 'res://src/assets/audio/explosions/medium_explosion.mp3';
 const EXPLOSION_PREFAB = 'res://src/assets/prefabs/explosion.pix3scene';
 const WRECK_PREFAB = 'res://src/assets/prefabs/burning-wreck.pix3scene';
+
+// ── Gondola gun (park-and-shoot) ─────────────────────────────────────────────
+const ENEMY_SHELL_PREFAB = 'res://src/assets/prefabs/enemy-shell.pix3scene';
+const SHOT_SOUNDS = [
+  'res://src/assets/audio/guns/enemy/eshot1.mp3',
+  'res://src/assets/audio/guns/enemy/eshot2.mp3',
+  'res://src/assets/audio/guns/enemy/eshot3.mp3',
+];
+const SHELL_SPEED = 300;
+const RECOIL_DUR = 0.18;
+const FLASH_DUR = 0.12;
+// Unik arc cannon (weapon class 0): lobbed shell (climb + downward pull).
+const SHELL_ARC_VY = 120;
+const SHELL_ARC_GRAVITY = -200;
+// Urik torpedo (weapon class 2): free-fall then ignite; textures verified to
+// exist under src/assets/textures/enemy/weapons/.
+const TORPEDO_BODY_TEX = 'res://src/assets/textures/enemy/weapons/torpedo.png';
+const TORPEDO_TRAIL_TEX = 'res://src/assets/textures/enemy/weapons/littlebg.png';
+const TORPEDO_SPEED = 260;
+const TORPEDO_GRAVITY = -300;
+const TORPEDO_IGNITE_SEC = 0.4;
 
 type PartName = 'body' | 'ropes' | 'gondola';
 
@@ -32,7 +53,11 @@ interface Part {
  * - hit the ROPES → they snap: the balloon sails UP and away, the gondola
  *   drops as a burning wreck (and explodes on whatever it lands on);
  * - hit the GONDOLA → it blows up in place, the balloon + ropes fly away.
- * Reports kills/escape through the same game-root signals as EnemyBalloon.
+ * Air units NEVER ram (see enemy-behavior.md §Flight): with a `stopX` it holds
+ * and PARKS-AND-SHOOTS from the gondola gun (`weaponClass:'arc'` = Unik lobbed
+ * cannon, `'torpedo'` = Urik free-fall rocket); with `stopX===0` it drifts
+ * across and despawns off the left edge. Reports kills/escape through the same
+ * game-root signals as EnemyBalloon.
  */
 export class CompoundBalloon extends Script {
   private parts: Part[] = [];
@@ -42,6 +67,15 @@ export class CompoundBalloon extends Script {
   private baseY: number | null = null;
   private shoveVx = 0;
   private shoveVy = 0;
+  private attackTimer = 0;
+
+  // ── gondola gun rig (park-and-shoot) ────────────────────────────────────────
+  private gunPivot: NodeBase | null = null;
+  private gunFlash: (NodeBase & { opacity?: number }) | null = null;
+  private gunBaseX = 0;
+  private gunBaseCaptured = false;
+  private recoilT = 0;
+  private flashT = 0;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -53,8 +87,14 @@ export class CompoundBalloon extends Script {
       stopX: 0,
       score: 20,
       gondolaScore: 8,
-      // Absolute castle HP a breakthrough costs (M4 scale: floors are 700..1600).
-      castleDamage: 90,
+      // Retained for compatibility but UNUSED for movement — air units never
+      // ram (WaveSpawner forces this to 0). Damage comes only from fired shots.
+      castleDamage: 0,
+      // Park-and-shoot: while holding at stopX, fire every attackPeriod s.
+      attackDamage: 0,
+      attackPeriod: 2,
+      // Gondola weapon: 'arc' (Unik lobbed cannon) or 'torpedo' (Urik rocket).
+      weaponClass: 'arc',
       // Wreck liveries (set per unik/urik by WaveSpawner.applyCompoundUnit).
       wreckBodyTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png',
       wreckGondolaTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png',
@@ -80,7 +120,17 @@ export class CompoundBalloon extends Script {
         num('speed', 'Speed (px/s)'),
         num('score', 'Score (full kill)'),
         num('gondolaScore', 'Score (gondola only)'),
-        num('castleDamage', 'Castle Damage (HP)'),
+        num('attackDamage', 'Attack Damage (HP)'),
+        num('attackPeriod', 'Attack Period (s)', 0.1),
+        {
+          name: 'weaponClass',
+          type: 'string' as const,
+          ui: { label: 'Weapon (arc|torpedo)', group: 'Compound' },
+          getValue: (c: unknown) => (c as CompoundBalloon).config.weaponClass,
+          setValue: (c: unknown, v: unknown) => {
+            (c as CompoundBalloon).config.weaponClass = String(v);
+          },
+        },
       ],
       groups: { Compound: { label: 'Compound Balloon', expanded: true } },
     };
@@ -108,6 +158,23 @@ export class CompoundBalloon extends Script {
     this.node?.connect('shoved', this, (vx: unknown, vy: unknown) => {
       this.onShoved(Number(vx) || 0, Number(vy) || 0);
     });
+
+    // Gondola gun: Unik has 'Unik Gun' (+ 'Muzzle Flash'); Urik mounts a
+    // 'Torpedo' launcher (no flash). Both hang under the shared 'Unik Gondola'.
+    const gondola = this.findPart('gondola')?.node ?? null;
+    this.gunPivot =
+      (gondola?.getChildByName('Unik Gun') as NodeBase | undefined) ??
+      (gondola?.getChildByName('Torpedo') as NodeBase | undefined) ??
+      null;
+    this.gunFlash =
+      (this.gunPivot?.getChildByName('Muzzle Flash') as (NodeBase & { opacity?: number }) | undefined) ??
+      null;
+    // Additive blend sells the flash (same trick as the explosion shockwave).
+    this.gunFlash?.traverse(obj => {
+      const mesh = obj as Mesh;
+      if (mesh.isMesh) (mesh.material as MeshBasicMaterial).blending = AdditiveBlending;
+    });
+    if (this.gunFlash) this.gunFlash.opacity = 0;
   }
 
   onUpdate(dt: number): void {
@@ -117,6 +184,9 @@ export class CompoundBalloon extends Script {
     if (this.baseY === null) {
       this.baseY = node.position.y;
     }
+
+    // Gun recoil/flash decay (no-op on units without a gondola gun).
+    this.updateGunRig(dt);
 
     // Shockwave impulse (decays quickly).
     if (this.shoveVx !== 0 || this.shoveVy !== 0) {
@@ -142,17 +212,103 @@ export class CompoundBalloon extends Script {
       return;
     }
 
-    // Intact: drift toward the castle with a buoyant bob.
+    // Intact: drift toward the castle with a buoyant bob. With a stopX it holds
+    // and park-and-shoots; without one it flies through and leaves the field.
     this.bobTime += dt;
     const stopX = Number(this.config.stopX);
     const holding = stopX !== 0 && node.position.x <= stopX;
     if (!holding) {
       node.position.x -= Number(this.config.speed) * dt;
+    } else {
+      this.updateAttack(dt);
     }
     node.position.y = this.baseY + Math.sin(this.bobTime * 1.4) * 4;
 
-    if (node.position.x <= -180) {
-      this.crashIntoCastle();
+    // Air units never ram: a fly-through (stopX 0) drifts off the left edge and
+    // despawns — no castle contact damage.
+    if (node.position.x < -430) {
+      this.despawn();
+    }
+  }
+
+  // ── park-and-shoot gondola gun ──────────────────────────────────────────────
+
+  /** Holding at stopX: fire the gondola weapon on the reload cadence. */
+  private updateAttack(dt: number): void {
+    const damage = Number(this.config.attackDamage);
+    if (damage <= 0 || !this.gunPivot) return;
+    this.attackTimer += dt;
+    const period = Math.max(0.5, Number(this.config.attackPeriod));
+    if (this.attackTimer < period) return;
+    this.attackTimer = 0;
+    this.fireGun(damage);
+  }
+
+  /**
+   * Fire the gondola gun: recoil kick + muzzle flash + a visible projectile
+   * that carries the castle damage to impact (so it isn't double-counted with
+   * the cadence). Arc = a lobbed EnemyShell; torpedo = a free-fall rocket.
+   */
+  private fireGun(damage: number): void {
+    const node = this.node;
+    const pivot = this.gunPivot;
+    if (!node || !pivot) return;
+    this.recoilT = RECOIL_DUR;
+    this.flashT = FLASH_DUR;
+    const sound = SHOT_SOUNDS[Math.floor(Math.random() * SHOT_SOUNDS.length)];
+    this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.1 });
+
+    // Muzzle in stage-local coords (grandchild under the gondola — resolve via
+    // the shared world→stage helper, which also accounts for parent scale).
+    const muzzle = this.partWorldToStage(this.gunFlash ?? pivot);
+    const torpedo = String(this.config.weaponClass) === 'torpedo';
+    void this.scene
+      ?.instantiate(ENEMY_SHELL_PREFAB, { parent: 'effects' })
+      .then(shell => {
+        shell.position.set(muzzle.x, muzzle.y, 0);
+        const logic = shell.components.find(
+          c => (c as { type?: string }).type === 'user:EnemyShell'
+        ) as { config?: Record<string, unknown> } | undefined;
+        if (!logic?.config) return;
+        logic.config.damage = damage;
+        if (torpedo) {
+          logic.config.mode = 'torpedo';
+          logic.config.vx = -TORPEDO_SPEED;
+          logic.config.vy = 0;
+          logic.config.gravity = TORPEDO_GRAVITY;
+          logic.config.torpedoIgniteSec = TORPEDO_IGNITE_SEC;
+          logic.config.bodyTexture = TORPEDO_BODY_TEX;
+          logic.config.trailTexture = TORPEDO_TRAIL_TEX;
+        } else {
+          logic.config.mode = 'straight';
+          logic.config.vx = -SHELL_SPEED;
+          logic.config.vy = SHELL_ARC_VY;
+          logic.config.gravity = SHELL_ARC_GRAVITY;
+        }
+      })
+      // If the projectile can't spawn, don't lose the hit.
+      .catch(() => this.emitToGameRoot('castle-damaged', damage));
+  }
+
+  /** Per-frame recoil/flash decay for the gondola gun (guarded; null-safe). */
+  private updateGunRig(dt: number): void {
+    const pivot = this.gunPivot;
+    if (!pivot || !pivot.visible) return;
+    if (!this.gunBaseCaptured) {
+      this.gunBaseX = pivot.position.x;
+      this.gunBaseCaptured = true;
+    }
+    if (this.recoilT > 0) {
+      this.recoilT = Math.max(0, this.recoilT - dt);
+      const k = this.recoilT / RECOIL_DUR; // 1 → 0
+      pivot.position.x = this.gunBaseX + 5 * k * k; // kicks back (+x), eases home
+    }
+    if (this.flashT > 0 && this.gunFlash) {
+      this.flashT = Math.max(0, this.flashT - dt);
+      const t = this.flashT / FLASH_DUR; // 1 → 0
+      this.gunFlash.opacity = 0.9 * t;
+      const s = 0.6 + 0.9 * t;
+      this.gunFlash.scale.set(s, s, 1);
     }
   }
 
@@ -239,17 +395,6 @@ export class CompoundBalloon extends Script {
     }
     this.state = 'flyaway';
     this.flyawaySpeed = 20;
-  }
-
-  private crashIntoCastle(): void {
-    if (this.state === 'gone') return;
-    this.scene?.audio.play(CRASH_SOUND, { bus: 'sfx', volumeVariation: 0.1 });
-    this.scene?.juice.shake('camera2d', { amplitude: 12, duration: 0.35 });
-    this.emitToGameRoot('castle-damaged', Number(this.config.castleDamage));
-    if (this.node) {
-      this.spawnExplosion(this.node.position.x, this.node.position.y, 1.1);
-    }
-    this.despawn();
   }
 
   private despawn(): void {

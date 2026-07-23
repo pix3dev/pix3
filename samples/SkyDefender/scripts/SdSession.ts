@@ -3,6 +3,7 @@ import {
   FLAG_HP_BONUS,
   RELOAD_SPECIAL_FACTOR,
   SHOP_ITEMS,
+  WEAPON_AMMO,
   WEAPON_DAMAGE,
 } from './SdBalance';
 
@@ -164,6 +165,14 @@ export const session = {
     const special = table.special && this.isOwned(specialItemId(key));
     const level = this.isOwned(`${key}-power`) ? 1 : 0;
     return (special ? table.special! : table.base)[level];
+  },
+
+  /** Effective magazine + reserve for a weapon, given its owned special. */
+  weaponAmmo(key: string): { magSize: number; reserve: number } {
+    const table = WEAPON_AMMO[key];
+    if (!table) return { magSize: 0, reserve: 0 };
+    const special = table.special && this.isOwned(specialItemId(key));
+    return special ? table.special! : table.base;
   },
 
   /** Reload-time multiplier (Reload Speed specials for gun/minigun). */

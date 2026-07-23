@@ -33,6 +33,11 @@ const SHOT_SOUNDS = [
 const SHELL_SPEED = 300;
 const RECOIL_DUR = 0.18;
 const FLASH_DUR = 0.12;
+// Light lobbed cannon (weapon class 0 / gunType 'typical'): the ball is thrown
+// UP and an opposing downward pull arcs it back onto the castle over its flight
+// (~200-480 px). Heavy/direct guns (class 1) keep a flat shot (vy/gravity 0).
+const SHELL_ARC_VY = 120;
+const SHELL_ARC_GRAVITY = -200;
 
 /**
  * EnemyBalloon — a typical aerostat (GDD "S" class) with the original
@@ -345,7 +350,9 @@ export class EnemyBalloon extends Script {
         ) as { config?: Record<string, unknown> } | undefined;
         if (logic?.config) {
           logic.config.vx = -SHELL_SPEED;
-          logic.config.vy = 0;
+          // Heavy = flat/direct; typical = lobbed arc (initial climb + gravity).
+          logic.config.vy = heavy ? 0 : SHELL_ARC_VY;
+          logic.config.gravity = heavy ? 0 : SHELL_ARC_GRAVITY;
           logic.config.damage = damage;
         }
       })
