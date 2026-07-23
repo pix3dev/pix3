@@ -9,7 +9,12 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
-import { SOUL_PRESETS, CUSTOM_SOUL_ID, type AgentSoul } from '@/services/agent/AgentSouls';
+import {
+  SOUL_PRESETS,
+  CUSTOM_SOUL_ID,
+  CUSTOM_SOUL_AVATAR,
+  type AgentSoul,
+} from '@/services/agent/AgentSouls';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
@@ -1198,6 +1203,7 @@ export class EditorSettingsDialog extends ComponentBase {
             tagline: 'Write your own name and personality.',
             sample: '',
             prompt: '',
+            avatar: CUSTOM_SOUL_AVATAR,
           },
           customSelected
         )}
@@ -1242,7 +1248,10 @@ export class EditorSettingsDialog extends ComponentBase {
         aria-pressed=${selected}
         @click=${() => this.onSelectSoul(soul.id)}
       >
-        <span class="soul-name">${soul.name}</span>
+        <span class="soul-head">
+          <img class="soul-avatar" src=${soul.avatar} alt="" aria-hidden="true" />
+          <span class="soul-name">${soul.name}</span>
+        </span>
         <span class="soul-tagline">${soul.tagline}</span>
         ${soul.sample ? html`<span class="soul-sample">“${soul.sample}”</span>` : null}
       </button>

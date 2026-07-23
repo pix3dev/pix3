@@ -45,10 +45,6 @@ export const resolve2DParentForCreation = (
   return null;
 };
 
-export const resolveDefault3DParent = (sceneGraph: SceneGraph): NodeBase | null => {
-  return sceneGraph.rootNodes.find(node => node instanceof Node3D) ?? null;
-};
-
 export const resolvePlacementParent = (
   sceneGraph: SceneGraph,
   parentNodeId: string | null | undefined

@@ -439,8 +439,8 @@ pix3-editor-settings-dialog .soul-grid {
 pix3-editor-settings-dialog .soul-card {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.7rem 0.8rem;
+  gap: 0.3rem;
+  padding: 0.55rem 0.65rem;
   text-align: left;
   cursor: pointer;
   border: 1px solid var(--line-1);
@@ -462,8 +462,29 @@ pix3-editor-settings-dialog .soul-card.is-selected {
   background: var(--accent-soft);
 }
 
+pix3-editor-settings-dialog .soul-card .soul-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+pix3-editor-settings-dialog .soul-card .soul-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  transition: border-color 0.15s;
+}
+
+pix3-editor-settings-dialog .soul-card.is-selected .soul-avatar {
+  border-color: var(--pix3-accent-color);
+}
+
 pix3-editor-settings-dialog .soul-card .soul-name {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--fg-0);
 }

@@ -10,7 +10,6 @@ import { ViewportRendererService } from '@/services/viewport/ViewportRenderServi
 import {
   insertNodeAtIndex,
   removeNodeFromSceneGraph,
-  resolveDefault3DParent,
   resolvePlacementParent,
 } from '@/features/scene/node-placement';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
@@ -72,18 +71,10 @@ export class AddModelOperation implements Operation<OperationInvokeResult> {
       return { didMutate: false };
     }
 
-    const hasExplicitHierarchyPlacement =
-      this.params.parentNodeId !== undefined || typeof this.params.insertIndex === 'number';
+    // Default to the scene root: an unqualified add should not nest under whatever the first
+    // root Node3D happens to be (often a camera or light). Only nest when a parent is explicit.
     const explicitParent = resolvePlacementParent(sceneGraph, this.params.parentNodeId ?? null);
-    const defaultParent = resolveDefault3DParent(sceneGraph);
-    const targetParent =
-      explicitParent instanceof Node3D
-        ? explicitParent
-        : hasExplicitHierarchyPlacement
-          ? null
-          : defaultParent instanceof Node3D
-            ? defaultParent
-            : null;
+    const targetParent = explicitParent instanceof Node3D ? explicitParent : null;
     const parentNodeId = targetParent?.nodeId ?? null;
 
     const dropPosition = this.resolveDropPosition(context, node);

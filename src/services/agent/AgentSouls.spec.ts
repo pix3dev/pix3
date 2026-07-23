@@ -5,10 +5,10 @@ describe('resolveSoul', () => {
   const brobot = SOUL_PRESETS.find(soul => soul.id === DEFAULT_SOUL_ID)!;
 
   it('resolves a named preset to its name and prompt', () => {
-    const resolved = resolveSoul({ soulId: 'vera', customSoulName: '', customSoulPrompt: '' });
-    const vera = SOUL_PRESETS.find(soul => soul.id === 'vera')!;
-    expect(resolved.name).toBe(vera.name);
-    expect(resolved.prompt).toBe(vera.prompt);
+    const resolved = resolveSoul({ soulId: 'anuta', customSoulName: '', customSoulPrompt: '' });
+    const anuta = SOUL_PRESETS.find(soul => soul.id === 'anuta')!;
+    expect(resolved.name).toBe(anuta.name);
+    expect(resolved.prompt).toBe(anuta.prompt);
   });
 
   it("resolves the 'professional' preset to Pix3 Agent with no persona", () => {
