@@ -1,0 +1,56 @@
+# Warchild — enemy ground vehicle. Body art includes its wheels; separate
+# bouncing wheel sprites + gun (original CorsetCar) are a later increment.
+# Per-id stats are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Warchild (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: Warchild
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/ground/warchild/warchild.png' }
+      width: 80
+      height: 27
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 74
+          height: 23
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:GroundVehicle
+        enabled: true
+        config:
+          hp: 200
+          speed: 60
+          score: 10
+          stopX: -150
+          attackDamage: 10
+          attackPeriod: 5
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Warchild · Surv"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 29]
+            scale: [1, 1]
+            rotation: 0
+        children: []

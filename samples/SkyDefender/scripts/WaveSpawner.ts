@@ -1,22 +1,49 @@
 import { Script } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
-import type { Texture } from 'three';
+import { CompoundBalloon } from './CompoundBalloon';
 import { EnemyBalloon } from './EnemyBalloon';
 import { GroundVehicle } from './GroundVehicle';
 import { BRIDGE, MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBalance';
 import { V15_SURVIVAL } from './SdV15';
 
-const BALLOON_PREFAB = 'res://src/assets/prefabs/balloon.pix3scene';
-const UNIK_PREFAB = 'res://src/assets/prefabs/unik.pix3scene';
-const TRUCK_PREFAB = 'res://src/assets/prefabs/ground-truck.pix3scene';
-/** Enemy transporter airship (S_SS) — self-contained animated+overlay prefab. */
-const TRANSPORTER_ENEMY_PREFAB = 'res://src/assets/prefabs/transporter-enemy.pix3scene';
 /** Joe's alarm cry — the original plays it on every ground-unit spawn. */
 const GROUND_ALARM_SOUND = 'res://src/assets/audio/other/warning_scream.mp3';
-/** Gunship barrels (B_TypGun / BigGun) — not any unit's body sprite, so they
- *  must be warmed separately from the roster loop. */
-const TYP_GUN_TEX = 'res://src/assets/textures/enemy/weapons/typical_gun.png';
-const BIG_GUN_TEX = 'res://src/assets/textures/enemy/weapons/big_gun1.png';
+
+// ── Unit prefab registry ─────────────────────────────────────────────────────
+// Every unit FAMILY is an authored prefab (visual composition baked per the
+// decompiled com.enemy.*.init(); reviewable on the dev unit-gallery scene).
+// The spawner only applies per-id STATS from SdBalance on top.
+const PREFABS = 'res://src/assets/prefabs';
+const AIR_FAMILY: ReadonlyArray<[from: number, to: number, file: string]> = [
+  [1, 1, 'lucky'],
+  [2, 2, 'lucky2'],
+  [3, 3, 'slevin'],
+  [4, 4, 'slevin-fire'],
+  [5, 8, 'avalon1'],
+  [9, 12, 'avalon2'],
+  [13, 16, 'lavalon1'],
+  [17, 20, 'lavalon2'],
+  [21, 25, 'nz'],
+  [26, 29, 'suc'],
+  [30, 30, 'fatty'],
+  [31, 31, 'fish'],
+  [32, 32, 'splash'],
+  [34, 34, 'nut'],
+];
+const GROUND_FAMILY = [
+  'atabus', 'attaban', 'baka', 'baron', 'bb', 'bus', 'dream',
+  'dreamer', 'fatima', 'medic', 'rracer', 'garbag', 'siege', 'warchild',
+] as const; // ids 49..62 in order
+
+/** id (1-62) → prefab path, or null for ids without a prefab yet (npc/boss). */
+function unitPrefabPath(id: number): string | null {
+  if (id === 33) return `${PREFABS}/transporter-enemy.pix3scene`;
+  if (id >= 35 && id <= 42) return `${PREFABS}/unik.pix3scene`;
+  if (id >= 43 && id <= 48) return `${PREFABS}/urik.pix3scene`;
+  if (id >= 49 && id <= 62) return `${PREFABS}/units/${GROUND_FAMILY[id - 49]}.pix3scene`;
+  const air = AIR_FAMILY.find(([from, to]) => id >= from && id <= to);
+  return air ? `${PREFABS}/units/${air[2]}.pix3scene` : null;
+}
 
 /** Original 640×480 top-left y → stage-local center-origin Y-up. */
 const toStageY = (origY: number): number => 240 - origY;
@@ -24,12 +51,6 @@ const toStageY = (origY: number): number => 240 - origY;
 const toStopX = (a: number): number => (a > 0 ? Math.max(a - 320, -170) : 0);
 /** Spawn x just past the right edge of the original playfield. */
 const SPAWN_X = 470;
-
-/** Structural view of the runtime Sprite2D bits we poke (setTexture is public). */
-type SpriteNode = NodeBase & {
-  setTexture?: (tex: Texture) => void;
-  updateSize?: (w: number, h: number) => void;
-};
 
 /**
  * WaveSpawner — drives one wave at a time. Campaign waves are the original
@@ -47,8 +68,6 @@ export class WaveSpawner extends Script {
   private running = false;
   private aliveCount = 0;
   private missionName = '';
-  /** Sprite cache keyed by texture path, preloaded in onStart to avoid pop-in. */
-  private unitTextures = new Map<string, Texture>();
   /** Survival-only stat overrides for the typical balloon. */
   private survivalStats: { hp: number; speed: number; score: number } | null = null;
   /** Ground assault: waits for the bridge, then runs its own clock. */
@@ -112,19 +131,17 @@ export class WaveSpawner extends Script {
     this.findNode('game-root')?.connect('bridge-ready', this, () => {
       this.bridgeReady = true;
     });
-    // Warm the sprite cache for every unit in the roster + the gunship barrels.
+    // Warm the texture cache for every unit body so first spawns don't pop in.
+    // (Prefab rig art — baskets, guns, gondolas — loads with each prefab.)
     const loader = this.scene?.getAssetLoader();
     if (loader) {
-      const paths = new Set<string>([TYP_GUN_TEX, BIG_GUN_TEX]);
+      const paths = new Set<string>();
       for (const unit of Object.values(UNITS)) {
-        for (const p of [unit.sprite, ...(unit.spriteVariants ?? [])].filter(Boolean)) {
-          paths.add(p);
-        }
+        if (unit.sprite) paths.add(unit.sprite);
       }
       for (const path of paths) {
         void loader
           .loadTexture(path)
-          .then(tex => this.unitTextures.set(path, tex))
           .catch(() => console.warn(`[WaveSpawner] missing sprite ${path}`));
       }
     }
@@ -245,26 +262,27 @@ export class WaveSpawner extends Script {
       this.aliveCount = Math.max(0, this.aliveCount - 1);
       return;
     }
-    const prefab = unit.transporter
-      ? TRANSPORTER_ENEMY_PREFAB
-      : unit.compound
-        ? UNIK_PREFAB
-        : unit.ground
-          ? TRUCK_PREFAB
-          : BALLOON_PREFAB;
+    const prefab = unitPrefabPath(entry.id);
+    if (!prefab) {
+      console.warn(`[WaveSpawner] no prefab for unit ${entry.id} (${unit.name})`);
+      this.aliveCount = Math.max(0, this.aliveCount - 1);
+      return;
+    }
     void scene
       .instantiate(prefab, { parent: String(this.config.enemiesNode) })
       .then(node => {
         if (unit.ground) {
           node.position.set(SPAWN_X, BRIDGE.truckY, 0);
-          this.applyGroundUnit(node, entry, unit);
+          this.applyGroundStats(node, entry, unit);
           // The ground-assault alarm (original FN_addMob: warning_scream +
           // Joe's scream animation for every unit rolling onto the bridge).
           scene.audio.play(GROUND_ALARM_SOUND, { bus: 'sfx' });
         } else {
           node.position.set(SPAWN_X, toStageY(entry.y), 0);
-          if (!unit.compound) {
-            this.applyUnit(node, entry, unit);
+          if (unit.compound) {
+            this.applyCompoundStats(node, entry, unit);
+          } else {
+            this.applyAirStats(node, entry, unit);
           }
         }
       })
@@ -274,148 +292,43 @@ export class WaveSpawner extends Script {
       });
   }
 
-  /** Dress a typical-balloon prefab up as the mission's actual unit. */
-  private applyUnit(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
-    // Sprite: the prefab root IS the Sprite2D. Typical balloons come in
-    // several liveries (spriteVariants) so a wave doesn't look uniform.
-    const sprite = node as SpriteNode;
-    const variants = unit.spriteVariants;
-    const spritePath =
-      variants && variants.length > 0
-        ? variants[Math.floor(Math.random() * variants.length)]
-        : unit.sprite;
-    const texture = this.unitTextures.get(spritePath);
-    if (texture && sprite.setTexture) {
-      sprite.setTexture(texture);
-      sprite.updateSize?.(unit.width, unit.height);
-    }
+  // The unit's VISUAL composition is baked into its family prefab (authored
+  // per the decompiled init() — review on the dev unit-gallery scene). The
+  // spawner only pushes per-id numbers from the v15 data on top.
 
-    // Hitbox follows the display size (the collision service reads config live).
-    const hitbox = node.components.find(
-      c => (c as { type?: string }).type === 'core:Hitbox2D'
-    ) as { config?: Record<string, unknown> } | undefined;
-    if (hitbox?.config) {
-      hitbox.config.width = Math.max(10, unit.width - 6);
-      hitbox.config.height = Math.max(8, unit.height - 4);
-    }
-
-    // Hanging rig: the typical "S" carries a naval mine, bombers carry their
-    // bomb on the same mount (both shootable). Units without the rig also
-    // lose its hitboxes (link + mine are targets too).
-    const carries = unit.carriesMine === true || unit.bomber === true;
-    const mount = node.getChildByName('Weapon Mount');
-    const mine = node.getChildByName('Carried Mine');
-    if (mount) mount.visible = carries;
-    if (mine) mine.visible = carries;
-    for (const part of [mount, mine]) {
-      if (!part) continue;
-      for (const comp of part.components) {
-        if ((comp as { type?: string }).type === 'core:Hitbox2D') {
-          (comp as { config: Record<string, unknown> }).config.group = carries
-            ? 'enemy'
-            : 'disabled';
-        }
-      }
-    }
-
-    // Behavior stats (survival waves override the typical balloon's numbers).
+  /** Per-id stats for air units (survival overrides the transporter fodder). */
+  private applyAirStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
     const logic = node.components.find((c): c is EnemyBalloon => c instanceof EnemyBalloon);
-    if (logic) {
-      const survival = this.survivalStats;
-      logic.config.hp = survival && entry.id === 33 ? survival.hp : unit.hp;
-      logic.config.speed = survival && entry.id === 33 ? survival.speed : unit.speed;
-      logic.config.score = survival && entry.id === 33 ? survival.score : unit.score;
-      logic.config.castleDamage = unit.castleDamage;
-      logic.config.stopX = toStopX(entry.a);
-      logic.config.attackDamage = unit.attackDamage ?? 0;
-      logic.config.attackPeriod = unit.attackPeriod ?? 4;
-      logic.config.bomber = unit.bomber === true;
-      logic.config.gunType = unit.gunType ?? '';
-      // The burning wreck reuses the livery this balloon was dressed with.
-      logic.config.spritePath = spritePath;
-    }
-
-    this.applyGunRig(node, unit);
+    if (!logic) return;
+    const survival = this.survivalStats;
+    logic.config.hp = survival && entry.id === 33 ? survival.hp : unit.hp;
+    logic.config.speed = survival && entry.id === 33 ? survival.speed : unit.speed;
+    logic.config.score = survival && entry.id === 33 ? survival.score : unit.score;
+    logic.config.castleDamage = unit.castleDamage;
+    logic.config.stopX = toStopX(entry.a);
+    logic.config.attackDamage = unit.attackDamage ?? 0;
+    logic.config.attackPeriod = unit.attackPeriod ?? 4;
   }
 
-  /**
-   * Dress the (hidden) gun rig for gunship units. Typical (NZ/SUC) hang the
-   * TypGun on the gondola (the re-shown Weapon Mount, hitbox left disabled);
-   * heavy (Avalon/Lavalon) mount the BigGun toward the front of the hull with
-   * the gondola baked into the body art. Plain balloons keep the rig hidden.
-   */
-  private applyGunRig(node: NodeBase, unit: UnitDef): void {
-    const pivot = node.getChildByName('Gun Pivot');
-    if (!pivot) return;
-    if (!unit.gunType) {
-      pivot.visible = false;
-      return;
-    }
-    pivot.visible = true;
-    const barrel = pivot.getChildByName('Gun Barrel') as SpriteNode | null;
-    const flash = pivot.getChildByName('Muzzle Flash');
-    const w = unit.width;
-    const h = unit.height;
-    // Gun art points left already (muzzle on the left), so no mirror: the
-    // barrel extends leftward from the breech at the pivot origin, muzzle at
-    // x = -barrelWidth. The flash sits just inside that muzzle tip.
-    if (unit.gunType === 'typical') {
-      // Gondola = the re-shown Weapon Mount (hitbox stays 'disabled' from the
-      // carries block — it's decorative here, not the shootable mine link).
-      const mount = node.getChildByName('Weapon Mount');
-      if (mount) {
-        mount.visible = true;
-        mount.position.set(0, -(h / 2 + 2), 0);
-      }
-      pivot.position.set(0, -(h / 2 + 5), 0);
-      const tex = this.unitTextures.get(TYP_GUN_TEX);
-      if (barrel && tex && barrel.setTexture) {
-        barrel.setTexture(tex);
-        barrel.updateSize?.(23, 9);
-        barrel.scale.set(1, 1, 1);
-        barrel.position.set(-11.5, 0, 0);
-      }
-      flash?.position.set(-21, 0, 0);
-    } else {
-      // Heavy: BigGun toward the front (left) of the hull; no separate gondola.
-      const s = w >= 150 ? 1 : 0.75;
-      pivot.position.set(-w * 0.4, -h * 0.2, 0);
-      const tex = this.unitTextures.get(BIG_GUN_TEX);
-      if (barrel && tex && barrel.setTexture) {
-        barrel.setTexture(tex);
-        barrel.updateSize?.(55, 10);
-        barrel.scale.set(s, s, 1);
-        barrel.position.set(-(55 * s) / 2, 0, 0);
-      }
-      flash?.position.set(-(55 * s) + 4, 0, 0);
-    }
+  /** Per-id stats for compound units (unik/urik prefabs). */
+  private applyCompoundStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
+    const logic = node.components.find((c): c is CompoundBalloon => c instanceof CompoundBalloon);
+    if (!logic) return;
+    logic.config.bodyHp = unit.hp;
+    logic.config.speed = unit.speed;
+    logic.config.score = unit.score;
+    logic.config.stopX = toStopX(entry.a);
   }
 
-  /** Dress the truck prefab up as the mission's ground unit. */
-  private applyGroundUnit(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
-    const sprite = node as SpriteNode;
-    const texture = this.unitTextures.get(unit.sprite);
-    if (texture && sprite.setTexture) {
-      sprite.setTexture(texture);
-      sprite.updateSize?.(unit.width, unit.height);
-    }
-
-    const hitbox = node.components.find(
-      c => (c as { type?: string }).type === 'core:Hitbox2D'
-    ) as { config?: Record<string, unknown> } | undefined;
-    if (hitbox?.config) {
-      hitbox.config.width = Math.max(10, unit.width - 6);
-      hitbox.config.height = Math.max(8, unit.height - 4);
-    }
-
+  /** Per-id stats for ground vehicles. */
+  private applyGroundStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
     const logic = node.components.find((c): c is GroundVehicle => c instanceof GroundVehicle);
-    if (logic) {
-      logic.config.hp = unit.hp;
-      logic.config.speed = unit.speed;
-      logic.config.score = unit.score;
-      logic.config.stopX = toStopX(entry.a);
-      logic.config.attackDamage = unit.attackDamage ?? 0;
-      logic.config.attackPeriod = unit.attackPeriod ?? 5;
-    }
+    if (!logic) return;
+    logic.config.hp = unit.hp;
+    logic.config.speed = unit.speed;
+    logic.config.score = unit.score;
+    logic.config.stopX = toStopX(entry.a);
+    logic.config.attackDamage = unit.attackDamage ?? 0;
+    logic.config.attackPeriod = unit.attackPeriod ?? 5;
   }
 }

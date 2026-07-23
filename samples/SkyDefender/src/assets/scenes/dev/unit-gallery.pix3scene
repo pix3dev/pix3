@@ -1,0 +1,267 @@
+# Unit Gallery — DEV scene. Every enemy unit prefab laid out in a grid for
+# visual review in the editor (no play mode needed). Labels inside the prefabs
+# are editorOnly nodes: the runtime strips them from play clones and exports.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "DEV: all unit prefabs on one scene"
+root:
+  - id: gallery
+    type: Group2D
+    name: Unit Gallery
+    properties:
+      width: 1000
+      height: 1000
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: gal-lucky
+        instance: res://src/assets/prefabs/units/lucky.pix3scene
+        name: "Lucky"
+        properties:
+          transform:
+            position: [-360, 420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-lucky2
+        instance: res://src/assets/prefabs/units/lucky2.pix3scene
+        name: "Lucky II"
+        properties:
+          transform:
+            position: [-120, 420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-slevin
+        instance: res://src/assets/prefabs/units/slevin.pix3scene
+        name: "Slevin"
+        properties:
+          transform:
+            position: [120, 420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-slevin-fire
+        instance: res://src/assets/prefabs/units/slevin-fire.pix3scene
+        name: "Slevin Fire"
+        properties:
+          transform:
+            position: [360, 420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-avalon1
+        instance: res://src/assets/prefabs/units/avalon1.pix3scene
+        name: "Avalon 1"
+        properties:
+          transform:
+            position: [-360, 280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-avalon2
+        instance: res://src/assets/prefabs/units/avalon2.pix3scene
+        name: "Avalon 2"
+        properties:
+          transform:
+            position: [-120, 280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-lavalon1
+        instance: res://src/assets/prefabs/units/lavalon1.pix3scene
+        name: "Lavalon 1"
+        properties:
+          transform:
+            position: [120, 280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-lavalon2
+        instance: res://src/assets/prefabs/units/lavalon2.pix3scene
+        name: "Lavalon 2"
+        properties:
+          transform:
+            position: [360, 280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-nz
+        instance: res://src/assets/prefabs/units/nz.pix3scene
+        name: "NZ Raider"
+        properties:
+          transform:
+            position: [-360, 140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-suc
+        instance: res://src/assets/prefabs/units/suc.pix3scene
+        name: "SU Cavalry"
+        properties:
+          transform:
+            position: [-120, 140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-fatty
+        instance: res://src/assets/prefabs/units/fatty.pix3scene
+        name: "Fatty"
+        properties:
+          transform:
+            position: [120, 140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-fish
+        instance: res://src/assets/prefabs/units/fish.pix3scene
+        name: "Fish"
+        properties:
+          transform:
+            position: [360, 140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-splash
+        instance: res://src/assets/prefabs/units/splash.pix3scene
+        name: "Splash"
+        properties:
+          transform:
+            position: [-360, 0]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-nut
+        instance: res://src/assets/prefabs/units/nut.pix3scene
+        name: "Nut"
+        properties:
+          transform:
+            position: [-120, 0]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-transporter
+        instance: res://src/assets/prefabs/transporter-enemy.pix3scene
+        name: "Transporter (S)"
+        properties:
+          transform:
+            position: [120, 0]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-unik
+        instance: res://src/assets/prefabs/unik.pix3scene
+        name: "Unik"
+        properties:
+          transform:
+            position: [360, 0]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-urik
+        instance: res://src/assets/prefabs/urik.pix3scene
+        name: "Urik"
+        properties:
+          transform:
+            position: [-360, -140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-atabus
+        instance: res://src/assets/prefabs/units/atabus.pix3scene
+        name: "Atabus"
+        properties:
+          transform:
+            position: [-120, -140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-attaban
+        instance: res://src/assets/prefabs/units/attaban.pix3scene
+        name: "Attaban"
+        properties:
+          transform:
+            position: [120, -140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-baka
+        instance: res://src/assets/prefabs/units/baka.pix3scene
+        name: "Baka"
+        properties:
+          transform:
+            position: [360, -140]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-baron
+        instance: res://src/assets/prefabs/units/baron.pix3scene
+        name: "Baron"
+        properties:
+          transform:
+            position: [-360, -280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-bb
+        instance: res://src/assets/prefabs/units/bb.pix3scene
+        name: "BB"
+        properties:
+          transform:
+            position: [-120, -280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-bus
+        instance: res://src/assets/prefabs/units/bus.pix3scene
+        name: "Bus"
+        properties:
+          transform:
+            position: [120, -280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-dream
+        instance: res://src/assets/prefabs/units/dream.pix3scene
+        name: "Dream"
+        properties:
+          transform:
+            position: [360, -280]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-dreamer
+        instance: res://src/assets/prefabs/units/dreamer.pix3scene
+        name: "Dreamer"
+        properties:
+          transform:
+            position: [-360, -420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-fatima
+        instance: res://src/assets/prefabs/units/fatima.pix3scene
+        name: "Fatima"
+        properties:
+          transform:
+            position: [-120, -420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-medic
+        instance: res://src/assets/prefabs/units/medic.pix3scene
+        name: "Medic"
+        properties:
+          transform:
+            position: [120, -420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-rracer
+        instance: res://src/assets/prefabs/units/rracer.pix3scene
+        name: "R-Racer"
+        properties:
+          transform:
+            position: [360, -420]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-garbag
+        instance: res://src/assets/prefabs/units/garbag.pix3scene
+        name: "Garbag"
+        properties:
+          transform:
+            position: [-360, -560]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-siege
+        instance: res://src/assets/prefabs/units/siege.pix3scene
+        name: "Siege"
+        properties:
+          transform:
+            position: [-120, -560]
+            scale: [1, 1]
+            rotation: 0
+      - id: gal-g-warchild
+        instance: res://src/assets/prefabs/units/warchild.pix3scene
+        name: "Warchild"
+        properties:
+          transform:
+            position: [120, -560]
+            scale: [1, 1]
+            rotation: 0

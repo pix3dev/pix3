@@ -742,6 +742,20 @@ export class NodeBase extends Object3D {
             n.properties.locked = v;
           },
         },
+        {
+          name: 'editorOnly',
+          type: 'boolean',
+          ui: {
+            label: 'Editor Only',
+            description:
+              'Annotation node (label, guide): visible while authoring, stripped from play mode and exported games',
+            group: 'Editor',
+          },
+          getValue: (node: unknown) => (node as NodeBase).properties.editorOnly === true,
+          setValue: (node: unknown, value: unknown) => {
+            (node as NodeBase).properties.editorOnly = !!value;
+          },
+        },
       ],
       groups: {
         Base: {

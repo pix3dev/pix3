@@ -55,6 +55,9 @@ export class CompoundBalloon extends Script {
       gondolaScore: 8,
       // Absolute castle HP a breakthrough costs (M4 scale: floors are 700..1600).
       castleDamage: 90,
+      // Wreck liveries (set per unik/urik by WaveSpawner.applyCompoundUnit).
+      wreckBodyTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png',
+      wreckGondolaTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png',
     };
   }
 
@@ -187,7 +190,7 @@ export class CompoundBalloon extends Script {
     this.scene?.audio.play(BODY_DEATH_SOUND, { bus: 'sfx', volumeVariation: 0.1 });
     this.spawnExplosion(world.x, world.y, 1.35);
     this.spawnWreck(
-      'res://src/assets/textures/enemy/air/unik/unik_body.png',
+      String(this.config.wreckBodyTex),
       world.x, world.y, -Number(this.config.speed) * 0.6, -10, 1.2
     );
     this.emitToGameRoot('unit-killed', Number(this.config.score));
@@ -207,7 +210,7 @@ export class CompoundBalloon extends Script {
       gondola.node.visible = false;
       this.disableHitbox(gondola.node);
       this.spawnWreck(
-        'res://src/assets/textures/enemy/air/unik/unik_nd.png',
+        String(this.config.wreckGondolaTex),
         world.x, world.y, -14, 0, 0.8
       );
     }

@@ -161,8 +161,16 @@ export class EnemyBalloon extends Script {
       this.onMineDamaged(Number(amount) || 0);
     });
 
-    // Gunship rig (WaveSpawner shows + positions it for NZ/SUC/Avalon/Lavalon).
-    this.gunPivot = (this.node?.getChildByName('Gun Pivot') as NodeBase | undefined) ?? null;
+    // Gunship rig: the firing pivot is the first visible mount slot the spawner
+    // enabled (Nose Gun for Avalon1, else Mount A/B gun-baskets). Recoil + the
+    // muzzle flash play on that mount.
+    for (const slot of ['Nose Gun', 'Mount A', 'Mount B']) {
+      const mount = this.node?.getChildByName(slot) as NodeBase | undefined;
+      if (mount?.visible) {
+        this.gunPivot = mount;
+        break;
+      }
+    }
     this.gunFlash =
       (this.gunPivot?.getChildByName('Muzzle Flash') as (NodeBase & { opacity?: number }) | undefined) ??
       null;

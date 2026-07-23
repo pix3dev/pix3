@@ -245,19 +245,14 @@ export interface UnitDef {
   attackDamage?: number;
   attackPeriod?: number;
   /**
-   * Gunship type — draws a suspended gun that recoils and fires a visible shell
-   * (see balloon.pix3scene gun rig + EnemyBalloon.fireGun). `heavy` = BigGun
-   * (Avalon/Lavalon), `typical` = TypGunMob on a gondola (NZ/SUC).
+   * Gunship type (informational — the gun rig itself is baked into the family
+   * prefab; EnemyBalloon reads its own baked config.gunType for recoil/shells).
    */
   gunType?: 'typical' | 'heavy';
   /** Bombers (Lucky/Slevin): carry ONE bomb, drop at `a`, then climb away. */
   bomber?: boolean;
   /** tpb 3 fire bomb (Stone + Burn1 flame) vs plain mine/stone. */
   fireBomb?: boolean;
-  /** Typical aerostats carry a naval mine on a rig (dropped when shot down). */
-  carriesMine?: boolean;
-  /** Alternate liveries — the spawner picks one at random per spawn. */
-  spriteVariants?: string[];
   /** Ground vehicle: drives the bridge deck instead of flying. */
   ground?: boolean;
   /** Enemy transporter airship (S_SS): animated brown body + static red overlay. */
@@ -408,14 +403,11 @@ function buildUnit(id: number): UnitDef {
     transporter: id === 33 ? true : undefined,
     bomber: id >= 1 && id <= 4 ? true : undefined,
     fireBomb: id === 4 ? true : undefined,
-    // v15 fodder (S_SS transporter airships) carry no bomb — only Lucky/Slevin do.
-    carriesMine: undefined,
     attackDamage: v.dmg,
     attackPeriod: ground ? 5 : 1.7,
-    // Gunships: 5–12 Avalon + 13–20 Lavalon fire the heavy BigGun; 21–29
-    // NZ/SUC fire the typical gun on a gondola. Others have no gun rig.
-    gunType: id >= 5 && id <= 20 ? 'heavy' : id >= 21 && id <= 29 ? 'typical' : undefined,
-    spriteVariants: a?.variants,
+    // Informational (rigs are baked in prefabs): Avalon1 = heavy nose gun,
+    // Avalon2/Lavalon/NZ/SUC = typical basket gun.
+    gunType: id >= 5 && id <= 8 ? 'heavy' : id >= 9 && id <= 29 ? 'typical' : undefined,
     unsupported: a ? undefined : true,
   };
 }
@@ -424,6 +416,12 @@ function buildUnit(id: number): UnitDef {
 export const UNITS: Record<number, UnitDef> = Object.fromEntries(
   Array.from({ length: 84 }, (_, i) => i + 1).map(id => [id, buildUnit(id)])
 );
+
+// Air-unit COMPOSITION (gasbag + suspended baskets/guns/bombs) is baked into
+// the per-family prefabs under src/assets/prefabs/units/ — authored from the
+// decompiled com.enemy.*.init() offsets. Ground truth + table:
+// design/original-data/release-v15/air-composition.md. Review visually on the
+// dev scene src/assets/scenes/dev/unit-gallery.pix3scene.
 
 // ── Missions (campaign = V15_CAMPAIGN, 30 levels verbatim) ──────────────
 

@@ -1,0 +1,138 @@
+# Urik — compound aerostat (ids 43-48): red-heart gasbags + ropes + torpedo
+# carriage. Same three-part destruction as Unik (CompoundBalloon), but the
+# carriage mounts a LIGHT TORPEDO (decompile: Urik_1 = 3× B_urik + B_LTorpedo,
+# no TypGunMob). See design/original-data/release-v15/air-composition.md.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: Compound enemy aerostat Urik (prefab)
+root:
+  - id: urik
+    type: Group2D
+    name: Urik
+    properties:
+      width: 80
+      height: 92
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: urik-logic
+        type: user:CompoundBalloon
+        enabled: true
+        config:
+          bodyHp: 100
+          ropesHp: 30
+          gondolaHp: 60
+          speed: 40
+          stopX: 0
+          score: 20
+          gondolaScore: 8
+          castleDamage: 0
+          wreckBodyTex: 'res://src/assets/textures/enemy/air/urik/urik_body.png'
+          wreckGondolaTex: 'res://src/assets/textures/enemy/air/urik/urik_body.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Urik · L17,18,19,20,23,24,27,29"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 56]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      # Ropes connecting the gasbags to the carriage — drawn behind everything.
+      - id: urik-ropes
+        type: Sprite2D
+        name: Unik Ropes
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/urik/urik_ropes.png' }
+          width: 52
+          height: 33
+          transform:
+            position: [0, -2]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: urik-ropes-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 36
+              height: 24
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      # Carrier gasbags — the two red-heart balloons on top.
+      - id: urik-body
+        type: Sprite2D
+        name: Unik Body
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/urik/urik_s.png' }
+          width: 54
+          height: 37
+          transform:
+            position: [0, 20]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: urik-body-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 50
+              height: 32
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      # Torpedo carriage hanging below.
+      - id: urik-gondola
+        type: Sprite2D
+        name: Unik Gondola
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/urik/urik_body.png' }
+          width: 72
+          height: 24
+          transform:
+            position: [0, -22]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: urik-gondola-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 66
+              height: 20
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children:
+          # Light torpedo slung under the carriage (fired as a rocket — engine
+          # ignites after free-fall, leaves a trail; behavior increment).
+          - id: urik-torpedo
+            type: Sprite2D
+            name: Torpedo
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/ltorpedo.png' }
+              width: 48
+              height: 8
+              transform:
+                position: [-4, -12]
+                scale: [1, 1]
+                rotation: 0
+            children: []

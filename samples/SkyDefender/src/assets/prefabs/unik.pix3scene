@@ -1,11 +1,18 @@
-# Unik — compound aerostat prefab (GDD "Multi Unit", unit id 39/40): carrier
-# balloon + ropes + armed gondola. Every part carries its own core:Hitbox2D so
-# the player can shoot the unit apart (see CompoundBalloon for the scenarios).
-# Draw order: ropes behind, then body, gondola in front.
+# Unik/Urik — compound aerostat prefab (GDD "Multi Unit", unit ids 35-48).
+# Composition ported from the decompiled `com.enemy.Unik_1.init()`:
+#   B_unik_s (gasbags, TOP) + B_unik_ropes (mid) + B_unik_body (gun carriage,
+#   BOTTOM) + a suspended TypGun. Each shootable part carries its own
+#   core:Hitbox2D so the player can take the unit apart (see CompoundBalloon):
+#   - carrier gasbags hit → the whole hull detonates and falls as a wreck;
+#   - ropes hit          → they snap, the gasbags sail up, the carriage drops;
+#   - carriage hit       → it blows off, the freed gasbags escape.
+# WaveSpawner.applyCompoundUnit re-skins the three parts for unik (35-42) vs
+# urik (43-48) liveries and sets per-unit stats.
+# Draw order (tree order = paint order): ropes behind → gasbags → carriage+gun.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
-  description: Compound enemy balloon Unik (prefab)
+  description: Compound enemy aerostat Unik/Urik (prefab)
 root:
   - id: unik
     type: Group2D
@@ -30,7 +37,24 @@ root:
           score: 20
           gondolaScore: 8
           castleDamage: 90
+          wreckBodyTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png'
+          wreckGondolaTex: 'res://src/assets/textures/enemy/air/unik/unik_body.png'
     children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Unik · L1,6,7,8,9,10,12,13,14,17,19,23,24,26,28"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 56]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      # Ropes connecting the gasbags to the carriage — drawn behind everything.
       - id: unik-ropes
         type: Sprite2D
         name: Unik Ropes
@@ -49,21 +73,23 @@ root:
             config:
               shape: rect
               width: 36
-              height: 26
+              height: 24
               offsetX: 0
               offsetY: 0
               group: enemy
               debugDraw: false
         children: []
+      # Carrier gasbags — the two balloons on top. Shooting these detonates the
+      # whole unit (mapped to the CompoundBalloon 'body'/carrier part).
       - id: unik-body
         type: Sprite2D
         name: Unik Body
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_body.png' }
-          width: 61
-          height: 33
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_s.png' }
+          width: 54
+          height: 37
           transform:
-            position: [0, 27]
+            position: [0, 20]
             scale: [1, 1]
             rotation: 0
         components:
@@ -72,22 +98,24 @@ root:
             enabled: true
             config:
               shape: rect
-              width: 56
-              height: 28
+              width: 50
+              height: 32
               offsetX: 0
               offsetY: 0
               group: enemy
               debugDraw: false
         children: []
+      # Armed carriage hanging below (gun beam + suspended TypGun). Shooting it
+      # blows it off and the gasbags escape (CompoundBalloon 'gondola' part).
       - id: unik-gondola
         type: Sprite2D
         name: Unik Gondola
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_nd.png' }
-          width: 56
-          height: 23
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/unik/unik_body.png' }
+          width: 61
+          height: 33
           transform:
-            position: [0, -28]
+            position: [0, -24]
             scale: [1, 1]
             rotation: 0
         components:
@@ -96,10 +124,38 @@ root:
             enabled: true
             config:
               shape: rect
-              width: 50
-              height: 18
+              width: 56
+              height: 22
               offsetX: 0
               offsetY: 0
               group: enemy
               debugDraw: false
-        children: []
+        children:
+          # Suspended gun (B_TypSnp) — points left; recoils and fires a visible
+          # shell in play (wired by CompoundBalloon.fireGun). No own hitbox: it
+          # is covered by the carriage hitbox, as in the original.
+          - id: unik-gun
+            type: Sprite2D
+            name: Unik Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/typical_gun.png' }
+              width: 23
+              height: 9
+              transform:
+                position: [-22, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: unik-gun-flash
+                type: Sprite2D
+                name: Muzzle Flash
+                properties:
+                  texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+                  width: 18
+                  height: 18
+                  opacity: 0
+                  transform:
+                    position: [-14, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []

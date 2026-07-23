@@ -47,6 +47,20 @@ root:
           mineHp: 25
           spritePath: 'res://src/assets/textures/enemy/air/transporter/over.png'
     children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Transporter (S) · L3,5,11"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 32]
+            scale: [1, 1]
+            rotation: 0
+        children: []
       # Brown body with the spinning propeller (numeric frames are the animation).
       - id: transporter-body
         type: Sprite2D

@@ -305,6 +305,10 @@ export class SceneRunner {
       throw new Error('[SceneRunner] instantiatePrefab: no parent node available.');
     }
     target.adoptChild(node);
+    // Runtime-spawned prefabs shed their authoring annotations too.
+    this.stripEditorOnly(
+      node.children.filter((child): child is NodeBase => child instanceof NodeBase)
+    );
     this.applyInitialVisibility([node]);
     return node;
   }
@@ -356,6 +360,7 @@ export class SceneRunner {
       this.applyLivePropertyUpdate(nodeId, propertyPath, value)
     );
 
+    this.runtimeGraph.rootNodes = this.stripEditorOnly(this.runtimeGraph.rootNodes);
     this.applyInitialVisibility(this.runtimeGraph.rootNodes);
 
     // Attach InputService to renderer
@@ -1573,6 +1578,36 @@ export class SceneRunner {
         this.updateBillboardSprites(node.children, camera);
       }
     }
+  }
+
+  /**
+   * Remove editor-only annotation nodes (`editorOnly: true` — labels, guides,
+   * design notes) from a play-mode graph. They render while authoring in the
+   * editor viewport but never enter a running scene — and since exported games
+   * run scenes through this same runner, they never ship either.
+   */
+  private stripEditorOnly(nodes: NodeBase[]): NodeBase[] {
+    const kept: NodeBase[] = [];
+    for (const node of nodes) {
+      if (this.isEditorOnly(node)) {
+        node.removeFromParent();
+        node.dispose();
+        continue;
+      }
+      const childNodes = node.children.filter(
+        (child): child is NodeBase => child instanceof NodeBase
+      );
+      if (childNodes.length > 0) {
+        this.stripEditorOnly(childNodes);
+      }
+      kept.push(node);
+    }
+    return kept;
+  }
+
+  private isEditorOnly(node: NodeBase): boolean {
+    const properties = node.properties as Record<string, unknown> | undefined;
+    return this.toBooleanLike(properties?.editorOnly) === true;
   }
 
   private applyInitialVisibility(nodes: NodeBase[]): void {

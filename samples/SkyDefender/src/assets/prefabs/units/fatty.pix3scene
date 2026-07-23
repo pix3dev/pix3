@@ -1,0 +1,60 @@
+# Fatty — enemy air unit (support unit, unarmed). Composition transcribed from the
+# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Fatty (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: Fatty
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/support/fatty.png' }
+      width: 66
+      height: 136
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 60
+          height: 132
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 50
+          score: 8
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: false
+          gunType: ''
+          spritePath: 'res://src/assets/textures/enemy/air/support/fatty.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Fatty · L18,25"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 84]
+            scale: [1, 1]
+            rotation: 0
+        children: []

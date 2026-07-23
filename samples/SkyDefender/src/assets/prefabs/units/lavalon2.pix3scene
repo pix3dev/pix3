@@ -1,0 +1,193 @@
+# Lavalon 2 — enemy air unit (little gunship, armed basket + slung basket). Composition transcribed from the
+# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Lavalon 2 (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: Lavalon 2
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/lavalon2/lavalon2.png' }
+      width: 107
+      height: 30
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 101
+          height: 26
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 50
+          score: 8
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: false
+          gunType: 'typical'
+          spritePath: 'res://src/assets/textures/enemy/air/lavalon2/lavalon2.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Lavalon 2 · L1,2,8,13,14,17"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 31]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: gondola-overlay
+        type: Sprite2D
+        name: Gondola
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/gondola/lavalon_gondola.png' }
+          width: 107
+          height: 30
+          visible: false
+          initiallyVisible: false
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: mount-a
+        type: Group2D
+        name: Mount A
+        properties:
+          width: 24
+          height: 16
+          transform:
+            position: [-16, -22]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: mount-a-rope
+            type: Sprite2D
+            name: Rope
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/rope.png' }
+              width: 3
+              height: 18
+              transform:
+                position: [0, 9]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mount-a-basket
+            type: Sprite2D
+            name: Basket
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/gondola/korzina.png' }
+              width: 20
+              height: 13
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: mount-a-hitbox
+                type: core:Hitbox2D
+                enabled: true
+                config:
+                  shape: rect
+                  width: 20
+                  height: 14
+                  offsetX: 0
+                  offsetY: 0
+                  group: enemy
+                  debugDraw: false
+            children: []
+          - id: mount-a-gun
+            type: Sprite2D
+            name: Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/typical_gun.png' }
+              width: 23
+              height: 9
+              transform:
+                position: [-9, 4]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mount-a-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 16
+              height: 16
+              opacity: 0
+              transform:
+                position: [-20, 4]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: mount-b
+        type: Group2D
+        name: Mount B
+        properties:
+          width: 24
+          height: 16
+          transform:
+            position: [12, -22]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: mount-b-rope
+            type: Sprite2D
+            name: Rope
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/rope.png' }
+              width: 3
+              height: 18
+              transform:
+                position: [0, 9]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mount-b-basket
+            type: Sprite2D
+            name: Basket
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/gondola/korzina.png' }
+              width: 20
+              height: 13
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: mount-b-hitbox
+                type: core:Hitbox2D
+                enabled: true
+                config:
+                  shape: rect
+                  width: 20
+                  height: 14
+                  offsetX: 0
+                  offsetY: 0
+                  group: enemy
+                  debugDraw: false
+            children: []

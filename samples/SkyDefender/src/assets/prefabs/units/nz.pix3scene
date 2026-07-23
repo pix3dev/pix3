@@ -1,0 +1,132 @@
+# NZ Raider — enemy air unit (rank-and-file zeppelin, gun-basket below). Composition transcribed from the
+# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "NZ Raider (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: NZ Raider
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/Nazi_typical.png' }
+      width: 66
+      height: 38
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 60
+          height: 34
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 50
+          score: 8
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: false
+          gunType: 'typical'
+          spritePath: 'res://src/assets/textures/enemy/air/typical_bloon/Nazi_typical.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "NZ Raider · L1,6,7,8,9,12,14,17,19,24,25,26"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 35]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: mount-a
+        type: Group2D
+        name: Mount A
+        properties:
+          width: 24
+          height: 16
+          transform:
+            position: [0, -27]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: mount-a-rope
+            type: Sprite2D
+            name: Rope
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/rope.png' }
+              width: 3
+              height: 18
+              transform:
+                position: [0, 9]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mount-a-basket
+            type: Sprite2D
+            name: Basket
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/gondola/korzina.png' }
+              width: 20
+              height: 13
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: mount-a-hitbox
+                type: core:Hitbox2D
+                enabled: true
+                config:
+                  shape: rect
+                  width: 20
+                  height: 14
+                  offsetX: 0
+                  offsetY: 0
+                  group: enemy
+                  debugDraw: false
+            children: []
+          - id: mount-a-gun
+            type: Sprite2D
+            name: Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/typical_gun.png' }
+              width: 23
+              height: 9
+              transform:
+                position: [-9, 4]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: mount-a-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 16
+              height: 16
+              opacity: 0
+              transform:
+                position: [-20, 4]
+                scale: [1, 1]
+                rotation: 0
+            children: []

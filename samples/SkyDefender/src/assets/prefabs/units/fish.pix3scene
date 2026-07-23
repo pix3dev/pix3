@@ -1,0 +1,60 @@
+# Fish — enemy air unit (support unit, unarmed). Composition transcribed from the
+# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Fish (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: Fish
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/support/fish.png' }
+      width: 106
+      height: 31
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 100
+          height: 27
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 50
+          score: 8
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: false
+          gunType: ''
+          spritePath: 'res://src/assets/textures/enemy/air/support/fish.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Fish · L4,14"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 31]
+            scale: [1, 1]
+            rotation: 0
+        children: []

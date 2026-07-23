@@ -1,0 +1,108 @@
+# Lucky II — enemy air unit (bomber, stone bomb (tpb 2)). Composition transcribed from the
+# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Lucky II (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: Lucky II
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/bomber_lucky/slpd.png' }
+      width: 40
+      height: 45
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 34
+          height: 41
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 100
+          speed: 50
+          score: 8
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: true
+          gunType: ''
+          spritePath: 'res://src/assets/textures/enemy/air/bomber_lucky/slpd.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Lucky II · Surv"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 38]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: weapon-mount
+        type: Sprite2D
+        name: Weapon Mount
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/typical_weapon_support.png' }
+          width: 20
+          height: 13
+          transform:
+            position: [0, -26]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: mount-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 18
+              height: 12
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: carried-mine
+        type: Sprite2D
+        name: Carried Mine
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/stone.png' }
+          width: 13
+          height: 13
+          transform:
+            position: [0, -39]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: mine-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 13
+              height: 13
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
