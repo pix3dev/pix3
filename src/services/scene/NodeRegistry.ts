@@ -23,6 +23,7 @@ import { CreateLabel2DCommand } from '@/features/scene/CreateLabel2DCommand';
 import { CreateColorRect2DCommand } from '@/features/scene/CreateColorRect2DCommand';
 import { CreateTiledSprite2DCommand } from '@/features/scene/CreateTiledSprite2DCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
+import { CreateSpineSkeleton2DCommand } from '@/features/scene/CreateSpineSkeleton2DCommand';
 import { CreateAnimatedSprite3DCommand } from '@/features/scene/CreateAnimatedSprite3DCommand';
 import { CreateParticles3DCommand } from '@/features/scene/CreateParticles3DCommand';
 import { CreatePostProcessCommand } from '@/features/scene/CreatePostProcessCommand';
@@ -119,6 +120,17 @@ export class NodeRegistry {
       icon: 'image',
       keywords: ['create', 'animated', 'sprite', '2d', 'image', 'texture'],
       order: 2.1,
+    });
+    this.registerNodeType({
+      id: 'spineskeleton2d',
+      displayName: 'SpineSkeleton2D',
+      description: 'Spine skeletal animation (.json/.skel + .atlas)',
+      category: '2D',
+      commandClass: CreateSpineSkeleton2DCommand,
+      color: '#96cbf6ff',
+      icon: 'activity',
+      keywords: ['create', 'spine', 'skeleton', 'bones', 'animation', '2d', 'rig'],
+      order: 2.15,
     });
     this.registerNodeType({
       id: 'colorrect2d',

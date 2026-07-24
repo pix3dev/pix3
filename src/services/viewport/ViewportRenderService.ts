@@ -36,6 +36,7 @@ import { Group2D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { ColorRect2D } from '@pix3/runtime';
+import { SpineSkeleton2D } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
 import { DirectionalLightNode } from '@pix3/runtime';
@@ -258,6 +259,7 @@ export class ViewportRendererService {
     findNodeById: (nodeId, nodes) => this.findNodeById(nodeId, nodes),
     get2DVisualRoot: nodeId => this.get2DVisualRoot(nodeId),
     getAssetLoader: () => this.assetLoader,
+    advanceSpinePreview: (nodeId, dt) => this.proxyRegistry.advanceSpinePreview(nodeId, dt),
     requestRender: () => this.requestRender(),
   });
   // Owns every 2D node type's editor "proxy visual" (the separate THREE meshes
@@ -269,6 +271,7 @@ export class ViewportRendererService {
   private readonly proxyRegistry = new Viewport2DProxyRegistry({
     readBlob: path => this.resourceManager.readBlob(path),
     readText: path => this.resourceManager.readText(path),
+    getAssetLoader: () => this.assetLoader,
     requestRender: () => this.requestRender(),
     installProxyEffects: (node, material) => this.installProxyEffects(node, material),
     disposeObject3D: root => this.disposeObject3D(root),
@@ -1895,6 +1898,7 @@ export class ViewportRendererService {
     }
 
     this.previewTicker.tickParticles(delta);
+    this.previewTicker.tickSpine(delta);
     this.previewTicker.tickComponents(delta);
 
     // Update controls once before rendering if they exist
@@ -2440,6 +2444,11 @@ export class ViewportRendererService {
           if (visualRoot) {
             this.proxyRegistry.syncTiledSprite2DVisual(node, visualRoot);
           }
+        } else if (node instanceof SpineSkeleton2D) {
+          const visualRoot = this.proxyRegistry.spineSkeleton2DVisuals.get(node.nodeId);
+          if (visualRoot) {
+            this.proxyRegistry.syncSpineSkeleton2DVisual(node, visualRoot);
+          }
         } else if (node instanceof Sprite2D) {
           const visualRoot = this.proxyRegistry.sprite2DVisuals.get(node.nodeId);
           if (visualRoot) {
@@ -2823,6 +2832,11 @@ export class ViewportRendererService {
       if (visualRoot) {
         this.proxyRegistry.syncTiledSprite2DVisual(node, visualRoot);
       }
+    } else if (node instanceof SpineSkeleton2D) {
+      const visualRoot = this.proxyRegistry.spineSkeleton2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        this.proxyRegistry.syncSpineSkeleton2DVisual(node, visualRoot);
+      }
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.proxyRegistry.sprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
@@ -2969,6 +2983,11 @@ export class ViewportRendererService {
       }
     } else if (node instanceof TiledSprite2D) {
       const visualRoot = this.proxyRegistry.tiledSprite2DVisuals.get(node.nodeId);
+      if (visualRoot) {
+        visualRoot.visible = node.visible;
+      }
+    } else if (node instanceof SpineSkeleton2D) {
+      const visualRoot = this.proxyRegistry.spineSkeleton2DVisuals.get(node.nodeId);
       if (visualRoot) {
         visualRoot.visible = node.visible;
       }
@@ -3301,6 +3320,15 @@ export class ViewportRendererService {
         this.disposeObject3D(visual);
       }
       this.proxyRegistry.tiledSprite2DVisuals.clear();
+
+      for (const visual of this.proxyRegistry.spineSkeleton2DVisuals.values()) {
+        if (visual.parent) {
+          visual.parent.remove(visual);
+        }
+        this.proxyRegistry.disposeSpineSkeleton2DVisual(visual);
+        this.disposeObject3D(visual);
+      }
+      this.proxyRegistry.spineSkeleton2DVisuals.clear();
       this.contentSync3D.clearTexturePaths();
 
       for (const visual of this.proxyRegistry.uiControl2DVisuals.values()) {
@@ -3430,6 +3458,9 @@ export class ViewportRendererService {
     prune(this.proxyRegistry.sprite2DVisuals);
     prune(this.proxyRegistry.colorRect2DVisuals);
     prune(this.proxyRegistry.tiledSprite2DVisuals);
+    prune(this.proxyRegistry.spineSkeleton2DVisuals, visual =>
+      this.proxyRegistry.disposeSpineSkeleton2DVisual(visual)
+    );
     prune(this.proxyRegistry.uiControl2DVisuals);
 
     // Drop animation mixers for removed MeshInstance nodes.
@@ -3594,6 +3625,14 @@ export class ViewportRendererService {
       this.proxyRegistry.tiledSprite2DVisuals.set(node.nodeId, visualRoot);
       parent.add(visualRoot);
       return visualRoot;
+    } else if (node instanceof SpineSkeleton2D) {
+      // The visual's asset load only checks the map after an await, i.e. after
+      // this synchronous block has registered the root — so its liveness guard
+      // sees the live proxy.
+      const visualRoot = this.proxyRegistry.createSpineSkeleton2DVisual(node);
+      this.proxyRegistry.spineSkeleton2DVisuals.set(node.nodeId, visualRoot);
+      parent.add(visualRoot);
+      return visualRoot;
     } else if (node instanceof UIControl2D) {
       const visualRoot = this.proxyRegistry.createUIControl2DVisual(node);
       this.proxyRegistry.uiControl2DVisuals.set(node.nodeId, visualRoot);
@@ -3616,6 +3655,7 @@ export class ViewportRendererService {
       this.proxyRegistry.sprite2DVisuals.get(nodeId) ??
       this.proxyRegistry.colorRect2DVisuals.get(nodeId) ??
       this.proxyRegistry.tiledSprite2DVisuals.get(nodeId) ??
+      this.proxyRegistry.spineSkeleton2DVisuals.get(nodeId) ??
       this.proxyRegistry.uiControl2DVisuals.get(nodeId)
     );
   }
@@ -3720,6 +3760,21 @@ export class ViewportRendererService {
         new THREE.Vector3(halfWidth, -halfHeight, 0),
         new THREE.Vector3(halfWidth, halfHeight, 0),
         new THREE.Vector3(-halfWidth, halfHeight, 0),
+      ];
+    } else if (node instanceof SpineSkeleton2D) {
+      // Setup-pose AABB (skeleton-local, NOT centered on the origin) — stable
+      // across frames, unlike the live pose bounds, so the selection frame does
+      // not jitter while an animation plays. Falls back to the placeholder box.
+      const bounds = node.getSetupBounds();
+      const width = bounds?.width ?? 100;
+      const height = bounds?.height ?? 100;
+      const minX = bounds?.x ?? -width / 2;
+      const minY = bounds?.y ?? -height / 2;
+      corners = [
+        new THREE.Vector3(minX, minY, 0),
+        new THREE.Vector3(minX + width, minY, 0),
+        new THREE.Vector3(minX + width, minY + height, 0),
+        new THREE.Vector3(minX, minY + height, 0),
       ];
     } else {
       // Determine node size for other node types (center-origin)
@@ -4413,6 +4468,12 @@ export class ViewportRendererService {
       this.disposeObject3D(visual);
     }
     this.proxyRegistry.tiledSprite2DVisuals.clear();
+
+    for (const visual of this.proxyRegistry.spineSkeleton2DVisuals.values()) {
+      this.proxyRegistry.disposeSpineSkeleton2DVisual(visual);
+      this.disposeObject3D(visual);
+    }
+    this.proxyRegistry.spineSkeleton2DVisuals.clear();
     this.contentSync3D.clearTexturePaths();
 
     for (const visual of this.proxyRegistry.uiControl2DVisuals.values()) {

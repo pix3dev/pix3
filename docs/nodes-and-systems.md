@@ -61,6 +61,7 @@ tables: [node-types-reference.md](node-types-reference.md).
 
 **2D content & UI** (orthographic overlay pass; draw order = tree order)
 - `Sprite2D`, `AnimatedSprite2D`, `TiledSprite2D`, `ColorRect2D` — images / frames / 9-slice-ish tiling / solid rects.
+- `SpineSkeleton2D` — a Spine skeleton (`.json`/`.skel` + `.atlas`). Skeletal rigs, mesh deformation and animation mixing, i.e. what a flipbook cannot do; see the recipe below.
 - UI controls: `Button2D`, `Label2D`, `Slider2D`, `Joystick2D`, `Checkbox2D`, `Bar2D`, `ScrollContainer2D`, `InventorySlot2D`.
   `Label2D` is multiline: a fixed `width` word-wraps, `labelAlign`/`labelVAlign` align inside the box, and `typewriterSpeed` + `setText()`/`skipTypewriter()`/`'typewriter-complete'` give a per-character reveal.
 - `Camera2D` — pan/zoom/limits/shake for the 2D pass. `CanvasLayer2D` — fixed HUD layer, unaffected by Camera2D.
@@ -76,6 +77,32 @@ tables: [node-types-reference.md](node-types-reference.md).
   ]}]}
 ```
 **Spritesheet mode** instead: set top-level `texturePath` and give each frame a UV rect `offset:{x,y}` + `repeat:{x,y}` (these default to 0 → sample nothing, so they're required here). Frames may carry `durationMultiplier` and `events:[{signal,args}]` (fired on play-driven frame entry). Node wiring: `type: AnimatedSprite2D`, properties `animationResourcePath`, `currentClip`, `isPlaying`, `freeOnFinish` (one-shot self-destruct), `width`/`height`. First spawn of a runtime-instantiated clip warms its texture cache; if the first play must be pixel-perfect, spawn one invisible warm-up at level start. Authoring GUI: the editor's animation panel produces the same file.
+
+**Spine skeletal animation (`SpineSkeleton2D`)** — for rigs authored in the Spine
+editor, when a flipbook (`.pix3anim`) is not enough: bone hierarchies, mesh
+deformation, skins, and crossfaded animation mixing. Point the node at its
+`skeletonPath` (`.json`/`.skel`) and `atlasPath` (`.atlas`); the page images come
+from the atlas text and are resolved next to it. Once the asset loads, the
+Inspector's `animation`/`skin` fields become dropdowns of the skeleton's real
+names. From a script:
+
+```ts
+const hero = scene.getNode<SpineSkeleton2D>('Hero');
+hero.play('run', { loop: true, mixDuration: 0.2 });
+hero.queue('idle', { loop: true });
+hero.setSkin('blue');
+```
+
+Signals: `animation-started`, `animation-finished` (non-looping end — pair with
+`freeOnFinish: true` for one-shot VFX), `animation-looped`, and `spine-event` for
+keyed animation events. Sizing is the node transform, not width/height. Spine is an
+**optional** dependency (`@esotericsoftware/spine-threejs` `~4.3`, Spine Runtimes
+License, lazily imported): the editor and the exported player register it
+automatically, a consumer project calls
+`setSpineModuleLoader(() => import('@esotericsoftware/spine-threejs'))` once.
+Not batched/atlased and no shader-effect support (spine owns its materials); CPU
+cost is per skeleton per frame, so budget dozens, not hundreds. Full property table:
+`docs/node-types-reference.md` → `### SpineSkeleton2D`.
 
 **3D content**
 - `GeometryMesh` — primitive/standard-material mesh; supports **shader effects** (§4) and baked/realtime AO.

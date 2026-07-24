@@ -10,6 +10,7 @@ import { AnimatedSprite2D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { ColorRect2D } from '@pix3/runtime';
+import { SpineSkeleton2D } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import type { Viewport2DProxyRegistry } from './Viewport2DProxyRegistry';
@@ -361,6 +362,7 @@ export class ViewportPicking {
         node instanceof Sprite2D ||
         node instanceof ColorRect2D ||
         node instanceof TiledSprite2D ||
+        node instanceof SpineSkeleton2D ||
         node instanceof UIControl2D
       )
     ) {
@@ -448,6 +450,9 @@ export class ViewportPicking {
     }
     if (node instanceof TiledSprite2D) {
       return proxyRegistry.tiledSprite2DVisuals.get(node.nodeId);
+    }
+    if (node instanceof SpineSkeleton2D) {
+      return proxyRegistry.spineSkeleton2DVisuals.get(node.nodeId);
     }
     if (node instanceof Sprite2D) {
       return proxyRegistry.sprite2DVisuals.get(node.nodeId);

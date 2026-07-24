@@ -1,0 +1,36 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Demos
+  created: 2026-07-25
+  description: SpineSkeleton2D smoke scene (spineboy example export).
+root:
+  - id: group2d-spine-root-0001
+    type: Group2D
+    name: Stage
+    properties:
+      width: 1280
+      height: 720
+      transform:
+        position: [0, 0]
+        rotation: 0
+        scale: [1, 1]
+    children:
+      - id: spineskeleton2d-spineboy-01
+        type: SpineSkeleton2D
+        name: SpineBoy
+        properties:
+          skeletonPath: res://assets/spine/spineboy-pro.json
+          atlasPath: res://assets/spine/spineboy.atlas
+          animation: run
+          loop: true
+          isPlaying: true
+          skin: ""
+          timeScale: 1
+          defaultMix: 0.15
+          color: "#ffffff"
+          previewInEditor: true
+          transform:
+            position: [0, -200]
+            rotation: 0
+            scale: [1, 1]
+        children: []

@@ -669,6 +669,15 @@ export class InspectorPanel extends ComponentBase {
     void this.applyPropertyChange(propertyName, modelUrl);
   }
 
+  onFileResourceDrop(propertyName: string, event: DragEvent, extensions: string[]): void {
+    const fileUrl = this.resourcePreview.getDroppedFileResource(event, extensions);
+    if (!fileUrl) {
+      return;
+    }
+
+    void this.applyPropertyChange(propertyName, fileUrl);
+  }
+
   onAnimationResourceDrop(propertyName: string, event: DragEvent): void {
     const animationUrl = this.resourcePreview.getDroppedAnimationResource(event);
     if (!animationUrl) {

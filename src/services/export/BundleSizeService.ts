@@ -66,6 +66,8 @@ const CATEGORY_BY_EXTENSION: Record<string, BundleSizeCategory> = {
   yaml: 'data',
   yml: 'data',
   pix3anim: 'data',
+  atlas: 'data',
+  skel: 'data',
   txt: 'data',
   csv: 'data',
   ttf: 'fonts',

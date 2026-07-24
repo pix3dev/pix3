@@ -27,12 +27,18 @@
   },
   "peerDependencies": {
     "postprocessing": ">=6.39.0",
-    "three": ">=0.183.0"
+    "three": ">=0.183.0",
+    "@esotericsoftware/spine-threejs": "~4.3"
   },
   "devDependencies": {
     "@types/three": "^0.183.1",
     "postprocessing": "^6.39.2",
     "three": "^0.183.2",
     "typescript": "^5.2.2"
+  },
+  "peerDependenciesMeta": {
+    "@esotericsoftware/spine-threejs": {
+      "optional": true
+    }
   }
 }

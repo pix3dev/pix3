@@ -6,6 +6,7 @@ import { Node3D } from '../nodes/Node3D';
 import { MeshInstance } from '../nodes/3D/MeshInstance';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
+import { SpineSkeleton2D } from '../nodes/2D/SpineSkeleton2D';
 import { ColorRect2D } from '../nodes/2D/ColorRect2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import type { TiledSpriteAxisStretch, TiledSpritePatchMode } from './tiled-sprite-geometry';
@@ -1066,6 +1067,41 @@ export class SceneLoader {
 
         return sprite;
       }
+      case 'SpineSkeleton2D': {
+        const props = baseProps.properties as Record<string, unknown>;
+        const transform = this.asRecord(props.transform);
+
+        const skeleton = new SpineSkeleton2D({
+          ...baseProps,
+          properties: props,
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation:
+            typeof (transform?.rotation ?? props.rotation) === 'number'
+              ? ((transform?.rotation ?? props.rotation) as number)
+              : 0,
+          layout: this.parseNode2DLayout(props),
+          opacity: this.asNumber(props.opacity, undefined),
+          skeletonPath: this.asString(props.skeletonPath) ?? null,
+          atlasPath: this.asString(props.atlasPath) ?? null,
+          texture: coerceTextureResource(props.texture ?? props.texturePath ?? null),
+          animation: this.asString(props.animation),
+          loop: typeof props.loop === 'boolean' ? props.loop : undefined,
+          isPlaying: typeof props.isPlaying === 'boolean' ? props.isPlaying : undefined,
+          skin: this.asString(props.skin),
+          timeScale: this.asNumber(props.timeScale, undefined),
+          defaultMix: this.asNumber(props.defaultMix, undefined),
+          color: this.asString(props.color),
+          twoColorTint: typeof props.twoColorTint === 'boolean' ? props.twoColorTint : undefined,
+          freeOnFinish: typeof props.freeOnFinish === 'boolean' ? props.freeOnFinish : undefined,
+          previewInEditor:
+            typeof props.previewInEditor === 'boolean' ? props.previewInEditor : undefined,
+        });
+
+        void this.loadSpineSkeleton2DAsset(skeleton);
+
+        return skeleton;
+      }
       case 'Sprite2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
@@ -2041,6 +2077,38 @@ export class SceneLoader {
       }
       default:
         return new NodeBase({ ...baseProps, type: definition.type });
+    }
+  }
+
+  /**
+   * Resolves a SpineSkeleton2D's skeleton + atlas and installs it on the node.
+   * A missing/broken asset only warns — the node stays in the scene with its
+   * authored paths so the inspector can fix them.
+   */
+  async loadSpineSkeleton2DAsset(skeleton: SpineSkeleton2D): Promise<void> {
+    const request = skeleton.getAssetRequest();
+    if (!request) {
+      skeleton.setSpineAsset(null);
+      return;
+    }
+
+    try {
+      const asset = await this.assetLoader.loadSpineAsset(request);
+      // The authored paths may have changed while we were loading (inspector
+      // edit): drop a stale result instead of installing the wrong skeleton.
+      const current = skeleton.getAssetRequest();
+      if (!current || current.skeletonPath !== request.skeletonPath) {
+        return;
+      }
+      if (current.atlasPath !== request.atlasPath || current.texturePath !== request.texturePath) {
+        return;
+      }
+      skeleton.setSpineAsset(asset);
+    } catch (error) {
+      console.warn(
+        `[SceneLoader] Error loading Spine asset for SpineSkeleton2D "${skeleton.nodeId}":`,
+        error
+      );
     }
   }
 

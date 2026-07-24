@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d": "^0.19.3",
+    "@esotericsoftware/spine-threejs": "~4.3.13",
     "@hocuspocus/provider": "^2.15.0",
     "@huggingface/transformers": "^4.2.0",
     "@imgly/background-removal": "^1.7.0",

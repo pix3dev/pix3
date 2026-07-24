@@ -18,6 +18,12 @@ import {
 import { configure2DTexture } from './configure-2d-texture';
 import { applyTextureRegionToTexture } from './texture-region';
 import { stampAtlasView, type AtlasFrame, type AtlasResolver } from './atlas-frame-map';
+import {
+  loadSpineAsset,
+  spineAssetKey,
+  type SpineAsset,
+  type SpineAssetRequest,
+} from './spine/SpineAsset';
 
 /** Options for {@link AssetLoader.loadTexture}. */
 export interface LoadTextureOptions {
@@ -64,6 +70,8 @@ export class AssetLoader {
   private readonly animationResourceLoadInFlight = new Map<string, Promise<AnimationResource>>();
   private readonly audioLoadInFlight = new Map<string, Promise<AudioBuffer>>();
   private readonly audioMetadataCache = new Map<string, LoadedAudioMetadata>();
+  private readonly spineAssetCache = new Map<string, SpineAsset>();
+  private readonly spineAssetLoadInFlight = new Map<string, Promise<SpineAsset>>();
   private atlasResolver: AtlasResolver | null = null;
 
   constructor(resources: ResourceManager, audioService?: AudioService) {
@@ -374,6 +382,64 @@ export class AssetLoader {
     });
 
     return loadPromise;
+  }
+
+  /**
+   * Loads a Spine skeleton + atlas pair, cached and de-duplicated by the three
+   * paths that identify it. The returned {@link SpineAsset} (skeleton data + page
+   * textures) is SHARED: every node and the editor's viewport proxy build their
+   * own `Skeleton`/`AnimationState` on top of it, and nobody but this loader may
+   * dispose it.
+   *
+   * Requires a host-registered Spine module (`setSpineModuleLoader`); rejects with
+   * an actionable message when Spine is not installed.
+   */
+  async loadSpineAsset(request: SpineAssetRequest): Promise<SpineAsset> {
+    const key = spineAssetKey(request);
+    const cached = this.spineAssetCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const inFlight = this.spineAssetLoadInFlight.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    // try/finally inside the async body (rather than a detached `.finally` on the
+    // promise) so a rejection is only ever observed by the caller's own await.
+    const loadPromise = (async (): Promise<SpineAsset> => {
+      try {
+        const asset = await loadSpineAsset(this.resources, request);
+        this.spineAssetCache.set(key, asset);
+        return asset;
+      } finally {
+        this.spineAssetLoadInFlight.delete(key);
+      }
+    })();
+
+    this.spineAssetLoadInFlight.set(key, loadPromise);
+    return loadPromise;
+  }
+
+  /** Cached Spine asset for a request, or null when it has not been loaded. */
+  getCachedSpineAsset(request: SpineAssetRequest): SpineAsset | null {
+    return this.spineAssetCache.get(spineAssetKey(request)) ?? null;
+  }
+
+  /**
+   * Drops a cached Spine asset and disposes its page textures. Call when the
+   * underlying files changed on disk; live views holding the old asset must be
+   * rebuilt by their owners.
+   */
+  evictSpineAsset(request: SpineAssetRequest): void {
+    const key = spineAssetKey(request);
+    const asset = this.spineAssetCache.get(key);
+    if (!asset) {
+      return;
+    }
+    this.spineAssetCache.delete(key);
+    asset.dispose();
   }
 
   async loadInstancingModel(resourcePath: string): Promise<InstancingModelAsset> {

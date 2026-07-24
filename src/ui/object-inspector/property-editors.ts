@@ -1311,6 +1311,112 @@ export class ModelResourceEditor extends ComponentBase {
   }
 }
 
+/**
+ * Generic project-file picker for `editor: 'file-resource'` schema properties.
+ * Accepts a drop from the Asset Browser, filtered by the extensions the schema
+ * declares (`ui.extensions`), plus manual `res://` entry — used for asset kinds
+ * that need no preview widget of their own (Spine `.json`/`.skel`/`.atlas`).
+ */
+@customElement('pix3-file-resource-editor')
+export class FileResourceEditor extends ComponentBase {
+  protected static useShadowDom = true;
+  @property({ type: String })
+  resourceUrl: string = '';
+
+  @property({ type: Boolean })
+  disabled: boolean = false;
+
+  /** Accepted extensions without the dot; empty accepts any file. */
+  @property({ type: Array })
+  extensions: string[] = [];
+
+  @state()
+  private isDragOver = false;
+
+  static styles = AudioResourceEditor.styles;
+
+  private get extensionLabel(): string {
+    return this.extensions.length > 0
+      ? this.extensions.map(extension => `.${extension}`).join(' / ')
+      : 'file';
+  }
+
+  private emitChange(url: string): void {
+    this.dispatchEvent(
+      new CustomEvent('change', {
+        detail: { url },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private onDragOver(event: DragEvent): void {
+    if (this.disabled) {
+      return;
+    }
+    event.preventDefault();
+    this.isDragOver = true;
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  private onDragLeave(): void {
+    this.isDragOver = false;
+  }
+
+  private onDrop(event: DragEvent): void {
+    if (this.disabled) {
+      return;
+    }
+    event.preventDefault();
+    this.isDragOver = false;
+
+    this.dispatchEvent(
+      new CustomEvent('file-drop', {
+        detail: { event, extensions: this.extensions },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  protected render() {
+    return html`
+      <div
+        class="drop-zone ${this.isDragOver ? 'is-dragover' : ''}"
+        @dragover=${(event: DragEvent) => this.onDragOver(event)}
+        @dragleave=${() => this.onDragLeave()}
+        @drop=${(event: DragEvent) => this.onDrop(event)}
+      >
+        <span class="drop-label">Drop ${this.extensionLabel} from Assets here</span>
+      </div>
+
+      <div class="url-row">
+        <input
+          type="text"
+          .value=${this.resourceUrl}
+          ?disabled=${this.disabled}
+          placeholder="res://path/to/asset"
+          @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
+        />
+        <button
+          type="button"
+          ?disabled=${!this.resourceUrl.trim()}
+          title="Show this file in the Asset Browser"
+          @click=${() => dispatchLocate(this, this.resourceUrl)}
+        >
+          Locate
+        </button>
+        <button type="button" ?disabled=${this.disabled} @click=${() => this.emitChange('')}>
+          Clear
+        </button>
+      </div>
+    `;
+  }
+}
+
 @customElement('pix3-animation-resource-editor')
 export class AnimationResourceEditor extends ComponentBase {
   protected static useShadowDom = true;
@@ -1887,6 +1993,7 @@ declare global {
     'pix3-texture-resource-editor': TextureResourceEditor;
     'pix3-audio-resource-editor': AudioResourceEditor;
     'pix3-model-resource-editor': ModelResourceEditor;
+    'pix3-file-resource-editor': FileResourceEditor;
     'pix3-animation-resource-editor': AnimationResourceEditor;
     'pix3-size-editor': SizeEditor;
     'pix3-slider-number-editor': SliderNumberEditor;

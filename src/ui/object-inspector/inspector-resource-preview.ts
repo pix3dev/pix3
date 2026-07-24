@@ -366,4 +366,17 @@ export class InspectorResourcePreview {
   getDroppedAnimationResource(event: DragEvent): string | null {
     return this.getDroppedResource(event, path => this.isAnimationResource(path));
   }
+
+  /**
+   * Dropped project file filtered by an explicit extension list (the
+   * `file-resource` inspector editor's `ui.extensions`). An empty list accepts
+   * any dropped project file.
+   */
+  getDroppedFileResource(event: DragEvent, extensions: readonly string[]): string | null {
+    if (extensions.length === 0) {
+      return this.getDroppedResource(event, () => true);
+    }
+    const allowed = new Set(extensions.map(extension => extension.toLowerCase()));
+    return this.getDroppedResource(event, path => this.hasSupportedExtension(path, allowed));
+  }
 }

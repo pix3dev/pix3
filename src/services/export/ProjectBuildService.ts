@@ -1,4 +1,5 @@
 import { injectable, inject } from '@/fw/di';
+import { parseSpineAtlasPageNames, resolveSpinePagePath } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 import type { CommandContext } from '@/core/command';
@@ -292,6 +293,7 @@ export class ProjectBuildService {
     }
 
     await this.collectLocaleAssetPaths(files, warnings);
+    await this.collectSpineAtlasPagePaths(files, warnings);
 
     const resolved = await this.resolveAssetDirectoryReferences(files);
     return Array.from(resolved).sort((a, b) => a.localeCompare(b));
@@ -341,6 +343,28 @@ export class ProjectBuildService {
 
   private hasFileExtension(path: string): boolean {
     return /\.[a-zA-Z0-9]+$/.test(path);
+  }
+
+  /**
+   * Add the page images every referenced Spine `.atlas` declares.
+   *
+   * The page file names live INSIDE the atlas text (relative to the atlas file),
+   * so they are invisible to the `res://` scan of scenes and scripts — the same
+   * class of miss as localized sprites. Without this a Spine skeleton ships with
+   * its skeleton + atlas but no textures.
+   */
+  private async collectSpineAtlasPagePaths(files: Set<string>, warnings: string[]): Promise<void> {
+    const atlasPaths = Array.from(files).filter(path => /\.atlas$/i.test(path));
+    for (const atlasPath of atlasPaths) {
+      try {
+        const contents = await this.fs.readTextFile(this.normalizeResourcePath(atlasPath));
+        for (const pageName of parseSpineAtlasPageNames(contents)) {
+          files.add(resolveSpinePagePath(atlasPath, pageName));
+        }
+      } catch {
+        warnings.push(`Failed to scan Spine atlas for page images: ${atlasPath}`);
+      }
+    }
   }
 
   /**

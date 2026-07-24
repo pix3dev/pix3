@@ -67,7 +67,10 @@ const EXTENSIONS_BY_CATEGORY: Readonly<
   ],
   models: ['glb', 'gltf', 'fbx', 'obj', 'bin'],
   audio: ['mp3', 'ogg', 'wav', 'm4a', 'aac', 'flac'],
-  animations: ['pix3anim'],
+  // Spine exports live with the animations: `.atlas`/`.skel` belong to a
+  // SpineSkeleton2D, and its `.json` skeleton stays under `data` (a JSON file is
+  // not necessarily Spine).
+  animations: ['pix3anim', 'atlas', 'skel'],
   scripts: ['ts', 'js', 'mjs'],
   fonts: ['ttf', 'otf', 'woff', 'woff2'],
   video: ['mp4', 'webm', 'ogv', 'mov', 'm4v'],
