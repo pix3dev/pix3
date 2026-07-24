@@ -10,6 +10,8 @@ import {
   configure2DTexture,
   createAtlasResolver,
   getProjectTextureFiltering,
+  parseSpineAtlasPageNames,
+  resolveSpinePagePath,
   type AtlasManifest,
   type AssetLoader,
 } from '@pix3/runtime';
@@ -230,6 +232,28 @@ export class TextureAtlasService {
         if (file.startsWith(prefix) && IMAGE_EXT_PATTERN.test(file)) {
           eligible.add(`res://${file}`);
         }
+      }
+    }
+
+    // Spine atlas pages must never be repacked: a page's UVs come from the
+    // `.atlas` file and assume a standalone, full-[0,1] texture. The loader reads
+    // pages straight off disk (bypassing loadTexture), so this is belt-and-braces
+    // — and it also keeps large skeleton sheets out of the shared atlas.
+    for (const [path] of sizeMap) {
+      if (!path.toLowerCase().endsWith('.atlas')) {
+        continue;
+      }
+      try {
+        const text = await this.fs.readTextFile(path);
+        for (const pageName of parseSpineAtlasPageNames(text)) {
+          // A page name may itself be absolute/schemed (hand-edited atlas), which
+          // resolveSpinePagePath passes through — so normalize instead of blindly
+          // prefixing, or the entry would read `res://res://…` and match nothing.
+          const pagePath = resolveSpinePagePath(path, pageName);
+          ineligible.add(`res://${stripRes(pagePath)}`);
+        }
+      } catch {
+        // Unreadable atlas — nothing to exclude.
       }
     }
 

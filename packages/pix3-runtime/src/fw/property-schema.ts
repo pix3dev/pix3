@@ -74,8 +74,16 @@ export interface PropertyUIHints {
     | 'audio-resource'
     | 'model-resource'
     | 'animation-resource'
+    | 'file-resource'
+    | 'spine-preview'
     | 'sprite-size'
     | 'localization-key';
+
+  /**
+   * For `editor: 'file-resource'` — file extensions (without the dot) the picker
+   * accepts, e.g. `['json', 'skel']`. Empty/omitted accepts any file.
+   */
+  extensions?: string[];
 
   /** Optional resource subtype for object-like values */
   resourceType?: 'texture' | 'model';

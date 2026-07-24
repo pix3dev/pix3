@@ -1311,6 +1311,232 @@ export class ModelResourceEditor extends ComponentBase {
   }
 }
 
+/**
+ * Editor-preview control for a Spine skeleton: an explicit play/pause toggle for
+ * viewport animation (off by default — a placed skeleton holds its first frame
+ * until asked) plus a Reset that rewinds to that first frame.
+ *
+ * The toggle drives the node's serialized `previewInEditor` property (undoable,
+ * like any inspector edit); Reset is transient pose-only state and does not go
+ * through an operation.
+ */
+@customElement('pix3-spine-preview-editor')
+export class SpinePreviewEditor extends ComponentBase {
+  protected static useShadowDom = true;
+
+  @property({ type: Boolean })
+  playing: boolean = false;
+
+  @property({ type: Boolean })
+  disabled: boolean = false;
+
+  static styles = css`
+    :host {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      width: 100%;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border: 1px solid var(--line-1);
+      background: var(--bg-2);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
+      padding: 0.2rem 0.55rem;
+      height: 26px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    button.is-active {
+      border-color: var(--accent);
+      color: var(--fg-0);
+      background: var(--accent-soft);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+    }
+  `;
+
+  private emit(name: string, detail?: unknown): void {
+    this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+  }
+
+  protected render() {
+    return html`
+      <button
+        type="button"
+        class=${this.playing ? 'is-active' : ''}
+        ?disabled=${this.disabled}
+        title=${this.playing ? 'Pause viewport animation' : 'Animate in the viewport'}
+        aria-pressed=${this.playing ? 'true' : 'false'}
+        @click=${() => this.emit('change', { playing: !this.playing })}
+      >
+        ${this.playing
+          ? iconTemplate('pause', 'M6 4h3v12H6zM11 4h3v12h-3z')
+          : iconTemplate('play', 'M6 4l9 6-9 6z')}
+        <span>${this.playing ? 'Pause' : 'Play'}</span>
+      </button>
+      <button
+        type="button"
+        ?disabled=${this.disabled}
+        title="Rewind to the first frame"
+        @click=${() => this.emit('reset-preview')}
+      >
+        ${iconTemplate('reset', 'M5 10a5 5 0 1 0 5-5H6.5M5 3v4h4', true)}
+        <span>Reset</span>
+      </button>
+    `;
+  }
+}
+
+/**
+ * Inline vector glyph for the preview buttons. Icons must never be emoji or text
+ * glyphs (see the UI conventions); these two shapes are local to this control, so
+ * they are drawn inline rather than registered in IconService.
+ */
+function iconTemplate(name: string, path: string, stroke = false) {
+  return html`<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" data-icon=${name}>
+    <path
+      d=${path}
+      fill=${stroke ? 'none' : 'currentColor'}
+      stroke=${stroke ? 'currentColor' : 'none'}
+      stroke-width=${stroke ? '1.6' : '0'}
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>`;
+}
+
+/**
+ * Generic project-file picker for `editor: 'file-resource'` schema properties.
+ * Accepts a drop from the Asset Browser, filtered by the extensions the schema
+ * declares (`ui.extensions`), plus manual `res://` entry — used for asset kinds
+ * that need no preview widget of their own (Spine `.json`/`.skel`/`.atlas`).
+ */
+@customElement('pix3-file-resource-editor')
+export class FileResourceEditor extends ComponentBase {
+  protected static useShadowDom = true;
+  @property({ type: String })
+  resourceUrl: string = '';
+
+  @property({ type: Boolean })
+  disabled: boolean = false;
+
+  /** Accepted extensions without the dot; empty accepts any file. */
+  @property({ type: Array })
+  extensions: string[] = [];
+
+  @state()
+  private isDragOver = false;
+
+  static styles = AudioResourceEditor.styles;
+
+  private get extensionLabel(): string {
+    return this.extensions.length > 0
+      ? this.extensions.map(extension => `.${extension}`).join(' / ')
+      : 'file';
+  }
+
+  private emitChange(url: string): void {
+    this.dispatchEvent(
+      new CustomEvent('change', {
+        detail: { url },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private onDragOver(event: DragEvent): void {
+    if (this.disabled) {
+      return;
+    }
+    event.preventDefault();
+    this.isDragOver = true;
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  private onDragLeave(): void {
+    this.isDragOver = false;
+  }
+
+  private onDrop(event: DragEvent): void {
+    if (this.disabled) {
+      return;
+    }
+    event.preventDefault();
+    this.isDragOver = false;
+
+    this.dispatchEvent(
+      new CustomEvent('file-drop', {
+        detail: { event, extensions: this.extensions },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  protected render() {
+    return html`
+      <div
+        class="drop-zone ${this.isDragOver ? 'is-dragover' : ''}"
+        @dragover=${(event: DragEvent) => this.onDragOver(event)}
+        @dragleave=${() => this.onDragLeave()}
+        @drop=${(event: DragEvent) => this.onDrop(event)}
+      >
+        <span class="drop-label">Drop ${this.extensionLabel} from Assets here</span>
+      </div>
+
+      <div class="url-row">
+        <input
+          type="text"
+          .value=${this.resourceUrl}
+          ?disabled=${this.disabled}
+          placeholder="res://path/to/asset"
+          @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
+        />
+        <button
+          type="button"
+          ?disabled=${!this.resourceUrl.trim()}
+          title="Show this file in the Asset Browser"
+          @click=${() => dispatchLocate(this, this.resourceUrl)}
+        >
+          Locate
+        </button>
+        <button type="button" ?disabled=${this.disabled} @click=${() => this.emitChange('')}>
+          Clear
+        </button>
+      </div>
+    `;
+  }
+}
+
 @customElement('pix3-animation-resource-editor')
 export class AnimationResourceEditor extends ComponentBase {
   protected static useShadowDom = true;
@@ -1887,6 +2113,8 @@ declare global {
     'pix3-texture-resource-editor': TextureResourceEditor;
     'pix3-audio-resource-editor': AudioResourceEditor;
     'pix3-model-resource-editor': ModelResourceEditor;
+    'pix3-file-resource-editor': FileResourceEditor;
+    'pix3-spine-preview-editor': SpinePreviewEditor;
     'pix3-animation-resource-editor': AnimationResourceEditor;
     'pix3-size-editor': SizeEditor;
     'pix3-slider-number-editor': SliderNumberEditor;

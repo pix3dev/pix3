@@ -8,6 +8,8 @@ import { findAnimationClip } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { ColorRect2D } from '@pix3/runtime';
+import { SpineSkeleton2D, SpineSkeletonView } from '@pix3/runtime';
+import type { AssetLoader } from '@pix3/runtime';
 import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
@@ -48,6 +50,39 @@ const EDITOR_ACCENT_COLOR = 0xf5ae39;
  * Pure (no instance state) so it is a module-level function shared by the proxy
  * registry and the facade's remaining 3D texture-sync paths.
  */
+/**
+ * Identity of the Spine files a node points at, plus the one flag that is baked
+ * into the view at construction (`twoColorTint`). A change means the proxy has to
+ * rebuild its view from scratch.
+ */
+function spineAssetSignature(node: SpineSkeleton2D): string {
+  return [
+    node.skeletonPath ?? '',
+    node.atlasPath ?? '',
+    node.texturePath ?? '',
+    node.twoColorTint ? 'dark' : 'plain',
+  ].join('|');
+}
+
+/** Everything that changes a Spine proxy's pose without rebuilding its view. */
+function spinePlaybackSignature(node: SpineSkeleton2D, opacity: number): string {
+  return [
+    node.animation,
+    node.skin,
+    node.loop ? '1' : '0',
+    node.timeScale,
+    node.defaultMix,
+    node.color,
+    opacity.toFixed(3),
+  ].join('|');
+}
+
+/** `#rrggbb` → three.js linear-space RGB components for spine's skeleton color. */
+function hexToRgb01(hex: string): { r: number; g: number; b: number } {
+  const color = new THREE.Color(hex);
+  return { r: color.r, g: color.g, b: color.b };
+}
+
 export function configureSpriteTexture(texture: THREE.Texture): void {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = false;
@@ -79,6 +114,8 @@ export function getFrameThicknessWorldPx(zoom: number): number {
 export interface Viewport2DProxyRegistryDeps {
   readBlob(path: string): Promise<Blob>;
   readText(path: string): Promise<string>;
+  /** Shared asset loader — Spine proxies resolve through its SpineAsset cache. */
+  getAssetLoader(): AssetLoader;
   requestRender(): void;
   installProxyEffects(node: NodeBase, material: THREE.Material): void;
   disposeObject3D(root: THREE.Object3D): void;
@@ -104,6 +141,9 @@ export class Viewport2DProxyRegistry {
   readonly colorRect2DVisuals = new Map<string, THREE.Group>();
   readonly tiledSprite2DVisuals = new Map<string, THREE.Group>();
   readonly uiControl2DVisuals = new Map<string, THREE.Group>();
+  readonly spineSkeleton2DVisuals = new Map<string, THREE.Group>();
+  /** Live Spine views owned by the proxies above, keyed by nodeId. */
+  private readonly spineViews = new Map<string, SpineSkeletonView>();
   // Shared 2D context for Label2D text measurement (layout mirroring the runtime).
   private labelMeasureCtx: CanvasRenderingContext2D | null = null;
 
@@ -116,6 +156,7 @@ export class Viewport2DProxyRegistry {
       this.colorRect2DVisuals.get(nodeId) ??
       this.animatedSprite2DVisuals.get(nodeId) ??
       this.tiledSprite2DVisuals.get(nodeId) ??
+      this.spineSkeleton2DVisuals.get(nodeId) ??
       this.uiControl2DVisuals.get(nodeId)
     );
   }
@@ -144,6 +185,7 @@ export class Viewport2DProxyRegistry {
       ...this.colorRect2DVisuals.values(),
       ...this.animatedSprite2DVisuals.values(),
       ...this.tiledSprite2DVisuals.values(),
+      ...this.spineSkeleton2DVisuals.values(),
       ...this.uiControl2DVisuals.values(),
     ]);
     let next = 0;
@@ -1176,6 +1218,246 @@ export class Viewport2DProxyRegistry {
 
     visualRoot.userData.animationTexture = null;
     visualRoot.userData.animationTexturePath = null;
+  }
+
+  /**
+   * Create the editor proxy for a SpineSkeleton2D node.
+   *
+   * Unlike the other 2D proxies this one does not rebuild the node's geometry by
+   * hand: it instantiates the SAME {@link SpineSkeletonView} the runtime node
+   * uses, from the same cached `SpineAsset`, so edit mode and play mode render
+   * identically. Until the asset resolves (or when the paths are unset/broken) a
+   * placeholder frame stands in so the node stays visible and selectable.
+   */
+  createSpineSkeleton2DVisual(node: SpineSkeleton2D): THREE.Group {
+    const root = new THREE.Group();
+    root.layers.set(LAYER_2D);
+    this.apply2DVisualTransform(node, root);
+
+    const placeholder = this.createSpineSkeleton2DPlaceholder(node);
+    root.add(placeholder);
+
+    root.userData.isSpineSkeleton2DVisualRoot = true;
+    root.userData.nodeId = node.nodeId;
+    root.userData.placeholder = placeholder;
+    root.userData.assetSignature = spineAssetSignature(node);
+    root.userData.viewSignature = null;
+
+    void this.loadSpineSkeleton2DAsset(node, root);
+    return root;
+  }
+
+  /**
+   * Dashed-looking outline shown while the skeleton is unresolved. Sized to the
+   * node's setup bounds when known, else a neutral 100×100 box, and kept as a
+   * floating adornment (non-zero group renderOrder) so it never joins the
+   * hierarchy content ordering.
+   */
+  private createSpineSkeleton2DPlaceholder(node: SpineSkeleton2D): THREE.Group {
+    const group = new THREE.Group();
+    group.layers.set(LAYER_2D);
+    group.renderOrder = 405;
+
+    const bounds = node.getSetupBounds();
+    const width = Math.max(8, Math.abs(bounds?.width ?? 100));
+    const height = Math.max(8, Math.abs(bounds?.height ?? 100));
+
+    const material = new THREE.MeshBasicMaterial({
+      color: EDITOR_ACCENT_COLOR,
+      transparent: true,
+      opacity: 0.18,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    material.userData.baseOpacity = 0.18;
+
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    mesh.scale.set(width, height, 1);
+    mesh.position.set(
+      (bounds?.x ?? -width / 2) + width / 2,
+      (bounds?.y ?? -height / 2) + height / 2,
+      0
+    );
+    mesh.layers.set(LAYER_2D);
+    mesh.renderOrder = 405;
+    mesh.userData.nodeId = node.nodeId;
+    group.add(mesh);
+
+    return group;
+  }
+
+  private async loadSpineSkeleton2DAsset(
+    node: SpineSkeleton2D,
+    visualRoot: THREE.Group
+  ): Promise<void> {
+    const request = node.getAssetRequest();
+    if (!request) {
+      return;
+    }
+
+    const signature = spineAssetSignature(node);
+    try {
+      const asset = await this.deps.getAssetLoader().loadSpineAsset(request);
+
+      // Latest-wins + liveness guard: the proxy may have been disposed while we
+      // awaited, or the node may point at different files by now.
+      if (
+        this.spineSkeleton2DVisuals.get(node.nodeId) !== visualRoot ||
+        spineAssetSignature(node) !== signature
+      ) {
+        return;
+      }
+
+      const view = new SpineSkeletonView({ asset, twoColorTint: node.twoColorTint });
+      this.disposeSpineView(node.nodeId, visualRoot);
+      this.spineViews.set(node.nodeId, view);
+      visualRoot.userData.spineView = view;
+      visualRoot.userData.viewSignature = signature;
+
+      const placeholder = visualRoot.userData.placeholder as THREE.Group | undefined;
+      if (placeholder) {
+        placeholder.visible = false;
+      }
+
+      visualRoot.add(view.object);
+      this.syncSpineSkeleton2DPlayback(node, view);
+      visualRoot.userData.playbackSignature = spinePlaybackSignature(
+        node,
+        this.getEffective2DOpacity(node)
+      );
+      this.stampSpineLayers(view);
+
+      // The node itself needs the asset too — its per-instance schema is what
+      // turns the inspector's `animation`/`skin` fields into dropdowns of the
+      // skeleton's real names. In the editor the SceneLoader's own load may not
+      // have landed yet (or may have failed to run at all for a node created
+      // interactively), and both paths share this cached asset, so whichever
+      // arrives first installs it and the other skips.
+      if (!node.isLoaded) {
+        node.setSpineAsset(asset);
+      }
+      // Nudge the inspector so the freshly available animation/skin lists render.
+      appState.scenes.nodeDataChangeSignal += 1;
+      this.deps.requestRender();
+    } catch (error) {
+      console.warn(`[Viewport] Failed to load Spine asset for node ${node.nodeId}:`, error);
+    }
+  }
+
+  /** Push authored animation/skin/mix/tint state into a (re)built view. */
+  private syncSpineSkeleton2DPlayback(node: SpineSkeleton2D, view: SpineSkeletonView): void {
+    view.setDefaultMix(node.defaultMix);
+    view.setTimeScale(node.timeScale);
+    if (node.skin) {
+      view.setSkin(node.skin);
+    }
+    view.setTint(hexToRgb01(node.color), this.getEffective2DOpacity(node));
+    if (node.animation) {
+      view.play(node.animation, { loop: node.loop });
+    }
+    view.refresh();
+  }
+
+  /**
+   * Spine adds its batch meshes lazily as slots/materials change, and three.js
+   * layers are per-object (not inherited), so freshly created batches would be
+   * invisible to the layer-filtered 2D camera. Re-stamp after every update.
+   */
+  private stampSpineLayers(view: SpineSkeletonView): void {
+    for (const child of view.object.children) {
+      child.layers.set(LAYER_2D);
+    }
+  }
+
+  syncSpineSkeleton2DVisual(node: SpineSkeleton2D, visualRoot: THREE.Group): void {
+    this.apply2DVisualTransform(node, visualRoot);
+    visualRoot.visible = node.visible;
+
+    // Asset paths changed → drop the current view and reload.
+    const signature = spineAssetSignature(node);
+    if (signature !== visualRoot.userData.assetSignature) {
+      visualRoot.userData.assetSignature = signature;
+      this.disposeSpineView(node.nodeId, visualRoot);
+      const placeholder = visualRoot.userData.placeholder as THREE.Group | undefined;
+      if (placeholder) {
+        placeholder.visible = true;
+      }
+      void this.loadSpineSkeleton2DAsset(node, visualRoot);
+      return;
+    }
+
+    const view = this.spineViews.get(node.nodeId);
+    if (!view) {
+      return;
+    }
+
+    // Only rebuild the pose when something that affects it actually changed: a
+    // refresh() re-skins the whole skeleton, and this runs on every layout pass.
+    const playbackSignature = spinePlaybackSignature(node, this.getEffective2DOpacity(node));
+    if (playbackSignature === visualRoot.userData.playbackSignature) {
+      return;
+    }
+    visualRoot.userData.playbackSignature = playbackSignature;
+    this.syncSpineSkeleton2DPlayback(node, view);
+    this.stampSpineLayers(view);
+  }
+
+  /** The live Spine view for a node's proxy, if it has loaded. */
+  getSpineView(nodeId: string): SpineSkeletonView | undefined {
+    return this.spineViews.get(nodeId);
+  }
+
+  /**
+   * Advance the editor preview for one Spine proxy. Called by the preview ticker
+   * for nodes with `previewInEditor` enabled.
+   */
+  advanceSpinePreview(nodeId: string, dt: number): boolean {
+    const view = this.spineViews.get(nodeId);
+    if (!view) {
+      return false;
+    }
+    view.update(dt);
+    this.stampSpineLayers(view);
+    return true;
+  }
+
+  /**
+   * Rewind one Spine proxy's view to the first frame of its current animation.
+   * Pose-only; the authored playback state is untouched.
+   */
+  resetSpinePreview(nodeId: string): boolean {
+    const view = this.spineViews.get(nodeId);
+    if (!view) {
+      return false;
+    }
+    view.rewind();
+    this.stampSpineLayers(view);
+    return true;
+  }
+
+  /**
+   * Dispose the Spine view attached to a proxy (if any). Safe to call before the
+   * generic `disposeObject3D` walk, which then only sees the placeholder.
+   */
+  disposeSpineView(nodeId: string, visualRoot?: THREE.Object3D): void {
+    const view = this.spineViews.get(nodeId);
+    if (view) {
+      view.dispose();
+      this.spineViews.delete(nodeId);
+    }
+    if (visualRoot) {
+      delete visualRoot.userData.spineView;
+      visualRoot.userData.viewSignature = null;
+    }
+  }
+
+  /** Dispose the Spine view owned by a proxy root, resolving its nodeId. */
+  disposeSpineSkeleton2DVisual(visualRoot: THREE.Object3D): void {
+    const nodeId = visualRoot.userData.nodeId as string | undefined;
+    if (nodeId) {
+      this.disposeSpineView(nodeId, visualRoot);
+    }
   }
 
   createUIControl2DVisual(node: UIControl2D): THREE.Group {

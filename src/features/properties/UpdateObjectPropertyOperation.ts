@@ -337,6 +337,17 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       'axisStretchVertical',
       'tileScale',
       'tileOffset',
+      // SpineSkeleton2D
+      'skeletonPath',
+      'atlasPath',
+      'animation',
+      'skin',
+      'loop',
+      'isPlaying',
+      'timeScale',
+      'defaultMix',
+      'twoColorTint',
+      'previewInEditor',
     ].includes(propertyPath);
   }
 

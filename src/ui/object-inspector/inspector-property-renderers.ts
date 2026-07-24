@@ -35,6 +35,7 @@ const PROPERTY_GROUP_ORDER = [
   'Anchor',
   'Style',
   'Sprite',
+  'Spine',
   'Animation',
 ];
 const PROPERTY_GROUP_ORDER_INDEX = new Map(
@@ -1029,6 +1030,39 @@ export class InspectorPropertyRenderers {
             @model-drop=${(event: CustomEvent<{ event: DragEvent }>) =>
               this.host.onModelResourceDrop(prop.name, event.detail.event)}
           ></pix3-model-resource-editor>
+        </div>
+      `;
+    }
+
+    if (prop.type === 'boolean' && prop.ui?.editor === 'spine-preview') {
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <pix3-spine-preview-editor
+            .playing=${state.value === 'true'}
+            ?disabled=${readOnly}
+            @change=${(event: CustomEvent<{ playing: boolean }>) =>
+              this.host.applyPropertyChange(prop.name, event.detail.playing)}
+            @reset-preview=${() => this.host.onSpinePreviewReset()}
+          ></pix3-spine-preview-editor>
+        </div>
+      `;
+    }
+
+    if (prop.type === 'string' && prop.ui?.editor === 'file-resource') {
+      const extensions = prop.ui?.extensions ?? [];
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <pix3-file-resource-editor
+            .resourceUrl=${state.value}
+            .extensions=${extensions}
+            ?disabled=${readOnly}
+            @change=${(event: CustomEvent<{ url: string }>) =>
+              this.host.applyPropertyChange(prop.name, event.detail.url.trim())}
+            @file-drop=${(event: CustomEvent<{ event: DragEvent; extensions: string[] }>) =>
+              this.host.onFileResourceDrop(prop.name, event.detail.event, event.detail.extensions)}
+          ></pix3-file-resource-editor>
         </div>
       `;
     }

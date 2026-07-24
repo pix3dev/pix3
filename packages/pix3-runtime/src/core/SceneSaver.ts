@@ -9,6 +9,7 @@ import { Camera2D } from '../nodes/2D/Camera2D';
 import { Sprite2D } from '../nodes/2D/Sprite2D';
 import { TiledSprite2D } from '../nodes/2D/TiledSprite2D';
 import { AnimatedSprite2D } from '../nodes/2D/AnimatedSprite2D';
+import { SpineSkeleton2D } from '../nodes/2D/SpineSkeleton2D';
 import { ColorRect2D } from '../nodes/2D/ColorRect2D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
 import { UIControl2D } from '../nodes/2D/UI/UIControl2D';
@@ -432,6 +433,61 @@ export class SceneSaver {
           Math.round(node.anchor.x * 1000) / 1000,
           Math.round(node.anchor.y * 1000) / 1000,
         ];
+      }
+    } else if (node instanceof SpineSkeleton2D) {
+      if (node.skeletonPath) {
+        props.skeletonPath = node.skeletonPath;
+      } else {
+        delete props.skeletonPath;
+      }
+
+      if (node.atlasPath) {
+        props.atlasPath = node.atlasPath;
+      } else {
+        delete props.atlasPath;
+      }
+
+      if (node.texture) {
+        props.texture = { ...node.texture };
+      } else {
+        delete props.texture;
+      }
+      delete props.texturePath;
+
+      if (node.animation) {
+        props.animation = node.animation;
+      } else {
+        delete props.animation;
+      }
+
+      if (node.skin) {
+        props.skin = node.skin;
+      } else {
+        delete props.skin;
+      }
+
+      props.loop = node.loop;
+      props.isPlaying = node.isPlaying;
+      props.timeScale = node.timeScale;
+      props.defaultMix = node.defaultMix;
+      props.color = node.color;
+
+      if (node.twoColorTint) {
+        props.twoColorTint = true;
+      } else {
+        delete props.twoColorTint;
+      }
+
+      if (node.freeOnFinish) {
+        props.freeOnFinish = true;
+      } else {
+        delete props.freeOnFinish;
+      }
+
+      if (node.previewInEditor) {
+        props.previewInEditor = true;
+      } else {
+        delete props.previewInEditor;
       }
     } else if (node instanceof AnimatedSprite2D) {
       delete props.frames;

@@ -9,6 +9,12 @@ import { installRuntimeImportMap } from './core/runtime-import-map';
 
 installRuntimeImportMap();
 
+// Teach the runtime how to lazily resolve the optional Spine runtime (its chunk
+// is only fetched once a scene loads a SpineSkeleton2D asset).
+import { registerSpineModuleLoader } from './core/lazy-spine';
+
+registerSpineModuleLoader();
+
 // Register runtime services
 import { registerRuntimeServices } from './core/register-runtime-services';
 import { ServiceContainer } from './fw/di';

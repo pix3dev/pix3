@@ -3,6 +3,7 @@ import { Node2D } from '@pix3/runtime';
 import { Node3D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
+import { SpineSkeleton2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import { CanvasLayer2D } from '@pix3/runtime';
 import { Camera2D } from '@pix3/runtime';
@@ -38,6 +39,9 @@ const NODE_3D_COLOR = '#ff7f6cff'; // --presence-2 (coral)
 export function getNodeVisuals(node: NodeBase): { color: string; icon: string } {
   if (node instanceof TiledSprite2D) {
     return { color: NODE_2D_COLOR, icon: 'grid' };
+  }
+  if (node instanceof SpineSkeleton2D) {
+    return { color: NODE_2D_COLOR, icon: 'activity' };
   }
   if (node instanceof Sprite2D) {
     return { color: NODE_2D_COLOR, icon: 'image' };

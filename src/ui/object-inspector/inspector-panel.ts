@@ -36,6 +36,7 @@ import type {
   AnimationInspectorSnapshot,
 } from '@/services/animation/AnimationEditorService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
+import { SpineSkeleton2D } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
@@ -667,6 +668,30 @@ export class InspectorPanel extends ComponentBase {
     }
 
     void this.applyPropertyChange(propertyName, modelUrl);
+  }
+
+  /**
+   * Rewind the selected Spine skeleton to the first frame of its current
+   * animation. Pose-only and deliberately NOT an operation: like the animation
+   * timeline's scrub preview this is transient editor state, so it must not enter
+   * undo history or dirty the scene.
+   */
+  onSpinePreviewReset(): void {
+    const node = this.primaryNode;
+    if (!(node instanceof SpineSkeleton2D)) {
+      return;
+    }
+    node.resetToFirstFrame();
+    this.viewportService.resetSpinePreview(node.nodeId);
+  }
+
+  onFileResourceDrop(propertyName: string, event: DragEvent, extensions: string[]): void {
+    const fileUrl = this.resourcePreview.getDroppedFileResource(event, extensions);
+    if (!fileUrl) {
+      return;
+    }
+
+    void this.applyPropertyChange(propertyName, fileUrl);
   }
 
   onAnimationResourceDrop(propertyName: string, event: DragEvent): void {

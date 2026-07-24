@@ -114,6 +114,105 @@ A 2D image display node. Renders a textured quad that always faces the camera.
 
 ---
 
+### SpineSkeleton2D
+
+A Spine skeletal-animation node. Renders a skeleton exported from the
+[Spine editor](https://esotericsoftware.com/) in the 2D layer, with animations
+selectable in the Inspector and drivable from scripts.
+
+**Type String:** `SpineSkeleton2D`
+
+**Requires the optional Spine runtime.** `@esotericsoftware/spine-threejs` (`~4.3`)
+is an *optional* peer dependency: pix3 declares the module contract and the host
+registers a loader for it (`setSpineModuleLoader`), so projects that never use
+Spine neither install nor download it. The editor and the exported player register
+it automatically; a consumer project that places a `SpineSkeleton2D` adds:
+
+```ts
+import { setSpineModuleLoader } from '@pix3/runtime';
+
+setSpineModuleLoader(() => import('@esotericsoftware/spine-threejs'));
+```
+
+Using the official Spine Runtimes requires a Spine Editor license (Spine Runtimes
+License). The skeleton export must come from a Spine version matching the installed
+runtime's minor (4.3 export ⇄ 4.3 runtime); a mismatch surfaces as a load error
+naming both files.
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `skeletonPath` | string | null | Skeleton export, `.json` or `.skel` (res://) |
+| `atlasPath` | string | null | Atlas export, `.atlas` (res://) |
+| `texture` | texture ref | null | Optional page-image override; single-page atlases only |
+| `animation` | string / select | '' | Animation to play; a dropdown of real names once loaded |
+| `loop` | boolean | true | Loop the authored animation |
+| `isPlaying` | boolean | true | Advance time in play mode |
+| `skin` | string / select | '' | Skin to apply; empty = the skeleton's default |
+| `timeScale` | number | 1 | Playback speed multiplier |
+| `defaultMix` | number | 0 | Crossfade duration between animations, seconds |
+| `color` | color | #ffffff | Tint (applied through spine's skeleton color) |
+| `twoColorTint` | boolean | false | Enable tint-black rendering (dark-tint exports) |
+| `freeOnFinish` | boolean | false | `queueFree()` when a non-looping animation ends |
+| `previewInEditor` | boolean | false | Animate in the editor viewport. **Off by default** — a placed skeleton holds its first frame; the Inspector's Play/Reset buttons drive it |
+
+**Script API:**
+
+```ts
+const hero = scene.getNode<SpineSkeleton2D>('Hero');
+
+hero.play('run', { loop: true, mixDuration: 0.2 });
+hero.queue('idle', { loop: true, delay: 0.5 });   // after the current entry
+hero.stop({ mixDuration: 0.25 });                 // mix back to the setup pose
+hero.pause();
+hero.resume();
+hero.setSkin('blue');
+hero.setMix('run', 'idle', 0.3);                  // per-pair crossfade
+hero.setTimeScale(1.5);
+
+hero.getAnimationNames();     // ['idle', 'run', …]
+hero.getSkinNames();
+hero.getCurrentAnimation();   // animation on track 0, or null
+hero.getSetupBounds();        // setup-pose AABB, or null before load
+hero.isLoaded;
+
+hero.resetToFirstFrame();     // rewind the current animation (pose only)
+```
+
+In the Inspector the **Animation** group shows the animation and skin as dropdowns
+of the loaded skeleton's real names, plus an **Editor Preview** row: `Play`/`Pause`
+toggles `previewInEditor` (an ordinary undoable edit) and `Reset` rewinds to the
+first frame. Reset is transient pose-only state — it never enters undo history and
+never dirties the scene, matching how the animation timeline's scrub preview
+behaves.
+
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `animation-started` | `(name, trackIndex)` | A track entry became current |
+| `animation-finished` | `(name, trackIndex)` | A non-looping animation ended (also flips `isPlaying` off) |
+| `animation-looped` | `(name, trackIndex)` | A looping animation completed a loop |
+| `spine-event` | `(name, { int, float, string }, trackIndex)` | A keyed animation event fired |
+
+**Usage Notes:**
+- Sizing comes from the node transform (`scale`), not a width/height pair — the
+  skeleton is authored in its own pixel units. The parse-time skeleton scale stays
+  at 1 so all instances share one cached `SkeletonData`.
+- The skeleton data and atlas page textures are shared across every node (and the
+  editor viewport proxy) that references the same files; each node owns only its
+  own `Skeleton`/`AnimationState`.
+- Atlas pages are loaded as standalone textures and are excluded from the
+  pre-launch texture atlas — their UVs come from the `.atlas` file. For the same
+  reason a Spine skeleton does not join the 2D quad batcher.
+- Shader effects (`core:adjust`, …) are not supported: spine creates its batch
+  materials dynamically. Use `color` / `twoColorTint` for tinting.
+- CPU cost is per skeleton per frame (geometry is rebuilt on the CPU). Budget for
+  units-to-dozens of visible skeletons, not hundreds.
+
+---
+
 ### Button2D
 
 An interactive button control for 2D user interfaces. Responds to pointer clicks and provides visual feedback.
@@ -774,6 +873,7 @@ filter).
 | Node3D | position (Vector3), rotation (Euler), scale (Vector3) |
 | Layout2D | width, height, resolutionPreset |
 | Sprite2D | texturePath, width, height, color |
+| SpineSkeleton2D | skeletonPath, atlasPath, animation, loop, skin, timeScale, defaultMix (optional Spine runtime) |
 | Camera2D | priority, zoom, offset, followTargetId, limitsEnabled, shakeAmplitude |
 | CanvasLayer2D | width, height (fixed HUD overlay; renders after post) |
 | Camera3D | projection, fov, near, far |

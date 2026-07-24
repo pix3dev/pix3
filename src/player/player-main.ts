@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { installRuntimeImportMap } from '@/core/runtime-import-map';
 import { ensureRapierLoaded } from '@/core/lazy-rapier';
+import { registerSpineModuleLoader } from '@/core/lazy-spine';
 import {
   AssetLoader,
   AudioService,
@@ -29,6 +30,7 @@ import { PreviewPlayerClient, type PreviewConnectionState } from './PreviewPlaye
 import { RemoteResourceManager } from './RemoteResourceManager';
 
 installRuntimeImportMap();
+registerSpineModuleLoader();
 
 interface PlayerUi {
   readonly app: HTMLElement;

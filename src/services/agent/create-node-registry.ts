@@ -4,6 +4,7 @@ import type { CreateNodeCommandPayload } from '@/features/scene/CreateNodeBaseCo
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { CreateTiledSprite2DCommand } from '@/features/scene/CreateTiledSprite2DCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
+import { CreateSpineSkeleton2DCommand } from '@/features/scene/CreateSpineSkeleton2DCommand';
 import { CreateColorRect2DCommand } from '@/features/scene/CreateColorRect2DCommand';
 import { CreateLabel2DCommand } from '@/features/scene/CreateLabel2DCommand';
 import { CreateButton2DCommand } from '@/features/scene/CreateButton2DCommand';
@@ -71,6 +72,15 @@ const REGISTRY: Record<string, { readonly label: string; readonly factory: Creat
       label: 'AnimatedSprite2D',
       factory: o =>
         new CreateAnimatedSprite2DCommand({
+          nodeName: o.name,
+          position: o.position,
+          parentNodeId: o.parentNodeId,
+        }),
+    },
+    spineskeleton2d: {
+      label: 'SpineSkeleton2D',
+      factory: o =>
+        new CreateSpineSkeleton2DCommand({
           nodeName: o.name,
           position: o.position,
           parentNodeId: o.parentNodeId,

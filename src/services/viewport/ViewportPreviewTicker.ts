@@ -3,6 +3,7 @@ import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
+import { SpineSkeleton2D } from '@pix3/runtime';
 import type {
   AssetLoader,
   EditorAppearanceOverride,
@@ -25,6 +26,8 @@ export interface ViewportPreviewTickerDeps {
   findNodeById(nodeId: string, nodes: NodeBase[]): NodeBase | null;
   get2DVisualRoot(nodeId: string): THREE.Group | undefined;
   getAssetLoader(): AssetLoader;
+  /** Advances one Spine proxy's own view; false when it has not loaded yet. */
+  advanceSpinePreview(nodeId: string, dt: number): boolean;
   requestRender(): void;
 }
 
@@ -38,6 +41,7 @@ export interface ViewportPreviewTickerDeps {
 export class ViewportPreviewTicker {
   private activeParticlePreviewCount = 0;
   private activeComponentPreviewCount = 0;
+  private activeSpinePreviewCount = 0;
 
   /**
    * Editor appearance overrides a script pushed via `setAppearanceOverride`,
@@ -85,6 +89,47 @@ export class ViewportPreviewTicker {
 
     visit(sceneGraph.rootNodes);
     this.activeParticlePreviewCount = active;
+  }
+
+  /**
+   * Advance the editor preview for SpineSkeleton2D nodes that opted in via
+   * `previewInEditor`. The viewport draws proxy visuals, not the runtime nodes, so
+   * this drives each proxy's own Spine view (the node's view stays at its authored
+   * pose until play mode ticks it).
+   */
+  tickSpine(dt: number): void {
+    if (appState.ui.isPlaying) {
+      this.activeSpinePreviewCount = 0;
+      return;
+    }
+
+    if (dt <= 0) {
+      return;
+    }
+
+    const sceneGraph = this.deps.getActiveSceneGraph();
+    if (!sceneGraph) {
+      this.activeSpinePreviewCount = 0;
+      return;
+    }
+
+    let active = 0;
+    const visit = (nodes: NodeBase[]) => {
+      for (const node of nodes) {
+        if (node instanceof SpineSkeleton2D && node.previewInEditor && node.isPlaying) {
+          if (this.deps.advanceSpinePreview(node.nodeId, dt)) {
+            active += 1;
+          }
+        }
+
+        if (node.children.length > 0) {
+          visit(node.children);
+        }
+      }
+    };
+
+    visit(sceneGraph.rootNodes);
+    this.activeSpinePreviewCount = active;
   }
 
   tickComponents(dt: number): void {
@@ -150,7 +195,11 @@ export class ViewportPreviewTicker {
    * tickers on every rendered frame.
    */
   hasActivePreview(): boolean {
-    return this.activeParticlePreviewCount > 0 || this.activeComponentPreviewCount > 0;
+    return (
+      this.activeParticlePreviewCount > 0 ||
+      this.activeComponentPreviewCount > 0 ||
+      this.activeSpinePreviewCount > 0
+    );
   }
 
   /**
