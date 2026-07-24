@@ -246,7 +246,11 @@ export class TextureAtlasService {
       try {
         const text = await this.fs.readTextFile(path);
         for (const pageName of parseSpineAtlasPageNames(text)) {
-          ineligible.add(`res://${resolveSpinePagePath(path, pageName)}`);
+          // A page name may itself be absolute/schemed (hand-edited atlas), which
+          // resolveSpinePagePath passes through — so normalize instead of blindly
+          // prefixing, or the entry would read `res://res://…` and match nothing.
+          const pagePath = resolveSpinePagePath(path, pageName);
+          ineligible.add(`res://${stripRes(pagePath)}`);
         }
       } catch {
         // Unreadable atlas — nothing to exclude.

@@ -146,13 +146,15 @@ function createSpineModuleStub(): {
     AtlasAttachmentLoader: class {},
     SkeletonJson: class {
       scale = 1;
-      readSkeletonData(): SpineSkeletonData {
+      readSkeletonData(source: unknown): SpineSkeletonData {
+        calls.push(`json:${typeof source}:${String(source).slice(0, 12)}`);
         return skeletonData;
       }
     },
     SkeletonBinary: class {
       scale = 1;
-      readSkeletonData(): SpineSkeletonData {
+      readSkeletonData(source: unknown): SpineSkeletonData {
+        calls.push(`binary:${source instanceof Uint8Array ? 'u8' : typeof source}`);
         return skeletonData;
       }
     },
@@ -234,6 +236,17 @@ describe('SpineSkeleton2D playback', () => {
 
     expect(first).toBe(second);
     expect(assetLoader.getCachedSpineAsset(REQUEST)).toBe(first);
+  });
+
+  it('hands JSON exports to SkeletonJson as raw text and .skel to SkeletonBinary', async () => {
+    // `SkeletonJson.readSkeletonData` takes `string | object` and parses a string
+    // itself (spine-core 4.3), so the loader passes `readText` through untouched;
+    // the binary reader needs a Uint8Array.
+    await assetLoader.loadSpineAsset(REQUEST);
+    expect(stub.calls).toContain(`json:string:${SKELETON_JSON.slice(0, 12)}`);
+
+    await assetLoader.loadSpineAsset({ ...REQUEST, skeletonPath: 'res://assets/spine/hero.skel' });
+    expect(stub.calls).toContain('binary:u8');
   });
 
   it('rejects with actionable guidance when no Spine runtime is registered', async () => {

@@ -359,7 +359,9 @@ export class ProjectBuildService {
       try {
         const contents = await this.fs.readTextFile(this.normalizeResourcePath(atlasPath));
         for (const pageName of parseSpineAtlasPageNames(contents)) {
-          files.add(resolveSpinePagePath(atlasPath, pageName));
+          // Page names can be absolute/schemed, which resolveSpinePagePath passes
+          // through — normalize so the set stays uniformly scheme-less.
+          files.add(this.normalizeResourcePath(resolveSpinePagePath(atlasPath, pageName)));
         }
       } catch {
         warnings.push(`Failed to scan Spine atlas for page images: ${atlasPath}`);
