@@ -165,6 +165,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
       'tree-node__content--prefab': !!this.node.isPrefabNode,
       'tree-node__content--prefab-root': !!this.node.isPrefabRoot,
       'tree-node__content--prefab-child': !!this.node.isPrefabChild,
+      'tree-node__content--hidden': !this.isVisible,
     });
 
     const expanderClasses = classMap({

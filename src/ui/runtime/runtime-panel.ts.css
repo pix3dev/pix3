@@ -179,6 +179,10 @@ pix3-runtime-panel .runtime-row.is-match .runtime-type {
   color: var(--accent);
 }
 
+pix3-runtime-panel .runtime-row.is-hidden {
+  opacity: 0.5;
+}
+
 pix3-runtime-panel .runtime-twisty {
   flex: 0 0 auto;
   width: 0.9rem;

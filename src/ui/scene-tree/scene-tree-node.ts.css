@@ -309,6 +309,12 @@ pix3-scene-tree-node {
   opacity: 0.8;
 }
 
+/* Nodes toggled off (visible=false) render dimmed so hidden content reads as
+   secondary at a glance, matching the eye-off toggle state. */
+.tree-node__content--hidden {
+  opacity: 0.5;
+}
+
 .tree-node__prefab-badge {
   font-size: 0.7rem;
   opacity: 0.85;

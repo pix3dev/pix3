@@ -615,7 +615,7 @@ export class RuntimePanel extends ComponentBase {
         <div
           class="runtime-row ${this.selectedUuid === node.uuid ? 'is-selected' : ''} ${matched
             ? 'is-match'
-            : ''}"
+            : ''} ${!node.visible ? 'is-hidden' : ''}"
           style=${`padding-left: ${level * 14 + 6}px`}
           role="treeitem"
           @click=${() => this.onRowClick(node)}

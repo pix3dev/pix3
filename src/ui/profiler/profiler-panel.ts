@@ -1,5 +1,7 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { svg } from 'lit';
+import { subscribe } from 'valtio/vanilla';
+import { appState } from '@/state';
 import {
   type ProfilerAudioSnapshot,
   type ProfilerFrameImpactEntrySnapshot,
@@ -89,6 +91,11 @@ export class ProfilerPanel extends ComponentBase {
   /** True once the user picked a source explicitly; disables auto-switching. */
   private sourceManuallySelected = false;
 
+  @state()
+  private sceneName: string | null = this.readSceneName();
+
+  private disposeSceneSubscription?: () => void;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.disposeSubscription = this.profilerSessionService.subscribe(snapshot => {
@@ -102,6 +109,9 @@ export class ProfilerPanel extends ComponentBase {
       this.syncSelectedSource();
       this.requestUpdate();
     });
+    this.disposeSceneSubscription = subscribe(appState.scenes, () => {
+      this.sceneName = this.readSceneName();
+    });
   }
 
   disconnectedCallback(): void {
@@ -109,9 +119,20 @@ export class ProfilerPanel extends ComponentBase {
     this.disposeSubscription = undefined;
     this.disposeTelemetrySubscription?.();
     this.disposeTelemetrySubscription = undefined;
+    this.disposeSceneSubscription?.();
+    this.disposeSceneSubscription = undefined;
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
     super.disconnectedCallback();
+  }
+
+  private readSceneName(): string | null {
+    const sceneId = appState.scenes.activeSceneId;
+    if (!sceneId) {
+      return null;
+    }
+
+    return appState.scenes.descriptors[sceneId]?.name ?? null;
   }
 
   protected firstUpdated(): void {
@@ -129,6 +150,11 @@ export class ProfilerPanel extends ComponentBase {
     return html`
       <pix3-panel panel-description=${snapshot.status === 'idle' ? idleCopy : ''}>
         <div class="profiler-root">
+          ${this.sceneName
+            ? html`<div class="profiler-grid">
+                ${this.renderMetricRow('Scene', this.sceneName)}
+              </div>`
+            : null}
           ${this.renderSourceSwitcher()}
           ${snapshot.status === 'idle'
             ? html`<p class="profiler-idle">${idleCopy}</p>`
