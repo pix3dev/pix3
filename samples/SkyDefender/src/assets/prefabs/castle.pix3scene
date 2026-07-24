@@ -85,6 +85,38 @@ root:
               targetGroup: enemy
               tracerSpeed: 420
         children:
+          - id: turret-tr2-tracer
+            type: Sprite2D
+            name: Turret Tracer
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/enemy/weapons/bammo.png
+              width: 7
+              height: 7
+              initiallyVisible: false
+              transform:
+                position: [3.7160304664183457, -10.404885305971305]
+                scale: [1, 1]
+                rotation: -0
+            children: []
+          - id: turret-tr2-barrel
+            type: Sprite2D
+            name: Turret Barrel
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/castle/castle_gun.png
+              width: 24
+              height: 9
+              transform:
+                position: [3.8719130659805217, -10.01775772859348]
+                scale: [1.4, 1.4]
+                rotation: -0
+              anchor:
+                - 0.2
+                - 0.5
+            children: []
           - id: turret-tr2-base
             type: Sprite2D
             name: Turret Base
@@ -98,35 +130,6 @@ root:
                 position: [0, -10]
                 scale: [1.4, 1.4]
                 rotation: 0
-            children: []
-          - id: turret-tr2-tracer
-            type: Sprite2D
-            name: Turret Tracer
-            properties:
-              texture:
-                type: texture
-                url: res://src/assets/textures/enemy/weapons/bammo.png
-              width: 7
-              height: 7
-              initiallyVisible: false
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-            children: []
-          - id: turret-tr2-barrel
-            type: Sprite2D
-            name: Turret Barrel
-            properties:
-              texture:
-                type: texture
-                url: res://src/assets/textures/castle/castle_gun.png
-              width: 24
-              height: 9
-              transform:
-                position: [0, 5]
-                scale: [1.4, 1.4]
-                rotation: -0
             children: []
       - id: turret-tr1
         type: Group2D
@@ -196,6 +199,57 @@ root:
                 scale: [1, 1]
                 rotation: -0
             children: []
+      - id: turret-aa
+        type: Group2D
+        name: Turret AA
+        properties:
+          width: 36
+          height: 36
+          initiallyVisible: false
+          transform:
+            position: [-251.85273028541692, 169.292353660814]
+            scale: [1, 1]
+            rotation: -0
+        components:
+          - id: turret-aa-logic
+            type: user:AutoTurret
+            enabled: true
+            config:
+              damage: 14
+              periodSec: 1.4
+              range: 330
+              targetGroup: enemy
+              tracerSpeed: 480
+        children:
+          - id: turret-aa-barrel
+            type: Sprite2D
+            name: Turret Barrel
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/castle/castle_gun.png
+              width: 24
+              height: 9
+              transform:
+                position: [0, 5]
+                scale: [1.6, 1.6]
+                rotation: 0
+            children: []
+          - id: turret-aa-tracer
+            type: Sprite2D
+            name: Turret Tracer
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/enemy/weapons/bammo.png
+              width: 7
+              height: 7
+              initiallyVisible: false
+              transform:
+                position: [-9.312777977889539, 5.230458263960571]
+                scale: [1, 1]
+                rotation: 0
+            children: []
       - id: floor-2
         type: Sprite2D
         name: Castle Floor 2
@@ -249,6 +303,8 @@ root:
         properties:
           width: 80
           height: 60
+          initiallyVisible: true
+          visible: false
           transform:
             position: [-273.5798863010342, -30.12587578722908]
             scale: [1, 1]
@@ -447,71 +503,6 @@ root:
               visible: false
               transform:
                 position: [6.974570648461508, 4.780623803530723]
-                scale: [1, 1]
-                rotation: 0
-            children: []
-      - id: turret-aa
-        type: Group2D
-        name: Turret AA
-        properties:
-          width: 36
-          height: 36
-          initiallyVisible: false
-          transform:
-            position: [-136, 212]
-            scale: [1, 1]
-            rotation: 0
-        components:
-          - id: turret-aa-logic
-            type: user:AutoTurret
-            enabled: true
-            config:
-              damage: 14
-              periodSec: 1.4
-              range: 330
-              targetGroup: enemy
-              tracerSpeed: 480
-        children:
-          - id: turret-aa-base
-            type: Sprite2D
-            name: Turret Base
-            properties:
-              texture:
-                type: texture
-                url: res://src/assets/textures/castle/castle_gun_support.png
-              width: 9
-              height: 27
-              transform:
-                position: [0, -10]
-                scale: [1.6, 1.6]
-                rotation: 0
-            children: []
-          - id: turret-aa-barrel
-            type: Sprite2D
-            name: Turret Barrel
-            properties:
-              texture:
-                type: texture
-                url: res://src/assets/textures/castle/castle_gun.png
-              width: 24
-              height: 9
-              transform:
-                position: [0, 5]
-                scale: [1.6, 1.6]
-                rotation: 0
-            children: []
-          - id: turret-aa-tracer
-            type: Sprite2D
-            name: Turret Tracer
-            properties:
-              texture:
-                type: texture
-                url: res://src/assets/textures/enemy/weapons/bammo.png
-              width: 7
-              height: 7
-              initiallyVisible: false
-              transform:
-                position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
             children: []

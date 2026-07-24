@@ -606,9 +606,14 @@ export class ViewportRendererService {
     this.disposers.push(unsubscribeSelection);
 
     // Subscribe to hierarchy changes to detect node structure mutations
-    // This handles cases where operations affect node structure (e.g., adding/removing nodes)
+    // (reparent/drag, add, remove, undo/redo). These reconcile the proxy visuals
+    // INCREMENTALLY rather than tearing the scene down and rebuilding it: a full
+    // rebuild re-uploads every sprite's texture asynchronously (the "white flash")
+    // and snaps the 2D camera back to the last saved pan. Reconciling keeps every
+    // surviving node's proxy — and its texture — in place and never moves the camera.
     const unsubscribeHierarchies = subscribe(appState.scenes.hierarchies, () => {
-      this.syncSceneContent();
+      this.reconcileSceneContent();
+      this.requestRender();
     });
     this.disposers.push(unsubscribeHierarchies);
 
@@ -3337,6 +3342,148 @@ export class ViewportRendererService {
     }
   }
 
+  /**
+   * Incrementally reconcile the editor's proxy visuals with the scene graph after
+   * a structural change (reparent/drag, add, remove, undo/redo) — WITHOUT the full
+   * teardown that {@link syncSceneContent} performs.
+   *
+   * The full rebuild disposes every 2D proxy and recreates it, which re-reads each
+   * sprite's blob and re-uploads its texture asynchronously; during that round-trip
+   * every sprite reverts to its blank placeholder material (the "white flash").
+   * Reconciling instead keeps every surviving node's proxy — and its already-
+   * uploaded texture — in place: only removed nodes are disposed, only new nodes
+   * are created, and reparented nodes' proxies are re-attached under their new
+   * parent visual. It deliberately never restores the 2D camera, so a structural
+   * edit never moves the viewport (camera restore belongs to scene switching).
+   */
+  private reconcileSceneContent(): void {
+    try {
+      const activeSceneId = appState.scenes.activeSceneId;
+      if (!this.scene || !activeSceneId) {
+        return;
+      }
+
+      const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
+      if (!sceneGraph) {
+        return;
+      }
+
+      // Snapshot every live node id (and its node) in the current graph.
+      const liveNodes = new Map<string, NodeBase>();
+      const collect = (nodes: readonly NodeBase[]) => {
+        for (const node of nodes) {
+          liveNodes.set(node.nodeId, node);
+          if (node.children.length > 0) {
+            collect(node.children);
+          }
+        }
+      };
+      collect(sceneGraph.rootNodes);
+
+      // 1. Dispose proxies + 3D content for nodes that no longer exist.
+      this.disposeRemovedNodeContent(liveNodes);
+
+      // 2. Ensure every live node has a proxy attached under the correct parent,
+      //    reusing existing proxies (no texture reload → no flash).
+      for (const root of sceneGraph.rootNodes) {
+        this.reconcileNodeProxy(root, undefined);
+      }
+
+      // 3. Node icons (3D camera/light/particles markers) draw from preloaded
+      //    shared textures, so a clear+rebuild here is flash-free.
+      this.adornments.clearNodeIcons();
+      this.adornments.buildNodeIcons(sceneGraph.rootNodes);
+
+      this.syncLighting();
+      this.updateSelection();
+    } catch (err) {
+      console.error('[ViewportRenderer] Error reconciling scene content:', err);
+    }
+  }
+
+  /**
+   * Dispose the 2D proxy visuals (and stale 3D content) belonging to nodes that
+   * are no longer present in the scene graph. Called from {@link reconcileSceneContent}.
+   */
+  private disposeRemovedNodeContent(liveNodes: Map<string, NodeBase>): void {
+    const prune = (
+      map: Map<string, THREE.Object3D>,
+      beforeDispose?: (visual: THREE.Object3D) => void
+    ) => {
+      for (const [nodeId, visual] of map) {
+        if (liveNodes.has(nodeId)) {
+          continue;
+        }
+        if (visual.parent) {
+          visual.parent.remove(visual);
+        }
+        beforeDispose?.(visual);
+        this.disposeObject3D(visual);
+        map.delete(nodeId);
+      }
+    };
+
+    prune(this.proxyRegistry.group2DVisuals);
+    prune(this.proxyRegistry.animatedSprite2DVisuals, visual =>
+      this.proxyRegistry.disposeAnimatedSprite2DTexture(visual)
+    );
+    prune(this.proxyRegistry.sprite2DVisuals);
+    prune(this.proxyRegistry.colorRect2DVisuals);
+    prune(this.proxyRegistry.tiledSprite2DVisuals);
+    prune(this.proxyRegistry.uiControl2DVisuals);
+
+    // Drop animation mixers for removed MeshInstance nodes.
+    for (const [nodeId, mixer] of this.animationMixers) {
+      if (!liveNodes.has(nodeId)) {
+        mixer.stopAllAction();
+        this.animationMixers.delete(nodeId);
+      }
+    }
+
+    // Detach any root-level 3D objects whose node was removed. (Nested 3D nodes
+    // are the same THREE objects as the runtime nodes, so a removed subtree has
+    // already been detached from the graph by the operation.)
+    if (this.scene) {
+      const stale3D: THREE.Object3D[] = [];
+      for (const child of this.scene.children) {
+        if (child instanceof Node3D && !liveNodes.has(child.nodeId)) {
+          stale3D.push(child);
+        }
+      }
+      for (const obj of stale3D) {
+        this.scene.remove(obj);
+      }
+    }
+  }
+
+  /**
+   * Ensure the proxy for a single node exists and is attached under the correct
+   * parent visual, reusing an existing proxy when present (a reparent just moves
+   * the existing visual — `THREE.Object3D.add` detaches it from its old parent).
+   * Recurses into children with the resolved 2D visual root.
+   */
+  private reconcileNodeProxy(node: NodeBase, parent2DVisualRoot?: THREE.Object3D): void {
+    if (!this.scene) return;
+
+    this.ensure3DNodeContent(node);
+
+    let visualRoot = this.getExisting2DVisual(node.nodeId);
+    if (visualRoot) {
+      // Re-attach under the current parent if the node was reparented.
+      const desiredParent = parent2DVisualRoot ?? this.scene;
+      if (visualRoot.parent !== desiredParent) {
+        desiredParent.add(visualRoot);
+      }
+    } else {
+      visualRoot = this.create2DNodeProxy(node, parent2DVisualRoot);
+    }
+
+    const current2DVisualRoot = visualRoot ?? parent2DVisualRoot;
+    for (const child of node.children) {
+      this.reconcileNodeProxy(child, current2DVisualRoot);
+    }
+  }
+
   private refreshSceneNodeData(): void {
     const sceneGraph = this.sceneManager.getActiveSceneGraph();
     if (!sceneGraph) {
@@ -3364,13 +3511,30 @@ export class ViewportRendererService {
   private processNodeForRendering(node: NodeBase, parent2DVisualRoot?: THREE.Object3D): void {
     if (!this.scene) return;
 
-    // Add 3D nodes to the scene with layer 0
+    this.ensure3DNodeContent(node);
+    const visualRoot = this.create2DNodeProxy(node, parent2DVisualRoot);
+    const current2DVisualRoot = visualRoot ?? parent2DVisualRoot;
+
+    for (const child of node.children) {
+      this.processNodeForRendering(child, current2DVisualRoot);
+    }
+  }
+
+  /**
+   * Ensure the 3D-side content for a single node exists: root Node3D objects are
+   * added to the scene, MeshInstance animation mixers are created, and 3D texture
+   * maps are synced. Idempotent — safe to call for an already-processed node
+   * (scene.add is guarded by `!node.parent`, mixers by presence, and the 3D
+   * texture syncs are path-guarded so they never reload an unchanged texture).
+   */
+  private ensure3DNodeContent(node: NodeBase): void {
+    if (!this.scene) return;
+
     if (node instanceof Node3D && !node.parent) {
       this.scene.add(node);
       node.layers.set(LAYER_3D); // 3D nodes use layer 0
     }
 
-    // Create AnimationMixer for MeshInstance nodes that have animations
     if (node instanceof MeshInstance && node.animations.length > 0) {
       if (!this.animationMixers.has(node.nodeId)) {
         const mixer = new THREE.AnimationMixer(node);
@@ -3389,56 +3553,71 @@ export class ViewportRendererService {
     if (node instanceof GeometryMesh) {
       this.contentSync3D.syncGeometryMeshMap(node);
     }
+  }
 
-    let current2DVisualRoot = parent2DVisualRoot;
+  /**
+   * Create the editor proxy visual for a single 2D node (when it is one of the
+   * 2D node types), register it, and attach it under `parent2DVisualRoot` (or the
+   * scene root). Returns the node's own visual root when it establishes one (so
+   * children nest under it), otherwise `undefined`. Non-recursive — callers walk
+   * the node's children themselves.
+   */
+  private create2DNodeProxy(
+    node: NodeBase,
+    parent2DVisualRoot?: THREE.Object3D
+  ): THREE.Object3D | undefined {
+    if (!this.scene) return undefined;
+    const parent = parent2DVisualRoot ?? this.scene;
 
     if (node instanceof Group2D) {
       const visualRoot = this.proxyRegistry.createGroup2DVisual(node);
       this.proxyRegistry.group2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     } else if (node instanceof AnimatedSprite2D) {
       const visualRoot = this.proxyRegistry.createAnimatedSprite2DVisual(node);
       this.proxyRegistry.animatedSprite2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     } else if (node instanceof Sprite2D) {
       const visualRoot = this.proxyRegistry.createSprite2DVisual(node);
       this.proxyRegistry.sprite2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     } else if (node instanceof ColorRect2D) {
       const visualRoot = this.proxyRegistry.createColorRect2DVisual(node);
       this.proxyRegistry.colorRect2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     } else if (node instanceof TiledSprite2D) {
       const visualRoot = this.proxyRegistry.createTiledSprite2DVisual(node);
       this.proxyRegistry.tiledSprite2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     } else if (node instanceof UIControl2D) {
       const visualRoot = this.proxyRegistry.createUIControl2DVisual(node);
       this.proxyRegistry.uiControl2DVisuals.set(node.nodeId, visualRoot);
-
-      const parent = parent2DVisualRoot ?? this.scene;
       parent.add(visualRoot);
-      current2DVisualRoot = visualRoot;
+      return visualRoot;
     }
 
-    for (const child of node.children) {
-      this.processNodeForRendering(child, current2DVisualRoot);
-    }
+    return undefined;
+  }
+
+  /**
+   * Look up an existing 2D proxy visual root for a node across every proxy map.
+   * Returns `undefined` for nodes that have no 2D proxy (3D nodes, plain
+   * containers).
+   */
+  private getExisting2DVisual(nodeId: string): THREE.Object3D | undefined {
+    return (
+      this.proxyRegistry.group2DVisuals.get(nodeId) ??
+      this.proxyRegistry.animatedSprite2DVisuals.get(nodeId) ??
+      this.proxyRegistry.sprite2DVisuals.get(nodeId) ??
+      this.proxyRegistry.colorRect2DVisuals.get(nodeId) ??
+      this.proxyRegistry.tiledSprite2DVisuals.get(nodeId) ??
+      this.proxyRegistry.uiControl2DVisuals.get(nodeId)
+    );
   }
 
   private syncAnimatedSprite2DVisuals(): void {
