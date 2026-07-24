@@ -232,6 +232,16 @@ export class SpineSkeleton2D extends Node2D implements InstancePropertySchemaPro
     this.view?.stop(options);
   }
 
+  /**
+   * Rewinds to the first frame of the current animation (setup pose when no
+   * animation is set). Pose-only: it does not touch {@link isPlaying} or any
+   * other authored property, so it is safe to call outside an operation — the
+   * editor's "reset" affordance uses it as transient preview state.
+   */
+  resetToFirstFrame(trackIndex = 0): void {
+    this.view?.rewind(trackIndex);
+  }
+
   /** Pauses time advance while keeping the current pose. */
   pause(): void {
     this.isPlaying = false;
@@ -462,9 +472,11 @@ export class SpineSkeleton2D extends Node2D implements InstancePropertySchemaPro
           name: 'previewInEditor',
           type: 'boolean',
           ui: {
-            label: 'Preview in Editor',
-            description: 'Animate in the editor viewport instead of showing a single pose',
+            label: 'Editor Preview',
+            description:
+              'Animate in the editor viewport instead of holding a single pose. Playback is off by default; Reset rewinds to the first frame.',
             group: 'Animation',
+            editor: 'spine-preview',
           },
           getValue: node => (node as SpineSkeleton2D).previewInEditor,
           setValue: (node, value) => {

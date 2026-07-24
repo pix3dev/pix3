@@ -28,7 +28,6 @@ root:
           timeScale: 1
           defaultMix: 0.15
           color: "#ffffff"
-          previewInEditor: true
           transform:
             position: [0, -200]
             rotation: 0

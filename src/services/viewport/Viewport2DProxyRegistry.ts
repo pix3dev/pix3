@@ -1423,6 +1423,20 @@ export class Viewport2DProxyRegistry {
   }
 
   /**
+   * Rewind one Spine proxy's view to the first frame of its current animation.
+   * Pose-only; the authored playback state is untouched.
+   */
+  resetSpinePreview(nodeId: string): boolean {
+    const view = this.spineViews.get(nodeId);
+    if (!view) {
+      return false;
+    }
+    view.rewind();
+    this.stampSpineLayers(view);
+    return true;
+  }
+
+  /**
    * Dispose the Spine view attached to a proxy (if any). Safe to call before the
    * generic `disposeObject3D` walk, which then only sees the placeholder.
    */

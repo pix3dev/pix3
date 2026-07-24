@@ -155,7 +155,7 @@ naming both files.
 | `color` | color | #ffffff | Tint (applied through spine's skeleton color) |
 | `twoColorTint` | boolean | false | Enable tint-black rendering (dark-tint exports) |
 | `freeOnFinish` | boolean | false | `queueFree()` when a non-looping animation ends |
-| `previewInEditor` | boolean | false | Animate in the editor viewport, not just play mode |
+| `previewInEditor` | boolean | false | Animate in the editor viewport. **Off by default** — a placed skeleton holds its first frame; the Inspector's Play/Reset buttons drive it |
 
 **Script API:**
 
@@ -176,7 +176,16 @@ hero.getSkinNames();
 hero.getCurrentAnimation();   // animation on track 0, or null
 hero.getSetupBounds();        // setup-pose AABB, or null before load
 hero.isLoaded;
+
+hero.resetToFirstFrame();     // rewind the current animation (pose only)
 ```
+
+In the Inspector the **Animation** group shows the animation and skin as dropdowns
+of the loaded skeleton's real names, plus an **Editor Preview** row: `Play`/`Pause`
+toggles `previewInEditor` (an ordinary undoable edit) and `Reset` rewinds to the
+first frame. Reset is transient pose-only state — it never enters undo history and
+never dirties the scene, matching how the animation timeline's scrub preview
+behaves.
 
 **Signals:**
 

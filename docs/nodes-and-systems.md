@@ -93,6 +93,10 @@ hero.queue('idle', { loop: true });
 hero.setSkin('blue');
 ```
 
+Editor playback is **opt-in**: a placed skeleton holds its first frame until you
+press Play on the Inspector's Editor Preview row (`previewInEditor`), and Reset
+rewinds to that frame without touching the authored state.
+
 Signals: `animation-started`, `animation-finished` (non-looping end — pair with
 `freeOnFinish: true` for one-shot VFX), `animation-looped`, and `spine-event` for
 keyed animation events. Sizing is the node transform, not width/height. Spine is an

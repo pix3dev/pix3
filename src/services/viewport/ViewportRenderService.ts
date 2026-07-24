@@ -2970,6 +2970,18 @@ export class ViewportRendererService {
     this.requestRender();
   }
 
+  /**
+   * Rewind a SpineSkeleton2D proxy to the first frame of its current animation
+   * and repaint. Transient pose-only state (no operation, no history) — the
+   * Inspector's Spine "Reset" button and the node's own `resetToFirstFrame()`
+   * are the two halves of the same action (node + proxy each own a view).
+   */
+  resetSpinePreview(nodeId: string): void {
+    if (this.proxyRegistry.resetSpinePreview(nodeId)) {
+      this.requestRender();
+    }
+  }
+
   updateNodeVisibility(node: NodeBase): void {
     if (node instanceof Group2D) {
       const visualRoot = this.proxyRegistry.group2DVisuals.get(node.nodeId);

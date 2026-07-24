@@ -10,7 +10,10 @@ import type { PropertySchema, PropertyDefinition } from './property-schema';
 /**
  * Optional per-instance schema contribution. A node implementing this appends
  * instance-specific properties (e.g. attached shader effects) AFTER its static
- * class schema. Because every schema consumer — the inspector, the animation
+ * class schema, or REPLACES a static property of the same name in place — which
+ * is how a node upgrades an authored text field to a live picker once it knows
+ * the valid values (SpineSkeleton2D's `animation`/`skin` become dropdowns of the
+ * loaded skeleton's names). Because every schema consumer — the inspector, the animation
  * timeline, the clip evaluator, `UpdateObjectPropertyOperation`, SceneRunner's
  * live-property sink, and prefab diffing — funnels through
  * {@link getNodePropertySchema}, these instance props become editable,
@@ -49,9 +52,24 @@ export function getNodePropertySchema(node: NodeBase): PropertySchema {
     return staticSchema;
   }
 
+  // An instance property with the same name REPLACES the static one at its
+  // original position (so group ordering is unchanged); anything new is appended.
+  // Without this the inspector would render the property twice — e.g. a plain
+  // text field next to the dropdown that was meant to supersede it.
+  const overrides = new Map(instance.properties.map(property => [property.name, property]));
+  const merged: PropertyDefinition[] = staticSchema.properties.map(
+    property => overrides.get(property.name) ?? property
+  );
+  const staticNames = new Set(staticSchema.properties.map(property => property.name));
+  for (const property of instance.properties) {
+    if (!staticNames.has(property.name)) {
+      merged.push(property);
+    }
+  }
+
   return {
     ...staticSchema,
-    properties: [...staticSchema.properties, ...instance.properties],
+    properties: merged,
     groups: { ...staticSchema.groups, ...instance.groups },
   };
 }

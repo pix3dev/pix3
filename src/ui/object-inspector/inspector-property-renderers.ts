@@ -1034,6 +1034,21 @@ export class InspectorPropertyRenderers {
       `;
     }
 
+    if (prop.type === 'boolean' && prop.ui?.editor === 'spine-preview') {
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <pix3-spine-preview-editor
+            .playing=${state.value === 'true'}
+            ?disabled=${readOnly}
+            @change=${(event: CustomEvent<{ playing: boolean }>) =>
+              this.host.applyPropertyChange(prop.name, event.detail.playing)}
+            @reset-preview=${() => this.host.onSpinePreviewReset()}
+          ></pix3-spine-preview-editor>
+        </div>
+      `;
+    }
+
     if (prop.type === 'string' && prop.ui?.editor === 'file-resource') {
       const extensions = prop.ui?.extensions ?? [];
       return html`

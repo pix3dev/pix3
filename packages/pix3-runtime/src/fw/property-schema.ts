@@ -75,6 +75,7 @@ export interface PropertyUIHints {
     | 'model-resource'
     | 'animation-resource'
     | 'file-resource'
+    | 'spine-preview'
     | 'sprite-size'
     | 'localization-key';
 

@@ -131,6 +131,27 @@ export class SpineSkeletonView {
     return entry?.animation?.name ?? null;
   }
 
+  /**
+   * Rewinds a track to the start of its animation without changing what is
+   * playing. Falls back to the setup pose when the track is empty. Pose-only —
+   * nothing about the authored playback state changes.
+   */
+  rewind(trackIndex = 0): void {
+    const entry = this.object.state.tracks[trackIndex] ?? null;
+    const animationName = entry?.animation?.name ?? null;
+    if (!animationName) {
+      this.object.skeleton.setupPose();
+      this.object.update(0);
+      return;
+    }
+
+    // Re-set the animation (rather than poking trackTime) so mixing state, event
+    // bookkeeping and the applied pose all restart from zero.
+    const restarted = this.object.state.setAnimation(trackIndex, animationName, entry?.loop ?? false);
+    restarted.mixDuration = 0;
+    this.object.update(0);
+  }
+
   /** Sets the default crossfade duration used when no pair-specific mix exists. */
   setDefaultMix(seconds: number): void {
     this.object.state.data.defaultMix = Math.max(0, seconds);

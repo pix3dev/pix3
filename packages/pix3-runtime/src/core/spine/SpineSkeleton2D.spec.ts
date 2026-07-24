@@ -4,6 +4,7 @@ import { Object3D } from 'three';
 import { AssetLoader } from '../AssetLoader';
 import { ResourceManager } from '../ResourceManager';
 import { SpineSkeleton2D } from '../../nodes/2D/SpineSkeleton2D';
+import { getNodePropertySchema } from '../../fw/property-schema-utils';
 import { parseSpineAtlasPageNames, resolveSpinePagePath } from './SpineAsset';
 import {
   setSpineModuleLoader,
@@ -356,6 +357,50 @@ describe('SpineSkeleton2D playback', () => {
     stub.calls.length = 0;
     node.tick(0.016);
     expect(stub.calls.filter(call => call.startsWith('update:'))).toEqual([]);
+  });
+
+  it('holds the first frame in the editor by default and rewinds on demand', async () => {
+    const node = new SpineSkeleton2D({ id: 'hero', name: 'Hero', ...REQUEST, animation: 'run' });
+    // Editor playback is opt-in: a freshly authored node never animates the
+    // viewport until `previewInEditor` is switched on.
+    expect(node.previewInEditor).toBe(false);
+
+    node.setSpineAsset(await assetLoader.loadSpineAsset(REQUEST));
+
+    stub.calls.length = 0;
+    node.resetToFirstFrame();
+    // Re-set (not a trackTime poke) so mixing/events restart from zero, then one
+    // geometry rebuild at dt 0 — and nothing about the authored state changes.
+    expect(stub.calls).toEqual(['setAnimation:0:run:true', 'update:0']);
+    expect(node.animation).toBe('run');
+    expect(node.isPlaying).toBe(true);
+  });
+
+  it('rewinds to the setup pose when no animation is playing', async () => {
+    const node = new SpineSkeleton2D({ id: 'hero', name: 'Hero', ...REQUEST });
+    node.setSpineAsset(await assetLoader.loadSpineAsset(REQUEST));
+
+    stub.calls.length = 0;
+    node.resetToFirstFrame();
+    expect(stub.calls).toEqual(['setupPose', 'update:0']);
+  });
+
+  it('replaces the static animation/skin props instead of duplicating them', async () => {
+    const node = new SpineSkeleton2D({ id: 'hero', name: 'Hero', ...REQUEST });
+    node.setSpineAsset(await assetLoader.loadSpineAsset(REQUEST));
+
+    const merged = getNodePropertySchema(node);
+    const animationProps = merged.properties.filter(p => p.name === 'animation');
+    const skinProps = merged.properties.filter(p => p.name === 'skin');
+    // One row each in the inspector — a text field next to its own dropdown was
+    // the bug this guards.
+    expect(animationProps).toHaveLength(1);
+    expect(skinProps).toHaveLength(1);
+    expect(animationProps[0].type).toBe('select');
+    expect(skinProps[0].type).toBe('select');
+    // Replaced in place, so the Animation group keeps its authored ordering.
+    const staticNames = SpineSkeleton2D.getPropertySchema().properties.map(p => p.name);
+    expect(merged.properties.map(p => p.name)).toEqual(staticNames);
   });
 
   it('upgrades animation/skin to dropdowns once the skeleton is loaded', async () => {
