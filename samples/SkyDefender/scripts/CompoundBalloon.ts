@@ -321,6 +321,10 @@ export class CompoundBalloon extends Script {
       const sound = HIT_SOUNDS[Math.floor(Math.random() * HIT_SOUNDS.length)];
       this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.12 });
       if (this.node) this.scene?.juice.punchScale(this.node, { amount: 0.12, duration: 0.14 });
+      // The floating HP bar tracks the carrier body (see UnitHealthBar).
+      if (part.key === 'body') {
+        this.node?.emit('hp-changed', part.hp / Math.max(1, Number(this.config.bodyHp)));
+      }
       return;
     }
 

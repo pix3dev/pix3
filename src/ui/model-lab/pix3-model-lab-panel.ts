@@ -26,6 +26,11 @@ import { Model3DExportService } from '@/services/model-gen/Model3DExportService'
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import { Scene3DGenService } from '@/services/model-gen/scene/Scene3DGenService';
 import {
+  NeuralModelGenService,
+  type NeuralGenState,
+  type NeuralGenStatus,
+} from '@/services/model-gen/neural/NeuralModelGenService';
+import {
   Model3DGenHistoryService,
   type ModelGenRecord,
 } from '@/services/model-gen/Model3DGenHistoryService';
@@ -124,6 +129,16 @@ const DEFAULT_PREFS: ModelLabPreferences = {
   sceneSaveFolder: DEFAULT_SCENE_SAVE_FOLDER,
 };
 
+const DEFAULT_NEURAL_STATE: NeuralGenState = {
+  status: 'idle',
+  progress: 0,
+  stage: '',
+  error: null,
+  modelRevision: 0,
+  canGenerate: true,
+  taskId: null,
+};
+
 const DEFAULT_SCENE_GEN_STATE: SceneGenState = {
   status: 'idle',
   stageLabel: '',
@@ -172,6 +187,43 @@ function statusChip(status: ModelGenStatus | SceneGenStatus): { label: string; t
       return { label: 'Cancelled', tone: 'warn' };
     default:
       return { label: status, tone: 'idle' };
+  }
+}
+
+/** Map a neural (Tripo3D) status to a compact human label for the progress block. */
+function neuralStatusLabel(status: NeuralGenStatus): string {
+  switch (status) {
+    case 'uploading':
+      return 'Uploading';
+    case 'queued':
+      return 'Queued';
+    case 'running':
+      return 'Generating';
+    case 'downloading':
+      return 'Downloading';
+    case 'done':
+      return 'Done';
+    case 'error':
+      return 'Error';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'idle':
+    default:
+      return 'Idle';
+  }
+}
+
+/** Map a neural status to an `ml-chip` tone class. */
+function neuralStatusTone(status: NeuralGenStatus): string {
+  switch (status) {
+    case 'done':
+      return 'ok';
+    case 'error':
+      return 'error';
+    case 'cancelled':
+      return 'warn';
+    default:
+      return 'busy';
   }
 }
 
@@ -239,6 +291,9 @@ export class ModelLabPanel extends ComponentBase {
   @inject(Scene3DGenService)
   private readonly sceneGenService!: Scene3DGenService;
 
+  @inject(NeuralModelGenService)
+  private readonly neuralGen!: NeuralModelGenService;
+
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
@@ -264,6 +319,8 @@ export class ModelLabPanel extends ComponentBase {
   @state() private activeLane: GenLane = 'model';
 
   // -- model-lane generation inputs ------------------------------------------
+  /** Procedural (codegen) vs neural (Tripo3D image→3D) generation — model lane only. */
+  @state() private modelGenMode: 'procedural' | 'neural' = 'procedural';
   @state() private reference: StagedReference | null = null;
   @state() private prompt = '';
   @state() private complexity: ComplexityHint = 'moderate';
@@ -278,6 +335,9 @@ export class ModelLabPanel extends ComponentBase {
   // -- mirrored service state ------------------------------------------------
   @state() private gen: ModelGenState = DEFAULT_GEN_STATE;
   @state() private sceneGen: SceneGenState = DEFAULT_SCENE_GEN_STATE;
+  @state() private neural: NeuralGenState = DEFAULT_NEURAL_STATE;
+  /** Whether a Tripo3D API key is configured — gates the neural Generate button. */
+  @state() private neuralKeySet = false;
   @state() private prefs: ModelLabPreferences = DEFAULT_PREFS;
   @state() private refreshingProviderId: string | null = null;
 
@@ -320,6 +380,7 @@ export class ModelLabPanel extends ComponentBase {
   private readonly disposers: Array<() => void> = [];
   private lastModelRevision = 0;
   private lastSceneRevision = 0;
+  private lastNeuralRevision = 0;
   private lastLogCount = 0;
   private saveFolderSeeded = false;
   private sceneSaveFolderSeeded = false;
@@ -328,6 +389,8 @@ export class ModelLabPanel extends ComponentBase {
     super.connectedCallback();
     this.disposers.push(this.genService.subscribe(state => this.onGenState(state)));
     this.disposers.push(this.sceneGenService.subscribe(state => this.onSceneGenState(state)));
+    this.disposers.push(this.neuralGen.subscribe(state => this.onNeuralState(state)));
+    void this.refreshNeuralKey();
     this.disposers.push(this.settings.subscribe(prefs => this.onPrefs(prefs)));
     this.disposers.push(this.catalog.subscribe(() => this.requestUpdate()));
     if (Model3DGenHistoryService.isSupported()) {
@@ -452,13 +515,16 @@ export class ModelLabPanel extends ComponentBase {
   // -- Generate tab ----------------------------------------------------------
 
   private renderGenerateTab() {
+    // The procedural pass Monitor, job history, and test-model palette are all procedural-only —
+    // hidden in the neural (Tripo3D) model mode, which surfaces its own progress block instead.
+    const neuralModel = this.activeLane === 'model' && this.modelGenMode === 'neural';
     return html`
       ${this.renderLaneSwitch()}
       ${this.activeLane === 'model' ? this.renderModelInputs() : this.renderSceneInputs()}
-      ${this.renderMonitor(this.activeMonitor(), this.activeDecider())}
+      ${neuralModel ? null : this.renderMonitor(this.activeMonitor(), this.activeDecider())}
       ${this.activeLane === 'scene' ? this.renderPaletteGaps() : null}
       ${this.activeLane === 'model' ? this.renderSaveGroup() : this.renderSceneSaveGroup()}
-      ${this.activeLane === 'model'
+      ${this.activeLane === 'model' && this.modelGenMode === 'procedural'
         ? html`${this.renderHistory()} ${this.renderTestModels()}`
         : null}
     `;
@@ -489,8 +555,8 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   private renderModelInputs() {
-    const running = !this.gen.canGenerate;
     return html`
+      ${this.renderModelGenModeToggle()}
       <section class="model-lab-section">
         <h3>Reference image</h3>
         <div
@@ -533,6 +599,40 @@ export class ModelLabPanel extends ComponentBase {
         <p class="ml-coming-soon">Picking from project assets and 2D-gen history is coming soon.</p>
       </section>
 
+      ${this.modelGenMode === 'procedural'
+        ? this.renderProceduralModelInputs()
+        : this.renderNeuralModelInputs()}
+    `;
+  }
+
+  /** The Procedural | Neural (Tripo3D) generation-mode selector (model lane only). */
+  private renderModelGenModeToggle() {
+    return html`
+      <div class="ml-mode-switch" role="group" aria-label="Model generation mode">
+        <button
+          type="button"
+          class="ml-mode ${this.modelGenMode === 'procedural' ? 'is-active' : ''}"
+          aria-pressed=${this.modelGenMode === 'procedural'}
+          @click=${() => this.setModelGenMode('procedural')}
+        >
+          Procedural
+        </button>
+        <button
+          type="button"
+          class="ml-mode ${this.modelGenMode === 'neural' ? 'is-active' : ''}"
+          aria-pressed=${this.modelGenMode === 'neural'}
+          @click=${() => this.setModelGenMode('neural')}
+        >
+          Neural (Tripo3D)
+        </button>
+      </div>
+    `;
+  }
+
+  /** Procedural-only inputs (prompt + complexity) and the codegen Generate / Stop control. */
+  private renderProceduralModelInputs() {
+    const running = !this.gen.canGenerate;
+    return html`
       <section class="model-lab-section">
         <h3>Prompt <span class="ml-optional">optional</span></h3>
         <textarea
@@ -580,6 +680,74 @@ export class ModelLabPanel extends ComponentBase {
           ? html`<p class="model-lab-status is-ok">Add a reference image to generate.</p>`
           : null}
       </section>
+    `;
+  }
+
+  /** Neural (Tripo3D) inputs: reuses the staged reference; adds a note, Generate/Stop, and progress. */
+  private renderNeuralModelInputs() {
+    const running = !this.neural.canGenerate;
+    const canGenerate = !!this.reference && this.neural.canGenerate && this.neuralKeySet;
+    return html`
+      <section class="model-lab-section">
+        <p class="ml-field-note">
+          Tripo3D is a neural image→3D service (metered — requires an API key). Generation uses the
+          reference image only.
+        </p>
+        ${running
+          ? html`<button
+              type="button"
+              class="model-lab-button is-danger with-icon"
+              @click=${() => this.onStopNeural()}
+            >
+              <span>${this.icons.getIcon('stop-circle', IconSize.SMALL)}</span> Stop
+            </button>`
+          : html`<button
+              type="button"
+              class="model-lab-button is-primary with-icon"
+              ?disabled=${!canGenerate}
+              @click=${() => this.onGenerateNeural()}
+            >
+              <span>${this.icons.getIcon('zap', IconSize.SMALL)}</span> Generate
+            </button>`}
+        ${!running && !this.reference
+          ? html`<p class="model-lab-status is-ok">Add a reference image to generate.</p>`
+          : null}
+        ${!running && this.reference && !this.neuralKeySet
+          ? html`<p class="model-lab-status is-error">
+              Add a Tripo3D API key in Settings to generate.
+            </p>`
+          : null}
+        ${this.renderNeuralProgress()}
+      </section>
+    `;
+  }
+
+  /** The neural run's status chip + progress bar + error, shown once a run has started. */
+  private renderNeuralProgress() {
+    const { status, progress, error } = this.neural;
+    if (status === 'idle') {
+      return null;
+    }
+    const pct = Math.max(0, Math.min(100, Math.round(progress)));
+    return html`
+      <div class="ml-progress" aria-live="polite">
+        <div class="ml-progress-head">
+          <span class="ml-chip ml-chip--${neuralStatusTone(status)}">
+            ${neuralStatusLabel(status)}
+          </span>
+          <span class="ml-progress-pct">${pct}%</span>
+        </div>
+        <div
+          class="ml-progress-track"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${pct}
+        >
+          <div class="ml-progress-bar" style="width: ${pct}%"></div>
+        </div>
+        ${error ? html`<p class="ml-error" role="alert">${error}</p>` : null}
+      </div>
     `;
   }
 
@@ -1189,6 +1357,40 @@ export class ModelLabPanel extends ComponentBase {
       </section>
 
       <section class="model-lab-section">
+        <h3>Tripo3D API key</h3>
+        <p class="ml-field-note">
+          Used for neural (Tripo3D) image→3D generation. Stored locally (SecretStorage).
+        </p>
+        <input
+          type="password"
+          class="ml-input ml-neural-key-input"
+          placeholder=${this.neuralKeySet ? '•••••••• (key set)' : 'Paste your Tripo3D API key'}
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <div class="model-lab-actions">
+          <button
+            type="button"
+            class="model-lab-button is-primary"
+            @click=${() => void this.onSaveNeuralKey()}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            class="model-lab-button"
+            ?disabled=${!this.neuralKeySet}
+            @click=${() => void this.onClearNeuralKey()}
+          >
+            Clear
+          </button>
+        </div>
+        <p class="model-lab-status is-ok" aria-live="polite">
+          ${this.neuralKeySet ? 'Key set' : 'No key'}
+        </p>
+      </section>
+
+      <section class="model-lab-section">
         <h3>Loop</h3>
         <label class="model-lab-field">
           <span>Mode</span>
@@ -1392,6 +1594,30 @@ export class ModelLabPanel extends ComponentBase {
     this.settings.updatePreferences({ scoreThreshold: Math.min(Math.max(raw, 0), 1) });
   }
 
+  /** Persist the Tripo3D key from the Settings field, clear the field, and refresh the set-flag. */
+  private async onSaveNeuralKey(): Promise<void> {
+    const input = this.querySelector<HTMLInputElement>('.ml-neural-key-input');
+    const value = input?.value.trim() ?? '';
+    if (!value) {
+      return;
+    }
+    await this.neuralGen.setKey(value);
+    if (input) {
+      input.value = '';
+    }
+    await this.refreshNeuralKey();
+  }
+
+  /** Clear the stored Tripo3D key and refresh the set-flag. */
+  private async onClearNeuralKey(): Promise<void> {
+    await this.neuralGen.clearKey();
+    const input = this.querySelector<HTMLInputElement>('.ml-neural-key-input');
+    if (input) {
+      input.value = '';
+    }
+    await this.refreshNeuralKey();
+  }
+
   private async refreshModels(providerId: string): Promise<void> {
     this.refreshingProviderId = providerId;
     try {
@@ -1540,6 +1766,20 @@ export class ModelLabPanel extends ComponentBase {
     this.genService.cancel();
   }
 
+  private onGenerateNeural(): void {
+    if (!this.reference) {
+      return;
+    }
+    void this.neuralGen.generate({
+      mimeType: this.reference.mimeType,
+      base64: this.reference.base64,
+    });
+  }
+
+  private onStopNeural(): void {
+    this.neuralGen.cancel();
+  }
+
   private onGenerateScene(): void {
     const brief = this.brief.trim();
     if (!brief) {
@@ -1582,6 +1822,26 @@ export class ModelLabPanel extends ComponentBase {
     }
   }
 
+  private onNeuralState(state: NeuralGenState): void {
+    this.neural = state;
+    if (state.modelRevision !== this.lastNeuralRevision) {
+      this.lastNeuralRevision = state.modelRevision;
+      // Only hot-swap when the model lane owns the viewport in neural mode.
+      if (this.activeLane === 'model' && this.modelGenMode === 'neural') {
+        this.swapInNeuralModel();
+      }
+    }
+  }
+
+  /** Refresh the cached "is a Tripo3D key configured?" flag (gates the neural Generate button). */
+  private async refreshNeuralKey(): Promise<void> {
+    try {
+      this.neuralKeySet = await this.neuralGen.hasKey();
+    } catch {
+      this.neuralKeySet = false;
+    }
+  }
+
   private onPrefs(prefs: ModelLabPreferences): void {
     this.prefs = prefs;
     if (!this.saveFolderSeeded) {
@@ -1607,11 +1867,42 @@ export class ModelLabPanel extends ComponentBase {
     } else {
       // Leaving the scene lane: remove (not dispose) its roots, then restore the model preview.
       this.clearSceneRoots();
-      if (this.genService.getModel()) {
-        this.swapInGeneratedModel();
+      this.restoreModelLanePreview();
+    }
+  }
+
+  /** Show the model lane's preview for the current {@link modelGenMode} (procedural or neural). */
+  private restoreModelLanePreview(): void {
+    if (this.modelGenMode === 'neural') {
+      if (this.neuralGen.getModel()) {
+        this.swapInNeuralModel();
       } else {
-        this.buildModel(this.selectedModelId || TEST_MODELS[0].id);
+        // No neural model yet — leave the viewport empty until a run completes.
+        this.disposeCurrentModel();
       }
+    } else if (this.genService.getModel()) {
+      this.swapInGeneratedModel();
+    } else {
+      this.buildModel(this.selectedModelId || TEST_MODELS[0].id);
+    }
+  }
+
+  /**
+   * Switch the model-lane generation mode. Clears the outgoing mode's preview + save state so a
+   * stale model doesn't linger, then (when the model lane owns the viewport) shows the incoming
+   * mode's preview via {@link restoreModelLanePreview}.
+   */
+  private setModelGenMode(mode: 'procedural' | 'neural'): void {
+    if (mode === this.modelGenMode) {
+      return;
+    }
+    this.modelGenMode = mode;
+    this.disposeCurrentModel();
+    this.lastSavedPath = null;
+    this.saveState = 'idle';
+    this.statusMessage = '';
+    if (this.activeLane === 'model') {
+      this.restoreModelLanePreview();
     }
   }
 
@@ -1633,6 +1924,34 @@ export class ModelLabPanel extends ComponentBase {
     this.currentModel = group;
     this.selectedModelId = '';
     this.saveName = slugify(this.gen.assessment?.objectClass ?? 'model');
+    this.lastSavedPath = null;
+    this.saveState = 'idle';
+    this.renderRequested = true;
+  }
+
+  /**
+   * Swap the neural (Tripo3D) lane's latest Group into the preview — mirrors
+   * {@link swapInGeneratedModel}, sourcing the Group from {@link NeuralModelGenService.getModel}.
+   * The neural Group is a fresh GLTF parse that shares nothing with the AssetLoader cache, so
+   * disposing the previous one on each swap (via {@link disposeCurrentModel}) is correct.
+   */
+  private swapInNeuralModel(): void {
+    if (!this.scene || !this.camera || !this.previewRoot) {
+      return;
+    }
+    const group = this.neuralGen.getModel();
+    if (!group) {
+      return;
+    }
+    this.disposeCurrentModel();
+    this.previewRoot.add(group);
+    this.previewRoot.updateMatrixWorld(true);
+    const framing = framePerspectiveCameraToObject(this.camera, group);
+    this.controls?.target.set(0, framing.focusTargetY, 0);
+    this.controls?.update();
+    this.currentModel = group;
+    this.selectedModelId = '';
+    this.saveName = this.neural.taskId ? slugify(`tripo-${this.neural.taskId}`) : 'model';
     this.lastSavedPath = null;
     this.saveState = 'idle';
     this.renderRequested = true;
@@ -1709,6 +2028,12 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   private async onSave(): Promise<void> {
+    // Neural saves write the RAW downloaded GLB bytes losslessly (preserving Tripo's PBR/textures)
+    // rather than re-exporting the parsed Group.
+    if (this.activeLane === 'model' && this.modelGenMode === 'neural') {
+      await this.onSaveNeural();
+      return;
+    }
     if (!this.currentModel) {
       return;
     }
@@ -1746,6 +2071,42 @@ export class ModelLabPanel extends ComponentBase {
       }
       const suffix = extras.length ? ` (+ ${extras.join(', ')})` : '';
       this.statusMessage = `Saved ${result.path}${suffix} (${formatBytes(result.bytes)}).`;
+    } catch (error) {
+      this.saveState = 'error';
+      this.statusMessage = error instanceof Error ? error.message : 'Failed to save the model.';
+    }
+  }
+
+  /**
+   * Save the neural lane's RAW downloaded GLB bytes losslessly. Reflects the saved path in the
+   * shared save status so {@link onAddToScene} (which reads {@link lastSavedPath}) works unchanged.
+   */
+  private async onSaveNeural(): Promise<void> {
+    if (!this.neuralGen.getGlbBlob()) {
+      this.saveState = 'error';
+      this.statusMessage = 'Generate a model before saving.';
+      return;
+    }
+    if (appState.project.status !== 'ready') {
+      this.saveState = 'error';
+      this.statusMessage = 'Open a project before saving.';
+      return;
+    }
+    const folder = this.saveFolder.trim().replace(/^\/+|\/+$/g, '');
+    const name = this.saveName.trim();
+    if (!name) {
+      this.saveState = 'error';
+      this.statusMessage = 'A file name is required.';
+      return;
+    }
+    this.saveState = 'saving';
+    this.statusMessage = '';
+    try {
+      const path = folder ? `${folder}/${name}` : name;
+      const result = await this.neuralGen.saveGlb(path);
+      this.lastSavedPath = result.path;
+      this.saveState = 'saved';
+      this.statusMessage = `Saved ${result.path} (${formatBytes(result.bytes)}).`;
     } catch (error) {
       this.saveState = 'error';
       this.statusMessage = error instanceof Error ? error.message : 'Failed to save the model.';

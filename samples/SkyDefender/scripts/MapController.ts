@@ -5,6 +5,7 @@ import {
   MISSIONS,
   MISSION_META,
   PORTRAITS,
+  levelScenePath,
   missionNameKey,
   speakerKey,
   type BriefingLine,
@@ -325,7 +326,13 @@ export class MapController extends Script {
     if (this.briefingMission === 0) return;
     globalThis.__SD_MODE = 'campaign';
     globalThis.__SD_MISSION = this.briefingMission;
-    void this.goTo(String(this.config.battleScene || 'res://src/assets/scenes/main.pix3scene'));
+    // Scene-per-level: load this mission's dedicated level scene. `battleScene`
+    // stays as a fallback for out-of-range missions (older single-scene flow).
+    const path =
+      this.briefingMission <= MISSIONS.length
+        ? levelScenePath(this.briefingMission)
+        : String(this.config.battleScene || 'res://src/assets/scenes/main.pix3scene');
+    void this.goTo(path);
   }
 
   // ── plumbing ────────────────────────────────────────────────────────────────

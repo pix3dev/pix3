@@ -1,0 +1,457 @@
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Level 06"
+root:
+  - id: game-root
+    type: Group2D
+    name: Game Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: game-flow
+        type: user:GameFlow
+        enabled: true
+        config:
+          countdownSeconds: 3
+          startMission: 6
+          menuScene: res://src/assets/scenes/menu.pix3scene
+          mapScene: res://src/assets/scenes/map.pix3scene
+      - id: wave-spawner
+        type: user:WaveSpawner
+        enabled: true
+        config:
+          enemiesNode: enemies
+          hp: 100
+          speed: 55
+          score: 8
+    children:
+      - id: stage
+        type: Group2D
+        name: Stage
+        properties:
+          width: 854
+          height: 480
+          transform:
+            position: [0, 0]
+            scale: [2.25, 2.25]
+            rotation: 0
+        children:
+          - id: sky-bg
+            type: Sprite2D
+            name: Sky Background
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/backgrounds/level_0/sky1.jpg
+              width: 854
+              height: 641
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: clouds-far
+            type: Group2D
+            name: Clouds Far
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-far
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 6
+                  wrapWidth: 1150
+                  jitter: 0.3
+            children:
+              - id: cloud-far-1
+                type: Sprite2D
+                name: Cloud Far 1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud4.png
+                  width: 320
+                  height: 150
+                  opacity: 0.9
+                  transform:
+                    position: [-300, 130]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-far-2
+                type: Sprite2D
+                name: Cloud Far 2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud6.png
+                  width: 280
+                  height: 130
+                  opacity: 0.85
+                  transform:
+                    position: [220, 165]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-far-3
+                type: Sprite2D
+                name: Cloud Far 3
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud2.png
+                  width: 300
+                  height: 140
+                  opacity: 0.9
+                  transform:
+                    position: [520, 95]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: clouds-near
+            type: Group2D
+            name: Clouds Near
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-near
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 14
+                  wrapWidth: 1200
+                  jitter: 0.25
+            children:
+              - id: cloud-near-1
+                type: Sprite2D
+                name: Cloud Near 1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud1.png
+                  width: 400
+                  height: 190
+                  opacity: 0.95
+                  transform:
+                    position: [-500, 60]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-near-2
+                type: Sprite2D
+                name: Cloud Near 2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud5.png
+                  width: 330
+                  height: 150
+                  opacity: 0.9
+                  transform:
+                    position: [360, 25]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: bridge
+            type: Group2D
+            name: Bridge
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: bridge-controller
+                type: user:BridgeController
+                enabled: true
+                config:
+                  mineX: -20
+          - id: castle
+            name: Castle
+            instance: res://src/assets/prefabs/castle.pix3scene
+          - id: effects
+            type: Group2D
+            name: Effects
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+          - id: enemies
+            type: Group2D
+            name: Enemies
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+          - id: cannonballs
+            type: Group2D
+            name: Cannonballs
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: ball-0
+                type: Sprite2D
+                name: Ball 0
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-1
+                type: Sprite2D
+                name: Ball 1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-2
+                type: Sprite2D
+                name: Ball 2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-3
+                type: Sprite2D
+                name: Ball 3
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-4
+                type: Sprite2D
+                name: Ball 4
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-5
+                type: Sprite2D
+                name: Ball 5
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-6
+                type: Sprite2D
+                name: Ball 6
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: ball-7
+                type: Sprite2D
+                name: Ball 7
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/enemy/weapons/bammo.png
+                  width: 11
+                  height: 11
+                  initiallyVisible: false
+                  transform:
+                    position: [-600, -400]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: clouds-front
+            type: Group2D
+            name: Clouds Front
+            properties:
+              width: 854
+              height: 480
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: parallax-front
+                type: user:ParallaxClouds
+                enabled: true
+                config:
+                  speed: 26
+                  wrapWidth: 1250
+                  jitter: 0.2
+            children:
+              - id: cloud-front-1
+                type: Sprite2D
+                name: Cloud Front 1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/clouds_firstplane.png
+                  width: 574
+                  height: 278
+                  opacity: 0.7
+                  transform:
+                    position: [-120, 205]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: cloud-front-2
+                type: Sprite2D
+                name: Cloud Front 2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/backgrounds/level_0/cloud3.png
+                  width: 360
+                  height: 170
+                  opacity: 0.55
+                  transform:
+                    position: [460, 228]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+      - id: hud
+        name: HUD
+        instance: res://src/assets/prefabs/battle-hud.pix3scene
+      - id: shop-overlay
+        name: Shop Overlay
+        instance: res://src/assets/prefabs/battle-shop.pix3scene
+      - id: result-overlay
+        name: Result Overlay
+        instance: res://src/assets/prefabs/battle-result.pix3scene
+  - id: camera2d
+    type: Camera2D
+    name: Game Camera
+    properties:
+      priority: 10
+      zoom: 1
+      offset:
+        - 0
+        - 0
+      followTargetId: ""
+      followDamping: 8
+      followOffset:
+        - 0
+        - 0
+      deadzone:
+        - 0
+        - 0
+      limitsEnabled: false
+      limitsCenter:
+        - 0
+        - 0
+      limitsSize:
+        - 1000
+        - 1000
+      shakeAmplitude: 8
+      shakeFrequency: 24
+      shakeDuration: 0.35
+      shakeDecay: 1.5
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+  - id: battle-music
+    type: AudioPlayer
+    name: Battle Music
+    properties:
+      audioTrack: res://src/assets/audio/theme/SkyDefender_Theme1.mp3
+      autoplay: true
+      loop: true
+      volume: 0.7
+      bus: music
+      pitchVariation: 0
+      volumeVariation: 0
+  - id: war-ambient
+    type: AudioPlayer
+    name: War Ambient
+    properties:
+      audioTrack: res://src/assets/audio/ambient/war_amb.mp3
+      autoplay: true
+      loop: true
+      volume: 0.35
+      bus: sfx
+      pitchVariation: 0
+      volumeVariation: 0

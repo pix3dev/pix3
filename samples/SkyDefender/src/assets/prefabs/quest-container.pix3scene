@@ -1,0 +1,39 @@
+# Quest Container — PLACEHOLDER landing zone (boat / cup / truck) for cargo
+# quest levels (L9 gold, L11 sheep, L21 cones). There is no dedicated
+# cup/boat/truck art in the archive, so this is a translucent amber ColorRect2D
+# marker; GameFlow positions it (containerX/Y) and scales it to the level's
+# container rect (w/100, h/100) from SdBalance.QUEST_LEVELS. The actual landing
+# test uses the numeric rect in QuestCargo, not this visual. FLAG: replace with
+# real boat/cup/truck sprites when available.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Quest cargo container (placeholder landing zone)"
+root:
+  - id: quest-container
+    type: ColorRect2D
+    name: Quest Container
+    properties:
+      width: 100
+      height: 100
+      color: "#f5ae39"
+      opacity: 0.28
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Cargo Container"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []

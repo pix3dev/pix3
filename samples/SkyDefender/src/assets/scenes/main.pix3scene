@@ -996,6 +996,65 @@ root:
                     position: [152, 9]
                     scale: [1, 1]
                     rotation: 0
+          - id: boss-bar
+            type: Group2D
+            name: Boss Bar
+            properties:
+              width: 472
+              height: 68
+              initiallyVisible: false
+              transform:
+                position: [0, 432]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: boss-hp-fill
+                type: Bar2D
+                name: Boss HP Fill
+                properties:
+                  label: ""
+                  width: 400
+                  height: 16
+                  minValue: 0
+                  maxValue: 1
+                  value: 1
+                  backBackgroundColor: "#2a1408"
+                  barColor: "#e8721f"
+                  showBorder: false
+                  borderColor: "#000000"
+                  borderWidth: 2
+                  transform:
+                    position: [-8, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: boss-hp-frame
+                type: Sprite2D
+                name: Boss HP Frame
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/boss_statusbar.png
+                  width: 472
+                  height: 34
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: boss-name-label
+                type: Label2D
+                name: Boss Name Label
+                properties:
+                  label: ""
+                  labelFontSize: 22
+                  labelColor: "#ffd9a8"
+                  labelAlign: center
+                  transform:
+                    position: [0, 26]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
           - id: portrait-cluster
             type: Group2D
             name: Portrait Cluster

@@ -280,6 +280,26 @@ export interface UnitDef {
   ground?: boolean;
   /** Enemy transporter airship (S_SS): animated brown body + static red overlay. */
   transporter?: boolean;
+  /** Boss (ids 75-84): driven by the generic boss.pix3scene + BossEnemy script. */
+  boss?: boolean;
+  /** Boss white-flash overlay texture (`B_bossN_w`). */
+  whiteTex?: string;
+  /** Boss emplacement guns shown (1-3). */
+  gunCount?: number;
+  /** Boss escort/mini-boss: same behaviour, but stays OFF the HUD boss bar. */
+  escort?: boolean;
+  /** Final boss (id 84): fires the King finale below 400 HP. */
+  finale?: boolean;
+  /** Quest NPC (ids 63-74): driven by quest-npc.pix3scene + QuestNpc script. */
+  npc?: boolean;
+  /** Quest role (protect/carrier/combat) from the QUEST table. */
+  role?: QuestRole;
+  /** Cargo class a carrier drops (0 none, 10 gold, 11 sheep, 12 cone). */
+  payloadType?: number;
+  /** Quest NPC body livery (re-textured on spawn). */
+  npcTex?: string;
+  /** Carrier payload livery (re-textured on the falling cargo). */
+  payloadTex?: string;
   /** True until the prefab/behaviour is wired — spawner skips these gracefully. */
   unsupported?: boolean;
 }
@@ -362,8 +382,256 @@ const ART: Record<number, Art> = {
   62: { sprite: `${GROUND}/warchild/warchild.png`, w: 80, h: 27 },
 };
 
+// ── Bosses (ids 75-84) ──────────────────────────────────────────────────────
+// BEST-EFFORT art mapping: only 5 boss art sets survive in the archive
+// (baby/grafz/rud/snake/xenon) for 10 boss ids, so several ids REUSE a family as
+// a placeholder — flagged below. Every path is Glob-verified to exist under
+// src/assets/textures/enemy/bosses/; the sizes are the display sizes from the
+// remaster spec and need in-editor visual confirmation. `_white` overlays that a
+// family lacks fall back to a sibling family's white (noted per-id).
+const BOSSES = 'res://src/assets/textures/enemy/bosses';
+
+interface BossDef {
+  art: string;
+  whiteTex: string;
+  width: number;
+  height: number;
+  gunCount: number;
+  escort?: boolean;
+  finale?: boolean;
+}
+
+const BOSS: Record<number, BossDef> = {
+  // 75 Boss1 — mini-boss escort (1200 hp).
+  75: { art: `${BOSSES}/snake/snake1.png`, whiteTex: `${BOSSES}/snake/snake1_white.png`, width: 70, height: 70, gunCount: 1, escort: true },
+  // 76 Boss2a — L5 level-ender.
+  76: { art: `${BOSSES}/baby/baby.png`, whiteTex: `${BOSSES}/baby/baby_white.png`, width: 214, height: 81, gunCount: 2 },
+  // 77 Boss2b — L10.
+  77: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3 },
+  // 78 Boss3 — L10.
+  78: { art: `${BOSSES}/rud/rud.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 207, height: 107, gunCount: 2 },
+  // 79 S_Xenon — L15.
+  79: { art: `${BOSSES}/xenon/x.png`, whiteTex: `${BOSSES}/xenon/x_white.png`, width: 164, height: 66, gunCount: 2 },
+  // 80 Boss5 — escort swarm (L15). White FALLS BACK to xenon's x_white (no xsup_white).
+  80: { art: `${BOSSES}/xenon/xsup.png`, whiteTex: `${BOSSES}/xenon/x_white.png`, width: 80, height: 32, gunCount: 1, escort: true },
+  // 81 Boss4 — L25. REUSE grafz art (PLACEHOLDER — no dedicated Boss4 art in archive).
+  81: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3 },
+  // 82 Bear — L20. REUSE rud art (PLACEHOLDER — Bear needs FFDec B_bear extraction).
+  82: { art: `${BOSSES}/rud/rud.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 207, height: 107, gunCount: 2 },
+  // 83 Boss6 — escort (L20). White FALLS BACK to rud_white (no rui_white).
+  83: { art: `${BOSSES}/rud/rui.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 55, height: 33, gunCount: 1, escort: true },
+  // 84 FinalBoss — L30. REUSE grafz art (PLACEHOLDER — dedicated final art in a later SWF).
+  84: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3, finale: true },
+};
+
+// ── Quest NPCs (ids 63-74) ───────────────────────────────────────────────────
+// The special "quest" mechanics (protect / cargo-into-container / combat) run on
+// the generic quest-npc.pix3scene + QuestNpc script. This table gives each id its
+// ROLE, cargo class and BEST-EFFORT body/payload art — there is no dedicated
+// quest-NPC art in the surviving archive, so several ids reuse a fitting
+// interactive/npc sprite as a placeholder. FLAG (needs in-editor art review):
+//   63 MTurik   → hunter.png       (no "Turik" art; reuse the hunter livery)
+//   64 MFargo   → fargo_small       (in-world Fargo — fmain.png is a portrait)
+//   66 MBob     → cityzen1          (generic citizen stand-in)
+//   68 MLucky   → bomber_lucky      (reuse an air-unit livery)
+//   69 MZombee  → firefly           (the "zom-bee" abductor — no dedicated art)
+//   70 MSheep   → sheep             (carrier body IS a sheep — reads as airlifted)
+//   71 MGold    → gold bar          (stands in for the defended gold pile/mine)
+//   72 MLuckyGold → hunter          (robber carrying a gold bar)
+//   73 MPolicek → policehunter      (golden-train guard carrying a cone/apple)
+//   74 MFargoWar → fargoship        (Fargo's warship stand-in)
+// Cargo art is real: gold.png (tpb10) / sheep.png (tpb11) / apple.png (tpb12).
+
+const INTER = 'res://src/assets/textures/interactive';
+const NPC = 'res://src/assets/textures/npc';
+
+export type QuestRole = 'protect' | 'carrier' | 'combat';
+
+export interface QuestDef {
+  role: QuestRole;
+  /** Cargo class: 0 none, 10 gold bar, 11 sheep, 12 cone/apple. */
+  payloadType: number;
+  npcTex: string;
+  payloadTex?: string;
+  width: number;
+  height: number;
+}
+
+/** id (63-74) → quest role + art. questId/container come from QUEST_LEVELS. */
+export const QUEST: Record<number, QuestDef> = {
+  63: { role: 'combat', payloadType: 0, npcTex: `${INTER}/hunter/hunter.png`, width: 60, height: 44 },
+  64: { role: 'protect', payloadType: 0, npcTex: `${NPC}/fargo_small/fs_1.png`, width: 44, height: 52 },
+  65: { role: 'protect', payloadType: 0, npcTex: `${INTER}/wife/wife.png`, width: 44, height: 52 },
+  66: { role: 'protect', payloadType: 0, npcTex: `${NPC}/cityzen1/c1_1.png`, width: 40, height: 50 },
+  67: { role: 'protect', payloadType: 0, npcTex: `${NPC}/enginer/e_run_1.png`, width: 40, height: 50 },
+  68: { role: 'combat', payloadType: 0, npcTex: `${AIR}/bomber_lucky/bl.png`, width: 40, height: 45 },
+  69: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/firefly/firefly.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
+  70: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/sheep/sheep.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
+  71: { role: 'protect', payloadType: 0, npcTex: `${INTER}/drop_objects/gold.png`, width: 40, height: 28 },
+  72: { role: 'carrier', payloadType: 10, npcTex: `${INTER}/hunter/hunter.png`, payloadTex: `${INTER}/drop_objects/gold.png`, width: 60, height: 44 },
+  73: { role: 'carrier', payloadType: 12, npcTex: `${INTER}/hunter/policehunter.png`, payloadTex: `${INTER}/drop_objects/apple.png`, width: 60, height: 44 },
+  74: { role: 'combat', payloadType: 0, npcTex: `${INTER}/fargo/fargoship.png`, width: 80, height: 50 },
+};
+
+// ── Quest levels ──────────────────────────────────────────────────────────────
+// Level (1-based) → quest metadata: the verbatim objective (mission-objectives.txt,
+// matched by CONTENT per campaign-structure.md — the arOpiska push-order is not
+// 1:1 with <Lvl>), the success rule the tracker evaluates at wave-clear, the gold
+// reward on success, and (cargo levels only) the stage-local landing rect for the
+// boat / cup / truck. FLAG: container rects are BEST-EFFORT placeholders (no
+// cup/boat/truck art or reliable positions survive — mission-positions.xml is a
+// bare, ambiguous <p> array); reward amounts are best-effort from the objective
+// flavor. successRule: protect = no guarded NPC killed; sheep = ≥5 saved; gold =
+// ≤3 taken (bars that were NOT shot into the boat); cones = ≥10 collected; repair
+// = ≥2 turrets; combat = clear the wave.
+
+export type QuestSuccessRule = 'protect' | 'sheep' | 'gold' | 'cones' | 'repair' | 'combat';
+
+export interface QuestLevelDef {
+  questId: string;
+  /** Verbatim (content-matched) objective text — mission-objectives.txt. */
+  objective: string;
+  successRule: QuestSuccessRule;
+  /** Gold granted on success (0 = none / already paid in advance). */
+  reward: number;
+  /** Cargo levels only: stage-local landing rect (center-origin, Y-up). */
+  container?: ContainerRect;
+}
+
+/** Stage-local cargo-container landing rect (center-origin, Y-up). */
+export interface ContainerRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Derive the stage-local container rect from an AUTHORED `quest-container` node
+ * placed in the level scene (its position + size×scale), or null when no such
+ * node is present. This lets a scene-per-level author drag/resize the boat/cup/
+ * truck visually and have it drive the QuestCargo landing test — the placed node
+ * becomes the single source of truth. Callers fall back to
+ * {@link QUEST_LEVELS}`[level].container` when this returns null (main.pix3scene
+ * and any level that hasn't authored a container yet).
+ */
+export function containerRectFromNode(node: unknown): ContainerRect | null {
+  const n = node as
+    | {
+        position?: { x: number; y: number };
+        scale?: { x: number; y: number };
+        width?: number;
+        height?: number;
+      }
+    | null
+    | undefined;
+  if (!n || !n.position) return null;
+  const sx = Math.abs(n.scale?.x ?? 1);
+  const sy = Math.abs(n.scale?.y ?? 1);
+  return {
+    x: n.position.x,
+    y: n.position.y,
+    w: (n.width ?? 100) * sx,
+    h: (n.height ?? 100) * sy,
+  };
+}
+
+/** 1-based level → quest def. Levels without an entry run as ordinary battles. */
+export const QUEST_LEVELS: Record<number, QuestLevelDef> = {
+  3: {
+    questId: 'q-fargo-ship',
+    objective: 'Protect the ship during the negotiations.',
+    successRule: 'protect',
+    reward: 200,
+  },
+  6: {
+    questId: 'q-wife',
+    objective: 'Your wife have gone shopping. You need to cover her take off and return.',
+    successRule: 'protect',
+    reward: 0,
+  },
+  7: {
+    questId: 'q-gold-mine',
+    objective: "Defend the gold mine from enemies. Don't let them steal the gold.",
+    successRule: 'protect',
+    reward: 0,
+  },
+  8: {
+    // FLAG: no dedicated "Bob" objective survives — protect/escort stand-in text.
+    questId: 'q-bob',
+    objective: 'Protect Bob while he does his shopping.',
+    successRule: 'protect',
+    reward: 0,
+  },
+  9: {
+    questId: 'q-lucky-gold',
+    objective:
+      'Enemies are trying to rob you again. Stop the pillage. Shoot off the stolen gold bars so they fall in the boat. Don’t take more than 3.',
+    successRule: 'gold',
+    reward: 100,
+    container: { x: 0, y: -170, w: 360, h: 90 },
+  },
+  11: {
+    questId: 'q-sheep',
+    objective:
+      'Save the sheep! At least 5 of them need to survive. There is a ship under them, so they will not die if they fall into it. Shoot off sheep so that they fall in the “cup”.',
+    successRule: 'sheep',
+    reward: 75,
+    container: { x: 0, y: -180, w: 440, h: 90 },
+  },
+  14: {
+    questId: 'q-turik-14',
+    objective: 'Kick the enemy out of the province.',
+    successRule: 'combat',
+    reward: 0,
+  },
+  17: {
+    // FLAG: L17 ("Mario") has no wave-grounded quest text — combat stand-in.
+    questId: 'q-lucky-17',
+    objective: 'Destroy all enemy forces.',
+    successRule: 'combat',
+    reward: 0,
+  },
+  19: {
+    questId: 'q-engineer',
+    objective:
+      'The old defense system is out of order. Protect the workers who are repairing it. Repair at least two turrets.',
+    successRule: 'repair',
+    reward: 150,
+  },
+  21: {
+    // FLAG: reward already paid in advance (500) per the objective — grant 0 here.
+    questId: 'q-golden-train',
+    objective: 'Shoot the cones off, so that they fall in the trucks. Fargo asks for 10 ones.',
+    successRule: 'cones',
+    reward: 0,
+    container: { x: 0, y: -160, w: 460, h: 90 },
+  },
+  22: {
+    questId: 'q-fargo-war',
+    objective: 'Battle, another battle. Destroy them all.',
+    successRule: 'combat',
+    reward: 75,
+  },
+  23: {
+    questId: 'q-turik-23',
+    objective: 'Kick the enemy out of the province.',
+    successRule: 'combat',
+    reward: 0,
+  },
+};
+
 /** Localization key of a 1-based mission's display name (see `locales/en.json`). */
 export const missionNameKey = (mission1Based: number): string => `mission.name.${mission1Based}`;
+
+/**
+ * `res://` path of a campaign mission's dedicated level scene (scene-per-level).
+ * Each `level-NN.pix3scene` is generated by `scripts/gen-levels.mjs` and carries
+ * `startMission: NN`, so loading it plays that mission directly. The map/menu
+ * hand-off still sets `__SD_MISSION` too (it takes precedence in GameFlow).
+ */
+export const levelScenePath = (mission1Based: number): string =>
+  `res://src/assets/scenes/level-${String(mission1Based).padStart(2, '0')}.pix3scene`;
 
 /** Localization key of a speaker's display name (`speaker.king` / `speaker.fargo` / `speaker.joe`). */
 export const speakerKey = (speaker: Speaker): string => `speaker.${speaker.toLowerCase()}`;
@@ -411,11 +679,17 @@ function buildUnit(id: number): UnitDef {
   const a = ART[id];
   const compound = id >= 35 && id <= 48;
   const ground = id >= 49 && id <= 62;
+  const boss = id >= 75 && id <= 84;
+  const npc = id >= 63 && id <= 74;
+  const b = BOSS[id];
+  const q = QUEST[id];
   return {
     name: v.cls,
-    sprite: a?.sprite ?? '',
-    width: a?.w ?? 40,
-    height: a?.h ?? 40,
+    // Bosses/quest-NPCs carry their body livery on `sprite`; the generic prefab
+    // (boss.pix3scene / quest-npc.pix3scene) re-sets it on spawn.
+    sprite: boss ? b.art : npc ? q.npcTex : (a?.sprite ?? ''),
+    width: boss ? b.width : npc ? q.width : (a?.w ?? 40),
+    height: boss ? b.height : npc ? q.height : (a?.h ?? 40),
     hp: v.hp,
     speed: Math.round(v.speed * 30),
     score: v.score,
@@ -423,6 +697,11 @@ function buildUnit(id: number): UnitDef {
     category: v.cat,
     compound: compound || undefined,
     ground: ground || undefined,
+    boss: boss || undefined,
+    whiteTex: boss ? b.whiteTex : undefined,
+    gunCount: boss ? b.gunCount : undefined,
+    escort: boss ? (b.escort || undefined) : undefined,
+    finale: boss ? (b.finale || undefined) : undefined,
     transporter: id === 33 ? true : undefined,
     bomber: id >= 1 && id <= 4 ? true : undefined,
     fireBomb: id === 4 ? true : undefined,
@@ -431,7 +710,15 @@ function buildUnit(id: number): UnitDef {
     // Informational (rigs are baked in prefabs): Avalon1 = heavy nose gun,
     // Avalon2/Lavalon/NZ/SUC = typical basket gun.
     gunType: id >= 5 && id <= 8 ? 'heavy' : id >= 9 && id <= 29 ? 'typical' : undefined,
-    unsupported: a ? undefined : true,
+    // Quest NPCs (generic prefab + QuestNpc): role + cargo + art from QUEST.
+    npc: npc || undefined,
+    role: npc ? q.role : undefined,
+    payloadType: npc ? q.payloadType : undefined,
+    npcTex: npc ? q.npcTex : undefined,
+    payloadTex: npc ? q.payloadTex : undefined,
+    // Bosses + quest NPCs are now wired (generic prefab + script); only art-less
+    // ordinary ids remain unsupported.
+    unsupported: boss || npc ? undefined : a ? undefined : true,
   };
 }
 

@@ -29,6 +29,10 @@ export class HudController extends Script {
   private hpOff: NodeBase | null = null;
   private lastLivesText = '';
   private livesModeApplied: boolean | null = null;
+  // Boss bar (top-center, hidden until a level-boss spawns; escorts skip it).
+  private bossBar: NodeBase | null = null;
+  private bossFill: Bar2D | null = null;
+  private bossNameLabel: RuntimeLabel2D | null = null;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -81,6 +85,28 @@ export class HudController extends Script {
     this.hpLabel = this.findNode('hp-label') as RuntimeLabel2D | null;
     this.livesLabel = this.findNode('lives-label') as RuntimeLabel2D | null;
     this.hpOff = this.findNode('hp-off');
+
+    // Boss HP bar: driven by BossEnemy signals on game-root (level bosses only).
+    this.bossBar = this.findNode('boss-bar');
+    this.bossFill = this.findNode('boss-hp-fill') as Bar2D | null;
+    this.bossNameLabel = this.findNode('boss-name-label') as RuntimeLabel2D | null;
+    if (this.bossBar) this.bossBar.visible = false;
+    gameRoot?.connect('boss-spawned', this, (info: unknown) => {
+      const { name, maxHp } = (info as { name?: string; maxHp?: number }) ?? {};
+      if (this.bossBar) this.bossBar.visible = true;
+      this.bossFill?.setValue(1);
+      if (this.bossNameLabel) {
+        this.bossNameLabel.label = String(name ?? '');
+        this.bossNameLabel.updateLabel();
+      }
+      void maxHp;
+    });
+    gameRoot?.connect('boss-hp', this, (fraction: unknown) => {
+      this.bossFill?.setValue(Math.max(0, Math.min(1, Number(fraction) || 0)));
+    });
+    gameRoot?.connect('boss-dead', this, () => {
+      if (this.bossBar) this.bossBar.visible = false;
+    });
   }
 
   onUpdate(dt: number): void {

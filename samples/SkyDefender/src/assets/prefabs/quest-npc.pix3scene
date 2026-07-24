@@ -1,0 +1,105 @@
+# Quest NPC — one generic prefab for every Sky Defender quest NPC (v15 ids
+# 63-74). WaveSpawner.applyNpcStats re-textures NPC Body (+ Cargo for carriers)
+# and pushes the per-id role/payload + per-level questId/container rect from
+# SdBalance's QUEST / QUEST_LEVELS tables. The QuestNpc script drives the
+# traverse-and-cross behaviour, protect/carrier/combat outcomes and the cargo
+# detach. Placeholder body art = a sheep (any carrier livery); the Cargo child
+# defaults hidden (only carriers show it). See scripts/QuestNpc.ts.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Quest NPC (generic prefab)"
+root:
+  - id: quest-npc
+    type: Group2D
+    name: Quest NPC
+    properties:
+      width: 60
+      height: 50
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: quest-npc-logic
+        type: user:QuestNpc
+        enabled: true
+        config:
+          hp: 100
+          speed: 60
+          score: 0
+          stopX: 0
+          role: combat
+          payloadType: 0
+          payloadHp: 1
+          payloadTex: ''
+          questId: ''
+          npcName: ''
+          containerX: 0
+          containerY: -170
+          containerW: 360
+          containerH: 90
+    children:
+      - id: npc-body
+        type: Sprite2D
+        name: NPC Body
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/interactive/sheep/sheep.png' }
+          width: 48
+          height: 40
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: npc-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 44
+              height: 36
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: cargo
+        type: Sprite2D
+        name: Cargo
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/interactive/drop_objects/gold.png' }
+          width: 24
+          height: 18
+          initiallyVisible: false
+          transform:
+            position: [0, -26]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: cargo-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 24
+              height: 18
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Quest NPC"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 36]
+            scale: [1, 1]
+            rotation: 0
+        children: []

@@ -1,0 +1,129 @@
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Battle shop overlay (reusable chrome)"
+root:
+  - id: shop-overlay
+    type: Group2D
+    name: Shop Overlay
+    properties:
+      width: 1920
+      height: 1080
+      initiallyVisible: false
+      visible: false
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: shop-controller
+        type: user:ShopController
+        enabled: true
+        config:
+          itemsNode: shop-items
+    children:
+      - id: shop-dim
+        type: ColorRect2D
+        name: Shop Dim
+        properties:
+          width: 1920
+          height: 1080
+          color: "#000000"
+          opacity: 0.55
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: shop-bg
+        type: Sprite2D
+        name: Shop Panel
+        properties:
+          texture:
+            type: texture
+            url: res://src/assets/textures/gui/shop/shop_bg.png
+          width: 1003
+          height: 816
+          transform:
+            position: [0, 60]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: shop-items
+        type: Group2D
+        name: Shop Items
+        properties:
+          width: 1003
+          height: 816
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+      - id: shop-gold-label
+        type: Label2D
+        name: Shop Gold
+        properties:
+          label: "0"
+          labelFontSize: 20
+          labelColor: "#ffe9a3"
+          labelAlign: center
+          transform:
+            position: [0, -286]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: shop-info-name
+        type: Label2D
+        name: Shop Info Name
+        properties:
+          label: UPGRADES
+          labelFontSize: 24
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, -207]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: shop-info-desc
+        type: Label2D
+        name: Shop Info Desc
+        properties:
+          label: Hover an item for details. Click to buy.
+          labelFontSize: 17
+          labelColor: "#e6ebf5"
+          labelAlign: center
+          transform:
+            position: [0, -238]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: shop-fight-button
+        type: Button2D
+        name: Fight Button
+        properties:
+          label: ""
+          width: 244
+          height: 100
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/fight.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/fight_o.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/fight_o.png
+          buttonAction: fight
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
+          transform:
+            position: [368, -282]
+            scale: [0.75, 0.75]
+            rotation: 0
+        children: []
