@@ -5,6 +5,7 @@ import { CompoundBalloon } from './CompoundBalloon';
 import { EnemyBalloon } from './EnemyBalloon';
 import { GroundVehicle } from './GroundVehicle';
 import { QuestNpc } from './QuestNpc';
+import { UnitHealthBar } from './UnitHealthBar';
 import {
   BRIDGE,
   containerRectFromNode,
@@ -337,6 +338,7 @@ export class WaveSpawner extends Script {
     logic.config.stopX = toStopX(entry.a);
     logic.config.attackDamage = unit.attackDamage ?? 0;
     logic.config.attackPeriod = unit.attackPeriod ?? 4;
+    this.attachHealthBar(node, unit);
   }
 
   /** Per-id stats for compound units (unik/urik prefabs). */
@@ -353,6 +355,7 @@ export class WaveSpawner extends Script {
     logic.config.attackDamage = unit.attackDamage ?? 0;
     logic.config.attackPeriod = unit.attackPeriod ?? 2;
     logic.config.weaponClass = entry.id >= 43 && entry.id <= 48 ? 'torpedo' : 'arc';
+    this.attachHealthBar(node, unit);
   }
 
   /** Per-id stats for ground vehicles. */
@@ -367,6 +370,7 @@ export class WaveSpawner extends Script {
     logic.config.attackPeriod = unit.attackPeriod ?? 5;
     // Behaviour variant: tip 13 = ram-and-self-destruct; else park-and-shoot.
     logic.config.tip = entry.tip;
+    this.attachHealthBar(node, unit);
   }
 
   /**
@@ -457,6 +461,22 @@ export class WaveSpawner extends Script {
     if (unit.role === 'carrier' && unit.payloadTex) {
       this.setChildTexture(node, 'Cargo', unit.payloadTex);
     }
+    this.attachHealthBar(node, unit);
+  }
+
+  /**
+   * Attach a floating HP bar to a freshly-spawned combat unit. Runtime-only
+   * (never authored/serialised), so it's constructed directly and attached with
+   * `addComponent`, which fires its `onStart` immediately (scene already running)
+   * to build the `Bar2D` child. Bosses are intentionally excluded — they own the
+   * dedicated HUD boss bar. Size/offset come from the unit's body when known so
+   * the bar sits just above each livery.
+   */
+  private attachHealthBar(node: NodeBase, unit?: UnitDef): void {
+    const bar = new UnitHealthBar(`${node.nodeId}:hpbar`, 'user:UnitHealthBar');
+    if (unit?.width) bar.config.width = Math.max(24, Math.min(64, unit.width));
+    if (unit?.height) bar.config.offsetY = unit.height / 2 + 12;
+    node.addComponent(bar);
   }
 
   /** Swap a child sprite's texture and resize it to the texture's native size. */

@@ -44,6 +44,54 @@ export default defineConfig(async ({ mode }) => {
     // await, so no TLA polyfill plugin is required.
     plugins: [
       wasm(),
+      // Same-origin download proxy for Tripo3D generated GLBs. The model URL is a presigned CDN
+      // link on a region-variable `*.tripo3d.com` host that sends NO CORS headers, so the browser
+      // cannot fetch it directly. A static Vite `proxy` entry can't target a runtime-variable host,
+      // so this streams an allowlisted URL server-side. Dev-only (like `/tripo-proxy`); production
+      // routes downloads through the pix3-agent-bridge. SSRF-guarded to Tripo hosts. See
+      // TripoModelProvider.downloadGlb.
+      {
+        name: 'pix3-tripo-download-proxy',
+        configureServer(server) {
+          server.middlewares.use('/tripo-download', async (req, res) => {
+            try {
+              const params = new URL(req.url ?? '', 'http://localhost').searchParams;
+              const target = params.get('url');
+              if (!target) {
+                res.statusCode = 400;
+                res.end('missing url');
+                return;
+              }
+              let parsed: URL;
+              try {
+                parsed = new URL(target);
+              } catch {
+                res.statusCode = 400;
+                res.end('bad url');
+                return;
+              }
+              if (parsed.protocol !== 'https:' || !/(^|\.)tripo3d\.com$/i.test(parsed.hostname)) {
+                res.statusCode = 403;
+                res.end('forbidden host');
+                return;
+              }
+              const upstream = await fetch(target);
+              if (!upstream.ok) {
+                res.statusCode = upstream.status || 502;
+                res.end(`upstream ${upstream.status}`);
+                return;
+              }
+              const buf = Buffer.from(await upstream.arrayBuffer());
+              res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'model/gltf-binary');
+              res.setHeader('Content-Length', String(buf.length));
+              res.end(buf);
+            } catch (error) {
+              res.statusCode = 500;
+              res.end(`proxy error: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          });
+        },
+      },
       VitePWA({
         registerType: 'autoUpdate',
         // The legacy src/sw.ts is NOT this service worker — generateSW builds
@@ -80,7 +128,7 @@ export default defineConfig(async ({ mode }) => {
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
           // player.html carries session query params, so navigation to it must
           // not fall back to the editor shell.
-          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/player\.html/],
+          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/tripo-proxy/, /^\/tripo-download/, /^\/player\.html/],
         },
       }),
       ...analyzePlugins,
@@ -200,6 +248,16 @@ export default defineConfig(async ({ mode }) => {
           changeOrigin: true,
           secure: true,
           rewrite: path => path.replace(/^\/cerebras-proxy/, ''),
+        },
+        // Tripo3D (neural image→3D) uses a Bearer-key server API with no CORS headers, so the
+        // browser cannot call api.tripo3d.ai directly. Same-origin dev proxy mirroring /zen-proxy;
+        // the user's key rides along as the Authorization header. For production, host an equivalent
+        // proxy (or route through the pix3-agent-bridge). See TripoModelProvider.
+        '/tripo-proxy': {
+          target: 'https://api.tripo3d.ai',
+          changeOrigin: true,
+          secure: true,
+          rewrite: path => path.replace(/^\/tripo-proxy/, ''),
         },
       },
     },

@@ -203,6 +203,8 @@ export class GroundVehicle extends Script {
     const sound = HIT_SOUNDS[Math.floor(Math.random() * HIT_SOUNDS.length)];
     this.scene?.audio.play(sound, { bus: 'sfx', pitchVariation: 0.12 });
     this.scene?.juice.punchScale(this.node, { amount: 0.15, duration: 0.14 });
+    // Survived a hit → reveal/refresh the floating HP bar (see UnitHealthBar).
+    this.node.emit('hp-changed', this.hp / Math.max(1, Number(this.config.hp)));
   }
 
   private die(): void {

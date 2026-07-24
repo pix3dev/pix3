@@ -171,6 +171,8 @@ export class QuestNpc extends Script {
       return;
     }
     this.hitFeedback();
+    // Survived a body hit → reveal/refresh the floating HP bar (see UnitHealthBar).
+    this.node?.emit('hp-changed', this.hp / Math.max(1, Number(this.config.hp)));
   }
 
   private onCargoDamaged(amount: number): void {
