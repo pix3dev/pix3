@@ -1,10 +1,17 @@
-# Pix3 Architecture Diagram
+# Pix3 Architecture Diagrams
 
-This document contains a high-level architecture diagram for Pix3 and notes about viewing and exporting diagrams in VS Code. It reflects the current operations-first model where the CommandDispatcher Service is the primary entry point for all actions, ensuring consistent lifecycle management and preconditions checking. This version also includes the Script Component System for behaviors and controllers.
+**This file is the visual/diagram layer** — mermaid system maps and a few
+editor-only wiring notes. For authoritative prose the spec wins: node
+properties → [node-types-reference.md](node-types-reference.md); property
+schema → [property-schema-reference.md](property-schema-reference.md);
+scripts/prefabs/animation/etc. → [pix3-specification.md](pix3-specification.md);
+binding code rules → `AGENTS.md`. Don't duplicate those here — link them.
+
+Skim the `##` headings and read only the diagram/section you need.
 
 ## Mermaid diagram
 
-Below is a Mermaid system diagram that represents the architecture described in `pix3-specification.md` (v1.13, operations-first).
+A Mermaid system diagram of the operations-first architecture (the CommandDispatcher is the entry point for all actions). Prose source of truth: [pix3-specification.md](pix3-specification.md).
 
 ```mermaid
 flowchart LR
@@ -120,94 +127,7 @@ graph TD
   Operation -->|performs| Viewport
 ```
 
-### Key Components
-
-- **PropertySchema**: Defines typed property metadata for a node class, including nodeType, properties array, and optional groups
-- **PropertyDefinition**: Individual property with name, type, getValue/setValue closures, UI hints (label, group, step, precision, unit, min, max)
-- **PropertyType**: Union type including `'string'`, `'number'`, `'boolean'`, `'vector2'`, `'vector3'`, `'vector4'`, `'euler'`, `'color'`, `'enum'`, `'select'`, `'object'`
-- **Custom Editors**: Web Components (`Vector2Editor`, `Vector3Editor`, `EulerEditor`) for grouped vector display
-- **Grid Layout**: Transform properties use 6-column CSS Grid (1rem 1fr 1rem 1fr 1rem 1fr) with color-coded X/Y/Z labels
-- **UpdateObjectPropertyOperation**: Uses schema's getValue/setValue for semantic transformations (e.g., radian/degree conversion)
-
-### Creating a Node Schema
-
-Node classes implement `getPropertySchema()` returning typed property definitions:
-
-```typescript
-export class Sprite2D extends Node2D {
-  static getPropertySchema(): PropertySchema {
-    return {
-      ...Node2D.getPropertySchema(),
-      nodeType: 'Sprite2D',
-      extends: 'Node2D',
-      properties: [
-        ...Node2D.getPropertySchema().properties,
-        {
-          name: 'texture',
-          type: 'string',
-          ui: {
-            label: 'Texture',
-            group: 'Sprite',
-          },
-          getValue: node => (node as Sprite2D).textureUrl || '',
-          setValue: (node, value) => {
-            // Custom logic here
-          },
-        },
-      ],
-    };
-  }
-}
-```
-
-### Property Type Support
-
-| Type        | Display                  | Usage                      |
-| ----------- | ------------------------ | -------------------------- |
-| `'string'`  | Text input               | Names, URLs, IDs           |
-| `'number'`  | Number input             | Dimensions, angles, values |
-| `'boolean'` | Checkbox                 | Flags, toggles             |
-| `'vector2'` | Grid with X/Y inputs     | 2D positions, scales       |
-| `'vector3'` | Grid with X/Y/Z inputs   | 3D positions, scales       |
-| `'vector4'` | Grid with X/Y/Z/W inputs | Colors (RGBA), quaternions |
-| `'euler'`   | Grid with X/Y/Z° inputs  | 3D rotations (degrees)     |
-| `'color'`   | Color picker             | Tint, highlight colors     |
-| `'enum'`    | Dropdown                 | Predefined choices         |
-| `'select'`  | List picker              | Option selection           |
-| `'object'`  | Nested object            | Complex data structures    |
-
-### Grid Layout for Transform Properties
-
-Transform group (position, rotation, scale) renders as 6-column grid with color-coded axes:
-
-```css
-.transform-fields {
-  display: grid;
-  grid-template-columns: 1rem 1fr 1rem 1fr 1rem 1fr;
-  gap: 0.5rem;
-  padding: 0.5rem;
-}
-
-.transform-field-label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-}
-
-/* Color-coded X/Y/Z labels */
-.transform-field-label:nth-child(1) {
-  color: #ff6b6b;
-} /* X - red */
-.transform-field-label:nth-child(3) {
-  color: #51cf66;
-} /* Y - green */
-.transform-field-label:nth-child(5) {
-  color: #4c6ef5;
-} /* Z - blue */
-```
-
-Result: Single-row display with compact axis labels and inline numeric inputs.
+Details, types, and authoring recipes: **[property-schema-reference.md](property-schema-reference.md)** (source: `packages/pix3-runtime/src/fw/`) and spec "Property Schema System". Editor-only note: Transform groups render via the `Vector2Editor`/`Vector3Editor`/`EulerEditor` web components (6-column grid, color-coded X/Y/Z axes).
 
 ## Command-Driven Menu System
 
@@ -271,143 +191,21 @@ The menu automatically updates without component changes.
 
 ## Implemented Node Types
 
-Pix3 currently implements the following node types, each with property schema support:
-
-### Base Classes
-
-- **NodeBase**: Base class extending Three.js Object3D
-  - Properties: id, name, type, visible, locked
-  - Used as foundation for all node types
-
-### 2D Nodes
-
-- **Node2D**: Base 2D node
-  - Properties: position (vector2), rotation (number°), scale (vector2)
-  - All rotation values stored internally as radians, displayed as degrees
-
-- **Layout2D**: Root container for 2D scenes
-  - Properties: width, height, resolutionPreset, showViewportOutline
-  - Replaces Group2D as the primary root for 2D content; size is independent of editor viewport
-
-- **Sprite2D**: 2D sprite image
-  - Properties: texture, tint, blend mode
-  - Renders via Three.js texture/material system
-
-- **Group2D**: 2D general container
-  - Properties: width, height (for size group)
-  - Allows positioning nested elements aligned to edges
-
-### 3D Nodes
-
-- **Node3D**: Base 3D node
-  - Properties: position (vector3), rotation (euler°), scale (vector3)
-  - Uses Three.js Euler angles for rotation
-
-- **Camera3D**: Perspective camera for 3D scene
-  - Properties: FOV, near plane, far plane
-
-- **MeshInstance**: Instance of a 3D model (GLB/GLTF)
-  - Properties: mesh path, material overrides
-  - Supports loading external models
-
-- **GeometryMesh**: Procedural geometry (Box, Sphere, etc.)
-  - Properties: geometry type, material
-
-### Lights
-
-- **DirectionalLightNode**: Directional light source
-  - Properties: color, intensity, cast shadow
-  - Used for sun-like lighting
-
-- **PointLightNode**: Point light source
-  - Properties: color, intensity, distance, decay, cast shadow
-  - Emits light in all directions from a point
-
-- **SpotLightNode**: Spot light source
-  - Properties: color, intensity, angle, penumbra, distance, decay, cast shadow
-  - Cone-shaped light with adjustable focus
+The current node inventory (every type + all its properties) lives in
+**[node-types-reference.md](node-types-reference.md)**; the capabilities view
+(what each is for, engine-vs-game) is in
+[nodes-and-systems.md](nodes-and-systems.md). Not duplicated here to avoid drift.
 
 ## Commands & Operations
 
-Pix3 implements a comprehensive set of commands and operations organized by feature:
-
-### History Commands
-
-- **UndoCommand**: Reverts last operation via HistoryManager
-- **RedoCommand**: Re-applies reverted operation
-
-### Scene Management Commands
-
-- **LoadSceneCommand**: Opens .pix3scene file from disk
-- **SaveSceneCommand**: Saves current scene to disk
-- **SaveAsSceneCommand**: Saves current scene with new filename
-- **ReloadSceneCommand**: Reloads current scene (triggered by FileWatchService on external changes)
-
-### Node Creation Commands
-
-- **CreateBoxCommand**: Creates 3D box geometry mesh
-- **CreateCamera3DCommand**: Adds perspective camera to scene
-- **CreateDirectionalLightCommand**: Adds directional light to scene
-- **CreateGroup2DCommand**: Creates 2D group container
-- **CreateLayout2DCommand**: Creates a Layout2D root node
-- **CreateMeshInstanceCommand**: Adds mesh instance from GLB/GLTF file
-- **CreatePointLightCommand**: Adds point light to scene
-- **CreateSpotLightCommand**: Adds spot light to scene
-- **CreateSprite2DCommand**: Creates 2D sprite node
-- **AddModelCommand**: Adds model from asset browser to scene
-
-All scene creation commands share `scene-command-utils.ts` for:
-
-- active-scene preconditions (`requireActiveScene`)
-- created-node payload resolution from selection (`getCreatedNodeIdFromSelection`)
-
-Scene create commands also share a common base class, `CreateNodeBaseCommand`, which centralizes:
-
-- active-scene precondition checks
-- operation execution through `OperationService.invokeAndPush()`
-- created-node payload extraction from selection
-
-Each concrete `Create*Command` remains as a thin wrapper that defines metadata (`id`, `title`, `keywords`) and provides the operation factory. This keeps `NodeRegistry` integration stable while removing duplicated command logic.
-
-To keep created-node payloads reliable, create operations must update selection consistently:
-
-- set `state.selection.nodeIds = [nodeId]`
-- set `state.selection.primaryNodeId = nodeId`
-
-and keep undo/redo selection cleanup symmetric.
-
-### Node Manipulation Commands
-
-- **DeleteObjectCommand**: Removes selected nodes from scene
-- **ReparentNodeCommand**: Moves nodes to new parent (drag-and-drop in scene tree)
-- **UpdateGroup2DSizeCommand**: Updates Group2D width/height
-- **UpdateLayout2DSizeCommand**: Updates Layout2D width/height
-
-### Property Commands
-
-- **UpdateObjectPropertyCommand**: Updates any node property via schema
-- **Transform2DCompleteOperation**: Completes 2D transform tool operation
-- **TransformCompleteOperation**: Completes 3D transform tool operation
-
-### Viewport Commands
-
-- **ToggleNavigationModeCommand**: Switches between 2D and 3D navigation modes
-- **ToggleLayer2DCommand**: Toggles visibility of the 2D layer
-- **ToggleLayer3DCommand**: Toggles visibility of the 3D layer
-- **ToggleGridCommand**: Toggles the 3D grid visibility
-
-### Selection Commands
-
-- **SelectObjectCommand**: Updates selection state with clicked/hovered node
-
-### Script Commands
-
-- **AttachBehaviorCommand**: Adds a behavior to a node via behavior picker
-- **DetachBehaviorCommand**: Removes a behavior from a node
-- **SetControllerCommand**: Sets a controller on a node via behavior picker
-- **ClearControllerCommand**: Removes controller from a node
-- **ToggleScriptEnabledCommand**: Toggles enabled state of a behavior or controller
-- **SetPlayModeOperation**: Single source of truth for `ui.isPlaying` and `ui.playModeStatus`
+The Command → Operation → history gateway is the binding pattern in `AGENTS.md`
+("Commands and Operations") and CLAUDE.md's architecture-essentials. The concrete
+command/operation set is code, not a doc list — read `src/features/<area>/`. Two
+invariants worth stating once: create operations must set both
+`selection.nodeIds = [nodeId]` and `selection.primaryNodeId = nodeId` (and keep
+undo/redo selection cleanup symmetric); scene-create commands share
+`CreateNodeBaseCommand` + `scene-command-utils.ts` (`requireActiveScene`,
+created-node payload from selection).
 
 ## Script Component System
 
@@ -439,23 +237,7 @@ graph TD
   style H fill:#fdf4ff
 ```
 
-### Key Components
-
-- **ScriptRegistry**: Unified registry for all component types (`core:*` and `user:*`), creates instances, provides property schemas
-- **Script**: Abstract base class for all components with `getPropertySchema()` for parameter definitions
-- **ScriptComponent**: Interface implemented by all script components
-- **ScriptExecutionService**: Game loop, calls `tick(dt)` on nodes, manages script lifecycle
-- **BehaviorPickerService**: Modal dialog for selecting components
-- **Inspector**: Displays attached components, allows adding/removing/toggling
-
-### Component Type IDs
-
-Components use namespace prefixes for type identification:
-
-- **Built-in**: `core:TestRotate`, `core:CameraFollow`
-- **User-defined**: `user:MyScript`, `user:NPCController`
-
-### Script Lifecycle
+Lifecycle sequence (`ScriptExecutionService` drives it):
 
 ```mermaid
 sequenceDiagram
@@ -465,7 +247,6 @@ sequenceDiagram
 
   S->>N: tick(dt)
   N->>C: for each component: if enabled: onUpdate(dt)
-  Note over B: Update state, animate properties
 
   alt Scene Load
     S->>N: onAttach(node)
@@ -480,61 +261,10 @@ sequenceDiagram
   end
 ```
 
-### Inspector Integration
-
-The Inspector panel includes a "Components" section for each node:
-
-- **Components List**: Shows all attached components with enable/disable and remove buttons
-- **Add Button**: "Add Component" button opens component picker modal
-- **No Components State**: Displays "No components attached" when empty
-- **Parameter Editing**: Components expose parameters via property schemas for inline editing
-
-### Script Parameter Schema
-
-Like node properties, script parameters use the property schema system:
-
-```typescript
-static getPropertySchema(): PropertySchema {
-  return {
-    nodeType: 'TestRotate',
-    properties: [
-      {
-        name: 'rotationSpeed',
-        type: 'number',
-        ui: {
-          label: 'Rotation Speed',
-          group: 'Component',
-          min: 0,
-          max: 10,
-          step: 0.1,
-        },
-        getValue: (c) => c.config.rotationSpeed,
-        setValue: (c, value) => {
-          c.config.rotationSpeed = Number(value);
-        },
-      },
-    ],
-    groups: { Component: { label: 'Component Parameters' } },
-  };
-}
-```
-
-### Commands for Script Management
-
-All script mutations use commands through CommandDispatcher:
-
-- **AddComponentCommand/Operation**: Add a component to a node
-- **RemoveComponentCommand/Operation**: Remove a component from a node
-- **ToggleScriptEnabledCommand/Operation**: Enable/disable a component
-- **SetPlayModeOperation**: Update play-mode state through OperationService (used by game tab lifecycle)
-
-### Built-in Components
-
-Pix3 includes example components for testing:
-
-- **core:TestRotate**: Rotates a 3D node continuously with configurable speed
-
-Additional components can be registered via `ScriptRegistry.registerComponent()`. Use `core:` prefix for built-in components and `user:` prefix for user-defined components.
+Full model — `Script` base class, `ScriptRegistry` (`core:`/`user:` IDs),
+component parameter schemas, serialization, `Add/RemoveComponentCommand`,
+`SetPlayModeOperation` — is in spec "Script Component System" and the
+[nodes-and-systems.md](nodes-and-systems.md) catalog. Don't restate it here.
 
 ## Runtime Stability Notes (2026-02-16)
 

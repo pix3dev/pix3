@@ -4,6 +4,22 @@ Version: 1.25
 
 Date: 2026-07-23
 
+> **Reading this doc economically (agents):** it is long — don't load the whole
+> file. `Grep` the heading *text* below, then `Read` with `offset`/`limit`.
+> **Reference sections by heading text, not by number** — the numbers are
+> historically inconsistent (`§8` precedes `§6`; the systems appended under
+> `6.15`–`6.22` are top-level, not children of Script Component System).
+
+## Contents (document order — grep the heading text)
+
+- Introduction · Key Features · Technology Stack · Architecture
+- Property Schema System · Script Component System
+- Layout2D Node · Project Templates, Target Platform and Agent Overlay
+- Autoload Scripts and Asset Browser Template Flow · Signals Engine · Groups Engine
+- Node Prefabs System · Keyframe Animation System · Localization (i18n)
+- Scene File Format (\*.pix3scene) · MVP Plan · Non-Functional Requirements
+- Project Structure · Roadmap and Milestones · Change Log
+
 ## 1. Introduction
 
 ### 1.1 Purpose of the Document
@@ -515,13 +531,13 @@ await this.scene.changeScene('res://src/assets/scenes/main.pix3scene', {
 - Works identically in play-mode and exports; additive to the runtime contract
   (consumed by DeepCore via yalc).
 
-## 6.5 Layout2D Node
+## 6.15 Layout2D Node
 
-### 6.5.1 Overview
+### 6.15.1 Overview
 
 Layout2D is a special 2D root node that represents the game viewport, separating it from the editor's WebGL viewport. This enables independent game layout testing across different screen sizes.
 
-### 6.5.2 Layout2D Properties
+### 6.15.2 Layout2D Properties
 
 Layout2D extends `Node2D` and provides the following properties:
 
@@ -530,7 +546,7 @@ Layout2D extends `Node2D` and provides the following properties:
 - `resolutionPreset: ResolutionPreset` - Quick preset selection for common resolutions
 - `showViewportOutline: boolean` - Toggle visual border visibility (default: true)
 
-### 6.5.3 Resolution Presets
+### 6.15.3 Resolution Presets
 
 ```typescript
 enum ResolutionPreset {
@@ -543,7 +559,7 @@ enum ResolutionPreset {
 }
 ```
 
-### 6.5.4 Layout Recalculation
+### 6.15.4 Layout Recalculation
 
 Layout2D triggers layout recalculation for all Group2D children when its size changes:
 
@@ -554,20 +570,20 @@ Layout2D triggers layout recalculation for all Group2D children when its size ch
 5. For each Group2D child: `child.updateLayout(layout2d.width, layout2d.height)`
 6. Recursive: children update their own children with inherited dimensions
 
-### 6.5.5 Key Constraints
+### 6.15.5 Key Constraints
 
 - Layout2D size is **independent** of editor viewport size
 - Editor viewport resize does NOT change Layout2D dimensions
 - Layout2D can only be resized via inspector properties (width/height or preset)
 - Layout2D visibility state cascades to all children
 
-### 6.5.6 Visual Representation
+### 6.15.6 Visual Representation
 
 - Purple dashed border (0x9b59b6) when `showViewportOutline` is true
 - Border visibility can be toggled via checkbox in inspector
 - Children (Group2D, Sprite2D) render normally within Layout2D bounds
 
-## 6.11.5 Project Templates, Target Platform and Agent Overlay
+## 6.16 Project Templates, Target Platform and Agent Overlay
 
 **New Project** is a two-step wizard (`pix3-create-project-dialog`): template picker (cover cards) → parameters (name, storage, target platform, base size). Bundled templates live under `src/templates/projects/<id>/`:
 
@@ -583,7 +599,7 @@ Every new project also receives an **agent overlay** (`src/templates/agent/**`):
 
 The editor ships as an installable **PWA** (`vite-plugin-pwa`, `autoUpdate`): standalone display, offline-precached app shell including `esbuild.wasm` (in-editor script compilation offline); the background-removal ONNX runtimes are excluded from precache. The legacy handwritten `src/sw.ts` remains unregistered.
 
-## 6.12 Autoload Scripts and Asset Browser Template Flow
+## 6.17 Autoload Scripts and Asset Browser Template Flow
 
 Pix3 supports project-level autoload scripts configured in `pix3project.yaml` under `autoloads`.
 Each autoload entry includes:
@@ -605,14 +621,14 @@ When `Create autoload script` is used, the editor:
 4. Adds the autoload entry to `pix3project.yaml`.
 5. Reveals the created script in the Asset Browser.
 
-### 6.12.1 Autoload Runtime Model
+### 6.17.1 Autoload Runtime Model
 
 - Autoload scripts are instantiated as script components and attached to an internal global root node.
 - They are initialized from project manifest order and persist across scene changes.
 - They are ticked before active-scene root nodes.
 - They are not serialized into `.pix3scene` files.
 
-### 6.12.2 `pix3project.yaml` Example
+### 6.17.2 `pix3project.yaml` Example
 
 ```yaml
 version: 1.0.0
@@ -625,11 +641,11 @@ autoloads:
     enabled: true
 ```
 
-## 6.13 Signals Engine
+## 6.18 Signals Engine
 
 Pix3 provides a node-local signal system on `NodeBase` for script-to-script communication.
 
-### 6.13.1 API
+### 6.18.1 API
 
 - `signal(name)` - declares a signal channel (optional but recommended).
 - `connect(signalName, target, method)` - subscribes target method.
@@ -638,14 +654,14 @@ Pix3 provides a node-local signal system on `NodeBase` for script-to-script comm
 - `disconnectAll(signalName?)` - clears one signal or all signal subscriptions on the emitter node.
 - `disconnectAllFromTarget(target)` - removes all subscriptions matching a target object.
 
-### 6.13.2 Lifecycle Safety
+### 6.18.2 Lifecycle Safety
 
 - `Script.onDetach()` base implementation automatically calls `node.disconnectAllFromTarget(this)`.
 - This avoids leaking listeners tied to detached script instances.
 - Preferred connection style: `node.connect('signal_name', this, this.onSomething)`.
 - Avoid using `.bind(this)` when connecting signals; bound functions are harder to match for exact disconnects.
 
-### 6.13.3 Example
+### 6.18.3 Example
 
 ```typescript
 // emitter
@@ -660,17 +676,17 @@ private onScoreChanged(newScore: number): void {
 }
 ```
 
-## 6.14 Groups Engine
+## 6.19 Groups Engine
 
 Groups provide runtime categorization for nodes (for example, `enemies`, `ui`, `interactables`).
 
-### 6.14.1 Node API
+### 6.19.1 Node API
 
 - `addToGroup(group)`
 - `removeFromGroup(group)`
 - `isInGroup(group)`
 
-### 6.14.2 Scene API
+### 6.19.2 Scene API
 
 `SceneManager` provides group-based queries and invocation:
 
@@ -679,7 +695,7 @@ Groups provide runtime categorization for nodes (for example, `enemies`, `ui`, `
 
 `callGroup` performs runtime method checks and warns if no callable method is found.
 
-### 6.14.3 Serialization
+### 6.19.3 Serialization
 
 Groups are serialized in `.pix3scene` nodes via `groups: []`.
 
@@ -691,13 +707,13 @@ root:
     groups: [actors, player]
 ```
 
-## 6.15 Node Prefabs System
+## 6.20 Node Prefabs System
 
-### 6.15.1 Overview
+### 6.20.1 Overview
 
 Pix3 supports a prefab system for reusing node hierarchies across scenes. Prefabs are standard `.pix3scene` files that can be instantiated (instanced) in other scenes — `.pix3scene` is the only scene/prefab extension; there is no dedicated `.pix3prefab` format, and "prefab" describes how a scene file is used (instanced via `instance:`), not a distinct file type. When a node branch is saved as a prefab, it becomes a reusable asset that can be placed multiple times in any scene. Changes to the source prefab can be propagated to all instances.
 
-### 6.15.2 Prefab Metadata
+### 6.20.2 Prefab Metadata
 
 Each prefab instance stores metadata in `node.metadata.__pix3Prefab`:
 
@@ -711,7 +727,7 @@ interface PrefabMetadata {
 }
 ```
 
-### 6.15.3 Prefab Utilities
+### 6.20.3 Prefab Utilities
 
 The `prefab-utils.ts` module provides helper functions:
 
@@ -721,7 +737,7 @@ The `prefab-utils.ts` module provides helper functions:
 - `isPrefabChildNode(node)` - True if node is a child within a prefab instance
 - `findPrefabInstanceRoot(node)` - Walks up the parent chain to find the instance root
 
-### 6.15.4 Instance Creation
+### 6.20.4 Instance Creation
 
 Creating a prefab instance uses the `instance:` YAML key:
 
@@ -739,7 +755,7 @@ root:
 
 The `properties` block allows overriding base prefab values. Overrides are tracked separately from the base values.
 
-### 6.15.5 Prefab Operations
+### 6.20.5 Prefab Operations
 
 The prefab lifecycle is managed by these operations:
 
@@ -767,7 +783,7 @@ The prefab lifecycle is managed by these operations:
    - Shallow (one level); undo/redo restore before/after marker+`instancePath` snapshots without a scene reparse, so node identity and the rest of undo history survive
    - `OpenPrefabCommand` (not an operation; opens a tab) opens an instance's source prefab in its own scene tab, optionally pre-selecting the corresponding node by `localId`
 
-### 6.15.6 Inspector Integration
+### 6.20.6 Inspector Integration
 
 When inspecting a node that is part of a prefab instance:
 
@@ -775,10 +791,10 @@ When inspecting a node that is part of a prefab instance:
 - A "Revert" button allows resetting overridden properties to base values
 - Visual indicators distinguish between base values and overrides
 - `getPrefabBaseValueForProperty()` retrieves original values for comparison
-- Component actions are locked on instance nodes: **Add/Remove/Enable/Disable Component** and **component property value editors** are disabled on every instance node (component config is not serialized as an override), and the **name** field is disabled on instance children (the root keeps an editable name). See §6.15.8
+- Component actions are locked on instance nodes: **Add/Remove/Enable/Disable Component** and **component property value editors** are disabled on every instance node (component config is not serialized as an override), and the **name** field is disabled on instance children (the root keeps an editable name). See §6.20.8
 - **Default overrides (placement)**: on an instance **root**, `position`, `rotation`, `scale`, `name`, and the 2D anchored-layout keys (`layoutEnabled`, `horizontalAlign`, `verticalAlign`) describe where the instance sits in the host scene, not the prefab's content (Unity "default overrides"). They are **not** flagged as overrides and have no Revert button, even though they still serialize on the `instance:` definition — so moving, scaling, or anchoring an instance (e.g. pinning a panel to a window edge) is placement, not a content edit. The same properties on a child (or a nested-instance root) remain real content overrides. Implemented via `isInstancePlacementProperty` (`src/features/scene/prefab-utils.ts`)
 
-### 6.15.7 Scene Tree Integration
+### 6.20.7 Scene Tree Integration
 
 The scene tree distinguishes prefab nodes:
 
@@ -788,7 +804,7 @@ The scene tree distinguishes prefab nodes:
 - **Double-click** a prefab node (root or child) opens its source prefab in a scene tab (a child pre-selects its corresponding node)
 - Context menu is prefab-aware: shows **Open Prefab** for any instance node and **Unlink Prefab Instance** for an instance root; hides Duplicate/Group/Delete/Save-as-Prefab for prefab children; keeps them for instance roots
 
-### 6.15.8 Structural Editing & Instance Lock
+### 6.20.8 Structural Editing & Instance Lock
 
 An instance's child structure is owned by its prefab file, and the save format only round-trips **property** overrides (`instance:` + root `properties:` + `overrides.byLocalId`). Structural edits inside an instance are therefore **not representable** and would be silently lost on save, so they are blocked at every entry point:
 
@@ -797,9 +813,9 @@ An instance's child structure is owned by its prefab file, and the save format o
 - Duplicating or grouping prefab children (filtered in the operations; commands report a reason)
 - Adding/removing/toggling components and editing component property values on **any** instance node, and renaming prefab **children** (disabled in the Inspector; guarded in `AddComponentCommand`/`RemoveComponentCommand`/`UpdateComponentPropertyCommand`/`ToggleScriptEnabledCommand`)
 
-Instance **roots** stay fully editable structurally (move, delete, duplicate as a second instance, rename). To edit an instance's contents in place, either open the prefab (edit the source) or **Unlink** the instance to convert it to plain nodes (§6.15.5). Deleting a prefab child is also blocked (`DeleteObjectOperation`).
+Instance **roots** stay fully editable structurally (move, delete, duplicate as a second instance, rename). To edit an instance's contents in place, either open the prefab (edit the source) or **Unlink** the instance to convert it to plain nodes (§6.20.5). Deleting a prefab child is also blocked (`DeleteObjectOperation`).
 
-### 6.15.9 Auto-Refresh Workflow
+### 6.20.9 Auto-Refresh Workflow
 
 1. User modifies and saves a prefab file externally (e.g., in VS Code) or in its own editor tab
 2. FileWatchService detects the file change
@@ -807,11 +823,11 @@ Instance **roots** stay fully editable structurally (move, delete, duplicate as 
 4. All instances referencing that prefab are rebuilt
 5. Property overrides are preserved during refresh
 
-## 6.16 Keyframe Animation System
+## 6.21 Keyframe Animation System
 
 Godot/Unity-style keyframe animation of node properties with tweened interpolation and audio cues. Runtime lives in `packages/pix3-runtime/src/animation/`; the editor UI is the bottom-docked **Animation** timeline panel (`animation-timeline`).
 
-### 6.16.1 Runtime Model
+### 6.21.1 Runtime Model
 
 - **`core:AnimationPlayer`** is a built-in script component (`AnimationPlayerBehavior`), registered like other behaviors. It plays clips on its host node and the host's descendants.
 - Clip data lives in the component's `config.animations` (`KeyframeAnimationSet`), so it serializes with the scene verbatim — no SceneLoader/SceneSaver changes, and collaboration sync rides along with scene snapshots.
@@ -821,7 +837,7 @@ Godot/Unity-style keyframe animation of node properties with tweened interpolati
 - **Evaluation** (`animation/clip-evaluator.ts`): pure sampling (`sampleTrack`, hold semantics outside the key range, per-segment easing from the left key) plus a node-applying layer (`createClipBindings` resolves targets/schema once, `applyClipAtTime` writes through `PropertyDefinition.setValue`). Easing curves (`animation/easing.ts`): `linear`, `step`, and Penner sine/quad/cubic/expo/back/elastic/bounce × in/out/inOut. Discrete types (boolean/string) always step. Colors interpolate per sRGB channel.
 - **Playback**: `onUpdate(dt)` advances time × `speed`, applies the pose, and fires time-window keys — audio and events alike — crossed in `(prev, next]` (shared boundary rule in `collectTimedKeysInRange`, loop-wrap aware; `fireTimeWindow` runs both so each key fires exactly once per crossing). Non-looping clips clamp to the final pose and emit `animation_finished` on the host node; `play()` emits `animation_started`. Public API: `play(clipName?)`, `stop()`, `pause()/resume()`, `seek(t)`, `currentTime`, `duration`, `isPlaying`, `getAnimationSet()`, `invalidateBindings()`. `autoplay` config starts a clip in `onStart`.
 
-### 6.16.2 Editor
+### 6.21.2 Editor
 
 - **Panel**: `pix3-animation-timeline-panel`, docked in the bottom stack next to Assets Preview/Logs. It binds to the `core:AnimationPlayer` of the selected node or its nearest ancestor; empty states offer adding the component (seeded with one clip) and creating clips. Toolbar: clip selector + clip actions (new/rename/duplicate/delete), preview transport, playhead readout, clip duration, loop, snap toggle + step, zoom, Add Track, add/delete key, easing selector for the selection.
 - **Editing** flows through a single operation, `animation-timeline.update-clips` (`UpdateAnimationPlayerClipsOperation`): an updater closure mutates a normalized draft of the set; undo/redo restore whole-set snapshots. Key drags commit per pointer-move with an `options.coalesceKey` plus the drag-start set as `previousSet`, so one history entry spans the whole drag. Pure helpers live in `features/animation-timeline/clip-edit-utils.ts`.
@@ -829,17 +845,17 @@ Godot/Unity-style keyframe animation of node properties with tweened interpolati
 - **Preview** (`AnimationTimelinePreviewService`): scrubbing/playback samples clips onto live nodes **without** dirtying the scene, touching history, or bumping `nodeDataChangeSignal`. Original values are snapshotted per animated property on session start and restored on stop. Guards via `OperationService` events: scene saves restore authored values before serialization and re-apply after; undo/redo or any foreign mutating operation (including play-mode start) ends the preview; the panel's own clip edits refresh bindings in place. Audio keys are audible during preview playback (not while scrubbing); event keys also fire during preview (a no-op in the editor since no game scripts are connected, but timing stays WYSIWYG with play mode).
 - Panel-local shortcuts (local keydown listener, not global keybindings): Space play/pause, Delete removes selected keys, arrows nudge keys/playhead by the snap step (Shift ×5), Home/End jump the playhead.
 
-## 6.17 Localization (i18n)
+## 6.22 Localization (i18n)
 
 Godot-inspired localization (`TranslationServer`/`tr()` adapted to Pix3): per-locale JSON tables + explicit key properties on nodes. Runtime lives in `packages/pix3-runtime/src/core/localization/`; editor authoring in `LocalizationEditorService` + the **Localization** panel + `src/features/localization/` commands/operations.
 
-### 6.17.1 Data Model
+### 6.22.1 Data Model
 
 - **Tables**: `locales/<locale>.json` at the project root, loaded via `res://locales/<locale>.json` (so exported-build embedding is free). Each file: `$meta` (`locale`, `name`, optional `direction`), `strings` (flat dot-namespaced key → text, `{param}` interpolation tokens), `sprites` (sprite key → `res://` texture path — for sprites/skins with baked per-language text). Written pretty-printed with sorted keys.
 - **Manifest**: `pix3project.yaml` gains an optional `localization:` block (`defaultLocale`, `fallbackLocale`, `locales: [...]`). Absent block ⇒ auto-discovery from `locales/*.json`; no locales ⇒ the whole system is inert.
 - **Resolution never throws**: `tr(key)` falls current locale → fallback locale → the key itself; `trSprite(key)` falls current → fallback → `null` (caller keeps the authored texture). Empty (`""`) entries count as *untranslated* and fall through the same chain (Godot semantics) — they are the template placeholders key extraction seeds for translators.
 
-### 6.17.2 Runtime
+### 6.22.2 Runtime
 
 - **`LocalizationService`** (plain class, no editor DI): `configure(cfg)`, `attachResources(rm)`, `setLocale(id)` (lazy table load + cache), `setTable(table)` (editor live-feed), `tr(key, params?)`, `trPlural(key, count, params?)` (convention suffix keys `key.one/.few/.many/.other` selected via `Intl.PluralRules(locale)`, falls to `.other` → bare key; `{count}` always interpolable), `trSprite(key)`, `has(key)`, `onChange(cb)`.
 - **Active-instance pointer** (`active-localization.ts`, globalThis sink like `project-texture-filtering.ts`): the editor activates a preview instance; `SceneRunner.startScene` swaps in an isolated play-mode instance seeded with the editor's preview locale (or `defaultLocale` in exports) and restores the previous pointer on stop. The seed locale's table load is **awaited before the first frame** (`runGraph` → `setupLocalization`), so keyed labels never flash the raw key — critical when a paused/background session freezes on frame one.
@@ -847,7 +863,7 @@ Godot-inspired localization (`TranslationServer`/`tr()` adapted to Pix3): per-lo
 - **Locale-change walk**: `applyLocaleToTree(roots, textureLoader?)` repaints every keyed label and re-resolves/reloads keyed sprite textures (stale async loads are dropped). Shared verbatim by `SceneRunner` (play) and the editor preview.
 - **Scripts**: `this.scene.localization` (`tr`, `setLocale`, `onChange`, …) mirroring the `scene.audio` facade; data modules can `import { getActiveLocalization } from '@pix3/runtime'`.
 
-### 6.17.3 Editor
+### 6.22.3 Editor
 
 - **`LocalizationEditorService`**: loads tables at project open (manifest or auto-discovery), owns the preview instance, exposes the authoring API (`setEntry`/`removeKey`/`addLocale`/`removeLocale`/`getMissing`, all section-aware: `'strings' | 'sprites'`), write-through persists each edit, mirrors counters into `appState.localization` (IDs/counts only — tables stay in the service).
 - **Localization panel** (`pix3-localization-panel`, View → Localization): Strings/Sprites section tabs; rows = keys, columns = default locale + one target locale; filter, missing-only view with per-cell warning tint; add/remove locale and key; preview-locale dropdown that live-updates the viewport (labels *and* localized sprite proxies).
@@ -856,7 +872,7 @@ Godot-inspired localization (`TranslationServer`/`tr()` adapted to Pix3): per-lo
 - **Key rename** (`RenameLocalizationKeyCommand`/`Operation`, panel row pencil or double-click on the key): moves the key in every locale table AND rewrites `labelKey` / `textureKey`-family references in all **open** scenes through the property schema (touched scenes marked dirty); one undoable step. Refuses when the new key already exists. Closed scene files and script literals are not rewritten — a follow-up panel Scan reports the stale script keys.
 - **Key extraction** (the POT analog): the panel's **Scan** button runs `ExtractLocalizationKeysCommand` → `LocalizationExtractionService.scan()` finds (a) `UIControl2D` `label:` literals without a `labelKey` in every `.pix3scene` (the active scene is read from its live graph, so unsaved edits are honored) and (b) `tr`/`trSprite`/`trPlural`/`setTextKey` string-literal keys in project scripts that are missing from the default table (interpolated template literals are skipped; `trPlural` resolves through its suffix keys). The report renders in the panel: per-item **Extract** (creates the key in the default locale + sets `labelKey` via the property op; suggested keys are name-slugs deduped against the table — identical literals share a key) and per-item **Add** for missing script keys. `ExtractLocalizationKeysOperation` then seeds keys present in the default locale but absent from other locales as `""` placeholders (undo removes only still-empty ones).
 
-### 6.17.4 Export
+### 6.22.4 Export
 
 - `ProjectBuildService.collectAssetPaths` additionally enumerates `locales/*.json` and every texture path in their `sprites` sections (invisible to the `res://` regex scan of scenes/scripts).
 - The generated `scene-manifest.ts` exports `runtimeLocalization` (the effective config or `null`); the runtime bootstrap calls `runner.setLocalizationConfig(...)` before `startScene`, so the first frame renders in `defaultLocale` and playable-HTML exports work offline via embedded tables.
@@ -1089,6 +1105,8 @@ root:
 4. **Milestone 3 — Collaboration Preview (future):** Shared sessions, commenting, live cursors (post-MVP).
 
 ## 13. Change Log
+
+> Section numbers cited in older entries reflect the numbering at that release; the appended systems were renumbered to 6.15–6.22 to remove duplicate numbers. Refer to sections by heading text.
 
 - **1.5 (2025-09-26):** Added target platforms, non-functional requirements, detailed architecture contracts, validation rules, and roadmap updates. Synced guidance on `fw` helpers.
 - **1.7 (2025-10-01):** Removed PixiJS dual-engine plan; consolidated rendering to single Three.js pipeline (perspective + orthographic). Updated project structure, removed obsolete adapter references, clarified rendering notes.

@@ -7,7 +7,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - **Pix3** is a browser-based editor for HTML5 scenes blending 2D and 3D layers.
 - **Stack**: TypeScript + Vite, Lit web components, Valtio state, Three.js, Golden Layout.
 - **Architecture**: Operations-first with `OperationService` as mutation gateway.
-- **Source of Truth**: `docs/pix3-specification.md` (v1.15, 2026-02-26).
+- **Source of Truth**: `docs/pix3-specification.md` (version is the number in its own title — don't cite one here).
 - **Capabilities catalog**: `docs/nodes-and-systems.md` — the inventory of every node, `core:*` behavior, system, and scripts-facing runtime API (and how to use each). **Check it before writing custom game logic**; it also carries the engine-vs-game decision. For agents building on the engine, the `pix3-game-dev` skill is the entry point.
 
 ## Essential Architecture Patterns
@@ -93,7 +93,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 5a. **Icons**: All UI icons render through `IconService.getIcon(...)` (vector SVG). Never hardcode emoji/glyphs as icons.
 6. **Async Safety**: Use `CommandDispatcher` to handle command execution flow and errors.
 7. **Proactiveness**: If a command requires a service, check its availability and register if necessary.
-8. **Documentation**: Maintain only `README.md`, `AGENTS.md`, and `docs/pix3-specification.md`. Do not create feature-specific `.md` files.
+8. **Documentation**: Keep the canonical doc set current; do **not** add new `.md` files. The set is `README.md`, `AGENTS.md`, `CLAUDE.md`, and under `docs/`: `pix3-specification.md`, `nodes-and-systems.md`, `node-types-reference.md`, `property-schema-reference.md`, `architecture.md`. New material = a section in one of these + a row in CLAUDE.md's doc router (not a new file).
 
 ## Development Commands
 

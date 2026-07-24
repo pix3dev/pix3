@@ -2,12 +2,30 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Authoritative references
+## Doc router — read the SECTION, not the whole file
 
-- **`AGENTS.md`** — the canonical coding rules (mutation gateway, DI, Lit component conventions, critical do/don't list). Read it before writing code; the rules there are binding.
-- **`docs/pix3-specification.md`** — the product/architecture source of truth (currently v1.15).
-- **`docs/architecture.md`** — deep-dive diagrams for the operations-first flow, property-schema system, script components, rendering, and state.
-- **`docs/nodes-and-systems.md`** — the capabilities catalog for agents: every node, `core:*` behavior, system, and scripts-facing runtime API, with how-to-use notes and the engine-vs-game decision. Consult it (and the `pix3-game-dev` skill) before writing custom game logic.
+Every doc below is bigger than the answer to any single task. **Locate the anchor with `Grep`, then `Read` with `offset`/`limit`** — don't load a whole file to find one section. Anchors are the *descriptive* heading text (grep that, not a section number — spec numbers are unreliable). `AGENTS.md` is the binding code-rule set: read it before writing code.
+
+| Task | File → section (grep the heading text) |
+|---|---|
+| Does the engine already do X? / engine-vs-game decision | `docs/nodes-and-systems.md` → "engine-vs-game decision", then the Nodes/Systems catalog |
+| All properties of one node type | `docs/node-types-reference.md` → `### <NodeName>` (summary table at "Node Properties Quick Reference") |
+| Write a game script / runtime API from a `Script` | `docs/nodes-and-systems.md` → "Scripts-facing runtime API" + the new-node checklist |
+| Add/fix an inspector property (schema authoring) | `docs/property-schema-reference.md` (recipes at top; source: `packages/pix3-runtime/src/fw/property-schema.ts`) |
+| New engine node, full checklist | `nodes-and-systems.md` engine-vs-game + spec "Scene File Format" + `property-schema-reference.md` |
+| `.pix3scene` YAML format / validation | `docs/pix3-specification.md` → "Scene File Format" |
+| Script lifecycle / registry / serialization | `docs/pix3-specification.md` → "Script Component System" |
+| Prefabs / keyframe animation / localization / signals / groups | `docs/pix3-specification.md` → "Node Prefabs System" / "Keyframe Animation" / "Localization" / "Signals Engine" / "Groups Engine" |
+| 2D draw order, overlay flag, texture-goes-black bug | this file → "2D overlay rendering" |
+| Viewport not repainting / render-on-demand | this file → "Editor viewport renders on demand" |
+| Command / Operation / undo wiring | `AGENTS.md` → "Commands and Operations"; code in `src/features/<area>/` |
+| Editor UI (Lit, panels, icons, theming) | `AGENTS.md` → "Component System" + `pix3-ui-conventions` skill |
+| ECS / `InstancedMesh3D` bulk API | `nodes-and-systems.md` → "ECS"; `node-types-reference.md` → `### InstancedMesh3D` |
+| System-overview diagrams / menu system / nav modes | `docs/architecture.md` (diagrams only — the spec is authoritative for prose) |
+| Build a game feature (entry point) | `pix3-game-dev` skill |
+| Debug the *running* editor | `debug-running-game` skill |
+
+**Version of record** is the `## N. Change Log` / title of `docs/pix3-specification.md` — never hardcode a spec version number in other docs.
 
 This file covers what those don't: commands, repo topology, and the non-obvious wiring.
 
@@ -68,7 +86,7 @@ The mental model that spans many files:
 
 3. **Dependency injection** (`src/fw/di.ts`): `@injectable()` services registered in `ServiceContainer` (singletons by default), injected via `@inject(ServiceClass)`. Requires `reflect-metadata` (imported first in `main.ts`) and `experimentalDecorators`. Services holding subscriptions/resources implement `dispose()`. The ~85 services in `src/services/` are grouped into domain subdirectories (`core`, `scene`, `project`, `cloud`, `collab`, `assets`, `scripting`, `play`, `export`, `editor`, `animation`, `localization`, `image-gen`, `bg-removal`, `library`, `viewport`, `agent`, `llm`, `ao-bake`, `atlas`) — deep-import from the domain folder (`@/services/<domain>/FooService`); no loose files sit at the `src/services/` root.
 
-4. **Property schema system** (Godot-inspired): node and `Script` classes implement `static getPropertySchema()` returning typed `PropertyDefinition`s with `getValue`/`setValue` closures. The Inspector renders editors dynamically from these; all edits go through `UpdateObjectPropertyOperation`. See `docs/property-schema-*.md`.
+4. **Property schema system** (Godot-inspired): node and `Script` classes implement `static getPropertySchema()` returning typed `PropertyDefinition`s with `getValue`/`setValue` closures. The Inspector renders editors dynamically from these; all edits go through `UpdateObjectPropertyOperation`. See `docs/property-schema-reference.md` (source: `packages/pix3-runtime/src/fw/`).
 
 5. **Unified script components** (Unity-style): runtime logic attaches to nodes as `Script` instances in `node.components` (`onAttach`/`onStart`/`onUpdate`/`onDetach`). Register types in `ScriptRegistry` with namespace IDs — `core:` for built-ins, `user:` for project scripts. `ScriptExecutionService` drives the play-mode game loop.
 

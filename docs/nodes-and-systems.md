@@ -8,7 +8,7 @@ that is the rule CLAUDE.md's *Engine vs Game feature decision* enforces.
 - Node detail (every property, per node): [node-types-reference.md](node-types-reference.md)
 - Product/architecture source of truth: [pix3-specification.md](pix3-specification.md)
 - Deep-dive diagrams (operations flow, schema, rendering, state): [architecture.md](architecture.md)
-- Property-schema authoring: [property-schema-quick-reference.md](property-schema-quick-reference.md)
+- Property-schema authoring: [property-schema-reference.md](property-schema-reference.md)
 
 ---
 
@@ -271,7 +271,7 @@ the tables + localized sprites automatically. Lives in
 `ECSService` runs a deterministic fixed-step update alongside per-frame node
 ticks. Games register systems/components for physics, AI, spawning, etc. **Use
 (consumer):** `sceneService.getECSService()` → register systems; the runner calls
-`fixedUpdate`. See [ecs-instancing.md](ecs-instancing.md) + `architecture.md`.
+`fixedUpdate`. For bulk instanced rendering see `InstancedMesh3D` in [node-types-reference.md](node-types-reference.md).
 
 ### Physics
 No built-in rigidbody node yet. Rapier is available (lazy-loaded) and the
@@ -409,7 +409,7 @@ play-mode hook, so the editor keeps running.
 ## 6. Editor-side rules (when an agent edits scenes/state)
 
 - **Mutation gateway:** every state change flows UI → `CommandDispatcher.execute(CommandClass, args)` → Command → Operation → history. **Never mutate `appState` or node properties directly.** A feature = a `Command` + an `Operation` under `src/features/<area>/`. (See CLAUDE.md + AGENTS.md — binding.)
-- **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-quick-reference.md](property-schema-quick-reference.md).
+- **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-reference.md](property-schema-reference.md).
 - **Serialization:** scenes are `.pix3scene` YAML (`root:` tree of nodes with `properties`, `components`, `children`). Copy a known-good demo in `samples/HelloWorld/` as a template.
 - **2D texture filtering (project setting):** Project Settings → *2D Texture Filtering* is `linear` (default, smoothed) or `nearest` (crisp pixel-art). It lives on the `ProjectManifest` and is pushed to the runtime global via `setProjectTextureFiltering`; `configure2DTexture` (runtime) and the editor's sprite-texture setup both read it, so 2D sprite/UI textures pick up the mode in edit mode, play mode, and export. 3D textures are unaffected (they keep mipmapped linear sampling).
 - **2D draw-call optimization (play mode):** a pre-launch **texture atlas** + a paint-order **quad batcher** cut a 2D frame from ~one draw call per node to a handful. The editor packer (`TextureAtlasService`) packs eligible sprite textures (Sprite2D / Button2D / AnimatedSprite2D / Bar2D — plus dynamic paths reached via script `res://` directory prefixes) into a few sheets, cached in IndexedDB, and installs a resolver on the play-mode `AssetLoader` so every texture load returns a lightweight **view** onto a shared sheet (`configure2DTexture` keeps sheets mipmap-free). The runtime `Batch2DSystem` then merges maximal contiguous same-source runs (in stamped `renderOrder`) into single draws, preserving paint order by construction (per-node opacity/tint ride vertex colors). Editor viewport rendering is unaffected (it draws its own proxy meshes). Toggles (`'auto'` default; `'off'` = byte-identical): project manifest `rendering2D.textureAtlas` / `.batching`, or `?pix3Atlas2D=off` / `?pix3Batch2D=off`, or `window.__PIX3_RENDER2D__`. `Label2D`/canvas text and `TiledSprite2D` are intentionally not atlased/batched. Exported games consume a shipped `assets/.atlas/atlas-manifest.json` via `installAtlasFromManifest` (emission from `ProjectBuildService` is a pending follow-up).
@@ -437,4 +437,4 @@ play-mode hook, so the editor keeps running.
 - Asset Library: services `src/services/library/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Model Lab (3D generation): orchestrator + pipeline in `src/services/model-gen/` (`Model3DGenService`, `SculptSpec`, `ModelPreviewRenderer`, `ComparisonSheet`, `Model3DGenHistoryService`, `prompts/`); scene lane in `src/services/model-gen/scene/` (`Scene3DGenService`, `LevelSpec`, `scene-validate`, `SceneInventoryService`, `ScenePreviewRenderer`, `scene-scatter`, `prompts`); panel `src/ui/model-lab/`; agent tools `generate_model_3d` / `generate_scene_3d` (`src/services/agent/AgentToolRegistry.ts`); debug lanes `__PIX3_DEBUG__.model3d` / `.scene3d` (`src/core/debug-bridge.ts`).
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.
-- Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [ecs-instancing.md](ecs-instancing.md), the `property-schema-*.md` set.
+- Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [property-schema-reference.md](property-schema-reference.md).

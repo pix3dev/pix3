@@ -8,7 +8,7 @@ that is the rule CLAUDE.md's *Engine vs Game feature decision* enforces.
 - Node detail (every property, per node): [node-types-reference.md](node-types-reference.md)
 - Product/architecture source of truth: [pix3-specification.md](pix3-specification.md)
 - Deep-dive diagrams (operations flow, schema, rendering, state): [architecture.md](architecture.md)
-- Property-schema authoring: [property-schema-quick-reference.md](property-schema-quick-reference.md)
+- Property-schema authoring: [property-schema-reference.md](property-schema-reference.md)
 
 ---
 
@@ -187,7 +187,7 @@ its properties. Pure-2D scenes can opt 2D in via `affect2D`.
 `ECSService` runs a deterministic fixed-step update alongside per-frame node
 ticks. Games register systems/components for physics, AI, spawning, etc. **Use
 (consumer):** `sceneService.getECSService()` → register systems; the runner calls
-`fixedUpdate`. See [ecs-instancing.md](ecs-instancing.md) + `architecture.md`.
+`fixedUpdate`. For bulk instanced rendering see `InstancedMesh3D` in [node-types-reference.md](node-types-reference.md).
 
 ### Physics
 No built-in rigidbody node yet. Rapier is available (lazy-loaded) and the
@@ -309,7 +309,7 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 ## 6. Editor-side rules (when an agent edits scenes/state)
 
 - **Mutation gateway:** every state change flows UI → `CommandDispatcher.execute(CommandClass, args)` → Command → Operation → history. **Never mutate `appState` or node properties directly.** A feature = a `Command` + an `Operation` under `src/features/<area>/`. (See CLAUDE.md + AGENTS.md — binding.)
-- **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-quick-reference.md](property-schema-quick-reference.md).
+- **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-reference.md](property-schema-reference.md).
 - **Serialization:** scenes are `.pix3scene` YAML (`root:` tree of nodes with `properties`, `components`, `children`). Copy a known-good demo in `samples/HelloWorld/` as a template.
 - **Debug bridge (dev):** `window.__PIX3_DEBUG__` exposes scene/liveScene/play/setProperty/errors for driving the running editor (see the `debug-running-game` skill). Consumer games can register `registerGameDebug({name, snapshot, inspect, action})` from `@pix3/runtime` for a game-specific surface.
 
@@ -334,4 +334,4 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
 - Asset Library: services `src/services/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.
-- Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [ecs-instancing.md](ecs-instancing.md), the `property-schema-*.md` set.
+- Deeper docs: [node-types-reference.md](node-types-reference.md), [pix3-specification.md](pix3-specification.md), [architecture.md](architecture.md), [property-schema-reference.md](property-schema-reference.md).

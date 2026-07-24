@@ -1,6 +1,10 @@
 # Pix3 Node Types Reference
 
-This document provides a comprehensive reference for all node types available in the Pix3 editor. Each node type is designed for specific use cases in 2D and 3D scene composition.
+Per-node property tables for every node type. **Reading economically:** grep the
+`### <NodeName>` heading for one node instead of loading the file; the
+one-line-per-node summary is at "Node Properties Quick Reference" (bottom). For
+*what a node is for* / engine-vs-game, use [nodes-and-systems.md](nodes-and-systems.md);
+for schema authoring, [property-schema-reference.md](property-schema-reference.md).
 
 ---
 
@@ -522,6 +526,37 @@ A node that loads and displays external 3D models in GLB or GLTF format.
 
 ---
 
+### InstancedMesh3D
+
+A `THREE.InstancedMesh` wrapper for rendering many copies of one geometry/material in a single draw call — for large ECS-driven simulations (crowds, particles, tiles). Populate it in bulk from a script/system, not the inspector.
+
+**Type String:** `InstancedMesh3D`
+
+**Node-level (serialized) properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxInstances` | number | — | Buffer capacity (instance count ceiling); read-only in inspector |
+| `enablePerInstanceColor` | boolean | false | Allocate a per-instance color buffer |
+| `castShadow` | boolean | — | Forwarded to the underlying mesh |
+| `receiveShadow` | boolean | — | Forwarded to the underlying mesh |
+| `frustumCulled` | boolean | — | Forwarded to the underlying mesh |
+| `visibleInstanceCount` | number | — | How many instances currently draw (read-only display) |
+
+**Bulk API (call from a script/system, then `flush()`):**
+- `writeMatrices(data, options?)` — write raw N×16 `Float32Array` instance matrices.
+- `writeTransforms(data, options?)` — write position/rotation/scale transforms (composed to matrices for you).
+- `writeColors(data, options?)` — write per-instance colors (requires `enablePerInstanceColor`).
+- `flush()` — upload dirty buffers to the GPU. `SceneRunner` calls `flush()` on every `InstancedMesh3D` before each frame; call it yourself if you mutate outside the runner loop.
+- `setGeometry(geometry)` / `setMaterial(material)`; `getInstanceMatrixBuffer()` / `getInstanceColorBuffer()` for direct access.
+
+**Usage Notes:**
+- **Instance buffers are NOT serialized** — only the node-level config above is saved. Repopulate buffers at runtime.
+- Raycasts against an instanced mesh return the hit `instanceId`.
+- Backed by `ECSService` for project-managed ECS worlds; runtime lives in `packages/pix3-runtime/src/nodes/3D/InstancedMesh3D.ts` + `core/ECSService.ts`.
+
+---
+
 ### DirectionalLightNode
 
 A light source that emits parallel rays in a single direction, like the sun. Illuminates all objects from the same angle.
@@ -745,6 +780,7 @@ filter).
 | VirtualCamera3D | priority, followTargetId, lookAtTargetId, blendDuration, fov |
 | GeometryMesh | geometry, size, material |
 | MeshInstance | src |
+| InstancedMesh3D | maxInstances, enablePerInstanceColor, visibleInstanceCount (bulk write*/flush) |
 | DirectionalLightNode | color, intensity, castShadow |
 | PointLightNode | color, intensity, distance, decay |
 | SpotLightNode | color, intensity, distance, angle, penumbra |
