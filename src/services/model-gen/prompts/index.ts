@@ -172,31 +172,36 @@ const QUALITY_PASSES: readonly PassPlanEntry[] = [
     id: 'blockout',
     label: 'Blockout',
     goal: 'Rough primitive massing only: place simple boxes/cylinders/spheres at the correct overall proportions, position and scale. No detail, no bevels, one plain material is fine.',
-    reviewRubric: 'Overall silhouette and proportions vs the reference — are the big masses the right size and in the right place?',
+    reviewRubric:
+      'Overall silhouette and proportions vs the reference — are the big masses the right size and in the right place?',
   },
   {
     id: 'structure',
     label: 'Structure',
     goal: "Separate the blockout into the spec's distinct components with correct parent/child placement and relative scale. Still primitive shapes, but every listed component now exists as its own mesh.",
-    reviewRubric: 'Component breakdown vs the reference — are all the major parts present and correctly arranged?',
+    reviewRubric:
+      'Component breakdown vs the reference — are all the major parts present and correctly arranged?',
   },
   {
     id: 'form',
     label: 'Form',
     goal: 'Refine the silhouette: add bevels, curves, chamfers, tapers and profile detail (ExtrudeGeometry/LatheGeometry/TubeGeometry where they help). Make edges read as manufactured, not blocky.',
-    reviewRubric: 'Silhouette fidelity and surface form vs the reference — do curves, bevels and contours match?',
+    reviewRubric:
+      'Silhouette fidelity and surface form vs the reference — do curves, bevels and contours match?',
   },
   {
     id: 'material',
     label: 'Material',
-    goal: "Apply PBR materials per the spec: base colors, metalness and roughness that match the reference, with CanvasTextures for grain/labels/wear where they add fidelity.",
-    reviewRubric: 'Material appearance vs the reference — color, metalness/roughness and surface finish per part.',
+    goal: 'Apply PBR materials per the spec: base colors, metalness and roughness that match the reference, with CanvasTextures for grain/labels/wear where they add fidelity.',
+    reviewRubric:
+      'Material appearance vs the reference — color, metalness/roughness and surface finish per part.',
   },
   {
     id: 'lighting',
     label: 'Lighting',
     goal: 'Bake read-friendly cues into geometry/materials (vertex colors, subtle ambient-occlusion tinting, emissive where the reference glows) so the model reads well under neutral studio light. Do NOT add lights to the group.',
-    reviewRubric: 'How the model reads under neutral light — depth, contrast and shading cues vs the reference.',
+    reviewRubric:
+      'How the model reads under neutral light — depth, contrast and shading cues vs the reference.',
   },
   {
     id: 'optimization',

@@ -2331,7 +2331,8 @@ export class AgentToolRegistry {
         [...state.passes].reverse().find(pass => pass.status === 'passed')?.score ?? null;
       // A previously-composited comparison sheet is a cheap, WebGL-free preview — attach it when one
       // exists (reviews may have been disabled, in which case there is none).
-      const sheet = [...state.passes].reverse().find(pass => pass.sheetDataUrl)?.sheetDataUrl ?? null;
+      const sheet =
+        [...state.passes].reverse().find(pass => pass.sheetDataUrl)?.sheetDataUrl ?? null;
       let images: Record<string, unknown> = {};
       if (sheet) {
         const block = dataUrlToImageBlock(sheet);
@@ -2424,7 +2425,8 @@ export class AgentToolRegistry {
         [...state.passes].reverse().find(pass => pass.status === 'passed')?.score ?? null;
       // The last pass with a comparison sheet is a cheap, WebGL-free preview — attach it when one
       // exists (reviews may have been disabled, in which case there is none).
-      const sheet = [...state.passes].reverse().find(pass => pass.sheetDataUrl)?.sheetDataUrl ?? null;
+      const sheet =
+        [...state.passes].reverse().find(pass => pass.sheetDataUrl)?.sheetDataUrl ?? null;
       let images: Record<string, unknown> = {};
       if (sheet) {
         const block = dataUrlToImageBlock(sheet);

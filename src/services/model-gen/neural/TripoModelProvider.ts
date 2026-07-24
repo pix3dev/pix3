@@ -184,7 +184,9 @@ export class TripoModelProvider {
       if (polls === 1) {
         console.info('[Tripo] first task payload', JSON.stringify(data));
       }
-      console.info(`[Tripo] poll #${polls}: status=${String(data.status)} progress=${lastProgress}`);
+      console.info(
+        `[Tripo] poll #${polls}: status=${String(data.status)} progress=${lastProgress}`
+      );
       const statusClass = classifyStatus(data.status);
 
       if (statusClass === 'done') {
@@ -275,7 +277,9 @@ export class TripoModelProvider {
     }
     const code = readCode(json);
     if (code !== 0) {
-      throw new Error(`Tripo3D request to ${path} returned error code ${code}${readMessage(json)}.`);
+      throw new Error(
+        `Tripo3D request to ${path} returned error code ${code}${readMessage(json)}.`
+      );
     }
     return json;
   }

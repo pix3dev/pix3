@@ -32,7 +32,11 @@ import { extractJsonObject } from '@/services/model-gen/model-gen-json';
 import { coerceReviewResult, type ReviewResult } from '@/services/model-gen/model-gen-review';
 import { ModelPreviewRenderer } from '@/services/model-gen/ModelPreviewRenderer';
 import { buildComparisonSheet } from '@/services/model-gen/ComparisonSheet';
-import { validateSculptSpec, type Assessment, type SculptSpec } from '@/services/model-gen/SculptSpec';
+import {
+  validateSculptSpec,
+  type Assessment,
+  type SculptSpec,
+} from '@/services/model-gen/SculptSpec';
 import type {
   ComplexityHint,
   ModelGenInput,
@@ -425,7 +429,10 @@ export class Model3DGenService {
     let attempt = this.parseSpec(first);
 
     if (!attempt.ok) {
-      this.log('warn', `Spec failed validation: ${attempt.errors.join('; ')}. Requesting a repair.`);
+      this.log(
+        'warn',
+        `Spec failed validation: ${attempt.errors.join('; ')}. Requesting a repair.`
+      );
       this.throwIfAborted(signal);
       const repairUser = [
         prompt.user,
@@ -459,14 +466,16 @@ export class Model3DGenService {
     return attempt.spec;
   }
 
-  private parseSpec(
-    text: string
-  ): { ok: boolean; spec: SculptSpec | null; errors: string[] } {
+  private parseSpec(text: string): { ok: boolean; spec: SculptSpec | null; errors: string[] } {
     let parsed: unknown;
     try {
       parsed = extractJsonObject(text);
     } catch (error) {
-      return { ok: false, spec: null, errors: [error instanceof Error ? error.message : String(error)] };
+      return {
+        ok: false,
+        spec: null,
+        errors: [error instanceof Error ? error.message : String(error)],
+      };
     }
     const validation = validateSculptSpec(parsed);
     return {
@@ -540,7 +549,14 @@ export class Model3DGenService {
         let feedback: string | null = null;
 
         for (;;) {
-          const built = await this.buildPass(spec, pass, previousCode, feedback, signal, maxIterations);
+          const built = await this.buildPass(
+            spec,
+            pass,
+            previousCode,
+            feedback,
+            signal,
+            maxIterations
+          );
           previousCode = built.code;
           lastGroup = built.group;
           this.currentModel = built.group;
@@ -598,7 +614,10 @@ export class Model3DGenService {
               `Stopped at ${pass.label}: ${review.rationale || 'fundamental mismatch with the reference.'}`
             );
           }
-          if ((decision === 'refine-code' || decision === 'refine-spec') && refineCount < maxIterations) {
+          if (
+            (decision === 'refine-code' || decision === 'refine-spec') &&
+            refineCount < maxIterations
+          ) {
             refineCount += 1;
             feedback = review.rationale || 'Improve this pass to better match the reference.';
             if (decision === 'refine-spec') {
@@ -845,9 +864,7 @@ export class Model3DGenService {
       }
       const group = factory(THREE);
       if (!(group instanceof THREE.Group)) {
-        throw new Error(
-          `createModel must return a THREE.Group (got ${describeValue(group)}).`
-        );
+        throw new Error(`createModel must return a THREE.Group (got ${describeValue(group)}).`);
       }
       return group;
     } finally {
@@ -981,7 +998,8 @@ export class Model3DGenService {
 
   private async resolveCodegen(): Promise<ResolvedCodegen> {
     const prefs = this.settings.getPreferences();
-    const providerId = prefs.codegenProviderId || this.agentSettings.getSelectedProvider()?.id || '';
+    const providerId =
+      prefs.codegenProviderId || this.agentSettings.getSelectedProvider()?.id || '';
     if (!providerId) {
       throw new Error('No codegen model is configured.');
     }
@@ -1146,9 +1164,7 @@ function readText(result: LlmResult): string {
 
 /** Strip a ```ts / ``` markdown fence from a code response, if present. */
 function stripCodeFences(text: string): string {
-  const fenced = text
-    .trim()
-    .match(/```(?:ts|typescript|js|javascript|tsx|jsx)?\s*([\s\S]*?)```/i);
+  const fenced = text.trim().match(/```(?:ts|typescript|js|javascript|tsx|jsx)?\s*([\s\S]*?)```/i);
   return (fenced ? fenced[1] : text).trim();
 }
 
@@ -1212,7 +1228,10 @@ function formatUsage(usage: LlmUsage | undefined): string {
 }
 
 /** Narrow an untrusted assessment payload, falling back to sane defaults. */
-function coerceAssessment(raw: unknown, fallbackComplexity: ComplexityHint | undefined): Assessment {
+function coerceAssessment(
+  raw: unknown,
+  fallbackComplexity: ComplexityHint | undefined
+): Assessment {
   const record = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const category = CATEGORIES.includes(record.category as Assessment['category'])
     ? (record.category as Assessment['category'])

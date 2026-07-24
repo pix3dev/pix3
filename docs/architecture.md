@@ -98,6 +98,8 @@ flowchart LR
   AC -->|reads scene nodes| N
 ```
 
+> This is the **core operations-first view**. Newer domains (agent, llm, collab, animation-timeline, model-lab, localization, post-processing, ECS) aren't drawn here — see the [nodes-and-systems.md](nodes-and-systems.md) catalog and the `src/services/<domain>/` layout in `AGENTS.md`.
+
 ## Property Schema System
 
 Pix3 uses a **property schema system** (Godot-inspired) for dynamic object inspector UI generation. This replaces hardcoded property editors with declarative type information.

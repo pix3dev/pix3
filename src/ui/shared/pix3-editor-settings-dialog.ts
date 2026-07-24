@@ -1191,7 +1191,8 @@ export class EditorSettingsDialog extends ComponentBase {
     const customSelected = this.soulId === CUSTOM_SOUL_ID;
     return html`
       <div class="hint">
-        Give the agent a name and a character. The soul only changes how it talks — not what it does.
+        Give the agent a name and a character. The soul only changes how it talks — not what it
+        does.
       </div>
 
       <div class="soul-grid">

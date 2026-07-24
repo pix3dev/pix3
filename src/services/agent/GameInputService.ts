@@ -698,7 +698,9 @@ export class GameInputService {
       [sdy, before.scale.y],
       [sdz, before.scale.z],
     ];
-    const [dMax, bMax] = axes.reduce((acc, cur) => (Math.abs(cur[0]) > Math.abs(acc[0]) ? cur : acc));
+    const [dMax, bMax] = axes.reduce((acc, cur) =>
+      Math.abs(cur[0]) > Math.abs(acc[0]) ? cur : acc
+    );
     base.scaleDelta = {
       x: round3(sdx),
       y: round3(sdy),

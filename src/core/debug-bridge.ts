@@ -930,9 +930,8 @@ function createBridge(): Pix3DebugBridge {
         service<Model3DGenService>(Model3DGenService).decideReview(decision);
       },
       async history(limit) {
-        const records = await service<Model3DGenHistoryService>(Model3DGenHistoryService).list(
-          limit
-        );
+        const records =
+          await service<Model3DGenHistoryService>(Model3DGenHistoryService).list(limit);
         return records.map(record => ({
           id: record.id,
           createdAt: record.createdAt,

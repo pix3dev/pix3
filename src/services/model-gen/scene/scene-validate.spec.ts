@@ -10,10 +10,7 @@ import {
 const KNOWN_PATHS = new Set(['models/rock.glb', 'prefabs/shrine.pix3scene']);
 
 /** A stub SceneManager whose parseScene either resolves a graph or rejects. */
-function stubSceneManager(behavior: {
-  graph?: SceneGraph;
-  error?: unknown;
-}): SceneManager {
+function stubSceneManager(behavior: { graph?: SceneGraph; error?: unknown }): SceneManager {
   return {
     async parseScene(): Promise<SceneGraph> {
       if (behavior.error) {
@@ -37,7 +34,9 @@ describe('collectResAndTypeIssues', () => {
           id: 'ground',
           type: 'GeometryMesh',
           properties: { geometry: 'plane', material: { type: 'standard', color: '#888888' } },
-          children: [{ id: 'rock', type: 'MeshInstance', properties: { src: 'res://models/rock.glb' } }],
+          children: [
+            { id: 'rock', type: 'MeshInstance', properties: { src: 'res://models/rock.glb' } },
+          ],
         },
       ],
     };

@@ -10,7 +10,9 @@ interface NodeLike {
   children?: NodeLike[];
 }
 
-const scatterDoc = (overrides: Record<string, unknown> = {}): { version: string; root: NodeLike[] } => ({
+const scatterDoc = (
+  overrides: Record<string, unknown> = {}
+): { version: string; root: NodeLike[] } => ({
   version: '1.0',
   root: [
     {
@@ -130,7 +132,12 @@ describe('expandScatterDirectives', () => {
             {
               id: 'trees',
               type: 'Scatter',
-              properties: { asset: 'res://props/tree.glb', count: 3, seed: 1, area: { center: [0, 0, 0], size: [4, 4] } },
+              properties: {
+                asset: 'res://props/tree.glb',
+                count: 3,
+                seed: 1,
+                area: { center: [0, 0, 0], size: [4, 4] },
+              },
             },
           ],
         },

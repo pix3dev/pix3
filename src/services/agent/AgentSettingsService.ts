@@ -323,7 +323,8 @@ export class AgentSettingsService {
             ? Math.min(Math.round(parsed.maxToolIterations), 100)
             : defaults.maxToolIterations,
         debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,
-        soulId: typeof parsed.soulId === 'string' && parsed.soulId ? parsed.soulId : defaults.soulId,
+        soulId:
+          typeof parsed.soulId === 'string' && parsed.soulId ? parsed.soulId : defaults.soulId,
         customSoulName:
           typeof parsed.customSoulName === 'string'
             ? parsed.customSoulName

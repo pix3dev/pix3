@@ -6,7 +6,13 @@
 
 import type { Assessment, SculptSpec } from '@/services/model-gen/SculptSpec';
 
-export type { Assessment, SculptMaterial, SculptComponent, SculptSpec, SpecValidation } from '@/services/model-gen/SculptSpec';
+export type {
+  Assessment,
+  SculptMaterial,
+  SculptComponent,
+  SculptSpec,
+  SpecValidation,
+} from '@/services/model-gen/SculptSpec';
 
 /** Generation depth: `fast` = fewer passes, `quality` = the full pipeline. */
 export type ModelGenMode = 'fast' | 'quality';

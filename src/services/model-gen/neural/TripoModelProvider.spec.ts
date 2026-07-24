@@ -22,9 +22,7 @@ describe('readUploadToken', () => {
   });
 
   it('prefers image_token over the other aliases', () => {
-    expect(
-      readUploadToken({ data: { image_token: 'a', file_token: 'b', token: 'c' } })
-    ).toBe('a');
+    expect(readUploadToken({ data: { image_token: 'a', file_token: 'b', token: 'c' } })).toBe('a');
   });
 
   it('returns null when no token field is present or the value is empty', () => {

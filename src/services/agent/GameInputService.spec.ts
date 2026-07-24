@@ -385,7 +385,8 @@ describe('GameInputService', () => {
     const { service } = buildService(runtime);
 
     const events: Array<{ type: string; buttons: number }> = [];
-    const record = (e: Event) => events.push({ type: e.type, buttons: (e as PointerEvent).buttons });
+    const record = (e: Event) =>
+      events.push({ type: e.type, buttons: (e as PointerEvent).buttons });
     runtime.canvas.addEventListener('pointerdown', record);
     runtime.canvas.addEventListener('pointermove', record);
     runtime.canvas.addEventListener('pointerup', record);

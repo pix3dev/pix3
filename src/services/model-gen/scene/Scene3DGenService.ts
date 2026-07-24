@@ -526,7 +526,10 @@ export class Scene3DGenService {
               `Stopped at ${pass.label}: ${review.rationale || 'the scene cannot reach the brief.'}`
             );
           }
-          if ((decision === 'refine-code' || decision === 'refine-spec') && refineCount < maxIterations) {
+          if (
+            (decision === 'refine-code' || decision === 'refine-spec') &&
+            refineCount < maxIterations
+          ) {
             refineCount += 1;
             feedback = review.rationale || 'Improve this pass to better match the brief.';
             if (decision === 'refine-spec') {
@@ -580,7 +583,14 @@ export class Scene3DGenService {
       });
 
       const feedback = validationError || refineFeedback || null;
-      const prompt = buildScenePassPrompt(levelSpec, inventory, pass, previousYaml, feedback, isEdit);
+      const prompt = buildScenePassPrompt(
+        levelSpec,
+        inventory,
+        pass,
+        previousYaml,
+        feedback,
+        isEdit
+      );
       const raw = await this.chatCodegen(
         prompt.system,
         prompt.systemStableChars,
@@ -826,7 +836,8 @@ export class Scene3DGenService {
 
   private async resolveCodegen(): Promise<ResolvedCodegen> {
     const prefs = this.settings.getPreferences();
-    const providerId = prefs.codegenProviderId || this.agentSettings.getSelectedProvider()?.id || '';
+    const providerId =
+      prefs.codegenProviderId || this.agentSettings.getSelectedProvider()?.id || '';
     if (!providerId) {
       throw new Error('No codegen model is configured.');
     }
@@ -988,9 +999,7 @@ function readText(result: LlmResult): string {
 
 /** Strip a ```yaml / ``` markdown fence from a response, if present. */
 function stripCodeFences(text: string): string {
-  const fenced = text
-    .trim()
-    .match(/```(?:yaml|yml|pix3scene)?\s*([\s\S]*?)```/i);
+  const fenced = text.trim().match(/```(?:yaml|yml|pix3scene)?\s*([\s\S]*?)```/i);
   return (fenced ? fenced[1] : text).trim();
 }
 

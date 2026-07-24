@@ -158,7 +158,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Coerce a value to a numeric [a, b] pair, or undefined if it isn't one. */
 function numericPair(value: unknown): [number, number] | undefined {
-  if (Array.isArray(value) && value.length >= 2 && isFiniteNumber(value[0]) && isFiniteNumber(value[1])) {
+  if (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    isFiniteNumber(value[0]) &&
+    isFiniteNumber(value[1])
+  ) {
     return [value[0], value[1]];
   }
   return undefined;

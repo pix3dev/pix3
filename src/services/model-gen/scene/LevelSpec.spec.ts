@@ -8,8 +8,18 @@ const validSpec = (): LevelSpec => ({
   title: 'Desert canyon arena',
   brief: 'A desert canyon arena with a central shrine.',
   zones: [
-    { id: 'arena', name: 'Arena floor', purpose: 'The central combat space.', paletteAssetIds: ['rock-a'] },
-    { id: 'shrine', name: 'Shrine', purpose: 'Focal structure.', paletteAssetIds: ['shrine-prefab'] },
+    {
+      id: 'arena',
+      name: 'Arena floor',
+      purpose: 'The central combat space.',
+      paletteAssetIds: ['rock-a'],
+    },
+    {
+      id: 'shrine',
+      name: 'Shrine',
+      purpose: 'Focal structure.',
+      paletteAssetIds: ['shrine-prefab'],
+    },
   ],
   lightingPlan: 'Warm low-angle desert sun with soft ambient fill.',
   cameraIntent: 'A 3/4 view framing the shrine.',
@@ -71,7 +81,9 @@ describe('validateLevelSpec', () => {
   it('accepts a well-formed paletteGaps array and keeps it', () => {
     const spec = {
       ...validSpec(),
-      paletteGaps: [{ need: 'A stone fountain', suggestedPrompt: 'A weathered stone fountain, 3D model.' }],
+      paletteGaps: [
+        { need: 'A stone fountain', suggestedPrompt: 'A weathered stone fountain, 3D model.' },
+      ],
     };
     const result = validateLevelSpec(spec, KNOWN);
     expect(result.ok).toBe(true);

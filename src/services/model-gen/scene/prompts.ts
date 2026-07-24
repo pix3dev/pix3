@@ -59,7 +59,7 @@ export const SCENE_NODE_CHEATSHEET = [
 export const SCENE_YAML_RULES = [
   'Hard rules:',
   '- Use ONLY the allowed node types above. Never invent a type; never use Layout2D.',
-  "- Every res:// reference (MeshInstance.src, prefab instance, material map/aoMap, textures) MUST be",
+  '- Every res:// reference (MeshInstance.src, prefab instance, material map/aoMap, textures) MUST be',
   '  an id/path from the provided palette. Never reference an asset that is not in the palette.',
   '- Every node needs a unique id across the whole document.',
   '- Use the transform format exactly: properties.transform.position/rotationEuler(deg)/scale.',
@@ -290,7 +290,9 @@ export function buildScenePassPrompt(
       ].join('\n')
     : '';
   const fix = feedback?.trim()
-    ? ['', 'Address this feedback (validation errors or a review note):', feedback.trim()].join('\n')
+    ? ['', 'Address this feedback (validation errors or a review note):', feedback.trim()].join(
+        '\n'
+      )
     : '';
   const user = [
     `Build pass: ${pass.label}.`,
@@ -318,9 +320,10 @@ function buildEvolveSection(previousYaml: string | null, isEdit: boolean): strin
       : 'Current scene YAML (from the previous pass — EVOLVE it, do not start over):';
     return ['', heading, previousYaml.trim()].join('\n');
   }
-  return ['', 'There is no scene yet — this is the first pass. Author the document from scratch.'].join(
-    '\n'
-  );
+  return [
+    '',
+    'There is no scene yet — this is the first pass. Author the document from scratch.',
+  ].join('\n');
 }
 
 /**

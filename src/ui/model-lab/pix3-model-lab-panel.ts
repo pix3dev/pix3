@@ -55,10 +55,7 @@ import type {
   PendingReview,
   ReferenceImageInput,
 } from '@/services/model-gen/model-gen-types';
-import type {
-  SceneGenState,
-  SceneGenStatus,
-} from '@/services/model-gen/scene/scene-gen-types';
+import type { SceneGenState, SceneGenStatus } from '@/services/model-gen/scene/scene-gen-types';
 import type { PaletteGap } from '@/services/model-gen/scene/LevelSpec';
 import { appState } from '@/state';
 import './pix3-model-lab-panel.ts.css';
@@ -876,16 +873,17 @@ export class ModelLabPanel extends ComponentBase {
           <p class="ml-gaps-intro">The brief calls for assets not in your project:</p>
           <ul class="ml-gaps-list" aria-label="Palette gaps">
             ${gaps.map(
-              gap => html`<li class="ml-gap">
-                <span class="ml-gap-need" title=${gap.need}>${gap.need}</span>
-                <button
-                  type="button"
-                  class="model-lab-button with-icon"
-                  @click=${() => this.onFillGapInModelLane(gap)}
-                >
-                  <span>${this.icons.getIcon('box', IconSize.SMALL)}</span> Generate in Model lane
-                </button>
-              </li>`
+              gap =>
+                html`<li class="ml-gap">
+                  <span class="ml-gap-need" title=${gap.need}>${gap.need}</span>
+                  <button
+                    type="button"
+                    class="model-lab-button with-icon"
+                    @click=${() => this.onFillGapInModelLane(gap)}
+                  >
+                    <span>${this.icons.getIcon('box', IconSize.SMALL)}</span> Generate in Model lane
+                  </button>
+                </li>`
             )}
           </ul>
         </div>
@@ -992,9 +990,14 @@ export class ModelLabPanel extends ComponentBase {
     }
     return html`
       <figure class="ml-sheet">
-        <img src=${sheetPass.sheetDataUrl} alt="Reference vs render comparison for ${sheetPass.label}" />
+        <img
+          src=${sheetPass.sheetDataUrl}
+          alt="Reference vs render comparison for ${sheetPass.label}"
+        />
         <figcaption class="ml-sheet-caption">
-          ${sheetPass.label}${sheetPass.score != null ? html` · ${formatScore(sheetPass.score)}` : null}
+          ${sheetPass.label}${sheetPass.score != null
+            ? html` · ${formatScore(sheetPass.score)}`
+            : null}
         </figcaption>
       </figure>
     `;
@@ -1011,7 +1014,9 @@ export class ModelLabPanel extends ComponentBase {
       <div class="ml-review" role="group" aria-label="Manual review">
         <div class="ml-review-head">
           <span class="ml-review-title">Review · ${passLabel}</span>
-          <span class="ml-score ml-score--${scoreTone(review.score)}">${formatScore(review.score)}</span>
+          <span class="ml-score ml-score--${scoreTone(review.score)}"
+            >${formatScore(review.score)}</span
+          >
         </div>
         <p class="ml-review-suggested">Suggested: <strong>${review.decision}</strong></p>
         ${review.rationale ? html`<p class="ml-review-rationale">${review.rationale}</p>` : null}
@@ -1477,18 +1482,20 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   private renderModelSlot(slot: 'codegen' | 'vision') {
-    const providerId = slot === 'codegen' ? this.prefs.codegenProviderId : this.prefs.visionProviderId;
+    const providerId =
+      slot === 'codegen' ? this.prefs.codegenProviderId : this.prefs.visionProviderId;
     const modelId = slot === 'codegen' ? this.prefs.codegenModelId : this.prefs.visionModelId;
     const withReasoning = slot === 'codegen';
     const providers = this.providers.list().filter(provider => !provider.hidden);
     const models = providerId ? this.catalog.getModels(providerId) : [];
     const canRefresh = providerId ? this.catalog.supportsRefresh(providerId) : false;
     const isRefreshing = this.refreshingProviderId === providerId;
-    const selectedModel = providerId && modelId ? this.catalog.getModel(providerId, modelId) : undefined;
-    const efforts = withReasoning ? selectedModel?.capabilities.reasoningEfforts ?? [] : [];
+    const selectedModel =
+      providerId && modelId ? this.catalog.getModel(providerId, modelId) : undefined;
+    const efforts = withReasoning ? (selectedModel?.capabilities.reasoningEfforts ?? []) : [];
     const currentEffort =
       withReasoning && providerId && modelId
-        ? this.settings.getReasoningEffort(providerId, modelId) ?? ''
+        ? (this.settings.getReasoningEffort(providerId, modelId) ?? '')
         : '';
 
     return html`
@@ -1575,7 +1582,11 @@ export class ModelLabPanel extends ComponentBase {
 
   private onReasoningChange(providerId: string, modelId: string, event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
-    this.settings.setReasoningEffort(providerId, modelId, value ? (value as ReasoningEffort) : undefined);
+    this.settings.setReasoningEffort(
+      providerId,
+      modelId,
+      value ? (value as ReasoningEffort) : undefined
+    );
   }
 
   private onIterationsChange(event: Event): void {

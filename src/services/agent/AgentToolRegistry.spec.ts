@@ -814,16 +814,16 @@ describe('AgentToolRegistry', () => {
       const storage = makeStorage();
       storage.files.set('scripts/big.ts', 'l1\nl2\nl3\nl4\nl5');
       const registry = buildRegistry({ storage });
-      expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 2, limit: 2 })).toEqual(
-        {
-          path: 'scripts/big.ts',
-          content: 'l2\nl3',
-          totalLines: 5,
-          startLine: 2,
-          endLine: 3,
-          hasMore: true,
-        }
-      );
+      expect(
+        await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 2, limit: 2 })
+      ).toEqual({
+        path: 'scripts/big.ts',
+        content: 'l2\nl3',
+        totalLines: 5,
+        startLine: 2,
+        endLine: 3,
+        hasMore: true,
+      });
       // Reading to the end reports hasMore:false.
       expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 4 })).toEqual({
         path: 'scripts/big.ts',
