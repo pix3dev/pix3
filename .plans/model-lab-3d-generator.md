@@ -253,3 +253,74 @@ reference photo, SkinnedMesh/rig export, LOD generation.
 - **Reference framing**: MVP renders the model from a default 3/4 view; camera-matching to the
   reference (img2threejs `solve_camera_pose`) is a quality booster we can add in Phase 3 by
   asking the vision model for approximate azimuth/elevation during Assess.
+
+## Backlog (post Phase-6, not scheduled)
+
+Status of the plan: Phases 1–6 (core, minus node-ops) shipped on `feat/scene-per-level` /
+`worktree-model-lab-3d`. Everything below is unscheduled backlog captured 2026-07-23.
+
+### B0. Neural image→3D provider (the priority direction)
+Honest assessment from real use: the **procedural reconstruction-by-code** approach (our whole
+model lane + img2threejs) is NOT production-quality for models next to **dedicated 3D-generation
+models**. A side-by-side with Copilot "Experiments" (image→3D) produced an order-of-magnitude
+better GLB (clean stylized house) than our procedural output. Direction: add a **neural
+generation mode** to Model Lab that calls a specialized image→3D (and/or text→3D) service and
+gets a GLB back directly.
+- **Copilot Experiments itself is not a public API** — but the same capability is available via
+  metered 3D-gen APIs: Meshy, Tripo (TripoSR/Tripo3D), Rodin/Hyper3D, Luma Genie, Stability
+  SF3D, CSM.ai, Kaedim, etc. Most are REST: POST image (or text) → poll → download `.glb`.
+- **Architecture fit is excellent** — it slots into the EXISTING chain: image → provider API →
+  GLB bytes → `Model3DExportService`/`ProjectStorageService.writeBinaryFile` → `MeshInstance` →
+  add to scene. Only the *generation step* changes; save/preview/add-to-scene are already built
+  (Phase 1). No procedural code contract, no esbuild, no per-pass review needed for a neural GLB.
+- **Shape:** a generation-provider abstraction so **Procedural (code)** and **Neural (API)**
+  coexist — a mode toggle (or a third lane) in the panel. A `Model3DGenProvider` interface
+  (`generate(image|prompt) → GLB blob + metadata`) with a procedural impl (current pipeline
+  wrapped) and one-or-more neural impls. Reuse the panel preview (load the returned GLB via
+  `GltfBlobLoader`), Save, Add-to-scene, and history.
+- **Keys off the browser:** a metered 3D-gen provider key belongs in `pix3-agent-bridge`'s
+  credential-injecting proxy (same pattern as OpenAI/Anthropic/Zen) — editor registers it as a
+  dynamic provider; the browser never sees the key. (Direct-with-CORS providers could be static
+  like Gemini, but the bridge proxy is the safer default.)
+- **Open questions:** which provider(s) to support first (licensing/ToS for commercial game
+  assets, cost per model, poll latency, GLB quality/topology, PBR vs vertex-color output,
+  attribution); async job UX (poll + progress in the panel); text→3D vs image→3D vs image+text.
+- Procedural lane stays useful for: no-API-key / offline, fully-deterministic + diffable output,
+  and as the img2threejs-style "understandable code" path — but neural should likely become the
+  DEFAULT for "I just want a good model".
+
+### B1. Model-lane fidelity (procedural) — from img2threejs main + v1.3
+Only worth doing if we keep investing in the procedural path (see B0). Ranked by value/cost:
+- **Camera-pose match** (`solve_camera_pose`) — ask vision for approx azimuth/elevation at Assess;
+  render the review shot from that pose so vision compares like-for-like. *High / low.*
+- **CIEDE2000 (ΔE00) color gate + reference color sampling** (v1.3) — pure-TS perceptual color
+  metric (sRGB→CIELAB→ΔE00) + band-median color sampling from the reference; use as a
+  **deterministic, token-free** color check in review and to feed the material pass real colors.
+  *High / low.*
+- **Detail-inventory → component gate** (`build_detail_inventory` + strict-quality) — force the
+  spec to map identity-defining details (eyes, ornament, gloss) to components before codegen;
+  block shallow specs. *High / medium.*
+- **Real `refine-spec`** — re-run the spec stage with feedback instead of folding into
+  `refine-code` (fixes structural, not just parametric, misses). *High / medium.*
+- **PBR evidence + de-light** (`extract_pbr_evidence`, `delight_albedo`) — derive
+  color/roughness/metalness from the reference, remove baked lighting. *Medium / medium.*
+- **Per-feature acceptance policy** (`feature_acceptance_policy`) — gate on per-feature scores,
+  not just global. *Medium / low.*
+- **Texture projection** (`bake_projected_texture`) — project the reference photo onto geometry
+  (canvas texture, GLB-compatible) for "looks like the photo" fidelity. *High value / high cost.*
+- **Character/anatomy track** (`grimoire/character/*`, v1.2) — unlock characters/organics.
+  *High / very high.* (Neural (B0) likely a better answer for characters.)
+- Minor recipes: `Shape.holes`/oval cutout extrusion, InstancedMesh single-draw hint (we have
+  `InstancedMesh3D`), candy/anodized material classification, Divine-Eye color diagnostics
+  (Hue-Zone-Parity / Specular-Wash, report-only). *Low.*
+- **Suitability gate** — reject non-viable reference images before spending tokens. *Low / low.*
+
+### B2. Scene-lane depth — node-ops patch editing (deferred from Phase 6)
+Incremental large-scene edits via an op-list (`create`/`set`/`move`/`convert`) applied to the
+working graph instead of whole-file YAML regeneration, once scenes outgrow whole-file regen.
+Keeps token cost flat for big levels. Whole-file regen works for MVP-sized scenes today.
+
+### B3. Scene-lane inventory captions (deferred from Phase 5)
+Vision-caption GLB/prefab thumbnails once, cached in IndexedDB by content hash, and feed the
+captions to the LevelSpec stage so the generator knows what each asset *looks like* (MVP passes
+only path + dims + category).

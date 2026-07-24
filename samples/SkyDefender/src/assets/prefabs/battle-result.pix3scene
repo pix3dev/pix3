@@ -1,0 +1,99 @@
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Battle result overlay (reusable chrome)"
+root:
+  - id: result-overlay
+    type: Group2D
+    name: Result Overlay
+    properties:
+      width: 1920
+      height: 1080
+      initiallyVisible: false
+      visible: false
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: result-dim
+        type: ColorRect2D
+        name: Result Dim
+        properties:
+          width: 1920
+          height: 1080
+          color: "#000000"
+          opacity: 0.65
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: result-panel
+        type: ColorRect2D
+        name: Result Panel
+        properties:
+          width: 760
+          height: 420
+          color: "#1a1a2e"
+          opacity: 0.92
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: result-title
+        type: Label2D
+        name: Result Title
+        properties:
+          label: VICTORY!
+          labelFontSize: 72
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, 90]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: result-stats
+        type: Label2D
+        name: Result Stats
+        properties:
+          label: The province is safe… for now.
+          labelFontSize: 28
+          labelColor: "#e6ebf5"
+          labelAlign: center
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: result-menu-button
+        type: Button2D
+        name: To Menu Button
+        properties:
+          label: ""
+          width: 244
+          height: 100
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/back.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/back_o.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/unibut/back_o.png
+          buttonAction: to-menu
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
+          transform:
+            position: [0, -120]
+            scale: [1, 1]
+            rotation: 0
+        children: []

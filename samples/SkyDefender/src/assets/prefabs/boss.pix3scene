@@ -1,0 +1,202 @@
+# Boss — one generic prefab for every Sky Defender boss (v15 ids 75-84). The
+# body/white textures + display size are re-set per-id by WaveSpawner.applyBossStats
+# from SdBalance's BOSS table; the BossEnemy script drives fly-in/hold/bob, the
+# round-robin emplacement guns, the vulnerability window (uyaz), the white-flash
+# and the FN_addBumbumZep chained death. Draw order (child order): body → white
+# overlay → guns. See scripts/BossEnemy.ts and README §Boss behavior.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Boss (generic prefab)"
+root:
+  - id: boss
+    type: Group2D
+    name: Boss
+    properties:
+      width: 214
+      height: 81
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: boss-logic
+        type: user:BossEnemy
+        enabled: true
+        config:
+          hp: 8000
+          score: 1000
+          stopX: 120
+          attackDamage: 7
+          bodyTex: 'res://src/assets/textures/enemy/bosses/baby/baby.png'
+          whiteTex: 'res://src/assets/textures/enemy/bosses/baby/baby_white.png'
+          bodyWidth: 214
+          bodyHeight: 81
+          gunCount: 2
+          fireIntervalTicks: 5
+          cycleTicks: 80
+          uyazOpenTick: 5
+          finale: false
+          escort: false
+          bossName: 'BOSS'
+    children:
+      - id: boss-body
+        type: Sprite2D
+        name: Boss Body
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/bosses/baby/baby.png' }
+          width: 214
+          height: 81
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: boss-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 206
+              height: 75
+              offsetX: 0
+              offsetY: 0
+              group: enemy
+              debugDraw: false
+        children: []
+      - id: boss-white
+        type: Sprite2D
+        name: Boss White
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/bosses/baby/baby_white.png' }
+          width: 214
+          height: 81
+          opacity: 0
+          initiallyVisible: false
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: boss-gun-1
+        type: Group2D
+        name: Boss Gun 1
+        properties:
+          width: 55
+          height: 10
+          transform:
+            position: [-70, 12]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: boss-gun-1-barrel
+            type: Sprite2D
+            name: Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/big_gun1.png' }
+              width: 55
+              height: 10
+              transform:
+                position: [-20, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: boss-gun-1-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 24
+              height: 24
+              opacity: 0
+              transform:
+                position: [-50, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: boss-gun-2
+        type: Group2D
+        name: Boss Gun 2
+        properties:
+          width: 55
+          height: 10
+          transform:
+            position: [-70, -22]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: boss-gun-2-barrel
+            type: Sprite2D
+            name: Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/big_gun1.png' }
+              width: 55
+              height: 10
+              transform:
+                position: [-20, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: boss-gun-2-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 24
+              height: 24
+              opacity: 0
+              transform:
+                position: [-50, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: boss-gun-3
+        type: Group2D
+        name: Boss Gun 3
+        properties:
+          width: 55
+          height: 10
+          transform:
+            position: [-48, 34]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: boss-gun-3-barrel
+            type: Sprite2D
+            name: Gun
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/big_gun1.png' }
+              width: 55
+              height: 10
+              transform:
+                position: [-20, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: boss-gun-3-flash
+            type: Sprite2D
+            name: Muzzle Flash
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/sfx/blowglow.png' }
+              width: 24
+              height: 24
+              opacity: 0
+              transform:
+                position: [-50, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "Boss · ids 75-84"
+          labelFontSize: 12
+          labelColor: "#ff9a4d"
+          labelAlign: center
+          transform:
+            position: [0, 60]
+            scale: [1, 1]
+            rotation: 0
+        children: []

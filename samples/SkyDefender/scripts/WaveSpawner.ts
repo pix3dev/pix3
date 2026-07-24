@@ -1,9 +1,19 @@
-import { Script } from '@pix3/runtime';
+import { Script, Sprite2D } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
+import { BossEnemy } from './BossEnemy';
 import { CompoundBalloon } from './CompoundBalloon';
 import { EnemyBalloon } from './EnemyBalloon';
 import { GroundVehicle } from './GroundVehicle';
-import { BRIDGE, MISSIONS, UNITS, type MissionEntry, type UnitDef } from './SdBalance';
+import { QuestNpc } from './QuestNpc';
+import {
+  BRIDGE,
+  containerRectFromNode,
+  MISSIONS,
+  QUEST_LEVELS,
+  UNITS,
+  type MissionEntry,
+  type UnitDef,
+} from './SdBalance';
 import { V15_SURVIVAL } from './SdV15';
 
 /** Joe's alarm cry — the original plays it on every ground-unit spawn. */
@@ -35,12 +45,14 @@ const GROUND_FAMILY = [
   'dreamer', 'fatima', 'medic', 'rracer', 'garbag', 'siege', 'warchild',
 ] as const; // ids 49..62 in order
 
-/** id (1-62) → prefab path, or null for ids without a prefab yet (npc/boss). */
+/** id (1-84) → prefab path, or null for ids without a prefab yet (quest npc). */
 function unitPrefabPath(id: number): string | null {
   if (id === 33) return `${PREFABS}/transporter-enemy.pix3scene`;
   if (id >= 35 && id <= 42) return `${PREFABS}/unik.pix3scene`;
   if (id >= 43 && id <= 48) return `${PREFABS}/urik.pix3scene`;
   if (id >= 49 && id <= 62) return `${PREFABS}/units/${GROUND_FAMILY[id - 49]}.pix3scene`;
+  if (id >= 63 && id <= 74) return `${PREFABS}/quest-npc.pix3scene`;
+  if (id >= 75 && id <= 84) return `${PREFABS}/boss.pix3scene`;
   const air = AIR_FAMILY.find(([from, to]) => id >= from && id <= to);
   return air ? `${PREFABS}/units/${air[2]}.pix3scene` : null;
 }
@@ -75,6 +87,9 @@ export class WaveSpawner extends Script {
   private groundFlags: boolean[] = [];
   private groundElapsed = 0;
   private bridgeReady = false;
+  /** 1-based campaign level of the current wave (0 = survival/none) — drives the
+   *  per-level quest identity + container rect for quest NPCs. */
+  private questLevel = 0;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -118,6 +133,7 @@ export class WaveSpawner extends Script {
       groundSpawned: this.groundFlags.filter(Boolean).length,
       bridgeReady: this.bridgeReady,
       survival: this.survivalStats,
+      questLevel: this.questLevel,
     };
   }
 
@@ -138,6 +154,11 @@ export class WaveSpawner extends Script {
       const paths = new Set<string>();
       for (const unit of Object.values(UNITS)) {
         if (unit.sprite) paths.add(unit.sprite);
+        // Boss white-flash overlays load lazily on spawn — warm them too.
+        if (unit.whiteTex) paths.add(unit.whiteTex);
+        // Quest NPC body + cargo liveries are re-textured on spawn — warm them.
+        if (unit.npcTex) paths.add(unit.npcTex);
+        if (unit.payloadTex) paths.add(unit.payloadTex);
       }
       for (const path of paths) {
         void loader
@@ -155,6 +176,7 @@ export class WaveSpawner extends Script {
     this.groundEntries = mission.ground ?? [];
     this.missionName = mission.name;
     this.survivalStats = null;
+    this.questLevel = index + 1;
     this.beginRun();
   }
 
@@ -177,6 +199,9 @@ export class WaveSpawner extends Script {
     this.entries = entries;
     this.groundEntries = ground;
     this.missionName = `Survival ${n}`;
+    // Survival has no campaign quest levels; quest NPCs (if any appear) fall back
+    // to a per-unit questId with no container.
+    this.questLevel = 0;
     this.beginRun();
   }
 
@@ -279,7 +304,11 @@ export class WaveSpawner extends Script {
           scene.audio.play(GROUND_ALARM_SOUND, { bus: 'sfx' });
         } else {
           node.position.set(SPAWN_X, toStageY(entry.y), 0);
-          if (unit.compound) {
+          if (unit.boss) {
+            this.applyBossStats(node, entry, unit);
+          } else if (unit.npc) {
+            this.applyNpcStats(node, entry, unit);
+          } else if (unit.compound) {
             this.applyCompoundStats(node, entry, unit);
           } else {
             this.applyAirStats(node, entry, unit);
@@ -338,5 +367,111 @@ export class WaveSpawner extends Script {
     logic.config.attackPeriod = unit.attackPeriod ?? 5;
     // Behaviour variant: tip 13 = ram-and-self-destruct; else park-and-shoot.
     logic.config.tip = entry.tip;
+  }
+
+  /**
+   * Per-id stats for bosses (ids 75-84, generic boss.pix3scene). Bosses always
+   * HOLD (never ram): they hold at `a` if given, else at a safe default on the
+   * right so they don't fly off the field. Re-textures the Boss Body + Boss
+   * White sprites to the per-id livery from the BOSS table (via the AssetLoader,
+   * resized to the texture's native size).
+   */
+  private applyBossStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
+    const logic = node.components.find((c): c is BossEnemy => c instanceof BossEnemy);
+    if (!logic) return;
+    logic.config.hp = unit.hp;
+    logic.config.score = unit.score;
+    // Bosses always hold: use the `a` mark, else a default hold on the right.
+    logic.config.stopX = entry.a > 0 ? toStopX(entry.a) : 120;
+    logic.config.attackDamage = unit.attackDamage ?? 0;
+    logic.config.bodyTex = unit.sprite;
+    logic.config.whiteTex = unit.whiteTex ?? unit.sprite;
+    logic.config.bodyWidth = unit.width;
+    logic.config.bodyHeight = unit.height;
+    logic.config.gunCount = unit.gunCount ?? 2;
+    logic.config.escort = unit.escort === true;
+    logic.config.finale = unit.finale === true;
+    logic.config.bossName = unit.name;
+
+    // Re-texture the body + white overlay to this boss's livery.
+    this.setBossTexture(node, 'Boss Body', unit.sprite);
+    this.setBossTexture(node, 'Boss White', unit.whiteTex ?? unit.sprite);
+
+    // Fit the `enemy` hitbox (on the Boss Body) to this boss's body size — the
+    // prefab default only covers the placeholder livery.
+    const body = node.getChildByName('Boss Body') as NodeBase | undefined;
+    const hitbox = body?.components.find(c => c.type === 'core:Hitbox2D');
+    if (hitbox) {
+      hitbox.config.width = Math.max(8, unit.width - 8);
+      hitbox.config.height = Math.max(8, unit.height - 8);
+    }
+  }
+
+  /** Swap a boss child sprite's texture and resize it to the texture's native size. */
+  private setBossTexture(node: NodeBase, childName: string, path: string): void {
+    this.setChildTexture(node, childName, path);
+  }
+
+  /**
+   * Per-id stats for quest NPCs (ids 63-74, generic quest-npc.pix3scene). Mirrors
+   * applyBossStats: pushes hp/speed/score + the role/payload/questId, re-textures
+   * the NPC Body (+ Cargo for carriers) and fits the body hitbox. The per-LEVEL
+   * questId + container rect (the boat/cup/truck) come from QUEST_LEVELS keyed by
+   * the current campaign level; survival (questLevel 0) falls back to a per-unit
+   * id with no container. Near-zero original speeds (MGold/MLuckyGold) are floored
+   * so the NPC still traverses the field (QuestNpc never parks — see its docstring).
+   */
+  private applyNpcStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
+    const logic = node.components.find((c): c is QuestNpc => c instanceof QuestNpc);
+    if (!logic) return;
+    const level = QUEST_LEVELS[this.questLevel];
+
+    logic.config.hp = unit.hp;
+    logic.config.speed = Math.max(40, unit.speed);
+    logic.config.score = unit.score;
+    logic.config.stopX = toStopX(entry.a);
+    logic.config.role = unit.role ?? 'combat';
+    logic.config.payloadType = unit.payloadType ?? 0;
+    logic.config.payloadTex = unit.payloadTex ?? '';
+    logic.config.npcName = unit.name;
+    logic.config.questId = level?.questId ?? `unit-${entry.id}`;
+    // Container rect: an authored `quest-container` node in the level scene wins
+    // (scene-per-level author placed the boat/cup/truck visually); otherwise the
+    // QUEST_LEVELS rect. This is the same source the visual + QuestCargo use.
+    const c = containerRectFromNode(this.findNode('quest-container')) ?? level?.container;
+    logic.config.containerX = c?.x ?? 0;
+    logic.config.containerY = c?.y ?? -170;
+    logic.config.containerW = c?.w ?? 360;
+    logic.config.containerH = c?.h ?? 90;
+
+    // Re-texture the body to this NPC's livery + fit the `enemy` hitbox.
+    this.setChildTexture(node, 'NPC Body', unit.npcTex ?? unit.sprite);
+    const body = node.getChildByName('NPC Body') as NodeBase | undefined;
+    const bodyHit = body?.components.find(c2 => c2.type === 'core:Hitbox2D');
+    if (bodyHit) {
+      bodyHit.config.width = Math.max(8, unit.width - 4);
+      bodyHit.config.height = Math.max(8, unit.height - 4);
+    }
+    // Carriers show + re-texture the Cargo child; QuestNpc.onStart handles the
+    // visibility/hitbox for non-carriers.
+    if (unit.role === 'carrier' && unit.payloadTex) {
+      this.setChildTexture(node, 'Cargo', unit.payloadTex);
+    }
+  }
+
+  /** Swap a child sprite's texture and resize it to the texture's native size. */
+  private setChildTexture(node: NodeBase, childName: string, path: string): void {
+    if (!path) return;
+    const child = node.getChildByName(childName);
+    const sprite = child instanceof Sprite2D ? child : null;
+    const loader = this.scene?.getAssetLoader();
+    if (!sprite || !loader) return;
+    void loader
+      .loadTexture(path)
+      .then(tex => {
+        sprite.setTexture(tex);
+        sprite.resetToOriginalSize();
+      })
+      .catch(() => console.warn(`[WaveSpawner] missing texture ${path}`));
   }
 }

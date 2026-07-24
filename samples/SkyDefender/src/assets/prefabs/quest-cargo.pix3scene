@@ -1,0 +1,34 @@
+# Quest Cargo — the payload (gold bar / sheep / cone) a carrier NPC drops when
+# its cargo is shot off. QuestNpc re-textures + configures it (payloadTex,
+# container rect, momentum); the QuestCargo script free-falls it and reports
+# quest-cargo-saved / quest-cargo-lost on game-root. See scripts/QuestCargo.ts.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Quest cargo (falling payload prefab)"
+root:
+  - id: quest-cargo
+    type: Sprite2D
+    name: Quest Cargo
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/interactive/drop_objects/gold.png' }
+      width: 24
+      height: 18
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: quest-cargo-logic
+        type: user:QuestCargo
+        enabled: true
+        config:
+          payloadType: 0
+          payloadTex: ''
+          questId: ''
+          containerX: 0
+          containerY: -170
+          containerW: 360
+          containerH: 90
+          vx: 0
+    children: []

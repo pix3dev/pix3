@@ -1,0 +1,834 @@
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "Battle HUD (reusable chrome)"
+root:
+  - id: hud
+    type: CanvasLayer2D
+    name: HUD
+    properties:
+      width: 1920
+      height: 1080
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: top-hp
+        type: Group2D
+        name: Top HP
+        properties:
+          width: 524
+          height: 56
+          transform:
+            position: [0, 505]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: hp-fill
+            type: Bar2D
+            name: HP Fill
+            properties:
+              label: ""
+              width: 452
+              height: 30
+              minValue: 0
+              maxValue: 1
+              value: 1
+              backBackgroundColor: "#2a1414"
+              barColor: "#d43333"
+              showBorder: false
+              borderColor: "#000000"
+              borderWidth: 2
+              transform:
+                position: [-26, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: hp-frame
+            type: Sprite2D
+            name: HP Frame
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/health.png
+              width: 524
+              height: 56
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: hp-label
+            type: Label2D
+            name: HP Label
+            properties:
+              label: 700/700
+              labelFontSize: 24
+              labelColor: "#f5e6c8"
+              labelAlign: center
+              transform:
+                position: [-26, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: hp-off
+            type: Sprite2D
+            name: HP Off Cover
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/health_off.png
+              width: 524
+              height: 56
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: lives-label
+            type: Label2D
+            name: Lives Label
+            properties:
+              label: ""
+              labelFontSize: 22
+              labelColor: "#ffe27a"
+              labelAlign: center
+              initiallyVisible: false
+              transform:
+                position: [152, 9]
+                scale: [1, 1]
+                rotation: 0
+      - id: boss-bar
+        type: Group2D
+        name: Boss Bar
+        properties:
+          width: 472
+          height: 68
+          initiallyVisible: false
+          transform:
+            position: [0, 432]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: boss-hp-fill
+            type: Bar2D
+            name: Boss HP Fill
+            properties:
+              label: ""
+              width: 400
+              height: 16
+              minValue: 0
+              maxValue: 1
+              value: 1
+              backBackgroundColor: "#2a1408"
+              barColor: "#e8721f"
+              showBorder: false
+              borderColor: "#000000"
+              borderWidth: 2
+              transform:
+                position: [-8, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: boss-hp-frame
+            type: Sprite2D
+            name: Boss HP Frame
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/boss_statusbar.png
+              width: 472
+              height: 34
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: boss-name-label
+            type: Label2D
+            name: Boss Name Label
+            properties:
+              label: ""
+              labelFontSize: 22
+              labelColor: "#ffd9a8"
+              labelAlign: center
+              transform:
+                position: [0, 26]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: portrait-cluster
+        type: Group2D
+        name: Portrait Cluster
+        properties:
+          width: 292
+          height: 295
+          transform:
+            position: [-808, -388]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: cluster-frame
+            type: Sprite2D
+            name: Cluster Frame
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/ingmain2.png
+              width: 292
+              height: 295
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: joe-portrait
+            type: Sprite2D
+            name: Joe Portrait
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/npc/joe/main.png
+              width: 269.0454540613503
+              height: 269.0454540613503
+              transform:
+                position: [-49.91907141909007, -48.91907141909002]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: joe-avatar
+                type: user:JoeAvatar
+                enabled: true
+                config:
+                  gunNode: maingun
+            children:
+              - id: joe-eye
+                type: Sprite2D
+                name: Joe Eye
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/npc/joe/eye.png
+                  width: 269.0454540613503
+                  height: 269.0454540613503
+                  initiallyVisible: false
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: weapon-btn-1
+            type: Button2D
+            name: Weapon 1 Gun
+            properties:
+              label: ""
+              width: 62
+              height: 62
+              textureNormal:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/tgunico.png
+              textureHover:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/tgunico2.png
+              texturePressed:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/tgunico2.png
+              buttonAction: weapon-1
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
+              transform:
+                position: [-69.6150651175891, 105.8612277655011]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: weapon-btn-2
+            type: Button2D
+            name: Weapon 2 Shotgun
+            properties:
+              label: ""
+              width: 62
+              height: 62
+              textureNormal:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/shotgunico.png
+              textureHover:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/shotgunico2.png
+              texturePressed:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/shotgunico2.png
+              buttonAction: weapon-2
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
+              transform:
+                position: [20.841253326019455, 86.47229799519391]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: weapon-btn-3
+            type: Button2D
+            name: Weapon 3 Minigun
+            properties:
+              label: ""
+              width: 62
+              height: 62
+              textureNormal:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/minigunico.png
+              textureHover:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/minigunico2.png
+              texturePressed:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/minigunico2.png
+              buttonAction: weapon-3
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
+              transform:
+                position: [86.22618820843024, 18.924603930523176]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: weapon-btn-4
+            type: Button2D
+            name: Weapon 4 Rifle
+            properties:
+              label: ""
+              width: 62
+              height: 62
+              textureNormal:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/sniperico.png
+              textureHover:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/sniperico2.png
+              texturePressed:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/sniperico2.png
+              buttonAction: weapon-4
+              backgroundColor: "#4a4a4a"
+              hoverColor: "#5a5a5a"
+              pressedColor: "#3a3a3a"
+              transform:
+                position: [103.15878191474621, -72.61510035835471]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: counters-panel
+        type: Group2D
+        name: Counters Panel
+        properties:
+          width: 893
+          height: 146
+          transform:
+            position: [40, -467]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: hud-controller
+            type: user:HudController
+            enabled: true
+            config:
+              gunNode: maingun
+              buttonPrefix: weapon-btn-
+        children:
+          - id: counters-bg
+            type: Sprite2D
+            name: Counters Background
+            properties:
+              texture:
+                type: texture
+                url: res://src/assets/textures/gui/ingame/ingmain3.png
+              width: 893
+              height: 146
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: odo-clip
+            type: Group2D
+            name: Clip Odometer
+            properties:
+              width: 60
+              height: 32
+              transform:
+                position: [-75, 26]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: odo-clip-user:Odometer-mrnmkv11h9n0
+                type: user:Odometer
+                enabled: true
+                config:
+                  initialValue: 0
+            children:
+              - id: odo-clip-0
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-12, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-clip-0-user:OdometerDigit-mrp1xigc92p5
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-clip-1
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [12, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-clip-1-user:OdometerDigit-mrp1xisre33h
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+          - id: odo-ammo
+            type: Group2D
+            name: Ammo Odometer
+            properties:
+              width: 100
+              height: 32
+              transform:
+                position: [44, 26]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: odo-ammo-user:Odometer-mrnmkwewc35g
+                type: user:Odometer
+                enabled: true
+                config:
+                  initialValue: 0
+            children:
+              - id: odo-ammo-0
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-34, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-ammo-0-user:OdometerDigit-mrp367a9buwj
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-ammo-1
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-11, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-ammo-1-user:OdometerDigit-mrp367wu3dtu
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-ammo-2
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [12, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-ammo-2-user:OdometerDigit-mrp368ftk6f6
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-ammo-3
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [35, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-ammo-3-user:OdometerDigit-mrp368u2fv5i
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+          - id: odo-score
+            type: Group2D
+            name: Score Odometer
+            properties:
+              width: 130
+              height: 32
+              transform:
+                position: [-192, -28]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: odo-score-user:Odometer-mrnmkxso436v
+                type: user:Odometer
+                enabled: true
+                config:
+                  initialValue: 0
+            children:
+              - id: odo-score-0
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-46, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-score-0-user:OdometerDigit-mrp369ltik9d
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-score-1
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-23, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-score-1-user:OdometerDigit-mrp369zzdlyd
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-score-2
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-score-2-user:OdometerDigit-mrp36adb9m8c
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-score-3
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [23, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-score-3-user:OdometerDigit-mrp36b5z2fu6
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-score-4
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [46, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-score-4-user:OdometerDigit-mrp36bjw21ku
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+          - id: odo-time
+            type: Group2D
+            name: Time Odometer
+            properties:
+              width: 104
+              height: 32
+              transform:
+                position: [-1, -28]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: odo-time-user:Odometer-mrnmkzp95q8d
+                type: user:Odometer
+                enabled: true
+                config:
+                  initialValue: 0
+            children:
+              - id: odo-time-0
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-34, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-time-0-user:OdometerDigit-mrp36catagv7
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-time-1
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-11, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-time-1-user:OdometerDigit-mrp36cp63g9m
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-time-2
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [12, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-time-2-user:OdometerDigit-mrp36dgf3c0m
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-time-3
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [35, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-time-3-user:OdometerDigit-mrp36duhh0xf
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+          - id: odo-kills
+            type: Group2D
+            name: Kills Odometer
+            properties:
+              width: 130
+              height: 32
+              transform:
+                position: [168, -28]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: odo-kills-user:Odometer-mrnml16q8745
+                type: user:Odometer
+                enabled: true
+                config:
+                  initialValue: 0
+            children:
+              - id: odo-kills-0
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-46, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-kills-0-user:OdometerDigit-mrp36e88g4in
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-kills-1
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [-23, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-kills-1-user:OdometerDigit-mrp36f00dnmx
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-kills-2
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-kills-2-user:OdometerDigit-mrp36fe43prv
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-kills-3
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [23, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-kills-3-user:OdometerDigit-mrp36g5p4fbi
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+              - id: odo-kills-4
+                type: Sprite2D
+                name: Digit
+                properties:
+                  texture:
+                    type: texture
+                    url: res://src/assets/textures/gui/ingame/number_indicator.png
+                  width: 22
+                  height: 31
+                  transform:
+                    position: [46, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: odo-kills-4-user:OdometerDigit-mrp36gil7g8o
+                    type: user:OdometerDigit
+                    enabled: true
+                children: []
+      - id: options-button
+        type: Button2D
+        name: Options Button
+        properties:
+          label: ""
+          width: 212
+          height: 106
+          textureNormal:
+            type: texture
+            url: res://src/assets/textures/gui/ingame/ingmain1.png
+          textureHover:
+            type: texture
+            url: res://src/assets/textures/gui/ingame/ingmain1.png
+          texturePressed:
+            type: texture
+            url: res://src/assets/textures/gui/ingame/ingmain1.png
+          buttonAction: options
+          backgroundColor: "#4a4a4a"
+          hoverColor: "#5a5a5a"
+          pressedColor: "#3a3a3a"
+          transform:
+            position: [842, -482]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: center-label
+        type: Label2D
+        name: Center Label
+        properties:
+          label: ""
+          labelFontSize: 96
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, 150]
+            scale: [1, 1]
+            rotation: 0
