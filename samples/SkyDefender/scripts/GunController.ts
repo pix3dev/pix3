@@ -81,12 +81,6 @@ const WEAPONS: WeaponDef[] = [
   },
 ];
 
-/** Minigun spin frames, cycled while firing. */
-const MINIGUN_FRAMES = Array.from(
-  { length: 6 },
-  (_, i) => `res://src/assets/textures/maingun/minigun/frames/mg000${i + 1}.png`
-);
-
 /** Local length of the rifle laser/beam rects as authored in the scene. */
 const BEAM_RECT_LENGTH = 1000;
 
@@ -125,7 +119,6 @@ export class GunController extends Script {
   private barrels: (NodeBase | null)[] = [];
   private deadGun: NodeBase | null = null;
   private flashTextures: (import('three').Texture | null)[] = [];
-  private minigunFrames: import('three').Texture[] = [];
   private minigunSpin = 0;
   private gameOver = false;
   private balls: Cannonball[] = [];
@@ -322,9 +315,6 @@ export class GunController extends Script {
           .then(tex => { this.flashTextures[i] = tex; })
           .catch(() => undefined);
       });
-      void Promise.all(MINIGUN_FRAMES.map(p => loader.loadTexture(p)))
-        .then(frames => { this.minigunFrames = frames; })
-        .catch(() => undefined);
     }
 
     // The gun dies with the castle: swap to the wreck and stop responding.
@@ -394,13 +384,13 @@ export class GunController extends Script {
     this.updateLaser(dt);
   }
 
-  /** Cycle the minigun's barrel frames for a short burst after each shot. */
+  /** Spin the minigun barrel's flipbook only during a burst; idle otherwise. */
   private updateMinigunSpin(dt: number): void {
-    if (this.minigunSpin <= 0 || this.minigunFrames.length === 0) return;
-    this.minigunSpin -= dt;
-    const barrel = this.barrels[2] as { setTexture?: (t: import('three').Texture) => void } | null;
-    const frame = Math.floor(performance.now() / 40) % this.minigunFrames.length;
-    barrel?.setTexture?.(this.minigunFrames[frame]);
+    if (this.minigunSpin > 0) {
+      this.minigunSpin -= dt;
+    }
+    const barrel = this.barrels[2] as { isPlaying?: boolean } | null;
+    if (barrel) barrel.isPlaying = this.minigunSpin > 0;
   }
 
   // ── aiming ────────────────────────────────────────────────────────────────

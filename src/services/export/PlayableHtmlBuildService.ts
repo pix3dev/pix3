@@ -630,14 +630,13 @@ export class PlayableHtmlBuildService {
 
     const candidates = [relativePath];
     if (!/\.[^/]+$/.test(relativePath)) {
-      candidates.push(
-        `${relativePath}.ts`,
-        `${relativePath}.js`,
-        `${relativePath}.json`,
-        `${relativePath}/index.ts`,
-        `${relativePath}/index.js`,
-        `${relativePath}/index.json`
-      );
+      // Only extension resolution here — NOT directory-index resolution.
+      // The bundler resolver (ScriptCompilerService) owns `/index.ts` resolution via its
+      // suffix list, and it records the resolved module at whatever path this loader accepts
+      // content for. If we resolved `dir` -> `dir/index.ts` here, esbuild would record the
+      // module at the bare directory path, so the index's sibling imports (`./x`) would then
+      // resolve against the parent directory instead of `dir/` and fail to load.
+      candidates.push(`${relativePath}.ts`, `${relativePath}.js`, `${relativePath}.json`);
     }
 
     return Array.from(

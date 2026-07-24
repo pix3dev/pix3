@@ -8,6 +8,7 @@ import {
 } from '@/core/command';
 import { DialogService, type DialogExpandableSection } from '@/services/editor/DialogService';
 import { LoggingService } from '@/services/core/LoggingService';
+import { ProjectBuildService } from '@/services/export/ProjectBuildService';
 import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
 import type {
@@ -42,6 +43,9 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   @inject(DialogService)
   private readonly dialogService!: DialogService;
 
+  @inject(ProjectBuildService)
+  private readonly projectBuildService!: ProjectBuildService;
+
   @inject(PlayableExportDialogService)
   private readonly playableExportDialogService!: PlayableExportDialogService;
 
@@ -60,15 +64,10 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       };
     }
 
-    const hasScenes = Object.keys(context.state.scenes.descriptors).length > 0;
-    if (!hasScenes) {
-      return {
-        canExecute: false,
-        reason: 'At least one loaded scene is required',
-        scope: 'scene',
-      };
-    }
-
+    // Export builds from the scenes on disk (see ProjectBuildService.collectScenePaths),
+    // so we intentionally do NOT require a scene to be loaded here — otherwise the command
+    // would be disabled on the Project Home tab, which loads no scene. Whether the project
+    // actually contains any scene is validated at execute time via disk discovery.
     return { canExecute: true };
   }
 
@@ -197,11 +196,28 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   }
 
   private async promptForEntryScenePath(context: CommandContext): Promise<string | null> {
-    const scenePaths = Object.values(context.state.scenes.descriptors)
-      .map(descriptor => this.normalizeResourcePath(descriptor.filePath))
-      .filter(path => path.length > 0)
-      .sort((left, right) => left.localeCompare(right));
-    const uniqueScenePaths = Array.from(new Set(scenePaths));
+    // Reuse the build service's scene resolution so the picker offers exactly the scenes
+    // that will be bundled — loaded descriptors when any are open, disk discovery otherwise
+    // (e.g. when launched from the Project Home tab with no scene loaded).
+    const collected = await this.projectBuildService.collectScenePaths(context);
+    const uniqueScenePaths = Array.from(
+      new Set(
+        collected.map(path => this.normalizeResourcePath(path)).filter(path => path.length > 0)
+      )
+    ).sort((left, right) => left.localeCompare(right));
+
+    if (uniqueScenePaths.length === 0) {
+      await this.dialogService.showConfirmation({
+        title: 'No Scenes to Export',
+        message:
+          'This project has no scenes to export.\n\n' +
+          'Create at least one scene before exporting a playable HTML bundle.',
+        confirmLabel: 'OK',
+        cancelLabel: 'Close',
+      });
+      return null;
+    }
+
     const initialSelection = this.resolveInitialSceneSelection(context, uniqueScenePaths);
 
     return await this.playableExportDialogService.showDialog({

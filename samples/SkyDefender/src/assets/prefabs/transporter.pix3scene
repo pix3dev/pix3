@@ -26,10 +26,13 @@ root:
           speed: 120
     children:
       - id: carrier-balloon
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Carrier Balloon
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/transporter/00000.png' }
+          animationResourcePath: res://src/assets/textures/enemy/air/transporter/rotor.pix3anim
+          currentClip: spin
+          isPlaying: true
+          freeOnFinish: false
           width: 55
           height: 29
           transform:

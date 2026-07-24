@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "texturePath": "",
+  "clips": [
+    {
+      "name": "spin",
+      "fps": 25,
+      "loop": true,
+      "playbackMode": "normal",
+      "frames": [
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0001.png" },
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0002.png" },
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0003.png" },
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0004.png" },
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0005.png" },
+        { "texturePath": "res://src/assets/textures/maingun/minigun/frames/mg0006.png" }
+      ]
+    }
+  ]
+}

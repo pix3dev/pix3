@@ -1,6 +1,8 @@
 # Typical explosion prefab (GDD "Типичный взрыв"): three boom1 sequences at
 # random angles (A over the unit, B/C behind) + a BlowGlow halo that grows and
-# fades. Spawned via scene.instantiate(); self-destroys (queueFree) when done.
+# fades. The boom sprites are AnimatedSprite2D nodes that self-play the one-shot
+# `burst` clip (boom1.pix3anim); the ExplosionEffect script drives the procedural
+# glow/shockwave + gameplay push and frees the group when done.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
@@ -41,10 +43,13 @@ root:
             rotation: 0
         children: []
       - id: boom-b
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Boom B
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          animationResourcePath: res://src/assets/textures/sfx/boom1/boom1.pix3anim
+          currentClip: burst
+          isPlaying: true
+          freeOnFinish: false
           width: 56
           height: 56
           transform:
@@ -53,10 +58,13 @@ root:
             rotation: 115
         children: []
       - id: boom-c
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Boom C
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          animationResourcePath: res://src/assets/textures/sfx/boom1/boom1.pix3anim
+          currentClip: burst
+          isPlaying: true
+          freeOnFinish: false
           width: 48
           height: 48
           transform:
@@ -78,10 +86,13 @@ root:
             rotation: 0
         children: []
       - id: boom-a
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Boom A
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/boom1/ex0059.png' }
+          animationResourcePath: res://src/assets/textures/sfx/boom1/boom1.pix3anim
+          currentClip: burst
+          isPlaying: true
+          freeOnFinish: false
           width: 64
           height: 64
           transform:

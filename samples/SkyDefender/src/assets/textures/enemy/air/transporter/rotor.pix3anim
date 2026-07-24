@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "texturePath": "",
+  "clips": [
+    {
+      "name": "spin",
+      "fps": 14,
+      "loop": true,
+      "playbackMode": "normal",
+      "frames": [
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00000.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00001.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00002.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00003.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00004.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00005.png" },
+        { "texturePath": "res://src/assets/textures/enemy/air/transporter/00006.png" }
+      ]
+    }
+  ]
+}

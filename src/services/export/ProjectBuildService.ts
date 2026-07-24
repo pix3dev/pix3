@@ -183,18 +183,38 @@ export class ProjectBuildService {
           : (scenePaths[0] ?? '');
   }
 
-  private async collectScenePaths(context: CommandContext): Promise<string[]> {
-    const descriptors = Object.values(context.state.scenes.descriptors);
-    const fromState = descriptors
-      .map(descriptor => this.normalizeResourcePath(descriptor.filePath))
-      .filter(path => path.length > 0);
-
-    if (fromState.length > 0) {
-      return Array.from(new Set(fromState)).sort((a, b) => a.localeCompare(b));
-    }
+  /**
+   * Resolve the scene paths this project would export. ALL `.pix3scene` files on
+   * disk are bundled, not just the ones open in the editor: games load scenes
+   * dynamically at runtime (scene-per-level navigation, e.g.
+   * `res://src/assets/scenes/level-${n}.pix3scene`), so a scene that is not
+   * currently loaded must still ship. Loaded descriptor paths are unioned in to
+   * cover scenes that live outside the discovery root.
+   */
+  async collectScenePaths(context: CommandContext): Promise<string[]> {
+    const scenePaths = new Set<string>();
 
     const discovered = await this.discoverFilesByExtension('.', '.pix3scene');
-    return discovered.sort((a, b) => a.localeCompare(b));
+    for (const path of discovered) {
+      const normalized = this.normalizeResourcePath(path);
+      // Prefabs share the `.pix3scene` extension but are instantiated, not
+      // navigated to — keep them out of the navigable manifest / entry picker.
+      // (They are still embedded as assets by collectAssetPaths.) pix3 has no
+      // formal scene/prefab marker, so we fall back to the `prefabs/` folder
+      // convention used across pix3 projects.
+      if (!this.isPrefabPath(normalized)) {
+        scenePaths.add(normalized);
+      }
+    }
+
+    for (const descriptor of Object.values(context.state.scenes.descriptors)) {
+      const path = this.normalizeResourcePath(descriptor.filePath);
+      if (path.length > 0) {
+        scenePaths.add(path);
+      }
+    }
+
+    return Array.from(scenePaths).sort((a, b) => a.localeCompare(b));
   }
 
   private getActiveScenePath(context: CommandContext): string {
@@ -223,25 +243,104 @@ export class ProjectBuildService {
   ): Promise<string[]> {
     const files = new Set<string>();
 
-    for (const scenePath of scenePaths) {
-      files.add(scenePath);
-
-      try {
-        const sceneContents = await this.fs.readTextFile(scenePath);
-        this.collectResourcePathsFromText(sceneContents, files);
-      } catch {
-        warnings.push(`Failed to scan scene for asset references: ${scenePath}`);
+    // Reference-carrying resources (scenes, prefabs, `.pix3anim` flipbooks) must be
+    // scanned transitively: a scene references prefab `.pix3scene` files, those
+    // prefabs reference textures / nested prefabs / `.pix3anim` resources, and a
+    // `.pix3anim` in turn lists its frame textures. Scanning only the top-level
+    // scenes embeds those files but not the assets declared inside them (which is
+    // why nested prefab sprites and AnimatedSprite2D frames rendered as white
+    // squares in exports).
+    const scanQueue: string[] = [];
+    const queuedForScan = new Set<string>();
+    const addResourcePath = (resourcePath: string): void => {
+      files.add(resourcePath);
+      if (this.isScannableResource(resourcePath) && !queuedForScan.has(resourcePath)) {
+        queuedForScan.add(resourcePath);
+        scanQueue.push(resourcePath);
       }
+    };
+
+    // Seed with EVERY scene and prefab on disk, not just the navigable manifest
+    // scenes: a game can load any scene/prefab dynamically at runtime (e.g.
+    // `scene.instantiate('res://…/explosion.pix3scene')` or a computed level
+    // path), and each must ship with its own nested assets embedded.
+    const allSceneLikeFiles = await this.discoverFilesByExtension('.', '.pix3scene');
+    for (const sceneLikePath of allSceneLikeFiles) {
+      addResourcePath(this.normalizeResourcePath(sceneLikePath));
+    }
+    for (const scenePath of scenePaths) {
+      addResourcePath(scenePath);
     }
 
     const projectSourceFiles = await this.collectProjectSourceDependencies(projectScriptFiles);
     for (const sourceContents of projectSourceFiles.values()) {
-      this.collectResourcePathsFromText(sourceContents, files);
+      this.collectResourcePathsFromText(sourceContents, addResourcePath);
+    }
+
+    while (scanQueue.length > 0) {
+      const scannablePath = scanQueue.shift();
+      if (!scannablePath) {
+        continue;
+      }
+
+      try {
+        const contents = await this.fs.readTextFile(scannablePath);
+        this.collectResourcePathsFromText(contents, addResourcePath);
+      } catch {
+        warnings.push(`Failed to scan resource for asset references: ${scannablePath}`);
+      }
     }
 
     await this.collectLocaleAssetPaths(files, warnings);
 
-    return Array.from(files).sort((a, b) => a.localeCompare(b));
+    const resolved = await this.resolveAssetDirectoryReferences(files);
+    return Array.from(resolved).sort((a, b) => a.localeCompare(b));
+  }
+
+  private isScannableResource(path: string): boolean {
+    // Resources whose contents reference further `res://` assets: scenes and
+    // prefabs (`.pix3scene`/`.prefab`) plus `.pix3anim` flipbooks (which list
+    // their frame texture paths).
+    return /\.(pix3scene|prefab|pix3anim)$/i.test(path);
+  }
+
+  private isPrefabPath(path: string): boolean {
+    return /(^|\/)prefabs\//i.test(path) || /\.prefab$/i.test(path);
+  }
+
+  /**
+   * Expand directory `res://` references into the concrete files they contain.
+   *
+   * Scripts frequently reference an asset *base directory* (e.g.
+   * `const BASE = 'res://src/assets/textures/enemy/air'`) and build individual
+   * frame paths dynamically (`` `${BASE}/transporter/${i}.png` ``). The static
+   * `res://` scan can only see the base directory, never the interpolated file
+   * paths. A directory cannot be embedded as a single asset, so we recursively
+   * enumerate its files — this both silences the "failed to embed" warnings and
+   * ensures runtime-constructed asset paths actually ship in the bundle. Bare
+   * paths that are neither a file nor a real directory (e.g. `res://…`
+   * placeholders in comments) are dropped silently.
+   */
+  private async resolveAssetDirectoryReferences(paths: Set<string>): Promise<Set<string>> {
+    const resolved = new Set<string>();
+
+    for (const path of paths) {
+      if (this.hasFileExtension(path)) {
+        resolved.add(path);
+        continue;
+      }
+
+      const nestedFiles = await this.discoverFilesByExtension(path, '');
+      for (const nested of nestedFiles) {
+        resolved.add(nested);
+      }
+    }
+
+    return resolved;
+  }
+
+  private hasFileExtension(path: string): boolean {
+    return /\.[a-zA-Z0-9]+$/.test(path);
   }
 
   /**
@@ -428,17 +527,48 @@ export class ProjectBuildService {
     return resolvedSegments.join('/');
   }
 
-  private collectResourcePathsFromText(contents: string, files: Set<string>): void {
+  private collectResourcePathsFromText(
+    contents: string,
+    addResourcePath: (resourcePath: string) => void
+  ): void {
     for (const match of contents.matchAll(RESOURCE_PATH_PATTERN)) {
       const resourcePath = (match[1] ?? '').trim();
       if (this.isConcreteResourcePath(resourcePath)) {
-        files.add(resourcePath);
+        addResourcePath(resourcePath);
+        continue;
+      }
+
+      // Dynamically-built path (e.g. `` `res://…/sfx/boom1/ex${i}.png` ``). The
+      // interpolated filename is unknowable statically, but the literal PREFIX
+      // reveals the containing directory. Emit that directory so the directory
+      // resolver embeds the whole frame sequence — otherwise programmatic
+      // frame animations render as white squares in the export.
+      const directoryPrefix = this.staticDirectoryPrefix(resourcePath);
+      if (directoryPrefix) {
+        addResourcePath(directoryPrefix);
       }
     }
   }
 
   private isConcreteResourcePath(resourcePath: string): boolean {
     return resourcePath.length > 0 && !resourcePath.includes('${') && !resourcePath.includes('`');
+  }
+
+  /**
+   * Extract the static directory prefix of a dynamically-interpolated resource
+   * path. `src/assets/textures/sfx/boom1/ex${String(59` → `src/assets/textures/sfx/boom1`.
+   * Returns null when nothing static precedes the interpolation (a fully
+   * computed path, e.g. `res://${scenePath}`), which cannot be resolved.
+   */
+  private staticDirectoryPrefix(resourcePath: string): string | null {
+    const staticPrefix = resourcePath.split('${')[0] ?? '';
+    const lastSlashIndex = staticPrefix.lastIndexOf('/');
+    if (lastSlashIndex <= 0) {
+      return null;
+    }
+
+    const directory = staticPrefix.slice(0, lastSlashIndex);
+    return directory.length > 0 ? directory : null;
   }
 
   private isProjectRuntimeScriptPath(filePath: string): boolean {

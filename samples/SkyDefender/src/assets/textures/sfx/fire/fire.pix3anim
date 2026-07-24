@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "texturePath": "",
+  "clips": [
+    {
+      "name": "burn",
+      "fps": 20,
+      "loop": true,
+      "playbackMode": "normal",
+      "frames": [
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0058.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0059.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0060.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0061.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0062.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0063.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0064.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0065.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0066.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0067.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0068.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0069.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0070.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0071.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0072.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0073.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0074.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0075.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0076.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0077.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0078.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0079.png" },
+        { "texturePath": "res://src/assets/textures/sfx/fire/burn0080.png" }
+      ]
+    }
+  ]
+}

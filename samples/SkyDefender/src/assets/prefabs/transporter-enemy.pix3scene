@@ -1,7 +1,7 @@
 # Enemy transporter airship (SWF class S_SS, symbol `SS`, id 33). The numerous
 # fodder dirigible: it carries no bomb and just clutters the sky. Always RED —
 # rendered as an animated BROWN body (transporter/00000..00006, spinning
-# propeller via user:PropellerAnim) with a static red `over` overlay drawn on
+# propeller — a looping AnimatedSprite2D) with a static red `over` overlay drawn on
 # top (the overlay leaves the propeller visible). WaveSpawner routes id 33 here;
 # it sets the EnemyBalloon stats but does NOT re-skin the art (fixed livery).
 version: 1.0.0
@@ -61,32 +61,22 @@ root:
             scale: [1, 1]
             rotation: 0
         children: []
-      # Brown body with the spinning propeller (numeric frames are the animation).
+      # Brown body with the spinning propeller: a self-playing looping flipbook
+      # (rotor.pix3anim) — no script needed.
       - id: transporter-body
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Body
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/transporter/00000.png' }
+          animationResourcePath: res://src/assets/textures/enemy/air/transporter/rotor.pix3anim
+          currentClip: spin
+          isPlaying: true
+          freeOnFinish: false
           width: 55
           height: 29
           transform:
             position: [0, 0]
             scale: [1, 1]
             rotation: 0
-        components:
-          - id: transporter-prop
-            type: user:PropellerAnim
-            enabled: true
-            config:
-              fps: 14
-              frames:
-                - 'res://src/assets/textures/enemy/air/transporter/00000.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00001.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00002.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00003.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00004.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00005.png'
-                - 'res://src/assets/textures/enemy/air/transporter/00006.png'
         children: []
       # Static red skin drawn on top — leaves the propeller showing.
       - id: transporter-over

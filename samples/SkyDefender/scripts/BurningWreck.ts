@@ -1,16 +1,9 @@
-import { Script, Sprite2D } from '@pix3/runtime';
+import { Node2D, Script, Sprite2D } from '@pix3/runtime';
 import type { NodeBase, PropertySchema } from '@pix3/runtime';
-import type { Texture } from 'three';
 
-const FIRE_FRAME_COUNT = 23;
-const FIRE_FRAME = (i: number) =>
-  `res://src/assets/textures/sfx/fire/burn${String(58 + i).padStart(4, '0')}.png`;
 const EXPLOSION_PREFAB = 'res://src/assets/prefabs/explosion.pix3scene';
 const IGNITE_SOUND = 'res://src/assets/audio/fire/fire_short.mp3';
 const IMPACT_SOUND = 'res://src/assets/audio/explosions/medium_explosion.mp3';
-
-/** Fire frames are shared by every wreck instance. */
-let fireFramesPromise: Promise<Texture[]> | null = null;
 
 /**
  * BurningWreck — the GDD "падение с горением": a dead hull falls like a comet
@@ -21,8 +14,7 @@ let fireFramesPromise: Promise<Texture[]> | null = null;
  */
 export class BurningWreck extends Script {
   private sprite: Sprite2D | null = null;
-  private fires: Sprite2D[] = [];
-  private frames: Texture[] | null = null;
+  private fires: Node2D[] = [];
   private vx = 0;
   private vy = 0;
   private time = 0;
@@ -37,7 +29,6 @@ export class BurningWreck extends Script {
       gravity: 260,
       spinDegPerSec: 35,
       impactY: -195,
-      fireFps: 20,
       explosionScale: 1,
     };
   }
@@ -58,7 +49,6 @@ export class BurningWreck extends Script {
         num('gravity', 'Gravity (px/s²)', 10),
         num('spinDegPerSec', 'Spin (deg/s)'),
         num('impactY', 'Impact Y (stage px)'),
-        num('fireFps', 'Fire FPS'),
       ],
       groups: { Wreck: { label: 'Burning Wreck', expanded: true } },
     };
@@ -71,7 +61,7 @@ export class BurningWreck extends Script {
     const spriteNode = this.node?.getChildByName('Wreck Sprite') ?? null;
     this.sprite = spriteNode instanceof Sprite2D ? spriteNode : null;
     this.fires = (this.node?.children ?? []).filter(
-      (c): c is Sprite2D => c instanceof Sprite2D && c.name.startsWith('Fire')
+      (c): c is Node2D => c instanceof Node2D && c.name.startsWith('Fire')
     );
 
     const texturePath = String(this.config.texturePath ?? '');
@@ -85,18 +75,6 @@ export class BurningWreck extends Script {
         })
         .catch(() => undefined);
     }
-
-    if (!fireFramesPromise) {
-      const loader = this.scene?.getAssetLoader();
-      if (loader) {
-        fireFramesPromise = Promise.all(
-          Array.from({ length: FIRE_FRAME_COUNT }, (_, i) => loader.loadTexture(FIRE_FRAME(i)))
-        );
-      }
-    }
-    void fireFramesPromise?.then(frames => {
-      this.frames = frames;
-    });
 
     this.scene?.audio.play(IGNITE_SOUND, { bus: 'sfx', volumeVariation: 0.15 });
   }
@@ -112,17 +90,13 @@ export class BurningWreck extends Script {
     node.position.y += this.vy * dt;
     node.rotation.z += (Number(this.config.spinDegPerSec) * Math.PI / 180) * dt;
 
-    // Flames: loop the sequence, keep them pointing against the motion
-    // (counter-rotate the parent spin so the trail reads as trajectory).
+    // Flames: keep them pointing against the motion (counter-rotate the parent
+    // spin so the trail reads as trajectory). The burn flipbook self-plays.
     const motionAngle = Math.atan2(this.vy, this.vx);
     const flameAngle = motionAngle + Math.PI / 2 - node.rotation.z;
-    if (this.frames) {
-      const frame = Math.floor(this.time * Number(this.config.fireFps));
-      this.fires.forEach((fire, i) => {
-        fire.setTexture(this.frames![(frame + i * 7) % FIRE_FRAME_COUNT]);
-        fire.rotation.z = flameAngle;
-      });
-    }
+    this.fires.forEach(fire => {
+      fire.rotation.z = flameAngle;
+    });
 
     // Off the sides — just vanish; below impact level — detonate.
     if (node.position.x < -460 || node.position.x > 480 || this.time > 8) {

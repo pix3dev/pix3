@@ -162,4 +162,70 @@ describe('PlayableHtmlBuildService', () => {
     expect(artifact.warnings).toContain('model warning');
     expect(artifact.externalModuleIds).toEqual([]);
   });
+
+  it('does not resolve a runtime directory to its index (leaves that to the bundler resolver)', async () => {
+    // Regression: the runtime file loader used to resolve a bare directory path to
+    // `<dir>/index.ts`. The bundler then recorded the module at the *directory* path, so the
+    // index's sibling imports (e.g. shader-effects/index.ts -> './shader-effect-types')
+    // resolved against the parent directory and failed with "File not found". The loader must
+    // be a pure exact-file reader; `/index.ts` resolution is the bundler resolver's job.
+    let capturedFileLoader: VirtualBundleOptions['fileLoader'] | undefined;
+    const projectBuildService = {
+      buildRuntimeProjectModel: vi.fn(
+        async () =>
+          ({
+            projectName: 'Runtime Demo',
+            scenePaths: ['scenes/main.pix3scene'],
+            entryScenePath: 'scenes/main.pix3scene',
+            assetPaths: [],
+            projectScriptFiles: new Map(),
+            files: new Map([['src/main.ts', "console.log('boot');\n"]]),
+            warnings: [],
+          }) as RuntimeProjectBuildModel
+      ),
+    } satisfies Pick<ProjectBuildService, 'buildRuntimeProjectModel'>;
+    const storage = {
+      readBlob: vi.fn(async () => new Blob([''], { type: 'text/plain' })),
+      readTextFile: vi.fn(async () => null),
+    } as unknown as Pick<ProjectStorageService, 'readBlob' | 'readTextFile'>;
+    const scriptCompiler = {
+      bundleVirtualProject: vi.fn(async (_files: Map<string, string>, options: unknown) => {
+        capturedFileLoader = (options as VirtualBundleOptions).fileLoader;
+        return { code: '', warnings: [] };
+      }),
+    } satisfies Pick<ScriptCompilerService, 'bundleVirtualProject'>;
+
+    const service = new PlayableHtmlBuildService();
+    Object.defineProperty(service, 'projectBuildService', {
+      value: projectBuildService,
+      configurable: true,
+    });
+    Object.defineProperty(service, 'storage', { value: storage, configurable: true });
+    Object.defineProperty(service, 'scriptCompiler', {
+      value: scriptCompiler,
+      configurable: true,
+    });
+
+    await service.buildPlayableHtml(createContext(), {
+      title: 'Playable Build',
+      entryScenePath: 'scenes/main.pix3scene',
+    });
+
+    expect(typeof capturedFileLoader).toBe('function');
+    const context = {
+      importer: 'pix3-runtime/src/index.ts',
+      requestedImportPath: './shader-effects',
+      namespace: 'virtual-fs',
+    } as const;
+
+    // A bare directory path must NOT be resolved to its index by the loader.
+    await expect(
+      capturedFileLoader?.('pix3-runtime/src/shader-effects', context)
+    ).resolves.toBeNull();
+    // The bundler resolver then probes the `/index.ts` suffix, which the loader serves as an
+    // exact file — recording the module at the correct directory-qualified path.
+    await expect(
+      capturedFileLoader?.('pix3-runtime/src/shader-effects/index.ts', context)
+    ).resolves.toContain("export * from './shader-effect-types';");
+  });
 });

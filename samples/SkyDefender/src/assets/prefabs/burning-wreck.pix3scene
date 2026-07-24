@@ -28,7 +28,6 @@ root:
           gravity: 260
           spinDegPerSec: 35
           impactY: -195
-          fireFps: 20
           explosionScale: 1
     children:
       - id: wreck-sprite
@@ -42,10 +41,13 @@ root:
             rotation: 0
         children: []
       - id: wreck-fire-1
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Fire 1
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/fire/burn0058.png' }
+          animationResourcePath: res://src/assets/textures/sfx/fire/fire.pix3anim
+          currentClip: burn
+          isPlaying: true
+          freeOnFinish: false
           width: 26
           height: 44
           opacity: 1
@@ -55,10 +57,13 @@ root:
             rotation: 0
         children: []
       - id: wreck-fire-2
-        type: Sprite2D
+        type: AnimatedSprite2D
         name: Fire 2
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/sfx/fire/burn0058.png' }
+          animationResourcePath: res://src/assets/textures/sfx/fire/fire.pix3anim
+          currentClip: burn
+          isPlaying: true
+          freeOnFinish: false
           width: 20
           height: 34
           opacity: 0.57

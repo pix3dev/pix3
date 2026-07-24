@@ -1,17 +1,10 @@
 import { Script } from '@pix3/runtime';
-import type { PropertySchema, Sprite2D } from '@pix3/runtime';
-import type { Texture } from 'three';
+import type { PropertySchema } from '@pix3/runtime';
 
-const ROTOR_FRAMES = 7;
-const ROTOR_PATH = (i: number) =>
-  `res://src/assets/textures/enemy/air/transporter/${String(i).padStart(5, '0')}.png`;
 const DOCK_SOUNDS = [
   'res://src/assets/audio/hits/enemy_hit1.mp3',
   'res://src/assets/audio/hits/enemy_hit2.mp3',
 ];
-
-/** Module-level rotor frame cache shared by all four carriers. */
-let rotorPromise: Promise<Texture[]> | null = null;
 
 /**
  * BridgeTransporter — the "заград-отряд" carrier aerostat (decompiled v10.18
@@ -22,12 +15,9 @@ let rotorPromise: Promise<Texture[]> | null = null;
  * hitbox, can't be shot (original: hp 0 / tip 101).
  */
 export class BridgeTransporter extends Script {
-  private frames: Texture[] | null = null;
-  private frameTime = 0;
   private bobTime = 0;
   private baseY: number | null = null;
   private arrived = false;
-  private balloon: Sprite2D | null = null;
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -54,32 +44,10 @@ export class BridgeTransporter extends Script {
     };
   }
 
-  onStart(): void {
-    this.balloon = (this.node?.getChildByName('Carrier Balloon') ?? null) as Sprite2D | null;
-    if (!rotorPromise) {
-      const loader = this.scene?.getAssetLoader();
-      if (loader) {
-        rotorPromise = Promise.all(
-          Array.from({ length: ROTOR_FRAMES }, (_, i) => loader.loadTexture(ROTOR_PATH(i)))
-        );
-      }
-    }
-    void rotorPromise?.then(frames => {
-      this.frames = frames;
-    });
-  }
-
   onUpdate(dt: number): void {
     if (!this.node) return;
     if (this.baseY === null) {
       this.baseY = this.node.position.y;
-    }
-
-    // Rotor sequence: 7 frames shown at ~1/3 speed (GDD animation note).
-    this.frameTime += dt;
-    if (this.frames && this.balloon) {
-      const frame = Math.floor(this.frameTime * 10) % ROTOR_FRAMES;
-      this.balloon.setTexture(this.frames[frame]);
     }
 
     this.bobTime += dt;

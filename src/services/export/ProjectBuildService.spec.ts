@@ -171,6 +171,125 @@ describe('ProjectBuildService', () => {
     ]);
   });
 
+  it('expands directory resource references into their contained files', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      // Script references an asset base *directory* and builds frame paths dynamically.
+      'scripts/enemy.ts':
+        "const BASE = 'res://src/assets/textures/enemy/air';\nexport const frame = (i: number) => `${BASE}/transporter/${String(i).padStart(5, '0')}.png`;\n",
+      'src/assets/textures/enemy/air/transporter/00000.png': 'frame-0',
+      'src/assets/textures/enemy/air/transporter/00001.png': 'frame-1',
+      'src/assets/textures/enemy/air/idle.png': 'idle',
+    });
+
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', {
+      value: fs,
+      configurable: true,
+    });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    // The bare directory path must not appear; its files are embedded instead.
+    expect(model.assetPaths).toEqual([
+      'scenes/main.pix3scene',
+      'src/assets/textures/enemy/air/idle.png',
+      'src/assets/textures/enemy/air/transporter/00000.png',
+      'src/assets/textures/enemy/air/transporter/00001.png',
+    ]);
+    expect(model.assetPaths).not.toContain('src/assets/textures/enemy/air');
+  });
+
+  it('scans prefab files transitively for their nested texture references', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      // Scene references a prefab; the prefab (only) declares the textures.
+      'scenes/main.pix3scene':
+        'root:\n  node:\n    prefab: res://src/assets/prefabs/explosion.pix3scene\n',
+      'src/assets/prefabs/explosion.pix3scene':
+        "root:\n  - type: Sprite2D\n    properties:\n      texture: { url: 'res://src/assets/textures/sfx/blowglow.png' }\n  - type: Sprite2D\n    properties:\n      nested: res://src/assets/prefabs/wave.pix3scene\n",
+      'src/assets/prefabs/wave.pix3scene':
+        "root:\n  - type: Sprite2D\n    properties:\n      texture: { url: 'res://src/assets/textures/sfx/wave.png' }\n",
+      'src/assets/textures/sfx/blowglow.png': 'glow-bytes',
+      'src/assets/textures/sfx/wave.png': 'wave-bytes',
+    });
+
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    // Nested prefab textures (one level deep AND transitively via wave.pix3scene)
+    // must be embedded — otherwise the prefab sprites render as white squares.
+    expect(model.assetPaths).toContain('src/assets/textures/sfx/blowglow.png');
+    expect(model.assetPaths).toContain('src/assets/textures/sfx/wave.png');
+    expect(model.assetPaths).toContain('src/assets/prefabs/explosion.pix3scene');
+    expect(model.assetPaths).toContain('src/assets/prefabs/wave.pix3scene');
+    // Prefabs are embedded as assets but excluded from the navigable manifest.
+    expect(model.scenePaths).toEqual(['scenes/main.pix3scene']);
+  });
+
+  it('scans .pix3anim flipbooks referenced by AnimatedSprite2D for their frame textures', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  node:\n    prefab: res://src/assets/prefabs/fire-burst.pix3scene\n',
+      'src/assets/prefabs/fire-burst.pix3scene':
+        'root:\n  - type: AnimatedSprite2D\n    properties:\n      animationResourcePath: res://src/assets/textures/sfx/fireb/fireb.pix3anim\n      freeOnFinish: true\n',
+      'src/assets/textures/sfx/fireb/fireb.pix3anim': JSON.stringify({
+        clips: [
+          {
+            name: 'burst',
+            fps: 30,
+            loop: false,
+            frames: [
+              { texturePath: 'res://src/assets/textures/sfx/fireb/fireb0001.png' },
+              { texturePath: 'res://src/assets/textures/sfx/fireb/fireb0002.png' },
+            ],
+          },
+        ],
+      }),
+      'src/assets/textures/sfx/fireb/fireb0001.png': 'f1',
+      'src/assets/textures/sfx/fireb/fireb0002.png': 'f2',
+    });
+
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toContain('src/assets/textures/sfx/fireb/fireb.pix3anim');
+    expect(model.assetPaths).toContain('src/assets/textures/sfx/fireb/fireb0001.png');
+    expect(model.assetPaths).toContain('src/assets/textures/sfx/fireb/fireb0002.png');
+  });
+
+  it('embeds programmatic frame sequences via the static directory prefix', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      // Fully programmatic animation: the frame directory is never referenced
+      // literally, only as the static prefix of an interpolated path.
+      'scripts/explosion.ts':
+        'const FRAME = (i: number) => `res://src/assets/textures/sfx/boom1/ex${String(59 + i).padStart(4, "0")}.png`;\nexport const first = FRAME(0);\n',
+      'src/assets/textures/sfx/boom1/ex0059.png': 'f0',
+      'src/assets/textures/sfx/boom1/ex0060.png': 'f1',
+      'src/assets/textures/sfx/boom1/ex0061.png': 'f2',
+    });
+
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toEqual([
+      'scenes/main.pix3scene',
+      'src/assets/textures/sfx/boom1/ex0059.png',
+      'src/assets/textures/sfx/boom1/ex0060.png',
+      'src/assets/textures/sfx/boom1/ex0061.png',
+    ]);
+  });
+
   it('ignores template literal resource placeholders during script asset discovery', async () => {
     const fs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
@@ -450,7 +569,7 @@ describe('ProjectBuildService', () => {
       'Configured default export scene was not found in build inputs: scenes/default.pix3scene'
     );
     expect(model.warnings).toContain(
-      'Failed to scan scene for asset references: scenes/main.pix3scene'
+      'Failed to scan resource for asset references: scenes/main.pix3scene'
     );
     expect(model.entryScenePath).toBe('scenes/main.pix3scene');
   });

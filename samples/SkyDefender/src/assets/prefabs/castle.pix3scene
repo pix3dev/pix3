@@ -413,12 +413,13 @@ root:
                     rotation: 0
                 children: []
               - id: barrel-minigun
-                type: Sprite2D
+                type: AnimatedSprite2D
                 name: Barrel Minigun
                 properties:
-                  texture:
-                    type: texture
-                    url: res://src/assets/textures/maingun/minigun/frames/mg0001.png
+                  animationResourcePath: res://src/assets/textures/maingun/minigun/frames/minigun.pix3anim
+                  currentClip: spin
+                  isPlaying: false
+                  freeOnFinish: false
                   width: 37
                   height: 25
                   initiallyVisible: false

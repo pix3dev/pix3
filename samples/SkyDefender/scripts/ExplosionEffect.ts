@@ -1,29 +1,30 @@
-import { Node2D, Script, Sprite2D } from '@pix3/runtime';
+import { Node2D, Script } from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 import { AdditiveBlending, Vector3 } from 'three';
-import type { Mesh, MeshBasicMaterial, Texture } from 'three';
-
-const FRAME_COUNT = 22;
-const FRAME_PATH = (i: number) =>
-  `res://src/assets/textures/sfx/boom1/ex${String(59 + i).padStart(4, '0')}.png`;
-
-/** Module-level frame cache shared by every explosion instance. */
-let framesPromise: Promise<Texture[]> | null = null;
+import type { Mesh, MeshBasicMaterial } from 'three';
 
 /**
- * ExplosionEffect — the GDD "typical explosion": the boom1 sequence played on
- * three sprites at different angles/sizes plus a BlowGlow halo that expands
- * and fades, PLUS the shockwave (GDD "Взрывная волна" — the player's hidden
- * weapon): the explosion_wave mask grows ×2 while fading (additive blend), and
- * every `enemy` hitbox inside the wave radius gets a `shoved(vx, vy)` impulse
- * away from the epicenter — a unit shoved into the castle detonates there.
- * The prefab self-destroys via `queueFree()` when everything is done.
+ * engine-check: no built-in covers this because it is the gameplay shockwave
+ * ("Взрывная волна" — an area impulse via collision2d.overlapCircle → emit
+ * 'shoved') plus a procedural halo/wave whose scale+opacity are coupled to the
+ * explosion timeline. The flipbook part (boom1 sequence) is NOT here anymore:
+ * the three Boom AnimatedSprite2D children self-play the one-shot `burst` clip.
+ *
+ * ExplosionEffect — the GDD "typical explosion": three boom sprites at random
+ * angles/sizes (now AnimatedSprite2D), a BlowGlow halo that expands and fades,
+ * PLUS the shockwave (GDD "Взрывная волна" — the player's hidden weapon): the
+ * explosion_wave mask grows ×2 while fading (additive blend), and every `enemy`
+ * hitbox inside the wave radius gets a `shoved(vx, vy)` impulse away from the
+ * epicenter — a unit shoved into the castle detonates there. The prefab
+ * self-destroys via `queueFree()` when everything is done. `fps` matches the
+ * boom1.pix3anim clip so the halo/wave/free stay in sync with the frames.
  */
 export class ExplosionEffect extends Script {
-  private booms: Sprite2D[] = [];
+  /** Frame count of the boom1 `burst` clip — drives glow/wave/free timing. */
+  private static readonly BOOM_FRAME_COUNT = 22;
+
   private glow: Node2D | null = null;
   private wave: Node2D | null = null;
-  private frames: Texture[] | null = null;
   private time = 0;
   private glowBaseScale = 1;
   private pushed = false;
@@ -64,9 +65,13 @@ export class ExplosionEffect extends Script {
   }
 
   onStart(): void {
-    this.booms = (this.node?.children ?? []).filter(
-      (c): c is Sprite2D => c instanceof Sprite2D && c.name.startsWith('Boom')
-    );
+    // Random per-instance orientation so no two explosions look alike (GDD).
+    // The three Boom AnimatedSprite2D children keep their authored relative
+    // angles; spinning the whole group varies the composite each spawn.
+    if (this.node) {
+      this.node.rotation.z = Math.random() * Math.PI * 2;
+    }
+
     const glowNode = this.node?.getChildByName('Blow Glow') ?? null;
     this.glow = glowNode instanceof Node2D ? glowNode : null;
     if (this.glow) {
@@ -84,23 +89,6 @@ export class ExplosionEffect extends Script {
         (mesh.material as MeshBasicMaterial).blending = AdditiveBlending;
       }
     });
-
-    // Random per-instance orientation so no two explosions look alike (GDD).
-    for (const boom of this.booms) {
-      boom.rotation.z = Math.random() * Math.PI * 2;
-    }
-
-    if (!framesPromise) {
-      const loader = this.scene?.getAssetLoader();
-      if (loader) {
-        framesPromise = Promise.all(
-          Array.from({ length: FRAME_COUNT }, (_, i) => loader.loadTexture(FRAME_PATH(i)))
-        );
-      }
-    }
-    void framesPromise?.then(frames => {
-      this.frames = frames;
-    });
   }
 
   onUpdate(dt: number): void {
@@ -108,23 +96,11 @@ export class ExplosionEffect extends Script {
     this.time += dt;
 
     const fps = Math.max(1, Number(this.config.fps));
-    const duration = FRAME_COUNT / fps;
+    const duration = ExplosionEffect.BOOM_FRAME_COUNT / fps;
 
     if (!this.pushed) {
       this.pushed = true;
       this.pushNeighbors();
-    }
-
-    // Sequence frames on all boom sprites (each one frame apart for variety).
-    if (this.frames) {
-      this.booms.forEach((boom, i) => {
-        const frame = Math.floor(this.time * fps) + i;
-        if (frame < FRAME_COUNT) {
-          boom.setTexture(this.frames![frame]);
-        } else {
-          boom.visible = false;
-        }
-      });
     }
 
     // Glow: expand and fade over the whole duration.
