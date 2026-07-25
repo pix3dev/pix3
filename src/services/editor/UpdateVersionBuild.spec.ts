@@ -49,10 +49,12 @@ describe('update-version helpers', () => {
       publishedAt: '2026-04-07T10:00:00.000Z',
     });
 
-    expect(source).toContain('version: "1.2.3"');
+    // Single quotes on purpose: the generated file lives under `src/` and must already match
+    // the repo's Prettier style, otherwise every version bump churns on the next format pass.
+    expect(source).toContain("version: '1.2.3'");
     expect(source).toContain('build: 9');
-    expect(source).toContain('displayVersion');
-    expect(source).toContain('publishedAt');
+    expect(source).toContain("displayVersion: 'v1.2.3 (build 9)'");
+    expect(source).toContain("publishedAt: '2026-04-07T10:00:00.000Z'");
   });
 
   it('writes incremented build metadata and generated source module', async () => {

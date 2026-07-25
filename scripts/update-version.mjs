@@ -38,9 +38,19 @@ export function buildVersionManifest(version, build, publishedAt) {
   return manifest;
 }
 
+/**
+ * Emit a TS string literal in the repo's Prettier style (singleQuote). JSON.stringify would
+ * hand back double quotes, so every version bump used to churn against the next format pass.
+ */
+function tsString(value) {
+  const json = JSON.stringify(String(value));
+  const inner = json.slice(1, -1);
+  return inner.includes("'") || inner.includes('\\') ? json : `'${inner}'`;
+}
+
 export function buildVersionModule(manifest) {
   const publishedAtLine = manifest.publishedAt
-    ? `  publishedAt: ${JSON.stringify(manifest.publishedAt)},\n`
+    ? `  publishedAt: ${tsString(manifest.publishedAt)},\n`
     : '';
 
   return `export interface EditorVersionInfo {
@@ -51,9 +61,9 @@ export function buildVersionModule(manifest) {
 }
 
 export const CURRENT_EDITOR_VERSION: EditorVersionInfo = {
-  version: ${JSON.stringify(manifest.version)},
+  version: ${tsString(manifest.version)},
   build: ${manifest.build},
-  displayVersion: ${JSON.stringify(manifest.displayVersion)},
+  displayVersion: ${tsString(manifest.displayVersion)},
 ${publishedAtLine}};
 `;
 }

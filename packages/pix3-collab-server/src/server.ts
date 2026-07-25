@@ -11,6 +11,7 @@ import { authRouter } from './core/auth/auth-router.js';
 import { projectsRouter } from './core/projects/projects-router.js';
 import { storageRouter } from './core/storage/storage-router.js';
 import { libraryRouter } from './core/library/library-router.js';
+import { storeRouter } from './core/library/store-router.js';
 import { adminRouter } from './core/admin/admin-router.js';
 import { previewRouter } from './core/preview/preview-router.js';
 import { createHocuspocusServer } from './sync/hocuspocus.js';
@@ -67,6 +68,9 @@ export async function startServer(): Promise<void> {
   app.use('/api/auth', authRouter);
   app.use('/api/projects', projectsRouter);
   app.use('/api/projects', storageRouter);
+  // Mounted before the private library router so '/api/library/store/...' is never swallowed
+  // by its '/items/:id' patterns.
+  app.use('/api/library/store', storeRouter);
   app.use('/api/library', libraryRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/preview', previewRouter);

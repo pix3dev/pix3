@@ -2,7 +2,6 @@ import { Router, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import { config } from '../../config.js';
 import { requireAuth, AuthenticatedRequest } from '../auth/auth-middleware.js';
 import {
   getOwnerLibraryItem,
@@ -10,6 +9,7 @@ import {
   softDeleteLibraryItem,
   upsertLibraryItem,
 } from './library-service.js';
+import { getItemDir, resolveSafePath } from './library-storage.js';
 
 export const libraryRouter = Router();
 
@@ -18,19 +18,6 @@ const upload = multer({
   // Match the project storage limit; a bundle uploads its files together.
   limits: { fileSize: 100 * 1024 * 1024, files: 200 },
 });
-
-function getItemDir(itemId: string): string {
-  // itemId is a client UUID; encode it so it can never escape the storage root.
-  return path.resolve(config.LIBRARY_STORAGE_DIR, encodeURIComponent(itemId));
-}
-
-function resolveSafePath(itemDir: string, relativePath: string): string | null {
-  const resolved = path.resolve(itemDir, relativePath);
-  if (!resolved.startsWith(itemDir + path.sep) && resolved !== itemDir) {
-    return null;
-  }
-  return resolved;
-}
 
 // GET /api/library/items — full private index for the caller (incl. tombstones) for sync.
 libraryRouter.get('/items', requireAuth, (req: AuthenticatedRequest, res: Response) => {

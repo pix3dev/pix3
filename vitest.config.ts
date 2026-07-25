@@ -4,7 +4,12 @@ import { resolve } from 'path';
 export default defineConfig({
   test: {
     environment: 'happy-dom',
-    include: ['src/**/*.spec.ts', 'packages/pix3-runtime/src/**/*.spec.ts'],
+    include: [
+      'src/**/*.spec.ts',
+      'packages/pix3-runtime/src/**/*.spec.ts',
+      // Server specs opt out of happy-dom per file via `// @vitest-environment node`.
+      'packages/pix3-collab-server/src/**/*.spec.ts',
+    ],
     // The default 'forks' pool reports "No test suite found" for every spec on
     // win32-arm64 (vitest 4.x); the threads pool runs them fine everywhere.
     pool: 'threads',
