@@ -311,6 +311,44 @@ describe('ProjectBuildService', () => {
     expect(model.assetPaths).toEqual(['scenes/main.pix3scene']);
   });
 
+  it('bundles the Spine runtime only for projects that place a SpineSkeleton2D', async () => {
+    const spineFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: SpineSkeleton2D\n    properties:\n      skeletonPath: res://assets/spine/hero.json\n      atlasPath: res://assets/spine/hero.atlas\n',
+      'assets/spine/hero.json': '{}',
+      'assets/spine/hero.atlas': 'hero.png\n	size: 64, 64\nhead\n	bounds: 0, 0, 8, 8\n',
+      'assets/spine/hero.png': 'page-bytes',
+    });
+    const spineService = new ProjectBuildService();
+    Object.defineProperty(spineService, 'fs', { value: spineFs, configurable: true });
+
+    const spineModel = await spineService.buildRuntimeProjectModel(createContext());
+
+    expect(spineModel.usesSpine).toBe(true);
+    // The page image is named inside the .atlas text, invisible to the res:// scan.
+    expect(spineModel.assetPaths).toContain('assets/spine/hero.png');
+    expect(spineModel.assetPaths).toContain('assets/spine/hero.atlas');
+    const spineModule = spineModel.files.get('src/generated/spine-runtime.ts') ?? '';
+    expect(spineModule).toContain("import * as spine from '@esotericsoftware/spine-threejs'");
+    expect(spineModule).toContain('setSpineModuleLoader');
+
+    const plainFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: Sprite2D\n',
+    });
+    const plainService = new ProjectBuildService();
+    Object.defineProperty(plainService, 'fs', { value: plainFs, configurable: true });
+
+    const plainModel = await plainService.buildRuntimeProjectModel(createContext());
+
+    // A Spine-free project must not pull in the (separately licensed, ~500 KB)
+    // runtime: the generated module stays empty so the bundler never reaches it.
+    expect(plainModel.usesSpine).toBe(false);
+    expect(plainModel.files.get('src/generated/spine-runtime.ts') ?? '').not.toContain(
+      '@esotericsoftware/spine-threejs'
+    );
+  });
+
   it('generates runtime project files and copies runtime sources', async () => {
     const fs = createInMemoryFs({
       'package.json': JSON.stringify(

@@ -196,6 +196,13 @@ behaves.
 | `animation-looped` | `(name, trackIndex)` | A looping animation completed a loop |
 | `spine-event` | `(name, { int, float, string }, trackIndex)` | A keyed animation event fired |
 
+**Export:** the HTML / zip playable export bundles the Spine runtime *statically*
+into `index.html`, but only when a scene actually places a `SpineSkeleton2D` — a
+dynamic import would become a chunk that a single-file export can never fetch.
+Skeleton, atlas and the atlas' page images ship with it; projects without a
+skeleton are unaffected in size. The generated npm project gets the dependency
+added to its `package.json` on the same condition.
+
 **Usage Notes:**
 - Sizing comes from the node transform (`scale`), not a width/height pair — the
   skeleton is authored in its own pixel units. The parse-time skeleton scale stays
