@@ -51,8 +51,18 @@ const RUNTIME_DEV_COMMAND = 'vite';
 const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
 const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
 const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;
-/** `type: SpineSkeleton2D` in a scene/prefab — the trigger for bundling Spine. */
-const SPINE_NODE_PATTERN = /(^|\s)type:\s*['"]?SpineSkeleton2D['"]?\s*$/m;
+/**
+ * `type: SpineSkeleton2D` in a scene/prefab — one trigger for bundling Spine.
+ * The optional tail allows a trailing YAML comment (`type: SpineSkeleton2D # hero`),
+ * which would otherwise read as "no Spine" and produce an export that ships the
+ * skeleton's assets but not the runtime that draws them.
+ */
+const SPINE_NODE_PATTERN = /(^|\s)type:\s*['"]?SpineSkeleton2D['"]?\s*(#.*)?$/m;
+/**
+ * The other trigger: a script that spawns / looks up the node type at runtime,
+ * in a project whose authored scenes contain no skeleton yet.
+ */
+const SPINE_SCRIPT_PATTERN = /\bSpineSkeleton2D\b/;
 const RELATIVE_IMPORT_PATTERN =
   /\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 const PROJECT_SOURCE_IMPORT_SUFFIXES = [
@@ -298,6 +308,9 @@ export class ProjectBuildService {
     const projectSourceFiles = await this.collectProjectSourceDependencies(projectScriptFiles);
     for (const sourceContents of projectSourceFiles.values()) {
       this.collectResourcePathsFromText(sourceContents, addResourcePath);
+      if (!this.scanFoundSpineNode && SPINE_SCRIPT_PATTERN.test(sourceContents)) {
+        this.scanFoundSpineNode = true;
+      }
     }
 
     while (scanQueue.length > 0) {

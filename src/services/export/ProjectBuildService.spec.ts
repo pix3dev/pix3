@@ -349,6 +349,31 @@ describe('ProjectBuildService', () => {
     );
   });
 
+  it('detects Spine through a trailing YAML comment and through project scripts', async () => {
+    // A trailing comment used to read as "no Spine": the export then shipped the
+    // skeleton's assets without the runtime that draws them.
+    const commentedFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  - type: SpineSkeleton2D # hero rig\n    properties:\n      skeletonPath: res://assets/spine/hero.json\n',
+      'assets/spine/hero.json': '{}',
+    });
+    const commentedService = new ProjectBuildService();
+    Object.defineProperty(commentedService, 'fs', { value: commentedFs, configurable: true });
+    expect((await commentedService.buildRuntimeProjectModel(createContext())).usesSpine).toBe(true);
+
+    // A project whose scenes have no skeleton yet but whose scripts spawn one.
+    const scriptedFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: Sprite2D\n',
+      'scripts/spawner.ts':
+        "import { SpineSkeleton2D } from '@pix3/runtime';\nexport const make = () => new SpineSkeleton2D({ id: 'x', name: 'x' });\n",
+    });
+    const scriptedService = new ProjectBuildService();
+    Object.defineProperty(scriptedService, 'fs', { value: scriptedFs, configurable: true });
+    expect((await scriptedService.buildRuntimeProjectModel(createContext())).usesSpine).toBe(true);
+  });
+
   it('generates runtime project files and copies runtime sources', async () => {
     const fs = createInMemoryFs({
       'package.json': JSON.stringify(
