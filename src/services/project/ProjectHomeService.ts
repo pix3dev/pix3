@@ -6,7 +6,7 @@ import { ThumbnailCacheService } from '@/services/assets/ThumbnailCacheService';
 
 /** A scene surfaced on the Project Home grid. */
 export interface HomeSceneEntry {
-  /** Project-relative path, e.g. `src/assets/scenes/main.pix3scene`. */
+  /** Project-relative path, e.g. `scenes/main.pix3scene`. */
   path: string;
   /** `res://`-prefixed resource id used to open the scene. */
   resourceId: string;

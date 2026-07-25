@@ -185,8 +185,8 @@ class StubResourceManager extends ResourceManager {
 }
 
 const REQUEST = {
-  skeletonPath: 'res://assets/spine/hero.json',
-  atlasPath: 'res://assets/spine/hero.atlas',
+  skeletonPath: 'res://spine/hero.json',
+  atlasPath: 'res://spine/hero.atlas',
 };
 
 describe('Spine atlas text parsing', () => {
@@ -200,11 +200,11 @@ describe('Spine atlas text parsing', () => {
   });
 
   it('resolves page names against the atlas directory', () => {
-    expect(resolveSpinePagePath('res://assets/spine/hero.atlas', 'hero.png')).toBe(
-      'res://assets/spine/hero.png'
+    expect(resolveSpinePagePath('res://spine/hero.atlas', 'hero.png')).toBe(
+      'res://spine/hero.png'
     );
-    expect(resolveSpinePagePath('res://assets/spine/hero.atlas', './pages/hero.png')).toBe(
-      'res://assets/spine/pages/hero.png'
+    expect(resolveSpinePagePath('res://spine/hero.atlas', './pages/hero.png')).toBe(
+      'res://spine/pages/hero.png'
     );
     expect(resolveSpinePagePath('res://a/hero.atlas', 'res://shared/hero.png')).toBe(
       'res://shared/hero.png'
@@ -245,7 +245,7 @@ describe('SpineSkeleton2D playback', () => {
     await assetLoader.loadSpineAsset(REQUEST);
     expect(stub.calls).toContain(`json:string:${SKELETON_JSON.slice(0, 12)}`);
 
-    await assetLoader.loadSpineAsset({ ...REQUEST, skeletonPath: 'res://assets/spine/hero.skel' });
+    await assetLoader.loadSpineAsset({ ...REQUEST, skeletonPath: 'res://spine/hero.skel' });
     expect(stub.calls).toContain('binary:u8');
   });
 

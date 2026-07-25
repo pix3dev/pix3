@@ -38,8 +38,8 @@ describe('SpineSkeleton2D scene persistence', () => {
     const node = new SpineSkeleton2D({
       id: 'hero',
       name: 'Hero',
-      skeletonPath: 'res://assets/spine/hero.json',
-      atlasPath: 'res://assets/spine/hero.atlas',
+      skeletonPath: 'res://spine/hero.json',
+      atlasPath: 'res://spine/hero.atlas',
       animation: 'run',
       loop: false,
       isPlaying: false,
@@ -54,8 +54,8 @@ describe('SpineSkeleton2D scene persistence', () => {
 
     const loaded = await roundTrip(node);
 
-    expect(loaded.skeletonPath).toBe('res://assets/spine/hero.json');
-    expect(loaded.atlasPath).toBe('res://assets/spine/hero.atlas');
+    expect(loaded.skeletonPath).toBe('res://spine/hero.json');
+    expect(loaded.atlasPath).toBe('res://spine/hero.atlas');
     expect(loaded.animation).toBe('run');
     expect(loaded.loop).toBe(false);
     expect(loaded.isPlaying).toBe(false);
@@ -74,21 +74,21 @@ describe('SpineSkeleton2D scene persistence', () => {
     // SceneSaver branch reads the instance (not the construction-time props).
     const node = new SpineSkeleton2D({ id: 'hero', name: 'Hero' });
 
-    findSetter('skeletonPath')(node, 'res://assets/spine/boss.skel');
-    findSetter('atlasPath')(node, 'res://assets/spine/boss.atlas');
+    findSetter('skeletonPath')(node, 'res://spine/boss.skel');
+    findSetter('atlasPath')(node, 'res://spine/boss.atlas');
     findSetter('animation')(node, 'attack');
     findSetter('loop')(node, false);
     findSetter('timeScale')(node, 0.5);
-    findSetter('texture')(node, 'res://assets/spine/boss.png');
+    findSetter('texture')(node, 'res://spine/boss.png');
 
     const loaded = await roundTrip(node);
 
-    expect(loaded.skeletonPath).toBe('res://assets/spine/boss.skel');
-    expect(loaded.atlasPath).toBe('res://assets/spine/boss.atlas');
+    expect(loaded.skeletonPath).toBe('res://spine/boss.skel');
+    expect(loaded.atlasPath).toBe('res://spine/boss.atlas');
     expect(loaded.animation).toBe('attack');
     expect(loaded.loop).toBe(false);
     expect(loaded.timeScale).toBeCloseTo(0.5);
-    expect(loaded.texturePath).toBe('res://assets/spine/boss.png');
+    expect(loaded.texturePath).toBe('res://spine/boss.png');
   });
 
   it('omits defaults and cleared paths from the serialized properties', async () => {
@@ -113,13 +113,13 @@ describe('SpineSkeleton2D scene persistence', () => {
     const node = new SpineSkeleton2D({ id: 'hero', name: 'Hero' });
     expect(node.getAssetRequest()).toBeNull();
 
-    node.skeletonPath = 'res://assets/spine/hero.json';
+    node.skeletonPath = 'res://spine/hero.json';
     expect(node.getAssetRequest()).toBeNull();
 
-    node.atlasPath = 'res://assets/spine/hero.atlas';
+    node.atlasPath = 'res://spine/hero.atlas';
     expect(node.getAssetRequest()).toEqual({
-      skeletonPath: 'res://assets/spine/hero.json',
-      atlasPath: 'res://assets/spine/hero.atlas',
+      skeletonPath: 'res://spine/hero.json',
+      atlasPath: 'res://spine/hero.atlas',
       texturePath: null,
     });
   });

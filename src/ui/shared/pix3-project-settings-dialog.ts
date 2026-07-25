@@ -136,7 +136,7 @@ export class ProjectSettingsDialog extends ComponentBase {
                         this.defaultExportScenePath = (e.target as HTMLInputElement).value;
                         this.defaultExportScenePathDirty = true;
                       }}
-                      placeholder="src/assets/scenes/main.pix3scene"
+                      placeholder="scenes/main.pix3scene"
                     />
                     <div class="hint">
                       Project-relative scene path used as the default startup scene for playable

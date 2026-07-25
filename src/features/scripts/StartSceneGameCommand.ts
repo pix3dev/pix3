@@ -11,7 +11,7 @@ import { OperationService } from '@/services/core/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 
 export interface StartSceneGameParams {
-  /** Scene to play — `res://` path or project-relative (`src/assets/scenes/x.pix3scene`). */
+  /** Scene to play — `res://` path or project-relative (`scenes/x.pix3scene`). */
   scenePath: string;
 }
 

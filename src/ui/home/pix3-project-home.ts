@@ -215,7 +215,7 @@ export class Pix3ProjectHome extends ComponentBase {
       height: 1080,
     };
     try {
-      const dir = 'src/assets/scenes';
+      const dir = 'scenes';
       await this.fileSystem.createDirectory(`res://${dir}`).catch(() => undefined);
       const name = await this.nextSceneName(dir);
       const resourceId = `res://${dir}/${name}.pix3scene`;

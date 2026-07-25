@@ -80,7 +80,7 @@ for the live list. Summary:
 > **Stale graph after a late compile:** a scene opened in the editor BEFORE the
 > first `compile_scripts` silently drops its `user:*` components, and play then
 > clones that empty graph. Fix without the old touch-the-file hack:
-> `agentTools.execute('play_start', { scene: 'src/assets/scenes/x.pix3scene', reload: true })`
+> `agentTools.execute('play_start', { scene: 'scenes/x.pix3scene', reload: true })`
 > — `reload: true` re-reads the scene from disk (registry now warm) before playing.
 >
 > **`scene()` vs `liveScene()` (critical):** play mode runs the game on an

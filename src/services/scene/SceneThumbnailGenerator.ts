@@ -77,7 +77,7 @@ export class SceneThumbnailGenerator {
 
   /**
    * Parse `blob` (scene/prefab YAML) and render a webp data URL thumbnail.
-   * `filePath` is the project-relative path (e.g. `src/assets/scenes/main.pix3scene`).
+   * `filePath` is the project-relative path (e.g. `scenes/main.pix3scene`).
    */
   public async generate(blob: Blob, filePath: string): Promise<string> {
     const text = await blob.text();

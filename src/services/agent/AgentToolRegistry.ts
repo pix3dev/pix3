@@ -1,6 +1,7 @@
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { guessMimeType } from '@/core/remote-preview/protocol';
+import { ensureAssetTypeFolder } from '@/core/asset-categories';
 import {
   componentToDTO,
   errors as capturedErrors,
@@ -915,7 +916,7 @@ export class AgentToolRegistry {
             name: {
               type: 'string',
               description:
-                'Target file name or relative path (e.g. "sprites/car.png"); the extension is added automatically when missing.',
+                'Target file name or relative path (e.g. "sprites/car.png"). Projects use a flat layout — one folder per asset type at the project root (`sprites/`, `models/`, `audio/`, …), never nested under `assets/`. A bare name is placed in the matching type folder automatically; the extension is added when missing.',
             },
             transparent: {
               type: 'boolean',
@@ -2192,7 +2193,9 @@ export class AgentToolRegistry {
     }
 
     const prompt = asString(args.prompt);
-    const name = this.safePath(asString(args.name));
+    // Bare file names land in the category folder at the project root (`car.png` →
+    // `sprites/car.png`) so generated art never litters the project root.
+    const name = ensureAssetTypeFolder(this.safePath(asString(args.name)));
     const references = Array.isArray(args.references)
       ? args.references.filter((r): r is string => typeof r === 'string')
       : undefined;

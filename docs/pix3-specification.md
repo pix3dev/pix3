@@ -507,7 +507,7 @@ one scene, so each scene runs standalone in the editor and the exported build bo
 the entry scene (Project Settings → Default Export Scene Path).
 
 ```typescript
-await this.scene.changeScene('res://src/assets/scenes/main.pix3scene', {
+await this.scene.changeScene('res://scenes/main.pix3scene', {
   transition: 'fade',   // 'fade' (default) | 'none'
   durationSec: 0.3,     // each of fade-out and fade-in
   onLoaded: () => {},   // fires at full black, after the new scene starts
@@ -885,6 +885,7 @@ The scene file uses the YAML format to ensure readability for both humans and ma
 
 - Declarative: The file describes the composition and structure of the scene, not the process of its creation.
 - Asset Referencing: Assets (models, textures) are not embedded in the file but are referenced via relative paths with a res:// prefix (path from the project root).
+- Flat Asset Layout: a game project keeps one folder per asset type **at its root** — `scenes/`, `sprites/` (images/textures), `models/`, `audio/`, `fonts/`, `spine/` (skeleton + atlas + pages together), `scripts/`, `locales/` — with free subdivision inside (`sprites/ui/…`). There is no `assets/` wrapper folder; the project templates ship this layout and `defaultAssetFolder()` (`src/core/asset-categories.ts`) is the canonical mapping used when the editor creates an asset from a bare file name.
 - Composition: Complex scenes are assembled from simpler ones by instantiating other scene files.
 - Unambiguous Structure: An explicit children key is used to denote the list of child nodes, which separates the hierarchy from the properties of the node itself.
 - Unique Identification: Every node must have an id field. The value is a short, cryptographically secure unique identifier (similar to Nano ID) to provide a balance between file readability and the absolute reliability of references.
@@ -923,7 +924,7 @@ root:
         name: 'Ground'
         properties:
           # Reference to an asset
-          mesh: 'res://assets/models/ground_plane.glb'
+          mesh: 'res://models/ground_plane.glb'
           scale: { x: 100, y: 1, z: 100 }
 ```
 
@@ -943,8 +944,8 @@ optional single-page override.
     transform:
       position: { x: 0, y: -120 }
       scale: { x: 1, y: 1 }
-    skeletonPath: 'res://assets/spine/hero.json'
-    atlasPath: 'res://assets/spine/hero.atlas'
+    skeletonPath: 'res://spine/hero.json'
+    atlasPath: 'res://spine/hero.atlas'
     animation: 'idle'
     loop: true
     isPlaying: true

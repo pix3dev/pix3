@@ -24,21 +24,28 @@ export interface AssetCategoryDefinition {
   readonly label: string;
   /** IconService icon name (Feather). */
   readonly icon: string;
+  /**
+   * Folder new assets of this category are created in — a single segment at the
+   * **project root** (the flat layout every project template ships — see the README
+   * under `src/templates/projects/<id>/files/`). `null` = no canonical home, so the
+   * author's path is left alone.
+   */
+  readonly folder: string | null;
 }
 
 /** Fixed display order for the grouped asset-browser view. */
 export const ASSET_CATEGORIES: readonly AssetCategoryDefinition[] = [
-  { id: 'scenes', label: 'Scenes', icon: 'film' },
-  { id: 'images', label: 'Images', icon: 'image' },
-  { id: 'models', label: 'Models', icon: 'box' },
-  { id: 'audio', label: 'Audio', icon: 'music' },
-  { id: 'animations', label: 'Animations', icon: 'activity' },
-  { id: 'scripts', label: 'Scripts', icon: 'code' },
-  { id: 'fonts', label: 'Fonts', icon: 'type' },
-  { id: 'video', label: 'Video', icon: 'video' },
-  { id: 'locales', label: 'Locales', icon: 'globe' },
-  { id: 'data', label: 'Data', icon: 'database' },
-  { id: 'other', label: 'Other', icon: 'file-text' },
+  { id: 'scenes', label: 'Scenes', icon: 'film', folder: 'scenes' },
+  { id: 'images', label: 'Images', icon: 'image', folder: 'sprites' },
+  { id: 'models', label: 'Models', icon: 'box', folder: 'models' },
+  { id: 'audio', label: 'Audio', icon: 'music', folder: 'audio' },
+  { id: 'animations', label: 'Animations', icon: 'activity', folder: 'animations' },
+  { id: 'scripts', label: 'Scripts', icon: 'code', folder: 'scripts' },
+  { id: 'fonts', label: 'Fonts', icon: 'type', folder: 'fonts' },
+  { id: 'video', label: 'Video', icon: 'video', folder: 'video' },
+  { id: 'locales', label: 'Locales', icon: 'globe', folder: 'locales' },
+  { id: 'data', label: 'Data', icon: 'database', folder: 'data' },
+  { id: 'other', label: 'Other', icon: 'file-text', folder: null },
 ];
 
 export const ASSET_CATEGORY_BY_ID: Readonly<Record<AssetCategoryId, AssetCategoryDefinition>> =
@@ -107,6 +114,39 @@ export function categorizeAssetPath(path: string): AssetCategoryId {
     return 'locales';
   }
   return CATEGORY_BY_EXTENSION.get(extension) ?? 'other';
+}
+
+/** Spine exports keep the whole export together instead of splitting by extension. */
+const FOLDER_BY_EXTENSION: Readonly<Record<string, string>> = {
+  atlas: 'spine',
+  skel: 'spine',
+};
+
+/**
+ * Canonical root folder a *new* asset of this kind belongs in, or `null` when there is
+ * no obvious home. Projects use a flat layout — one folder per asset type at the project
+ * root (`sprites/`, `models/`, `audio/`, `spine/`, …), never nested under `assets/`.
+ */
+export function defaultAssetFolder(pathOrName: string): string | null {
+  const extension = getAssetPathExtension(pathOrName);
+  return (
+    FOLDER_BY_EXTENSION[extension] ?? ASSET_CATEGORY_BY_ID[categorizeAssetPath(pathOrName)].folder
+  );
+}
+
+/**
+ * Ensures a path for a newly created asset lives inside a type folder: a bare file name
+ * (`car.png`) is prefixed with its category folder (`sprites/car.png`), while a name that
+ * already carries a folder is returned untouched — the author's placement wins. Only for
+ * assets being *created*; never re-point a path that already exists on disk.
+ */
+export function ensureAssetTypeFolder(pathOrName: string): string {
+  const normalized = pathOrName.replace(/\\+/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+  if (normalized.includes('/')) {
+    return normalized;
+  }
+  const folder = defaultAssetFolder(normalized);
+  return folder ? `${folder}/${normalized}` : normalized;
 }
 
 /*

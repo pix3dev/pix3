@@ -75,8 +75,8 @@ async () => window.__PIX3_DEBUG__.assets.generate({
   prompt: 'a wooden UI button plate, warm oak, in the exact art style of the ' +
           'reference; NO text, NO letters, fully opaque background, crisp edges',
   references: [
-    'res://src/assets/textures/ui/shop-ui.png',       // style reference(s)
-    'res://src/assets/textures/ui/btn_close_normal.png',
+    'res://sprites/ui/shop-ui.png',       // style reference(s)
+    'res://sprites/ui/btn_close_normal.png',
   ],
   aspectRatio: '1:1',      // must be in capabilities.aspectRatios; else omitted
   imageSize: '1K',         // must be in capabilities.imageSizes; else omitted
@@ -126,7 +126,7 @@ game asset:
 ```js
 async () => window.__PIX3_DEBUG__.assets.save(
   '<id>',
-  'src/assets/textures/ui/btn_close_normal.png',
+  'sprites/ui/btn_close_normal.png',
   { maxSize: 256 }        // longest edge ≤ 256; omit to keep full size
 )
 // → { path, width, height, bytes, mimeType }
@@ -173,7 +173,7 @@ game's existing look **without** the native file picker:
 ```js
 async () => {
   const p = document.querySelector('pix3-sprite-editor-panel');
-  await p.addReferenceFromProject('res://src/assets/textures/ui/shop-ui.png');
+  await p.addReferenceFromProject('res://sprites/ui/shop-ui.png');
   await p.addReferenceFromProject('res://.../an_already_generated_sibling.png'); // for state consistency
   return { refCount: p.references.length }; // model cap is usually 6
 }
@@ -240,7 +240,7 @@ must already be reachable, but it creates missing dirs:
 ```js
 async () => {
   const p = document.querySelector('pix3-sprite-editor-panel');
-  p.saveName = 'src/assets/textures/ui/btn_close_normal.png'; // project-relative; res:// prefix also accepted
+  p.saveName = 'sprites/ui/btn_close_normal.png'; // project-relative; res:// prefix also accepted
   p.saveMaxSize = 256;  // OPTIONAL: longest-edge downscale on save (0 = keep full 1K/2K size)
   return await p.onSaveToProject();
 }
@@ -266,13 +266,13 @@ block form — copy an existing `Sprite2D`'s `texture:` block as the template. F
 ```yaml
           textureNormal:
             type: texture
-            url: res://src/assets/textures/ui/btn_close_normal.png
+            url: res://sprites/ui/btn_close_normal.png
           textureHover:
             type: texture
-            url: res://src/assets/textures/ui/btn_close_hover.png
+            url: res://sprites/ui/btn_close_hover.png
           texturePressed:
             type: texture
-            url: res://src/assets/textures/ui/btn_close_pressed.png
+            url: res://sprites/ui/btn_close_pressed.png
           # textureDisabled optional; missing states fall back to normal
 ```
 

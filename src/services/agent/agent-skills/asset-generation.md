@@ -42,7 +42,10 @@ Default when you omit it: `transparent:true`→sprite, otherwise→texture.
   e.g. `"a red sports car seen from top-down, centered, plain flat background, <style tokens>"`.
 - For icons: `"a single <thing> icon, centered, plain background, <style tokens>"`.
 - Always set `transparent: true` for sprite/icon.
-- Save under a sensible path, e.g. `src/assets/textures/<kind>/<name>.png`.
+- Save into the asset-type folder at the **project root** — images go under `sprites/`, e.g.
+  `sprites/<kind>/<name>.png`. Projects use a flat layout (`sprites/`, `models/`, `audio/`,
+  `spine/`, `scenes/`, `scripts/`); never nest assets under an `assets/` folder, and never
+  drop a file in the project root.
 - Omit `maxSize` to use the project default (keeps files small). Pass it only when you need a
   specific size (e.g. a small 128px icon).
 

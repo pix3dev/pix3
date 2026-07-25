@@ -19,8 +19,8 @@ root:
         type: SpineSkeleton2D
         name: SpineBoy
         properties:
-          skeletonPath: res://assets/spine/spineboy-pro.json
-          atlasPath: res://assets/spine/spineboy.atlas
+          skeletonPath: res://spine/spineboy-pro.json
+          atlasPath: res://spine/spineboy.atlas
           animation: run
           loop: true
           isPlaying: true

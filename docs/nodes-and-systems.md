@@ -358,7 +358,7 @@ frame, components get a proper `onDetach`); immediate `node.dispose()` is for
 teardown outside the tick.
 
 ### Scene transitions (change the running scene)
-`await scene.changeScene('res://src/assets/scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
+`await scene.changeScene('res://scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
 — Godot's `change_scene_to_file`. Loads the *saved* target file, tears down the
 current scene and starts the new one at full black, then fades in. Works
 identically in play-mode and exports (all scenes ship in the build). The old

@@ -314,10 +314,10 @@ describe('ProjectBuildService', () => {
   it('bundles the Spine runtime only for projects that place a SpineSkeleton2D', async () => {
     const spineFs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
-      'scenes/main.pix3scene': 'root:\n  - type: SpineSkeleton2D\n    properties:\n      skeletonPath: res://assets/spine/hero.json\n      atlasPath: res://assets/spine/hero.atlas\n',
-      'assets/spine/hero.json': '{}',
-      'assets/spine/hero.atlas': 'hero.png\n	size: 64, 64\nhead\n	bounds: 0, 0, 8, 8\n',
-      'assets/spine/hero.png': 'page-bytes',
+      'scenes/main.pix3scene': 'root:\n  - type: SpineSkeleton2D\n    properties:\n      skeletonPath: res://spine/hero.json\n      atlasPath: res://spine/hero.atlas\n',
+      'spine/hero.json': '{}',
+      'spine/hero.atlas': 'hero.png\n	size: 64, 64\nhead\n	bounds: 0, 0, 8, 8\n',
+      'spine/hero.png': 'page-bytes',
     });
     const spineService = new ProjectBuildService();
     Object.defineProperty(spineService, 'fs', { value: spineFs, configurable: true });
@@ -326,8 +326,8 @@ describe('ProjectBuildService', () => {
 
     expect(spineModel.usesSpine).toBe(true);
     // The page image is named inside the .atlas text, invisible to the res:// scan.
-    expect(spineModel.assetPaths).toContain('assets/spine/hero.png');
-    expect(spineModel.assetPaths).toContain('assets/spine/hero.atlas');
+    expect(spineModel.assetPaths).toContain('spine/hero.png');
+    expect(spineModel.assetPaths).toContain('spine/hero.atlas');
     const spineModule = spineModel.files.get('src/generated/spine-runtime.ts') ?? '';
     expect(spineModule).toContain("import * as spine from '@esotericsoftware/spine-threejs'");
     expect(spineModule).toContain('setSpineModuleLoader');
@@ -355,8 +355,8 @@ describe('ProjectBuildService', () => {
     const commentedFs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
       'scenes/main.pix3scene':
-        'root:\n  - type: SpineSkeleton2D # hero rig\n    properties:\n      skeletonPath: res://assets/spine/hero.json\n',
-      'assets/spine/hero.json': '{}',
+        'root:\n  - type: SpineSkeleton2D # hero rig\n    properties:\n      skeletonPath: res://spine/hero.json\n',
+      'spine/hero.json': '{}',
     });
     const commentedService = new ProjectBuildService();
     Object.defineProperty(commentedService, 'fs', { value: commentedFs, configurable: true });

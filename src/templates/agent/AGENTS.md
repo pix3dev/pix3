@@ -24,7 +24,7 @@ as an exported single-file HTML.
 | `pix3project.yaml` | Project manifest (viewport size, platform, quality, autoloads) — don't edit unless asked |
 | `scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the editor's startup scene (opened first, and what you iterate on). A build boots the **entry scene** = Project Settings → Default Export Scene Path, which may be a separate menu scene |
 | `scripts/*.ts` | Game scripts: `export class X extends Script` → referenced in scenes as `type: user:X` |
-| `sprites/`, `audio/` | Art and sound assets, referenced as `res://sprites/...` / `res://audio/...`. Other asset-type folders (`models/`, fonts, …) are created as you add those assets |
+| `sprites/`, `audio/` | Art and sound assets, referenced as `res://sprites/...` / `res://audio/...`. Other asset-type folders (`models/`, `fonts/`, `spine/`, `locales/`, …) are created as you add those assets |
 | `.claude/skills/` | Your skills: `pix3-game-dev` (engine capabilities, how to write scenes/scripts), `pix3-remote-preview` (running and debugging the game) |
 | `.pix3/` | Editor metadata (template/version info) — do not edit |
 
@@ -44,7 +44,12 @@ as an exported single-file HTML.
    `components:` as `type: user:<ClassName>`. To move between scenes at runtime
    (menu → game → results), call
    `this.scene.changeScene('res://scenes/<name>.pix3scene', { transition: 'fade' })`.
-4. **Asset paths** always use the `res://` scheme relative to the project root.
+4. **Asset paths** always use the `res://` scheme relative to the project root. New
+   files go into the folder for their **asset type at the project root** — an image
+   into `sprites/`, a model into `models/`, a sound into `audio/`, a Spine export
+   (`.json`/`.skel` + `.atlas` + pages, kept together) into `spine/`. Subfolders inside
+   those are fine (`sprites/ui/…`). Never introduce a wrapper folder such as
+   `assets/` or `src/assets/`, and never leave an asset loose in the project root.
 5. **Missing art?** Use colored primitives (`ColorRect2D`, `GeometryMesh` with a
    material color) or the bundled logo as placeholders the user can swap later;
    note every placeholder you leave in your summary.

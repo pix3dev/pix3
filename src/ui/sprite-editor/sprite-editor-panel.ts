@@ -1977,7 +1977,9 @@ const deriveSaveName = (prompt: string, boundPath: string | null, mimeType: stri
     const folder = slashIndex >= 0 ? relative.slice(0, slashIndex) : '';
     return ensureImageExt(folder ? `${folder}/${base}` : base, mimeType);
   }
-  return ensureImageExt(`generated/${base}`, mimeType);
+  // Images live under the project-root `sprites/` folder (flat project layout); the
+  // `generated/` bucket keeps AI output out of the hand-curated sprites.
+  return ensureImageExt(`sprites/generated/${base}`, mimeType);
 };
 
 const deriveNodeName = (path: string): string => {
