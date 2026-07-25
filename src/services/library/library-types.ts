@@ -8,8 +8,15 @@
 
 import { categorizeAssetPath } from '@/core/asset-categories';
 
-/** Where an item is stored. UI/search work over the aggregate and stay scope-agnostic. */
-export type LibraryScope = 'builtin' | 'user' | 'team';
+/**
+ * Where an item is stored. UI/search work over the aggregate and stay scope-agnostic.
+ *
+ * `builtin` is no longer a source of its own: the static `public/library/` pack is an internal
+ * offline fallback of {@link LibraryScope} `store` (see `StoreLibraryProvider`), which re-emits
+ * those items as `store`. The value stays in the union because `BuiltinLibraryProvider` still
+ * declares it.
+ */
+export type LibraryScope = 'builtin' | 'store' | 'user' | 'team';
 
 /**
  * Insertion-relevant type of an item. Superset of the asset-browser categories: it
@@ -74,6 +81,51 @@ export interface LibraryItemManifest {
   createdAt: number;
   /** Epoch millis. */
   updatedAt: number;
+
+  // -- Curated Asset Store fields (all optional; see `.plans/asset-store-admin.md` §4) ---------
+  //
+  // Pre-store manifests stay valid without any of these. `status`, `publisherId`, `downloads`
+  // and `featured` are READ-ONLY for the client: the server owns those columns and re-stamps
+  // them onto every manifest it hands out, so a local edit is silently overwritten on the next
+  // fetch. Status/featured change through `PATCH /items/:id`, downloads through the download
+  // ping. Everything else here (`categoryPath`, `version`, `changelog`, `gallery`,
+  // `publisherName`) is authored client-side and uploaded with the bundle.
+
+  /** Store lifecycle. Absent ⇒ treated as `published`. Not read for user/team scope. */
+  status?: StoreItemStatus;
+  /** Store taxonomy path, one or two levels (`ui`, `ui/buttons`). User/team keep using `category`. */
+  categoryPath?: string;
+  /** Semver-ish item version; publishing defaults it to `1.0.0`. */
+  version?: string;
+  /** Newest-first release notes. */
+  changelog?: Array<{ version: string; date: number; notes: string }>;
+  /** Bundle-relative paths of extra preview images, beyond `preview`. */
+  gallery?: string[];
+  /** User id of the publishing admin. Server-owned — the uploaded value is ignored. */
+  publisherId?: string;
+  /** Display name of the publisher ("Pix3 Team"). */
+  publisherName?: string;
+  /** Download-ping counter. Server-owned. */
+  downloads?: number;
+  /** Curation flag driving the "Featured" aggregate. Server-owned (PATCH-only). */
+  featured?: boolean;
+}
+
+/** Store lifecycle: `unlisted` stays reachable by direct id but drops out of the listing. */
+export type StoreItemStatus = 'draft' | 'published' | 'unlisted';
+
+/**
+ * A node of the server-curated store taxonomy. The list is flat and `id` is the full path
+ * (`ui`, `ui/buttons`), so nesting needs no parsing — `parentId` is null at the top level.
+ * Depth is capped at two levels server-side.
+ */
+export interface StoreCategory {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly label: string;
+  readonly sortOrder: number;
+  /** Published items filed directly here; subcategories are counted separately. */
+  readonly itemCount: number;
 }
 
 /**

@@ -38,6 +38,36 @@ pix3-library-panel .lib-rail__head {
   color: var(--fg-3);
 }
 
+pix3-library-panel .lib-rail__head--row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 6px;
+}
+
+pix3-library-panel .lib-rail__head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+
+pix3-library-panel .lib-rail__head-btn:hover {
+  color: var(--fg-0);
+  background: var(--bg-2);
+}
+
+pix3-library-panel .lib-rail__head-btn svg {
+  display: block;
+}
+
 pix3-library-panel .lib-rail__group {
   padding: 0 0 4px;
 }
@@ -112,6 +142,17 @@ pix3-library-panel .lib-cat__label {
   font-size: 12.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+pix3-library-panel .lib-source__admin {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+pix3-library-panel .lib-source__admin svg {
+  display: block;
+  width: 12px;
+  height: 12px;
 }
 
 pix3-library-panel .lib-source__count,
@@ -437,6 +478,71 @@ pix3-library-panel .lib-chip.is-active {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--accent-line);
+}
+
+pix3-library-panel .lib-chips--sub {
+  padding-left: 8px;
+  border-left: 1px solid var(--line-1);
+}
+
+/* ── Curation badges (store + admin only) ──────────────────────────────── */
+pix3-library-panel .lib-badge {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 999px;
+}
+
+pix3-library-panel .lib-badge svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+}
+
+pix3-library-panel .lib-badge--draft {
+  color: var(--fg-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+}
+
+pix3-library-panel .lib-badge--unlisted {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+}
+
+pix3-library-panel .lib-badge--featured {
+  padding: 0 3px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+}
+
+pix3-library-panel .lib-thumb__badges {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: calc(100% - 10px);
+}
+
+pix3-library-panel .lib-card.is-draft .lib-thumb {
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+
+pix3-library-panel .lib-card.is-draft .lib-card__name {
+  color: var(--fg-2);
 }
 
 /* ── Results ───────────────────────────────────────────────────────────── */

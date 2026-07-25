@@ -1,5 +1,5 @@
 /**
- * Facade over the Asset Library providers (builtin / user / team). Aggregates their item
+ * Facade over the Asset Library providers (store / user / team). Aggregates their item
  * lists, maintains an in-memory search index, and routes bundle reads/writes to the owning
  * provider. UI panels inject this and never touch providers directly.
  *
@@ -9,8 +9,11 @@
  */
 
 import { injectable } from '@/fw/di';
-import { BuiltinLibraryProvider } from '@/services/library/BuiltinLibraryProvider';
 import { LocalLibraryProvider } from '@/services/library/LocalLibraryProvider';
+import {
+  StoreLibraryProvider,
+  type StoreItemMetaPatch,
+} from '@/services/library/StoreLibraryProvider';
 import {
   filterItems,
   collectTags,
@@ -22,13 +25,15 @@ import type {
   LibraryItem,
   LibraryProvider,
   LibraryScope,
+  StoreCategory,
 } from '@/services/library/library-types';
 
 @injectable()
 export class AssetLibraryService {
-  private readonly builtin = new BuiltinLibraryProvider();
+  /** The builtin pack is not registered on its own — it is the store provider's offline fallback. */
+  private readonly store = new StoreLibraryProvider();
   private readonly local = new LocalLibraryProvider();
-  private readonly providers: readonly LibraryProvider[] = [this.builtin, this.local];
+  private readonly providers: readonly LibraryProvider[] = [this.store, this.local];
 
   private readonly listeners = new Set<() => void>();
   private readonly providerUnsubscribes: Array<() => void> = [];
@@ -181,6 +186,46 @@ export class AssetLibraryService {
   /** Drop a tombstone once its deletion has been pushed (or is moot). */
   clearUserTombstone(id: string): Promise<void> {
     return this.local.clearTombstone(id);
+  }
+
+  // -- Curated store (admin) -------------------------------------------------
+  // Same reasoning as the cloud-sync bridge above: narrow delegates instead of exposing the
+  // provider, so cache invalidation and change notification stay in one place. Authorization is
+  // the server's job — these calls just fail with 401/403 for a non-admin.
+
+  /** Upload/replace a store bundle. A bundle that fails the publish gate stays a draft. */
+  async putStoreItem(bundle: LibraryBundle): Promise<LibraryItem> {
+    const item = await this.store.put(bundle);
+    this.invalidate();
+    this.notify();
+    return item;
+  }
+
+  /** Hard-delete a store item (row + files); the store keeps no tombstones. */
+  async deleteStoreItem(id: string): Promise<void> {
+    await this.store.delete(id);
+    this.invalidate();
+    this.notify();
+  }
+
+  /** Edit store-only metadata: status, category, featured, or manifest fields. */
+  async patchStoreItemMeta(id: string, patch: StoreItemMetaPatch): Promise<LibraryItem> {
+    const item = await this.store.patchMeta(id, patch);
+    this.invalidate();
+    this.notify();
+    return item;
+  }
+
+  /** Server-curated store taxonomy (flat list, `id` is the full path). Empty when offline. */
+  getStoreCategories(): Promise<StoreCategory[]> {
+    return this.store.listCategories();
+  }
+
+  /** Re-pull the store index (panel open / window focus), bypassing the cached list. */
+  async refreshStore(): Promise<void> {
+    await this.store.refresh();
+    this.invalidate();
+    this.notify();
   }
 
   subscribe(listener: () => void): () => void {

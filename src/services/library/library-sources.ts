@@ -7,11 +7,12 @@
  * rows, so adding a provider is a config edit. Categories are per-source: editable sources derive
  * them from item manifests (+ user-created names), read-only sources declare them here.
  *
- * See `.plans/asset-library.md`. Server-backed Team/Store/providers are Phase 2/3 — until then
- * their sources render correctly but list no items.
+ * See `.plans/asset-library.md`. The Store is server-backed (`StoreLibraryProvider`, with the
+ * builtin pack as its offline fallback); Team and the external providers are declared but list no
+ * items until their backends land.
  */
 
-import type { LibraryItem, LibraryScope } from './library-types';
+import type { LibraryItem, LibraryScope, StoreCategory } from './library-types';
 
 /** How a source behaves: whether it is writable and what metadata its cards show. */
 export type LibrarySourceKind = 'personal' | 'team' | 'store' | 'provider';
@@ -28,7 +29,11 @@ export interface LibrarySourceConfig {
   readonly kind: LibrarySourceKind;
   /** IconService (Feather) name for the rail row. */
   readonly icon: string;
-  /** Writable sources accept drops and expose manage/remove actions. */
+  /**
+   * Editable *by design* (the user's own / team content). Not the whole story for the store,
+   * whose write access depends on the signed-in user — ask {@link canEditSource} instead of
+   * reading this flag in UI code.
+   */
   readonly editable: boolean;
   /** Short read-only hint shown on the rail badge / inspector subtitle. */
   readonly hint: string;
@@ -36,13 +41,18 @@ export interface LibrarySourceConfig {
   readonly scope?: LibraryScope;
   /** Label of the always-first aggregate category ("All" / "Featured"). */
   readonly aggregateLabel: string;
-  /** Declared categories for read-only sources. Editable sources derive theirs from items. */
+  /**
+   * Declared categories for read-only sources. Editable sources derive theirs from items, and
+   * the store overrides these with the server taxonomy when it is reachable (they stay as the
+   * offline fallback).
+   */
   readonly categories?: readonly LibrarySourceCategory[];
 }
 
 /**
  * The catalogue. Order is the rail order. `user`/`store` are wired to the real user (OPFS) and
- * builtin providers; `team`/providers are declared but list no items until the server lands.
+ * store (server + builtin fallback) providers; `team`/providers are declared but list no items
+ * until the server lands.
  */
 export const LIBRARY_SOURCES: readonly LibrarySourceConfig[] = [
   {
@@ -72,7 +82,7 @@ export const LIBRARY_SOURCES: readonly LibrarySourceConfig[] = [
     icon: 'tag',
     editable: false,
     hint: 'official',
-    scope: 'builtin',
+    scope: 'store',
     aggregateLabel: 'Featured',
     categories: [
       { id: 'ui', label: 'UI Kits' },
@@ -99,6 +109,19 @@ export const LIBRARY_SOURCES: readonly LibrarySourceConfig[] = [
     ],
   },
 ];
+
+/**
+ * Whether the signed-in user may write to a source right now: personal/team are editable by
+ * design, the curated store only for an admin. A pure function taking the context (rather than
+ * reading `appState` here) keeps this config module testable and free of state imports; callers
+ * pass `{ isAdmin: appState.auth.user?.is_admin ?? false }` and re-render on auth changes.
+ */
+export function canEditSource(
+  source: LibrarySourceConfig,
+  ctx: { readonly isAdmin: boolean }
+): boolean {
+  return source.editable || (source.kind === 'store' && ctx.isAdmin);
+}
 
 /** Items belonging to a source: everything from its backing scope, or none for config-only sources. */
 export function itemsForSource(
@@ -160,17 +183,51 @@ export function addCustomCategory(sourceId: string, label: string): LibrarySourc
   return category;
 }
 
+/** Top-level nodes of a server taxonomy, in curated order — what the rail renders. */
+export function topLevelCategories(
+  declared: readonly StoreCategory[] = []
+): readonly StoreCategory[] {
+  return declared
+    .filter(category => !category.parentId)
+    .slice()
+    .sort(compareCategories);
+}
+
+/** Children of one taxonomy node, in curated order — what the subcategory chips render. */
+export function subcategoriesOf(
+  declared: readonly StoreCategory[] = [],
+  parentId: string
+): readonly StoreCategory[] {
+  return declared
+    .filter(category => category.parentId === parentId)
+    .slice()
+    .sort(compareCategories);
+}
+
+function compareCategories(a: StoreCategory, b: StoreCategory): number {
+  return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label);
+}
+
 /**
  * The rail categories for a source: always the aggregate first, then either the declared
  * categories (read-only) or the union of item-assigned + user-created categories (editable).
+ *
+ * `declared` carries a server taxonomy (the store's) and, when present, replaces the config
+ * categories of a read-only source. Only its top level goes on the rail — the rail stays flat,
+ * subcategories surface as chips (see {@link subcategoriesOf}). Omitting it keeps the previous
+ * behavior exactly, which is also the offline path.
  */
 export function categoriesForSource(
   source: LibrarySourceConfig,
-  sourceItems: readonly LibraryItem[]
+  sourceItems: readonly LibraryItem[],
+  declared?: readonly StoreCategory[]
 ): LibrarySourceCategory[] {
   const aggregate: LibrarySourceCategory = { id: 'all', label: source.aggregateLabel };
 
   if (!source.editable) {
+    if (declared && declared.length > 0) {
+      return [aggregate, ...topLevelCategories(declared).map(({ id, label }) => ({ id, label }))];
+    }
     return [aggregate, ...(source.categories ?? [])];
   }
 
@@ -189,7 +246,13 @@ export function categoriesForSource(
   return [aggregate, ...byId.values()];
 }
 
-/** Count of items in a source under a category id (`all` ⇒ every item in the source). */
+/**
+ * Count of items in a source under a category id (`all` ⇒ every item in the source).
+ *
+ * Store items live on the hierarchical `categoryPath`, so a top-level count includes its
+ * subcategories (`ui` counts `ui/buttons`); user/team items keep the flat `manifest.category`.
+ * An item is matched by whichever field it carries, so a mixed list counts correctly.
+ */
 export function countItemsInCategory(
   categoryId: string,
   sourceItems: readonly LibraryItem[]
@@ -197,7 +260,13 @@ export function countItemsInCategory(
   if (categoryId === 'all') {
     return sourceItems.length;
   }
-  return sourceItems.filter(item => item.manifest.category === categoryId).length;
+  return sourceItems.filter(item => {
+    const { category, categoryPath } = item.manifest;
+    if (categoryPath) {
+      return categoryPath === categoryId || categoryPath.startsWith(`${categoryId}/`);
+    }
+    return category === categoryId;
+  }).length;
 }
 
 /** Best-effort human label from a category id when no explicit label was recorded. */

@@ -311,6 +311,236 @@ pix3-library-inspector .lib-insp__tags-empty {
   color: var(--fg-3);
 }
 
+/* ── Store curation (admin) ────────────────────────────────────────────── */
+pix3-library-inspector .lib-insp__gallery {
+  display: flex;
+  gap: 6px;
+  margin: -6px 0 14px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+}
+
+pix3-library-inspector .lib-insp__gallery-img {
+  flex: 0 0 auto;
+  width: 84px;
+  height: 56px;
+  object-fit: cover;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+}
+
+pix3-library-inspector .lib-insp__admin.is-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+pix3-library-inspector .lib-insp__admin .lib-insp__section-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+pix3-library-inspector .lib-insp__admin-badge {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+pix3-library-inspector .lib-insp__admin-badge svg {
+  display: block;
+}
+
+pix3-library-inspector .lib-insp__alert {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-2);
+}
+
+pix3-library-inspector .lib-insp__alert-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+pix3-library-inspector .lib-insp__alert-icon svg {
+  display: block;
+}
+
+pix3-library-inspector .lib-insp__issues {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-2);
+}
+
+pix3-library-inspector .lib-insp__issues-title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 600;
+}
+
+pix3-library-inspector .lib-insp__issues-list {
+  margin: 6px 0 0;
+  padding-left: 22px;
+  line-height: 1.55;
+  color: var(--fg-1);
+}
+
+pix3-library-inspector .lib-insp__segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+}
+
+pix3-library-inspector .lib-insp__segment {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: none;
+  border-left: 1px solid var(--line-1);
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__segment:first-child {
+  border-left: none;
+}
+
+pix3-library-inspector .lib-insp__segment:hover:not(:disabled) {
+  color: var(--fg-0);
+  background: var(--bg-3);
+}
+
+pix3-library-inspector .lib-insp__segment.is-active {
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-library-inspector .lib-insp__segment:disabled {
+  cursor: default;
+}
+
+pix3-library-inspector .lib-insp__segment-icon svg,
+pix3-library-inspector .lib-insp__toggle svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+pix3-library-inspector .lib-insp__toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__toggle.is-on {
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+pix3-library-inspector .lib-insp__field {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  outline: none;
+}
+
+pix3-library-inspector .lib-insp__field:focus {
+  border-color: var(--accent);
+}
+
+pix3-library-inspector .lib-insp__field:disabled {
+  opacity: 0.6;
+}
+
+pix3-library-inspector .lib-insp__field.is-invalid {
+  border-color: var(--warn);
+}
+
+pix3-library-inspector .lib-insp__field--area {
+  height: auto;
+  padding: 6px 8px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+pix3-library-inspector .lib-insp__field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+pix3-library-inspector .lib-insp__field-label {
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+
+pix3-library-inspector .lib-insp__preview.is-invalid,
+pix3-library-inspector .lib-insp__tags.is-invalid {
+  outline: 1px dashed var(--warn);
+  outline-offset: 3px;
+}
+
+pix3-library-inspector .lib-insp__changelog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  list-style: none;
+}
+
+pix3-library-inspector .lib-insp__changelog li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+pix3-library-inspector .lib-insp__changelog-date {
+  flex-shrink: 0;
+  color: var(--fg-3);
+}
+
+pix3-library-inspector .lib-insp__changelog-notes {
+  min-width: 0;
+  color: var(--fg-1);
+}
+
 pix3-library-inspector .lib-insp__danger {
   display: inline-flex;
   gap: 7px;
@@ -325,6 +555,11 @@ pix3-library-inspector .lib-insp__danger {
   border: 1px solid var(--danger);
   border-radius: 7px;
   cursor: pointer;
+}
+
+pix3-library-inspector .lib-insp__danger:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 pix3-library-inspector :focus-visible {
