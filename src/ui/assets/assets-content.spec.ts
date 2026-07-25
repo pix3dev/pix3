@@ -339,7 +339,285 @@ describe('AssetsContent (Phase 3 header)', () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.paths.sort()).toEqual(['assets/a.png', 'assets/b.png']);
   });
+
+  it('keeps a shift-range selection when the preview service echoes the click', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        items: [
+          createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+          createItem({ name: 'b.png', path: 'assets/b.png', kind: 'file', previewType: 'image' }),
+          createItem({ name: 'c.png', path: 'assets/c.png', kind: 'file', previewType: 'image' }),
+        ],
+      }),
+      { thumbnailSize: 104, contentView: 'grid' },
+      true
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const buttons = panel.querySelectorAll('.assets-preview-item');
+    buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await panel.updateComplete;
+
+    expect(panel.getSelectedPaths().sort()).toEqual([
+      'assets/a.png',
+      'assets/b.png',
+      'assets/c.png',
+    ]);
+    expect(panel.querySelectorAll('.assets-preview-item.is-selected')).toHaveLength(3);
+  });
+
+  it('re-stretches a shift-range from the original anchor, not the last shift-click', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        items: ['a', 'b', 'c', 'd'].map(name =>
+          createItem({
+            name: `${name}.png`,
+            path: `assets/${name}.png`,
+            kind: 'file',
+            previewType: 'image',
+          })
+        ),
+      }),
+      { thumbnailSize: 104, contentView: 'grid' },
+      true
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const buttons = panel.querySelectorAll('.assets-preview-item');
+    // Anchor on "d", stretch up to "b"…
+    buttons[3]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await panel.updateComplete;
+    expect(panel.getSelectedPaths().sort()).toEqual([
+      'assets/b.png',
+      'assets/c.png',
+      'assets/d.png',
+    ]);
+
+    // …then shrink it to "c": the anchor is still "d", so this is c..d, not b..c.
+    buttons[2]?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await panel.updateComplete;
+    expect(panel.getSelectedPaths().sort()).toEqual(['assets/c.png', 'assets/d.png']);
+
+    // A plain click moves the anchor.
+    buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await panel.updateComplete;
+    expect(panel.getSelectedPaths().sort()).toEqual(['assets/a.png', 'assets/b.png']);
+  });
+
+  it('still mirrors an externally-driven selection from the service', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    const items = [
+      createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+      createItem({ name: 'b.png', path: 'assets/b.png', kind: 'file', previewType: 'image' }),
+    ];
+    stubServices(
+      panel,
+      createSnapshot({ items }),
+      { thumbnailSize: 104, contentView: 'grid' },
+      true
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const buttons = panel.querySelectorAll('.assets-preview-item');
+    buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttons[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    await panel.updateComplete;
+    expect(panel.getSelectedPaths()).toHaveLength(2);
+
+    // A reveal from elsewhere (Scene Tree / Inspector) collapses to the revealed item.
+    notifyListeners(panel, createSnapshot({ items, selectedItemPath: 'assets/a.png' }));
+    await panel.updateComplete;
+
+    expect(panel.getSelectedPaths()).toEqual(['assets/a.png']);
+  });
+
+  it('drops a dragged multi-selection on a folder card as a move request', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        selectedFolderPath: 'assets',
+        items: [
+          createItem({ name: 'textures', path: 'assets/textures', kind: 'directory' }),
+          createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+          createItem({ name: 'b.png', path: 'assets/b.png', kind: 'file', previewType: 'image' }),
+        ],
+      }),
+      { thumbnailSize: 104, contentView: 'grid' },
+      true
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const cards = panel.querySelectorAll<HTMLElement>('.assets-preview-item');
+    const [folderCard, cardA, cardB] = [cards[0], cards[1], cards[2]];
+    cardA?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    cardB?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    await panel.updateComplete;
+
+    const dataTransfer = new FakeDataTransfer();
+    cardA?.dispatchEvent(dragEvent('dragstart', dataTransfer));
+    // `copy` alone makes the browser reject the move drop targets outright.
+    expect(dataTransfer.effectAllowed).toBe('copyMove');
+
+    const dragOver = dragEvent('dragover', dataTransfer);
+    folderCard?.dispatchEvent(dragOver);
+    await panel.updateComplete;
+
+    expect(dragOver.defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe('move');
+    expect(panel.querySelector('.assets-preview-item.is-drop-target')).toBe(folderCard);
+
+    const requests: Array<{ paths: string[]; targetPath: string; targetLabel: string }> = [];
+    panel.addEventListener('content-move-request', event => {
+      requests.push(
+        (event as CustomEvent<{ paths: string[]; targetPath: string; targetLabel: string }>).detail
+      );
+    });
+
+    folderCard?.dispatchEvent(dragEvent('drop', dataTransfer));
+    await panel.updateComplete;
+
+    expect(requests).toEqual([
+      {
+        paths: ['assets/a.png', 'assets/b.png'],
+        targetPath: 'assets/textures',
+        targetLabel: 'textures',
+      },
+    ]);
+    expect(panel.querySelector('.assets-preview-item.is-drop-target')).toBeNull();
+  });
+
+  it('ignores drops on a file card (only folders accept moves)', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        items: [
+          createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+          createItem({ name: 'b.png', path: 'assets/b.png', kind: 'file', previewType: 'image' }),
+        ],
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const cards = panel.querySelectorAll<HTMLElement>('.assets-preview-item');
+    const dataTransfer = new FakeDataTransfer();
+    cards[0]?.dispatchEvent(dragEvent('dragstart', dataTransfer));
+
+    const requests: unknown[] = [];
+    panel.addEventListener('content-move-request', event => requests.push(event));
+
+    const dragOver = dragEvent('dragover', dataTransfer);
+    cards[1]?.dispatchEvent(dragOver);
+    cards[1]?.dispatchEvent(dragEvent('drop', dataTransfer));
+    await panel.updateComplete;
+
+    expect(dragOver.defaultPrevented).toBe(false);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('accepts a move drop on a parent breadcrumb', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        selectedFolderPath: 'assets/textures',
+        items: [
+          createItem({
+            name: 'a.png',
+            path: 'assets/textures/a.png',
+            kind: 'file',
+            previewType: 'image',
+          }),
+        ],
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const dataTransfer = new FakeDataTransfer();
+    panel
+      .querySelector<HTMLElement>('.assets-preview-item')
+      ?.dispatchEvent(dragEvent('dragstart', dataTransfer));
+
+    const requests: Array<{ paths: string[]; targetPath: string; targetLabel: string }> = [];
+    panel.addEventListener('content-move-request', event => {
+      requests.push(
+        (event as CustomEvent<{ paths: string[]; targetPath: string; targetLabel: string }>).detail
+      );
+    });
+
+    // Crumbs: [project root, "assets", "textures" (current, disabled)].
+    const crumbs = panel.querySelectorAll<HTMLElement>('.crumb');
+    crumbs[1]?.dispatchEvent(dragEvent('dragover', dataTransfer));
+    crumbs[1]?.dispatchEvent(dragEvent('drop', dataTransfer));
+
+    expect(requests).toEqual([
+      { paths: ['assets/textures/a.png'], targetPath: 'assets', targetLabel: 'assets' },
+    ]);
+  });
 });
+
+/** Minimal DataTransfer stand-in: happy-dom has no drag data store. */
+class FakeDataTransfer {
+  effectAllowed = 'none';
+  dropEffect = 'none';
+  items = [] as unknown as DataTransferItemList;
+  private readonly store = new Map<string, string>();
+
+  get types(): readonly string[] {
+    return Array.from(this.store.keys());
+  }
+
+  setData(type: string, value: string): void {
+    this.store.set(type, value);
+  }
+
+  getData(type: string): string {
+    return this.store.get(type) ?? '';
+  }
+
+  setDragImage(): void {
+    // The real implementation snapshots the element; nothing to do here.
+  }
+}
+
+function dragEvent(type: string, dataTransfer: FakeDataTransfer): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  return event;
+}
+
+/** Pushes a snapshot through the stubbed service subscription. */
+function notifyListeners(panel: AssetsContentElement, snapshot: AssetsPreviewSnapshot): void {
+  const service = (panel as unknown as { assetsPreviewService: { selectItem: unknown } })
+    .assetsPreviewService as unknown as {
+    __listeners?: Array<(value: AssetsPreviewSnapshot) => void>;
+  };
+  const listeners = service.__listeners;
+  if (!listeners) {
+    throw new Error('Stub service did not expose its listeners.');
+  }
+  listeners.forEach(listener => listener(snapshot));
+}
 
 function stubServices(
   panel: AssetsContentElement,
@@ -349,19 +627,36 @@ function stubServices(
   persisted: { thumbnailSize?: number; contentView?: 'grid' | 'list' } | null = {
     thumbnailSize: 104,
     contentView: 'grid',
-  }
+  },
+  // When true, `selectItem` re-notifies subscribers like the real service does — the
+  // echo that must not collapse a locally-built multi-selection.
+  echoSelection = false
 ) {
+  const listeners: Array<(value: AssetsPreviewSnapshot) => void> = [];
   const assetsPreviewService: Pick<
     AssetsPreviewService,
     'subscribe' | 'selectItem' | 'requestThumbnail'
   > = {
     subscribe(listener: (value: AssetsPreviewSnapshot) => void) {
+      listeners.push(listener);
       listener(snapshot);
       return () => undefined;
     },
-    selectItem: vi.fn(),
+    selectItem: vi.fn((path: string) => {
+      if (!echoSelection) {
+        return;
+      }
+      const echoed: AssetsPreviewSnapshot = {
+        ...snapshot,
+        selectedItemPath: path,
+        selectedItem: snapshot.items.find(item => item.path === path) ?? null,
+      };
+      listeners.forEach(listener => listener(echoed));
+    }),
     requestThumbnail: vi.fn(),
   };
+  // Exposed so a test can push an externally-driven snapshot (see `notifyListeners`).
+  Object.defineProperty(assetsPreviewService, '__listeners', { value: listeners });
 
   const assetFileActivationService: Pick<AssetFileActivationService, 'handleActivation'> = {
     handleActivation: vi.fn(async () => undefined),

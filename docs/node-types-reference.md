@@ -59,38 +59,6 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 
 ---
 
-### Layout2D
-
-The root container for 2D scenes. This is the top-level node that defines the canvas area for all 2D content. All other 2D nodes should be children of a Layout2D.
-
-**Type String:** `Layout2D`
-
-**Properties:**
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `width` | number | 1920 | Canvas width in pixels |
-| `height` | number | 1080 | Canvas height in pixels |
-| `resolutionPreset` | enum | FullHD | Resolution preset |
-| `showViewportOutline` | boolean | true | Show viewport border |
-
-**Resolution Presets:**
-
-| Preset | Dimensions | Description |
-|--------|------------|-------------|
-| `FullHD` | 1920×1080 | Full HD (default) |
-| `HD` | 1280×720 | HD Ready |
-| `Tablet` | 1024×768 | Standard tablet |
-| `MobilePortrait` | 1080×1920 | Mobile portrait |
-| `Custom` | user-defined | Manual dimensions |
-
-**Usage Notes:**
-- Only one Layout2D should exist per scene
-- All 2D content renders within these bounds
-- Changing resolution automatically recalculates child layouts
-
----
-
 ### Sprite2D
 
 A 2D image display node. Renders a textured quad that always faces the camera.
@@ -855,7 +823,7 @@ filter).
 
 ### For 2D Projects:
 
-1. **Start with Layout2D** as your scene root
+1. **Start with a Group2D** as your scene root (the game viewport size comes from project settings; use anchor layout for responsiveness)
 2. Add **Sprite2D** for images and graphics
 3. Use **Button2D**, **Slider2D**, **Joystick2D** for UI controls
 4. Use **Node2D** as containers to group related elements
@@ -878,7 +846,6 @@ filter).
 | NodeBase | id, name, type, visible, locked |
 | Node2D | position (Vector2), rotation, scale (Vector2) |
 | Node3D | position (Vector3), rotation (Euler), scale (Vector3) |
-| Layout2D | width, height, resolutionPreset |
 | Sprite2D | texturePath, width, height, color |
 | SpineSkeleton2D | skeletonPath, atlasPath, animation, loop, skin, timeScale, defaultMix (optional Spine runtime) |
 | Camera2D | priority, zoom, offset, followTargetId, limitsEnabled, shakeAmplitude |

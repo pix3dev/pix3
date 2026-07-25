@@ -12,8 +12,9 @@ import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import { computeDirectoryStats } from '@/services/assets/asset-folder-stats';
 import { isDocumentActive } from '@/services/core/page-activity';
 import {
-  ASSET_PATH_LIST_MIME,
+  getDraggedAssetPaths,
   getLibraryItemDragData,
+  hasAssetDragData,
   hasGenerationDragData,
   hasLibraryItemDragData,
 } from '@/ui/shared/asset-drag-drop';
@@ -1330,8 +1331,9 @@ export class AssetTree extends ComponentBase {
       }
     }
 
-    // Handle internal drag (existing logic)
-    if (!this.draggedPath) {
+    // Handle internal drag: a tree-node drag (`draggedPath`) or an asset drag started in
+    // the content pane (the tree never sees its dragstart, so detect it by MIME type).
+    if (!this.draggedPath && !hasAssetDragData(e.dataTransfer)) {
       return;
     }
 
@@ -1429,44 +1431,29 @@ export class AssetTree extends ComponentBase {
   }
 
   /**
-   * Reads the dragged source paths from a drop, preferring the multi-path list
-   * MIME (a JSON array set by the content grid's drag start) so an entire
-   * multi-selection moves at once; falls back to the single `text/plain` path
-   * (a tree-node drag) when the list MIME is absent.
-   */
-  private getDroppedSourcePaths(dataTransfer: DataTransfer): string[] {
-    const listRaw = dataTransfer.getData(ASSET_PATH_LIST_MIME);
-    if (listRaw) {
-      try {
-        const parsed: unknown = JSON.parse(listRaw);
-        if (Array.isArray(parsed)) {
-          const paths = parsed.filter(
-            (value): value is string => typeof value === 'string' && value.length > 0
-          );
-          if (paths.length > 0) {
-            return paths;
-          }
-        }
-      } catch {
-        // fall through to the single-path fallback
-      }
-    }
-
-    const plain = dataTransfer.getData('text/plain');
-    return plain ? [plain] : [];
-  }
-
-  /**
-   * Moves the dragged source paths into `targetDirPath` behind a single
-   * confirmation dialog, skipping no-op moves (items already in the target).
+   * Moves the dragged source paths into `targetDirPath`. `dataTransfer` is read
+   * synchronously (the drag data store is only accessible inside the `drop` handler).
    */
   private async moveDroppedPaths(
     dataTransfer: DataTransfer,
     targetDirPath: string,
     targetLabel: string
   ): Promise<void> {
+    await this.movePathsInto(getDraggedAssetPaths(dataTransfer), targetDirPath, targetLabel);
+  }
+
+  /**
+   * Moves `paths` into `targetDirPath` behind a single confirmation dialog, skipping
+   * no-op moves (items already in the target). Public so the unified Assets panel can
+   * route content-pane folder drops here instead of duplicating the move + refresh logic.
+   */
+  public async movePathsInto(
+    paths: readonly string[],
+    targetDirPath: string,
+    targetLabel: string
+  ): Promise<void> {
     const targetDir = targetDirPath || '.';
-    const sourcePaths = this.getDroppedSourcePaths(dataTransfer).filter(sourcePath => {
+    const sourcePaths = paths.filter(sourcePath => {
       if (!sourcePath || sourcePath === targetDir) {
         return false;
       }

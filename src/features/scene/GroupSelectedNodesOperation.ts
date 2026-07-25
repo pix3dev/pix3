@@ -6,8 +6,10 @@ import type {
 } from '@/core/Operation';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { Group2D, Node2D, Node3D, NodeBase, SceneManager } from '@pix3/runtime';
-import { Quaternion, Vector3 } from 'three';
+import { Matrix4, Quaternion, Vector3 } from 'three';
 import { isPrefabChildNode } from '@/features/scene/prefab-utils';
+import { computeUnionLocalRect, sizeGroupToRect } from '@/features/scene/group2d-resize-utils';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 
 export interface GroupSelectedNodesOperationParams {
   nodeIds: string[];
@@ -111,6 +113,12 @@ export class GroupSelectedNodesOperation implements Operation<OperationInvokeRes
     this.insertNode(sceneGraph.rootNodes, createdGroup, commonParent, insertIndex);
     sceneGraph.nodeMap.set(createdGroup.nodeId, createdGroup);
 
+    if (createdGroup instanceof Group2D) {
+      // Pre-size the box to the selection's bounds BEFORE attaching: attach() preserves the children's
+      // world transforms, so the group already hugs its contents with no compensation pass.
+      this.sizeGroup2DToSelection(createdGroup, orderedNodes, container);
+    }
+
     for (const node of orderedNodes) {
       this.reparentNode(sceneGraph.rootNodes, node, createdGroup, -1);
     }
@@ -209,6 +217,46 @@ export class GroupSelectedNodesOperation implements Operation<OperationInvokeRes
     SceneStateUpdater.updateHierarchyState(state, this.activeSceneIdAtCommit, sceneGraph);
     SceneStateUpdater.markSceneDirty(state, this.activeSceneIdAtCommit);
     SceneStateUpdater.selectNode(state, this.createdGroup.nodeId);
+  }
+
+  /**
+   * Size and position a newly created Group2D so its box wraps the nodes it is about to adopt,
+   * measured in the group's own parent frame (the same measurement fit-to-contents uses). Falls back
+   * to the constructor default box when the nodes cannot be measured (no 2D nodes, or no viewport
+   * renderer — e.g. headless).
+   */
+  private sizeGroup2DToSelection(
+    group: Group2D,
+    nodes: NodeBase[],
+    container: OperationContext['container']
+  ): void {
+    const node2Ds = nodes.filter((node): node is Node2D => node instanceof Node2D);
+    if (node2Ds.length === 0) {
+      return;
+    }
+
+    let viewportRenderer: ViewportRendererService;
+    try {
+      viewportRenderer = container.getService<ViewportRendererService>(
+        container.getOrCreateToken(ViewportRendererService)
+      );
+    } catch {
+      return;
+    }
+
+    const parent = group.parentNode;
+    let frameWorldInverse = new Matrix4();
+    if (parent) {
+      parent.updateWorldMatrix(true, false);
+      frameWorldInverse = parent.matrixWorld.clone().invert();
+    }
+
+    const rect = computeUnionLocalRect(node2Ds, frameWorldInverse, node =>
+      viewportRenderer.getNodeOnlyLocalCorners(node)
+    );
+    if (rect) {
+      sizeGroupToRect(group, rect);
+    }
   }
 
   private generateNodeId(prefix: string, nodeMap: Map<string, NodeBase>): string {

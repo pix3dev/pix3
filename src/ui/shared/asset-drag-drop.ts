@@ -105,6 +105,51 @@ export const getLibraryItemDragData = (
   }
 };
 
+/**
+ * Project-relative source paths carried by an in-editor asset drag, used by the move
+ * (drag-into-folder) drop targets. Prefers the multi-path list MIME set by the Assets
+ * content pane so a whole multi-selection moves at once, then the single-path MIME, then
+ * `text/plain` (an Asset Tree node drag sets only that for folders).
+ *
+ * Only readable inside a `drop` handler — during `dragover` the drag data store is in
+ * protected mode and `getData` returns `''`; use {@link hasAssetDragData} there.
+ */
+export const getDraggedAssetPaths = (dataTransfer: DataTransfer | null): string[] => {
+  if (!dataTransfer) {
+    return [];
+  }
+
+  const listRaw = dataTransfer.getData(ASSET_PATH_LIST_MIME);
+  if (listRaw) {
+    try {
+      const parsed: unknown = JSON.parse(listRaw);
+      if (Array.isArray(parsed)) {
+        const paths = parsed.filter(
+          (value): value is string => typeof value === 'string' && value.length > 0
+        );
+        if (paths.length > 0) {
+          return paths;
+        }
+      }
+    } catch {
+      // Fall through to the single-path forms.
+    }
+  }
+
+  const single = dataTransfer.getData(ASSET_PATH_MIME);
+  if (single) {
+    return [single];
+  }
+
+  const plain = dataTransfer.getData('text/plain');
+  return plain
+    ? plain
+        .split(/\r?\n/u)
+        .map(value => value.trim())
+        .filter(value => value.length > 0)
+    : [];
+};
+
 const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',

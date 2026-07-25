@@ -83,6 +83,12 @@ export interface Transform2DUpdateOptions {
   snapRotation?: boolean;
   /** Rotation snap increment in degrees (defaults to 5 when snapRotation is true). */
   rotationSnapDegrees?: number;
+  /**
+   * Resize the container's box only, leaving its children untouched (Figma's "ignore constraints"
+   * analog — bound to Ctrl/Cmd while dragging a resize handle). Children are restored to their
+   * drag-start base states, so toggling the modifier mid-drag is lossless in both directions.
+   */
+  resizeBoxOnly?: boolean;
 }
 
 export class TransformTool2d {
@@ -958,11 +964,16 @@ export class TransformTool2d {
 
       // Figma-style proportional child resize: scale each selected Group2D's descendants by the same
       // factors, reapplied from the drag-start base states each frame (idempotent, drift-free).
+      // Ctrl/Cmd (resizeBoxOnly) resizes the box alone — reapplying the base states with factors of 1
+      // restores the children exactly, so the modifier can be toggled freely mid-drag.
       if (transform.childStartStates) {
+        const childFactorX = options.resizeBoxOnly ? 1 : scaleFactorX;
+        const childFactorY = options.resizeBoxOnly ? 1 : scaleFactorY;
+        const childMinSize = options.resizeBoxOnly ? 0 : minSize;
         for (const [childId, base] of transform.childStartStates) {
           const child = sceneGraph.nodeMap.get(childId);
           if (child instanceof Node2D) {
-            applyProportionalToNode(child, base, scaleFactorX, scaleFactorY, minSize);
+            applyProportionalToNode(child, base, childFactorX, childFactorY, childMinSize);
           }
         }
       }

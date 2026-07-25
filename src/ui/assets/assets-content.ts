@@ -15,7 +15,9 @@ import {
   ASSET_PATH_MIME,
   ASSET_RESOURCE_LIST_MIME,
   ASSET_RESOURCE_MIME,
+  getDraggedAssetPaths,
   getLibraryItemDragData,
+  hasAssetDragData,
   hasGenerationDragData,
   hasLibraryItemDragData,
   toProjectResourcePath,
@@ -90,6 +92,13 @@ export class AssetsContent extends ComponentBase {
   @state()
   private isGenerationDropActive = false;
 
+  /**
+   * Folder path (or `.` for a breadcrumb pointing at the project root) currently hovered
+   * by an in-editor asset drag; dropping there moves the dragged items into it.
+   */
+  @state()
+  private dropTargetPath: string | null = null;
+
   /** Path of the audio asset currently previewing (null = none). */
   @state()
   private playingAudioPath: string | null = null;
@@ -106,9 +115,18 @@ export class AssetsContent extends ComponentBase {
   private disposeProjectSubscription?: () => void;
   private lastProjectId: string | null = null;
   private selectedPaths = new Set<string>();
+  /** Focused item: the last item clicked, whatever the modifier (drives Space preview + Inspector). */
   private lastSelectedPath: string | null = null;
+  /**
+   * Fixed end of a shift-range: the last item picked *without* Shift. Kept separate from
+   * {@link lastSelectedPath} so repeated shift-clicks re-stretch the same range instead of
+   * walking the anchor along with each click.
+   */
+  private selectionAnchorPath: string | null = null;
   /** Last service-driven selected item we mirrored, so unrelated snapshot updates don't clobber local selection. */
   private lastSyncedSelectedItemPath: string | null | undefined = undefined;
+  /** True while we are pushing our own selection into the service (see {@link syncSelectionToService}). */
+  private isPushingSelection = false;
   /** Shared element for asset-browser audio preview; reused across items. */
   private audioPreviewEl: HTMLAudioElement | null = null;
   private lastPreviewFolderPath: string | null = null;
@@ -146,14 +164,20 @@ export class AssetsContent extends ComponentBase {
       // Browser) into the local highlight set. Only react when the service's selected item
       // actually changes, so local multi-selection made inside this panel isn't clobbered by
       // unrelated snapshot updates (e.g. thumbnails becoming ready).
-      if (snapshot.selectedItemPath !== this.lastSyncedSelectedItemPath) {
+      if (this.isPushingSelection) {
+        // Our own `selectItem` echo: record it so the next external change is still
+        // detected, but never collapse the multi-selection we just built locally.
+        this.lastSyncedSelectedItemPath = snapshot.selectedItemPath;
+      } else if (snapshot.selectedItemPath !== this.lastSyncedSelectedItemPath) {
         this.lastSyncedSelectedItemPath = snapshot.selectedItemPath;
         if (snapshot.selectedItemPath) {
           this.selectedPaths = new Set([snapshot.selectedItemPath]);
           this.lastSelectedPath = snapshot.selectedItemPath;
+          this.selectionAnchorPath = snapshot.selectedItemPath;
         } else {
           this.selectedPaths = new Set();
           this.lastSelectedPath = null;
+          this.selectionAnchorPath = null;
         }
       }
       this.snapshot = snapshot;
@@ -292,9 +316,14 @@ export class AssetsContent extends ComponentBase {
       <nav class="assets-breadcrumbs" aria-label="Folder path">
         <button
           type="button"
-          class="crumb ${isRootActive ? 'is-active' : ''}"
+          class="crumb ${isRootActive ? 'is-active' : ''} ${this.dropTargetPath === '.'
+            ? 'is-drop-target'
+            : ''}"
           ?disabled=${isRootActive}
           @click=${() => this.onBreadcrumbClick('.')}
+          @dragover=${(event: DragEvent) => this.onMoveDragOver(event, '.')}
+          @dragleave=${(event: DragEvent) => this.onMoveDragLeave(event, '.')}
+          @drop=${(event: DragEvent) => this.onMoveDrop(event, '.', rootLabel)}
         >
           ${rootLabel}
         </button>
@@ -307,9 +336,14 @@ export class AssetsContent extends ComponentBase {
             >
             <button
               type="button"
-              class="crumb ${isLast ? 'is-active' : ''}"
+              class="crumb ${isLast ? 'is-active' : ''} ${this.dropTargetPath === path
+                ? 'is-drop-target'
+                : ''}"
               ?disabled=${isLast}
               @click=${() => this.onBreadcrumbClick(path)}
+              @dragover=${(event: DragEvent) => this.onMoveDragOver(event, path)}
+              @dragleave=${(event: DragEvent) => this.onMoveDragLeave(event, path)}
+              @drop=${(event: DragEvent) => this.onMoveDrop(event, path, part)}
             >
               ${part}
             </button>
@@ -431,7 +465,7 @@ export class AssetsContent extends ComponentBase {
     // member of a multi-selection keeps the selection intact (so Delete acts on all of them).
     if (!this.selectedPaths.has(item.path)) {
       this.updateSelectionFromClick(event, item);
-      this.assetsPreviewService.selectItem(item.path);
+      this.syncSelectionToService(item.path);
     }
     this.contextMenu = { item, x: event.clientX, y: event.clientY };
   }
@@ -490,17 +524,32 @@ export class AssetsContent extends ComponentBase {
 
   private renderItem(item: AssetPreviewItem) {
     const isSelected = this.selectedPaths.has(item.path);
+    const isDropTarget = this.dropTargetPath === item.path && this.isDropTargetItem(item);
     return html`
       <button
-        class="assets-preview-item ${isSelected ? 'is-selected' : ''}"
+        class="assets-preview-item ${isSelected ? 'is-selected' : ''} ${isDropTarget
+          ? 'is-drop-target'
+          : ''}"
         title=${this.buildTooltip(item)}
-        draggable=${item.kind === 'file' ? 'true' : 'false'}
+        draggable="true"
         @click=${(event: MouseEvent) => this.onItemSelected(event, item)}
         @dblclick=${(event: MouseEvent) => {
           void this.onItemDoubleClick(event, item);
         }}
         @contextmenu=${(event: MouseEvent) => this.onItemContextMenu(event, item)}
         @dragstart=${(event: DragEvent) => this.onItemDragStart(event, item)}
+        @dragend=${() => this.onItemDragEnd()}
+        @dragover=${(event: DragEvent) => {
+          if (this.isDropTargetItem(item)) {
+            this.onMoveDragOver(event, item.path);
+          }
+        }}
+        @dragleave=${(event: DragEvent) => this.onMoveDragLeave(event, item.path)}
+        @drop=${(event: DragEvent) => {
+          if (this.isDropTargetItem(item)) {
+            this.onMoveDrop(event, item.path, item.name);
+          }
+        }}
       >
         <span class="thumb">
           ${item.previewType === 'text' && item.previewText
@@ -548,17 +597,32 @@ export class AssetsContent extends ComponentBase {
       : item.width !== null && item.height !== null
         ? `${item.width}×${item.height}`
         : '';
+    const isDropTarget = this.dropTargetPath === item.path && this.isDropTargetItem(item);
     return html`
       <button
-        class="assets-list-row ${isSelected ? 'is-selected' : ''} ${isPlaying ? 'is-playing' : ''}"
+        class="assets-list-row ${isSelected ? 'is-selected' : ''} ${isPlaying
+          ? 'is-playing'
+          : ''} ${isDropTarget ? 'is-drop-target' : ''}"
         title=${this.buildTooltip(item)}
-        draggable=${item.kind === 'file' ? 'true' : 'false'}
+        draggable="true"
         @click=${(event: MouseEvent) => this.onItemSelected(event, item)}
         @dblclick=${(event: MouseEvent) => {
           void this.onItemDoubleClick(event, item);
         }}
         @contextmenu=${(event: MouseEvent) => this.onItemContextMenu(event, item)}
         @dragstart=${(event: DragEvent) => this.onItemDragStart(event, item)}
+        @dragend=${() => this.onItemDragEnd()}
+        @dragover=${(event: DragEvent) => {
+          if (this.isDropTargetItem(item)) {
+            this.onMoveDragOver(event, item.path);
+          }
+        }}
+        @dragleave=${(event: DragEvent) => this.onMoveDragLeave(event, item.path)}
+        @drop=${(event: DragEvent) => {
+          if (this.isDropTargetItem(item)) {
+            this.onMoveDrop(event, item.path, item.name);
+          }
+        }}
       >
         ${isAudio ? this.renderAudioToggle(item, 'is-inline') : null}
         <span class="row-thumb">
@@ -591,7 +655,7 @@ export class AssetsContent extends ComponentBase {
       return;
     }
     this.updateSelectionFromClick(event, item);
-    this.assetsPreviewService.selectItem(item.path);
+    this.syncSelectionToService(item.path);
     if (item.previewType === 'model' || item.previewType === 'scene') {
       this.assetsPreviewService.requestThumbnail(item.path);
     }
@@ -733,31 +797,149 @@ export class AssetsContent extends ComponentBase {
     return total !== null ? this.formatDuration(total) : '';
   }
 
+  /**
+   * Pushes the last-clicked item into the preview service (drives the Inspector and the
+   * external-reveal mirror) without the resulting snapshot notification collapsing the
+   * multi-selection we just built locally.
+   */
+  private syncSelectionToService(path: string): void {
+    this.isPushingSelection = true;
+    try {
+      this.assetsPreviewService.selectItem(path);
+    } finally {
+      this.isPushingSelection = false;
+    }
+  }
+
   private onItemDragStart(event: DragEvent, item: AssetPreviewItem): void {
-    if (item.kind !== 'file' || !event.dataTransfer) {
+    if (!event.dataTransfer) {
       return;
     }
 
     if (!this.selectedPaths.has(item.path)) {
       this.selectedPaths = new Set([item.path]);
       this.lastSelectedPath = item.path;
+      this.selectionAnchorPath = item.path;
       this.requestUpdate();
     }
 
-    const selectedItems = this.snapshot.items.filter(
-      candidate => candidate.kind === 'file' && this.selectedPaths.has(candidate.path)
+    // Drag the whole multi-selection (folders included, so they can be moved too), in the
+    // order shown in the pane.
+    const selectedItems = this.snapshot.items.filter(candidate =>
+      this.selectedPaths.has(candidate.path)
     );
     const itemsToDrag = selectedItems.length > 0 ? selectedItems : [item];
-    const resourcePaths = itemsToDrag.map(candidate => toProjectResourcePath(candidate.path));
     const plainPaths = itemsToDrag.map(candidate => candidate.path);
-    const resourcePath = resourcePaths[0] ?? toProjectResourcePath(item.path);
-    event.dataTransfer.effectAllowed = 'copy';
+    // Only files carry `res://` resource MIMEs — those are what the viewport / scene tree
+    // read to create nodes, and a folder is not an asset resource.
+    const resourcePaths = itemsToDrag
+      .filter(candidate => candidate.kind === 'file')
+      .map(candidate => toProjectResourcePath(candidate.path));
+    // `copyMove`, not `copy`: the drop targets that move assets (folder cards here, the
+    // Asset Tree) request `dropEffect = 'move'`, which the browser rejects outright — no
+    // drop event at all — when the source only allows copying.
+    event.dataTransfer.effectAllowed = 'copyMove';
     event.dataTransfer.setData('text/plain', plainPaths.join('\n'));
     event.dataTransfer.setData(ASSET_PATH_MIME, plainPaths[0] ?? item.path);
-    event.dataTransfer.setData(ASSET_RESOURCE_MIME, resourcePath);
     event.dataTransfer.setData(ASSET_PATH_LIST_MIME, JSON.stringify(plainPaths));
-    event.dataTransfer.setData(ASSET_RESOURCE_LIST_MIME, JSON.stringify(resourcePaths));
-    event.dataTransfer.setData('text/uri-list', resourcePath);
+    if (resourcePaths.length > 0) {
+      event.dataTransfer.setData(ASSET_RESOURCE_MIME, resourcePaths[0]);
+      event.dataTransfer.setData(ASSET_RESOURCE_LIST_MIME, JSON.stringify(resourcePaths));
+      event.dataTransfer.setData('text/uri-list', resourcePaths[0]);
+    }
+    this.setMultiDragImage(event, itemsToDrag.length);
+  }
+
+  /**
+   * Shows a `N items` chip as the drag image for a multi-selection so it is obvious the
+   * whole selection travels (the browser default only pictures the grabbed card).
+   */
+  private setMultiDragImage(event: DragEvent, count: number): void {
+    if (count < 2 || !event.dataTransfer?.setDragImage) {
+      return;
+    }
+    const chip = document.createElement('div');
+    chip.textContent = `${count} items`;
+    // Styled inline, not in the stylesheet: the element has to live on `document.body`
+    // (Lit owns this host's children, and the drag image must be attached + laid out), so
+    // a class here would mean an unscoped global rule.
+    chip.style.cssText = [
+      'position:fixed',
+      'top:-1000px',
+      'left:-1000px',
+      'padding:0.2rem 0.5rem',
+      'border-radius:var(--radius-1, 4px)',
+      'background:var(--accent, #f5ae39)',
+      'color:var(--bg-0, #14161a)',
+      'font:600 12px/1.4 system-ui, sans-serif',
+      'white-space:nowrap',
+    ].join(';');
+    document.body.appendChild(chip);
+    try {
+      event.dataTransfer.setDragImage(chip, 12, 12);
+    } catch {
+      // Older engines can refuse a freshly-attached element; the default image is fine.
+    }
+    // The browser snapshots the element synchronously, so it can go away right after.
+    requestAnimationFrame(() => chip.remove());
+  }
+
+  private onItemDragEnd(): void {
+    this.dropTargetPath = null;
+  }
+
+  /** True when `item` can receive a move drop (folder cards only). */
+  private isDropTargetItem(item: AssetPreviewItem): boolean {
+    return item.kind === 'directory';
+  }
+
+  private onMoveDragOver(event: DragEvent, targetPath: string): void {
+    if (appState.collaboration.isReadOnly || !hasAssetDragData(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    if (this.dropTargetPath !== targetPath) {
+      this.dropTargetPath = targetPath;
+    }
+  }
+
+  private onMoveDragLeave(event: DragEvent, targetPath: string): void {
+    if (this.dropTargetPath !== targetPath) {
+      return;
+    }
+    const related = event.relatedTarget as Node | null;
+    if (related && (event.currentTarget as HTMLElement).contains(related)) {
+      return;
+    }
+    this.dropTargetPath = null;
+  }
+
+  /**
+   * Drop on a folder card / breadcrumb: hand the dragged paths to the panel, which routes
+   * them through the Asset Tree's move flow (one confirmation, reference rewrite, refresh).
+   */
+  private onMoveDrop(event: DragEvent, targetPath: string, targetLabel: string): void {
+    this.dropTargetPath = null;
+    if (appState.collaboration.isReadOnly || !hasAssetDragData(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const paths = getDraggedAssetPaths(event.dataTransfer).filter(path => path !== targetPath);
+    if (paths.length === 0) {
+      return;
+    }
+    this.dispatchEvent(
+      new CustomEvent('content-move-request', {
+        detail: { paths, targetPath, targetLabel },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private onGenerationDragOver(event: DragEvent): void {
@@ -810,8 +992,9 @@ export class AssetsContent extends ComponentBase {
     const orderedPaths = this.snapshot.items.map(candidate => candidate.path);
     const nextSelectedPaths = new Set(this.selectedPaths);
 
-    if (event.shiftKey && this.lastSelectedPath && orderedPaths.includes(this.lastSelectedPath)) {
-      const startIndex = orderedPaths.indexOf(this.lastSelectedPath);
+    const anchorPath = this.selectionAnchorPath;
+    if (event.shiftKey && anchorPath && orderedPaths.includes(anchorPath)) {
+      const startIndex = orderedPaths.indexOf(anchorPath);
       const endIndex = orderedPaths.indexOf(item.path);
       const [rangeStart, rangeEnd] =
         startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
@@ -822,15 +1005,19 @@ export class AssetsContent extends ComponentBase {
           nextSelectedPaths.add(path);
         }
       }
+      // The anchor deliberately stays put: successive shift-clicks re-stretch the range
+      // from the item where the selection started, they don't walk it forward.
     } else if (event.ctrlKey || event.metaKey) {
       if (nextSelectedPaths.has(item.path)) {
         nextSelectedPaths.delete(item.path);
       } else {
         nextSelectedPaths.add(item.path);
       }
+      this.selectionAnchorPath = item.path;
     } else {
       nextSelectedPaths.clear();
       nextSelectedPaths.add(item.path);
+      this.selectionAnchorPath = item.path;
     }
 
     if (nextSelectedPaths.size === 0) {

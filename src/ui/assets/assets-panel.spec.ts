@@ -39,6 +39,7 @@ class StubAssetTree extends HTMLElement {
   deleteSelected = vi.fn(async () => undefined);
   renameSelected = vi.fn(async () => undefined);
   handleRootDrop = vi.fn(async () => undefined);
+  movePathsInto = vi.fn(async () => undefined);
   revealAndOpen = vi.fn(async () => true);
   getTargetDirectory = vi.fn(() => '.');
 }
@@ -189,5 +190,30 @@ describe('AssetsPanel (Phase 4)', () => {
     expect(stubs.projectService.deleteEntry).toHaveBeenNthCalledWith(1, 'assets/a.png');
     expect(stubs.projectService.deleteEntry).toHaveBeenNthCalledWith(2, 'assets/b.png');
     expect(stubs.assetsPreviewService.clearSelectedItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes content-move-request to the tree move flow', async () => {
+    const panel = document.createElement('pix3-assets-panel') as AssetsPanelElement;
+    stubServices(panel);
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.querySelector('pix3-assets-content')?.dispatchEvent(
+      new CustomEvent('content-move-request', {
+        detail: {
+          paths: ['assets/a.png', 'assets/b.png'],
+          targetPath: 'assets/textures',
+          targetLabel: 'textures',
+        },
+        bubbles: true,
+        composed: true,
+      })
+    );
+
+    expect(tree(panel).movePathsInto).toHaveBeenCalledWith(
+      ['assets/a.png', 'assets/b.png'],
+      'assets/textures',
+      'textures'
+    );
   });
 });

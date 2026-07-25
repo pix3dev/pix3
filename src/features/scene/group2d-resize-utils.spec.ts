@@ -21,6 +21,27 @@ function centerCorners(node: Node2D): THREE.Vector3[] {
   ];
 }
 
+/**
+ * Anchor-aware corner measurer, mirroring the Sprite2D/TiledSprite2D branch of
+ * `ViewportRenderService.getNodeOnlyLocalCorners`: the sprite occupies
+ * `[-ax·w .. (1-ax)·w] × [-ay·h .. (1-ay)·h]` in node-local space.
+ */
+function measureCorners(node: Node2D): THREE.Vector3[] {
+  if (node instanceof Sprite2D) {
+    const w = node.width ?? 64;
+    const h = node.height ?? 64;
+    const ax = node.anchor?.x ?? 0.5;
+    const ay = node.anchor?.y ?? 0.5;
+    return [
+      new THREE.Vector3(-ax * w, -ay * h, 0),
+      new THREE.Vector3((1 - ax) * w, -ay * h, 0),
+      new THREE.Vector3((1 - ax) * w, (1 - ay) * h, 0),
+      new THREE.Vector3(-ax * w, (1 - ay) * h, 0),
+    ];
+  }
+  return centerCorners(node);
+}
+
 let idCounter = 0;
 function makeGroup(width: number, height: number, x = 0, y = 0): Group2D {
   const group = new Group2D({ id: `g${++idCounter}`, width, height });
@@ -177,6 +198,80 @@ describe('group2d-resize-utils', () => {
       const childWorldAfter = child.getWorldPosition(new THREE.Vector3());
       expect(childWorldAfter.x).toBeCloseTo(childWorldBefore.x);
       expect(childWorldAfter.y).toBeCloseTo(childWorldBefore.y);
+    });
+
+    it('measures the contents rect in group-local space regardless of the group transform', () => {
+      // The union is expressed in G-local, so rotating/scaling G must not change it.
+      const upright = makeGroup(100, 100, 7, -3);
+      upright.add(makeGroup(40, 40, 20, 0));
+      const transformed = makeGroup(100, 100, 7, -3);
+      transformed.rotation.set(0, 0, Math.PI / 6);
+      transformed.scale.set(2, 3, 1);
+      transformed.add(makeGroup(40, 40, 20, 0));
+
+      const a = computeContentsLocalRect(upright, centerCorners)!;
+      const b = computeContentsLocalRect(transformed, centerCorners)!;
+      expect(b.minX).toBeCloseTo(a.minX);
+      expect(b.maxX).toBeCloseTo(a.maxX);
+      expect(b.minY).toBeCloseTo(a.minY);
+      expect(b.maxY).toBeCloseTo(a.maxY);
+    });
+
+    it('expands the rect by a rotated child’s true footprint', () => {
+      const group = makeGroup(100, 100);
+      const child = makeGroup(40, 40); // 45° → half-diagonal 20·√2 ≈ 28.284
+      child.rotation.set(0, 0, Math.PI / 4);
+      group.add(child);
+
+      const rect = computeContentsLocalRect(group, centerCorners)!;
+      expect(rect.maxX).toBeCloseTo(Math.SQRT2 * 20);
+      expect(rect.minY).toBeCloseTo(-Math.SQRT2 * 20);
+    });
+
+    it('honours a sprite child’s anchor when measuring', () => {
+      const group = makeGroup(100, 100);
+      // anchor (0,0) = bottom-left, so the sprite occupies x[10..50] y[10..50] in group-local space.
+      const sprite = new Sprite2D({
+        id: `s${++idCounter}`,
+        width: 40,
+        height: 40,
+        anchor: [0, 0],
+      });
+      sprite.position.set(10, 10, 0);
+      group.add(sprite);
+
+      const rect = computeContentsLocalRect(group, measureCorners)!;
+      expect(rect.minX).toBeCloseTo(10);
+      expect(rect.maxX).toBeCloseTo(50);
+      expect(rect.minY).toBeCloseTo(10);
+      expect(rect.maxY).toBeCloseTo(50);
+    });
+
+    it('shifts a rotated, scaled group’s position through its linear part (p + L·c)', () => {
+      const group = makeGroup(100, 100, 10, 20);
+      group.rotation.set(0, 0, Math.PI / 6);
+      group.scale.set(2, 3, 1);
+      group.add(makeGroup(40, 40, 20, 0)); // rect x[0..40] y[-20..20] → c = (20, 0)
+
+      const rect = computeContentsLocalRect(group, centerCorners)!;
+      const [groupPlan] = buildFitPlans(group, rect);
+      const cos = Math.cos(Math.PI / 6);
+      const sin = Math.sin(Math.PI / 6);
+      expect(groupPlan.currentState.position!.x).toBeCloseTo(10 + 2 * 20 * cos);
+      expect(groupPlan.currentState.position!.y).toBeCloseTo(20 + 2 * 20 * sin);
+      expect(groupPlan.currentState.width).toBeCloseTo(40);
+      expect(groupPlan.currentState.height).toBeCloseTo(40);
+    });
+
+    it('clamps a degenerate (single-point) contents rect to 1×1', () => {
+      const group = makeGroup(100, 100);
+      const zeroSized = new Sprite2D({ id: `s${++idCounter}`, width: 0, height: 0 });
+      group.add(zeroSized);
+
+      const rect = computeContentsLocalRect(group, measureCorners)!;
+      const [groupPlan] = buildFitPlans(group, rect);
+      expect(groupPlan.currentState.width).toBe(1);
+      expect(groupPlan.currentState.height).toBe(1);
     });
   });
 });

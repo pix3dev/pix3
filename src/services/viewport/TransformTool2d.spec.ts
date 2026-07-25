@@ -15,7 +15,11 @@ import {
   type Active2DTransform,
   type Selection2DOverlay,
 } from '@/services/viewport/TransformTool2d';
-import { Sprite2D, type SceneGraph } from '@pix3/runtime';
+import { Group2D, NodeBase, Sprite2D, type SceneGraph } from '@pix3/runtime';
+import {
+  captureProportionalBase,
+  collectProportionalTargets,
+} from '@/features/scene/group2d-resize-utils';
 
 describe('TransformTool2d', () => {
   let tool: TransformTool2d;
@@ -624,6 +628,144 @@ describe('TransformTool2d', () => {
 
       expect(sprite.width).toBeCloseTo(150);
       expect(sprite.height).toBeCloseTo(50);
+    });
+  });
+
+  describe('proportional child resize', () => {
+    const viewportSize = { width: 800, height: 600 };
+
+    const createCamera = (): THREE.OrthographicCamera => {
+      const camera = new THREE.OrthographicCamera(-400, 400, 300, -300, 0.1, 1000);
+      camera.position.z = 100;
+      camera.updateProjectionMatrix();
+      return camera;
+    };
+
+    const toScreenXY = (worldX: number, worldY: number) => ({
+      x: worldX + 400,
+      y: 300 - worldY,
+    });
+
+    /** A 100×50 group at the origin with one 40×20 sprite child at local (20, 10). */
+    const createGroupWithChild = () => {
+      const group = new Group2D({ id: 'group-resize', name: 'Group', width: 100, height: 50 });
+      const child = new Sprite2D({
+        id: 'child-resize',
+        name: 'Child',
+        width: 40,
+        height: 20,
+        position: new THREE.Vector2(20, 10),
+      });
+      group.add(child);
+      group.updateWorldMatrix(true, false);
+
+      const sceneGraph: SceneGraph = {
+        version: '1.0',
+        rootNodes: [group],
+        nodeMap: new Map<string, NodeBase>([
+          [group.nodeId, group],
+          [child.nodeId, child],
+        ]),
+        metadata: {},
+      };
+
+      const transform: Active2DTransform = {
+        nodeIds: [group.nodeId],
+        handle: 'scale-e',
+        startPointerWorld: new THREE.Vector3(50, 0, 0),
+        startStates: new Map([
+          [
+            group.nodeId,
+            {
+              position: group.position.clone(),
+              rotation: group.rotation.z,
+              scale: new THREE.Vector2(group.scale.x, group.scale.y),
+              width: group.width,
+              height: group.height,
+              worldPosition: group.getWorldPosition(new THREE.Vector3()),
+              worldRotationZ: group.rotation.z,
+            },
+          ],
+        ]),
+        combinedBounds: new THREE.Box3(
+          new THREE.Vector3(-50, -25, 0),
+          new THREE.Vector3(50, 25, 0)
+        ),
+        startCenterWorld: new THREE.Vector3(0, 0, 0),
+        anchorWorld: new THREE.Vector3(-50, 0, 0),
+        anchorLocal: new THREE.Vector3(-50, 0, 0),
+        startSize: new THREE.Vector2(100, 50),
+        childStartStates: new Map(
+          collectProportionalTargets(group).map(target => [
+            target.node.nodeId,
+            captureProportionalBase(target),
+          ])
+        ),
+      };
+
+      return { group, child, sceneGraph, transform };
+    };
+
+    it('scales the child position and size with the group by default', () => {
+      const { group, child, sceneGraph, transform } = createGroupWithChild();
+      const pointer = toScreenXY(100, 0); // width 100 → 150, fx = 1.5
+
+      tool.updateTransform(
+        pointer.x,
+        pointer.y,
+        transform,
+        sceneGraph,
+        createCamera(),
+        viewportSize
+      );
+
+      expect(group.width).toBeCloseTo(150);
+      expect(child.position.x).toBeCloseTo(30);
+      expect(child.position.y).toBeCloseTo(10);
+      expect(child.width).toBeCloseTo(60);
+      expect(child.height).toBeCloseTo(20);
+    });
+
+    it('leaves the child untouched when resizeBoxOnly (Ctrl) is set', () => {
+      const { group, child, sceneGraph, transform } = createGroupWithChild();
+      const pointer = toScreenXY(100, 0);
+
+      tool.updateTransform(
+        pointer.x,
+        pointer.y,
+        transform,
+        sceneGraph,
+        createCamera(),
+        viewportSize,
+        { resizeBoxOnly: true }
+      );
+
+      expect(group.width).toBeCloseTo(150);
+      expect(child.position.x).toBeCloseTo(20);
+      expect(child.position.y).toBeCloseTo(10);
+      expect(child.width).toBeCloseTo(40);
+      expect(child.height).toBeCloseTo(20);
+    });
+
+    it('restores proportional scaling when the modifier is released mid-drag', () => {
+      const { group, child, sceneGraph, transform } = createGroupWithChild();
+      const camera = createCamera();
+      const first = toScreenXY(150, 0); // fx = 2
+      const second = toScreenXY(100, 0); // fx = 1.5
+
+      tool.updateTransform(first.x, first.y, transform, sceneGraph, camera, viewportSize);
+      tool.updateTransform(first.x, first.y, transform, sceneGraph, camera, viewportSize, {
+        resizeBoxOnly: true,
+      });
+      // Base states are intact, so the child is exactly back where the drag started…
+      expect(child.position.x).toBeCloseTo(20);
+      expect(child.width).toBeCloseTo(40);
+
+      // …and releasing the modifier re-derives from those same base states (no drift from fx = 2).
+      tool.updateTransform(second.x, second.y, transform, sceneGraph, camera, viewportSize);
+      expect(group.width).toBeCloseTo(150);
+      expect(child.position.x).toBeCloseTo(30);
+      expect(child.width).toBeCloseTo(60);
     });
   });
 

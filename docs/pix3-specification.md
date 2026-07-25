@@ -1,6 +1,6 @@
 # Pix3 — Technical Specification
 
-Version: 1.26
+Version: 1.27
 
 Date: 2026-07-25
 
@@ -14,7 +14,7 @@ Date: 2026-07-25
 
 - Introduction · Key Features · Technology Stack · Architecture
 - Property Schema System · Script Component System
-- Layout2D Node · Project Templates, Target Platform and Agent Overlay
+- Group2D Sizing (Fit to Contents, Proportional Resize) · Project Templates, Target Platform and Agent Overlay
 - Autoload Scripts and Asset Browser Template Flow · Signals Engine · Groups Engine
 - Node Prefabs System · Keyframe Animation System · Localization (i18n)
 - Scene File Format (\*.pix3scene) · MVP Plan · Non-Functional Requirements
@@ -531,57 +531,73 @@ await this.scene.changeScene('res://scenes/main.pix3scene', {
 - Works identically in play-mode and exports; additive to the runtime contract
   (consumed by DeepCore via yalc).
 
-## 6.15 Layout2D Node
+## 6.15 Group2D Sizing: Fit to Contents and Proportional Resize
 
-### 6.15.1 Overview
+> Legacy: the `Layout2D` node that used to be documented here was removed. Scene roots are plain
+> `Node2D`/`Group2D` with anchor layout, and the game viewport comes from project settings
+> (`viewportBaseSize`). `SceneLoader` rejects a `Layout2D` node with a validation error, and the
+> per-child `updateLayout(width, height)` cascade no longer exists.
 
-Layout2D is a special 2D root node that represents the game viewport, separating it from the editor's WebGL viewport. This enables independent game layout testing across different screen sizes.
+Group2D is center-origin with an explicit `width`/`height` box and `isContainer = true`. The box is
+*authored* — it does not track its children — so the editor provides the two inverse authoring
+gestures below. Both are **editor-only**: the math lives in `src/features/scene/group2d-resize-utils.ts`
+(pure, dependency-light) and the runtime is untouched. Games get responsive behavior from anchor
+layout (`Node2D.layoutEnabled` + align modes), not from these gestures.
 
-### 6.15.2 Layout2D Properties
+### 6.15.1 Fit to Contents
 
-Layout2D extends `Node2D` and provides the following properties:
+`FitGroup2DToContentsCommand` / `Operation` (Inspector *Size* section button, **Edit → Fit Group to
+Contents**, `Ctrl+Alt+F`) recomputes the group's `width`/`height` and shifts its origin so the box
+wraps its contents, **without moving anything in world space**:
 
-- `width: number` - Game viewport width in pixels (default: 1920)
-- `height: number` - Game viewport height in pixels (default: 1080)
-- `resolutionPreset: ResolutionPreset` - Quick preset selection for common resolutions
-- `showViewportOutline: boolean` - Toggle visual border visibility (default: true)
+1. Union of every `Node2D` descendant's node-only rect (anchor-aware per node type, plus each nested
+   Group2D's own box), mapped into the group's local frame through the matrix chain — so children's
+   rotation/scale and nesting depth are handled, and the result is independent of the group's own
+   transform. Visibility-agnostic: hidden nodes count.
+2. New size = the union's extent (clamped ≥ 1); the origin moves onto the union's center `c`.
+3. Compensation: the group's parent-space position becomes `p + L·c` (`L = R(θ)·diag(sx, sy)`, the
+   group's own linear part) and every **direct** child shifts by `−c` in group-local. Deeper
+   descendants are relative to their own parents and stay untouched. Rotation and scale never change.
 
-### 6.15.3 Resolution Presets
+No `Node2D` descendants → no-op (the inspector button is disabled).
 
-```typescript
-enum ResolutionPreset {
-  Custom = 'custom',
-  FullHD = '1920x1080', // 1920x1080
-  HD = '1280x720', // 1280x720
-  MobilePortrait = '1080x1920', // 1080x1920
-  MobileLandscape = '1920x1080', // 1920x1080
-  Tablet = '1024x768', // 1024x768
-}
-```
+### 6.15.2 Proportional child resize (Figma-style)
 
-### 6.15.4 Layout Recalculation
+Resizing a Group2D — gizmo handles or the Inspector W/H fields (`ResizeGroup2DCommand`) — scales its
+children's positions **and sizes** by `(fx, fy) = (newW/oldW, newH/oldH)` about the center origin:
 
-Layout2D triggers layout recalculation for all Group2D children when its size changes:
+| Child | Position | Size | Recurse |
+|---|---|---|---|
+| `layoutEnabled` (anchored) | skip | skip | no — anchor layout owns its subtree |
+| exposes numeric `width` + `height` | `q → (q.x·fx, q.y·fy)` | `width·fx`, `height·fy` (`scale` untouched) | **yes**, same factors |
+| no width/height | `q → (q.x·fx, q.y·fy)` | `scale·(fx, fy)` | no — descendants inherit via the transform |
 
-1. User changes Layout2D size/preset via inspector
-2. `UpdateLayout2DSizeOperation` executes
-3. `layout2d.width` and `layout2d.height` updated
-4. `layout2d.recalculateChildLayouts()` called
-5. For each Group2D child: `child.updateLayout(layout2d.width, layout2d.height)`
-6. Recursive: children update their own children with inherited dimensions
+Invariant: *handled via width/height ⇒ recurse; handled via scale ⇒ stop* — no double-scaling at any
+nesting depth. A zero-size axis forces that factor to 1. Rotated children under non-uniform factors
+are an approximation (a true proportional resize would be a shear, which `Object3D` cannot represent);
+uniform factors are exact for any rotation. The same rules apply to any size-bearing 2D container, not
+just Group2D (e.g. a Sprite2D parenting other sprites).
 
-### 6.15.5 Key Constraints
+- **Live drag** captures each descendant's base state once at drag start and reapplies from it every
+  frame — idempotent, so min-clamps and long gestures cannot accumulate drift.
+- **Hold `Ctrl` while dragging a resize handle** for a box-only resize (children keep their positions
+  and sizes — the "ignore constraints" analog); releasing `Ctrl` mid-drag resumes proportional scaling
+  from the same base states.
+- Non-editor writes to `width`/`height` (generic `UpdateObjectPropertyCommand`, agent tools, scripts,
+  animation) keep box-only semantics plus anchor reflow. Proportional scaling is an *editor authoring*
+  gesture, not a property semantic.
 
-- Layout2D size is **independent** of editor viewport size
-- Editor viewport resize does NOT change Layout2D dimensions
-- Layout2D can only be resized via inspector properties (width/height or preset)
-- Layout2D visibility state cascades to all children
+### 6.15.3 History and grouping
 
-### 6.15.6 Visual Representation
+A whole gesture is **one** undo step: `Transform2DBatchOperation` composes per-node
+`Transform2DCompleteOperation` commits through `BulkOperationBuilder`, ordered container-first (its
+anchor reflow runs before the explicit child plans; undo replays reversed). This also collapses plain
+multi-select move/rotate/scale drags into a single history entry.
 
-- Purple dashed border (0x9b59b6) when `showViewportOutline` is true
-- Border visibility can be toggled via checkbox in inspector
-- Children (Group2D, Sprite2D) render normally within Layout2D bounds
+`GroupSelectedNodesOperation` creates a new Group2D **pre-sized and pre-positioned to the selection's
+bounds** (same measurement as Fit to Contents, expressed in the new group's parent frame) before
+attaching the children — `attach()` preserves their world transforms, so no compensation pass is
+needed and a freshly created group already hugs its contents.
 
 ## 6.16 Project Templates, Target Platform and Agent Overlay
 
@@ -1022,7 +1038,6 @@ still loads without it — the node keeps its authored properties and warns.
       │   │   │   ├── CreateCamera3DCommand.ts
       │   │   │   ├── CreateDirectionalLightCommand.ts
       │   │   │   ├── CreateGroup2DCommand.ts
-      │   │   │   ├── CreateLayout2DCommand.ts
       │   │   │   ├── CreateMeshInstanceCommand.ts
       │   │   │   ├── CreatePointLightCommand.ts
       │   │   │   ├── CreateSpotLightCommand.ts
@@ -1039,8 +1054,9 @@ still loads without it — the node keeps its authored properties and warns.
       │   │   │   ├── SaveAsPrefabCommand.ts
       │   │   │   ├── SaveAsPrefabOperation.ts
       │   │   │   ├── SaveAsSceneCommand.ts
-      │   │   │   ├── SaveSceneCommand.ts
-      │   │   │   └── UpdateLayout2DSizeCommand.ts
+      │   │   │   ├── FitGroup2DToContentsCommand.ts
+      │   │   │   ├── group2d-resize-utils.ts
+      │   │   │   └── SaveSceneCommand.ts
 │   │   └── selection/
 │   │       ├── SelectObjectCommand.ts
 │   │       └── SelectObjectOperation.ts
@@ -1059,7 +1075,6 @@ still loads without it — the node keeps its authored properties and warns.
 │   │   ├── NodeBase.ts       # Extends Three.js Object3D; purely data/logic
       │   │   ├── 2D/
       │   │   │   ├── Group2D.ts
-      │   │   │   ├── Layout2D.ts
       │   │   │   └── Sprite2D.ts
 │   │   └── 3D/
 │   │       ├── Camera3D.ts
@@ -1161,4 +1176,5 @@ still loads without it — the node keeps its authored properties and warns.
 - **1.25 (2026-07-23):** Added the Model Lab **Scene lane** — generates whole `.pix3scene` **levels** from a text brief (a lane switch in the Model Lab panel; reuses the model lane's pass/review machinery). Pipeline (`src/services/model-gen/scene/`): `SceneInventoryService` scans the project for usable models/prefabs/textures → `LevelSpec` codegen (zones + lighting/camera intent + flagged `paletteGaps`, validated) → locked passes (layout → placement → dressing → lighting → polish; edit runs use dressing → lighting → polish) emitting whole-file declarative `.pix3scene` YAML. The validation gate is `SceneManager.parseScene` PLUS `scene-validate` (an allow-list of runtime node `type`s and a `res://`-ref existence check, since parseScene tolerates unknown types and missing refs). Valid YAML is previewed as a live runtime scene (`NodeBase extends THREE.Object3D`, so parsed roots render directly — no SceneRunner) from a top-down orthographic + 3/4 perspective view (`ScenePreviewRenderer`), composited (`buildImageStrip`) and vision-reviewed against the brief with the same autonomous/manual-gate self-correction as the model lane. Depth features: **editing an existing scene** (`baseScenePath` seeds the pass loop), a deterministic **scatter expander** (`type: Scatter` authoring-sugar node → seeded mulberry32 node clusters, expanded before the gate so it never persists), and **palette-gap → model-lane handoff** (`LevelSpec.paletteGaps` surfaced in the panel with a one-click prompt into the model lane). Output saves via `writeTextFile` and opens as a normal scene tab (`EditorTabService.focusOrOpenScene`). Headless: agent tool `generate_scene_3d` and `__PIX3_DEBUG__.scene3d` (debug bridge v7). Node-ops patch editing (incremental large-scene edits) is deliberately deferred; passes regenerate whole-file YAML. Plan: `.plans/model-lab-3d-generator.md`.
 - **1.24 (2026-07-23):** Added Model Lab — an in-editor 3D asset generator that reconstructs hard-surface models **procedurally by code** from a reference image (img2threejs-style; not neural image-to-mesh). Pipeline (`src/services/model-gen/`): vision assess → `SculptSpec` (+ deterministic validator) → locked build passes (blockout → structure → form → material → lighting → optimization; `fast` mode collapses to blockout + form-material) where each pass's `createModel(THREE): THREE.Group` factory is compiled via `ScriptCompilerService` (esbuild → blob import; Mesh*Standard*/*Physical* only, no `ShaderMaterial`), rendered offscreen (`ModelPreviewRenderer`, screenshots a clone so the panel keeps the original), composited against the reference (`ComparisonSheet`), and vision-scored with `continue`/`refine-code`/`refine-spec`/`stop` self-correction (autonomous, or a `pauseForReview` manual gate: Accept/Retry/Stop). Output is a self-contained `.glb` via `Model3DExportService` (+ optional `.sculpt.json`/`.factory.ts` siblings for re-editing), added to a scene as a `MeshInstance`. Two-tab **Model Lab** panel (`src/ui/model-lab/`): Generate (reference drop/paste/pick, prompt, complexity, live preview hot-swap, pass monitor + comparison sheets, IndexedDB job history via `Model3DGenHistoryService` with Open/Regenerate-from-spec) and Settings (codegen + vision model pickers, reasoning effort, score threshold, iterations, save folder). Headless surfaces: agent tool `generate_model_3d` (`AgentToolRegistry`) and `window.__PIX3_DEBUG__.model3d` (debug bridge v6). Objects only — character/organic reconstruction is deferred. Plan: `.plans/model-lab-3d-generator.md`.
 - **1.19 (2026-07-12):** Remote Preview device telemetry in the editor. The QR/join-link modal was replaced by an in-Game-tab session card (`pix3-remote-preview-card`, rendered by `pix3-game-tab` while a preview session is active): QR, join link, relay status and a live device strip; `project.start-remote-preview` opens the Game tab and brings the Profiler and Logs panels forward; closing the Game tab stops the session. Players now report a one-shot `device-info` message (UA, GPU via `WEBGL_debug_renderer_info`, screen/viewport, deviceMemory, cores; re-sent on host reconnect, stored per client on the relay and exposed in session status `players[]`) and extended 1s metrics (`maxFrameMs`, `longFrameCount` >33ms hitches, `jsHeapUsedMb`); player log forwarding is rate-limited (25/500ms window with a drop counter). New `RemotePreviewTelemetryService` keys metrics/logs/status by relay clientId, derives human device labels from UA, and mirrors remote logs into `LoggingService` with a `source` tag; the Logs panel gains a source chip + source filter, and the Profiler panel gains a metrics-source switcher (Editor vs each remote device, auto-selects a live device when local play is idle) rendering 1Hz history charts, a Device section (GPU/screen/memory/cores/status) and spike rows instead of the local-only audio/frame-impact sections.
+- **1.27 (2026-07-25):** Documented **Group2D sizing** (§6.15, replacing the removed `Layout2D` section and its stale `child.updateLayout(...)` cascade) and completed the feature: **Fit to Contents** (`FitGroup2DToContentsCommand`/`Operation` — inspector button, **Edit → Fit Group to Contents**, `Mod+Alt+F`; the command now falls back to the primary selection so the menu/keybinding work, and its preconditions disable it for a non-Group2D or childless selection) and **Figma-style proportional child resize** (gizmo + `ResizeGroup2DCommand`). New: `GroupSelectedNodesOperation` creates a Group2D **pre-sized/pre-positioned to the selection's bounds** in the new group's parent frame (`computeUnionLocalRect` + `sizeGroupToRect`; `attach()` then preserves the children's world transforms) instead of a fixed 100×100 box; **Ctrl/Cmd while dragging a resize handle** resizes the box only (`Transform2DUpdateOptions.resizeBoxOnly` — children are reapplied from the drag-start base states with factors of 1, so the modifier is lossless in both directions mid-drag and box-only children drop out of the commit). Specs added for both operations, the fit command, the group-creation sizing and the box-only modifier. Deliberately not implemented (see `.plans/done/group2d-autosize-resize-design.md` §7): a reactive auto-size flag and promoting the planner into the runtime as `Group2D.scaleContents`.
 - **1.26 (2026-07-25):** Added the `SpineSkeleton2D` node — Spine skeletal animation in the 2D layer (see §7.2.1 for the YAML shape and `docs/node-types-reference.md` → `### SpineSkeleton2D` for the full property/API table). Runtime: `core/spine/` holds the module contract (`spine-module.ts`, a hand-declared structural subset so `@esotericsoftware/spine-threejs` stays an OPTIONAL dependency injected by the host via `setSpineModuleLoader`), the shared asset loader/cache (`SpineAsset.ts`, `AssetLoader.loadSpineAsset` — pages load as standalone textures, bypassing the pre-launch atlas, and `parseSpineAtlasPageNames` exposes page names to tooling), and `SpineSkeletonView.ts` (one renderable skeleton configured for the 2D pass: `depthTest/Write: false` materials, `zOffset: 0`, tint/alpha through spine's skeleton color, play/queue/stop/skin/mix helpers). The node exposes `play`/`queue`/`stop`/`pause`/`resume`/`setSkin`/`setMix`/`setTimeScale` plus `animation-started`/`animation-finished`/`animation-looped`/`spine-event` signals, `freeOnFinish` for one-shot VFX, and a per-instance property schema that turns `animation`/`skin` into dropdowns of the loaded skeleton's real names (an instance property now REPLACES the same-named static one in `getNodePropertySchema` instead of appending a duplicate row). Editor playback is opt-in — the Inspector's Editor Preview row toggles `previewInEditor` and its Reset rewinds to the first frame as transient, non-undoable pose state (`resetToFirstFrame`). Editor: the same `SpineSkeletonView` backs a new viewport proxy (`spineSkeleton2DVisuals`, placeholder frame until the asset resolves, setup-pose AABB for selection/framing, per-frame layer re-stamping because spine adds batch meshes lazily), `previewInEditor` animates through the preview ticker, and `CreateSpineSkeleton2DCommand`/`Operation` register in the node palette and the agent create-node registry. New generic inspector editor kind `file-resource` (+ `ui.extensions`) for picking project files by extension. Export/tooling: the build model carries `usesSpine` (a scene/prefab scan for `type: SpineSkeleton2D`) and emits `src/generated/spine-runtime.ts` behind the new `virtual:runtime-spine` module — a STATIC import of the Spine runtime for projects that use it (a dynamic one would become a chunk the single-file HTML export cannot fetch), empty otherwise; the playable bundler vendors `spine-threejs`'s prebuilt ESM alongside three/yaml/rapier, and the generated npm project gets the dependency plus a resolve alias. `ProjectBuildService` embeds atlas page images, `TextureAtlasService` excludes them from packing, and `.atlas`/`.skel` join the asset taxonomies.

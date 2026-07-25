@@ -41,26 +41,38 @@ export function computeContentsLocalRect(
   measure: Node2DCornerMeasurer
 ): LocalRect | null {
   group.updateWorldMatrix(true, false);
-  const groupWorldInverse = group.matrixWorld.clone().invert();
+  const node2DChildren = group.children.filter((child): child is Node2D => child instanceof Node2D);
+  return computeUnionLocalRect(node2DChildren, group.matrixWorld.clone().invert(), measure);
+}
+
+/**
+ * Union of `nodes` and their whole subtrees — each node's own node-only rect (via the measurer) plus
+ * every `Node2D` descendant's — expressed in the frame described by `frameWorldInverse` (the inverse
+ * world matrix of the frame to measure in: a group for fit-to-contents, a prospective parent when
+ * pre-sizing a new group to a selection). Returns `null` when `nodes` is empty.
+ */
+export function computeUnionLocalRect(
+  nodes: readonly Node2D[],
+  frameWorldInverse: THREE.Matrix4,
+  measure: Node2DCornerMeasurer
+): LocalRect | null {
   const box = new THREE.Box3();
   let expanded = false;
 
-  const visit = (parent: Node2D): void => {
-    for (const child of parent.children) {
-      if (!(child instanceof Node2D)) continue;
-      child.updateWorldMatrix(true, false);
-      for (const corner of measure(child)) {
-        const inGroupLocal = corner
-          .clone()
-          .applyMatrix4(child.matrixWorld)
-          .applyMatrix4(groupWorldInverse);
-        box.expandByPoint(inGroupLocal);
-        expanded = true;
-      }
-      visit(child);
+  const visit = (node: Node2D): void => {
+    node.updateWorldMatrix(true, false);
+    for (const corner of measure(node)) {
+      const inFrame = corner.clone().applyMatrix4(node.matrixWorld).applyMatrix4(frameWorldInverse);
+      box.expandByPoint(inFrame);
+      expanded = true;
+    }
+    for (const child of node.children) {
+      if (child instanceof Node2D) visit(child);
     }
   };
-  visit(group);
+  for (const node of nodes) {
+    visit(node);
+  }
 
   if (!expanded) return null;
   return { minX: box.min.x, minY: box.min.y, maxX: box.max.x, maxY: box.max.y };
@@ -116,6 +128,20 @@ export function buildFitPlans(group: Group2D, rect: LocalRect): Transform2DCompl
   }
 
   return plans;
+}
+
+/**
+ * Set a (childless or freshly created) group's box to `rect` directly, where `rect` is expressed in
+ * the group's PARENT frame: the box wraps the rect and the center-origin lands on its center. Used
+ * when a new Group2D is created around a selection — the children are attached afterwards, and
+ * `attach()` preserves their world transforms. For an existing group with children use
+ * {@link buildFitPlans} instead, which keeps the children world-exact and is undoable.
+ */
+export function sizeGroupToRect(group: Group2D, rect: LocalRect): void {
+  group.width = Math.max(1, rect.maxX - rect.minX);
+  group.height = Math.max(1, rect.maxY - rect.minY);
+  group.position.set((rect.minX + rect.maxX) / 2, (rect.minY + rect.maxY) / 2, group.position.z);
+  group.captureAuthoredLayoutRectFromCurrent();
 }
 
 /** How a node participates in proportional resize: via width/height (recurse) or via scale (stop). */

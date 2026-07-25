@@ -1116,6 +1116,8 @@ export class EditorTabComponent extends ComponentBase {
         preserveAspectRatio: event.shiftKey,
         constrainMoveToAxis: event.shiftKey,
         snapRotation: event.shiftKey,
+        // Hold Ctrl/Cmd while resizing to change the container's box only (children stay put).
+        resizeBoxOnly: event.ctrlKey || event.metaKey,
         // Hold Alt to temporarily invert the persistent snap setting.
         snapToGrid: appState.ui.snapToGrid !== event.altKey,
         gridSize: appState.ui.grid2DSize,

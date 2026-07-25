@@ -67,6 +67,7 @@ import { RefreshPrefabInstancesCommand } from '@/features/scene/RefreshPrefabIns
 import { DeleteObjectCommand } from '@/features/scene/DeleteObjectCommand';
 import { DuplicateNodesCommand } from '@/features/scene/DuplicateNodesCommand';
 import { GroupSelectedNodesCommand } from '@/features/scene/GroupSelectedNodesCommand';
+import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { PublishToLibraryCommand } from '@/features/library/PublishToLibraryCommand';
 import { UndoCommand } from '@/features/history/UndoCommand';
@@ -363,6 +364,7 @@ export class Pix3EditorShell extends ComponentBase {
     const deleteCommand = new DeleteObjectCommand();
     const duplicateCommand = new DuplicateNodesCommand();
     const groupSelectedCommand = new GroupSelectedNodesCommand();
+    const fitGroup2DToContentsCommand = new FitGroup2DToContentsCommand();
     const saveAsPrefabCommand = new SaveAsPrefabCommand();
     const publishToLibraryCommand = new PublishToLibraryCommand();
     const undoCommand = new UndoCommand(this.operationService);
@@ -436,6 +438,7 @@ export class Pix3EditorShell extends ComponentBase {
       deleteCommand,
       duplicateCommand,
       groupSelectedCommand,
+      fitGroup2DToContentsCommand,
       saveAsPrefabCommand,
       publishToLibraryCommand,
       startGameCommand,

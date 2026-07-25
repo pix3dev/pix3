@@ -1,6 +1,9 @@
 # Design: Group2D "Fit to Contents" + Figma-style Proportional Child Resize
 
-Status: DESIGN (implementation-ready). Two coupled editor features:
+Status: **SHIPPED** — Phase 1 (commit `7cd1bac`), Phase 2 and the actionable Phase 3 items are all
+implemented and live-verified; see §7 for what was deliberately left out. Behavior of record is now
+`docs/pix3-specification.md` → "Group2D Sizing: Fit to Contents and Proportional Resize"; this file is
+kept as the design rationale. Two coupled editor features:
 
 - **(A) Fit Group2D to contents** — one-shot action that recomputes the group's `width`/`height`
   (and shifts its center-origin) to wrap its children, **without moving any child in world space**.
@@ -389,27 +392,57 @@ Size
 
 ## 7. Phased plan
 
-**Phase 1 — MVP (one PR, both features):**
-1. `group2d-resize-utils.ts` + unit specs (pure math: rotated/scaled groups, anchor-aware sprite
-   corners, nested groups, zero sizes, layoutEnabled skip).
-2. (A) `FitGroup2DToContentsOperation`/`Command` + inspector button + op spec (build a small scene
-   graph, run, assert world corners of every descendant unchanged; assert single undo step
-   restores byte-exact states — follow `Align2DNodesOperation.spec.ts` patterns).
-3. (B-inspector) `ResizeGroup2DOperation`/`Command` + `renderSizeGroup` Group2D branch + op spec
-   (children position+size scaled; nested group recursion; anchored child skipped; undo exact).
-4. (B-gizmo) `Transform2DBatchOperation`; `TransformTool2d` child capture + live apply;
-   `complete2DTransform` batching; delete dead `updateLayout` block; manual verify via
-   editor (drag handles on a populated group; undo once restores everything).
+**Phase 1 — MVP (one PR, both features): DONE** (commit `7cd1bac`, specs completed afterwards)
+1. ✅ `group2d-resize-utils.ts` + unit specs (pure math: rotated/scaled groups, anchor-aware sprite
+   corners, nested groups, zero sizes, layoutEnabled skip) — 14 tests.
+2. ✅ (A) `FitGroup2DToContentsOperation`/`Command` + inspector button + op spec
+   (`FitGroup2DToContentsOperation.spec.ts`: rotated+scaled group, nested descendant sticking out,
+   anchored child, world-invariance of every descendant, single-step undo/redo).
+3. ✅ (B-inspector) `ResizeGroup2DOperation`/`Command` + `renderSizeGroup` Group2D branch + op spec
+   (`ResizeGroup2DOperation.spec.ts`: position+size scaling, nested recursion, scale-fallback stop
+   rule, anchored child skipped, undo/redo exact, invalid/unchanged size no-op).
+4. ✅ (B-gizmo) `Transform2DBatchOperation`; `TransformTool2d` child capture + live apply;
+   `complete2DTransform` batching; dead `updateLayout` block deleted.
 
-**Phase 2:** auto-fit on group creation in `GroupSelectedNodesOperation` (decision #7) — create
-pre-sized at selection bounds, `attach()` does the rest; update its spec.
+**Phase 2 — DONE:** auto-fit on group creation in `GroupSelectedNodesOperation` (decision #7). The
+group is created, inserted, then sized via `computeUnionLocalRect` + `sizeGroupToRect` **in its own
+parent frame** before the `attach()` loop (attach preserves world transforms). Falls back to the
+default box when nothing measurable is selected or no `ViewportRendererService` is available
+(headless). New `GroupSelectedNodesOperation.spec.ts` covers bounds sizing + world-invariance, the
+parent-frame measurement, undo, and the unaffected 3D path.
 
-**Phase 3 (optional, post-feedback):**
-- Ctrl-drag / checkbox modifier for box-only group resize (Figma's "ignore constraints" analog).
-- Menu entry + shortcut for Fit (`menuPath`, via CommandRegistry metadata).
-- Reactive auto-size **flag** — still not recommended: needs recompute hooks on every child
-  mutation path, feedback-loop guards against (B), serialization + runtime semantics questions
-  (engine-agnostic rule). Revisit only if users ask after living with the button.
-- Promote `buildProportionalResizePlans` into `packages/pix3-runtime/src/core/` +
-  `Group2D.scaleContents(fx, fy)` if a game needs runtime proportional resize (then
-  `yalc:publish` + `docs/nodes-and-systems.md` entry).
+**Phase 3:**
+- ✅ **Ctrl/Cmd-drag box-only resize** — `Transform2DUpdateOptions.resizeBoxOnly`, passed from
+  `editor-tab`'s pointermove (`event.ctrlKey || event.metaKey`). Implemented by reapplying the
+  drag-start base states with factors of 1 (and no min clamp), so the modifier is lossless in both
+  directions mid-drag and box-only children fall out of the commit via `isStateEqual`. 3 specs in
+  `TransformTool2d.spec.ts`.
+- ✅ **Menu entry + shortcut for Fit** — `FitGroup2DToContentsCommand` now takes optional params and
+  resolves the primary selection otherwise; `menuPath: 'edit'`, `menuOrder: 17`,
+  `keybinding: 'Mod+Alt+F'`, `when: '!isInputFocused && (viewportFocused || sceneTreeFocused)'`;
+  registered in `pix3-editor-shell`. Preconditions reject a non-Group2D / childless selection so the
+  menu item disables. `FitGroup2DToContentsCommand.spec.ts` covers the fallback and the gating.
+- ❌ **NOT implemented — reactive auto-size flag.** Still rejected for the reasons in decision #1:
+  recompute hooks on every child-mutation path, feedback-loop guards against (B), and serialization +
+  runtime semantics questions. Revisit only if users ask after living with the button.
+- ❌ **NOT implemented — promoting the planner into `packages/pix3-runtime`** (`Group2D.scaleContents`).
+  Conditional by design: it buys nothing until a game needs runtime proportional resize, and it would
+  add a runtime API + `yalc:publish` + `docs/nodes-and-systems.md` surface. The module is written
+  dependency-light so the move stays cheap.
+
+## 8. Live verification (in-editor, state-based)
+
+Verified against the running editor (HelloWorld project, `test-spine` scene: `Stage` Group2D →
+`SpineBoy`):
+
+- **Phase 2:** grouping the selected SpineBoy produced a Group2D at the spine setup-bounds centre
+  (`20.59, 135.16`) sized **418 × 686** (not the old fixed 100 × 100), with the child compensated to
+  `(-20.59, -335.16)` — world position exactly preserved at `(0, -200)`.
+- **Fit via the registered command** (no params → primary selection, i.e. the menu/shortcut path):
+  after a generic `width = 1000` edit (box-only, child untouched — decision #5 confirmed live),
+  `scene.fit-group2d-to-contents` shrank the box back to 418 × 686 keeping the child's world position;
+  one `edit.undo` restored it.
+- **Ctrl box-only drag:** `scale-e` drag with `resizeBoxOnly` left the child local position at
+  `-20.591`; releasing the modifier mid-drag re-derived it as `-22.831` (= `-20.591 × 1109/1000`, the
+  live factor); the commit was a single history entry and one undo restored group + child. No console
+  errors; the scene was restored via undo (nothing saved).

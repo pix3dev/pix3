@@ -293,7 +293,7 @@ Pix3 supports specialized navigation modes for 2D and 3D authoring, controlled v
 - **Controls**: Custom orthographic pan and zoom. Standard OrbitControls are disabled.
 - **Camera**: Orthographic camera.
 - **Behavior**: Handled via `pan2D` and `zoom2D` in `ViewportRendererService`. Trackpad gestures and wheel events are mapped to 2D transformations.
-- **Integration**: Viewport interaction changes to flat, axis-aligned movement, ideal for working with `Layout2D` and 2D elements.
+- **Integration**: Viewport interaction changes to flat, axis-aligned movement, ideal for working with `Group2D` and 2D elements.
 
 ### Adaptive layer & navigation availability
 

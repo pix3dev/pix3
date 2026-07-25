@@ -61,6 +61,13 @@ pix3-assets-content .crumb:disabled {
   cursor: default;
 }
 
+pix3-assets-content .crumb.is-drop-target {
+  background: var(--accent-soft);
+  color: var(--fg-0);
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
+
 pix3-assets-content .crumb-sep {
   display: inline-flex;
   align-items: center;
@@ -191,6 +198,13 @@ pix3-assets-content .assets-preview-item:hover {
 }
 
 pix3-assets-content .assets-preview-item.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Folder card under an asset drag — dropping there moves the dragged items into it. */
+pix3-assets-content .assets-preview-item.is-drop-target {
+  border-style: dashed;
   border-color: var(--accent);
   background: var(--accent-soft);
 }
@@ -362,6 +376,12 @@ pix3-assets-content .assets-list-row:hover {
 pix3-assets-content .assets-list-row.is-selected {
   border-left-color: var(--accent);
   background: var(--accent-soft);
+}
+
+pix3-assets-content .assets-list-row.is-drop-target {
+  background: var(--accent-soft);
+  outline: 2px dashed var(--accent-line);
+  outline-offset: -2px;
 }
 
 pix3-assets-content .assets-list-row .row-thumb {

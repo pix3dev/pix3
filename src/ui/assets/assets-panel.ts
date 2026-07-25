@@ -231,6 +231,18 @@ export class AssetsPanel extends ComponentBase {
     void this.deletePaths(paths);
   };
 
+  /**
+   * A content-pane drop on a folder card / breadcrumb. Routed through the Asset Tree so
+   * grid drops and tree drops share one move flow (single confirmation, `res://`
+   * reference rewrite, tree + grid refresh).
+   */
+  private onContentMoveRequest = (e: Event) => {
+    const detail = (e as CustomEvent<{ paths: string[]; targetPath: string; targetLabel: string }>)
+      .detail;
+    if (!detail || detail.paths.length === 0 || appState.collaboration.isReadOnly) return;
+    void this.assetTreeRef?.movePathsInto(detail.paths, detail.targetPath, detail.targetLabel);
+  };
+
   // ── Toolbar actions ──────────────────────────────────────────────────────
   private onCreateFolder = async () => {
     try {
@@ -568,6 +580,7 @@ export class ${singletonName} extends Script {
         @folder-navigate=${this.onFolderNavigate}
         @content-rename-request=${this.onContentRenameRequest}
         @content-delete-request=${this.onContentDeleteRequest}
+        @content-move-request=${this.onContentMoveRequest}
       >
         <div
           class="assets-split"
