@@ -11,6 +11,7 @@ import {
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { DialogService } from '@/services/editor/DialogService';
 import { ApiClientError, storeFileUrl } from '@/services/cloud/ApiClient';
+import { normalizeBundlePath } from '@/services/library/library-path-remap';
 import {
   canEditSource,
   categoriesForSource,
@@ -296,7 +297,10 @@ export class LibraryInspector extends ComponentBase {
     if (value === current) {
       return;
     }
-    await this.patchStore({ manifestPatch: { [field]: value || undefined } });
+    // Send the empty string, not `undefined`: JSON.stringify drops undefined keys, so clearing a
+    // field (picking "— none —" for the license, emptying the description) would never reach the
+    // server — the patch would arrive without the key and the old value would survive.
+    await this.patchStore({ manifestPatch: { [field]: value } });
   }
 
   /**
@@ -443,7 +447,7 @@ export class LibraryInspector extends ComponentBase {
           path =>
             html`<img
               class="lib-insp__gallery-img"
-              src=${storeFileUrl(item.manifest.id, path)}
+              src=${storeFileUrl(item.manifest.id, normalizeBundlePath(path))}
               alt=""
               loading="lazy"
             />`

@@ -38,6 +38,12 @@ function toManifest(raw: Record<string, unknown> | null): LibraryItemManifest | 
   if (!raw || typeof raw.id !== 'string' || !Array.isArray(raw.files)) {
     return null;
   }
+  // Every entry must be a string: `fetchServerBundle` feeds them straight to `normalizeBundlePath`,
+  // so a malformed index (or a proxy returning something else) would throw mid-download instead of
+  // degrading to the fallback pack.
+  if (!raw.files.every(file => typeof file === 'string')) {
+    return null;
+  }
   // Only the fields the UI indexes by are checked; the server owns the rest of the shape.
   return raw as unknown as LibraryItemManifest;
 }
@@ -214,16 +220,23 @@ export class StoreLibraryProvider implements LibraryProvider {
       return null;
     }
 
-    const files = new Map<string, Blob>();
-    for (const relativePath of manifest.files) {
+    // Fetch the bundle's files concurrently — a prefab pulls its textures, scripts and nested
+    // scenes, and downloading them one after another made the wait the sum of the round-trips.
+    // The browser still caps parallel requests per host; any failure collapses to null as before.
+    const downloads = manifest.files.map(async relativePath => {
       const normalized = normalizeBundlePath(relativePath);
       const response = await fetch(ApiClient.storeFileUrl(id, normalized));
       if (!response.ok) {
         return null;
       }
-      files.set(normalized, await response.blob());
+      return [normalized, await response.blob()] as const;
+    });
+
+    const entries = await Promise.all(downloads);
+    if (entries.some(entry => entry === null)) {
+      return null;
     }
-    return { manifest, files };
+    return { manifest, files: new Map(entries as Array<readonly [string, Blob]>) };
   }
 
   private invalidate(): void {

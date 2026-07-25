@@ -163,6 +163,44 @@ describe('StoreLibraryProvider', () => {
     expect(bundle?.manifest.id).toBe('a');
   });
 
+  it('fetches bundle files concurrently and fails the whole bundle on one bad file', async () => {
+    mockApiClient.getStoreItem.mockResolvedValue({
+      item: serverEntry('a', 'Server A', ['one.png', 'two.png', 'three.png']),
+    });
+    let inFlight = 0;
+    let peakInFlight = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string) => {
+        inFlight += 1;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+        return String(url).endsWith('two.png')
+          ? new Response(null, { status: 404 })
+          : new Response(new Blob(['data']), { status: 200 });
+      })
+    );
+    const fallback = createFallback([]);
+    const provider = new StoreLibraryProvider(fallback);
+
+    // One missing file must not yield a half-materialized bundle.
+    await expect(provider.getBundle('a')).resolves.toBeNull();
+    expect(peakInFlight).toBeGreaterThan(1);
+  });
+
+  it('rejects a server manifest whose files are not strings', async () => {
+    const broken = serverEntry('a', 'Server A');
+    (broken.manifest as Record<string, unknown>).files = [{ nope: true }];
+    mockApiClient.getStoreIndex.mockResolvedValue({ items: [broken] });
+    mockApiClient.getStoreItem.mockResolvedValue({ item: broken });
+    const provider = new StoreLibraryProvider(createFallback([]));
+
+    // A malformed index degrades to the pack instead of throwing mid-download.
+    await expect(provider.list()).resolves.toEqual([]);
+    await expect(provider.getBundle('a')).resolves.toBeNull();
+  });
+
   it('falls back to the pack bundle when the server does not have the item', async () => {
     mockApiClient.getStoreItem.mockRejectedValue(new Error('404'));
     const fallback = createFallback([packItem('b', 'Pack B')]);
