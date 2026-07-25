@@ -36,6 +36,7 @@ describe('PlayableHtmlBuildService', () => {
       scenePaths: ['scenes/main.pix3scene'],
       entryScenePath: 'scenes/main.pix3scene',
       assetPaths: ['assets/hero.png', 'scenes/main.pix3scene'],
+      usesSpine: false,
       projectScriptFiles: new Map([
         ['scripts/bootstrap.ts', 'export class Bootstrap {}\n'],
         ['src/scripts/player.ts', 'export class Player {}\n'],
@@ -178,6 +179,7 @@ describe('PlayableHtmlBuildService', () => {
             scenePaths: ['scenes/main.pix3scene'],
             entryScenePath: 'scenes/main.pix3scene',
             assetPaths: [],
+            usesSpine: false,
             projectScriptFiles: new Map(),
             files: new Map([['src/main.ts', "console.log('boot');\n"]]),
             warnings: [],

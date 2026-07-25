@@ -111,15 +111,32 @@ const YAML_VENDOR_SOURCE_LOADERS = import.meta.glob('../../../node_modules/yaml/
   import: 'default',
 }) as Record<string, () => Promise<string>>;
 
+/**
+ * The optional Spine runtime, as its prebuilt single-file ESM bundle (spine-core
+ * is already inlined there; its only external is `three`, which the alias map
+ * below points at the vendored copy). Loaded lazily by the bundler and only
+ * reachable when the generated `virtual:runtime-spine` module imports it, i.e.
+ * when the project actually places a SpineSkeleton2D.
+ */
+const SPINE_VENDOR_SOURCE_LOADERS = import.meta.glob(
+  '../../../node_modules/@esotericsoftware/spine-threejs/dist/esm/spine-threejs.mjs',
+  {
+    query: '?raw',
+    import: 'default',
+  }
+) as Record<string, () => Promise<string>>;
+
 const GENERATED_EMBEDDED_ASSETS_MODULE_PATH = 'virtual/generated/runtime-embedded-assets.ts';
 const GENERATED_REFLECT_METADATA_MODULE_PATH = 'virtual/generated/reflect-metadata.ts';
 const GENERATED_IOS_HAPTICS_MODULE_PATH = 'virtual/generated/ios-haptics.ts';
 const GENERATED_LIT_DECORATORS_MODULE_PATH = 'virtual/generated/lit-decorators.ts';
+const GENERATED_SPINE_RUNTIME_MODULE_PATH = 'virtual/generated/runtime-spine.ts';
 const REGISTER_PROJECT_SCRIPTS_PATH = 'src/register-project-scripts.ts';
 const RUNTIME_SOURCE_PREFIX = 'pix3-runtime/src/';
 const RAPIER_VENDOR_MODULE_PATH = 'vendor/rapier/rapier.mjs';
 const THREE_VENDOR_PREFIX = 'vendor/three/';
 const YAML_VENDOR_PREFIX = 'vendor/yaml/';
+const SPINE_VENDOR_MODULE_PATH = 'vendor/spine/spine-threejs.mjs';
 const RAPIER_VENDOR_WASM_URL_PATTERN = /new URL\("rapier_wasm3d_bg\.wasm","<deleted>"\)/g;
 
 @injectable()
@@ -239,6 +256,8 @@ export class PlayableHtmlBuildService {
         yaml: `${YAML_VENDOR_PREFIX}browser/index.js`,
         'lit/decorators.js': GENERATED_LIT_DECORATORS_MODULE_PATH,
         'virtual:runtime-embedded-assets': GENERATED_EMBEDDED_ASSETS_MODULE_PATH,
+        'virtual:runtime-spine': GENERATED_SPINE_RUNTIME_MODULE_PATH,
+        '@esotericsoftware/spine-threejs': SPINE_VENDOR_MODULE_PATH,
         'reflect-metadata': GENERATED_REFLECT_METADATA_MODULE_PATH,
         'ios-haptics': GENERATED_IOS_HAPTICS_MODULE_PATH,
       },
@@ -292,6 +311,13 @@ export class PlayableHtmlBuildService {
       ].join('\n')
     );
     files.set(GENERATED_EMBEDDED_ASSETS_MODULE_PATH, embeddedAssetsModule.moduleSource);
+    // Registers the optional Spine runtime, but only for projects that use it —
+    // the module is `export {}` otherwise, so esbuild never pulls the vendored
+    // bundle in and Spine-free exports stay the same size as before.
+    files.set(
+      GENERATED_SPINE_RUNTIME_MODULE_PATH,
+      model.files.get('src/generated/spine-runtime.ts') ?? 'export {};'
+    );
 
     return {
       files,
@@ -484,6 +510,14 @@ export class PlayableHtmlBuildService {
   }
 
   private async loadVendorModuleSource(filePath: string): Promise<string | null> {
+    if (filePath === SPINE_VENDOR_MODULE_PATH) {
+      const loader =
+        SPINE_VENDOR_SOURCE_LOADERS[
+          '../../../node_modules/@esotericsoftware/spine-threejs/dist/esm/spine-threejs.mjs'
+        ] ?? null;
+      return loader ? await loader() : null;
+    }
+
     if (filePath === RAPIER_VENDOR_MODULE_PATH) {
       return await this.loadRapierCompatModuleSource();
     }

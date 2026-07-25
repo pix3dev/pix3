@@ -21,6 +21,9 @@ import {
 } from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
+// Registers the optional Spine runtime when the build detected a SpineSkeleton2D;
+// a no-op module otherwise. Must run before the first scene load.
+import 'virtual:runtime-spine';
 
 async function bootstrap(): Promise<void> {
   const app = document.getElementById('app');

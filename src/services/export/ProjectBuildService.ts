@@ -35,14 +35,34 @@ export interface RuntimeProjectBuildModel {
   readonly assetPaths: readonly string[];
   readonly projectScriptFiles: ReadonlyMap<string, string>;
   readonly files: ReadonlyMap<string, string>;
+  /**
+   * True when a scene or prefab in the build places a `SpineSkeleton2D`. The
+   * optional Spine runtime is only wired into the generated bundle in that case,
+   * so projects that never use it ship none of its ~500 KB.
+   */
+  readonly usesSpine: boolean;
   readonly warnings: readonly string[];
 }
 
+/** Kept in sync with the editor's own dependency: the skeleton data format is minor-locked. */
+const SPINE_RUNTIME_DEPENDENCY_RANGE = '~4.3';
 const RUNTIME_BUILD_COMMAND = 'vite build';
 const RUNTIME_DEV_COMMAND = 'vite';
 const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
 const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
 const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;
+/**
+ * `type: SpineSkeleton2D` in a scene/prefab — one trigger for bundling Spine.
+ * The optional tail allows a trailing YAML comment (`type: SpineSkeleton2D # hero`),
+ * which would otherwise read as "no Spine" and produce an export that ships the
+ * skeleton's assets but not the runtime that draws them.
+ */
+const SPINE_NODE_PATTERN = /(^|\s)type:\s*['"]?SpineSkeleton2D['"]?\s*(#.*)?$/m;
+/**
+ * The other trigger: a script that spawns / looks up the node type at runtime,
+ * in a project whose authored scenes contain no skeleton yet.
+ */
+const SPINE_SCRIPT_PATTERN = /\bSpineSkeleton2D\b/;
 const RELATIVE_IMPORT_PATTERN =
   /\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 const PROJECT_SOURCE_IMPORT_SUFFIXES = [
@@ -100,6 +120,7 @@ export class ProjectBuildService {
     const entryScenePath = this.resolveEntryScenePath(context, scenePaths, options, warnings);
     const projectScriptFiles = await this.collectProjectScriptFiles();
     const assetPaths = await this.collectAssetPaths(scenePaths, projectScriptFiles, warnings);
+    const usesSpine = this.scanFoundSpineNode;
     const projectName = context.state.project.projectName ?? 'Pix3 Project';
     const quality =
       context.state.project.manifest?.quality ??
@@ -121,8 +142,10 @@ export class ProjectBuildService {
         entryScenePath,
         assetPaths,
         quality,
-        localization
+        localization,
+        usesSpine
       ),
+      usesSpine,
       warnings,
     };
   }
@@ -137,7 +160,7 @@ export class ProjectBuildService {
     const ensuredDirectories = new Set<string>();
     const writtenFiles = await this.writeGeneratedFiles(model.files, ensuredDirectories);
 
-    const packageJsonUpdated = await this.mergePackageJsonPatch();
+    const packageJsonUpdated = await this.mergePackageJsonPatch(model.usesSpine);
     createdDirectories = ensuredDirectories.size;
 
     return {
@@ -237,6 +260,13 @@ export class ProjectBuildService {
     return typeof configured === 'string' ? this.normalizeResourcePath(configured) : '';
   }
 
+  /**
+   * Set while scanning scenes/prefabs in {@link collectAssetPaths} — see
+   * {@link RuntimeProjectBuildModel.usesSpine}. Reading the texts again just to
+   * answer this would double the scan cost, so the flag rides along.
+   */
+  private scanFoundSpineNode = false;
+
   private async collectAssetPaths(
     scenePaths: string[],
     projectScriptFiles: ReadonlyMap<string, string>,
@@ -261,6 +291,8 @@ export class ProjectBuildService {
       }
     };
 
+    this.scanFoundSpineNode = false;
+
     // Seed with EVERY scene and prefab on disk, not just the navigable manifest
     // scenes: a game can load any scene/prefab dynamically at runtime (e.g.
     // `scene.instantiate('res://…/explosion.pix3scene')` or a computed level
@@ -276,6 +308,9 @@ export class ProjectBuildService {
     const projectSourceFiles = await this.collectProjectSourceDependencies(projectScriptFiles);
     for (const sourceContents of projectSourceFiles.values()) {
       this.collectResourcePathsFromText(sourceContents, addResourcePath);
+      if (!this.scanFoundSpineNode && SPINE_SCRIPT_PATTERN.test(sourceContents)) {
+        this.scanFoundSpineNode = true;
+      }
     }
 
     while (scanQueue.length > 0) {
@@ -287,6 +322,9 @@ export class ProjectBuildService {
       try {
         const contents = await this.fs.readTextFile(scannablePath);
         this.collectResourcePathsFromText(contents, addResourcePath);
+        if (!this.scanFoundSpineNode && SPINE_NODE_PATTERN.test(contents)) {
+          this.scanFoundSpineNode = true;
+        }
       } catch {
         warnings.push(`Failed to scan resource for asset references: ${scannablePath}`);
       }
@@ -602,7 +640,7 @@ export class ProjectBuildService {
     return !EXCLUDED_PROJECT_SCRIPT_SUFFIXES.some(suffix => normalized.endsWith(suffix));
   }
 
-  private async mergePackageJsonPatch(): Promise<boolean> {
+  private async mergePackageJsonPatch(usesSpine: boolean): Promise<boolean> {
     const patchTemplate = this.getPackagePatchTemplate();
     if (!patchTemplate) {
       return false;
@@ -632,11 +670,42 @@ export class ProjectBuildService {
     }
 
     this.mergeStringMap(existing, 'dependencies', patch.dependencies ?? {});
+    if (usesSpine) {
+      // Only projects that place a SpineSkeleton2D get the (separately licensed,
+      // ~500 KB) Spine runtime as a dependency.
+      this.mergeStringMap(existing, 'dependencies', {
+        '@esotericsoftware/spine-threejs': SPINE_RUNTIME_DEPENDENCY_RANGE,
+      });
+    }
     this.mergeStringMap(existing, 'devDependencies', patch.devDependencies ?? {});
 
     const json = JSON.stringify(existing, null, 2) + '\n';
     await this.fs.writeTextFile('package.json', json);
     return true;
+  }
+
+  /**
+   * Source of the generated `virtual:runtime-spine` module.
+   *
+   * It imports the Spine runtime STATICALLY on purpose: a dynamic import becomes
+   * a separate chunk, which a single-file HTML export can never fetch. The module
+   * is empty unless a scene actually places a `SpineSkeleton2D`, so projects that
+   * do not use Spine ship none of its ~500 KB.
+   */
+  private buildSpineRuntimeModule(usesSpine: boolean): string {
+    if (!usesSpine) {
+      return ['// No SpineSkeleton2D in this project: Spine is not bundled.', 'export {};', ''].join(
+        '\n'
+      );
+    }
+
+    return [
+      "import * as spine from '@esotericsoftware/spine-threejs';",
+      "import { setSpineModuleLoader, type SpineModule } from '@pix3/runtime';",
+      '',
+      'setSpineModuleLoader(() => Promise.resolve(spine as unknown as SpineModule));',
+      '',
+    ].join('\n');
   }
 
   private buildGeneratedFiles(
@@ -645,7 +714,8 @@ export class ProjectBuildService {
     entryScenePath: string,
     assetPaths: readonly string[],
     quality: QualitySettings,
-    localization: RuntimeLocalizationConfig
+    localization: RuntimeLocalizationConfig,
+    usesSpine: boolean
   ): ReadonlyMap<string, string> {
     const replacements: Record<string, string> = {
       PROJECT_NAME: projectName,
@@ -666,6 +736,7 @@ export class ProjectBuildService {
       'src/generated/scene-manifest.ts',
       this.buildSceneManifestTs(scenePaths, entryScenePath, quality, localization)
     );
+    files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usesSpine));
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
     for (const [sourcePath, sourceContents] of Object.entries(runtimeSourceFiles)) {
