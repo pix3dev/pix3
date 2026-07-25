@@ -256,6 +256,51 @@ pix3-assets-content .audio-play-btn.is-playing {
   transform: scale(1.06);
 }
 
+/* List-view variant: sits in the row flow instead of over a thumbnail. */
+pix3-assets-content .audio-play-btn.is-inline {
+  position: static;
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  background: transparent;
+  color: var(--fg-2);
+}
+
+pix3-assets-content .audio-play-btn.is-inline svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+/* Playhead: a hairline track whose fill is scaled by --audio-progress (0..1), so
+   `timeupdate` only rewrites a custom property instead of relayouting the card. */
+pix3-assets-content .audio-progress,
+pix3-assets-content .row-audio-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--line-2);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+pix3-assets-content .audio-progress::after,
+pix3-assets-content .row-audio-progress::after {
+  content: '';
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(var(--audio-progress, 0));
+  transform-origin: left center;
+}
+
+pix3-assets-content .row-audio-progress {
+  height: 2px;
+  border-radius: 999px;
+}
+
 pix3-assets-content .thumb-spinner {
   position: absolute;
   width: 1.15rem;
@@ -294,6 +339,7 @@ pix3-assets-content .assets-list {
 }
 
 pix3-assets-content .assets-list-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.5rem;

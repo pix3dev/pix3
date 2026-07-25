@@ -74,7 +74,7 @@ describe('ExportPlayableHtmlCommand', () => {
     }
   });
 
-  it('fails precondition when there are no loaded scenes', () => {
+  it('passes precondition with no loaded scenes (export builds from disk)', () => {
     const command = new ExportPlayableHtmlCommand();
 
     const context = createContext({
@@ -82,13 +82,9 @@ describe('ExportPlayableHtmlCommand', () => {
       scenes: { descriptors: {}, activeSceneId: null },
     });
 
-    const result = command.preconditions(context);
-
-    expect(result.canExecute).toBe(false);
-    if (!result.canExecute) {
-      expect(result.reason).toBe('At least one loaded scene is required');
-      expect(result.scope).toBe('scene');
-    }
+    // Export discovers scenes on disk, so it must stay enabled on the Project Home tab,
+    // which loads no scene; the "project has a scene" check happens at execute time.
+    expect(command.preconditions(context).canExecute).toBe(true);
   });
 
   it('exports playable html through the save picker when available', async () => {

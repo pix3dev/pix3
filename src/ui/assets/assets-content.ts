@@ -94,6 +94,14 @@ export class AssetsContent extends ComponentBase {
   @state()
   private playingAudioPath: string | null = null;
 
+  /** Playhead of the running preview, seconds (drives the progress bar + clock). */
+  @state()
+  private playbackSeconds = 0;
+
+  /** Duration of the running preview, seconds (0 until known). */
+  @state()
+  private playbackDuration = 0;
+
   private disposePreviewSubscription?: () => void;
   private disposeProjectSubscription?: () => void;
   private lastProjectId: string | null = null;
@@ -113,6 +121,10 @@ export class AssetsContent extends ComponentBase {
   private readonly onGlobalKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       this.closeContextMenu();
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Spacebar') {
+      this.onSpaceKey(event);
     }
   };
 
@@ -502,33 +514,43 @@ export class AssetsContent extends ComponentBase {
                     ? html`<span class="thumb-spinner" aria-hidden="true"></span>`
                     : null}
                 `}
-          ${item.previewType === 'audio' && item.kind === 'file' && item.previewUrl
-            ? html`<span
-                class="audio-play-btn ${this.playingAudioPath === item.path ? 'is-playing' : ''}"
-                aria-hidden="true"
-                title=${this.playingAudioPath === item.path ? 'Stop preview' : 'Play preview'}
-                >${this.iconService.getIcon(
-                  this.playingAudioPath === item.path ? 'stop' : 'play',
-                  18
-                )}</span
-              >`
+          ${this.isAudioPreviewable(item)
+            ? html`${this.renderAudioToggle(item, '')}
+              ${this.playingAudioPath === item.path
+                ? this.renderAudioProgress('audio-progress')
+                : null}`
             : null}
         </span>
         <span class="name">${item.name}</span>
-        ${item.kind === 'file' && item.sizeBytes !== null
-          ? html`<span class="meta">${this.formatFileSize(item.sizeBytes)}</span>`
-          : null}
+        ${this.renderItemMeta(item)}
       </button>
     `;
   }
 
+  /** Card footer line: `0:03 / 0:12 · 24.0 KB` for audio, plain size otherwise. */
+  private renderItemMeta(item: AssetPreviewItem) {
+    if (item.kind !== 'file') {
+      return null;
+    }
+    const sizeLabel = item.sizeBytes !== null ? this.formatFileSize(item.sizeBytes) : '';
+    const timeLabel = item.previewType === 'audio' ? this.buildAudioTimeLabel(item) : '';
+    const label = [timeLabel, sizeLabel].filter(part => part.length > 0).join(' · ');
+    return label ? html`<span class="meta">${label}</span>` : null;
+  }
+
   private renderListRow(item: AssetPreviewItem) {
     const isSelected = this.selectedPaths.has(item.path);
-    const dimensions =
-      item.width !== null && item.height !== null ? `${item.width}×${item.height}` : '';
+    const isAudio = this.isAudioPreviewable(item);
+    const isPlaying = this.playingAudioPath === item.path;
+    // Audio rows have no pixel dimensions, so the same column carries the clock.
+    const dimensions = isAudio
+      ? this.buildAudioTimeLabel(item)
+      : item.width !== null && item.height !== null
+        ? `${item.width}×${item.height}`
+        : '';
     return html`
       <button
-        class="assets-list-row ${isSelected ? 'is-selected' : ''}"
+        class="assets-list-row ${isSelected ? 'is-selected' : ''} ${isPlaying ? 'is-playing' : ''}"
         title=${this.buildTooltip(item)}
         draggable=${item.kind === 'file' ? 'true' : 'false'}
         @click=${(event: MouseEvent) => this.onItemSelected(event, item)}
@@ -538,6 +560,7 @@ export class AssetsContent extends ComponentBase {
         @contextmenu=${(event: MouseEvent) => this.onItemContextMenu(event, item)}
         @dragstart=${(event: DragEvent) => this.onItemDragStart(event, item)}
       >
+        ${isAudio ? this.renderAudioToggle(item, 'is-inline') : null}
         <span class="row-thumb">
           ${item.thumbnailUrl
             ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
@@ -552,6 +575,7 @@ export class AssetsContent extends ComponentBase {
             ? this.formatFileSize(item.sizeBytes)
             : ''}</span
         >
+        ${isPlaying ? this.renderAudioProgress('row-audio-progress') : null}
       </button>
     `;
   }
@@ -573,6 +597,44 @@ export class AssetsContent extends ComponentBase {
     }
   }
 
+  /**
+   * Space toggles the preview of the selected audio asset (Unity/Godot-style), and
+   * stops whatever is playing when the selection isn't previewable. Only handled while
+   * focus is inside the panel and not in a text field; the default must be suppressed
+   * because the asset cards are `<button>`s and Space would re-activate the focused one.
+   */
+  private onSpaceKey(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (!target || !this.contains(target)) {
+      return;
+    }
+    if (target.closest('input, textarea, select, [contenteditable="true"]')) {
+      return;
+    }
+    const selected = this.findSelectedAudioItem();
+    if (selected) {
+      event.preventDefault();
+      this.toggleAudioPreview(selected);
+      return;
+    }
+    if (this.playingAudioPath) {
+      event.preventDefault();
+      this.stopAudioPreview();
+    }
+  }
+
+  /** The single selected item, when it is a previewable audio file. */
+  private findSelectedAudioItem(): AssetPreviewItem | null {
+    if (!this.lastSelectedPath) {
+      return null;
+    }
+    const item = this.snapshot.items.find(candidate => candidate.path === this.lastSelectedPath);
+    if (!item || item.kind !== 'file' || item.previewType !== 'audio' || !item.previewUrl) {
+      return null;
+    }
+    return item;
+  }
+
   private toggleAudioPreview(item: AssetPreviewItem): void {
     if (this.playingAudioPath === item.path) {
       this.stopAudioPreview();
@@ -581,18 +643,40 @@ export class AssetsContent extends ComponentBase {
     if (!item.previewUrl) {
       return;
     }
-    if (!this.audioPreviewEl) {
-      this.audioPreviewEl = new Audio();
-      this.audioPreviewEl.addEventListener('ended', () => {
-        this.playingAudioPath = null;
-      });
-    }
-    this.audioPreviewEl.src = item.previewUrl;
-    this.audioPreviewEl.currentTime = 0;
-    void this.audioPreviewEl.play().catch(() => {
+    const audio = this.ensureAudioElement();
+    audio.src = item.previewUrl;
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      // Autoplay policies / unsupported codec: drop back to the idle state.
       this.playingAudioPath = null;
+      this.playbackSeconds = 0;
     });
     this.playingAudioPath = item.path;
+    // Seed from the analyzed metadata so the progress bar is live from frame one;
+    // `loadedmetadata` refines it once the element decodes the header.
+    this.playbackDuration = item.durationSeconds ?? 0;
+    this.playbackSeconds = 0;
+  }
+
+  /** Lazily creates the shared preview element; one element = one sound at a time. */
+  private ensureAudioElement(): HTMLAudioElement {
+    if (this.audioPreviewEl) {
+      return this.audioPreviewEl;
+    }
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.addEventListener('timeupdate', () => {
+      this.playbackSeconds = audio.currentTime;
+    });
+    audio.addEventListener('loadedmetadata', () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        this.playbackDuration = audio.duration;
+      }
+    });
+    audio.addEventListener('ended', () => this.stopAudioPreview());
+    audio.addEventListener('error', () => this.stopAudioPreview());
+    this.audioPreviewEl = audio;
+    return audio;
   }
 
   private stopAudioPreview(): void {
@@ -604,6 +688,49 @@ export class AssetsContent extends ComponentBase {
     if (this.playingAudioPath !== null) {
       this.playingAudioPath = null;
     }
+    this.playbackSeconds = 0;
+    this.playbackDuration = 0;
+  }
+
+  /** 0..1 playhead of the running preview (0 when the duration is still unknown). */
+  private getPlaybackFraction(): number {
+    if (this.playbackDuration <= 0) {
+      return 0;
+    }
+    return Math.min(1, Math.max(0, this.playbackSeconds / this.playbackDuration));
+  }
+
+  private isAudioPreviewable(item: AssetPreviewItem): boolean {
+    return item.kind === 'file' && item.previewType === 'audio' && !!item.previewUrl;
+  }
+
+  /** Play/stop affordance drawn over an audio thumbnail (grid) or inline (list). */
+  private renderAudioToggle(item: AssetPreviewItem, extraClass: string) {
+    const isPlaying = this.playingAudioPath === item.path;
+    return html`<span
+      class="audio-play-btn ${extraClass} ${isPlaying ? 'is-playing' : ''}"
+      aria-hidden="true"
+      title=${isPlaying ? 'Stop preview' : 'Play preview (Space)'}
+      >${this.iconService.getIcon(isPlaying ? 'stop' : 'play', 18)}</span
+    >`;
+  }
+
+  private renderAudioProgress(className: string) {
+    return html`<span
+      class=${className}
+      aria-hidden="true"
+      style="--audio-progress:${this.getPlaybackFraction()}"
+    ></span>`;
+  }
+
+  /** `0:03 / 0:12` while previewing, plain duration otherwise. */
+  private buildAudioTimeLabel(item: AssetPreviewItem): string {
+    const total = item.durationSeconds;
+    if (this.playingAudioPath === item.path) {
+      const duration = this.playbackDuration > 0 ? this.playbackDuration : (total ?? 0);
+      return `${this.formatDuration(this.playbackSeconds)} / ${this.formatDuration(duration)}`;
+    }
+    return total !== null ? this.formatDuration(total) : '';
   }
 
   private onItemDragStart(event: DragEvent, item: AssetPreviewItem): void {

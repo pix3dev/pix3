@@ -33,8 +33,8 @@
 - [x] add color picker for color values in Object inspector (Сложность: M)
 - [x] make a node picker for properties with node type (Сложность: M)
 - [x] allow to preview glb models from asset browser (Сложность: M)
-- [ ] allow to preview sounds in editor (Сложность: M)
-- [ ] allow to preview sounds in assets preview panel (Сложность: M)
+- [x] allow to preview sounds in editor (Сложность: M) — *inspector `audio-resource` editor: waveform + player + duration/channels/rate*
+- [x] allow to preview sounds in assets preview panel (Сложность: M) — *waveform thumb + play/stop in grid & list, playhead bar, `0:03 / 0:12` clock, Space on the selected asset*
 - [ ] allow to preview animations in assets preview panel (Сложность: M)
 - [x] add alignment methods for 2d objects (Сложность: M)
 - [x] add show all and reset zoom in 2d navigation mode (Сложность: S)

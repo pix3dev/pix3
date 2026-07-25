@@ -165,6 +165,140 @@ describe('AssetsContent (Phase 3 header)', () => {
     expect(panel.getSelectedPaths().sort()).toEqual(['assets/a.png', 'assets/b.png']);
   });
 
+  it('previews audio from the grid card and reflects the playhead', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(panel, createSnapshot({ items: [audioItem()] }));
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const toggle = panel.querySelector<HTMLElement>('.audio-play-btn');
+    expect(toggle).not.toBeNull();
+    expect(panel.querySelector('.audio-progress')).toBeNull();
+
+    toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.audio-play-btn.is-playing')).not.toBeNull();
+    // Duration comes from the analyzed metadata, so the clock is live immediately.
+    expect(panel.querySelector('.meta')?.textContent).toContain('0:00 / 0:12');
+
+    const audio = getPreviewElement(panel);
+    audio.currentTime = 3;
+    audio.dispatchEvent(new Event('timeupdate'));
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.meta')?.textContent).toContain('0:03 / 0:12');
+    expect(panel.querySelector<HTMLElement>('.audio-progress')?.style.cssText).toContain('0.25');
+
+    toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.audio-play-btn.is-playing')).toBeNull();
+    expect(panel.querySelector('.audio-progress')).toBeNull();
+  });
+
+  it('stops the preview when playback ends', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(panel, createSnapshot({ items: [audioItem()] }));
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel
+      .querySelector<HTMLElement>('.audio-play-btn')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    getPreviewElement(panel).dispatchEvent(new Event('ended'));
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.audio-play-btn.is-playing')).toBeNull();
+  });
+
+  it('offers an inline audio toggle and duration column in list view', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(panel, createSnapshot({ items: [audioItem()] }), {
+      thumbnailSize: 104,
+      contentView: 'list',
+    });
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const row = panel.querySelector('.assets-list-row');
+    expect(row?.querySelector('.audio-play-btn.is-inline')).not.toBeNull();
+    expect(row?.querySelector('.row-dim')?.textContent).toContain('0:12');
+
+    row
+      ?.querySelector<HTMLElement>('.audio-play-btn')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.assets-list-row.is-playing')).not.toBeNull();
+    expect(panel.querySelector('.row-audio-progress')).not.toBeNull();
+    expect(panel.querySelector('.row-dim')?.textContent).toContain('0:00 / 0:12');
+  });
+
+  it('toggles the preview of the selected audio asset with Space', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        items: [
+          audioItem(),
+          createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+        ],
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const card = panel.querySelector<HTMLButtonElement>('.assets-preview-item');
+    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    const keyDown = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    card!.dispatchEvent(keyDown);
+    await panel.updateComplete;
+
+    // The default must be suppressed: the cards are buttons and Space would re-activate them.
+    expect(keyDown.defaultPrevented).toBe(true);
+    expect(panel.querySelector('.audio-play-btn.is-playing')).not.toBeNull();
+
+    card!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    );
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.audio-play-btn.is-playing')).toBeNull();
+  });
+
+  it('ignores Space when the selected asset is not previewable audio', async () => {
+    const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+    stubServices(
+      panel,
+      createSnapshot({
+        items: [
+          createItem({ name: 'a.png', path: 'assets/a.png', kind: 'file', previewType: 'image' }),
+        ],
+      })
+    );
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const card = panel.querySelector<HTMLButtonElement>('.assets-preview-item');
+    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await panel.updateComplete;
+
+    const keyDown = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    card!.dispatchEvent(keyDown);
+
+    expect(keyDown.defaultPrevented).toBe(false);
+  });
+
   it('emits content-delete-request for the multi-selection', async () => {
     const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
     stubServices(
@@ -263,6 +397,33 @@ function stubServices(
   }
 
   return { assetsPreviewService, projectService };
+}
+
+function audioItem(): AssetPreviewItem {
+  return createItem({
+    name: 'shot.wav',
+    path: 'audio/shot.wav',
+    kind: 'file',
+    extension: 'wav',
+    previewType: 'audio',
+    previewUrl: 'blob:shot',
+    thumbnailUrl: 'data:image/svg+xml,waveform',
+    thumbnailStatus: 'ready',
+    iconName: 'music',
+    sizeBytes: 24576,
+    durationSeconds: 12,
+    channelCount: 1,
+    sampleRate: 44100,
+  });
+}
+
+/** The panel's shared, lazily-created preview element (created on first play). */
+function getPreviewElement(panel: AssetsContentElement): HTMLAudioElement {
+  const element = (panel as unknown as { audioPreviewEl: HTMLAudioElement | null }).audioPreviewEl;
+  if (!element) {
+    throw new Error('Audio preview element was not created.');
+  }
+  return element;
 }
 
 function createItem(
