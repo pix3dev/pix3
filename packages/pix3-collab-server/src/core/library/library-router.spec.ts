@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { randomUUID } from 'crypto';
 import type { AddressInfo } from 'net';
 import express from 'express';
