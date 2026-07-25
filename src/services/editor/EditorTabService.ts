@@ -18,6 +18,7 @@ import { subscribe } from 'valtio/vanilla';
 import { CodeDocumentService } from '@/services/scripting/CodeDocumentService';
 import { PreviewHostService } from '@/services/play/PreviewHostService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 
 export type DirtyCloseDecision = 'save' | 'dont-save' | 'cancel';
 
@@ -53,16 +54,26 @@ export class EditorTabService {
   @inject(ProjectScriptLoaderService)
   private readonly projectScriptLoader!: ProjectScriptLoaderService;
 
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
+
   private disposeSceneSubscription?: () => void;
   private disposeAnimationSubscription?: () => void;
   private disposeLayoutSubscription?: () => void;
   private disposeTabsSubscription?: () => void;
+  private disposeProjectSubscription?: () => void;
   private disposeCodeDocumentsSubscription?: () => void;
   private handleBeforeUnload?: (e: BeforeUnloadEvent) => void;
   private readonly sceneLoadInFlight = new Map<string, Promise<void>>();
   private readonly animationLoadInFlight = new Map<string, Promise<void>>();
   private previousActiveTabIdBeforeGame: string | null = null; // Track tab active before game tab
   private isRestoringProjectSession = false;
+  // Project that owns the tabs currently in `appState.tabs`. Persistence writes only while this
+  // matches `appState.project.id`; `null` means "not adopted yet" (right after a project switch or
+  // teardown), which keeps a transient empty tab set from overwriting a session we can still
+  // restore. Ownership is claimed by restoreProjectSession() or by opening a project resource tab.
+  private sessionProjectId: string | null = null;
+  private lastSeenProjectId: string | null = null;
   // While true, focus events emitted by Golden Layout are ignored. Set during programmatic tab
   // removal so GL's automatic neighbour-selection can't hijack the active tab we intend to restore.
   private suppressLayoutFocusSync = false;
@@ -92,32 +103,32 @@ export class EditorTabService {
       void this.closeTab(tabId);
     });
 
+    // Tabs address project-relative resources, so they belong to exactly one project. Drop them
+    // when the active project changes — otherwise they keep pointing at the previous project's
+    // files and get persisted under the new project's session key.
+    this.lastSeenProjectId = appState.project.id;
+    this.disposeProjectSubscription = subscribe(appState.project, () => {
+      const projectId = appState.project.id;
+      if (projectId === this.lastSeenProjectId) return;
+      const previousProjectId = this.lastSeenProjectId;
+      this.lastSeenProjectId = projectId;
+      this.discardTabsOnProjectSwitch(previousProjectId);
+    });
+
     // Persist open tabs and active tab per project.
     this.disposeTabsSubscription = subscribe(
       appState.tabs,
       () => {
         const projectId = appState.project.id;
-        if (!projectId) return;
+        if (!projectId || projectId !== this.sessionProjectId) return;
 
-        const filteredTabs = appState.tabs.tabs.filter(
-          t =>
-            !t.resourceId.startsWith('templ://') &&
-            t.type !== 'game' &&
-            t.type !== 'sprite-editor' &&
-            t.type !== 'model-lab'
-        );
+        const filteredTabs = appState.tabs.tabs.filter(t => this.isPersistableTab(t));
 
         let savedActiveTabId = appState.tabs.activeTabId;
         const activeTab = appState.tabs.tabs.find(t => t.id === savedActiveTabId);
 
         // If the active tab is excluded (like game / sprite-editor tabs), use a persisted tab
-        if (
-          activeTab &&
-          (activeTab.resourceId.startsWith('templ://') ||
-            activeTab.type === 'game' ||
-            activeTab.type === 'sprite-editor' ||
-            activeTab.type === 'model-lab')
-        ) {
+        if (activeTab && !this.isPersistableTab(activeTab)) {
           savedActiveTabId =
             this.previousActiveTabIdBeforeGame ??
             (filteredTabs.length > 0 ? filteredTabs[0].id : null);
@@ -167,6 +178,8 @@ export class EditorTabService {
     this.disposeLayoutSubscription = undefined;
     this.disposeTabsSubscription?.();
     this.disposeTabsSubscription = undefined;
+    this.disposeProjectSubscription?.();
+    this.disposeProjectSubscription = undefined;
     this.disposeCodeDocumentsSubscription?.();
     this.disposeCodeDocumentsSubscription = undefined;
     if (this.handleBeforeUnload) {
@@ -183,6 +196,17 @@ export class EditorTabService {
     initialTitle?: string
   ): Promise<EditorTab> {
     this.initialize();
+
+    // Opening a project resource hands session ownership to the current project, so persistence
+    // resumes writing under the right key after a switch (and only once real tabs exist).
+    const currentProjectId = appState.project.id;
+    if (
+      currentProjectId &&
+      this.sessionProjectId !== currentProjectId &&
+      this.isPersistableTab({ type, resourceId })
+    ) {
+      this.sessionProjectId = currentProjectId;
+    }
 
     const tabId = this.deriveTabId(type, resourceId);
     const existing = appState.tabs.tabs.find(t => t.id === tabId);
@@ -348,6 +372,8 @@ export class EditorTabService {
   }
 
   async restoreProjectSession(projectId: string): Promise<boolean> {
+    this.initialize();
+
     const raw = localStorage.getItem(`pix3.projectTabs:${projectId}`);
     if (!raw) return false;
 
@@ -363,28 +389,47 @@ export class EditorTabService {
         ),
       });
 
-      // Skip template tabs (templ://) — they should not be restored.
-      const tabsToRestore = (
+      // Skip template tabs (templ://) and editor-only tabs — they should not be restored.
+      const candidates = (
         session.tabs as Array<{
           type: string;
           resourceId: string;
           title?: string;
           contextState?: EditorTab['contextState'];
         }>
-      ).filter((t: { resourceId: string; type: string }) => {
-        if (t.resourceId.startsWith('templ://')) return false;
-        if (t.type === 'game') return false;
-        if (t.type === 'sprite-editor') return false;
-        if (t.type === 'model-lab') return false;
-        // Legacy: pre-rename sessions persisted 'asset-generator' tabs; keep dropping them.
-        if (t.type === 'asset-generator') return false;
-        return true;
-      });
+      ).filter(t => this.isPersistableTab(t));
+
+      // A session can name resources that no longer exist — a deleted file, or a tab that leaked in
+      // from another project before session ownership was tracked. Restoring those would reopen a
+      // permanently broken tab on every launch, so drop them (and heal the stored session below).
+      const tabsToRestore: typeof candidates = [];
+      for (const tabData of candidates) {
+        if (await this.isMissingProjectResource(tabData.resourceId)) {
+          console.warn(
+            '[EditorTabService] Dropping restored tab, resource no longer exists:',
+            tabData.resourceId
+          );
+          continue;
+        }
+        tabsToRestore.push(tabData);
+      }
 
       console.log('[EditorTabService] Tabs to restore (after filter):', {
         count: tabsToRestore.length,
         tabs: tabsToRestore.map(t => `${t.type}:${t.resourceId}`),
       });
+
+      // Nothing survived the existence check: drop the stored session outright, otherwise the same
+      // dead entries would be re-examined (and re-warned about) on every launch.
+      if (tabsToRestore.length === 0) {
+        if (candidates.length > 0) {
+          localStorage.removeItem(`pix3.projectTabs:${projectId}`);
+        }
+        return false;
+      }
+
+      // From here on, the tabs in appState represent this project's session.
+      this.sessionProjectId = projectId;
 
       this.isRestoringProjectSession = true;
       try {
@@ -469,10 +514,79 @@ export class EditorTabService {
     }
   }
 
+  /**
+   * Close every tab. This only ever runs as part of project teardown (closing or replacing the
+   * project), so session ownership is released first: the emptying tab set must not be written
+   * back over the stored session the user may want to continue next time.
+   */
   async closeAllTabs(skipDirtyPrompt = false): Promise<void> {
+    this.sessionProjectId = null;
     const tabs = [...appState.tabs.tabs];
     for (const tab of tabs) {
       await this.closeTabInternal(tab, skipDirtyPrompt);
+    }
+  }
+
+  /**
+   * Tear down every tab because the active project changed underneath us. Unlike closeAllTabs this
+   * skips the dirty prompt on purpose: the project directory has already been swapped, so saving
+   * would write the old project's documents into the new project.
+   */
+  private discardTabsOnProjectSwitch(previousProjectId: string | null): void {
+    // Release ownership first — the tab mutations below must not touch either project's session.
+    this.sessionProjectId = null;
+
+    const tabs = [...appState.tabs.tabs];
+    if (tabs.length === 0) {
+      return;
+    }
+
+    const dirtyCount = tabs.filter(tab => tab.isDirty).length;
+    console.warn(
+      `[EditorTabService] Active project changed (${previousProjectId ?? 'none'} → ` +
+        `${appState.project.id ?? 'none'}); discarding ${tabs.length} tab(s)` +
+        (dirtyCount > 0 ? `, ${dirtyCount} with unsaved changes` : '')
+    );
+
+    this.previousActiveTabIdBeforeGame = null;
+    this.suppressLayoutFocusSync = true;
+    try {
+      for (const tab of tabs) {
+        this.cleanupClosedTabState(tab);
+        this.layoutManager.removeEditorTab(tab.id);
+      }
+    } finally {
+      this.suppressLayoutFocusSync = false;
+    }
+
+    appState.tabs.tabs = [];
+    appState.tabs.activeTabId = null;
+  }
+
+  /**
+   * Session-persistable tabs are real project resources only — game, sprite-editor, model-lab and
+   * template tabs are editor-local and must never be restored on the next launch.
+   */
+  private isPersistableTab(tab: { type: string; resourceId: string }): boolean {
+    if (tab.resourceId.startsWith('templ://')) return false;
+    if (tab.type === 'game') return false;
+    if (tab.type === 'sprite-editor') return false;
+    if (tab.type === 'model-lab') return false;
+    // Legacy: pre-rename sessions persisted 'asset-generator' tabs; keep dropping them.
+    if (tab.type === 'asset-generator') return false;
+    return true;
+  }
+
+  /**
+   * True when a `res://` resource can no longer be read from the project. Non-`res://` ids
+   * (collab scenes, synthetic editor ids) have no backing file and are always treated as present.
+   */
+  private async isMissingProjectResource(resourceId: string): Promise<boolean> {
+    if (!resourceId.startsWith('res://')) return false;
+    try {
+      return (await this.storage.getLastModified(resourceId)) === null;
+    } catch {
+      return true;
     }
   }
 

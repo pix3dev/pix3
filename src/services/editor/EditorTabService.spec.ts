@@ -73,6 +73,17 @@ describe('EditorTabService (code tabs)', () => {
       },
     });
 
+    Object.defineProperty(service, 'previewHostService', {
+      value: { isActive: vi.fn().mockReturnValue(false), stop: vi.fn() },
+    });
+    Object.defineProperty(service, 'projectScriptLoader', {
+      value: { waitForScripts: vi.fn(async () => undefined) },
+    });
+    Object.defineProperty(service, 'storage', {
+      value: { getLastModified: vi.fn(async () => 1) },
+      configurable: true,
+    });
+
     return {
       service,
       setDocument(next: Partial<typeof documentSnapshot>) {
@@ -124,5 +135,73 @@ describe('EditorTabService (code tabs)', () => {
     const dirtyTabs = service.getDirtyTabs();
     expect(dirtyTabs).toHaveLength(1);
     expect(dirtyTabs[0]?.type).toBe('code');
+  });
+
+  // Valtio batches subscription callbacks into a microtask.
+  const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+  it('discards tabs on a project switch instead of persisting them under the new project', async () => {
+    const { service } = createService();
+    appState.project.id = 'project-a';
+
+    await service.openResourceTab('code', 'res://scripts/player.ts');
+    await flush();
+    expect(localStorage.getItem('pix3.projectTabs:project-a')).toContain('res://scripts/player.ts');
+
+    appState.project.id = 'project-b';
+    await flush();
+
+    expect(appState.tabs.tabs).toHaveLength(0);
+    expect(appState.tabs.activeTabId).toBeNull();
+    // project-a keeps its session; project-b never inherits the foreign tab.
+    expect(localStorage.getItem('pix3.projectTabs:project-a')).toContain('res://scripts/player.ts');
+    expect(localStorage.getItem('pix3.projectTabs:project-b')).toBeNull();
+  });
+
+  it('skips restored tabs whose project resource no longer exists', async () => {
+    const { service } = createService();
+    appState.project.id = 'project-a';
+    Object.defineProperty(service, 'storage', {
+      value: {
+        getLastModified: vi.fn(async (path: string) =>
+          path === 'res://scripts/player.ts' ? 1 : null
+        ),
+      },
+    });
+
+    localStorage.setItem(
+      'pix3.projectTabs:project-a',
+      JSON.stringify({
+        tabs: [
+          { resourceId: 'res://scripts/player.ts', type: 'code', title: 'player.ts' },
+          { resourceId: 'res://scenes/gone.pix3scene', type: 'scene', title: 'gone.pix3scene' },
+        ],
+        activeTabId: 'code:res://scripts/player.ts',
+      })
+    );
+
+    await service.restoreProjectSession('project-a');
+
+    expect(appState.tabs.tabs.map(tab => tab.resourceId)).toEqual(['res://scripts/player.ts']);
+  });
+
+  it('drops a stored session whose resources have all disappeared', async () => {
+    const { service } = createService();
+    appState.project.id = 'project-a';
+    Object.defineProperty(service, 'storage', {
+      value: { getLastModified: vi.fn(async () => null) },
+    });
+
+    localStorage.setItem(
+      'pix3.projectTabs:project-a',
+      JSON.stringify({
+        tabs: [{ resourceId: 'res://scenes/castle.pix3scene', type: 'scene', title: 'castle' }],
+        activeTabId: 'scene:res://scenes/castle.pix3scene',
+      })
+    );
+
+    await expect(service.restoreProjectSession('project-a')).resolves.toBe(false);
+    expect(appState.tabs.tabs).toHaveLength(0);
+    expect(localStorage.getItem('pix3.projectTabs:project-a')).toBeNull();
   });
 });

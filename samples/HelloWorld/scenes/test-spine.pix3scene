@@ -12,8 +12,8 @@ root:
       height: 720
       transform:
         position: [0, 0]
-        rotation: 0
         scale: [1, 1]
+        rotation: 0
     children:
       - id: spineskeleton2d-spineboy-01
         type: SpineSkeleton2D
@@ -24,12 +24,42 @@ root:
           animation: run
           loop: true
           isPlaying: true
-          skin: ""
           timeScale: 1
           defaultMix: 0.15
           color: "#ffffff"
           transform:
-            position: [0, -200]
-            rotation: 0
+            position: [352.44755244755237, -338.46153846153845]
             scale: [1, 1]
+            rotation: 0
+        components:
+          - id: spineskeleton2d-spineboy-01-animation-player-1785003678006
+            type: core:AnimationPlayer
+            enabled: true
+            config:
+              autoplay: ""
+              speed: 1
+              animations:
+                version: 1.0.0
+                clips:
+                  - name: new-clip
+                    duration: 1
+                    loop: false
+                    tracks:
+                      - id: track-ms0p7434-ufwkmh
+                        kind: property
+                        targetPath: ""
+                        property: position
+                        valueType: vector2
+                        enabled: true
+                        keys:
+                          - time: 0
+                            value:
+                              - -476.223712200885
+                              - -327.9719959605824
+                            easing: linear
+                          - time: 1
+                            value:
+                              - 352.44755244755237
+                              - -338.46153846153845
+                            easing: linear
         children: []
