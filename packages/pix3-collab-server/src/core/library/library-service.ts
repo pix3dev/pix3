@@ -216,7 +216,7 @@ export function listPublicItems(
     // Free-text search runs as a LIKE over the raw manifest JSON: name, tags and description
     // all live inside it, and the catalog is a curated few-hundred rows — an FTS index (or a
     // normalized tag table) would cost more to keep in sync than the scan costs to run.
-    where.push('lower(manifest) LIKE ?');
+    where.push(`lower(manifest) LIKE ? ESCAPE '\\'`);
     params.push(`%${escapeLike(filter.q.toLowerCase())}%`);
   }
 

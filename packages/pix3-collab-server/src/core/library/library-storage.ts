@@ -11,9 +11,16 @@ export function getItemDir(itemId: string): string {
   return path.resolve(config.LIBRARY_STORAGE_DIR, encodeURIComponent(itemId));
 }
 
+/**
+ * Resolve a bundle-relative path inside an item directory, or null when it escapes.
+ *
+ * The directory itself is rejected: `''`, `'.'` and `'a/..'` all resolve to it, and every
+ * caller treats the result as a *file* (writeFileSync / sendFile), so returning it would
+ * turn a malformed manifest into an EISDIR 500 instead of a clean 400.
+ */
 export function resolveSafePath(itemDir: string, relativePath: string): string | null {
   const resolved = path.resolve(itemDir, relativePath);
-  if (!resolved.startsWith(itemDir + path.sep) && resolved !== itemDir) {
+  if (!resolved.startsWith(itemDir + path.sep)) {
     return null;
   }
   return resolved;

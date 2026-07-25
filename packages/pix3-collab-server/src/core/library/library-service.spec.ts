@@ -131,6 +131,14 @@ describe('library-service store queries', () => {
       expect(ids(listPublicItems({ q: 'nothing-here' }, false))).toEqual([]);
     });
 
+    it('treats LIKE metacharacters in the query as literals', () => {
+      // Without the ESCAPE clause the escaped '%' would still glob and match every item.
+      expect(ids(listPublicItems({ q: '%' }, false))).toEqual([]);
+      expect(ids(listPublicItems({ q: 'neon_button' }, false))).toEqual([]);
+      seedItem('literal', { name: '50% Off Pack', type: 'sprite' }, { updatedAt: 60 });
+      expect(ids(listPublicItems({ q: '50%' }, false))).toEqual(['literal']);
+    });
+
     it('sorts by featured and by downloads', () => {
       expect(ids(listPublicItems({ sort: 'featured' }, false))).toEqual(['star', 'pub']);
       bumpDownloads('pub');
