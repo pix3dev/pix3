@@ -6,8 +6,11 @@ import type { CommandContext } from '@/core/command';
 import {
   createDefaultQualitySettings,
   DEFAULT_TARGET_PLATFORM,
+  resolveExportSettings,
+  type ExportSettings,
   type QualitySettings,
 } from '@/core/ProjectManifest';
+import { createGlobMatcher } from '@/services/export/glob-match';
 
 interface BuildPackagePatch {
   sideEffects?: boolean;
@@ -28,11 +31,35 @@ export interface ProjectBuildOptions {
   readonly entryScenePath?: string;
 }
 
+/** What pulled an asset into the build — see {@link AssetReachabilityEntry}. */
+export type AssetInclusionReason =
+  | 'project-scene'
+  | 'scene-reference'
+  | 'script-reference'
+  | 'directory-expansion'
+  | 'atlas-page'
+  | 'locale-table'
+  | 'locale-sprite'
+  | 'include-glob';
+
+export interface AssetReachabilityEntry {
+  readonly reason: AssetInclusionReason;
+  /** The scene / script / atlas / directory that referenced it; `''` for roots. */
+  readonly via: string;
+}
+
 export interface RuntimeProjectBuildModel {
   readonly projectName: string;
   readonly scenePaths: readonly string[];
   readonly entryScenePath: string;
   readonly assetPaths: readonly string[];
+  /**
+   * Why each {@link assetPaths} entry is in the build, keyed by asset path.
+   * Bookkeeping only — it never changes the output, but it is what makes the
+   * (deliberately over-inclusive) collector auditable: every shipped byte can be
+   * traced back to the scene, script, atlas or glob that asked for it.
+   */
+  readonly reachability: ReadonlyMap<string, AssetReachabilityEntry>;
   readonly projectScriptFiles: ReadonlyMap<string, string>;
   readonly files: ReadonlyMap<string, string>;
   /**
@@ -49,6 +76,19 @@ const SPINE_RUNTIME_DEPENDENCY_RANGE = '~4.3';
 const RUNTIME_BUILD_COMMAND = 'vite build';
 const RUNTIME_DEV_COMMAND = 'vite';
 const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+/** Never walked when resolving `includeGlobs` — tooling and build output. */
+const NON_SHIPPABLE_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  '.yalc',
+  '.vscode',
+  '.idea',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  '.cache',
+]);
 const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
 const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;
 /**
@@ -115,11 +155,23 @@ export class ProjectBuildService {
     context: CommandContext,
     options: ProjectBuildOptions = {}
   ): Promise<RuntimeProjectBuildModel> {
-    const scenePaths = await this.collectScenePaths(context);
+    const exportSettings = resolveExportSettings(context.state.project.manifest);
+    // A scene the project excludes from the build must also leave the navigable
+    // manifest and the entry-scene picker — otherwise the export could name an
+    // entry scene whose file it never ships.
+    const isSceneExcluded = createGlobMatcher(exportSettings.excludeGlobs);
+    const scenePaths = (await this.collectScenePaths(context)).filter(
+      scenePath => !isSceneExcluded(scenePath)
+    );
     const warnings: string[] = [];
     const entryScenePath = this.resolveEntryScenePath(context, scenePaths, options, warnings);
     const projectScriptFiles = await this.collectProjectScriptFiles();
-    const assetPaths = await this.collectAssetPaths(scenePaths, projectScriptFiles, warnings);
+    const { assetPaths, reachability } = await this.collectAssetPaths(
+      scenePaths,
+      projectScriptFiles,
+      exportSettings,
+      warnings
+    );
     const usesSpine = this.scanFoundSpineNode;
     const projectName = context.state.project.projectName ?? 'Pix3 Project';
     const quality =
@@ -135,6 +187,7 @@ export class ProjectBuildService {
       scenePaths,
       entryScenePath,
       assetPaths,
+      reachability,
       projectScriptFiles,
       files: this.buildGeneratedFiles(
         projectName,
@@ -270,9 +323,13 @@ export class ProjectBuildService {
   private async collectAssetPaths(
     scenePaths: string[],
     projectScriptFiles: ReadonlyMap<string, string>,
+    exportSettings: ExportSettings,
     warnings: string[]
-  ): Promise<string[]> {
+  ): Promise<{ assetPaths: string[]; reachability: Map<string, AssetReachabilityEntry> }> {
     const files = new Set<string>();
+    const reachability = new Map<string, AssetReachabilityEntry>();
+    const isExcluded = createGlobMatcher(exportSettings.excludeGlobs);
+    const excludedPaths = new Set<string>();
 
     // Reference-carrying resources (scenes, prefabs, `.pix3anim` flipbooks) must be
     // scanned transitively: a scene references prefab `.pix3scene` files, those
@@ -283,8 +340,24 @@ export class ProjectBuildService {
     // squares in exports).
     const scanQueue: string[] = [];
     const queuedForScan = new Set<string>();
-    const addResourcePath = (resourcePath: string): void => {
+    const addResourcePath = (
+      resourcePath: string,
+      reason: AssetInclusionReason,
+      via = ''
+    ): void => {
+      // `excludeGlobs` gates the graph, not just the output: an excluded scene is
+      // never scanned, so the assets only it referenced drop out with it.
+      if (isExcluded(resourcePath)) {
+        excludedPaths.add(resourcePath);
+        return;
+      }
+
       files.add(resourcePath);
+      // First writer wins — the scan is breadth-first, so this records the
+      // shortest path from a build root to the asset.
+      if (!reachability.has(resourcePath)) {
+        reachability.set(resourcePath, { reason, via });
+      }
       if (this.isScannableResource(resourcePath) && !queuedForScan.has(resourcePath)) {
         queuedForScan.add(resourcePath);
         scanQueue.push(resourcePath);
@@ -299,15 +372,26 @@ export class ProjectBuildService {
     // path), and each must ship with its own nested assets embedded.
     const allSceneLikeFiles = await this.discoverFilesByExtension('.', '.pix3scene');
     for (const sceneLikePath of allSceneLikeFiles) {
-      addResourcePath(this.normalizeResourcePath(sceneLikePath));
+      addResourcePath(this.normalizeResourcePath(sceneLikePath), 'project-scene');
     }
     for (const scenePath of scenePaths) {
-      addResourcePath(scenePath);
+      addResourcePath(scenePath, 'project-scene');
+    }
+
+    // Force-included files join the scan as roots, so an `includeGlobs` scene
+    // brings its own textures rather than shipping as an empty shell.
+    for (const includedPath of await this.collectForcedIncludePaths(exportSettings)) {
+      addResourcePath(includedPath, 'include-glob');
     }
 
     const projectSourceFiles = await this.collectProjectSourceDependencies(projectScriptFiles);
-    for (const sourceContents of projectSourceFiles.values()) {
-      this.collectResourcePathsFromText(sourceContents, addResourcePath);
+    for (const [sourcePath, sourceContents] of projectSourceFiles) {
+      this.collectResourcePathsFromText(
+        sourceContents,
+        'script-reference',
+        sourcePath,
+        addResourcePath
+      );
       if (!this.scanFoundSpineNode && SPINE_SCRIPT_PATTERN.test(sourceContents)) {
         this.scanFoundSpineNode = true;
       }
@@ -321,7 +405,12 @@ export class ProjectBuildService {
 
       try {
         const contents = await this.fs.readTextFile(scannablePath);
-        this.collectResourcePathsFromText(contents, addResourcePath);
+        this.collectResourcePathsFromText(
+          contents,
+          'scene-reference',
+          scannablePath,
+          addResourcePath
+        );
         if (!this.scanFoundSpineNode && SPINE_NODE_PATTERN.test(contents)) {
           this.scanFoundSpineNode = true;
         }
@@ -330,11 +419,89 @@ export class ProjectBuildService {
       }
     }
 
-    await this.collectLocaleAssetPaths(files, warnings);
-    await this.collectSpineAtlasPagePaths(files, warnings);
+    await this.collectLocaleAssetPaths(addResourcePath, warnings);
+    await this.collectSpineAtlasPagePaths(files, addResourcePath, warnings);
 
-    const resolved = await this.resolveAssetDirectoryReferences(files);
-    return Array.from(resolved).sort((a, b) => a.localeCompare(b));
+    const resolved = await this.resolveAssetDirectoryReferences(
+      files,
+      (filePath, directoryPath) => {
+        if (isExcluded(filePath)) {
+          excludedPaths.add(filePath);
+          return false;
+        }
+
+        if (!reachability.has(filePath)) {
+          reachability.set(filePath, { reason: 'directory-expansion', via: directoryPath });
+        }
+        return true;
+      }
+    );
+
+    // Directory references were recorded while scanning but never ship as assets;
+    // drop them (and anything else that fell out) so the graph mirrors the output.
+    for (const recordedPath of [...reachability.keys()]) {
+      if (!resolved.has(recordedPath)) {
+        reachability.delete(recordedPath);
+      }
+    }
+
+    if (excludedPaths.size > 0) {
+      warnings.push(
+        `Excluded ${excludedPaths.size} file(s) matching the project's export excludeGlobs.`
+      );
+    }
+
+    return {
+      assetPaths: Array.from(resolved).sort((a, b) => a.localeCompare(b)),
+      reachability,
+    };
+  }
+
+  /**
+   * Files pulled in by `includeGlobs` — the escape hatch for assets no static
+   * scan can see (paths assembled from save data, scenes reached only through a
+   * computed level index). Skipped entirely when no pattern is configured, so
+   * the default export never pays for the project-wide walk.
+   */
+  private async collectForcedIncludePaths(exportSettings: ExportSettings): Promise<string[]> {
+    if (exportSettings.includeGlobs.length === 0) {
+      return [];
+    }
+
+    const isIncluded = createGlobMatcher(exportSettings.includeGlobs);
+    const projectFiles = await this.collectShippableProjectFiles('.');
+    return projectFiles.filter(filePath => isIncluded(filePath));
+  }
+
+  /**
+   * Recursively list project files that could plausibly ship, skipping tooling
+   * and build output. Unlike {@link discoverFilesByExtension} this must never
+   * descend into `node_modules`, which would dwarf the project itself.
+   */
+  private async collectShippableProjectFiles(directoryPath: string): Promise<string[]> {
+    const result: string[] = [];
+
+    let entries: ReadonlyArray<{ name: string; kind: FileSystemHandleKind; path: string }>;
+    try {
+      entries = await this.fs.listDirectory(directoryPath);
+    } catch {
+      return result;
+    }
+
+    for (const entry of entries) {
+      if (entry.kind === 'file') {
+        result.push(entry.path);
+        continue;
+      }
+
+      if (NON_SHIPPABLE_DIRECTORIES.has(entry.name)) {
+        continue;
+      }
+
+      result.push(...(await this.collectShippableProjectFiles(entry.path)));
+    }
+
+    return result;
   }
 
   private isScannableResource(path: string): boolean {
@@ -361,7 +528,10 @@ export class ProjectBuildService {
    * paths that are neither a file nor a real directory (e.g. `res://…`
    * placeholders in comments) are dropped silently.
    */
-  private async resolveAssetDirectoryReferences(paths: Set<string>): Promise<Set<string>> {
+  private async resolveAssetDirectoryReferences(
+    paths: Set<string>,
+    acceptExpanded: (filePath: string, directoryPath: string) => boolean
+  ): Promise<Set<string>> {
     const resolved = new Set<string>();
 
     for (const path of paths) {
@@ -372,7 +542,9 @@ export class ProjectBuildService {
 
       const nestedFiles = await this.discoverFilesByExtension(path, '');
       for (const nested of nestedFiles) {
-        resolved.add(nested);
+        if (acceptExpanded(nested, path)) {
+          resolved.add(nested);
+        }
       }
     }
 
@@ -391,7 +563,11 @@ export class ProjectBuildService {
    * class of miss as localized sprites. Without this a Spine skeleton ships with
    * its skeleton + atlas but no textures.
    */
-  private async collectSpineAtlasPagePaths(files: Set<string>, warnings: string[]): Promise<void> {
+  private async collectSpineAtlasPagePaths(
+    files: ReadonlySet<string>,
+    addResourcePath: (path: string, reason: AssetInclusionReason, via?: string) => void,
+    warnings: string[]
+  ): Promise<void> {
     const atlasPaths = Array.from(files).filter(path => /\.atlas$/i.test(path));
     for (const atlasPath of atlasPaths) {
       try {
@@ -399,7 +575,11 @@ export class ProjectBuildService {
         for (const pageName of parseSpineAtlasPageNames(contents)) {
           // Page names can be absolute/schemed, which resolveSpinePagePath passes
           // through — normalize so the set stays uniformly scheme-less.
-          files.add(this.normalizeResourcePath(resolveSpinePagePath(atlasPath, pageName)));
+          addResourcePath(
+            this.normalizeResourcePath(resolveSpinePagePath(atlasPath, pageName)),
+            'atlas-page',
+            atlasPath
+          );
         }
       } catch {
         warnings.push(`Failed to scan Spine atlas for page images: ${atlasPath}`);
@@ -408,15 +588,45 @@ export class ProjectBuildService {
   }
 
   /**
-   * Add `locales/*.json` tables and every texture path referenced in their
-   * `sprites` sections to the build's file set. The sprite paths are the one
-   * class of assets invisible to the `res://` regex scan of scenes/scripts —
-   * they are referenced only through localization keys.
+   * Add the `locales/*.json` tables the exported game can actually reach, plus
+   * every texture path referenced in their `sprites` sections. The sprite paths
+   * are the one class of assets invisible to the `res://` regex scan of
+   * scenes/scripts — they are referenced only through localization keys.
+   *
+   * Only *declared* locales ship. The exported runtime fetches
+   * `res://locales/<id>.json` exclusively for ids in the localization config
+   * baked into the scene manifest, so a table outside that set is provably
+   * unreachable — this is an exact match against the runtime's own config, not a
+   * heuristic. A null config means localization is inert in the export, and the
+   * whole `locales/` folder (plus its localized sprite variants) is dead weight.
    */
-  private async collectLocaleAssetPaths(files: Set<string>, warnings: string[]): Promise<void> {
+  private async collectLocaleAssetPaths(
+    addResourcePath: (path: string, reason: AssetInclusionReason, via?: string) => void,
+    warnings: string[]
+  ): Promise<void> {
     const localeFiles = await this.discoverFilesByExtension('locales', '.json');
+    if (localeFiles.length === 0) {
+      return;
+    }
+
+    const localization = this.localizationEditor.getRuntimeConfig();
+    const shippedLocaleFiles = new Set(
+      localization
+        ? [localization.defaultLocale, localization.fallbackLocale ?? '', ...localization.locales]
+            .filter(locale => locale.length > 0)
+            .map(locale => `locales/${locale}.json`)
+        : []
+    );
+
+    const skipped: string[] = [];
+
     for (const localePath of localeFiles) {
-      files.add(localePath);
+      if (!shippedLocaleFiles.has(localePath)) {
+        skipped.push(localePath);
+        continue;
+      }
+
+      addResourcePath(localePath, 'locale-table');
       try {
         const contents = await this.fs.readTextFile(localePath);
         const parsed = JSON.parse(contents) as { sprites?: Record<string, unknown> };
@@ -426,12 +636,20 @@ export class ProjectBuildService {
           }
           const resourcePath = this.normalizeResourcePath(value.trim());
           if (this.isConcreteResourcePath(resourcePath)) {
-            files.add(resourcePath);
+            addResourcePath(resourcePath, 'locale-sprite', localePath);
           }
         }
       } catch {
         warnings.push(`Failed to scan locale table for sprite references: ${localePath}`);
       }
+    }
+
+    if (skipped.length > 0) {
+      warnings.push(
+        localization
+          ? `Excluded ${skipped.length} locale table(s) not declared in the project localization settings: ${skipped.join(', ')}`
+          : `Localization is not configured for this project — excluded ${skipped.length} unreachable locale table(s): ${skipped.join(', ')}`
+      );
     }
   }
 
@@ -593,12 +811,14 @@ export class ProjectBuildService {
 
   private collectResourcePathsFromText(
     contents: string,
-    addResourcePath: (resourcePath: string) => void
+    reason: AssetInclusionReason,
+    via: string,
+    addResourcePath: (resourcePath: string, reason: AssetInclusionReason, via?: string) => void
   ): void {
     for (const match of contents.matchAll(RESOURCE_PATH_PATTERN)) {
       const resourcePath = (match[1] ?? '').trim();
       if (this.isConcreteResourcePath(resourcePath)) {
-        addResourcePath(resourcePath);
+        addResourcePath(resourcePath, reason, via);
         continue;
       }
 
@@ -609,7 +829,7 @@ export class ProjectBuildService {
       // frame animations render as white squares in the export.
       const directoryPrefix = this.staticDirectoryPrefix(resourcePath);
       if (directoryPrefix) {
-        addResourcePath(directoryPrefix);
+        addResourcePath(directoryPrefix, reason, via);
       }
     }
   }
@@ -694,9 +914,11 @@ export class ProjectBuildService {
    */
   private buildSpineRuntimeModule(usesSpine: boolean): string {
     if (!usesSpine) {
-      return ['// No SpineSkeleton2D in this project: Spine is not bundled.', 'export {};', ''].join(
-        '\n'
-      );
+      return [
+        '// No SpineSkeleton2D in this project: Spine is not bundled.',
+        'export {};',
+        '',
+      ].join('\n');
     }
 
     return [

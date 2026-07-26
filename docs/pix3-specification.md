@@ -611,6 +611,13 @@ v1 templates: `empty-3d`, `empty-2d`, `playable-3d`, `playable-2d` (tap-to-start
 
 The project manifest (`pix3project.yaml`) additionally stores `projectType`, `targetPlatform` (`mobile`|`desktop`|`universal`) and `quality` (`antialias`, `shadows`, `maxPixelRatio`; defaults derived from the platform). Play mode (`GamePlaySessionService`) and runtime/playable builds (via the generated `scene-manifest.ts` `runtimeQuality` export) apply the preset.
 
+An optional `export:` block controls which files reach an HTML/ZIP build:
+
+- `includeGlobs` — force-ship these files even though nothing references them (paths assembled from save data, scenes reached only through a computed level index). Matched scenes/prefabs join the reference scan as roots, so they bring their own textures.
+- `excludeGlobs` — never ship these. The exclusion gates the reference graph, not just the output: an excluded scene is not scanned, so assets only it referenced drop with it, and it also leaves the navigable scene manifest so the export cannot name an entry scene whose file it never ships.
+
+Patterns match project-relative paths (a leading `res://` is stripped) and support `*`, `**` and `?` (`src/services/export/glob-match.ts`). An absent or empty block is inert and is not written back to the manifest. Independently of both lists, `RuntimeProjectBuildModel.reachability` records for every shipped asset **why** it is in the build (`project-scene`, `scene-reference`, `script-reference`, `directory-expansion`, `atlas-page`, `locale-table`, `locale-sprite`, `include-glob`) and what referenced it — bookkeeping that never changes the output, but makes the deliberately over-inclusive collector auditable.
+
 Every new project also receives an **agent overlay** (`src/templates/agent/**`): `design/` (GDD + references folder), `AGENTS.md`, `CLAUDE.md`, `.claude/skills/pix3-game-dev/` (with bundled copies of `nodes-and-systems.md` and `node-types-reference.md`) and `.claude/skills/pix3-remote-preview/`, plus `.pix3/template.json` (template id + editor version). This makes a freshly created project directly usable by coding agents working on the local folder.
 
 The editor ships as an installable **PWA** (`vite-plugin-pwa`, `autoUpdate`): standalone display, offline-precached app shell including `esbuild.wasm` (in-editor script compilation offline); the background-removal ONNX runtimes are excluded from precache. The legacy handwritten `src/sw.ts` remains unregistered.
@@ -655,6 +662,11 @@ autoloads:
   - scriptPath: scripts/GameManager.ts
     singleton: GameManager
     enabled: true
+export:
+  includeGlobs:
+    - src/assets/audio/voice/**/*.mp3
+  excludeGlobs:
+    - src/assets/scenes/scratch/**
 ```
 
 ## 6.18 Signals Engine
@@ -890,7 +902,7 @@ Godot-inspired localization (`TranslationServer`/`tr()` adapted to Pix3): per-lo
 
 ### 6.22.4 Export
 
-- `ProjectBuildService.collectAssetPaths` additionally enumerates `locales/*.json` and every texture path in their `sprites` sections (invisible to the `res://` regex scan of scenes/scripts).
+- `ProjectBuildService.collectAssetPaths` additionally enumerates the `locales/*.json` tables **declared in the effective localization config** (`defaultLocale` + `fallbackLocale` + `locales`) and every texture path in their `sprites` sections (invisible to the `res://` regex scan of scenes/scripts). Undeclared tables on disk — and the sprite variants only they reference — are excluded with a build warning: the exported runtime fetches `res://locales/<id>.json` solely for ids in the baked config, so they are provably unreachable. A `null` config (localization inert) excludes the whole folder.
 - The generated `scene-manifest.ts` exports `runtimeLocalization` (the effective config or `null`); the runtime bootstrap calls `runner.setLocalizationConfig(...)` before `startScene`, so the first frame renders in `defaultLocale` and playable-HTML exports work offline via embedded tables.
 
 ## 7. Scene File Format (\*.pix3scene)

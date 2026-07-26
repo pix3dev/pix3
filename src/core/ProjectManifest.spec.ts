@@ -3,9 +3,48 @@ import {
   createDefaultProjectManifest,
   createDefaultQualitySettings,
   normalizeProjectManifest,
+  resolveExportSettings,
 } from './ProjectManifest';
 
 describe('ProjectManifest', () => {
+  it('normalizes export glob lists and strips the res:// scheme', () => {
+    const manifest = normalizeProjectManifest({
+      ...createDefaultProjectManifest(),
+      export: {
+        includeGlobs: ['  res://src/assets/audio/**  ', './src/assets/fonts/**', '', 42],
+        excludeGlobs: ['scratch/**', 'scratch/**'],
+      },
+    });
+
+    expect(manifest.export).toEqual({
+      includeGlobs: ['src/assets/audio/**', 'src/assets/fonts/**'],
+      excludeGlobs: ['scratch/**'],
+    });
+  });
+
+  it('keeps an empty or absent export block out of the manifest', () => {
+    expect(createDefaultProjectManifest().export).toBeUndefined();
+    expect(
+      normalizeProjectManifest({
+        ...createDefaultProjectManifest(),
+        export: { includeGlobs: [], excludeGlobs: [] },
+      }).export
+    ).toBeUndefined();
+  });
+
+  it('resolves export settings defensively for partial or absent manifests', () => {
+    const empty = { includeGlobs: [], excludeGlobs: [] };
+
+    expect(resolveExportSettings(null)).toEqual(empty);
+    expect(resolveExportSettings({})).toEqual(empty);
+    // A manifest straight off disk has not been normalized yet.
+    expect(resolveExportSettings({ export: { excludeGlobs: 'nope' } })).toEqual(empty);
+    expect(resolveExportSettings({ export: { excludeGlobs: ['scratch/**'] } })).toEqual({
+      includeGlobs: [],
+      excludeGlobs: ['scratch/**'],
+    });
+  });
+
   it('normalizes default export scene path from resource path input', () => {
     const manifest = normalizeProjectManifest({
       ...createDefaultProjectManifest(),

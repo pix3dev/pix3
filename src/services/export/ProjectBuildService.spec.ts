@@ -106,6 +106,34 @@ const createContext = (): CommandContext => {
   };
 };
 
+type RuntimeLocalization = { defaultLocale: string; fallbackLocale?: string; locales: string[] };
+
+/**
+ * Stub the injected collaborators on the instance. `@inject` installs a getter on
+ * the prototype, so an own property shadows the container lookup.
+ */
+const attachStubs = (
+  service: ProjectBuildService,
+  fs: InMemoryFs,
+  localization: RuntimeLocalization | null = null
+): void => {
+  Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+  Object.defineProperty(service, 'localizationEditor', {
+    value: { getRuntimeConfig: () => localization },
+    configurable: true,
+  });
+};
+
+const withExportSettings = (
+  context: CommandContext,
+  settings: { includeGlobs?: string[]; excludeGlobs?: string[] }
+): CommandContext => {
+  context.state.project.manifest = {
+    export: settings,
+  } as unknown as CommandContext['state']['project']['manifest'];
+  return context;
+};
+
 describe('ProjectBuildService', () => {
   it('builds an in-memory runtime project model without writing files', async () => {
     const fs = createInMemoryFs({
@@ -314,7 +342,8 @@ describe('ProjectBuildService', () => {
   it('bundles the Spine runtime only for projects that place a SpineSkeleton2D', async () => {
     const spineFs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
-      'scenes/main.pix3scene': 'root:\n  - type: SpineSkeleton2D\n    properties:\n      skeletonPath: res://spine/hero.json\n      atlasPath: res://spine/hero.atlas\n',
+      'scenes/main.pix3scene':
+        'root:\n  - type: SpineSkeleton2D\n    properties:\n      skeletonPath: res://spine/hero.json\n      atlasPath: res://spine/hero.atlas\n',
       'spine/hero.json': '{}',
       'spine/hero.atlas': 'hero.png\n	size: 64, 64\nhead\n	bounds: 0, 0, 8, 8\n',
       'spine/hero.png': 'page-bytes',
@@ -372,6 +401,175 @@ describe('ProjectBuildService', () => {
     const scriptedService = new ProjectBuildService();
     Object.defineProperty(scriptedService, 'fs', { value: scriptedFs, configurable: true });
     expect((await scriptedService.buildRuntimeProjectModel(createContext())).usesSpine).toBe(true);
+  });
+
+  it('ships only the locale tables the exported runtime can reach', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      'locales/en.json': JSON.stringify({ strings: { play: 'Play' }, sprites: {} }),
+      'locales/ru.json': JSON.stringify({
+        strings: { play: 'Играть' },
+        sprites: { logo: 'res://src/assets/textures/logo-ru.png' },
+      }),
+      // Authored but never declared in the project's localization settings.
+      'locales/de.json': JSON.stringify({
+        strings: {},
+        sprites: { logo: 'res://src/assets/textures/logo-de.png' },
+      }),
+      'src/assets/textures/logo-ru.png': 'ru-bytes',
+      'src/assets/textures/logo-de.png': 'de-bytes',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs, { defaultLocale: 'en', locales: ['en', 'ru'] });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toContain('locales/en.json');
+    expect(model.assetPaths).toContain('locales/ru.json');
+    // The runtime only ever fetches `res://locales/<declared>.json`, so the
+    // undeclared table and its sprite variant are dead weight.
+    expect(model.assetPaths).not.toContain('locales/de.json');
+    expect(model.assetPaths).not.toContain('src/assets/textures/logo-de.png');
+    expect(model.assetPaths).toContain('src/assets/textures/logo-ru.png');
+    expect(model.warnings).toContain(
+      'Excluded 1 locale table(s) not declared in the project localization settings: locales/de.json'
+    );
+  });
+
+  it('ships no locale tables when the project has no localization config', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      'locales/en.json': JSON.stringify({ strings: {}, sprites: {} }),
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs, null);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toEqual(['scenes/main.pix3scene']);
+    expect(model.warnings.join('\n')).toContain('Localization is not configured');
+  });
+
+  it('keeps the fallback locale even when it is not in the declared list', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      'locales/en.json': JSON.stringify({ strings: {}, sprites: {} }),
+      'locales/ru.json': JSON.stringify({ strings: {}, sprites: {} }),
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs, { defaultLocale: 'ru', fallbackLocale: 'en', locales: ['ru'] });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toContain('locales/ru.json');
+    expect(model.assetPaths).toContain('locales/en.json');
+  });
+
+  it('drops files matching the export excludeGlobs, along with what only they referenced', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n    texture: res://src/assets/textures/hero.png\n',
+      'scenes/scratch.pix3scene':
+        'root:\n  node:\n    texture: res://src/assets/textures/wip.png\n',
+      'src/assets/textures/hero.png': 'hero',
+      'src/assets/textures/wip.png': 'wip',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(
+      withExportSettings(createContext(), { excludeGlobs: ['scenes/scratch.pix3scene'] })
+    );
+
+    expect(model.assetPaths).toEqual(['scenes/main.pix3scene', 'src/assets/textures/hero.png']);
+    // An excluded scene is never scanned, so the texture only it referenced goes too.
+    expect(model.assetPaths).not.toContain('src/assets/textures/wip.png');
+    // ...and it must not remain navigable, or the export could name an entry
+    // scene whose file it never ships.
+    expect(model.scenePaths).toEqual(['scenes/main.pix3scene']);
+    expect(model.warnings.join('\n')).toContain('excludeGlobs');
+  });
+
+  it('force-ships files matching the export includeGlobs and scans included scenes', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      // Referenced by nothing a static scan can see (path built from save data).
+      'src/assets/audio/theme.mp3': 'audio-bytes',
+      'src/assets/audio/notes.txt': 'not audio',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(
+      withExportSettings(createContext(), { includeGlobs: ['src/assets/audio/**/*.mp3'] })
+    );
+
+    expect(model.assetPaths).toContain('src/assets/audio/theme.mp3');
+    expect(model.assetPaths).not.toContain('src/assets/audio/notes.txt');
+    expect(model.reachability.get('src/assets/audio/theme.mp3')).toEqual({
+      reason: 'include-glob',
+      via: '',
+    });
+  });
+
+  it('records why each shipped asset is in the build', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  node:\n    prefab: res://src/assets/prefabs/hud.pix3scene\n',
+      'src/assets/prefabs/hud.pix3scene':
+        "root:\n  - type: Sprite2D\n    properties:\n      texture: { url: 'res://src/assets/textures/hud.png' }\n",
+      'src/assets/textures/hud.png': 'hud',
+      'scripts/boot.ts': "export const icon = 'res://src/assets/textures/icon.png';\n",
+      'src/assets/textures/icon.png': 'icon',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.reachability.get('scenes/main.pix3scene')?.reason).toBe('project-scene');
+    expect(model.reachability.get('src/assets/textures/hud.png')).toEqual({
+      reason: 'scene-reference',
+      via: 'src/assets/prefabs/hud.pix3scene',
+    });
+    expect(model.reachability.get('src/assets/textures/icon.png')).toEqual({
+      reason: 'script-reference',
+      via: 'scripts/boot.ts',
+    });
+    // The graph mirrors the output exactly — no directory placeholders linger.
+    expect([...model.reachability.keys()].sort()).toEqual([...model.assetPaths]);
+  });
+
+  it('attributes directory-expanded frames to the directory that pulled them in', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      'scripts/explosion.ts':
+        'const FRAME = (i: number) => `res://src/assets/textures/sfx/boom1/ex${i}.png`;\nexport const first = FRAME(0);\n',
+      'src/assets/textures/sfx/boom1/ex0.png': 'f0',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.reachability.get('src/assets/textures/sfx/boom1/ex0.png')).toEqual({
+      reason: 'directory-expansion',
+      via: 'src/assets/textures/sfx/boom1',
+    });
+    expect(model.reachability.has('src/assets/textures/sfx/boom1')).toBe(false);
   });
 
   it('generates runtime project files and copies runtime sources', async () => {

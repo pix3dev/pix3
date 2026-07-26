@@ -44,10 +44,26 @@ export interface LocalizationSettings {
   locales: string[];
 }
 
+/**
+ * Export-time asset selection. Absent ⇒ nothing is forced into or out of the
+ * build (the collector's own reachability scan decides alone).
+ *
+ * Patterns match project-relative file paths (no `res://` prefix) and support
+ * `*` (within a path segment), `**` (across segments) and `?`.
+ */
+export interface ExportSettings {
+  /** Always ship these files, even when nothing in the project references them. */
+  includeGlobs: string[];
+  /** Never ship these files; a scene/prefab excluded here is not scanned either. */
+  excludeGlobs: string[];
+}
+
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
   defaultExportScenePath?: string;
+  /** Export-time asset selection; absent ⇒ defaults (see {@link ExportSettings}). */
+  export?: ExportSettings;
   viewportBaseSize: {
     width: number;
     height: number;
@@ -182,6 +198,53 @@ const normalizeLocalization = (input: unknown): LocalizationSettings | undefined
   };
 };
 
+export const createDefaultExportSettings = (): ExportSettings => ({
+  includeGlobs: [],
+  excludeGlobs: [],
+});
+
+const normalizeGlobList = (input: unknown): string[] => {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const patterns = input
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0)
+    // Authors write either form; the collector works in scheme-less paths.
+    .map(entry => (entry.startsWith('res://') ? entry.slice(6) : entry).replace(/^\.\//, ''));
+
+  return [...new Set(patterns)];
+};
+
+const normalizeExportSettings = (input: unknown): ExportSettings | undefined => {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const includeGlobs = normalizeGlobList(record.includeGlobs);
+  const excludeGlobs = normalizeGlobList(record.excludeGlobs);
+  // An empty block is inert — keep it out of the manifest so projects that never
+  // touch export settings don't grow a no-op section on every save.
+  if (includeGlobs.length === 0 && excludeGlobs.length === 0) {
+    return undefined;
+  }
+
+  return { includeGlobs, excludeGlobs };
+};
+
+/**
+ * Effective export settings for a manifest that may be absent, partial, or not
+ * yet normalized (state can hold a manifest straight off disk).
+ */
+export const resolveExportSettings = (manifest: unknown): ExportSettings => {
+  const record =
+    manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>) : {};
+  return normalizeExportSettings(record.export) ?? createDefaultExportSettings();
+};
+
 const normalizeDefaultExportScenePath = (input: unknown): string | undefined => {
   if (typeof input !== 'string') {
     return undefined;
@@ -247,6 +310,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
         : DEFAULT_PROJECT_MANIFEST_VERSION,
     autoloads,
     defaultExportScenePath: normalizeDefaultExportScenePath(record.defaultExportScenePath),
+    export: normalizeExportSettings(record.export),
     viewportBaseSize: normalizeViewportBaseSize(record.viewportBaseSize),
     ambientOcclusion: normalizeAmbientOcclusion(record.ambientOcclusion),
     textureFiltering: normalizeTextureFiltering(record.textureFiltering),
