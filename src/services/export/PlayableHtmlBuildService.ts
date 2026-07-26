@@ -247,6 +247,10 @@ export class PlayableHtmlBuildService {
       entryFiles: ['src/main.ts'],
       entryStrategy: 'import-only',
       externalModules: [],
+      // Every export path minifies: the playable embeds the runtime and the vendored
+      // three/rapier/yaml/spine sources verbatim, and ad networks measure the raw HTML (2–5 MB
+      // budgets), where unminified vendor code is the single biggest line item.
+      minify: true,
       moduleAliases: {
         '@pix3/runtime': 'pix3-runtime/src/index.ts',
         '@pix3/runtime/*': 'pix3-runtime/src/*',

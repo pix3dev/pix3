@@ -6,7 +6,7 @@
 
 **Оси приоритизации:** 🧃 juice · 🎬 кат-сцены · 🤖 agent pipeline · 💰 бизнес (playable ads).
 
-Верифицировано по коду на commit `d591e68` (2026-07-06); статусы P1 перепроверены на `757d7c7` (2026-07-25).
+Верифицировано по коду на commit `d591e68` (2026-07-06); статусы P1 перепроверены на `757d7c7` (2026-07-25); P0.6-минификация и статус asset store — на `7f0c0f1` (2026-07-26).
 
 ---
 
@@ -112,7 +112,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 
 - **Есть:** single-file сборка + size report (см. гипотезу 4).
 - **Делать:** слой адаптеров: mraid-обёртка (viewable/ready), протокольные события, пресеты сетей (AppLovin, Unity Ads, ironSource, Mintegral, Meta, Google — у каждой свои требования: inline vs zip, размер 2–5 MB, orientation); runtime CTA-API `Playable.openStore()`; аудит «нет внешних запросов»; валидатор бюджета в диалоге экспорта.
-- Быстрый выигрыш там же: включить **минификацию** бандла (esbuild minify — не обнаружена).
+- ✅ **Минификация бандла — сделано (2026-07-26).** `VirtualBundleOptions.minify` в [ScriptCompilerService](../src/services/scripting/ScriptCompilerService.ts) (по умолчанию **выключена** — внутриредакторная компиляция скриптов должна оставаться читаемой, ошибки рантайма сообщаются по этим номерам строк), включена в [PlayableHtmlBuildService.createCompileOptions](../src/services/export/PlayableHtmlBuildService.ts) ⇒ действует на **оба** экспорта, html и zip. Безопасно, потому что рантайм нигде не разрешает типы через `constructor.name`: типы нод, id скриптов и property-схемы — явные строки (проверено грепом). Замер на `samples/HelloWorld` (entry `demo-01`, 11 сцен, 15 ассетов, вкл. Spine): **3 705 457 → 2 113 559 байт (−43%)**, кодовая часть 2.97 → 1.30 MiB (−56%); минифицированный playable проверен живьём — рендерит сцену, консоль чистая. Ассеты (733 KiB base64) минификация не трогает — следующий рычаг по размеру именно они (KTX2/сжатие, см. P3).
 - Критерий: экспорт одного проекта проходит тест-инструменты 3 сетей без ручной правки HTML.
 
 **Рекомендуемый порядок P0:** ~~P0.4 (S, быстрый клей)~~ ✅ → ~~P0.5 (множитель для всего дальнейшего тюнинга)~~ ✅ → ~~P0.3 (juice-примитивы)~~ ✅ → ~~P0.1 (vcam-3D)~~ ✅ (Camera2D-подпункт отложен) → ~~P0.2 (post-fx)~~ ✅ Bloom/Vignette/CA (LUT/CanvasLayer2D/editor-2D — отложены) → **P0.6** ← следующий (ad-network адаптеры экспорта).
@@ -158,7 +158,7 @@ Single-file экспорт **есть и серьёзный**: [PlayableHtmlBuil
 
 ## 6. P3 — масштаб (после того как P0–P2 приносят результат)
 
-glb-инспектор размера (M, TODO) · Draco/meshopt + KTX2 (M) · remote preview на устройстве (L, TODO) · asset library/store (M, TODO) · кастомные Безье-кривые easing + редактор кривых (M) · spline/dolly-пути камеры (L) · FSM/бленды клипов, AnimationTree-lite (L) · IK (L) · A/B-фреймворк вариаций playable (M, использует запись видео из P1) · публикация runtime-пакета в облако (M, TODO) · tools.gritsenko.biz (L, TODO, low).
+glb-инспектор размера (M, TODO) · Draco/meshopt + KTX2 (M) · ~~remote preview на устройстве~~ ✅ (спека 1.18–1.19) · ~~asset library/store~~ ✅ (спека 1.20 + 1.28: серверный курируемый стор, фазы A–D; осталась Phase E — версионирование/«update available», коллекции-паки, OPFS-кэш, CDN) · кастомные Безье-кривые easing + редактор кривых (M) · spline/dolly-пути камеры (L) · FSM/бленды клипов, AnimationTree-lite (L) · IK (L) · A/B-фреймворк вариаций playable (M, использует запись видео из P1) · публикация runtime-пакета в облако (M, TODO) · tools.gritsenko.biz (L, TODO, low).
 
 ## 7. Анти-скоуп (осознанно не делаем)
 

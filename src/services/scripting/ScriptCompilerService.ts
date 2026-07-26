@@ -58,6 +58,14 @@ export interface VirtualBundleOptions {
   readonly moduleAliases?: Readonly<Record<string, string>>;
   readonly define?: Readonly<Record<string, string>>;
   readonly entryStrategy?: VirtualEntryStrategy;
+  /**
+   * Minify the bundle. Off by default: in-editor script compilation must stay readable, because
+   * runtime errors are reported back to the user against these line numbers. Export builds turn it
+   * on — the playable inlines the whole runtime plus vendored three/rapier as SOURCE, and ad
+   * networks budget the raw file size. Safe because nothing in the runtime resolves types through
+   * `constructor.name`: node types, script ids and property schemas are all explicit strings.
+   */
+  readonly minify?: boolean;
 }
 
 interface VirtualFileSystemPluginOptions {
@@ -178,6 +186,7 @@ export class ScriptCompilerService {
         format: 'esm',
         platform: 'browser',
         target: 'es2022',
+        minify: options.minify === true,
         define,
         external: [...externalModules],
         write: false,

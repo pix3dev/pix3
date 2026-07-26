@@ -121,6 +121,8 @@ describe('PlayableHtmlBuildService', () => {
       entryFiles: ['src/main.ts'],
       entryStrategy: 'import-only',
       externalModules: [],
+      // Exports must minify — the runtime and the vendored libraries are embedded as source.
+      minify: true,
       moduleAliases: {
         '@pix3/runtime': 'pix3-runtime/src/index.ts',
         '@pix3/runtime/*': 'pix3-runtime/src/*',
