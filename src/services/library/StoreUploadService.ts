@@ -28,6 +28,9 @@ import { inject, injectable } from '@/fw/di';
 import * as ApiClient from '@/services/cloud/ApiClient';
 import { AssetLibraryService } from '@/services/library/AssetLibraryService';
 import { normalizeBundlePath } from '@/services/library/library-path-remap';
+// The library's canonical slug rule (NFKD + diacritic stripping + dash collapsing) — a local
+// copy would quietly disagree with the rest of the library on non-ASCII names.
+import { slugify } from '@/services/library/library-search';
 import { inferItemTypeFromPath, type LibraryItemManifest } from '@/services/library/library-types';
 import type { StoreValidationIssue } from '@/services/library/store-validation';
 
@@ -236,12 +239,6 @@ export class StoreUploadService {
       try {
         await this.uploadBundle(bundle, opts);
         outcomes.push({ bundleId: bundle.id, status: 'ok' });
-        // Surface the new item immediately; a failed refresh is cosmetic, never a failed upload.
-        try {
-          await this.library.refreshStore();
-        } catch {
-          // The next panel focus re-pulls the catalog anyway.
-        }
       } catch (error) {
         if (error instanceof UploadAbortedError) {
           cancelled = true;
@@ -254,6 +251,16 @@ export class StoreUploadService {
           message: messageOf(error),
           issues: error instanceof StoreUploadError ? error.issues : undefined,
         });
+      }
+    }
+
+    // One refresh for the whole batch, not one per bundle: a ten-folder drop would otherwise
+    // re-pull the index ten times. A failed refresh is cosmetic — the panel re-pulls on focus.
+    if (outcomes.some(outcome => outcome.status === 'ok')) {
+      try {
+        await this.library.refreshStore();
+      } catch {
+        // Ignored on purpose: the upload itself succeeded.
       }
     }
     return outcomes;
@@ -627,16 +634,6 @@ function deriveName(label: string): string {
   const base = label.split('/').pop() ?? label;
   const dot = base.lastIndexOf('.');
   return (dot > 0 ? base.slice(0, dot) : base).trim() || 'Untitled item';
-}
-
-function slugify(name: string): string {
-  return (
-    name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'item'
-  );
 }
 
 function nonEmpty(value: unknown): value is string {

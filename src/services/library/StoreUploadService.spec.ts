@@ -361,6 +361,28 @@ describe('StoreUploadService.upload', () => {
     expect(refreshStore).toHaveBeenCalledTimes(1);
   });
 
+  it('re-pulls the catalog once for the whole batch, not once per bundle', async () => {
+    const { service, refreshStore } = makeService();
+    const bundles = await stageTwo(service);
+    FakeXhr.respond = xhr => xhr.finish(201, JSON.stringify({ status: 'draft' }));
+
+    const outcomes = await service.upload(bundles, {});
+
+    expect(outcomes.every(outcome => outcome.status === 'ok')).toBe(true);
+    expect(FakeXhr.instances).toHaveLength(2);
+    expect(refreshStore).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-pull the catalog when every bundle failed', async () => {
+    const { service, refreshStore } = makeService();
+    const bundles = await stageTwo(service);
+    FakeXhr.respond = xhr => xhr.finish(500, '{"error":"boom"}');
+
+    await service.upload(bundles, {});
+
+    expect(refreshStore).not.toHaveBeenCalled();
+  });
+
   it('keeps going after a failed bundle and carries the server publish checklist', async () => {
     const { service } = makeService();
     const bundles = await stageTwo(service);
