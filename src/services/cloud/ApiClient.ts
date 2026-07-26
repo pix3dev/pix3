@@ -485,6 +485,14 @@ export function storeFileUrl(itemId: string, bundlePath: string): string {
   return `${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}/files/${encodedPath}`;
 }
 
+/**
+ * URL of a store item resource. Exported because the bundle upload runs on `XMLHttpRequest`
+ * (progress + abort, see `StoreUploadService`) and still has to hit exactly this endpoint.
+ */
+export function storeItemUrl(itemId: string): string {
+  return `${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}`;
+}
+
 export function getStoreIndex(params: ApiStoreListParams = {}): Promise<{ items: ApiStoreItem[] }> {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

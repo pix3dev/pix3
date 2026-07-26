@@ -362,6 +362,43 @@ pix3-library-panel .lib-thumb-slider {
   accent-color: var(--accent);
 }
 
+pix3-library-panel .lib-newitem {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-library-panel .lib-newitem:hover {
+  border-color: var(--accent-line);
+}
+
+pix3-library-panel .lib-newitem svg {
+  display: block;
+}
+
+/*
+ * Visually hidden but still focusable and clickable — `display: none` would take the inputs out of
+ * the accessibility tree and out of reach of the file-chooser automation that drives them.
+ */
+pix3-library-panel .lib-fileinput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+
 pix3-library-panel .lib-iconbtn {
   display: inline-flex;
   align-items: center;
