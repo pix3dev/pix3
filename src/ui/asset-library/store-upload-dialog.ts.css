@@ -1,0 +1,451 @@
+/*
+ * Every rule is scoped under the element tag on purpose: Light-DOM dialogs in this app used to
+ * share unscoped `.dialog-*` / `.btn-*` globals and quietly restyled each other.
+ */
+pix3-store-upload-dialog {
+  display: contents;
+}
+
+pix3-store-upload-dialog *,
+pix3-store-upload-dialog *::before,
+pix3-store-upload-dialog *::after {
+  box-sizing: border-box;
+}
+
+pix3-store-upload-dialog .sud-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pix3-z-modal);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+}
+
+pix3-store-upload-dialog .sud-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 860px);
+  max-height: min(86vh, 720px);
+  padding: 18px 20px 16px;
+  font: 13px/1.4 var(--font-ui);
+  color: var(--fg-0);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-float);
+}
+
+pix3-store-upload-dialog .sud-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+pix3-store-upload-dialog .sud-title {
+  flex: 1;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+pix3-store-upload-dialog .sud-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--fg-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+pix3-store-upload-dialog .sud-close:hover:not(:disabled) {
+  color: var(--fg-0);
+  background: var(--bg-2);
+}
+
+pix3-store-upload-dialog .sud-close:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+pix3-store-upload-dialog .sud-hint {
+  margin: 6px 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+pix3-store-upload-dialog .sud-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-1);
+}
+
+pix3-store-upload-dialog .sud-alert {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-2);
+}
+
+pix3-store-upload-dialog .sud-alert__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+pix3-store-upload-dialog .sud-alert__list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+pix3-store-upload-dialog .sud-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(220px, 300px) 1fr;
+  gap: 12px;
+  min-height: 0;
+}
+
+pix3-store-upload-dialog .sud-list,
+pix3-store-upload-dialog .sud-meta {
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+}
+
+pix3-store-upload-dialog .sud-list {
+  padding: 4px;
+}
+
+pix3-store-upload-dialog .sud-meta {
+  padding: 10px 12px 14px;
+}
+
+pix3-store-upload-dialog .sud-empty {
+  padding: 20px 10px;
+  font-size: 12.5px;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--fg-0);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+pix3-store-upload-dialog .sud-item:hover {
+  background: var(--bg-2);
+}
+
+pix3-store-upload-dialog .sud-item.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+pix3-store-upload-dialog .sud-item.is-blocked {
+  color: var(--danger);
+  border-color: var(--danger-line);
+}
+
+pix3-store-upload-dialog .sud-item__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--fg-2);
+}
+
+pix3-store-upload-dialog .sud-item__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+pix3-store-upload-dialog .sud-item__name {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-store-upload-dialog .sud-item__sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-item__issue {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+pix3-store-upload-dialog .sud-item__state {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-item__state.is-ok {
+  color: var(--axis-y);
+}
+
+pix3-store-upload-dialog .sud-item__state.is-bad {
+  color: var(--danger);
+}
+
+pix3-store-upload-dialog .sud-item__state.is-progress {
+  color: var(--accent);
+}
+
+pix3-store-upload-dialog .sud-issues {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-2);
+}
+
+pix3-store-upload-dialog .sud-issues__title {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-weight: 600;
+}
+
+pix3-store-upload-dialog .sud-issues__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+pix3-store-upload-dialog .sud-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 132px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+}
+
+pix3-store-upload-dialog .sud-preview.is-invalid {
+  border-color: var(--danger-line);
+}
+
+pix3-store-upload-dialog .sud-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+pix3-store-upload-dialog .sud-preview__icon {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-preview__caption {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-field-label {
+  display: block;
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-2);
+  text-transform: uppercase;
+}
+
+pix3-store-upload-dialog .sud-field-label span {
+  font-weight: 400;
+  text-transform: none;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-field {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  outline: none;
+}
+
+pix3-store-upload-dialog .sud-field--area {
+  height: auto;
+  padding: 6px 8px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+pix3-store-upload-dialog .sud-field:focus {
+  border-color: var(--accent);
+}
+
+pix3-store-upload-dialog .sud-field:disabled {
+  opacity: 0.5;
+}
+
+pix3-store-upload-dialog .sud-field.is-invalid {
+  border-color: var(--danger);
+}
+
+pix3-store-upload-dialog .sud-field-row {
+  display: flex;
+  gap: 6px;
+}
+
+pix3-store-upload-dialog .sud-files {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-store-upload-dialog .sud-files__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+
+pix3-store-upload-dialog .sud-files__list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+
+pix3-store-upload-dialog .sud-files__more {
+  list-style: none;
+  margin-left: -16px;
+}
+
+pix3-store-upload-dialog .sud-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+pix3-store-upload-dialog .sud-status {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+pix3-store-upload-dialog .sud-status__done {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--axis-y);
+}
+
+pix3-store-upload-dialog .sud-progress {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  background: var(--bg-3);
+  border-radius: 999px;
+}
+
+pix3-store-upload-dialog .sud-progress__bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+pix3-store-upload-dialog .sud-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12.5px;
+  border: none;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+pix3-store-upload-dialog .sud-btn--ghost {
+  color: var(--fg-0);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+}
+
+pix3-store-upload-dialog .sud-btn--ghost:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+pix3-store-upload-dialog .sud-btn--primary {
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+pix3-store-upload-dialog .sud-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+pix3-store-upload-dialog .sud-btn svg,
+pix3-store-upload-dialog .sud-close svg,
+pix3-store-upload-dialog .sud-item__icon svg,
+pix3-store-upload-dialog .sud-item__state svg,
+pix3-store-upload-dialog .sud-status__done svg,
+pix3-store-upload-dialog .sud-alert__icon svg,
+pix3-store-upload-dialog .sud-preview__icon svg {
+  display: block;
+}
+
+pix3-store-upload-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

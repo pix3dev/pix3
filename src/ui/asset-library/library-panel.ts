@@ -29,6 +29,11 @@ import {
   type StoreCategory,
 } from '@/services/library/library-types';
 import {
+  StoreUploadService,
+  type IngestEntry,
+  type StoreIngestPlan,
+} from '@/services/library/StoreUploadService';
+import {
   getDroppedAssetResourcePath,
   getLibraryItemDragData,
   hasAssetDragData,
@@ -52,6 +57,7 @@ import {
 } from './library-view-model';
 
 import './store-category-editor';
+import './store-upload-dialog';
 import './library-panel.ts.css';
 
 /** MIME emitted by the Scene Tree when dragging a node (payload = node id). */
@@ -84,6 +90,7 @@ export class LibraryPanel extends ComponentBase {
   @inject(PublishToLibraryService) private readonly publishService!: PublishToLibraryService;
   @inject(LibrarySelectionService) private readonly selectionService!: LibrarySelectionService;
   @inject(LibrarySyncService) private readonly syncService!: LibrarySyncService;
+  @inject(StoreUploadService) private readonly uploadService!: StoreUploadService;
   @inject(IconService) private readonly iconService!: IconService;
 
   @state() private items: LibraryItem[] = [];
@@ -105,6 +112,10 @@ export class LibraryPanel extends ComponentBase {
   /** Server taxonomy for the store rail/chips. Empty ⇒ offline, config categories stay in charge. */
   @state() private storeCategories: StoreCategory[] = [];
   @state() private categoryEditorOpen = false;
+  /** Staged OS content awaiting the upload dialog (store source only). */
+  @state() private uploadPlan: StoreIngestPlan | null = null;
+  /** Category the OS content was dropped on, pre-filled into the staged bundles. */
+  private uploadCategoryPath: string | null = null;
 
   private disposeLibrarySubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
@@ -370,12 +381,26 @@ export class LibraryPanel extends ComponentBase {
     if (!this.canEditCurrentSource || !dataTransfer) {
       return false;
     }
+    return (
+      this.internalDragPayload(dataTransfer) ||
+      // OS drag & drop manifests as the `Files` type; only writable sources take it.
+      this.osFileDrag(dataTransfer)
+    );
+  }
+
+  /** A payload the editor itself started (scene node, project asset, library card). */
+  private internalDragPayload(dataTransfer: DataTransfer): boolean {
     const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
     return (
       types.includes(SCENE_TREE_NODE_MIME) ||
       hasAssetDragData(dataTransfer) ||
       hasLibraryItemDragData(dataTransfer)
     );
+  }
+
+  private osFileDrag(dataTransfer: DataTransfer): boolean {
+    const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+    return types.includes('Files');
   }
 
   private onDropTargetDragOver(event: DragEvent, target: DropTarget): void {
@@ -407,18 +432,36 @@ export class LibraryPanel extends ComponentBase {
     event.preventDefault();
     event.stopPropagation();
     this.dropTarget = null;
+
+    // OS files must be captured HERE, synchronously: `webkitGetAsEntry()` stops working the moment
+    // the drop handler yields, so the entry objects cannot be collected inside an async method.
+    // Editor-internal payloads win when both are present.
+    if (!this.internalDragPayload(dataTransfer) && this.osFileDrag(dataTransfer)) {
+      const entries = this.uploadService.captureEntries(dataTransfer);
+      if (entries.length > 0) {
+        void this.ingestOsEntries(target, entries);
+        return;
+      }
+    }
+
     void this.handleDropInto(target, dataTransfer);
   }
 
-  private async handleDropInto(target: DropTarget, dataTransfer: DataTransfer): Promise<void> {
-    // Resolve the destination category: a category row targets itself; the grid uses the
-    // currently-browsed category (narrowed by the subcategory chip, when one is active); the rail
-    // drop zone files under no category ("All").
+  /**
+   * Resolve the destination category of a drop: a category row targets itself; the grid uses the
+   * currently-browsed category (narrowed by the subcategory chip, when one is active); the rail
+   * drop zone files under no category. The aggregate row ("All" / "Featured") is not a real
+   * category — it files the item under none.
+   */
+  private resolveDropCategory(target: DropTarget): string | undefined {
     const browsed = this.subcategoryId ?? (this.categoryId !== 'all' ? this.categoryId : undefined);
     const dropped =
       target.kind === 'category' ? target.categoryId : target.kind === 'grid' ? browsed : undefined;
-    // The aggregate row ("All" / "Featured") is not a real category — it files the item under none.
-    const categoryId = dropped === 'all' ? undefined : dropped;
+    return dropped === 'all' ? undefined : dropped;
+  }
+
+  private async handleDropInto(target: DropTarget, dataTransfer: DataTransfer): Promise<void> {
+    const categoryId = this.resolveDropCategory(target);
 
     // A drop into the store publishes to the curated catalog (admin-only, server-enforced); every
     // other source keeps landing in the personal library.
@@ -459,6 +502,80 @@ export class LibraryPanel extends ComponentBase {
       } catch (error) {
         console.error('[LibraryPanel] Failed to publish asset to library:', error);
       }
+    }
+  }
+
+  // ── OS content (drag & drop / file picker) ──────────────────────────────────
+
+  /**
+   * Turn captured OS entries into staged bundles and route them: the store opens the upload dialog
+   * (metadata, gate, progress), while the personal library — which writes locally through
+   * `putUserItem` rather than through the store upload — just imports them straight away.
+   */
+  private async ingestOsEntries(target: DropTarget, entries: IngestEntry[]): Promise<void> {
+    const categoryId = this.resolveDropCategory(target);
+    let plan: StoreIngestPlan;
+    try {
+      plan = await this.uploadService.buildPlan(entries);
+    } catch (error) {
+      console.error('[LibraryPanel] Failed to read the dropped files:', error);
+      return;
+    }
+    if (plan.bundles.length === 0 && plan.issues.length === 0) {
+      return;
+    }
+    if (this.source.kind === 'store') {
+      this.uploadCategoryPath = categoryId ?? null;
+      this.uploadPlan = plan;
+      return;
+    }
+    await this.importPlanIntoUserLibrary(plan, categoryId);
+  }
+
+  /** Personal-library path: the same staged bundles, written locally with a flat `category`. */
+  private async importPlanIntoUserLibrary(
+    plan: StoreIngestPlan,
+    categoryId: string | undefined
+  ): Promise<void> {
+    let last: LibraryItem | null = null;
+    for (const bundle of plan.bundles) {
+      if (bundle.oversize) {
+        continue;
+      }
+      // Store lifecycle fields are meaningless in the personal library.
+      const { status: _status, categoryPath: _categoryPath, ...manifest } = bundle.manifest;
+      try {
+        last = await this.library.putUserItem({
+          manifest: { ...manifest, category: categoryId },
+          files: bundle.files,
+        });
+      } catch (error) {
+        console.error('[LibraryPanel] Failed to import dropped files:', error);
+      }
+    }
+    if (last) {
+      await this.afterPublish('user', categoryId, last);
+    }
+  }
+
+  /** File-picker counterpart of the drop: same plan, same dialog (and the a11y/automation path). */
+  private async onPickedFiles(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+    const entries = this.uploadService.entriesFromFileList(files);
+    // Reset so picking the same file twice in a row still fires `change`.
+    input.value = '';
+    await this.ingestOsEntries({ kind: 'grid' }, entries);
+  }
+
+  private onUploadDialogClose(uploaded: number): void {
+    this.uploadPlan = null;
+    this.uploadCategoryPath = null;
+    if (uploaded > 0) {
+      void this.reload();
     }
   }
 
@@ -555,6 +672,14 @@ export class LibraryPanel extends ComponentBase {
             @store-categories-close=${(event: CustomEvent<{ changed: boolean }>) =>
               void this.onCategoryEditorClose(event.detail.changed)}
           ></pix3-store-category-editor>`
+        : nothing}
+      ${this.uploadPlan
+        ? html`<pix3-store-upload-dialog
+            .plan=${this.uploadPlan}
+            .defaultCategoryPath=${this.uploadCategoryPath}
+            @store-upload-close=${(event: CustomEvent<{ uploaded: number }>) =>
+              this.onUploadDialogClose(event.detail.uploaded)}
+          ></pix3-store-upload-dialog>`
         : nothing}
     `;
   }
@@ -761,6 +886,7 @@ export class LibraryPanel extends ComponentBase {
               : nothing}
           </div>
           <span class="lib-toolbar__spacer"></span>
+          ${this.renderNewStoreItem()}
           <span class="lib-count">${items.length} items</span>
           <input
             class="lib-thumb-slider"
@@ -836,6 +962,58 @@ export class LibraryPanel extends ComponentBase {
             : this.renderList(items)}
       </div>
     `;
+  }
+
+  /**
+   * The file-picker entry point for store uploads. Not just an accessibility fallback for the OS
+   * drag: a picker is also the only way to feed content in from automation (an OS-level drag cannot
+   * be synthesized), so it must produce exactly the same plan and dialog as a drop.
+   */
+  private renderNewStoreItem() {
+    if (!this.isStoreAdmin) {
+      return nothing;
+    }
+    const onChange = (event: Event) => void this.onPickedFiles(event);
+    return html`
+      <button
+        type="button"
+        class="lib-newitem"
+        title="Stage files as a new store item"
+        @click=${() => this.pickerInput('libStoreFilesInput')?.click()}
+      >
+        ${this.icon('upload')}<span>New Store item…</span>
+      </button>
+      <button
+        type="button"
+        class="lib-iconbtn"
+        title="Stage a folder as one store item"
+        aria-label="Stage a folder as one store item"
+        @click=${() => this.pickerInput('libStoreFolderInput')?.click()}
+      >
+        ${this.icon('folder-plus')}
+      </button>
+      <input
+        id="libStoreFilesInput"
+        class="lib-fileinput"
+        type="file"
+        multiple
+        aria-label="Files for a new store item"
+        @change=${onChange}
+      />
+      <input
+        id="libStoreFolderInput"
+        class="lib-fileinput"
+        type="file"
+        multiple
+        webkitdirectory
+        aria-label="Folder for a new store item"
+        @change=${onChange}
+      />
+    `;
+  }
+
+  private pickerInput(id: string): HTMLInputElement | null {
+    return this.querySelector<HTMLInputElement>(`#${id}`);
   }
 
   /**
