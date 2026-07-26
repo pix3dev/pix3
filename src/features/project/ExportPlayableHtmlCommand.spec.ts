@@ -44,6 +44,12 @@ const createBuildArtifact = (
         },
       ],
     },
+    reachability: new Map([
+      [
+        'src/assets/textures/avatar.png',
+        { reason: 'scene-reference' as const, via: 'scenes/main.pix3scene' },
+      ],
+    ]),
     warnings: [],
     bundleWarnings: [],
     externalModuleIds: [],
@@ -191,12 +197,17 @@ describe('ExportPlayableHtmlCommand', () => {
         message: expect.stringContaining('Bundle size report:'),
         expandableSection: {
           title: 'Embedded assets by source size',
-          items: ['src/assets/textures/avatar.png: 512 B raw -> 684 B base64'],
+          items: [
+            'src/assets/textures/avatar.png: 512 B raw -> 684 B base64 [Referenced by a scene or prefab <- scenes/main.pix3scene]',
+          ],
           maxHeightPx: 260,
         },
       })
     );
     expect(readyCall?.message).toContain('Output HTML: 1.00 KiB (1024 bytes)');
+    // Per-reason breakdown: the "why is this bundle so big?" answer.
+    expect(readyCall?.message).toContain('Assets included by reason:');
+    expect(readyCall?.message).toContain('Referenced by a scene or prefab: 1 file, 512 B');
     expect(readyCall?.message).not.toContain('src/assets/textures/avatar.png');
     expect(dialogService.showConfirmation.mock.invocationCallOrder[0]).toBeLessThan(
       showSaveFilePicker.mock.invocationCallOrder[0]

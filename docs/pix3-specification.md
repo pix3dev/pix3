@@ -613,10 +613,14 @@ The project manifest (`pix3project.yaml`) additionally stores `projectType`, `ta
 
 An optional `export:` block controls which files reach an HTML/ZIP build:
 
-- `includeGlobs` — force-ship these files even though nothing references them (paths assembled from save data, scenes reached only through a computed level index). Matched scenes/prefabs join the reference scan as roots, so they bring their own textures.
-- `excludeGlobs` — never ship these. The exclusion gates the reference graph, not just the output: an excluded scene is not scanned, so assets only it referenced drop with it, and it also leaves the navigable scene manifest so the export cannot name an entry scene whose file it never ships.
+- `pruneUnusedAssets` (default `false`) — seed the asset scan from the entry scene + `extraRootScenePaths` instead of from every `.pix3scene` on disk, so unreachable scenes/prefabs and the assets only they reference stay out. Off by default because a game may load any scene at runtime; opting in is the author's call. Project scripts are still scanned broadly while pruning (they are the safety net for dynamically-built resource paths), and every pruned scene is **named in a build warning** — never dropped silently. Pruned scenes also leave the navigable scene manifest, since shipping a manifest entry without its file would only fail at load time.
+- `extraRootScenePaths` — additional reachability roots for the above: scenes/prefabs loaded dynamically (`level-${n}.pix3scene`, `instantiate()` with a computed path) that no static scan can see.
+- `includeGlobs` — force-ship these files even though nothing references them (paths assembled from save data). Matched scenes/prefabs join the reference scan as roots, so they bring their own textures.
+- `excludeGlobs` — never ship these. The exclusion gates the reference graph, not just the output: an excluded scene is not scanned, so assets only it referenced drop with it, and it also leaves the navigable scene manifest.
 
-Patterns match project-relative paths (a leading `res://` is stripped) and support `*`, `**` and `?` (`src/services/export/glob-match.ts`). An absent or empty block is inert and is not written back to the manifest. Independently of both lists, `RuntimeProjectBuildModel.reachability` records for every shipped asset **why** it is in the build (`project-scene`, `scene-reference`, `script-reference`, `directory-expansion`, `atlas-page`, `locale-table`, `locale-sprite`, `include-glob`) and what referenced it — bookkeeping that never changes the output, but makes the deliberately over-inclusive collector auditable.
+Globs match project-relative paths (a leading `res://` is stripped) and support `*`, `**` and `?` (`src/services/export/glob-match.ts`). An all-default block is inert and is not written back to the manifest.
+
+Independently of every setting above, `RuntimeProjectBuildModel.reachability` records for each shipped asset **why** it is in the build (`entry-scene`, `extra-root`, `project-scene`, `scene-reference`, `script-reference`, `directory-expansion`, `atlas-page`, `locale-table`, `locale-sprite`, `include-glob`) and what referenced it. Both export commands surface it (`src/services/export/export-report.ts`): the confirmation body carries an **Assets included by reason** breakdown with per-reason file counts and bytes — a heavy `Whole directory pulled in by a dynamic path` row is the usual explanation for a surprising bundle size — and the expandable asset list names the scene, script or glob behind each file. This is what makes the deliberately over-inclusive collector auditable rather than mysterious.
 
 Every new project also receives an **agent overlay** (`src/templates/agent/**`): `design/` (GDD + references folder), `AGENTS.md`, `CLAUDE.md`, `.claude/skills/pix3-game-dev/` (with bundled copies of `nodes-and-systems.md` and `node-types-reference.md`) and `.claude/skills/pix3-remote-preview/`, plus `.pix3/template.json` (template id + editor version). This makes a freshly created project directly usable by coding agents working on the local folder.
 
@@ -663,6 +667,9 @@ autoloads:
     singleton: GameManager
     enabled: true
 export:
+  pruneUnusedAssets: true
+  extraRootScenePaths:
+    - res://src/assets/scenes/level-2.pix3scene
   includeGlobs:
     - src/assets/audio/voice/**/*.mp3
   excludeGlobs:

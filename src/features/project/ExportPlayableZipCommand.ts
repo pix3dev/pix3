@@ -6,8 +6,14 @@ import {
   type CommandMetadata,
   type CommandPreconditionResult,
 } from '@/core/command';
-import { DialogService } from '@/services/editor/DialogService';
+import { DialogService, type DialogExpandableSection } from '@/services/editor/DialogService';
 import { LoggingService } from '@/services/core/LoggingService';
+import {
+  buildAssetProvenanceItems,
+  buildInclusionSummaryLines,
+  formatExportBytes,
+  summarizeInclusionReasons,
+} from '@/services/export/export-report';
 import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
 import type {
@@ -100,7 +106,8 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
         this.playableExportProgressDialogService.close();
       }
 
-      for (const warning of [...artifact.warnings, ...artifact.bundleWarnings]) {
+      const allWarnings = [...artifact.warnings, ...artifact.bundleWarnings];
+      for (const warning of allWarnings) {
         this.loggingService.warn(`[Playable Zip Export] ${warning}`);
       }
 
@@ -113,8 +120,13 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
           `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
           `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}\n` +
           `index.html: ${this.formatBytes(artifact.htmlBytes)}, assets: ${this.formatBytes(artifact.assetBytes)}, ` +
-          `zip: ${this.formatBytes(artifact.zipBlob.size)}\n\n` +
-          `Unpack it onto any static host and open index.html.`,
+          `zip: ${this.formatBytes(artifact.zipBlob.size)}` +
+          this.buildInclusionReportSection(artifact) +
+          (allWarnings.length > 0
+            ? `\n\nWarnings:\n${allWarnings.map(warning => `- ${warning}`).join('\n')}`
+            : '') +
+          `\n\nUnpack it onto any static host and open index.html.`,
+        expandableSection: this.buildPackedAssetsSection(artifact),
         confirmLabel: 'Save File',
         cancelLabel: 'Cancel',
       });
@@ -197,15 +209,35 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
     URL.revokeObjectURL(objectUrl);
   }
 
-  private formatBytes(bytes: number): string {
-    if (bytes < 1024) {
-      return `${bytes} B`;
-    }
-    if (bytes < 1024 * 1024) {
-      return `${(bytes / 1024).toFixed(2)} KiB`;
+  /**
+   * Why the archive weighs what it does, grouped by what pulled each asset in —
+   * see the HTML export's counterpart for the reasoning.
+   */
+  private buildInclusionReportSection(artifact: PlayableZipBuildArtifact): string {
+    const rows = summarizeInclusionReasons(artifact.reachability, artifact.assetEntries);
+    if (rows.length === 0) {
+      return '';
     }
 
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+    return `\n\nAssets included by reason:\n${buildInclusionSummaryLines(rows).join('\n')}`;
+  }
+
+  private buildPackedAssetsSection(
+    artifact: PlayableZipBuildArtifact
+  ): DialogExpandableSection | undefined {
+    if (artifact.assetEntries.length === 0) {
+      return undefined;
+    }
+
+    return {
+      title: 'Packed assets by size',
+      items: buildAssetProvenanceItems(artifact.assetEntries, artifact.reachability),
+      maxHeightPx: 260,
+    };
+  }
+
+  private formatBytes(bytes: number): string {
+    return formatExportBytes(bytes);
   }
 
   private toSuggestedFileName(projectName: string): string {

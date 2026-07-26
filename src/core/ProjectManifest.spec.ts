@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createDefaultExportSettings,
   createDefaultProjectManifest,
   createDefaultQualitySettings,
   normalizeProjectManifest,
@@ -7,42 +8,48 @@ import {
 } from './ProjectManifest';
 
 describe('ProjectManifest', () => {
-  it('normalizes export glob lists and strips the res:// scheme', () => {
+  it('normalizes export path lists and strips the res:// scheme', () => {
     const manifest = normalizeProjectManifest({
       ...createDefaultProjectManifest(),
       export: {
+        pruneUnusedAssets: true,
+        extraRootScenePaths: ['res://scenes/level-2.pix3scene'],
         includeGlobs: ['  res://src/assets/audio/**  ', './src/assets/fonts/**', '', 42],
         excludeGlobs: ['scratch/**', 'scratch/**'],
       },
     });
 
     expect(manifest.export).toEqual({
+      pruneUnusedAssets: true,
+      extraRootScenePaths: ['scenes/level-2.pix3scene'],
       includeGlobs: ['src/assets/audio/**', 'src/assets/fonts/**'],
       excludeGlobs: ['scratch/**'],
     });
   });
 
-  it('keeps an empty or absent export block out of the manifest', () => {
+  it('keeps an all-default or absent export block out of the manifest', () => {
     expect(createDefaultProjectManifest().export).toBeUndefined();
     expect(
       normalizeProjectManifest({
         ...createDefaultProjectManifest(),
-        export: { includeGlobs: [], excludeGlobs: [] },
+        export: { pruneUnusedAssets: false, includeGlobs: [], excludeGlobs: [] },
       }).export
     ).toBeUndefined();
   });
 
   it('resolves export settings defensively for partial or absent manifests', () => {
-    const empty = { includeGlobs: [], excludeGlobs: [] };
+    const empty = createDefaultExportSettings();
 
     expect(resolveExportSettings(null)).toEqual(empty);
     expect(resolveExportSettings({})).toEqual(empty);
     // A manifest straight off disk has not been normalized yet.
     expect(resolveExportSettings({ export: { excludeGlobs: 'nope' } })).toEqual(empty);
     expect(resolveExportSettings({ export: { excludeGlobs: ['scratch/**'] } })).toEqual({
-      includeGlobs: [],
+      ...empty,
       excludeGlobs: ['scratch/**'],
     });
+    // Pruning must never be inferred from a truthy-ish value.
+    expect(resolveExportSettings({ export: { pruneUnusedAssets: 'yes' } })).toEqual(empty);
   });
 
   it('normalizes default export scene path from resource path input', () => {

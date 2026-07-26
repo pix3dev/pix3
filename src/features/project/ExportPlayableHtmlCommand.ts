@@ -16,6 +16,12 @@ import type {
   PlayableHtmlBuildArtifact,
   PlayableHtmlBundleSizeReport,
 } from '@/services/export/PlayableHtmlBuildService';
+import {
+  buildAssetProvenanceItems,
+  buildInclusionSummaryLines,
+  formatExportBytes,
+  summarizeInclusionReasons,
+} from '@/services/export/export-report';
 
 type SaveFilePickerFn = (options?: unknown) => Promise<FileSystemFileHandle>;
 type WindowWithSavePicker = Window & {
@@ -102,7 +108,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       const readyToSave = await this.dialogService.showConfirmation({
         title: 'Playable HTML Ready',
         message: this.buildReadyMessage(artifact),
-        expandableSection: this.buildEmbeddedAssetsSection(artifact.sizeReport),
+        expandableSection: this.buildEmbeddedAssetsSection(artifact),
         confirmLabel: 'Save File',
         cancelLabel: 'Cancel',
       });
@@ -278,9 +284,25 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
       `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}, Generated files: ${artifact.fileCount}` +
       this.buildBundleSizeReportSection(artifact.sizeReport) +
+      this.buildInclusionReportSection(artifact) +
       warningSection +
       `\n\nClick "Save File" to choose where to write the .html file.`
     );
+  }
+
+  /**
+   * Why the bundle weighs what it does, grouped by what pulled each asset in.
+   * A fat `Whole directory pulled in by a dynamic path` row is the usual
+   * explanation for a surprising bundle size, and it points straight at the
+   * `excludeGlobs` entry that would fix it.
+   */
+  private buildInclusionReportSection(artifact: PlayableHtmlBuildArtifact): string {
+    const rows = summarizeInclusionReasons(artifact.reachability, artifact.sizeReport.assetEntries);
+    if (rows.length === 0) {
+      return '';
+    }
+
+    return `\n\nAssets included by reason:\n${buildInclusionSummaryLines(rows).join('\n')}`;
   }
 
   private buildSuccessMessage(
@@ -322,31 +344,29 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   }
 
   private buildEmbeddedAssetsSection(
-    report: PlayableHtmlBundleSizeReport
+    artifact: PlayableHtmlBuildArtifact
   ): DialogExpandableSection | undefined {
-    if (report.assetEntries.length === 0) {
+    const entries = artifact.sizeReport.assetEntries;
+    if (entries.length === 0) {
       return undefined;
     }
 
     return {
       title: 'Embedded assets by source size',
-      items: report.assetEntries.map(
+      // Biggest-first, each line naming what referenced it — so a heavy asset can
+      // be traced to the scene, script or glob responsible without a rebuild.
+      items: buildAssetProvenanceItems(
+        entries,
+        artifact.reachability,
         entry =>
-          `${entry.path}: ${this.formatBytes(entry.rawBytes)} raw -> ${this.formatBytes(entry.base64Bytes)} base64`
+          `${this.formatBytes(entry.rawBytes)} raw -> ${this.formatBytes(entry.base64Bytes)} base64`
       ),
       maxHeightPx: 260,
     };
   }
 
   private formatBytes(bytes: number): string {
-    if (bytes < 1024) {
-      return `${bytes} B`;
-    }
-    if (bytes < 1024 * 1024) {
-      return `${(bytes / 1024).toFixed(2)} KiB`;
-    }
-
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+    return formatExportBytes(bytes);
   }
 
   private formatPercent(part: number, whole: number): string {

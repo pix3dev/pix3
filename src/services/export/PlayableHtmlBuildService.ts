@@ -2,6 +2,7 @@ import { injectable, inject } from '@/fw/di';
 import type { CommandContext } from '@/core/command';
 import {
   ProjectBuildService,
+  type AssetReachabilityEntry,
   type ProjectBuildOptions,
   type RuntimeProjectBuildModel,
 } from '@/services/export/ProjectBuildService';
@@ -39,6 +40,8 @@ export interface PlayableHtmlBuildArtifact {
   readonly assetCount: number;
   readonly fileCount: number;
   readonly sizeReport: PlayableHtmlBundleSizeReport;
+  /** Why each shipped asset is in the bundle — see {@link RuntimeProjectBuildModel.reachability}. */
+  readonly reachability: ReadonlyMap<string, AssetReachabilityEntry>;
   readonly warnings: readonly string[];
   readonly bundleWarnings: readonly string[];
   readonly externalModuleIds: readonly string[];
@@ -51,8 +54,16 @@ export interface PlayableZipBuildArtifact {
   readonly assetCount: number;
   readonly htmlBytes: number;
   readonly assetBytes: number;
+  /** Packed size per asset — the zip counterpart of the HTML size report's entries. */
+  readonly assetEntries: readonly PlayableZipAssetSizeEntry[];
+  readonly reachability: ReadonlyMap<string, AssetReachabilityEntry>;
   readonly warnings: readonly string[];
   readonly bundleWarnings: readonly string[];
+}
+
+export interface PlayableZipAssetSizeEntry {
+  readonly path: string;
+  readonly rawBytes: number;
 }
 
 interface EmbeddedAssetsBuildStats {
@@ -180,13 +191,13 @@ export class PlayableHtmlBuildService {
     zip.file('index.html', html);
 
     let assetBytes = 0;
-    let packedAssets = 0;
+    const assetEntries: PlayableZipAssetSizeEntry[] = [];
     for (const assetPath of model.assetPaths) {
       try {
         const blob = await this.storage.readBlob(assetPath);
         zip.file(assetPath, blob);
         assetBytes += blob.size;
-        packedAssets += 1;
+        assetEntries.push({ path: assetPath, rawBytes: blob.size });
       } catch {
         warnings.push(`Failed to pack asset into zip export: ${assetPath}`);
       }
@@ -202,9 +213,17 @@ export class PlayableHtmlBuildService {
       zipBlob,
       entryScenePath: model.entryScenePath,
       sceneCount: model.scenePaths.length,
-      assetCount: packedAssets,
+      assetCount: assetEntries.length,
       htmlBytes: this.measureUtf8Bytes(html),
       assetBytes,
+      assetEntries: [...assetEntries].sort((left, right) => {
+        if (right.rawBytes !== left.rawBytes) {
+          return right.rawBytes - left.rawBytes;
+        }
+
+        return left.path.localeCompare(right.path);
+      }),
+      reachability: model.reachability,
       warnings,
       bundleWarnings: compilation.warnings,
     };
@@ -236,6 +255,7 @@ export class PlayableHtmlBuildService {
       assetCount: model.assetPaths.length,
       fileCount: prepared.files.size,
       sizeReport: this.buildBundleSizeReport(html, prepared.embeddedAssetsStats),
+      reachability: model.reachability,
       warnings,
       bundleWarnings: compilation.warnings,
       externalModuleIds: compileOptions.externalModules ?? [],

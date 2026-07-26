@@ -34,6 +34,8 @@ export interface ProjectBuildOptions {
 /** What pulled an asset into the build — see {@link AssetReachabilityEntry}. */
 export type AssetInclusionReason =
   | 'project-scene'
+  | 'entry-scene'
+  | 'extra-root'
   | 'scene-reference'
   | 'script-reference'
   | 'directory-expansion'
@@ -76,6 +78,8 @@ const SPINE_RUNTIME_DEPENDENCY_RANGE = '~4.3';
 const RUNTIME_BUILD_COMMAND = 'vite build';
 const RUNTIME_DEV_COMMAND = 'vite';
 const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
+/** How many pruned scenes to name before collapsing into "and N more". */
+const PRUNED_SCENE_WARNING_LIMIT = 10;
 /** Never walked when resolving `includeGlobs` — tooling and build output. */
 const NON_SHIPPABLE_DIRECTORIES = new Set([
   'node_modules',
@@ -168,11 +172,18 @@ export class ProjectBuildService {
     const projectScriptFiles = await this.collectProjectScriptFiles();
     const { assetPaths, reachability } = await this.collectAssetPaths(
       scenePaths,
+      entryScenePath,
       projectScriptFiles,
       exportSettings,
       warnings
     );
     const usesSpine = this.scanFoundSpineNode;
+    // With pruning on, a scene that did not survive the reachability scan must
+    // also leave the navigable manifest — listing a scene the bundle does not
+    // carry would only produce a runtime load failure.
+    const shippedScenePaths = exportSettings.pruneUnusedAssets
+      ? scenePaths.filter(scenePath => assetPaths.includes(scenePath))
+      : scenePaths;
     const projectName = context.state.project.projectName ?? 'Pix3 Project';
     const quality =
       context.state.project.manifest?.quality ??
@@ -184,14 +195,14 @@ export class ProjectBuildService {
 
     return {
       projectName,
-      scenePaths,
+      scenePaths: shippedScenePaths,
       entryScenePath,
       assetPaths,
       reachability,
       projectScriptFiles,
       files: this.buildGeneratedFiles(
         projectName,
-        scenePaths,
+        shippedScenePaths,
         entryScenePath,
         assetPaths,
         quality,
@@ -322,6 +333,7 @@ export class ProjectBuildService {
 
   private async collectAssetPaths(
     scenePaths: string[],
+    entryScenePath: string,
     projectScriptFiles: ReadonlyMap<string, string>,
     exportSettings: ExportSettings,
     warnings: string[]
@@ -340,6 +352,8 @@ export class ProjectBuildService {
     // squares in exports).
     const scanQueue: string[] = [];
     const queuedForScan = new Set<string>();
+    const directoryQueue: string[] = [];
+    const queuedDirectories = new Set<string>();
     const addResourcePath = (
       resourcePath: string,
       reason: AssetInclusionReason,
@@ -349,6 +363,16 @@ export class ProjectBuildService {
       // never scanned, so the assets only it referenced drop out with it.
       if (isExcluded(resourcePath)) {
         excludedPaths.add(resourcePath);
+        return;
+      }
+
+      // A directory cannot ship as one asset — queue it for expansion instead of
+      // adding it to the file set. See resolveDirectoryReference.
+      if (!this.hasFileExtension(resourcePath)) {
+        if (!queuedDirectories.has(resourcePath)) {
+          queuedDirectories.add(resourcePath);
+          directoryQueue.push(resourcePath);
+        }
         return;
       }
 
@@ -366,16 +390,31 @@ export class ProjectBuildService {
 
     this.scanFoundSpineNode = false;
 
-    // Seed with EVERY scene and prefab on disk, not just the navigable manifest
-    // scenes: a game can load any scene/prefab dynamically at runtime (e.g.
-    // `scene.instantiate('res://…/explosion.pix3scene')` or a computed level
-    // path), and each must ship with its own nested assets embedded.
-    const allSceneLikeFiles = await this.discoverFilesByExtension('.', '.pix3scene');
-    for (const sceneLikePath of allSceneLikeFiles) {
-      addResourcePath(this.normalizeResourcePath(sceneLikePath), 'project-scene');
-    }
-    for (const scenePath of scenePaths) {
-      addResourcePath(scenePath, 'project-scene');
+    const allSceneLikeFiles = (await this.discoverFilesByExtension('.', '.pix3scene')).map(path =>
+      this.normalizeResourcePath(path)
+    );
+
+    if (exportSettings.pruneUnusedAssets) {
+      // Reachability seeding: only the entry scene and the author-declared extra
+      // roots start the scan, so scenes/prefabs nothing reaches — and the assets
+      // only they referenced — stay out of the bundle.
+      if (entryScenePath) {
+        addResourcePath(entryScenePath, 'entry-scene');
+      }
+      for (const extraRoot of exportSettings.extraRootScenePaths) {
+        addResourcePath(extraRoot, 'extra-root');
+      }
+    } else {
+      // Default: seed with EVERY scene and prefab on disk, not just the navigable
+      // manifest scenes. A game can load any scene/prefab dynamically at runtime
+      // (e.g. `scene.instantiate('res://…/explosion.pix3scene')` or a computed
+      // level path), and each must ship with its own nested assets embedded.
+      for (const sceneLikePath of allSceneLikeFiles) {
+        addResourcePath(sceneLikePath, 'project-scene');
+      }
+      for (const scenePath of scenePaths) {
+        addResourcePath(scenePath, 'project-scene');
+      }
     }
 
     // Force-included files join the scan as roots, so an `includeGlobs` scene
@@ -397,53 +436,17 @@ export class ProjectBuildService {
       }
     }
 
-    while (scanQueue.length > 0) {
-      const scannablePath = scanQueue.shift();
-      if (!scannablePath) {
-        continue;
-      }
-
-      try {
-        const contents = await this.fs.readTextFile(scannablePath);
-        this.collectResourcePathsFromText(
-          contents,
-          'scene-reference',
-          scannablePath,
-          addResourcePath
-        );
-        if (!this.scanFoundSpineNode && SPINE_NODE_PATTERN.test(contents)) {
-          this.scanFoundSpineNode = true;
-        }
-      } catch {
-        warnings.push(`Failed to scan resource for asset references: ${scannablePath}`);
-      }
-    }
+    // One fixpoint over both queues. Directory expansion has to feed back into the
+    // scan, not run after it: a `.pix3scene` or `.pix3anim` reached only through an
+    // interpolated path (`level-${n}.pix3scene`) arrives via its directory, and if
+    // it were never scanned its own prefabs/frame textures would silently go
+    // missing from the build.
+    await this.drainResourceScan(scanQueue, directoryQueue, addResourcePath, warnings);
 
     await this.collectLocaleAssetPaths(addResourcePath, warnings);
     await this.collectSpineAtlasPagePaths(files, addResourcePath, warnings);
-
-    const resolved = await this.resolveAssetDirectoryReferences(
-      files,
-      (filePath, directoryPath) => {
-        if (isExcluded(filePath)) {
-          excludedPaths.add(filePath);
-          return false;
-        }
-
-        if (!reachability.has(filePath)) {
-          reachability.set(filePath, { reason: 'directory-expansion', via: directoryPath });
-        }
-        return true;
-      }
-    );
-
-    // Directory references were recorded while scanning but never ship as assets;
-    // drop them (and anything else that fell out) so the graph mirrors the output.
-    for (const recordedPath of [...reachability.keys()]) {
-      if (!resolved.has(recordedPath)) {
-        reachability.delete(recordedPath);
-      }
-    }
+    // Locale sprites and atlas pages can themselves name new resources/directories.
+    await this.drainResourceScan(scanQueue, directoryQueue, addResourcePath, warnings);
 
     if (excludedPaths.size > 0) {
       warnings.push(
@@ -451,10 +454,85 @@ export class ProjectBuildService {
       );
     }
 
+    if (exportSettings.pruneUnusedAssets) {
+      this.warnAboutPrunedScenes(allSceneLikeFiles, files, warnings);
+    }
+
     return {
-      assetPaths: Array.from(resolved).sort((a, b) => a.localeCompare(b)),
+      assetPaths: Array.from(files).sort((a, b) => a.localeCompare(b)),
       reachability,
     };
+  }
+
+  /**
+   * Alternate between scanning reference-carrying resources and expanding directory
+   * references until neither queue has anything left. Each step can feed the other:
+   * a scene names a directory, the directory yields a prefab, the prefab names more
+   * textures.
+   */
+  private async drainResourceScan(
+    scanQueue: string[],
+    directoryQueue: string[],
+    addResourcePath: (path: string, reason: AssetInclusionReason, via?: string) => void,
+    warnings: string[]
+  ): Promise<void> {
+    while (scanQueue.length > 0 || directoryQueue.length > 0) {
+      const scannablePath = scanQueue.shift();
+      if (scannablePath) {
+        try {
+          const contents = await this.fs.readTextFile(scannablePath);
+          this.collectResourcePathsFromText(
+            contents,
+            'scene-reference',
+            scannablePath,
+            addResourcePath
+          );
+          if (!this.scanFoundSpineNode && SPINE_NODE_PATTERN.test(contents)) {
+            this.scanFoundSpineNode = true;
+          }
+        } catch {
+          warnings.push(`Failed to scan resource for asset references: ${scannablePath}`);
+        }
+        continue;
+      }
+
+      const directoryPath = directoryQueue.shift();
+      if (!directoryPath) {
+        continue;
+      }
+
+      for (const nested of await this.discoverFilesByExtension(directoryPath, '')) {
+        addResourcePath(nested, 'directory-expansion', directoryPath);
+      }
+    }
+  }
+
+  /**
+   * Name every scene/prefab that reachability seeding dropped.
+   *
+   * This is the safety valve for the one way pruning can break a shipped game: a
+   * scene loaded through a path no static scan can see (a computed level index,
+   * a name read from save data) looks unreachable and silently stops shipping.
+   * Listing them by name turns that into something an author notices before the
+   * build leaves the editor — the fix is to add them to `extraRootScenePaths`.
+   */
+  private warnAboutPrunedScenes(
+    allSceneLikeFiles: readonly string[],
+    shipped: ReadonlySet<string>,
+    warnings: string[]
+  ): void {
+    const pruned = allSceneLikeFiles.filter(scenePath => !shipped.has(scenePath));
+    if (pruned.length === 0) {
+      return;
+    }
+
+    const listed = pruned.slice(0, PRUNED_SCENE_WARNING_LIMIT).join(', ');
+    const overflow = pruned.length - PRUNED_SCENE_WARNING_LIMIT;
+    warnings.push(
+      `Pruned ${pruned.length} scene/prefab file(s) not reachable from the entry scene: ` +
+        `${listed}${overflow > 0 ? `, and ${overflow} more` : ''}. ` +
+        `If the game loads any of them dynamically, declare it in the project's export extraRootScenePaths.`
+    );
   }
 
   /**
@@ -516,41 +594,16 @@ export class ProjectBuildService {
   }
 
   /**
-   * Expand directory `res://` references into the concrete files they contain.
+   * A `res://` reference without a file extension is treated as a *directory*.
    *
-   * Scripts frequently reference an asset *base directory* (e.g.
+   * Scripts frequently reference an asset base directory (e.g.
    * `const BASE = 'res://src/assets/textures/enemy/air'`) and build individual
    * frame paths dynamically (`` `${BASE}/transporter/${i}.png` ``). The static
    * `res://` scan can only see the base directory, never the interpolated file
-   * paths. A directory cannot be embedded as a single asset, so we recursively
-   * enumerate its files — this both silences the "failed to embed" warnings and
-   * ensures runtime-constructed asset paths actually ship in the bundle. Bare
-   * paths that are neither a file nor a real directory (e.g. `res://…`
-   * placeholders in comments) are dropped silently.
+   * paths, so {@link drainResourceScan} enumerates such directories recursively.
+   * Bare paths that are neither a file nor a real directory (e.g. `res://…`
+   * placeholders in comments) enumerate to nothing and are dropped silently.
    */
-  private async resolveAssetDirectoryReferences(
-    paths: Set<string>,
-    acceptExpanded: (filePath: string, directoryPath: string) => boolean
-  ): Promise<Set<string>> {
-    const resolved = new Set<string>();
-
-    for (const path of paths) {
-      if (this.hasFileExtension(path)) {
-        resolved.add(path);
-        continue;
-      }
-
-      const nestedFiles = await this.discoverFilesByExtension(path, '');
-      for (const nested of nestedFiles) {
-        if (acceptExpanded(nested, path)) {
-          resolved.add(nested);
-        }
-      }
-    }
-
-    return resolved;
-  }
-
   private hasFileExtension(path: string): boolean {
     return /\.[a-zA-Z0-9]+$/.test(path);
   }

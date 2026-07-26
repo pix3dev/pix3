@@ -52,6 +52,19 @@ export interface LocalizationSettings {
  * `*` (within a path segment), `**` (across segments) and `?`.
  */
 export interface ExportSettings {
+  /**
+   * Seed the asset scan from the entry scene + {@link extraRootScenePaths} instead
+   * of from every `.pix3scene` on disk, so unreachable scenes/prefabs and the
+   * assets only they reference stay out of the build. Defaults to `false`: a game
+   * may load any scene at runtime, so opting in is the author's call.
+   */
+  pruneUnusedAssets: boolean;
+  /**
+   * Extra reachability roots for {@link pruneUnusedAssets} — scenes/prefabs the
+   * game loads dynamically (`level-${n}.pix3scene`, `instantiate()` with a
+   * computed path) and which no static scan can therefore see.
+   */
+  extraRootScenePaths: string[];
   /** Always ship these files, even when nothing in the project references them. */
   includeGlobs: string[];
   /** Never ship these files; a scene/prefab excluded here is not scanned either. */
@@ -199,23 +212,26 @@ const normalizeLocalization = (input: unknown): LocalizationSettings | undefined
 };
 
 export const createDefaultExportSettings = (): ExportSettings => ({
+  pruneUnusedAssets: false,
+  extraRootScenePaths: [],
   includeGlobs: [],
   excludeGlobs: [],
 });
 
-const normalizeGlobList = (input: unknown): string[] => {
+/** Trim, drop blanks, strip `res://` / `./`, dedupe — for globs and root paths alike. */
+const normalizePathList = (input: unknown): string[] => {
   if (!Array.isArray(input)) {
     return [];
   }
 
-  const patterns = input
+  const paths = input
     .filter((entry): entry is string => typeof entry === 'string')
     .map(entry => entry.trim())
     .filter(entry => entry.length > 0)
     // Authors write either form; the collector works in scheme-less paths.
     .map(entry => (entry.startsWith('res://') ? entry.slice(6) : entry).replace(/^\.\//, ''));
 
-  return [...new Set(patterns)];
+  return [...new Set(paths)];
 };
 
 const normalizeExportSettings = (input: unknown): ExportSettings | undefined => {
@@ -224,15 +240,22 @@ const normalizeExportSettings = (input: unknown): ExportSettings | undefined => 
   }
 
   const record = input as Record<string, unknown>;
-  const includeGlobs = normalizeGlobList(record.includeGlobs);
-  const excludeGlobs = normalizeGlobList(record.excludeGlobs);
-  // An empty block is inert — keep it out of the manifest so projects that never
-  // touch export settings don't grow a no-op section on every save.
-  if (includeGlobs.length === 0 && excludeGlobs.length === 0) {
-    return undefined;
-  }
+  const settings: ExportSettings = {
+    pruneUnusedAssets: record.pruneUnusedAssets === true,
+    extraRootScenePaths: normalizePathList(record.extraRootScenePaths),
+    includeGlobs: normalizePathList(record.includeGlobs),
+    excludeGlobs: normalizePathList(record.excludeGlobs),
+  };
 
-  return { includeGlobs, excludeGlobs };
+  // An all-default block is inert — keep it out of the manifest so projects that
+  // never touch export settings don't grow a no-op section on every save.
+  const isInert =
+    !settings.pruneUnusedAssets &&
+    settings.extraRootScenePaths.length === 0 &&
+    settings.includeGlobs.length === 0 &&
+    settings.excludeGlobs.length === 0;
+
+  return isInert ? undefined : settings;
 };
 
 /**

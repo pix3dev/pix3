@@ -126,13 +126,34 @@ const attachStubs = (
 
 const withExportSettings = (
   context: CommandContext,
-  settings: { includeGlobs?: string[]; excludeGlobs?: string[] }
+  settings: {
+    pruneUnusedAssets?: boolean;
+    extraRootScenePaths?: string[];
+    includeGlobs?: string[];
+    excludeGlobs?: string[];
+  }
 ): CommandContext => {
   context.state.project.manifest = {
     export: settings,
   } as unknown as CommandContext['state']['project']['manifest'];
   return context;
 };
+
+/**
+ * Entry scene -> prefab -> texture, plus an orphan scene reachable from nothing.
+ * `createContext()` makes `scenes/main.pix3scene` the active (entry) scene.
+ */
+const unreachableSceneProject = (): Record<string, string> => ({
+  'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+  'scenes/main.pix3scene':
+    'root:\n  node:\n    texture: res://src/assets/textures/hero.png\n    prefab: res://src/assets/prefabs/hud.pix3scene\n',
+  'src/assets/prefabs/hud.pix3scene':
+    "root:\n  - type: Sprite2D\n    properties:\n      texture: { url: 'res://src/assets/textures/hud.png' }\n",
+  'scenes/orphan.pix3scene': 'root:\n  node:\n    texture: res://src/assets/textures/orphan.png\n',
+  'src/assets/textures/hero.png': 'hero',
+  'src/assets/textures/hud.png': 'hud',
+  'src/assets/textures/orphan.png': 'orphan',
+});
 
 describe('ProjectBuildService', () => {
   it('builds an in-memory runtime project model without writing files', async () => {
@@ -570,6 +591,141 @@ describe('ProjectBuildService', () => {
       via: 'src/assets/textures/sfx/boom1',
     });
     expect(model.reachability.has('src/assets/textures/sfx/boom1')).toBe(false);
+  });
+
+  it('scans scenes reached only through a directory expansion', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      // The level path is interpolated, so only the containing directory is
+      // statically visible — the level itself arrives via directory expansion.
+      'scripts/levels.ts':
+        'export const level = (n: number) => `res://levels/level-${String(n).padStart(2, "0")}.pix3scene`;\n',
+      'levels/level-01.pix3scene':
+        'root:\n  node:\n    prefab: res://src/assets/prefabs/unit.pix3scene\n',
+      'src/assets/prefabs/unit.pix3scene':
+        "root:\n  - type: Sprite2D\n    properties:\n      texture: { url: 'res://src/assets/textures/unit.png' }\n",
+      'src/assets/textures/unit.png': 'unit',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    // Expansion has to feed back into the scan: an expanded level that is never
+    // scanned would ship without the prefab and texture it references.
+    expect(model.assetPaths).toContain('levels/level-01.pix3scene');
+    expect(model.assetPaths).toContain('src/assets/prefabs/unit.pix3scene');
+    expect(model.assetPaths).toContain('src/assets/textures/unit.png');
+  });
+
+  it('scans a .pix3anim reached only through a directory expansion', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  node:\n',
+      'scripts/fx.ts':
+        'export const clip = (n: number) => `res://fx/burst${n}.pix3anim`;\nexport const first = clip(1);\n',
+      'fx/burst1.pix3anim': JSON.stringify({
+        clips: [
+          {
+            name: 'burst',
+            fps: 30,
+            loop: false,
+            frames: [{ texturePath: 'res://fx/frames/burst-0001.png' }],
+          },
+        ],
+      }),
+      'fx/frames/burst-0001.png': 'f1',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.assetPaths).toContain('fx/burst1.pix3anim');
+    expect(model.assetPaths).toContain('fx/frames/burst-0001.png');
+  });
+
+  it('ships every scene on disk by default, reachable or not', async () => {
+    const fs = createInMemoryFs(unreachableSceneProject());
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    // The default stays deliberately over-inclusive: a game may load any scene at
+    // runtime, so opting into pruning is the author's call.
+    expect(model.assetPaths).toContain('scenes/orphan.pix3scene');
+    expect(model.assetPaths).toContain('src/assets/textures/orphan.png');
+    expect(model.warnings.join('\n')).not.toContain('Pruned');
+  });
+
+  it('prunes scenes unreachable from the entry scene when pruneUnusedAssets is on', async () => {
+    const fs = createInMemoryFs(unreachableSceneProject());
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(
+      withExportSettings(createContext(), { pruneUnusedAssets: true })
+    );
+
+    expect(model.assetPaths).toEqual([
+      'scenes/main.pix3scene',
+      'src/assets/prefabs/hud.pix3scene',
+      'src/assets/textures/hero.png',
+      'src/assets/textures/hud.png',
+    ]);
+    // The orphan scene and its exclusive texture are gone...
+    expect(model.assetPaths).not.toContain('scenes/orphan.pix3scene');
+    expect(model.assetPaths).not.toContain('src/assets/textures/orphan.png');
+    // ...and it must not stay navigable, or the runtime would fail to load it.
+    expect(model.scenePaths).toEqual(['scenes/main.pix3scene']);
+    expect(model.reachability.get('scenes/main.pix3scene')?.reason).toBe('entry-scene');
+    // Pruned scenes are named, never dropped silently.
+    expect(model.warnings.join('\n')).toContain('scenes/orphan.pix3scene');
+    expect(model.warnings.join('\n')).toContain('extraRootScenePaths');
+  });
+
+  it('keeps a dynamically loaded scene alive through extraRootScenePaths', async () => {
+    const fs = createInMemoryFs(unreachableSceneProject());
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(
+      withExportSettings(createContext(), {
+        pruneUnusedAssets: true,
+        extraRootScenePaths: ['res://scenes/orphan.pix3scene'],
+      })
+    );
+
+    // Declared as a root, so it ships together with what it references.
+    expect(model.assetPaths).toContain('scenes/orphan.pix3scene');
+    expect(model.assetPaths).toContain('src/assets/textures/orphan.png');
+    expect(model.reachability.get('scenes/orphan.pix3scene')?.reason).toBe('extra-root');
+    expect(model.warnings.join('\n')).not.toContain('Pruned');
+  });
+
+  it('still scans project scripts as a safety net while pruning', async () => {
+    const fs = createInMemoryFs({
+      ...unreachableSceneProject(),
+      // No scene references this texture — only a script does.
+      'scripts/boot.ts': "export const icon = 'res://src/assets/textures/icon.png';\n",
+      'src/assets/textures/icon.png': 'icon',
+    });
+
+    const service = new ProjectBuildService();
+    attachStubs(service, fs);
+
+    const model = await service.buildRuntimeProjectModel(
+      withExportSettings(createContext(), { pruneUnusedAssets: true })
+    );
+
+    expect(model.assetPaths).toContain('src/assets/textures/icon.png');
   });
 
   it('generates runtime project files and copies runtime sources', async () => {
