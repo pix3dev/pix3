@@ -78,7 +78,19 @@ export interface ManifestEntry {
   modified: string;
 }
 
+/** One unmet publish requirement, as reported by the store's server-side gate. */
+export interface ApiStoreValidationIssue {
+  field: string;
+  message: string;
+}
+
 class ApiClientError extends Error {
+  /**
+   * Field-level detail for endpoints that reject with a checklist rather than one message
+   * (today: the Asset Store publish gate, `400 { error, issues }`).
+   */
+  public issues?: ApiStoreValidationIssue[];
+
   constructor(
     message: string,
     public status: number,
@@ -88,6 +100,19 @@ class ApiClientError extends Error {
     super(fullMessage);
     this.name = 'ApiClientError';
   }
+}
+
+/** Pick up an `issues` array when the server sent one, so callers can render a per-field list. */
+function readIssues(body: unknown): ApiStoreValidationIssue[] | undefined {
+  const issues = (body as { issues?: unknown } | null)?.issues;
+  if (!Array.isArray(issues)) {
+    return undefined;
+  }
+  return issues.filter(
+    (issue): issue is ApiStoreValidationIssue =>
+      typeof (issue as ApiStoreValidationIssue)?.field === 'string' &&
+      typeof (issue as ApiStoreValidationIssue)?.message === 'string'
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -105,7 +130,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       throw new ApiClientError(getUploadLimitMessage(), res.status, fullUrl);
     }
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiClientError(body.error ?? res.statusText, res.status, fullUrl);
+    const error = new ApiClientError(body.error ?? res.statusText, res.status, fullUrl);
+    error.issues = readIssues(body);
+    throw error;
   }
   return res.json() as Promise<T>;
 }
@@ -379,6 +406,186 @@ export function deleteLibraryItem(
     method: 'DELETE',
     body: JSON.stringify({ deletedAt }),
   });
+}
+
+// --- Curated Asset Store (public reads, admin writes) ---
+
+/** Lifecycle of a store item; mirrors the server column. */
+export type ApiStoreItemStatus = 'draft' | 'published' | 'unlisted';
+
+/**
+ * One catalog row. The server re-stamps its own columns (status/categoryPath/featured/downloads/
+ * publisherId) onto `manifest` before sending, so the manifest is self-sufficient for the UI.
+ */
+export interface ApiStoreItem {
+  id: string;
+  manifest: Record<string, unknown> | null;
+  updatedAt: number;
+  status: ApiStoreItemStatus;
+  categoryPath: string | null;
+  featured: boolean;
+  downloads: number;
+  publishedAt: number | null;
+}
+
+/** A taxonomy node. `id` is the full path (`ui`, `ui/buttons`); depth is capped at 2. */
+export interface ApiStoreCategory {
+  id: string;
+  parentId: string | null;
+  label: string;
+  sortOrder: number;
+  /** Published items filed directly here (subcategories count separately). */
+  itemCount: number;
+}
+
+export interface ApiStoreCategoryInput {
+  id: string;
+  parentId?: string | null;
+  label: string;
+  sortOrder?: number;
+}
+
+export interface ApiStoreAuditEntry {
+  id: number;
+  actorId: string;
+  action: string;
+  itemId: string | null;
+  detail: unknown;
+  createdAt: string;
+}
+
+export interface ApiStoreListParams {
+  q?: string;
+  /** Category path filter; matches the category and its subcategories server-side. */
+  category?: string;
+  type?: string;
+  /** Admin-only narrowing; anonymous callers are pinned to `published` regardless. */
+  status?: ApiStoreItemStatus | 'all';
+  sort?: 'updated' | 'downloads' | 'featured';
+}
+
+export interface ApiStoreItemMetaPatch {
+  status?: ApiStoreItemStatus;
+  categoryPath?: string | null;
+  featured?: boolean;
+  /** Shallow-merged into the stored manifest (name/description/tags/license/…). */
+  manifestPatch?: Record<string, unknown>;
+}
+
+/**
+ * Direct URL of a bundle file. Store reads are public, so previews and downloads go straight to
+ * this URL (`<img src>`, plain `fetch`) with no cookie and no manifest round-trip.
+ */
+export function storeFileUrl(itemId: string, bundlePath: string): string {
+  const encodedPath = bundlePath
+    .split('/')
+    .filter(Boolean)
+    .map(segment => encodeURIComponent(segment))
+    .join('/');
+  return `${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}/files/${encodedPath}`;
+}
+
+export function getStoreIndex(params: ApiStoreListParams = {}): Promise<{ items: ApiStoreItem[] }> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      query.set(key, value);
+    }
+  }
+  const search = query.toString();
+  return request(`/api/library/store/items${search ? `?${search}` : ''}`);
+}
+
+export function getStoreItem(itemId: string): Promise<{ item: ApiStoreItem }> {
+  return request(`/api/library/store/items/${encodeURIComponent(itemId)}`);
+}
+
+/** Upload/replace a whole store bundle (admin). `manifest.id` must equal `itemId`. */
+export async function uploadStoreItem(
+  itemId: string,
+  manifest: unknown,
+  files: readonly LibraryUploadFile[]
+): Promise<{ id: string; updatedAt: number; status: ApiStoreItemStatus }> {
+  const formData = new FormData();
+  formData.append('manifest', JSON.stringify(manifest));
+  formData.append('paths', JSON.stringify(files.map(file => file.path)));
+  for (const file of files) {
+    formData.append('files', file.blob, file.path.split('/').pop() ?? 'file');
+  }
+
+  const res = await fetch(`${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+  if (!res.ok) {
+    if (res.status === 413) {
+      throw new ApiClientError(getUploadLimitMessage(itemId), res.status);
+    }
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const error = new ApiClientError(body.error ?? res.statusText, res.status);
+    error.issues = readIssues(body);
+    throw error;
+  }
+  return res.json();
+}
+
+/** Status / category / featured / manifest-field edit (admin). Publishing runs the server gate. */
+export function patchStoreItemMeta(
+  itemId: string,
+  patch: ApiStoreItemMetaPatch
+): Promise<{ item: ApiStoreItem }> {
+  return request(`/api/library/store/items/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Hard delete: row plus bundle files (admin). The store has no tombstones — clients only read. */
+export function deleteStoreItem(itemId: string): Promise<{ ok: boolean }> {
+  return request(`/api/library/store/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+}
+
+/** Popularity ping, sent once per materialized bundle (not per downloaded file). */
+export function pingStoreDownload(itemId: string): Promise<{ downloads: number }> {
+  return request(`/api/library/store/items/${encodeURIComponent(itemId)}/download`, {
+    method: 'POST',
+  });
+}
+
+export function getStoreCategories(): Promise<{ categories: ApiStoreCategory[] }> {
+  return request('/api/library/store/categories');
+}
+
+export function createStoreCategory(
+  input: ApiStoreCategoryInput
+): Promise<{ category: ApiStoreCategory }> {
+  return request('/api/library/store/categories', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateStoreCategory(
+  categoryId: string,
+  patch: { label?: string; sortOrder?: number }
+): Promise<{ ok: boolean }> {
+  return request(`/api/library/store/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Delete a category; the server re-homes its items to the parent (or to none). */
+export function deleteStoreCategory(categoryId: string): Promise<{ ok: boolean }> {
+  return request(`/api/library/store/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function getStoreAudit(limit = 50, offset = 0): Promise<{ entries: ApiStoreAuditEntry[] }> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/library/store/audit?${query.toString()}`);
 }
 
 export { ApiClientError };

@@ -1,17 +1,24 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
+import { subscribe } from 'valtio/vanilla';
+import { appState } from '@/state';
 import { AssetLibraryService } from '@/services/library/AssetLibraryService';
 import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import { LibrarySelectionService } from '@/services/library/LibrarySelectionService';
 import { LibrarySyncService, type LibrarySyncState } from '@/services/library/LibrarySyncService';
-import { PublishToLibraryService } from '@/services/library/PublishToLibraryService';
+import {
+  PublishToLibraryService,
+  type PublishTarget,
+} from '@/services/library/PublishToLibraryService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import {
   LIBRARY_SOURCES,
   addCustomCategory,
+  canEditSource,
   categoriesForSource,
   countItemsInCategory,
   itemsForSource,
+  subcategoriesOf,
   type LibrarySourceCategory,
   type LibrarySourceConfig,
 } from '@/services/library/library-sources';
@@ -19,6 +26,7 @@ import {
   LIBRARY_ITEM_TYPES,
   type LibraryItem,
   type LibraryItemType,
+  type StoreCategory,
 } from '@/services/library/library-types';
 import {
   getDroppedAssetResourcePath,
@@ -30,14 +38,20 @@ import {
 import {
   assetFileCount,
   formatItemType,
+  hasStatusChip,
   iconForItemType,
   isFreePrice,
   isStoreLike,
+  matchesCategorySelection,
   priceLabel,
   publisherLabel,
+  statusIcon,
+  statusLabel,
+  storeStatus,
   thumbHue,
 } from './library-view-model';
 
+import './store-category-editor';
 import './library-panel.ts.css';
 
 /** MIME emitted by the Scene Tree when dragging a node (payload = node id). */
@@ -77,6 +91,8 @@ export class LibraryPanel extends ComponentBase {
   @state() private loading = true;
   @state() private sourceId = 'user';
   @state() private categoryId = 'all';
+  /** Store-only second level: a chip narrowing the rail category to one `categoryPath`. */
+  @state() private subcategoryId: string | null = null;
   @state() private typeFilter: 'all' | LibraryItemType = 'all';
   @state() private query = '';
   @state() private view: 'grid' | 'list' = 'grid';
@@ -86,15 +102,28 @@ export class LibraryPanel extends ComponentBase {
   /** Bumped after creating a custom category so the rail re-derives. */
   @state() private categoryRevision = 0;
   @state() private syncState: LibrarySyncState = this.syncService.getState();
+  /** Server taxonomy for the store rail/chips. Empty ⇒ offline, config categories stay in charge. */
+  @state() private storeCategories: StoreCategory[] = [];
+  @state() private categoryEditorOpen = false;
 
   private disposeLibrarySubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
   private disposeSyncSubscription?: () => void;
+  private disposeAuthSubscription?: () => void;
+
+  /** The store index is a one-way pull — re-check it when the user comes back to the window. */
+  private readonly onWindowFocus = () => {
+    void this.library.refreshStore();
+  };
 
   connectedCallback(): void {
     super.connectedCallback();
     this.restoreViewPrefs();
     this.disposeLibrarySubscription = this.library.subscribe(() => void this.reload());
+    // Admin chrome is a capability, not a config flag: it has to appear/disappear on sign-in and
+    // sign-out without a reload.
+    this.disposeAuthSubscription = subscribe(appState.auth, () => this.requestUpdate());
+    window.addEventListener('focus', this.onWindowFocus);
     // Mirror the shared selection so the card highlight tracks it (e.g. the Inspector clears the
     // library selection when a scene node is picked — the highlight should clear with it).
     this.disposeSelectionSubscription = this.selectionService.subscribe(() => {
@@ -107,16 +136,22 @@ export class LibraryPanel extends ComponentBase {
       this.syncState = state;
     });
     void this.reload();
+    // Opening the panel is the natural moment to re-pull the catalog (and, through the resulting
+    // notification, the item list).
+    void this.library.refreshStore();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    window.removeEventListener('focus', this.onWindowFocus);
     this.disposeLibrarySubscription?.();
     this.disposeLibrarySubscription = undefined;
     this.disposeSelectionSubscription?.();
     this.disposeSelectionSubscription = undefined;
     this.disposeSyncSubscription?.();
     this.disposeSyncSubscription = undefined;
+    this.disposeAuthSubscription?.();
+    this.disposeAuthSubscription = undefined;
     // Closing the panel returns the Inspector to node properties.
     this.selectionService.clear();
   }
@@ -133,6 +168,19 @@ export class LibraryPanel extends ComponentBase {
       this.items = [];
     } finally {
       this.loading = false;
+    }
+    await this.loadStoreCategories();
+  }
+
+  /**
+   * Pull the server taxonomy. An unreachable server returns an empty list, and that is not an
+   * error state — the store source silently falls back to its config categories.
+   */
+  private async loadStoreCategories(): Promise<void> {
+    try {
+      this.storeCategories = await this.library.getStoreCategories();
+    } catch {
+      this.storeCategories = [];
     }
   }
 
@@ -182,15 +230,45 @@ export class LibraryPanel extends ComponentBase {
     return itemsForSource(this.source, this.items);
   }
 
+  /** Whether the signed-in user may write to the browsed source right now. */
+  private get isAdmin(): boolean {
+    return appState.auth.user?.is_admin ?? false;
+  }
+
+  private get canEditCurrentSource(): boolean {
+    return canEditSource(this.source, { isAdmin: this.isAdmin });
+  }
+
+  /** Admin chrome (status chips, taxonomy editor, store drops) — store source, admin user. */
+  private get isStoreAdmin(): boolean {
+    return this.source.kind === 'store' && this.canEditCurrentSource;
+  }
+
   private get categories(): LibrarySourceCategory[] {
     void this.categoryRevision;
-    return categoriesForSource(this.source, this.sourceItems);
+    return categoriesForSource(
+      this.source,
+      this.sourceItems,
+      this.source.kind === 'store' ? this.storeCategories : undefined
+    );
+  }
+
+  /** Second-level chips for the browsed store category (empty for every other source). */
+  private get subcategories(): readonly StoreCategory[] {
+    if (this.source.kind !== 'store' || this.categoryId === 'all') {
+      return [];
+    }
+    return subcategoriesOf(this.storeCategories, this.categoryId);
   }
 
   private get visibleItems(): LibraryItem[] {
     const query = this.query.trim().toLowerCase();
     return this.sourceItems.filter(item => {
-      const inCategory = this.categoryId === 'all' || item.manifest.category === this.categoryId;
+      const inCategory = matchesCategorySelection(
+        item.manifest,
+        this.categoryId,
+        this.subcategoryId
+      );
       const inType = this.typeFilter === 'all' || item.manifest.type === this.typeFilter;
       const inQuery = !query || item.manifest.name.toLowerCase().includes(query);
       return inCategory && inType && inQuery;
@@ -204,10 +282,16 @@ export class LibraryPanel extends ComponentBase {
     }
     this.sourceId = id;
     this.categoryId = 'all';
+    this.subcategoryId = null;
     this.typeFilter = 'all';
     this.query = '';
     this.selectedItemId = null;
     this.selectionService.clear();
+  }
+
+  private selectCategory(categoryId: string): void {
+    this.categoryId = categoryId;
+    this.subcategoryId = null;
   }
 
   private select(item: LibraryItem): void {
@@ -283,7 +367,7 @@ export class LibraryPanel extends ComponentBase {
 
   // ── Drag & drop into the library ────────────────────────────────────────────
   private dropAllowed(dataTransfer: DataTransfer | null): boolean {
-    if (!this.source.editable || !dataTransfer) {
+    if (!this.canEditCurrentSource || !dataTransfer) {
       return false;
     }
     const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
@@ -328,13 +412,17 @@ export class LibraryPanel extends ComponentBase {
 
   private async handleDropInto(target: DropTarget, dataTransfer: DataTransfer): Promise<void> {
     // Resolve the destination category: a category row targets itself; the grid uses the
-    // currently-browsed category; the rail drop zone files under no category ("All").
-    const categoryId =
-      target.kind === 'category'
-        ? target.categoryId
-        : target.kind === 'grid' && this.categoryId !== 'all'
-          ? this.categoryId
-          : undefined;
+    // currently-browsed category (narrowed by the subcategory chip, when one is active); the rail
+    // drop zone files under no category ("All").
+    const browsed = this.subcategoryId ?? (this.categoryId !== 'all' ? this.categoryId : undefined);
+    const dropped =
+      target.kind === 'category' ? target.categoryId : target.kind === 'grid' ? browsed : undefined;
+    // The aggregate row ("All" / "Featured") is not a real category — it files the item under none.
+    const categoryId = dropped === 'all' ? undefined : dropped;
+
+    // A drop into the store publishes to the curated catalog (admin-only, server-enforced); every
+    // other source keeps landing in the personal library.
+    const publishTarget: PublishTarget = this.source.kind === 'store' ? 'store' : 'user';
 
     // Reordering an existing library card between categories.
     const libraryDrag = getLibraryItemDragData(dataTransfer);
@@ -343,12 +431,16 @@ export class LibraryPanel extends ComponentBase {
       return;
     }
 
-    // A subtree dragged from the Scene Tree → pack into a personal-library prefab.
+    // A subtree dragged from the Scene Tree → pack into a library prefab.
     const nodeId = dataTransfer.getData(SCENE_TREE_NODE_MIME);
     if (nodeId) {
       try {
-        await this.publishService.publishNode({ nodeId, category: categoryId });
-        this.afterPublish(categoryId);
+        const item = await this.publishService.publishNode({
+          nodeId,
+          category: categoryId,
+          target: publishTarget,
+        });
+        await this.afterPublish(publishTarget, categoryId, item);
       } catch (error) {
         console.error('[LibraryPanel] Failed to publish node to library:', error);
       }
@@ -359,8 +451,11 @@ export class LibraryPanel extends ComponentBase {
     const assetPath = getDroppedAssetResourcePath(dataTransfer);
     if (assetPath) {
       try {
-        await this.publishService.publishAssetPath(assetPath, { category: categoryId });
-        this.afterPublish(categoryId);
+        const item = await this.publishService.publishAssetPath(assetPath, {
+          category: categoryId,
+          target: publishTarget,
+        });
+        await this.afterPublish(publishTarget, categoryId, item);
       } catch (error) {
         console.error('[LibraryPanel] Failed to publish asset to library:', error);
       }
@@ -369,8 +464,26 @@ export class LibraryPanel extends ComponentBase {
 
   private async reassignCategory(itemId: string, categoryId: string | undefined): Promise<void> {
     const item = this.items.find(i => i.manifest.id === itemId);
-    // Only the personal (user) library is writable today.
-    if (!item || item.scope !== 'user') {
+    if (!item) {
+      return;
+    }
+    const category = categoryId && categoryId !== 'all' ? categoryId : undefined;
+
+    // Store items are server-owned: re-filing one is a metadata PATCH, not a bundle rewrite.
+    if (item.scope === 'store') {
+      if (!this.isStoreAdmin) {
+        return;
+      }
+      try {
+        await this.library.patchStoreItemMeta(itemId, { categoryPath: category ?? null });
+      } catch (error) {
+        console.error('[LibraryPanel] Failed to re-file the store item:', error);
+      }
+      return;
+    }
+
+    // Otherwise only the personal (user) library is writable today.
+    if (item.scope !== 'user') {
       return;
     }
     try {
@@ -378,7 +491,6 @@ export class LibraryPanel extends ComponentBase {
       if (!bundle) {
         return;
       }
-      const category = categoryId && categoryId !== 'all' ? categoryId : undefined;
       await this.library.putUserItem({
         manifest: { ...bundle.manifest, category },
         files: bundle.files,
@@ -388,19 +500,63 @@ export class LibraryPanel extends ComponentBase {
     }
   }
 
-  /** Publishing always lands in the personal library — surface it there. */
-  private afterPublish(categoryId: string | undefined): void {
-    if (this.sourceId !== 'user') {
-      this.switchSource('user');
+  /**
+   * Surface a freshly published item where it landed: switch to its source, browse its category
+   * and select it, so a store draft opens straight into the inspector for the admin to complete.
+   */
+  private async afterPublish(
+    target: PublishTarget,
+    categoryId: string | undefined,
+    published: LibraryItem | null
+  ): Promise<void> {
+    const sourceId = target === 'store' ? 'store' : 'user';
+    if (this.sourceId !== sourceId) {
+      this.switchSource(sourceId);
     }
     if (categoryId) {
-      this.categoryId = categoryId;
+      // A store subcategory lives on the chip row; its parent stays the selected rail row.
+      const parent = target === 'store' ? categoryId.split('/')[0] : categoryId;
+      this.categoryId = parent;
+      this.subcategoryId = target === 'store' && parent !== categoryId ? categoryId : null;
+    }
+    if (!published) {
+      return;
+    }
+    await this.reload();
+    const fresh = this.items.find(i => i.manifest.id === published.manifest.id) ?? published;
+    this.select(fresh);
+  }
+
+  /** Reload the taxonomy after the admin edited it, so the rail and chips catch up. */
+  private async onCategoryEditorClose(changed: boolean): Promise<void> {
+    this.categoryEditorOpen = false;
+    if (!changed) {
+      return;
+    }
+    // `refreshStore` drops the provider's cached taxonomy along with its index.
+    await this.library.refreshStore();
+    await this.loadStoreCategories();
+    if (!this.categories.some(category => category.id === this.categoryId)) {
+      this.selectCategory('all');
+    } else if (
+      this.subcategoryId &&
+      !this.subcategories.some(category => category.id === this.subcategoryId)
+    ) {
+      this.subcategoryId = null;
     }
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
   protected render() {
-    return html` <div class="lib-doc">${this.renderRail()} ${this.renderContent()}</div> `;
+    return html`
+      <div class="lib-doc">${this.renderRail()} ${this.renderContent()}</div>
+      ${this.categoryEditorOpen
+        ? html`<pix3-store-category-editor
+            @store-categories-close=${(event: CustomEvent<{ changed: boolean }>) =>
+              void this.onCategoryEditorClose(event.detail.changed)}
+          ></pix3-store-category-editor>`
+        : nothing}
+    `;
   }
 
   private icon(name: string, size: number = IconSize.SMALL) {
@@ -409,12 +565,26 @@ export class LibraryPanel extends ComponentBase {
 
   private renderRail() {
     const source = this.source;
+    const canEditTaxonomy = this.isStoreAdmin;
     return html`
       <div class="lib-rail">
         <div class="lib-rail__head">SOURCE</div>
         <div class="lib-rail__group">${LIBRARY_SOURCES.map(s => this.renderSourceRow(s))}</div>
         <div class="lib-rail__divider"></div>
-        <div class="lib-rail__head">CATEGORIES</div>
+        <div class="lib-rail__head lib-rail__head--row">
+          <span>CATEGORIES</span>
+          ${canEditTaxonomy
+            ? html`<button
+                type="button"
+                class="lib-rail__head-btn"
+                title="Edit store categories"
+                aria-label="Edit store categories"
+                @click=${() => (this.categoryEditorOpen = true)}
+              >
+                ${this.icon('settings')}
+              </button>`
+            : nothing}
+        </div>
         <div class="lib-rail__categories">
           ${this.categories.map(cat => this.renderCategoryRow(cat))}
           ${source.editable
@@ -435,6 +605,8 @@ export class LibraryPanel extends ComponentBase {
   private renderSourceRow(s: LibrarySourceConfig) {
     const active = s.id === this.sourceId;
     const count = itemsForSource(s, this.items).length;
+    // The store row carries an admin badge so it is obvious *why* it suddenly accepts drops.
+    const admin = s.kind === 'store' && canEditSource(s, { isAdmin: this.isAdmin });
     return html`
       <button
         type="button"
@@ -443,6 +615,14 @@ export class LibraryPanel extends ComponentBase {
       >
         <span class="lib-source__icon">${this.icon(s.icon)}</span>
         <span class="lib-source__name">${s.name}</span>
+        ${admin
+          ? html`<span
+              class="lib-source__admin"
+              title=${`${s.hint} · admin`}
+              aria-label=${`${s.hint} · admin`}
+              >${this.icon('shield')}</span
+            >`
+          : nothing}
         <span class="lib-source__count">${count}</span>
       </button>
     `;
@@ -457,7 +637,7 @@ export class LibraryPanel extends ComponentBase {
       <button
         type="button"
         class="lib-cat ${active ? 'is-active' : ''} ${isDropTarget ? 'is-drop-target' : ''}"
-        @click=${() => (this.categoryId = cat.id)}
+        @click=${() => this.selectCategory(cat.id)}
         @dragover=${(e: DragEvent) =>
           this.onDropTargetDragOver(e, { kind: 'category', categoryId: cat.id })}
         @dragleave=${() => this.onDropTargetDragLeave()}
@@ -472,7 +652,7 @@ export class LibraryPanel extends ComponentBase {
   }
 
   private renderRailFooter(source: LibrarySourceConfig) {
-    if (source.editable) {
+    if (this.canEditCurrentSource) {
       const isDropTarget = this.dropTarget?.kind === 'zone';
       return html`
         ${source.id === 'user' ? this.renderSyncStatus() : nothing}
@@ -484,7 +664,10 @@ export class LibraryPanel extends ComponentBase {
         >
           <span class="lib-dropzone__icon">${this.icon('download', IconSize.MEDIUM)}</span>
           <span class="lib-dropzone__text">
-            Drop nodes, prefabs or files here to save to <b>${source.name}</b>
+            Drop nodes, prefabs or files here to save to <b>${source.name}</b>${source.kind ===
+            'store'
+              ? html` — they arrive as <b>drafts</b>`
+              : nothing}
           </span>
         </div>
       `;
@@ -562,6 +745,9 @@ export class LibraryPanel extends ComponentBase {
     const categoryLabel = (
       this.categories.find(c => c.id === this.categoryId) ?? this.categories[0]
     ).label;
+    const subcategoryLabel = this.subcategoryId
+      ? (this.subcategories.find(c => c.id === this.subcategoryId)?.label ?? null)
+      : null;
     return html`
       <div class="lib-content">
         <div class="lib-toolbar">
@@ -569,6 +755,10 @@ export class LibraryPanel extends ComponentBase {
             <span class="lib-crumb__source">${source.name}</span>
             <span class="lib-crumb__sep">›</span>
             <span class="lib-crumb__current">${categoryLabel}</span>
+            ${subcategoryLabel
+              ? html`<span class="lib-crumb__sep">›</span>
+                  <span class="lib-crumb__current">${subcategoryLabel}</span>`
+              : nothing}
           </div>
           <span class="lib-toolbar__spacer"></span>
           <span class="lib-count">${items.length} items</span>
@@ -636,6 +826,7 @@ export class LibraryPanel extends ComponentBase {
               </button>`;
             })}
           </div>
+          ${this.renderSubcategoryChips()}
         </div>
 
         ${this.loading
@@ -643,6 +834,39 @@ export class LibraryPanel extends ComponentBase {
           : this.view === 'grid'
             ? this.renderGrid(items)
             : this.renderList(items)}
+      </div>
+    `;
+  }
+
+  /**
+   * The store taxonomy's second level. The rail stays flat (top level only) and subcategories
+   * surface here, beside the type chips, so a two-level tree does not turn the rail into an
+   * accordion.
+   */
+  private renderSubcategoryChips() {
+    const subcategories = this.subcategories;
+    if (subcategories.length === 0) {
+      return nothing;
+    }
+    return html`
+      <div class="lib-chips lib-chips--sub" role="group" aria-label="Filter by subcategory">
+        <button
+          type="button"
+          class="lib-chip ${this.subcategoryId === null ? 'is-active' : ''}"
+          @click=${() => (this.subcategoryId = null)}
+        >
+          All
+        </button>
+        ${subcategories.map(
+          category =>
+            html`<button
+              type="button"
+              class="lib-chip ${this.subcategoryId === category.id ? 'is-active' : ''}"
+              @click=${() => (this.subcategoryId = category.id)}
+            >
+              ${category.label}
+            </button>`
+        )}
       </div>
     `;
   }
@@ -667,9 +891,10 @@ export class LibraryPanel extends ComponentBase {
   private renderGridCard(item: LibraryItem) {
     const selected = item.manifest.id === this.selectedItemId;
     const meta = this.cardMeta(item);
+    const draft = this.showsAdminStatus(item) && storeStatus(item.manifest) === 'draft';
     return html`
       <div
-        class="lib-card ${selected ? 'is-selected' : ''}"
+        class="lib-card ${selected ? 'is-selected' : ''} ${draft ? 'is-draft' : ''}"
         draggable="true"
         title=${item.manifest.description ?? item.manifest.name}
         @click=${() => this.select(item)}
@@ -715,6 +940,7 @@ export class LibraryPanel extends ComponentBase {
       >
         <span class="lib-row__icon">${this.icon(iconForItemType(item.manifest.type))}</span>
         <span class="lib-row__name">${item.manifest.name}</span>
+        ${this.renderStatusBadges(item)}
         <span class="lib-row__type">${formatItemType(item.manifest.type)}</span>
         <span class="lib-row__spacer"></span>
         ${store
@@ -741,7 +967,38 @@ export class LibraryPanel extends ComponentBase {
               >${price}</span
             >`
           : nothing}
+        ${this.showsAdminStatus(item)
+          ? html`<span class="lib-thumb__badges">${this.renderStatusBadges(item)}</span>`
+          : nothing}
       </div>
+    `;
+  }
+
+  /**
+   * Lifecycle chips are curation chrome: only the store shows them, and only to an admin — a
+   * regular visitor never sees a draft in the first place.
+   */
+  private showsAdminStatus(item: LibraryItem): boolean {
+    return this.isStoreAdmin && item.scope === 'store';
+  }
+
+  private renderStatusBadges(item: LibraryItem) {
+    if (!this.showsAdminStatus(item)) {
+      return nothing;
+    }
+    const status = storeStatus(item.manifest);
+    return html`
+      ${hasStatusChip(status)
+        ? html`<span class="lib-badge lib-badge--${status}" title=${statusLabel(status)}>
+            <span class="lib-badge__icon">${this.icon(statusIcon(status))}</span>
+            <span>${statusLabel(status)}</span>
+          </span>`
+        : nothing}
+      ${item.manifest.featured
+        ? html`<span class="lib-badge lib-badge--featured" title="Featured" aria-label="Featured"
+            >${this.icon('star')}</span
+          >`
+        : nothing}
     `;
   }
 

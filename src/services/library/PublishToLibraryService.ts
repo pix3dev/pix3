@@ -62,6 +62,12 @@ interface CollectContext {
   scriptIndex: Map<string, string> | null;
 }
 
+/**
+ * Which library the packed bundle lands in. `store` is admin-only (server-enforced) and files the
+ * item under the curated taxonomy as a draft — publishing it is a separate, gated step.
+ */
+export type PublishTarget = 'user' | 'store';
+
 export interface PublishNodeParams {
   readonly nodeId: string;
   /** Display name; defaults to the node's own name. */
@@ -70,8 +76,10 @@ export interface PublishNodeParams {
   readonly description?: string;
   /** Item type; defaults to `prefab`. */
   readonly type?: LibraryItemType;
-  /** Optional library category id to file the item under. */
+  /** Optional library category id to file the item under (a `categoryPath` when targeting store). */
   readonly category?: string;
+  /** Destination library; defaults to the personal one. */
+  readonly target?: PublishTarget;
 }
 
 /** Bundle-relative filename the packed subtree scene is stored under. */
@@ -117,7 +125,7 @@ export class PublishToLibraryService {
       name,
       type: params.type ?? 'prefab',
       tags: [...(params.tags ?? [])],
-      category: params.category,
+      ...this.categoryFields(params.target, params.category),
       description: params.description,
       preview,
       entry: ENTRY_FILE,
@@ -130,13 +138,13 @@ export class PublishToLibraryService {
     return { manifest, files: ctx.files };
   }
 
-  /** Build the bundle and persist it into the personal library. */
+  /** Build the bundle and persist it into the target library (personal by default). */
   async publishNode(params: PublishNodeParams): Promise<LibraryItem | null> {
     const bundle = await this.buildBundle(params);
     if (!bundle) {
       return null;
     }
-    return this.library.putUserItem(bundle);
+    return this.persist(bundle, params.target);
   }
 
   /**
@@ -150,7 +158,7 @@ export class PublishToLibraryService {
    */
   async publishAssetPath(
     resourcePath: string,
-    opts?: { category?: string; tags?: readonly string[] }
+    opts?: { category?: string; tags?: readonly string[]; target?: PublishTarget }
   ): Promise<LibraryItem | null> {
     const relativePath = normalizeBundlePath(stripResScheme(resourcePath));
     if (!relativePath) {
@@ -198,7 +206,7 @@ export class PublishToLibraryService {
       name,
       type,
       tags: [...(opts?.tags ?? [])],
-      category: opts?.category,
+      ...this.categoryFields(opts?.target, opts?.category),
       preview,
       entry,
       files: [...ctx.files.keys()],
@@ -207,7 +215,25 @@ export class PublishToLibraryService {
       createdAt: 0,
       updatedAt: 0,
     };
-    return this.library.putUserItem({ manifest, files: ctx.files });
+    return this.persist({ manifest, files: ctx.files }, opts?.target);
+  }
+
+  /**
+   * Category fields for the target: the store files items under the hierarchical `categoryPath`
+   * and always starts them as drafts (the publish gate runs later, on the server), while the
+   * personal/team libraries keep the flat, free-text `category`.
+   */
+  private categoryFields(
+    target: PublishTarget | undefined,
+    category: string | undefined
+  ): Pick<LibraryItemManifest, 'category' | 'categoryPath' | 'status'> {
+    return target === 'store' ? { categoryPath: category, status: 'draft' } : { category };
+  }
+
+  private persist(bundle: LibraryBundle, target: PublishTarget | undefined): Promise<LibraryItem> {
+    return target === 'store'
+      ? this.library.putStoreItem(bundle)
+      : this.library.putUserItem(bundle);
   }
 
   /**

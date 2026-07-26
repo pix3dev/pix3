@@ -4,7 +4,12 @@
  * these are display concerns (the real manifest is sparse; store/provider metadata is synthesized).
  */
 
-import type { LibraryItem, LibraryItemType } from '@/services/library/library-types';
+import type {
+  LibraryItem,
+  LibraryItemManifest,
+  LibraryItemType,
+  StoreItemStatus,
+} from '@/services/library/library-types';
 import type { LibrarySourceConfig } from '@/services/library/library-sources';
 
 /** Feather icon name for an item type. */
@@ -55,12 +60,95 @@ export function isFreePrice(price: string): boolean {
   return price === 'Free' || price === 'CC0';
 }
 
-/** Synthesized publisher label for a store/provider item. */
+/**
+ * Publisher label for a store/provider item. Server-backed store items carry an explicit
+ * `publisherName`; pre-store bundles only ever had `authorId`, and the static fallback pack has
+ * neither — hence the synthesized default.
+ */
 export function publisherLabel(item: LibraryItem, source: LibrarySourceConfig): string {
-  if (item.manifest.authorId) {
-    return item.manifest.authorId;
+  const { publisherName, authorId } = item.manifest;
+  if (publisherName && publisherName.trim()) {
+    return publisherName;
+  }
+  if (authorId) {
+    return authorId;
   }
   return source.kind === 'store' ? 'Pix3 Team' : source.name;
+}
+
+// ── Curated store status ────────────────────────────────────────────────────
+// Card, list row and inspector all read the lifecycle through these, so a draft never looks
+// published in one place and unpublished in another.
+
+/** Lifecycle of a store item. A manifest without `status` predates the store ⇒ published. */
+export function storeStatus(manifest: LibraryItemManifest): StoreItemStatus {
+  return manifest.status ?? 'published';
+}
+
+/** Human label for a lifecycle state. */
+export function statusLabel(status: StoreItemStatus): string {
+  switch (status) {
+    case 'draft':
+      return 'Draft';
+    case 'unlisted':
+      return 'Unlisted';
+    default:
+      return 'Published';
+  }
+}
+
+/** IconService (Feather) name for a lifecycle state. */
+export function statusIcon(status: StoreItemStatus): string {
+  switch (status) {
+    case 'draft':
+      return 'edit-3';
+    case 'unlisted':
+      return 'eye-off';
+    default:
+      return 'check-circle';
+  }
+}
+
+/** Whether a status deserves a chip at all (published is the silent default). */
+export function hasStatusChip(status: StoreItemStatus): boolean {
+  return status !== 'published';
+}
+
+/** Compact download counter: `0`, `942`, `1.2k`, `3.4M`. */
+export function formatDownloads(downloads: number | undefined): string {
+  const value = typeof downloads === 'number' && Number.isFinite(downloads) ? downloads : 0;
+  if (value < 1000) {
+    return String(Math.max(0, Math.round(value)));
+  }
+  const [scaled, suffix] = value < 1_000_000 ? [value / 1000, 'k'] : [value / 1_000_000, 'M'];
+  const rounded = Math.round(scaled * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}${suffix}`;
+}
+
+/**
+ * Whether an item passes the browsed category selection.
+ *
+ * Store items are filed on the hierarchical `categoryPath`, so a top-level rail row shows its
+ * subcategories too (`ui` includes `ui/buttons`), and a subcategory chip narrows to exactly one
+ * path. User/team items keep the flat `manifest.category`. Kept here so the grid, the list and the
+ * counters agree on what "in this category" means.
+ */
+export function matchesCategorySelection(
+  manifest: LibraryItemManifest,
+  categoryId: string,
+  subcategoryId?: string | null
+): boolean {
+  if (subcategoryId) {
+    return manifest.categoryPath === subcategoryId;
+  }
+  if (categoryId === 'all') {
+    return true;
+  }
+  const { category, categoryPath } = manifest;
+  if (categoryPath) {
+    return categoryPath === categoryId || categoryPath.startsWith(`${categoryId}/`);
+  }
+  return category === categoryId;
 }
 
 /**

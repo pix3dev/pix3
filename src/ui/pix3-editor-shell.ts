@@ -70,6 +70,7 @@ import { GroupSelectedNodesCommand } from '@/features/scene/GroupSelectedNodesCo
 import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { PublishToLibraryCommand } from '@/features/library/PublishToLibraryCommand';
+import { PublishToStoreCommand } from '@/features/library/PublishToStoreCommand';
 import { UndoCommand } from '@/features/history/UndoCommand';
 import { RedoCommand } from '@/features/history/RedoCommand';
 import { StartGameCommand } from '@/features/scripts/StartGameCommand';
@@ -367,6 +368,7 @@ export class Pix3EditorShell extends ComponentBase {
     const fitGroup2DToContentsCommand = new FitGroup2DToContentsCommand();
     const saveAsPrefabCommand = new SaveAsPrefabCommand();
     const publishToLibraryCommand = new PublishToLibraryCommand();
+    const publishToStoreCommand = new PublishToStoreCommand();
     const undoCommand = new UndoCommand(this.operationService);
     const redoCommand = new RedoCommand(this.operationService);
     const startGameCommand = new StartGameCommand(
@@ -441,6 +443,7 @@ export class Pix3EditorShell extends ComponentBase {
       fitGroup2DToContentsCommand,
       saveAsPrefabCommand,
       publishToLibraryCommand,
+      publishToStoreCommand,
       startGameCommand,
       startMainSceneGameCommand,
       stopGameCommand,
