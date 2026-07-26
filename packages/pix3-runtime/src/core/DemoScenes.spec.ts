@@ -17,8 +17,8 @@ import { registerBuiltInScripts } from '../behaviors/register-behaviors';
  * the real SceneLoader with the built-in scripts registered.
  */
 function demoPath(file: string): string {
-  // Vitest runs from the repo root; samples/HelloWorld lives under it.
-  return resolve(process.cwd(), 'samples/HelloWorld', file);
+  // Vitest runs from the repo root; the demos live in the sample project's scene folder.
+  return resolve(process.cwd(), 'samples/HelloWorld/scenes', file);
 }
 
 function createLoader(preloadTextures: string[] = []): SceneLoader {
