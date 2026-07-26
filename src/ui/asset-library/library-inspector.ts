@@ -491,14 +491,6 @@ export class LibraryInspector extends ComponentBase {
           >
             ${this.icon('download')}<span>${free ? 'Install' : `Buy ${price}`}</span>
           </button>
-          <button
-            type="button"
-            class="lib-insp__btn lib-insp__btn--ghost"
-            title="Open store page"
-            aria-label="Open store page"
-          >
-            ${this.icon('external-link')}
-          </button>
         </div>
       `;
     }
