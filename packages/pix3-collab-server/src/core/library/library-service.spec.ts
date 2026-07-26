@@ -233,12 +233,22 @@ describe('library-service store queries', () => {
   });
 
   it('appends and reads the audit log newest-first', () => {
-    appendAudit('admin-1', 'item.upload', 'a', { status: 'draft' });
-    appendAudit('admin-1', 'item.delete', 'a', null);
+    appendAudit('u1', 'item.upload', 'a', { status: 'draft' });
+    appendAudit('u1', 'item.delete', 'a', null);
 
     const entries = listAudit(10, 0);
     expect(entries.map(entry => entry.action)).toEqual(['item.delete', 'item.upload']);
     expect(entries[1]?.detail).toEqual({ status: 'draft' });
     expect(listAudit(1, 1).map(entry => entry.action)).toEqual(['item.upload']);
+  });
+
+  it('names the actor, and keeps the entry when the actor is unknown', () => {
+    appendAudit('u1', 'item.publish', 'a', null);
+    appendAudit('ghost', 'item.delete', 'a', null);
+
+    expect(listAudit(10, 0).map(entry => [entry.actorId, entry.actorName])).toEqual([
+      ['ghost', null],
+      ['u1', 'a'],
+    ]);
   });
 });

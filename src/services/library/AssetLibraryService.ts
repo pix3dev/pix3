@@ -20,6 +20,7 @@ import {
   uniqueSlug,
   type LibraryFilter,
 } from '@/services/library/library-search';
+import type { StoreSeedResult } from '@/services/library/store-seed';
 import type {
   LibraryBundle,
   LibraryItem,
@@ -214,6 +215,17 @@ export class AssetLibraryService {
     this.invalidate();
     this.notify();
     return item;
+  }
+
+  /**
+   * Push the bundled starter pack into the server catalog (admin). Idempotent: pack ids are stable,
+   * so a second run replaces the same items and keeps whatever status/category they were given.
+   */
+  async seedStoreFromBuiltinPack(): Promise<StoreSeedResult> {
+    const result = await this.store.seedFromFallbackPack();
+    this.invalidate();
+    this.notify();
+    return result;
   }
 
   /** Server-curated store taxonomy (flat list, `id` is the full path). Empty when offline. */

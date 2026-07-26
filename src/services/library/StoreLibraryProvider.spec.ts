@@ -10,6 +10,7 @@ const mockApiClient = {
   deleteStoreItem: vi.fn(),
   pingStoreDownload: vi.fn(),
   getStoreCategories: vi.fn(),
+  createStoreCategory: vi.fn(),
   storeFileUrl: (itemId: string, path: string) =>
     `/api/library/store/items/${itemId}/files/${path}`,
 };
@@ -69,6 +70,7 @@ describe('StoreLibraryProvider', () => {
     mockApiClient.deleteStoreItem.mockResolvedValue({ ok: true });
     mockApiClient.uploadStoreItem.mockResolvedValue({ id: 'a', updatedAt: 5, status: 'draft' });
     mockApiClient.getStoreCategories.mockResolvedValue({ categories: [] });
+    mockApiClient.createStoreCategory.mockResolvedValue({ categories: [] });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(new Response(new Blob(['data']), { status: 200 }))
@@ -251,6 +253,44 @@ describe('StoreLibraryProvider', () => {
     });
     expect(item.manifest.name).toBe('Renamed');
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('seeds the pack from the raw server index, not the merged list', async () => {
+    // The merged list contains the pack itself; reading it as "already on the server" would make a
+    // first-time seed look like an update and preserve curation that does not exist.
+    mockApiClient.getStoreIndex.mockResolvedValue({ items: [] });
+    const fallback = createFallback([packItem('builtin-a', 'Pack A')]);
+    vi.spyOn(fallback, 'getBundle').mockResolvedValue({
+      manifest: manifest('builtin-a', {
+        name: 'Pack A',
+        tags: ['ui'],
+        description: 'Bundled.',
+        preview: 'preview.png',
+        license: 'CC0',
+        files: ['preview.png'],
+      }),
+      files: new Map([['preview.png', new Blob(['x'])]]),
+    });
+    const provider = new StoreLibraryProvider(fallback);
+    const listener = vi.fn();
+    provider.subscribe(listener);
+
+    const result = await provider.seedFromFallbackPack();
+
+    expect(mockApiClient.getStoreIndex).toHaveBeenCalledWith({ status: 'all' });
+    expect(mockApiClient.createStoreCategory).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'starter', parentId: null })
+    );
+    expect(result.outcomes).toEqual([
+      expect.objectContaining({ id: 'builtin-a', result: 'created' }),
+    ]);
+    const uploadedManifest = mockApiClient.uploadStoreItem.mock.calls[0]![1] as Record<
+      string,
+      unknown
+    >;
+    expect(uploadedManifest).toMatchObject({ license: 'CC0-1.0', categoryPath: 'starter' });
+    // put() notifies, and the seed re-notifies once it is done.
+    expect(listener).toHaveBeenCalled();
   });
 
   it('returns no categories when the taxonomy endpoint fails', async () => {

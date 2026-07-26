@@ -14,7 +14,7 @@
         "entry": "prefab.pix3scene",
         "files": ["prefab.pix3scene", "logo.png"],
         "source": "packed",
-        "license": "CC0",
+        "license": "CC0-1.0",
         "createdAt": 0,
         "updatedAt": 0
       }
@@ -32,7 +32,7 @@
         "entry": "panel.png",
         "files": ["panel.png"],
         "source": "packed",
-        "license": "CC0",
+        "license": "CC0-1.0",
         "createdAt": 0,
         "updatedAt": 0
       }

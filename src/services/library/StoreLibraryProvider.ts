@@ -15,6 +15,7 @@
 import * as ApiClient from '@/services/cloud/ApiClient';
 import { BuiltinLibraryProvider } from '@/services/library/BuiltinLibraryProvider';
 import { normalizeBundlePath } from '@/services/library/library-path-remap';
+import { seedStoreFromBuiltinPack, type StoreSeedResult } from '@/services/library/store-seed';
 import type {
   LibraryBundle,
   LibraryItem,
@@ -144,6 +145,34 @@ export class StoreLibraryProvider implements LibraryProvider {
       throw new Error(`Store item ${id} came back without a usable manifest.`);
     }
     return { scope: this.scope, manifest };
+  }
+
+  /**
+   * Upload the static fallback pack into the server catalog (admin). Both halves of the seed live
+   * here because this provider is the only place that holds both the pack and the server.
+   */
+  async seedFromFallbackPack(): Promise<StoreSeedResult> {
+    const result = await seedStoreFromBuiltinPack({
+      listPackItems: () => this.fallback.list(),
+      getPackBundle: id => this.fallback.getBundle(id),
+      // The raw server index, NOT `list()`: the merged list contains the pack itself, which would
+      // make every item look like it already had server-side curation to preserve.
+      listServerItems: async () => {
+        const { items } = await ApiClient.getStoreIndex({ status: 'all' });
+        return items.map(item => ({
+          id: item.id,
+          status: item.status,
+          categoryPath: item.categoryPath,
+        }));
+      },
+      ensureCategory: async input => {
+        await ApiClient.createStoreCategory({ ...input, parentId: null, sortOrder: 0 });
+      },
+      putStoreItem: bundle => this.put(bundle),
+    });
+    this.invalidate();
+    this.notify();
+    return result;
   }
 
   /** Server taxonomy (flat, `id` is the full path). Cached until the next write. */

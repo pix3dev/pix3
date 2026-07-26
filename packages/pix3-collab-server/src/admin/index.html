@@ -63,10 +63,15 @@
                     :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'users' ? 'tab-active' : 'text-gray-400']">
                     Пользователи
                 </button>
-                <button 
+                <button
                     @click="currentTab = 'projects'"
                     :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'projects' ? 'tab-active' : 'text-gray-400']">
                     Проекты
+                </button>
+                <button
+                    @click="openAudit"
+                    :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'audit' ? 'tab-active' : 'text-gray-400']">
+                    Журнал стора
                 </button>
             </div>
 
@@ -160,6 +165,50 @@
                 </div>
             </div>
 
+            <!-- Вкладка: Журнал стора (audit log курируемого Asset Store) -->
+            <div v-show="currentTab === 'audit'" class="glass-panel rounded-lg overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-700 flex justify-between items-center">
+                    <h2 class="text-lg font-medium text-white">Действия в Asset Store</h2>
+                    <button @click="fetchAudit(true)" class="p-2 hover:bg-gray-700 rounded transition-colors" title="Обновить">
+                        <i data-lucide="refresh-cw" class="w-5 h-5 text-gray-400"></i>
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="uppercase tracking-wider border-b border-gray-700 bg-gray-800/50 text-gray-400">
+                            <tr>
+                                <th class="px-6 py-4">Когда</th>
+                                <th class="px-6 py-4">Кто</th>
+                                <th class="px-6 py-4">Действие</th>
+                                <th class="px-6 py-4">Item</th>
+                                <th class="px-6 py-4">Детали</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="auditLoading" class="border-b border-gray-800"><td colspan="5" class="px-6 py-8 text-center text-gray-500">Загрузка...</td></tr>
+                            <tr v-else-if="audit.length === 0" class="border-b border-gray-800"><td colspan="5" class="px-6 py-8 text-center text-gray-500">Пока никто ничего не публиковал</td></tr>
+                            <tr v-for="entry in audit" :key="entry.id" class="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
+                                <td class="px-6 py-4 text-gray-400">{{ formatAuditDate(entry.createdAt) }}</td>
+                                <td class="px-6 py-4 text-gray-300">
+                                    {{ entry.actorName || '—' }}
+                                    <span class="text-gray-600 font-mono text-xs ml-1">{{ entry.actorId.substring(0, 8) }}</span>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <span :class="['px-2 py-1 rounded text-xs font-medium', auditActionClass(entry.action)]">{{ auditActionLabel(entry.action) }}</span>
+                                </td>
+                                <td class="px-6 py-4 text-gray-400 font-mono text-xs">{{ entry.itemId || '—' }}</td>
+                                <td class="px-6 py-4 text-gray-400 font-mono text-xs max-w-md truncate" :title="formatAuditDetail(entry.detail)">{{ formatAuditDetail(entry.detail) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div v-if="auditHasMore" class="px-6 py-4 border-t border-gray-700 text-center">
+                    <button @click="fetchAudit(false)" class="px-4 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors">
+                        Показать ещё
+                    </button>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -171,7 +220,11 @@
                 const currentTab = ref('users');
                 const users = ref([]);
                 const projects = ref([]);
+                const audit = ref([]);
+                const auditLoading = ref(false);
+                const auditHasMore = ref(false);
                 const loading = ref(false);
+                const AUDIT_PAGE = 50;
                 const toast = ref({ show: false, message: '', type: 'success' });
                 const currentUser = ref(null);
 
@@ -227,6 +280,62 @@
                     nextTick(() => lucide.createIcons());
                 };
 
+                // Журнал стора грузится страницами по 50 (сервер отдаёт максимум 200 за запрос):
+                // `reset` перечитывает с начала, иначе дописываем следующую страницу к списку.
+                const fetchAudit = async (reset) => {
+                    auditLoading.value = reset;
+                    const offset = reset ? 0 : audit.value.length;
+                    const data = await apiFetch(`/api/library/store/audit?limit=${AUDIT_PAGE}&offset=${offset}`);
+                    if (data) {
+                        const entries = data.entries ?? [];
+                        audit.value = reset ? entries : audit.value.concat(entries);
+                        auditHasMore.value = entries.length === AUDIT_PAGE;
+                    }
+                    auditLoading.value = false;
+                    nextTick(() => lucide.createIcons());
+                };
+
+                const openAudit = () => {
+                    currentTab.value = 'audit';
+                    if (audit.value.length === 0) {
+                        fetchAudit(true);
+                    }
+                };
+
+                const AUDIT_LABELS = {
+                    'item.upload': 'Загрузка бандла',
+                    'item.publish': 'Публикация',
+                    'item.unlist': 'Снят с витрины',
+                    'item.delete': 'Удаление',
+                    'item.meta': 'Правка меты',
+                    'category.create': 'Категория: создана',
+                    'category.update': 'Категория: изменена',
+                    'category.delete': 'Категория: удалена',
+                };
+
+                const auditActionLabel = (action) => AUDIT_LABELS[action] ?? action;
+
+                const auditActionClass = (action) => {
+                    if (action === 'item.delete' || action === 'category.delete') return 'bg-red-900/40 text-red-200';
+                    if (action === 'item.publish') return 'bg-green-900/40 text-green-200';
+                    if (action === 'item.unlist') return 'bg-amber-900/40 text-amber-200';
+                    return 'bg-gray-700 text-gray-300';
+                };
+
+                // sqlite пишет `datetime('now')` — UTC в формате "YYYY-MM-DD HH:MM:SS" без зоны;
+                // без ISO-нормализации браузер принял бы это за локальное время.
+                const formatAuditDate = (value) => {
+                    if (!value) return '—';
+                    const parsed = new Date(`${value.replace(' ', 'T')}Z`);
+                    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('ru-RU');
+                };
+
+                const formatAuditDetail = (detail) => {
+                    if (detail === null || detail === undefined) return '—';
+                    if (typeof detail === 'string') return detail;
+                    return Object.entries(detail).map(([key, value]) => `${key}: ${value}`).join(', ');
+                };
+
                 const deleteUser = async (id) => {
                     if (id === currentUser.value?.id) {
                         showToast('Нельзя удалить самого себя', 'error');
@@ -263,7 +372,10 @@
 
                 return {
                     currentTab, users, projects, loading, toast, currentUser,
-                    fetchUsers, fetchProjects, deleteUser, deleteProject, logout
+                    audit, auditLoading, auditHasMore,
+                    fetchUsers, fetchProjects, deleteUser, deleteProject, logout,
+                    openAudit, fetchAudit, auditActionLabel, auditActionClass,
+                    formatAuditDate, formatAuditDetail
                 };
             }
         }).mount('#app');

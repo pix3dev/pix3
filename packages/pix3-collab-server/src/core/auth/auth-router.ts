@@ -47,7 +47,10 @@ authRouter.post('/register', async (req: Request, res: Response) => {
 
     const token = signToken({ userId: id, email });
     res.cookie('token', token, COOKIE_OPTIONS);
-    res.status(201).json({ id, email, username, token });
+    // `is_admin` travels with every user payload (register/login/me): the editor drives admin-only
+    // chrome off it, and omitting it here left a freshly signed-in admin looking like a plain user
+    // until the next reload re-read /me.
+    res.status(201).json({ id, email, username, is_admin: false, token });
   } catch (err) {
     console.error('[auth] register error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -65,8 +68,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     const db = getDb();
     const user = db
-      .prepare('SELECT id, email, username, password_hash FROM users WHERE email = ?')
-      .get(email) as { id: string; email: string; username: string; password_hash: string } | undefined;
+      .prepare('SELECT id, email, username, password_hash, is_admin FROM users WHERE email = ?')
+      .get(email) as
+      | { id: string; email: string; username: string; password_hash: string; is_admin: number }
+      | undefined;
 
     if (!user) {
       res.status(401).json({ error: 'Invalid email or password' });
@@ -81,7 +86,13 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
     const token = signToken({ userId: user.id, email: user.email });
     res.cookie('token', token, COOKIE_OPTIONS);
-    res.json({ id: user.id, email: user.email, username: user.username, token });
+    res.json({
+      id: user.id,
+      email: user.email,
+      username: user.username,
+      is_admin: Boolean(user.is_admin),
+      token,
+    });
   } catch (err) {
     console.error('[auth] login error:', err);
     res.status(500).json({ error: 'Internal server error' });

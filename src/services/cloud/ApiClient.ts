@@ -448,6 +448,8 @@ export interface ApiStoreCategoryInput {
 export interface ApiStoreAuditEntry {
   id: number;
   actorId: string;
+  /** Username of the acting admin; `null` when that account no longer exists. */
+  actorName: string | null;
   action: string;
   itemId: string | null;
   detail: unknown;

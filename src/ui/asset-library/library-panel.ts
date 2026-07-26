@@ -10,6 +10,7 @@ import {
   PublishToLibraryService,
   type PublishTarget,
 } from '@/services/library/PublishToLibraryService';
+import { DialogService } from '@/services/editor/DialogService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import {
   LIBRARY_SOURCES,
@@ -33,6 +34,11 @@ import {
   type IngestEntry,
   type StoreIngestPlan,
 } from '@/services/library/StoreUploadService';
+import {
+  STORE_SEED_CATEGORY_ID,
+  STORE_SEED_CATEGORY_LABEL,
+  type StoreSeedResult,
+} from '@/services/library/store-seed';
 import {
   getDroppedAssetResourcePath,
   getLibraryItemDragData,
@@ -91,6 +97,7 @@ export class LibraryPanel extends ComponentBase {
   @inject(LibrarySelectionService) private readonly selectionService!: LibrarySelectionService;
   @inject(LibrarySyncService) private readonly syncService!: LibrarySyncService;
   @inject(StoreUploadService) private readonly uploadService!: StoreUploadService;
+  @inject(DialogService) private readonly dialogService!: DialogService;
   @inject(IconService) private readonly iconService!: IconService;
 
   @state() private items: LibraryItem[] = [];
@@ -112,6 +119,8 @@ export class LibraryPanel extends ComponentBase {
   /** Server taxonomy for the store rail/chips. Empty ⇒ offline, config categories stay in charge. */
   @state() private storeCategories: StoreCategory[] = [];
   @state() private categoryEditorOpen = false;
+  /** True while the starter-pack seed is uploading (disables the button, avoids a double run). */
+  @state() private seeding = false;
   /** Staged OS content awaiting the upload dialog (store source only). */
   @state() private uploadPlan: StoreIngestPlan | null = null;
   /** Category the OS content was dropped on, pre-filled into the staged bundles. */
@@ -571,6 +580,80 @@ export class LibraryPanel extends ComponentBase {
     await this.ingestOsEntries({ kind: 'grid' }, entries);
   }
 
+  /**
+   * Migrate the editor's bundled starter pack into the server catalog. The pack keeps shipping as
+   * the offline fallback; seeding is what gives those items a server row, so they can be re-filed,
+   * featured or replaced like any other store item. Re-running is safe (see `store-seed.ts`).
+   */
+  private async onSeedStarterPack(): Promise<void> {
+    if (!this.isStoreAdmin || this.seeding) {
+      return;
+    }
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Import the starter pack?',
+      message:
+        `Uploads the pack bundled with the editor into the curated store, filing new items under ` +
+        `"${STORE_SEED_CATEGORY_LABEL}". Items already in the store are replaced, keeping their ` +
+        `current status, category and featured flag.`,
+      confirmLabel: 'Import',
+      cancelLabel: 'Cancel',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.seeding = true;
+    try {
+      const result = await this.library.seedStoreFromBuiltinPack();
+      await this.reportSeedResult(result);
+    } catch (error) {
+      await this.dialogService.showConfirmation({
+        title: 'Starter pack import failed',
+        message: error instanceof Error ? error.message : 'The store rejected the import.',
+        confirmLabel: 'OK',
+        cancelLabel: 'Close',
+      });
+    } finally {
+      this.seeding = false;
+    }
+  }
+
+  private async reportSeedResult(result: StoreSeedResult): Promise<void> {
+    if (result.outcomes.length === 0) {
+      await this.dialogService.showConfirmation({
+        title: 'Nothing to import',
+        message: 'The bundled starter pack is empty or could not be read.',
+        confirmLabel: 'OK',
+        cancelLabel: 'Close',
+      });
+      return;
+    }
+
+    const failed = result.outcomes.filter(outcome => outcome.result === 'failed');
+    const imported = result.outcomes.length - failed.length;
+    const lines = result.outcomes.map(outcome =>
+      outcome.result === 'failed'
+        ? `${outcome.name} — failed: ${outcome.error ?? 'unknown error'}`
+        : `${outcome.name} — ${outcome.result} (${outcome.status ?? 'draft'})`
+    );
+    await this.dialogService.showConfirmation({
+      title: failed.length === 0 ? 'Starter pack imported' : 'Starter pack partially imported',
+      message: `${imported} of ${result.outcomes.length} items are now in the store.`,
+      disclaimer: result.categoryReady
+        ? undefined
+        : `The "${STORE_SEED_CATEGORY_LABEL}" category could not be created, so new items stayed ` +
+          `drafts — file them by hand to publish.`,
+      expandableSection: { title: 'Details', items: lines },
+      confirmLabel: 'OK',
+      cancelLabel: 'Close',
+    });
+
+    if (imported > 0) {
+      await this.afterPublish('store', STORE_SEED_CATEGORY_ID, null);
+      await this.reload();
+    }
+  }
+
   private onUploadDialogClose(uploaded: number): void {
     this.uploadPlan = null;
     this.uploadCategoryPath = null;
@@ -975,6 +1058,16 @@ export class LibraryPanel extends ComponentBase {
     }
     const onChange = (event: Event) => void this.onPickedFiles(event);
     return html`
+      <button
+        type="button"
+        class="lib-iconbtn"
+        title="Import the bundled starter pack into the store"
+        aria-label="Import the bundled starter pack into the store"
+        ?disabled=${this.seeding}
+        @click=${() => void this.onSeedStarterPack()}
+      >
+        ${this.icon('package')}
+      </button>
       <button
         type="button"
         class="lib-newitem"

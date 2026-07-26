@@ -534,6 +534,8 @@ export type LibraryAuditAction =
 export interface LibraryAuditEntry {
   id: number;
   actorId: string;
+  /** Actor's username, joined at read time. `null` once that user is gone — the trail survives. */
+  actorName: string | null;
   action: string;
   itemId: string | null;
   detail: unknown;
@@ -555,16 +557,20 @@ export function appendAudit(
 }
 
 export function listAudit(limit: number, offset: number): LibraryAuditEntry[] {
+  // LEFT JOIN, not INNER: an entry whose actor was deleted must still show up in the trail.
   const rows = getDb()
     .prepare(
-      `SELECT id, actor_id, action, item_id, detail, created_at
-       FROM library_audit_log
-       ORDER BY id DESC
+      `SELECT a.id, a.actor_id, u.username AS actor_name, a.action, a.item_id, a.detail,
+              a.created_at
+       FROM library_audit_log a
+       LEFT JOIN users u ON u.id = a.actor_id
+       ORDER BY a.id DESC
        LIMIT ? OFFSET ?`
     )
     .all(limit, offset) as Array<{
     id: number;
     actor_id: string;
+    actor_name: string | null;
     action: string;
     item_id: string | null;
     detail: string | null;
@@ -573,6 +579,7 @@ export function listAudit(limit: number, offset: number): LibraryAuditEntry[] {
   return rows.map(row => ({
     id: row.id,
     actorId: row.actor_id,
+    actorName: row.actor_name,
     action: row.action,
     itemId: row.item_id,
     detail: row.detail ? (JSON.parse(row.detail) as unknown) : null,

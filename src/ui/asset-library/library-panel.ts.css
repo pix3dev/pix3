@@ -420,6 +420,12 @@ pix3-library-panel .lib-iconbtn:hover {
   background: var(--bg-2);
 }
 
+pix3-library-panel .lib-iconbtn:disabled {
+  color: var(--fg-2);
+  cursor: default;
+  background: transparent;
+}
+
 pix3-library-panel .lib-iconbtn.is-active {
   color: var(--accent);
   background: var(--accent-soft);
