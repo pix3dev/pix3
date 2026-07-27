@@ -48,6 +48,8 @@ export const MessageTypeIds = {
   SetClientPrefsCommand: 15,
   /** S→C host migration announcement. */
   HostChangedEvent: 16,
+  /** S→C the complete membership, including the recipient. Chunked with `Final`; join and resume. */
+  RoomRosterEvent: 17,
 
   // ── State sync: entities (64–127) ──────────────────────────────────────────
   /** C→S spawn request. */

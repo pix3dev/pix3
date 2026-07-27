@@ -183,6 +183,22 @@ export class MemoryPackWriter {
     this.writeRaw(value);
   }
 
+  /**
+   * `uint[]`: `[i32 elementCount]` then that many little-endian `u32`s. `null` is `FFFFFFFF`.
+   *
+   * The count is the **element** count, not a byte count — the two coincide only for `byte[]`.
+   */
+  writeUint32Array(value: readonly number[] | null): void {
+    if (value === null) {
+      this.writeInt32(-1);
+      return;
+    }
+    this.writeInt32(value.length);
+    for (const element of value) {
+      this.writeUint32(element);
+    }
+  }
+
   /** `string[]`: `[i32 elementCount]` then that many fully-encoded strings. */
   writeStringArray(value: readonly (string | null)[] | null): void {
     if (value === null) {

@@ -62,6 +62,7 @@ import {
   type ControlMessage,
   type EntityWireState,
   type RejectCodeValue,
+  type RoomRosterEvent,
   type SignalTargetValue,
   type WelcomeEvent,
 } from './protocol';
@@ -484,6 +485,10 @@ export class NetworkService {
   private readonly pendingSnapshot = new Map<number, NetEntityRecord>();
   private snapshotInProgress = false;
   private snapshotComplete = false;
+
+  /** Accumulates a possibly multi-chunk `RoomRosterEvent`; committed only at `FrameFlags.Final`. */
+  private readonly pendingRoster: NetPeer[] = [];
+  private rosterInProgress = false;
 
   private lastSeq: number | null = null;
   /** True between a detected gap and the snapshot that cures it; hot frames are dropped meanwhile. */
@@ -1203,6 +1208,9 @@ export class NetworkService {
       case MessageTypeIds.RoomVarsChangedEvent:
         this.handleRoomVars(message.body.keys, message.body.values);
         break;
+      case MessageTypeIds.RoomRosterEvent:
+        this.handleRoomRoster(message.body);
+        break;
       case MessageTypeIds.SignalEvent:
         this.dispatchSignal(message.body.name, message.body.payload, message.body.senderClientId);
         break;
@@ -1230,6 +1238,10 @@ export class NetworkService {
     this.lastSeq = null;
     this.desynced = false;
     this.lastRejectCode = null;
+    // A roster half-accumulated when the socket dropped is worthless: the answer to this welcome is a
+    // fresh full one, on a resume exactly as on a join.
+    this.pendingRoster.length = 0;
+    this.rosterInProgress = false;
     // A resume answers with the full room-var set too, so the next vars event replaces either way.
     this.receivedRoomVarsForSession = false;
 
@@ -1323,6 +1335,71 @@ export class NetworkService {
         listener(changedKeys);
       }
     }
+  }
+
+  /**
+   * Accumulates one roster chunk. A roster may be split across several self-contained
+   * `RoomRosterEvent`s and only the last carries `Final`, so nothing is applied until then — the same
+   * discipline a multi-frame snapshot uses, and for the same reason: half a full-state message is not
+   * a state.
+   */
+  private handleRoomRoster(roster: RoomRosterEvent): void {
+    if (!this.rosterInProgress) {
+      this.pendingRoster.length = 0;
+      this.rosterInProgress = true;
+    }
+
+    // Parallel arrays of equal length by contract; a mismatch is a broken peer, so read only the pairs
+    // that exist rather than inventing a name or dropping the whole roster.
+    const count = Math.min(roster.clientIds.length, roster.displayNames.length);
+    if (count !== roster.clientIds.length || count !== roster.displayNames.length) {
+      this.counters.malformedFrames += 1;
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const clientId = roster.clientIds[i];
+      this.pendingRoster.push({
+        clientId,
+        displayName: roster.displayNames[i],
+        isLocal: clientId === this.clientId,
+      });
+    }
+
+    if (isFinalFrame(roster.frameFlags)) {
+      this.commitRoster();
+    }
+  }
+
+  /**
+   * A roster is the authoritative membership, so committing it *replaces* the peer list: anyone
+   * missing from it is gone. That is what heals the one case `PeerLeftEvent` cannot — a member who
+   * left while this client was inside its resume grace, whose event it was not connected to receive —
+   * and it is why a resumed session reconciles here instead of resetting at the welcome.
+   */
+  private commitRoster(): void {
+    // The roster includes the local client, but keep the existing entry as a fallback: a session
+    // whose `peers` briefly did not contain the local player would be a nasty thing to render.
+    const local = this.peerMap.get(this.clientId);
+    this.peerMap.clear();
+
+    // `peers` is documented local-client-first, and the server's enumeration order is not.
+    for (const peer of this.pendingRoster) {
+      if (peer.isLocal) {
+        this.peerMap.set(peer.clientId, peer);
+      }
+    }
+    if (this.peerMap.size === 0 && local) {
+      this.peerMap.set(local.clientId, local);
+    }
+    for (const peer of this.pendingRoster) {
+      if (!peer.isLocal) {
+        this.peerMap.set(peer.clientId, peer);
+      }
+    }
+
+    this.pendingRoster.length = 0;
+    this.rosterInProgress = false;
+    this.notifyPeers();
   }
 
   // ── Hot plane ──────────────────────────────────────────────────────────────
@@ -1672,6 +1749,8 @@ export class NetworkService {
     this.pendingSnapshot.clear();
     this.publishStates.clear();
     this.peerMap.clear();
+    this.pendingRoster.length = 0;
+    this.rosterInProgress = false;
     this.roomVars.clear();
     this.receivedRoomVarsForSession = false;
     this.snapshotInProgress = false;

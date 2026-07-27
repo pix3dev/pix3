@@ -909,6 +909,19 @@ function fieldBytesList(fields: Fields, key: string): Uint8Array[] {
   return fieldStringList(fields, key).map(hexBytes);
 }
 
+function fieldNumberList(fields: Fields, key: string): number[] {
+  const value = fields[key];
+  if (!Array.isArray(value)) {
+    throw new Error(`Field "${key}" is not an array.`);
+  }
+  return value.map(element => {
+    if (typeof element !== 'number') {
+      throw new Error(`Field "${key}" holds a non-numeric element.`);
+    }
+    return element;
+  });
+}
+
 /** A `…Repeat: { char, count }` field: a string of one repeated character. */
 function fieldRepeat(fields: Fields, key: string): string {
   const value = fields[key];
@@ -1095,6 +1108,17 @@ const CONTROL_BUILDERS: ReadonlyMap<string, (fields: Fields) => ControlMessage> 
     (f: Fields): ControlMessage => ({
       typeId: MessageTypeIds.RoomVarsChangedEvent,
       body: { keys: fieldStringList(f, 'Keys'), values: fieldBytesList(f, 'ValuesHex') },
+    }),
+  ],
+  [
+    'RoomRosterEvent',
+    (f: Fields): ControlMessage => ({
+      typeId: MessageTypeIds.RoomRosterEvent,
+      body: {
+        clientIds: fieldNumberList(f, 'ClientIds'),
+        displayNames: fieldStringList(f, 'DisplayNames'),
+        frameFlags: fieldNumber(f, 'FrameFlags'),
+      },
     }),
   ],
   [

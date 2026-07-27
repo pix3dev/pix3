@@ -191,6 +191,18 @@ function delta(seq: number, input: DeltaInput): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+/** One roster chunk. `final` false is a chunk of a roster that continues. */
+function roster(entries: [clientId: number, displayName: string][], final = true): Uint8Array {
+  return encodeControlMessage({
+    typeId: MessageTypeIds.RoomRosterEvent,
+    body: {
+      clientIds: entries.map(([clientId]) => clientId),
+      displayNames: entries.map(([, displayName]) => displayName),
+      frameFlags: final ? FrameFlags.Final : FrameFlags.None,
+    },
+  });
+}
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 class FakeVisibility implements NetworkVisibilitySource {
@@ -833,6 +845,106 @@ describe('NetworkService', () => {
       );
       expect(h.service.peers).toHaveLength(1);
       expect(seen).toEqual([2, 2, 1]);
+    });
+
+    it('replaces the peer list with the roster, local client first', async () => {
+      const h = createHarness();
+      await join(h);
+      // A joiner is not in its own PeerJoinedEvent fan-out, so until the roster lands it knows only
+      // itself — from the welcome, under the name it asked for.
+      expect(h.service.peers).toEqual([{ clientId: 7, displayName: 'Ann', isLocal: true }]);
+
+      const seen: number[] = [];
+      h.service.onPeersChange(peers => seen.push(peers.length));
+
+      // The server enumerates its membership in no particular order; `peers` is still local-first.
+      h.socket().deliver(
+        roster([
+          [9, 'Bob'],
+          [7, 'Ann'],
+          [11, 'Cat'],
+        ])
+      );
+
+      expect(h.service.peers).toEqual([
+        { clientId: 7, displayName: 'Ann', isLocal: true },
+        { clientId: 9, displayName: 'Bob', isLocal: false },
+        { clientId: 11, displayName: 'Cat', isLocal: false },
+      ]);
+      expect(seen).toEqual([3]);
+
+      // The peer events keep carrying the deltas on top of it.
+      h.socket().deliver(
+        encodeControlMessage({
+          typeId: MessageTypeIds.PeerLeftEvent,
+          body: { clientId: 9, reason: 1 },
+        })
+      );
+      expect(h.service.peers.map(peer => peer.clientId)).toEqual([7, 11]);
+
+      // And a later roster is full state, not a delta: whoever it omits is gone.
+      h.socket().deliver(roster([[7, 'Ann']]));
+      expect(h.service.peers).toEqual([{ clientId: 7, displayName: 'Ann', isLocal: true }]);
+    });
+
+    it('commits a chunked roster only at Final', async () => {
+      const h = createHarness();
+      await join(h);
+      const seen: number[] = [];
+      h.service.onPeersChange(peers => seen.push(peers.length));
+
+      h.socket().deliver(
+        roster(
+          [
+            [7, 'Ann'],
+            [9, 'Bob'],
+          ],
+          false
+        )
+      );
+
+      // Half a full-state message is not a state: nothing is applied and nobody is notified.
+      expect(h.service.peers).toEqual([{ clientId: 7, displayName: 'Ann', isLocal: true }]);
+      expect(seen).toEqual([]);
+
+      h.socket().deliver(roster([[11, 'Cat']]));
+
+      expect(h.service.peers.map(peer => peer.clientId)).toEqual([7, 9, 11]);
+      expect(seen).toEqual([3]);
+    });
+
+    it('reconciles the peer list from the roster a resume answers with', async () => {
+      const h = createHarness();
+      await join(h);
+      h.socket().deliver(
+        roster([
+          [7, 'Ann'],
+          [9, 'Bob'],
+        ])
+      );
+      expect(h.service.peers).toHaveLength(2);
+
+      h.socket().serverClose(1006, 'blip');
+      vi.advanceTimersByTime(100);
+      h.socket().serverOpen();
+      h.socket().deliver(welcome({ resumed: true }));
+
+      // A resumed client must not reset its local state to find out what changed…
+      expect(h.service.peers.map(peer => peer.clientId)).toEqual([7, 9]);
+
+      // …so the roster is what retires the peer that left inside the grace, whose PeerLeftEvent this
+      // client was not connected to receive, and what introduces the one that joined.
+      h.socket().deliver(
+        roster([
+          [7, 'Ann'],
+          [12, 'Dee'],
+        ])
+      );
+
+      expect(h.service.peers).toEqual([
+        { clientId: 7, displayName: 'Ann', isLocal: true },
+        { clientId: 12, displayName: 'Dee', isLocal: false },
+      ]);
     });
 
     it('routes emitted signals and dispatches inbound ones', async () => {

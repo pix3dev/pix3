@@ -214,6 +214,22 @@ export class MemoryPackReader {
     return this.bytes.slice(at, at + count);
   }
 
+  /** `uint[]`: an element count, then that many little-endian `u32`s. `FFFFFFFF` is `null`. */
+  readUint32Array(): number[] | null {
+    const count = this.readInt32();
+    if (count === -1) {
+      return null;
+    }
+    if (count < 0) {
+      throw new RangeError(`Illegal array element count ${count}.`);
+    }
+    const elements: number[] = [];
+    for (let i = 0; i < count; i++) {
+      elements.push(this.readUint32());
+    }
+    return elements;
+  }
+
   /** `string[]`: an element count, then that many fully-encoded strings. */
   readStringArray(): (string | null)[] | null {
     const count = this.readInt32();

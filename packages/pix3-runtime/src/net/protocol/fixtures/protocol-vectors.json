@@ -330,6 +330,34 @@
         "hex": "02 04 04 00000000 00000000"
       },
       {
+        "message": "RoomRosterEvent",
+        "name": "empty but final",
+        "fields": { "ClientIds": [], "DisplayNames": [], "FrameFlags": 1 },
+        "hex": "03 04 04 01 00000000 00000000 01",
+        "note": "A roster is always sent, even when it would be empty: a client must be told the roster is complete. Three members, so three declared lengths: two empty collection headers and the flags byte."
+      },
+      {
+        "message": "RoomRosterEvent",
+        "name": "two members, final",
+        "fields": { "ClientIds": [7, 9], "DisplayNames": ["Ada", "Bo"], "FrameFlags": 1 },
+        "hex": "03 0C 19 01 02000000 07000000 09000000 02000000 FCFFFFFF 03000000 416461 FDFFFFFF 02000000 426F 01",
+        "note": "uint[] is a collection header of element count then 4 bytes each: 4 + 8 = 12. string[] is 4 + (4 + 4 + 3) + (4 + 4 + 2) = 25."
+      },
+      {
+        "message": "RoomRosterEvent",
+        "name": "a chunk that is not the last",
+        "fields": { "ClientIds": [7], "DisplayNames": ["Ada"], "FrameFlags": 0 },
+        "hex": "03 08 0F 01 01000000 07000000 01000000 FCFFFFFF 03000000 416461 00",
+        "note": "FrameFlags 0: a self-contained chunk of a roster that continues. Only the last chunk carries Final."
+      },
+      {
+        "message": "RoomRosterEvent",
+        "name": "non-ASCII display name",
+        "fields": { "ClientIds": [42], "DisplayNames": ["Привет"], "FrameFlags": 1 },
+        "hex": "03 08 18 01 01000000 2A000000 01000000 F3FFFFFF 06000000 D09FD180D0B8D0B2D0B5D182 01",
+        "note": "The UTF-16-length-vs-byte-count trap, inside an array: 12 UTF-8 bytes but a UTF-16 length of 6, so the member is 4 + (4 + 4 + 12) = 24 — and a sender that sized its chunks by character count would overflow the frame cap."
+      },
+      {
         "message": "HelloCommand",
         "name": "full, with resume key",
         "fields": {

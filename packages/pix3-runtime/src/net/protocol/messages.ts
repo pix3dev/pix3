@@ -1,5 +1,5 @@
 /**
- * The 23 control-plane messages, hand-written against MemoryPack's version-tolerant object format.
+ * The 24 control-plane messages, hand-written against MemoryPack's version-tolerant object format.
  *
  * Every message here is **version-tolerant with explicit member ordering**, which is what lets a field
  * be appended without a protocol version bump. Two rules follow from that and are obeyed by every
@@ -115,7 +115,8 @@ export function decodeHelloCommand(payload: Uint8Array): HelloCommand {
 
 /**
  * S→C. Handshake accepted; the client is now a room member. Followed by a `RoomVarsChangedEvent`,
- * then one or more `SnapshotPacket`s (the last with `FrameFlags.Final`).
+ * then one or more `RoomRosterEvent`s and one or more `SnapshotPacket`s (each series' last frame
+ * carrying `FrameFlags.Final`).
  */
 export interface WelcomeEvent {
   /** Room-unique id for this session. Preserved across a successful resume. */
@@ -778,6 +779,65 @@ export function decodeHostChangedEvent(payload: Uint8Array): HostChangedEvent {
   return message;
 }
 
+// ── RoomRosterEvent (17, S→C) ────────────────────────────────────────────────
+
+/**
+ * S→C. The room's **complete** membership, **including the receiving client itself**, sent on every
+ * join and every resume. {@link RoomRosterEvent.clientIds} and {@link RoomRosterEvent.displayNames}
+ * are parallel arrays of equal length.
+ *
+ * It is a **full-state** message, not a delta: replace the roster with it, exactly as a snapshot
+ * replaces the known set. `PeerJoinedEvent`/`PeerLeftEvent` carry the changes afterwards, and like
+ * them this is room-scoped, never AOI-filtered.
+ *
+ * **Chunked**: a roster that does not fit the 4 KiB payload cap arrives as several self-contained
+ * `RoomRosterEvent`s and only the last carries `FrameFlags.Final`, so a receiver must **accumulate**
+ * chunks and commit at `Final`. One chunk is always sent, even for an empty roster, so the completion
+ * is never merely implied.
+ */
+export interface RoomRosterEvent {
+  /** Client ids, positionally paired with {@link RoomRosterEvent.displayNames}. */
+  clientIds: number[];
+  /** Display names, positionally paired with {@link RoomRosterEvent.clientIds}. */
+  displayNames: string[];
+  /** `FrameFlags`: bit 0 is `Final`. Bits 1–7 are reserved and must be ignored, never rejected. */
+  frameFlags: number;
+}
+
+/** A `RoomRosterEvent` with every member at its wire default. */
+export function createRoomRosterEvent(): RoomRosterEvent {
+  return { clientIds: [], displayNames: [], frameFlags: 0 };
+}
+
+export function encodeRoomRosterEvent(message: RoomRosterEvent): Uint8Array {
+  const w = new MemoryPackWriter();
+  w.writeUint32Array(message.clientIds);
+  w.endMember();
+  w.writeStringArray(message.displayNames);
+  w.endMember();
+  w.writeUint8(message.frameFlags);
+  w.endMember();
+  return w.finish();
+}
+
+export function decodeRoomRosterEvent(payload: Uint8Array): RoomRosterEvent {
+  const r = new MemoryPackReader(payload);
+  const message = createRoomRosterEvent();
+  if (r.hasMember(0)) {
+    r.seekMember(0);
+    message.clientIds = r.readUint32Array() ?? [];
+  }
+  if (r.hasMember(1)) {
+    r.seekMember(1);
+    message.displayNames = (r.readStringArray() ?? []).map(name => name ?? '');
+  }
+  if (r.hasMember(2)) {
+    r.seekMember(2);
+    message.frameFlags = r.readUint8();
+  }
+  return message;
+}
+
 // ── SpawnEntityRequest (64, C→S) ─────────────────────────────────────────────
 
 /**
@@ -1170,6 +1230,7 @@ export type ControlMessage =
   | { typeId: typeof MessageTypeIds.ResyncCommand; body: ResyncCommand }
   | { typeId: typeof MessageTypeIds.SetClientPrefsCommand; body: SetClientPrefsCommand }
   | { typeId: typeof MessageTypeIds.HostChangedEvent; body: HostChangedEvent }
+  | { typeId: typeof MessageTypeIds.RoomRosterEvent; body: RoomRosterEvent }
   | { typeId: typeof MessageTypeIds.SpawnEntityRequest; body: SpawnEntityRequest }
   | { typeId: typeof MessageTypeIds.SpawnEntityResponse; body: SpawnEntityResponse }
   | { typeId: typeof MessageTypeIds.DespawnEntityCommand; body: DespawnEntityCommand }
@@ -1200,6 +1261,7 @@ const KNOWN_CONTROL_TYPE_IDS: ReadonlySet<number> = new Set<number>([
   MessageTypeIds.ResyncCommand,
   MessageTypeIds.SetClientPrefsCommand,
   MessageTypeIds.HostChangedEvent,
+  MessageTypeIds.RoomRosterEvent,
   MessageTypeIds.SpawnEntityRequest,
   MessageTypeIds.SpawnEntityResponse,
   MessageTypeIds.DespawnEntityCommand,
@@ -1254,6 +1316,8 @@ export function decodeControlMessage(
       return { typeId, body: decodeSetClientPrefsCommand(payload) };
     case MessageTypeIds.HostChangedEvent:
       return { typeId, body: decodeHostChangedEvent(payload) };
+    case MessageTypeIds.RoomRosterEvent:
+      return { typeId, body: decodeRoomRosterEvent(payload) };
     case MessageTypeIds.SpawnEntityRequest:
       return { typeId, body: decodeSpawnEntityRequest(payload) };
     case MessageTypeIds.SpawnEntityResponse:
@@ -1313,6 +1377,8 @@ export function encodeControlPayload(message: ControlMessage): Uint8Array {
       return encodeSetClientPrefsCommand(message.body);
     case MessageTypeIds.HostChangedEvent:
       return encodeHostChangedEvent(message.body);
+    case MessageTypeIds.RoomRosterEvent:
+      return encodeRoomRosterEvent(message.body);
     case MessageTypeIds.SpawnEntityRequest:
       return encodeSpawnEntityRequest(message.body);
     case MessageTypeIds.SpawnEntityResponse:
