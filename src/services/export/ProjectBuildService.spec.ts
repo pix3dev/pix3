@@ -279,6 +279,44 @@ describe('ProjectBuildService', () => {
     expect(model.scenePaths).toEqual(['scenes/main.pix3scene']);
   });
 
+  it('emits a deterministically sorted netKindTable of the shipped prefabs', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  node:\n    a: res://src/assets/prefabs/zebra.pix3scene\n' +
+        '    b: res://src/assets/prefabs/Bomb.pix3scene\n' +
+        '    c: res://src/assets/prefabs/apple.pix3scene\n',
+      'src/assets/prefabs/zebra.pix3scene': 'root:\n  node:\n',
+      'src/assets/prefabs/Bomb.pix3scene': 'root:\n  node:\n',
+      'src/assets/prefabs/apple.pix3scene': 'root:\n  node:\n',
+      'src/assets/textures/hero.png': 'bytes',
+    });
+
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+    const manifest = model.files.get('src/generated/scene-manifest.ts') ?? '';
+
+    // The index into this list IS the wire `Kind`, so the order is a contract: sorted by code
+    // point (uppercase first), never by locale, and only prefabs — a texture or a navigable scene
+    // must not occupy a kind.
+    expect(manifest).toContain('export const netKindTable = ');
+    const table = JSON.parse(
+      manifest
+        .slice(manifest.indexOf('netKindTable = ') + 'netKindTable = '.length)
+        .split(' as const;')[0]
+    ) as { prefabs: string[]; authored: string[] };
+    expect(table.prefabs).toEqual([
+      'res://src/assets/prefabs/Bomb.pix3scene',
+      'res://src/assets/prefabs/apple.pix3scene',
+      'res://src/assets/prefabs/zebra.pix3scene',
+    ]);
+    // The Phase-3 authored-binding segment is reserved but empty, and appends *after* the prefabs
+    // so its arrival cannot shift a published kind.
+    expect(table.authored).toEqual([]);
+  });
+
   it('scans .pix3anim flipbooks referenced by AnimatedSprite2D for their frame textures', async () => {
     const fs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),

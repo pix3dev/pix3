@@ -9,7 +9,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { NetworkService, type NetworkVisibilitySource } from './NetworkService';
+import {
+  NetworkService,
+  NetworkSpawnError,
+  netOwnershipOf,
+  type NetworkSpawnErrorKind,
+  type NetworkVisibilitySource,
+} from './NetworkService';
+import { NetKindTable } from './net-kind-table';
 import type { WsLikeSocket } from './WsTransport';
 import {
   createEntityWireState,
@@ -225,7 +232,9 @@ class FakeVisibility implements NetworkVisibilitySource {
   }
 }
 
-function createHarness(options: { visibility?: NetworkVisibilitySource | null } = {}) {
+function createHarness(
+  options: { visibility?: NetworkVisibilitySource | null; kindTable?: NetKindTable } = {}
+) {
   const sockets: FakeSocket[] = [];
   const service = new NetworkService({
     socketFactory: url => {
@@ -236,6 +245,7 @@ function createHarness(options: { visibility?: NetworkVisibilitySource | null } 
     visibility: options.visibility ?? null,
     backoff: { initialDelayMs: 100, factor: 2, jitterRatio: 0, maxAttempts: 3 },
     random: () => 0.5,
+    kindTable: options.kindTable,
   });
 
   const socket = (): FakeSocket => {
@@ -1046,6 +1056,230 @@ describe('NetworkService', () => {
       // A client write is a request that goes out as SetRoomVarCommand.
       expect(h.service.vars.set('matchPhase', 'results')).toBe(true);
       expect(countTypeId(h.socket(), MessageTypeIds.SetRoomVarCommand)).toBe(1);
+    });
+  });
+
+  describe('spawn / despawn', () => {
+    const PLAYER = 'res://prefabs/player.pix3scene';
+    const BOMB = 'res://prefabs/bomb.pix3scene';
+
+    function spawnHarness() {
+      return createHarness({ kindTable: new NetKindTable([BOMB, PLAYER]) });
+    }
+
+    /** The `RequestId` of the last `SpawnEntityRequest` this client sent. */
+    function lastSpawnRequest(socket: FakeSocket) {
+      const requests = socket
+        .controlMessages()
+        .filter(message => message?.typeId === MessageTypeIds.SpawnEntityRequest);
+      const last = requests[requests.length - 1];
+      if (last?.typeId !== MessageTypeIds.SpawnEntityRequest) {
+        throw new Error('no SpawnEntityRequest was sent');
+      }
+      return last.body;
+    }
+
+    function spawnResponse(requestId: number, netId: number, rejectCode: number = RejectCode.None) {
+      return encodeControlMessage({
+        typeId: MessageTypeIds.SpawnEntityResponse,
+        body: { requestId, netId, rejectCode },
+      });
+    }
+
+    async function expectSpawnRejection(
+      promise: Promise<number>,
+      kind: NetworkSpawnErrorKind
+    ): Promise<NetworkSpawnError> {
+      const error = await promise.then(
+        netId => {
+          throw new Error(`expected a rejection, got netId ${netId}`);
+        },
+        (reason: unknown) => reason
+      );
+      expect(error).toBeInstanceOf(NetworkSpawnError);
+      expect((error as NetworkSpawnError).kind).toBe(kind);
+      return error as NetworkSpawnError;
+    }
+
+    it('sends a quantized request and resolves with the minted netId', async () => {
+      const h = spawnHarness();
+      await join(h);
+
+      const pending = h.service.spawn(PLAYER, {
+        position: { x: 0, y: 1024 },
+        rotation: Math.PI,
+        ownership: 'shared',
+        appFlags: 5,
+      });
+
+      const request = lastSpawnRequest(h.socket());
+      // Kind is the table index, and every field is quantized — a spawn must not introduce a value
+      // the delta plane could not have expressed.
+      expect(request.kind).toBe(1);
+      expect(request.qx).toBe(32768);
+      // (1024 − (−2048)) × 65535 / 4096 = 49151.25, and the normative rounding is floor(v + 0.5).
+      expect(request.qy).toBe(49151);
+      expect(request.qrot).toBe(128);
+      expect(netOwnershipOf(request.flags)).toBe('shared');
+      expect(request.flags >> 3).toBe(5);
+
+      const netId = packNetId(4, 1);
+      h.socket().deliver(spawnResponse(request.requestId, netId));
+
+      await expect(pending).resolves.toBe(netId);
+      expect(h.service.ownsEntity(netId)).toBe(true);
+      expect(h.service.ownedEntityCount).toBe(1);
+      expect(h.service.stats.spawnsSent).toBe(1);
+    });
+
+    it('surfaces each reject code as its own failure kind', async () => {
+      const cases: [number, NetworkSpawnErrorKind][] = [
+        [RejectCode.QuotaExceeded, 'quota'],
+        [RejectCode.EntityLimitReached, 'entity-limit'],
+        [RejectCode.KindNotAllowed, 'kind-not-allowed'],
+        [RejectCode.InternalError, 'rejected'],
+      ];
+
+      for (const [rejectCode, kind] of cases) {
+        const h = spawnHarness();
+        await join(h);
+        const pending = h.service.spawn(BOMB);
+        const request = lastSpawnRequest(h.socket());
+        h.socket().deliver(spawnResponse(request.requestId, 0, rejectCode));
+
+        const error = await expectSpawnRejection(pending, kind);
+        expect(error.rejectCode).toBe(rejectCode);
+        expect(error.prefabPath).toBe(BOMB);
+        expect(h.service.ownedEntityCount).toBe(0);
+        expect(h.service.stats.spawnsRejected).toBe(1);
+        // A refused spawn must not take the session with it.
+        expect(h.service.isOnline).toBe(true);
+      }
+    });
+
+    it('refuses a prefab that has no kind, without sending anything', async () => {
+      const h = spawnHarness();
+      await join(h);
+
+      await expectSpawnRejection(h.service.spawn('res://prefabs/ghost.pix3scene'), 'unknown-kind');
+      expect(countTypeId(h.socket(), MessageTypeIds.SpawnEntityRequest)).toBe(0);
+    });
+
+    it('refuses a spawn while offline', async () => {
+      const service = new NetworkService({
+        visibility: null,
+        kindTable: new NetKindTable([BOMB]),
+      });
+      await expectSpawnRejection(service.spawn(BOMB), 'offline');
+    });
+
+    it('rejects an in-flight spawn when the socket drops', async () => {
+      const h = spawnHarness();
+      await join(h);
+      const pending = h.service.spawn(BOMB);
+      expect(countTypeId(h.socket(), MessageTypeIds.SpawnEntityRequest)).toBe(1);
+
+      // 4002 is permanent, so the transport closes instead of retrying — either way the request can
+      // never be answered, and an unsettled promise would be a leak a game script cannot see.
+      h.socket().serverClose(4002, 'token rejected');
+
+      const error = await expectSpawnRejection(pending, 'transport');
+      expect(error.message).toContain('closed');
+    });
+
+    it('rejects an in-flight spawn on a local disconnect', async () => {
+      const h = spawnHarness();
+      await join(h);
+      const pending = h.service.spawn(BOMB);
+
+      h.service.disconnect();
+
+      await expectSpawnRejection(pending, 'cancelled');
+    });
+
+    it('despawns an owned entity and frees its slot in the owner budget', async () => {
+      const h = spawnHarness();
+      await join(h);
+      const pending = h.service.spawn(BOMB);
+      const netId = packNetId(9, 3);
+      h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, netId));
+      await pending;
+
+      expect(h.service.despawn(netId)).toBe(true);
+      expect(h.service.ownsEntity(netId)).toBe(false);
+      expect(h.service.ownedEntityCount).toBe(0);
+
+      const commands = h
+        .socket()
+        .controlMessages()
+        .filter(message => message?.typeId === MessageTypeIds.DespawnEntityCommand);
+      expect(commands).toHaveLength(1);
+      expect(
+        commands[0]?.typeId === MessageTypeIds.DespawnEntityCommand ? commands[0].body.netId : 0
+      ).toBe(netId);
+    });
+
+    it('holds the 64-entities-per-owner quota locally', async () => {
+      const h = spawnHarness();
+      await join(h);
+
+      for (let i = 0; i < 64; i += 1) {
+        const pending = h.service.spawn(BOMB);
+        h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, packNetId(i, 1)));
+        await pending;
+      }
+      expect(h.service.ownedEntityCount).toBe(64);
+
+      const sentBefore = countTypeId(h.socket(), MessageTypeIds.SpawnEntityRequest);
+      const error = await expectSpawnRejection(h.service.spawn(BOMB), 'quota');
+      // The 65th never reaches the fabric: this is the owner's own budget, and the answer is local.
+      expect(countTypeId(h.socket(), MessageTypeIds.SpawnEntityRequest)).toBe(sentBefore);
+      expect(error.rejectCode).toBe(RejectCode.QuotaExceeded);
+      expect(h.service.stats.spawnsThrottled).toBe(1);
+
+      // Freeing one slot makes room again.
+      h.service.despawn(packNetId(0, 1));
+      const pending = h.service.spawn(BOMB);
+      h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, packNetId(64, 1)));
+      await expect(pending).resolves.toBe(packNetId(64, 1));
+    });
+
+    it('holds the 240-spawns-per-minute quota locally', async () => {
+      const h = spawnHarness();
+      await join(h);
+
+      // Answer every request so the owner budget never bites — this is the *rate* limit's test.
+      for (let i = 0; i < 240; i += 1) {
+        const pending = h.service.spawn(BOMB);
+        const netId = packNetId(i % 32, 1 + Math.floor(i / 32));
+        h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, netId));
+        await pending;
+        h.service.despawn(netId);
+      }
+
+      await expectSpawnRejection(h.service.spawn(BOMB), 'rate-limited');
+
+      // The window is a minute wide, so it reopens after one.
+      vi.advanceTimersByTime(60_001);
+      const pending = h.service.spawn(BOMB);
+      const netId = packNetId(100, 1);
+      h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, netId));
+      await expect(pending).resolves.toBe(netId);
+    });
+
+    it('drops an owned entity from the budget when its removal arrives', async () => {
+      const h = spawnHarness();
+      await join(h);
+      const pending = h.service.spawn(BOMB);
+      const netId = packNetId(11, 2);
+      h.socket().deliver(spawnResponse(lastSpawnRequest(h.socket()).requestId, netId));
+      await pending;
+
+      h.socket().deliver(snapshot(0, [{ netId, state: entityState({ ownerId: 7 }) }]));
+      h.socket().deliver(delta(1, { removedSlots: [11] }));
+
+      expect(h.service.ownsEntity(netId)).toBe(false);
+      expect(h.service.entities.has(netId)).toBe(false);
     });
   });
 

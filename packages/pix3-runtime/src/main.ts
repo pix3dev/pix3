@@ -13,12 +13,14 @@ import {
   SceneRunner,
   SceneSaver,
   ScriptRegistry,
+  setNetworkPrefabTable,
 } from '@pix3/runtime';
 import {
   activeScenePath,
   scenePaths,
   runtimeQuality,
   runtimeLocalization,
+  netKindTable,
 } from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
@@ -39,6 +41,10 @@ async function bootstrap(): Promise<void> {
   const scriptRegistry = new ScriptRegistry();
   registerBuiltInScripts(scriptRegistry);
   registerProjectScripts(scriptRegistry);
+
+  // Wire `Kind` ↔ prefab path for multiplayer spawns (D6). Installed before any scene runs, because
+  // a kind that changes mid-session repoints entities every peer already spawned.
+  setNetworkPrefabTable(netKindTable);
 
   const assetLoader = new AssetLoader(resourceManager, audioService);
   const sceneLoader = new SceneLoader(assetLoader, scriptRegistry, resourceManager);

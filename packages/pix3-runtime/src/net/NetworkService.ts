@@ -11,10 +11,11 @@
  * no-op before `connect()`. A single-player game touching `this.scene.network` must never throw and
  * must never need a guard at the call site.
  *
- * **Scope.** This is Phase 1.2. It owns the *data*: `netId → record`, the slot table, peers, room
- * vars, signals. Binding entities to scene nodes — `core:NetworkedNode`, `core:ReplicatedTransform`,
- * spawn/despawn, interpolation — is Phase 1.3 and deliberately absent here. Nothing in this module
- * imports `three` or a node class.
+ * **Scope.** This owns the *data*: `netId → record`, the slot table, peers, room vars, signals, and
+ * the spawn/despawn request lane. Binding an entity to a scene node — `core:NetworkedNode`,
+ * `core:ReplicatedTransform`, remote prefab instantiation, interpolation — belongs to
+ * `core/NetworkNodeBinder` and the two components, because those need the node tree. Nothing in this
+ * module imports `three` or a node class.
  *
  * The wire contract is `docs/protocol.md` in the pix3-rooms repo; every byte goes through the codec
  * in `./protocol`, which is pinned by golden vectors and must not be re-implemented here.
@@ -30,6 +31,7 @@ import {
   createSnapshotPacketView,
   createUpdateRecord,
   DeltaMask,
+  dequantizeRotation,
   encodeControlMessage,
   ENTITY_UPDATE_PACKET_HEADER_SIZE,
   framePayload,
@@ -64,8 +66,10 @@ import {
   type RejectCodeValue,
   type RoomRosterEvent,
   type SignalTargetValue,
+  type SpawnEntityResponse,
   type WelcomeEvent,
 } from './protocol';
+import { getNetKindTable, type NetKindTable } from './net-kind-table';
 import {
   WsTransport,
   type WsBackoffOptions,
@@ -169,6 +173,109 @@ export interface NetPublishState {
   teleport?: boolean;
 }
 
+/**
+ * What happens to an entity when its owner leaves — the low two bits of the flags byte.
+ *
+ * - `owned` — despawned with its owner. The right policy for an avatar.
+ * - `shared` — reassigned to the new host (this is what keeps a departing host's props alive).
+ * - `transferable` — reassignable to any client.
+ */
+export type NetOwnershipPolicy = 'owned' | 'shared' | 'transferable';
+
+const OWNERSHIP_BITS: Readonly<Record<NetOwnershipPolicy, number>> = {
+  owned: 0,
+  shared: 1,
+  transferable: 2,
+};
+
+/** Mask of the ownership-policy bits inside the flags byte. */
+export const NET_OWNERSHIP_MASK = 0b11;
+
+/** Bit 2 is fabric-reserved and must be sent as 0; app bits are 3–7. */
+export const NET_APP_FLAGS_SHIFT = 3;
+
+/** Reads the ownership policy out of a flags byte. */
+export function netOwnershipOf(flags: number): NetOwnershipPolicy {
+  switch (flags & NET_OWNERSHIP_MASK) {
+    case OWNERSHIP_BITS.shared:
+      return 'shared';
+    case OWNERSHIP_BITS.transferable:
+      return 'transferable';
+    default:
+      // `3` is reserved by the spec; treating it as `owned` is the conservative reading.
+      return 'owned';
+  }
+}
+
+/** Composes a flags byte: ownership in bits 0–1, bit 2 forced to 0, app bits in 3–7. */
+export function netFlagsByte(ownership: NetOwnershipPolicy, appFlags = 0): number {
+  return (
+    (OWNERSHIP_BITS[ownership] & NET_OWNERSHIP_MASK) | ((appFlags & 0x1f) << NET_APP_FLAGS_SHIFT)
+  );
+}
+
+/** True when an update's mask carried the `Teleport` bit: snap to it, never interpolate. */
+export function isNetTeleport(mask: number): boolean {
+  return (mask & DeltaMask.Teleport) !== 0;
+}
+
+/** Initial state for {@link NetworkService.spawn}. Everything is world-space and optional. */
+export interface NetSpawnOptions {
+  /** Initial world position. Quantized against the room's bounds before it goes out. */
+  position?: { x: number; y: number };
+  /** Initial rotation in radians. */
+  rotation?: number;
+  /** Initial linear velocity in units/second. Off the wire by default; send it only if needed. */
+  velocity?: { x: number; y: number };
+  /** What happens when this client leaves. Default `'owned'`. */
+  ownership?: NetOwnershipPolicy;
+  /** Game-defined flag bits 3–7, replicated verbatim; the fabric never interprets them. */
+  appFlags?: number;
+  /** Optional cold props: bytes verbatim, or any JSON-serializable value. Capped at 512 B server-side. */
+  props?: Uint8Array | object | null;
+}
+
+/** Why a {@link NetworkService.spawn} failed. Each one is a different thing to do about it. */
+export type NetworkSpawnErrorKind =
+  /** No room membership. */
+  | 'offline'
+  /** The prefab has no kind: it is missing from the build's `netKindTable`. */
+  | 'unknown-kind'
+  /** This client's own 240-spawns-per-minute budget, refused before the frame left. */
+  | 'rate-limited'
+  /** `RejectCode.QuotaExceeded` — **this owner's** 64-entity budget. Despawn something. */
+  | 'quota'
+  /** `RejectCode.EntityLimitReached` — the **room's** table is full. Nothing this client can do. */
+  | 'entity-limit'
+  /** `RejectCode.KindNotAllowed` — the kind is not on the room's allowlist (a build mismatch). */
+  | 'kind-not-allowed'
+  /** Any other `RejectCode` the fabric answered with. */
+  | 'rejected'
+  /** The socket dropped, or the session left `online`, while the request was in flight. */
+  | 'transport'
+  /** `disconnect()` or `dispose()` happened while the request was in flight. */
+  | 'cancelled'
+  /** The frame could not be handed to the transport at all. */
+  | 'invalid';
+
+/** The typed failure {@link NetworkService.spawn} rejects with. */
+export class NetworkSpawnError extends Error {
+  /** Which class of failure this is. */
+  readonly kind: NetworkSpawnErrorKind;
+  /** The prefab path the caller asked for. */
+  readonly prefabPath: string;
+  /** The `RejectCode` the server answered with, or `RejectCode.None` for a local refusal. */
+  readonly rejectCode: number;
+
+  constructor(kind: NetworkSpawnErrorKind, prefabPath: string, message: string, rejectCode = 0) {
+    super(message);
+    this.name = 'NetworkSpawnError';
+    this.kind = kind;
+    this.prefabPath = prefabPath;
+    this.rejectCode = rejectCode;
+  }
+}
+
 /** Where an emitted signal goes. A raw `clientId` means "that peer only". */
 export type NetSignalDestination = 'server' | 'peers' | 'aoi' | number;
 
@@ -208,6 +315,14 @@ export interface NetworkStats {
   nonFiniteRejected: number;
   /** Signals dropped because a handler threw. */
   signalHandlerErrors: number;
+  /** `SpawnEntityRequest`s that left this client. */
+  spawnsSent: number;
+  /** Spawns the fabric refused (any `RejectCode`). */
+  spawnsRejected: number;
+  /** Spawns the local 240/min or 64-entity budget refused before they went out. */
+  spawnsThrottled: number;
+  /** `DespawnEntityCommand`s that left this client. */
+  despawnsSent: number;
 }
 
 /** Why a connect attempt failed. */
@@ -270,6 +385,11 @@ export interface NetworkServiceOptions {
    * `null` explicitly to opt out.
    */
   visibility?: NetworkVisibilitySource | null;
+  /**
+   * `kind ↔ prefab path` table. Defaults to the process-wide one, read on every use so a host may
+   * install the build's table after the service exists.
+   */
+  kindTable?: NetKindTable;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -280,6 +400,19 @@ const MAX_RECORDS_PER_ENTITY_UPDATE_PACKET = 8;
 /** Quota: `Resync requests — 2/s per connection`. */
 const MAX_RESYNCS_PER_WINDOW = 2;
 const RESYNC_WINDOW_MS = 1000;
+
+/** Quota: `Spawns — 240/min per connection`. Refused locally so a burst never reaches the fabric. */
+const MAX_SPAWNS_PER_WINDOW = 240;
+const SPAWN_WINDOW_MS = 60_000;
+
+/**
+ * Quota: `Entities per owner — 64`. Counted locally too, so the common case answers immediately with
+ * the same `'quota'` verdict the fabric would have sent a round trip later.
+ */
+const MAX_ENTITIES_PER_OWNER = 64;
+
+/** `RequestId` is a `uint`; the correlation counter wraps with it. */
+const REQUEST_ID_MODULO = 0x1_0000_0000;
 
 /** `u16 Seq` wraps mod 2¹⁶. */
 const SEQ_MODULO = 0x1_0000;
@@ -351,6 +484,13 @@ interface PublishEntry {
   mask: number;
   /** False until one record for this entity has actually gone out. */
   hasSent: boolean;
+}
+
+/** One in-flight `SpawnEntityRequest`, keyed by its `RequestId`. */
+interface PendingSpawn {
+  readonly prefabPath: string;
+  readonly resolve: (netId: number) => void;
+  readonly reject: (error: NetworkSpawnError) => void;
 }
 
 // ── Room vars ────────────────────────────────────────────────────────────────
@@ -474,6 +614,13 @@ export class NetworkService {
   private readonly entityMap = new Map<number, NetEntityRecord>();
   private readonly slotToNetId = new Map<number, number>();
   private readonly publishStates = new Map<number, PublishEntry>();
+  /** Correlated `SpawnEntityRequest`s. Emptied on every path that ends a session — never leaked. */
+  private readonly pendingSpawns = new Map<number, PendingSpawn>();
+  private nextRequestId = 1;
+  private readonly spawnTimestamps: number[] = [];
+  /** Entities this client spawned and has not despawned — the 64-per-owner budget. */
+  private readonly ownedNetIds = new Set<number>();
+  private readonly kindTableOverride: NetKindTable | null;
   private readonly roomVars: NetRoomVars;
   /**
    * False until the first `RoomVarsChangedEvent` of a session. That first event is the **full** set
@@ -508,6 +655,10 @@ export class NetworkService {
     unknownSlotUpdates: 0,
     nonFiniteRejected: 0,
     signalHandlerErrors: 0,
+    spawnsSent: 0,
+    spawnsRejected: 0,
+    spawnsThrottled: 0,
+    despawnsSent: 0,
   };
 
   private readonly signalHandlers = new Map<string, Set<NetSignalHandler>>();
@@ -546,6 +697,7 @@ export class NetworkService {
     this.random = options.random;
     this.visibility =
       options.visibility === undefined ? defaultVisibilitySource() : options.visibility;
+    this.kindTableOverride = options.kindTable ?? null;
     this.roomVars = new NetRoomVars((key, value) => this.sendSetRoomVar(key, value));
   }
 
@@ -775,6 +927,7 @@ export class NetworkService {
     this.rejectPendingConnect(
       new NetworkConnectError('cancelled', 'The session was disconnected locally.')
     );
+    this.rejectPendingSpawns('cancelled', 'The session was disconnected locally.');
     this.stopPump();
     this.detachVisibility();
     this.resetSessionState();
@@ -999,6 +1152,187 @@ export class NetworkService {
     this.publishStates.delete(netId);
   }
 
+  // ── Spawn / despawn ────────────────────────────────────────────────────────
+
+  /** The `kind ↔ prefab path` table this session resolves spawns against. */
+  get kinds(): NetKindTable {
+    return this.kindTableOverride ?? getNetKindTable();
+  }
+
+  /** Net ids this client spawned and has not despawned. Bounded by the 64-per-owner quota. */
+  get ownedEntityCount(): number {
+    return this.ownedNetIds.size;
+  }
+
+  /** True when this client spawned `netId` and still owns it. */
+  ownsEntity(netId: number): boolean {
+    return this.ownedNetIds.has(netId);
+  }
+
+  /**
+   * Asks the room to create an entity of the prefab's kind, owned by this client. Resolves with the
+   * **server-minted** `netId` (plan decision D6: nothing is networked until the fabric mints its id).
+   *
+   * Every field goes out **quantized**, so a spawn cannot introduce a position the delta plane could
+   * not have expressed — the quantized integers are the replicated values on both sides.
+   *
+   * Rejects with a {@link NetworkSpawnError} whose `kind` separates the cases that need different
+   * handling: `'quota'` (this owner's 64-entity budget — despawn something), `'entity-limit'` (the
+   * room's table is full — nothing this client can do), `'kind-not-allowed'` (build/allowlist
+   * mismatch), plus the local `'offline'` / `'unknown-kind'` / `'rate-limited'` refusals. A request
+   * still in flight when the socket drops rejects with `'transport'` rather than hanging forever.
+   */
+  spawn(prefabPath: string, options: NetSpawnOptions = {}): Promise<number> {
+    const kind = this.kinds.kindOf(prefabPath);
+    if (kind === null) {
+      return Promise.reject(
+        new NetworkSpawnError(
+          'unknown-kind',
+          prefabPath,
+          `"${prefabPath}" is not in this build's netKindTable, so it has no wire kind. Export the ` +
+            'project (the exporter emits the table) or call registerNetworkPrefab() on every client.'
+        )
+      );
+    }
+
+    const quantizer = this.worldQuantizer;
+    if (!this.isOnline || !quantizer) {
+      return Promise.reject(
+        new NetworkSpawnError('offline', prefabPath, 'Cannot spawn: this session is not in a room.')
+      );
+    }
+
+    if (this.ownedNetIds.size >= MAX_ENTITIES_PER_OWNER) {
+      this.counters.spawnsThrottled += 1;
+      return Promise.reject(
+        new NetworkSpawnError(
+          'quota',
+          prefabPath,
+          `This client already owns ${MAX_ENTITIES_PER_OWNER} entities — despawn one first.`,
+          RejectCode.QuotaExceeded
+        )
+      );
+    }
+
+    const now = this.now();
+    while (this.spawnTimestamps.length > 0 && now - this.spawnTimestamps[0] >= SPAWN_WINDOW_MS) {
+      this.spawnTimestamps.shift();
+    }
+    if (this.spawnTimestamps.length >= MAX_SPAWNS_PER_WINDOW) {
+      this.counters.spawnsThrottled += 1;
+      return Promise.reject(
+        new NetworkSpawnError(
+          'rate-limited',
+          prefabPath,
+          `Spawn rate limit: ${MAX_SPAWNS_PER_WINDOW} spawns per minute per connection.`,
+          RejectCode.RateLimited
+        )
+      );
+    }
+
+    const position = options.position;
+    if (
+      !quantizer.tryQuantizePosition(position?.x ?? 0, position?.y ?? 0, this.quantizedPosition)
+    ) {
+      this.counters.nonFiniteRejected += 1;
+      return Promise.reject(
+        new NetworkSpawnError('invalid', prefabPath, 'Spawn position must be finite.')
+      );
+    }
+    const qrot = tryQuantizeRotation(options.rotation ?? 0);
+    const qvx = tryQuantizeVelocity(options.velocity?.x ?? 0);
+    const qvy = tryQuantizeVelocity(options.velocity?.y ?? 0);
+    if (qrot === null || qvx === null || qvy === null) {
+      this.counters.nonFiniteRejected += 1;
+      return Promise.reject(
+        new NetworkSpawnError('invalid', prefabPath, 'Spawn rotation and velocity must be finite.')
+      );
+    }
+
+    const requestId = this.nextRequestId;
+    this.nextRequestId = (this.nextRequestId + 1) % REQUEST_ID_MODULO || 1;
+
+    const sent = this.sendControl({
+      typeId: MessageTypeIds.SpawnEntityRequest,
+      body: {
+        requestId,
+        kind,
+        qx: this.quantizedPosition.qx,
+        qy: this.quantizedPosition.qy,
+        qrot,
+        qvx,
+        qvy,
+        flags: netFlagsByte(options.ownership ?? 'owned', options.appFlags ?? 0),
+        props: encodeSpawnProps(options.props),
+      },
+    });
+    if (!sent) {
+      return Promise.reject(
+        new NetworkSpawnError('invalid', prefabPath, 'The spawn request could not be sent.')
+      );
+    }
+
+    this.spawnTimestamps.push(now);
+    this.counters.spawnsSent += 1;
+
+    return new Promise<number>((resolve, reject) => {
+      this.pendingSpawns.set(requestId, { prefabPath, resolve, reject });
+    });
+  }
+
+  /**
+   * Asks the room to remove an entity this client owns. Returns whether the command left this
+   * client; the authoritative removal arrives as a `DeltaPacket` removal record.
+   */
+  despawn(netId: number): boolean {
+    if (!this.isOnline) {
+      return false;
+    }
+    const sent = this.sendControl({
+      typeId: MessageTypeIds.DespawnEntityCommand,
+      body: { netId },
+    });
+    if (!sent) {
+      return false;
+    }
+    this.counters.despawnsSent += 1;
+    // Free the local budget immediately: the entity is gone as far as this client is concerned, and
+    // waiting for the removal record would make a despawn-then-respawn burst hit its own quota.
+    this.ownedNetIds.delete(netId);
+    this.publishStates.delete(netId);
+    return true;
+  }
+
+  // ── Quantization facade ────────────────────────────────────────────────────
+  //
+  // The codec under `net/protocol` is internal to `net/`, but a replication component genuinely
+  // needs the round trip: an owner must *render* the values its peers will see, or it spends the
+  // session chasing a divergence pop. These two hand it exactly that, and nothing else.
+
+  /**
+   * Snaps a world position onto the room's quantization grid — the position peers will actually
+   * receive. Writes into `out` and returns `false` (writing nothing) while offline or on a
+   * non-finite input.
+   */
+  snapPosition(x: number, y: number, out: { x: number; y: number }): boolean {
+    const quantizer = this.worldQuantizer;
+    if (!quantizer || !quantizer.tryQuantizePosition(x, y, this.quantizedPosition)) {
+      return false;
+    }
+    out.x = quantizer.dequantizeX(this.quantizedPosition.qx);
+    out.y = quantizer.dequantizeY(this.quantizedPosition.qy);
+    return true;
+  }
+
+  /**
+   * Snaps a rotation onto the wire's 256 steps per turn, returning it wrapped into `[0, 2π)`, or
+   * `null` when `rotation` is not finite.
+   */
+  snapRotation(rotation: number): number | null {
+    const q = tryQuantizeRotation(rotation);
+    return q === null ? null : dequantizeRotation(q);
+  }
+
   /**
    * Runs the send pump immediately instead of waiting for the interval. Exposed for hosts that want a
    * flush at a deterministic moment (an editor stepping frames, a test); the interval is the norm.
@@ -1063,11 +1397,16 @@ export class NetworkService {
         break;
       case 'reconnecting':
         this.session = null;
+        this.rejectPendingSpawns(
+          'transport',
+          'The room connection dropped before the spawn was answered.'
+        );
         this.setStatus('reconnecting');
         break;
       case 'closed': {
         const error = this.describeClose(info);
         this.session = null;
+        this.rejectPendingSpawns('transport', `The room connection closed: ${error.message}`);
         this.setStatus('offline');
         this.rejectPendingConnect(error);
         this.notifyError(error);
@@ -1214,6 +1553,9 @@ export class NetworkService {
       case MessageTypeIds.SignalEvent:
         this.dispatchSignal(message.body.name, message.body.payload, message.body.senderClientId);
         break;
+      case MessageTypeIds.SpawnEntityResponse:
+        this.handleSpawnResponse(message.body);
+        break;
       default:
         // Every other control message (chat, room info, spawn responses, cold props) belongs to a
         // later phase. Decoded, ignored, and deliberately not counted as unknown.
@@ -1296,6 +1638,51 @@ export class NetworkService {
     this.pendingConnect = null;
     this.connectPromise = null;
     resolve?.(this.session);
+  }
+
+  /**
+   * Correlates one `SpawnEntityResponse` back to its request. An unknown `RequestId` is a response
+   * to a request this session already gave up on (a resume, a race with `disconnect()`); it is
+   * ignored rather than counted, because the fabric did nothing wrong.
+   */
+  private handleSpawnResponse(response: SpawnEntityResponse): void {
+    const pending = this.pendingSpawns.get(response.requestId);
+    if (!pending) {
+      return;
+    }
+    this.pendingSpawns.delete(response.requestId);
+
+    if (response.rejectCode !== RejectCode.None || response.netId === 0) {
+      this.counters.spawnsRejected += 1;
+      pending.reject(
+        new NetworkSpawnError(
+          spawnErrorKindFor(response.rejectCode),
+          pending.prefabPath,
+          describeRejectCode(response.rejectCode),
+          response.rejectCode
+        )
+      );
+      return;
+    }
+
+    this.ownedNetIds.add(response.netId);
+    pending.resolve(response.netId);
+  }
+
+  /**
+   * Settles every in-flight spawn. Called from every path that ends a session — a socket drop, a
+   * reconnect, `disconnect()`, `dispose()` — because the fabric will never answer a request whose
+   * connection is gone, and an unsettled promise is a leak a game script cannot see or recover from.
+   */
+  private rejectPendingSpawns(kind: NetworkSpawnErrorKind, message: string): void {
+    if (this.pendingSpawns.size === 0) {
+      return;
+    }
+    const pending = [...this.pendingSpawns.values()];
+    this.pendingSpawns.clear();
+    for (const request of pending) {
+      request.reject(new NetworkSpawnError(kind, request.prefabPath, message));
+    }
   }
 
   private handleRejected(code: number, message: string): void {
@@ -1762,6 +2149,9 @@ export class NetworkService {
     this.lastPingSentAtMs = 0;
     this.lastPingClientTimeMs = 0;
     this.rttMs = 0;
+    this.ownedNetIds.clear();
+    this.spawnTimestamps.length = 0;
+    this.rejectPendingSpawns('transport', 'The session was reset before the spawn was answered.');
   }
 
   private setStatus(status: NetworkStatus): void {
@@ -1801,6 +2191,15 @@ export class NetworkService {
   }
 
   private flushChanges(changes: NetEntityChange[]): void {
+    // An entity that left is no longer on this owner's 64-entity budget, and its publish
+    // bookkeeping would otherwise keep re-sending a record for a slot that has been reused.
+    for (const change of changes) {
+      if (change.kind === 'leave') {
+        this.ownedNetIds.delete(change.netId);
+        this.publishStates.delete(change.netId);
+      }
+    }
+
     if (changes.length === 0 || this.entityListeners.size === 0) {
       changes.length = 0;
       return;
@@ -1831,6 +2230,35 @@ function toRecord(netId: number, state: EntityWireState): NetEntityRecord {
     ownerId: state.ownerId,
     flags: state.flags,
   };
+}
+
+/**
+ * Maps a spawn `RejectCode` onto its {@link NetworkSpawnErrorKind}. The spec is explicit that
+ * `QuotaExceeded` and `EntityLimitReached` must stay distinguishable — one is this owner's budget
+ * and clears when it despawns something, the other is the room's table and does not.
+ */
+function spawnErrorKindFor(rejectCode: number): NetworkSpawnErrorKind {
+  switch (rejectCode) {
+    case RejectCode.QuotaExceeded:
+      return 'quota';
+    case RejectCode.EntityLimitReached:
+      return 'entity-limit';
+    case RejectCode.KindNotAllowed:
+      return 'kind-not-allowed';
+    default:
+      return 'rejected';
+  }
+}
+
+/** Cold props for a spawn: bytes verbatim, any other value as UTF-8 JSON, `null` for nothing. */
+function encodeSpawnProps(props: Uint8Array | object | null | undefined): Uint8Array | null {
+  if (props === null || props === undefined) {
+    return null;
+  }
+  if (props instanceof Uint8Array) {
+    return props;
+  }
+  return textEncoder.encode(JSON.stringify(props));
 }
 
 /** Decoded byte arrays are views over the receive buffer; anything we retain has to be copied. */

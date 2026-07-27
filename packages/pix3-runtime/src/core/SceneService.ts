@@ -5,6 +5,7 @@ import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { Collision2DService } from './Collision2DService';
 import { NetworkService } from '../net/NetworkService';
+import { NetworkNodeBinder } from './NetworkNodeBinder';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
@@ -72,8 +73,18 @@ export interface SceneServiceDelegate {
    * graph in the shared SceneManager — the runner owns it exclusively.
    */
   loadAndStartScene(path: string): Promise<void>;
-  /** Spawn a prefab scene into the running graph (see SceneService.instantiate). */
-  instantiatePrefab?(path: string, parent?: NodeBase | null): Promise<NodeBase>;
+  /**
+   * Spawn a prefab scene into the running graph (see SceneService.instantiate).
+   *
+   * `instanceId` overrides the runner's own `spawn-<n>` counter. Replication needs it: passing
+   * `net:<netId>` makes every client derive identical child ids for the same entity, which is what
+   * lets a spawned child be addressed as `(rootNetId, childPath)` (plan decision D6).
+   */
+  instantiatePrefab?(
+    path: string,
+    parent?: NodeBase | null,
+    instanceId?: string
+  ): Promise<NodeBase>;
 }
 
 /** Options for {@link SceneService.changeScene}. */
@@ -133,6 +144,8 @@ export class SceneService {
    * Lazily replaced by an offline no-op instance when no host installed one.
    */
   private networkService: NetworkService | null = null;
+  /** Scene-scoped entity↔node bindings; see {@link netNodes}. Recreated per scene, unlike the session. */
+  private networkNodeBinder: NetworkNodeBinder | null = null;
   private readonly scratchPointerUnproject = new Vector3();
   /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
   private changeScenePromise: Promise<void> | null = null;
@@ -148,6 +161,12 @@ export class SceneService {
    */
   setDelegate(delegate: SceneServiceDelegate | null): void {
     this.delegate = delegate;
+    if (!delegate) {
+      // The graph this binder's nodes live in is being torn down. The *entities* survive (the
+      // session outlives the scene), so remote ones go back on its pending list and are
+      // re-instantiated into whatever scene runs next.
+      this.networkNodeBinder?.handleSceneStopped();
+    }
   }
 
   /**
@@ -167,6 +186,9 @@ export class SceneService {
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
     this.collision2dService = null;
+    // Scene state, unlike the session below: its bindings point at nodes that are going away.
+    this.networkNodeBinder?.dispose();
+    this.networkNodeBinder = null;
     // `networkService` is deliberately left alone: the host owns its lifetime (D5) and the session
     // must outlive scene teardown. Dropping the reference here would silently hand scripts an
     // offline stub while a real room membership is still live.
@@ -295,6 +317,30 @@ export class SceneService {
    */
   setNetworkService(service: NetworkService | null): void {
     this.networkService = service;
+    // The binder holds a subscription to the *old* session; a new one needs a new binder.
+    this.networkNodeBinder?.dispose();
+    this.networkNodeBinder = null;
+    if (service) {
+      // Created eagerly, not on first use: a peer's avatar must appear even in a scene that has no
+      // networked node of its own, and the binder is what listens for the entity that carries it.
+      void this.netNodes;
+    }
+  }
+
+  /**
+   * Binds replicated entities to scene nodes — `this.scene.netNodes.getNode(netId)`,
+   * `getNetId(node)`, `bind(...)`. Unlike {@link network}, this **is** scene state: it instantiates a
+   * peer's prefab when its entity enters and frees it when it leaves, so it is recreated per scene.
+   * `core:NetworkedNode` and `core:ReplicatedTransform` are the components that drive it.
+   */
+  get netNodes(): NetworkNodeBinder {
+    if (!this.networkNodeBinder) {
+      this.networkNodeBinder = new NetworkNodeBinder({
+        network: this.network,
+        instantiate: (path, options) => this.instantiate(path, options),
+      });
+    }
+    return this.networkNodeBinder;
   }
 
   /**
@@ -354,7 +400,7 @@ export class SceneService {
    */
   async instantiate(
     path: string,
-    options: { parent?: NodeBase | string | null } = {}
+    options: { parent?: NodeBase | string | null; instanceId?: string } = {}
   ): Promise<NodeBase> {
     if (!this.delegate?.instantiatePrefab) {
       throw new Error('[SceneService] instantiate requires a running scene.');
@@ -368,7 +414,7 @@ export class SceneService {
     } else {
       parent = options.parent ?? null;
     }
-    return this.delegate.instantiatePrefab(path, parent);
+    return this.delegate.instantiatePrefab(path, parent, options.instanceId);
   }
 
   /** The live InputService for the running scene, or null (editor previews). */

@@ -304,12 +304,18 @@ export class SceneRunner {
    * tick), and honors `initiallyVisible`. Default parent is the first scene
    * root node; despawn with `node.dispose()`.
    */
-  async instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
+  async instantiatePrefab(
+    path: string,
+    parent?: NodeBase | null,
+    instanceIdOverride?: string
+  ): Promise<NodeBase> {
     if (!this.isRunning || !this.runtimeGraph) {
       throw new Error('[SceneRunner] instantiatePrefab requires a running scene.');
     }
     this.spawnCounter += 1;
-    const instanceId = `spawn-${this.spawnCounter}`;
+    // A caller-supplied id is how replication makes the same entity derive the same child ids on
+    // every client (`net:<netId>`); everything else gets the local counter.
+    const instanceId = instanceIdOverride?.trim() || `spawn-${this.spawnCounter}`;
     const node = await this.sceneManager.instantiatePrefab(path, instanceId);
 
     const target = parent ?? this.runtimeGraph.rootNodes[0] ?? null;
@@ -1362,8 +1368,12 @@ export class SceneRunner {
       loadAndStartScene(path: string): Promise<void> {
         return runner.loadAndStartScene(path);
       },
-      instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
-        return runner.instantiatePrefab(path, parent);
+      instantiatePrefab(
+        path: string,
+        parent?: NodeBase | null,
+        instanceId?: string
+      ): Promise<NodeBase> {
+        return runner.instantiatePrefab(path, parent, instanceId);
       },
     });
   }
