@@ -4,6 +4,7 @@ import type { Camera2D } from '../nodes/2D/Camera2D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { Collision2DService } from './Collision2DService';
+import { NetworkService } from '../net/NetworkService';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
@@ -126,6 +127,12 @@ export class SceneService {
   private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
   private collision2dService: Collision2DService | null = null;
+  /**
+   * The multiplayer session. Owned by the SceneRunner **host** (see plan decision D5), installed via
+   * {@link setNetworkService}, and deliberately not tied to the scene: it must survive `changeScene`.
+   * Lazily replaced by an offline no-op instance when no host installed one.
+   */
+  private networkService: NetworkService | null = null;
   private readonly scratchPointerUnproject = new Vector3();
   /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
   private changeScenePromise: Promise<void> | null = null;
@@ -160,6 +167,9 @@ export class SceneService {
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
     this.collision2dService = null;
+    // `networkService` is deliberately left alone: the host owns its lifetime (D5) and the session
+    // must outlive scene teardown. Dropping the reference here would silently hand scripts an
+    // offline stub while a real room membership is still live.
     this.fadeOverlay?.remove();
     this.fadeOverlay = null;
     this.flashOverlay?.remove();
@@ -258,6 +268,33 @@ export class SceneService {
       this.collision2dService = new Collision2DService();
     }
     return this.collision2dService;
+  }
+
+  /**
+   * The multiplayer session — `this.scene.network.connect(...)`, `net.isOnline`, `net.on/emit`,
+   * `net.vars`. Every member is offline-safe, so a single-player game may touch it freely: reads
+   * return sane defaults and writes are no-ops until something calls `connect()`.
+   *
+   * Unlike {@link collision2d}, the session is **not** scene state. A host (the runtime bootstrap,
+   * the editor's play session, the preview player) constructs one and installs it with
+   * {@link setNetworkService}; it then outlives every `changeScene`, because leaving a room just
+   * because the game switched levels is exactly the bug D5 exists to prevent. When no host installed
+   * one, this getter lazily creates a private, permanently-offline instance so scripts still work.
+   */
+  get network(): NetworkService {
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    return this.networkService;
+  }
+
+  /**
+   * Installs the host-owned network session. Call once, before the first scene starts; the host keeps
+   * ownership and is responsible for `dispose()`. Passing `null` detaches, after which the getter
+   * falls back to a fresh offline instance.
+   */
+  setNetworkService(service: NetworkService | null): void {
+    this.networkService = service;
   }
 
   /**

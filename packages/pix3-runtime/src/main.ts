@@ -4,6 +4,7 @@ import {
   AssetLoader,
   AudioService,
   installAtlasFromManifest,
+  NetworkService,
   registerBuiltInScripts,
   ResourceManager,
   RuntimeRenderer,
@@ -61,6 +62,9 @@ async function bootstrap(): Promise<void> {
   renderer.attach(app);
 
   const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);
+  // Multiplayer session (D5): owned here, not by the scene, so it survives `changeScene`. Offline
+  // and inert until a game script calls `this.scene.network.connect(...)`.
+  runner.setNetworkService(new NetworkService());
   runner.setBatching2DEnabled(true);
   if (runtimeLocalization) {
     // Baked from pix3project.yaml (or auto-discovered locales/) at export time;

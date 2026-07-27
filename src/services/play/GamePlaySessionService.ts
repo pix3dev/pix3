@@ -3,6 +3,7 @@ import { subscribe } from 'valtio/vanilla';
 import {
   AssetLoader,
   AudioService,
+  NetworkService,
   RuntimeRenderer,
   SceneManager,
   SceneRunner,
@@ -83,6 +84,13 @@ export class GamePlaySessionService {
   private popoutWindowResizeHandler?: () => void;
   private runner?: SceneRunner;
   private renderer?: RuntimeRenderer;
+  /**
+   * The multiplayer session (plan decision D5). Owned by this service rather than by a runner, so it
+   * outlives `changeScene` and every play/restart cycle; a stopped play session leaves the room but
+   * keeps the object, and "Play Online" (Phase 1.5) drives it from the Game tab. Nothing connects on
+   * its own.
+   */
+  private networkService?: NetworkService;
   private focusCleanup?: () => void;
   private focusPauseSuppressed = false;
   private syncPromise: Promise<void> = Promise.resolve();
@@ -126,6 +134,8 @@ export class GamePlaySessionService {
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
     this.detachRuntime();
+    this.networkService?.dispose();
+    this.networkService = undefined;
     this.closePopoutWindow();
   }
 
@@ -332,6 +342,10 @@ export class GamePlaySessionService {
 
     this.renderer = renderer;
     this.runner = runner;
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    runner.setNetworkService(this.networkService);
     // Phase 3: enable the 2D quad batcher for this run (flag-gated; off is
     // byte-identical to individual-mesh rendering).
     runner.setBatching2DEnabled(isBatch2DEnabled());
@@ -390,6 +404,10 @@ export class GamePlaySessionService {
     // Keep atlasing strictly play-mode-scoped: edit-mode texture loads on the
     // shared AssetLoader must always get raw standalone textures.
     this.assetLoader.setAtlasResolver(null);
+
+    // Stopping the game leaves the room; the session object itself is kept so the Game tab can
+    // start a new one without re-wiring.
+    this.networkService?.disconnect();
 
     if (this.runner) {
       this.runner.stop();

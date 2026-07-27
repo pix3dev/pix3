@@ -8,6 +8,7 @@ import {
   AudioService,
   getGameDebug,
   installAtlasFromManifest,
+  NetworkService,
   registerBuiltInScripts,
   RuntimeRenderer,
   SceneLoader,
@@ -109,6 +110,11 @@ class PreviewPlayerApp {
   private scriptBundle: { code: string; hash: string } | null = null;
   private scriptModule: { exports: Record<string, unknown>; hash: string } | null = null;
   private stack: RuntimeStack | null = null;
+  /**
+   * The multiplayer session (plan decision D5). Owned by the player, not by a runner, so it survives
+   * `changeScene` and a hot restart of the preview stack. Nothing connects on its own.
+   */
+  private networkService: NetworkService | null = null;
   private startTimer: number | null = null;
   private startGeneration = 0;
   private starting = false;
@@ -302,6 +308,11 @@ class PreviewPlayerApp {
       height: config.viewportBaseSize.height,
     });
 
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    runner.setNetworkService(this.networkService);
+
     const disposeFrameSubscription = runner.subscribeFrameStats(sample => {
       this.onFrameSample(sample, renderer);
     });
@@ -489,6 +500,9 @@ class PreviewPlayerApp {
       return;
     }
 
+    // Tearing the stack down ends the game, so it also leaves the room; the session object is kept
+    // for the next start.
+    this.networkService?.disconnect();
     this.stack.disposeFrameSubscription();
     this.stack.runner.stop();
     this.stack.renderer.dispose();

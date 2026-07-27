@@ -14,6 +14,7 @@ import { SceneManager } from './SceneManager';
 import { RuntimeRenderer } from './RuntimeRenderer';
 import { InputService } from './InputService';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
+import type { NetworkService } from '../net/NetworkService';
 import { AudioService, type ActiveAudioPlaybackSnapshot } from './AudioService';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
@@ -203,6 +204,18 @@ export class SceneRunner {
     this.overlayCamera.layers.enable(LAYER_2D_OVERLAY);
 
     this.bindSceneServiceDelegate();
+  }
+
+  /**
+   * Install the host-owned multiplayer session, reachable from scripts as
+   * `this.scene.network`. The host constructs it (plan decision D5: the three
+   * SceneRunner bootstraps), keeps ownership, and disposes it — the runner only
+   * hands it to the SceneService, where it survives every `changeScene`.
+   * Nothing auto-connects; a session starts only when something calls
+   * `network.connect(...)`.
+   */
+  setNetworkService(service: NetworkService | null): void {
+    this.sceneService.setNetworkService(service);
   }
 
   /**
