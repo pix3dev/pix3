@@ -1,0 +1,412 @@
+{
+  "$schema": "./protocol-vectors.schema.md",
+  "protocolVersion": 2,
+  "about": [
+    "Golden vectors for the pix3-rooms wire protocol, shared by every implementation.",
+    "Every expected value here was derived BY HAND from the offset, encoding and rounding tables in",
+    "docs/protocol.md — never captured from a run of a codec. A vector produced by the code under test",
+    "would only prove that the code agrees with itself; these fail the moment an offset, a width, an",
+    "endianness or a rounding mode drifts away from the published contract.",
+    "Verified from two sides: tests/Pix3.Rooms.Tests/Protocol/GoldenVectorFileTests.cs checks the C#",
+    "codec against this file, and packages/pix3-runtime/src/net/protocol/protocol.spec.ts (in the pix3",
+    "repo, which holds a stamped copy) checks the hand-written TypeScript codec against the same bytes.",
+    "Hex strings ignore whitespace. Float inputs are written as decimals that are exactly representable",
+    "in float32, so widening them to double is lossless and both languages read the same number; the",
+    "three rotation cases that are not exactly representable carry an explicit float32 bit pattern",
+    "instead, because a decimal literal there would round differently in the two languages."
+  ],
+  "quantization": {
+    "world": { "originX": -2048, "originY": -2048, "size": 4096 },
+    "position": [
+      { "name": "origin", "input": -2048, "q": 0, "why": "(v - origin) = 0" },
+      { "name": "far corner", "input": 2048, "q": 65535, "why": "4096 x 65535 / 4096 = 65535 exactly, the top of the range" },
+      { "name": "centre, positive half", "input": 0, "q": 32768, "why": "2048 x 65535 / 4096 = 32767.5 -> floor(32768.0) = 32768" },
+      { "name": "quarter", "input": -1024, "q": 16384, "why": "1024 x 65535 / 4096 = 16383.75 -> floor(16384.25) = 16384" },
+      { "name": "three quarters", "input": 1024, "q": 49151, "why": "3072 x 65535 / 4096 = 49151.25 -> floor(49151.75) = 49151" },
+      { "name": "one unit", "input": -2047, "q": 16, "why": "65535 / 4096 = 15.99975... -> floor(16.49975...) = 16, i.e. ~1/16 unit per step" },
+      { "name": "below the world", "input": -10000, "q": 0, "why": "clamped silently" },
+      { "name": "above the world", "input": 10000, "q": 65535, "why": "clamped silently" }
+    ],
+    "positionDequantize": [
+      { "q": 0, "expect": -2048 },
+      { "q": 65535, "expect": 2048 }
+    ],
+    "rotation": [
+      { "name": "zero", "input": 0, "q": 0 },
+      { "name": "quarter turn", "bits": "3FC90FDB", "approx": 1.5707964, "q": 64, "why": "0.25 x 256" },
+      { "name": "half turn", "bits": "40490FDB", "approx": 3.1415927, "q": 128, "why": "0.5 x 256" },
+      { "name": "negative quarter turn wraps first", "bits": "BFC90FDB", "approx": -1.5707964, "q": 192, "why": "wraps to 3pi/2 -> 0.75 x 256; the wrap happens before the scale" },
+      { "name": "just under a full turn folds to zero", "bits": "40C8F5C3", "approx": 6.28, "q": 0, "why": "255.870... + 0.5 -> floor 256, and & 0xFF folds it onto 0" },
+      { "name": "a hair below zero folds to zero", "bits": "BA83126F", "approx": -0.001, "q": 0, "why": "wraps to just under 2pi and folds the same way" }
+    ],
+    "velocity": [
+      { "name": "zero", "input": 0, "q": 0 },
+      { "name": "positive", "input": 100, "q": 800 },
+      { "name": "negative", "input": -100, "q": -800 },
+      { "name": "positive half", "input": 0.0625, "q": 1, "why": "0.5 -> floor(1.0) = 1; banker's rounding would give 0" },
+      { "name": "negative half", "input": -0.0625, "q": 0, "why": "-0.5 -> floor(0.0) = 0; AwayFromZero would give -1" },
+      { "name": "positive two-and-a-half", "input": 0.3125, "q": 3, "why": "2.5 -> floor(3.0) = 3; banker's rounding would give 2" },
+      { "name": "negative two-and-a-half", "input": -0.3125, "q": -2, "why": "-2.5 -> floor(-2.0) = -2; AwayFromZero would give -3" },
+      { "name": "top of range", "input": 4095.875, "q": 32767 },
+      { "name": "bottom of range", "input": -4096, "q": -32768 },
+      { "name": "above range", "input": 5000, "q": 32767 },
+      { "name": "below range", "input": -5000, "q": -32768 }
+    ],
+    "nonFinite": {
+      "why": "Non-finite input is refused and counted, never quantized: one NaN poisons the spatial hash.",
+      "inputs": ["NaN", "Infinity", "-Infinity"]
+    }
+  },
+  "hot": {
+    "sample": {
+      "why": "One entity reused throughout, chosen so no two fields share a value and every multi-byte field has distinguishable high and low bytes, so a swapped endianness cannot pass.",
+      "netId": 131079,
+      "netIdNote": "slot 7, generation 2 -> slot | (generation << 16) = 0x00020007",
+      "kind": 4660,
+      "ownerId": 42,
+      "qx": 35243,
+      "qy": 256,
+      "qrot": 64,
+      "qvx": -1000,
+      "qvy": 32767,
+      "flags": 169,
+      "flagsNote": "0xA9 = 1010_1001: policy bits 0-1 = 01 (Shared), fabric reserved bit 2 clear, app bits 3-7 = 10101"
+    },
+    "vectors": [
+      {
+        "name": "FullRecord",
+        "hex": "07000200 3412 2A000000 AB89 0001 40 18FC FF7F A9",
+        "why": "0 u32 NetId, 4 u16 Kind, 6 u32 OwnerId, 10 u16 QX, 12 u16 QY, 14 u8 QRot, 15 i16 QVx, 17 i16 QVy, 19 u8 Flags"
+      },
+      {
+        "name": "UpdateRecord/typical moving entity",
+        "slot": 258,
+        "mask": 7,
+        "hex": "0201 07 AB89 0001 40",
+        "why": "u16 Slot + mask + QX + QY + QRot = the 8 bytes the bandwidth budget is built on"
+      },
+      {
+        "name": "UpdateRecord/every field",
+        "slot": 65535,
+        "mask": 191,
+        "hex": "FFFF BF AB89 0001 40 18FC FF7F A9",
+        "why": "0x3F | 0x80: every payload bit plus Teleport, which contributes no bytes. The 13-byte maximum."
+      },
+      {
+        "name": "UpdateRecord/signal bits only",
+        "slot": 3,
+        "mask": 192,
+        "hex": "0300 C0",
+        "why": "ColdDirty | Teleport carry no payload: a bare 3-byte header"
+      },
+      {
+        "name": "UpdateRecord/rot and flags only",
+        "slot": 258,
+        "mask": 36,
+        "hex": "0201 24 40 A9",
+        "why": "Fields appear in bit order; a decoder that mis-ordered them would land QRot on Flags"
+      },
+      {
+        "name": "OwnerUpdateRecord/x and y",
+        "mask": 3,
+        "hex": "07000200 03 AB89 0001",
+        "why": "Keyed by u32 NetId rather than slot, so the server can reject a mutation aimed at a reused slot"
+      },
+      {
+        "name": "OwnerUpdateRecord/every payload field",
+        "mask": 63,
+        "hex": "07000200 3F AB89 0001 40 18FC FF7F A9",
+        "why": "The 15-byte maximum"
+      },
+      {
+        "name": "RemovedSlot",
+        "slot": 258,
+        "hex": "0201",
+        "why": "A removal record is a bare little-endian slot"
+      },
+      {
+        "name": "SnapshotPacket/one record, final",
+        "seq": 258,
+        "serverTick": 1234,
+        "frameFlags": 1,
+        "count": 1,
+        "hex": "44 0201 D2040000 01 0100 07000200 3412 2A000000 AB89 0001 40 18FC FF7F A9",
+        "why": "0 u8 TypeId 68, 1 u16 Seq, 3 u32 ServerTick, 7 u8 FrameFlags, 8 u16 Count, then FullRecord x Count"
+      },
+      {
+        "name": "SnapshotPacket/empty but final",
+        "seq": 0,
+        "serverTick": 0,
+        "frameFlags": 1,
+        "count": 0,
+        "hex": "44 0000 00000000 01 0000",
+        "why": "A snapshot is always sent, even when empty: a joiner who can see nothing must still be told the snapshot is complete"
+      },
+      {
+        "name": "DeltaPacket/empty",
+        "seq": 258,
+        "serverTick": 1234,
+        "hex": "45 0201 D2040000 0000 0000 0000",
+        "why": "All three counts are always present, even when zero: 7 + 3 x 2 = 13 bytes of fixed overhead"
+      },
+      {
+        "name": "DeltaPacket/one of each section",
+        "seq": 258,
+        "serverTick": 1234,
+        "removedSlots": [3],
+        "enterCount": 1,
+        "updateCount": 1,
+        "embedsUpdateRecord": "UpdateRecord/typical moving entity",
+        "hex": "45 0201 D2040000 0100 0300 0100 07000200 3412 2A000000 AB89 0001 40 18FC FF7F A9 0100 0201 07 AB89 0001 40",
+        "why": "Sections are interleaved (count, then its records, then the next count), removals first so a slot's removal always precedes any reuse of it"
+      },
+      {
+        "name": "EntityUpdatePacket",
+        "clientTick": 1234,
+        "count": 1,
+        "embedsOwnerUpdateRecord": "OwnerUpdateRecord/x and y",
+        "hex": "43 D2040000 01 07000200 03 AB89 0001",
+        "why": "0 u8 TypeId 67, 1 u32 ClientTick, 5 u8 Count, 6 OwnerUpdateRecord x Count"
+      },
+      {
+        "name": "SignalBatchPacket/two entries",
+        "seq": 258,
+        "serverTick": 1234,
+        "entries": [
+          { "sender": 42, "name": "fire", "payloadHex": "AABB" },
+          { "sender": 7, "name": "hit", "payloadHex": "" }
+        ],
+        "hex": "82 0201 D2040000 02 2A000000 04 66697265 02 AABB 07000000 03 686974 00",
+        "why": "8-byte header then (u32 Sender, u8 NameLength, name, u8 PayloadLength, payload) per entry; one entry is 6 + NameLength + PayloadLength bytes"
+      }
+    ]
+  },
+  "control": {
+    "why": [
+      "MemoryPack version-tolerant objects: [u8 memberCount][varint ByteLength x memberCount][values].",
+      "See docs/protocol.md -> Control-plane encoding. These vectors exercise every encoding rule the",
+      "format has: the empty object, each primitive width, ASCII and non-ASCII strings, the empty and",
+      "null string, empty and null arrays, nested string[]/byte[][], and a member length that crosses",
+      "the single-byte varint boundary."
+    ],
+    "vectors": [
+      {
+        "message": "LeaveCommand",
+        "fields": {},
+        "hex": "00",
+        "note": "An empty message is a lone memberCount of zero"
+      },
+      {
+        "message": "ResyncCommand",
+        "fields": {},
+        "hex": "00"
+      },
+      {
+        "message": "PingCommand",
+        "fields": { "ClientTimeMs": 1234 },
+        "hex": "01 08 D204000000000000",
+        "note": "One member, i64"
+      },
+      {
+        "message": "PongEvent",
+        "fields": { "ClientTimeMs": 1234, "ServerTimeMs": 1700000000000, "ServerTick": 99 },
+        "hex": "03 08 08 04 D204000000000000 0068E5CF8B010000 63000000"
+      },
+      {
+        "message": "PeerLeftEvent",
+        "fields": { "ClientId": 7, "Reason": 3 },
+        "hex": "02 04 01 07000000 03",
+        "note": "The worked example in docs/protocol.md"
+      },
+      {
+        "message": "PeerJoinedEvent",
+        "fields": { "ClientId": 9, "DisplayName": "Ada" },
+        "hex": "02 04 0B 09000000 FCFFFFFF 03000000 416461",
+        "note": "String member is 4 + 4 + 3 = 11 bytes; ~3 = -4 = FCFFFFFF"
+      },
+      {
+        "message": "HostChangedEvent",
+        "fields": { "HostClientId": 5, "PreviousHostClientId": 7 },
+        "hex": "02 04 04 05000000 07000000"
+      },
+      {
+        "message": "RoomInfoEvent",
+        "fields": { "PlayerCount": 3, "EntityCount": 40, "ServerTick": 1234 },
+        "hex": "03 02 02 04 0300 2800 D2040000"
+      },
+      {
+        "message": "RejectedEvent",
+        "fields": { "Code": 6, "Message": "full" },
+        "hex": "02 02 0C 0600 FBFFFFFF 04000000 66756C6C",
+        "note": "Code 6 = RoomFull"
+      },
+      {
+        "message": "ChatMessageEvent",
+        "fields": { "ClientId": 42, "Text": "Привет" },
+        "hex": "02 04 14 2A000000 F3FFFFFF 06000000 D09FD180D0B8D0B2D0B5D182",
+        "note": "The load-bearing non-ASCII case: 12 UTF-8 bytes but a UTF-16 length of 6. A client that writes the byte count in both slots produces text C# mis-sizes."
+      },
+      {
+        "message": "SendChatCommand",
+        "fields": { "Text": "😀" },
+        "hex": "01 0C FBFFFFFF 02000000 F09F9880",
+        "note": "A surrogate pair: 4 UTF-8 bytes, UTF-16 length 2"
+      },
+      {
+        "message": "SendChatCommand",
+        "name": "empty string",
+        "fields": { "Text": "" },
+        "hex": "01 04 00000000",
+        "note": "An empty string is the non-negative UTF-16 length zero, not a UTF-8 header"
+      },
+      {
+        "message": "SetClientPrefsCommand",
+        "fields": { "Hidden": true, "SendRateDivisor": 2 },
+        "hex": "02 01 01 01 02"
+      },
+      {
+        "message": "DespawnEntityCommand",
+        "fields": { "NetId": 131079 },
+        "hex": "01 04 07000200"
+      },
+      {
+        "message": "SpawnEntityResponse",
+        "fields": { "RequestId": 9, "NetId": 131079, "RejectCode": 0 },
+        "hex": "03 04 04 02 09000000 07000200 0000"
+      },
+      {
+        "message": "SetRoomVarCommand",
+        "fields": { "Key": "phase", "ValueHex": "0102" },
+        "hex": "02 0D 06 FAFFFFFF 05000000 7068617365 02000000 0102"
+      },
+      {
+        "message": "SetEntityPropsCommand",
+        "fields": { "NetId": 131079, "JsonHex": "7B7D" },
+        "hex": "02 04 06 07000200 02000000 7B7D"
+      },
+      {
+        "message": "EntityPropsChangedEvent",
+        "fields": { "NetId": 131079, "JsonHex": "7B7D" },
+        "hex": "02 04 06 07000200 02000000 7B7D"
+      },
+      {
+        "message": "SignalEvent",
+        "fields": { "SenderClientId": 42, "Name": "hit", "PayloadHex": "" },
+        "hex": "03 04 0B 04 2A000000 FCFFFFFF 03000000 686974 00000000",
+        "note": "An empty byte[] is a collection header of zero, distinct from the null FFFFFFFF"
+      },
+      {
+        "message": "EmitSignalCommand",
+        "fields": { "Name": "fire", "Target": 3, "TargetClientId": 0, "PayloadHex": "AABB" },
+        "hex": "04 0C 01 04 06 FBFFFFFF 04000000 66697265 03 00000000 02000000 AABB",
+        "note": "Target 3 = AoiPeers"
+      },
+      {
+        "message": "SpawnEntityRequest",
+        "fields": {
+          "RequestId": 9,
+          "Kind": 4660,
+          "QX": 35243,
+          "QY": 256,
+          "QRot": 64,
+          "QVx": -1000,
+          "QVy": 32767,
+          "Flags": 169,
+          "PropsHex": "7B7D"
+        },
+        "hex": "09 04 02 02 02 01 02 02 01 06 09000000 3412 AB89 0001 40 18FC FF7F A9 02000000 7B7D",
+        "note": "Nine members. Spawn carries quantized fields, not floats, so it cannot introduce a value the delta plane could not express."
+      },
+      {
+        "message": "RoomVarsChangedEvent",
+        "fields": { "Keys": ["a", "bb"], "ValuesHex": ["AA", "BBCC"] },
+        "hex": "02 17 0F 02000000 FEFFFFFF 01000000 61 FDFFFFFF 02000000 6262 02000000 01000000 AA 02000000 BBCC",
+        "note": "string[] and byte[][]: a collection header of element count, then that many fully-encoded elements"
+      },
+      {
+        "message": "RoomVarsChangedEvent",
+        "name": "empty arrays",
+        "fields": { "Keys": [], "ValuesHex": [] },
+        "hex": "02 04 04 00000000 00000000"
+      },
+      {
+        "message": "HelloCommand",
+        "name": "full, with resume key",
+        "fields": {
+          "ProtocolVersion": 2,
+          "Token": "dev:a:r1",
+          "RoomId": "r1",
+          "DisplayName": "Ada",
+          "Capabilities": 3,
+          "ResumeKeyHex": "0102030405060708090A0B0C0D0E0F10"
+        },
+        "hex": "06 02 10 0A 0B 02 14 0200 F7FFFFFF 08000000 6465763A613A7231 FDFFFFFF 02000000 7231 FCFFFFFF 03000000 416461 0300 10000000 0102030405060708090A0B0C0D0E0F10"
+      },
+      {
+        "message": "HelloCommand",
+        "name": "fresh join, null resume key",
+        "fields": {
+          "ProtocolVersion": 2,
+          "Token": "t",
+          "RoomId": "r",
+          "DisplayName": "",
+          "Capabilities": 0,
+          "ResumeKeyHex": null
+        },
+        "hex": "06 02 09 09 04 02 04 0200 FEFFFFFF 01000000 74 FEFFFFFF 01000000 72 00000000 0000 FFFFFFFF",
+        "note": "A fresh join and a resume attempt differ only by this member: null array is FFFFFFFF, still a declared length of 4"
+      },
+      {
+        "message": "HelloCommand",
+        "name": "default-constructed",
+        "fields": {
+          "ProtocolVersion": 0,
+          "Token": "",
+          "RoomId": "",
+          "DisplayName": "",
+          "Capabilities": 0,
+          "ResumeKeyHex": null
+        },
+        "hex": "06 02 04 04 04 02 04 0000 00000000 00000000 00000000 0000 FFFFFFFF"
+      },
+      {
+        "message": "HelloCommand",
+        "name": "token crossing the single-byte varint boundary",
+        "fields": {
+          "ProtocolVersion": 2,
+          "TokenRepeat": { "char": "x", "count": 120 },
+          "RoomId": "r",
+          "DisplayName": "",
+          "Capabilities": 0,
+          "ResumeKeyHex": null
+        },
+        "hex": "06 02 848000 09 04 02 04 0200 87FFFFFF 78000000 787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878 FEFFFFFF 01000000 72 00000000 0000 FFFFFFFF",
+        "note": "The Token member is 4 + 4 + 120 = 128 bytes, one past the raw-byte range, so its length is the marker 0x84 followed by a u16. A real JWT lands here, which is why this case is pinned. ~120 = -121 = 87FFFFFF."
+      },
+      {
+        "message": "WelcomeEvent",
+        "name": "the answer to a resumed Hello",
+        "fields": {
+          "ClientId": 7,
+          "RoomId": "r1",
+          "TickHz": 20,
+          "ServerTimeMs": 1700000000000,
+          "ServerTick": 1234,
+          "AoiRadius": 512,
+          "MaxPlayers": 600,
+          "ProtocolVersion": 2,
+          "WorldOriginX": -2048,
+          "WorldOriginY": -2048,
+          "WorldSize": 4096,
+          "Mode": 0,
+          "MaxVisibleEntities": 64,
+          "HostClientId": 7,
+          "ResumeKeyHex": "0102030405060708090A0B0C0D0E0F10",
+          "Resumed": true
+        },
+        "hex": "10 04 0A 01 08 04 04 02 02 04 04 04 01 02 04 14 01 07000000 FDFFFFFF 02000000 7231 14 0068E5CF8B010000 D2040000 00000044 5802 0200 000000C5 000000C5 00008045 00 4000 07000000 10000000 0102030405060708090A0B0C0D0E0F10 01",
+        "note": "The largest control message, at sixteen members, and the only one carrying a float or a bool — so it is what pins those two primitive encodings. Floats are IEEE-754 little-endian: AoiRadius 512 is 00000044, and the world bounds -2048 / 4096 are 000000C5 / 00008045."
+      }
+    ]
+  }
+}
