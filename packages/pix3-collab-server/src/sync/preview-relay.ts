@@ -253,7 +253,12 @@ function handlePlayerText(peer: RelayPeer, message: JsonMessage): void {
   }
 }
 
-function handlePlayerBinary(peer: RelayPeer, frame: Buffer, header: JsonMessage, payload: Buffer): void {
+function handlePlayerBinary(
+  peer: RelayPeer,
+  frame: Buffer,
+  header: JsonMessage,
+  payload: Buffer
+): void {
   const { session } = peer;
 
   if (header.type === 'screenshot') {

@@ -38,7 +38,11 @@ describe('SceneService viewport API', () => {
     const service = new SceneService();
 
     Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 400 });
-    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 800 });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      writable: true,
+      value: 800,
+    });
     Object.defineProperty(window, 'devicePixelRatio', {
       configurable: true,
       writable: true,
@@ -289,7 +293,11 @@ describe('SceneService.changeScene', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     await expect(
-      service.changeScene('res://gone.pix3scene', { transition: 'fade', durationSec: 0.1, onLoaded })
+      service.changeScene('res://gone.pix3scene', {
+        transition: 'fade',
+        durationSec: 0.1,
+        onLoaded,
+      })
     ).rejects.toThrow(/missing scene/);
     expect(onLoaded).not.toHaveBeenCalled();
     // Reveal the still-running old scene rather than stranding a black screen.

@@ -11,7 +11,10 @@ export const config = {
   COLLABORATION_PATH: process.env.COLLABORATION_PATH || '/collaboration',
   PREVIEW_PATH: process.env.PREVIEW_PATH || '/preview',
   // Sliding TTL for anonymous preview sessions (any WS/HTTP activity extends it).
-  PREVIEW_SESSION_TTL_MS: parseInt(process.env.PREVIEW_SESSION_TTL_MS || String(6 * 60 * 60 * 1000), 10),
+  PREVIEW_SESSION_TTL_MS: parseInt(
+    process.env.PREVIEW_SESSION_TTL_MS || String(6 * 60 * 60 * 1000),
+    10
+  ),
   // Public origin of THIS server (e.g. https://cloud.pix3.dev). Returned to the
   // editor on session creation so join links carry an explicit relay origin and
   // players/agents connect here directly, no matter where the player page or

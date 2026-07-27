@@ -253,9 +253,14 @@ describe('GameInputService', () => {
       }
     );
     clearInterval(moverF);
-    expect(forward.observed?.Player.moved).toBe(true);
-    expect(forward.observed?.Player.alignForward!).toBeGreaterThan(0.9);
-    expect(Math.abs(forward.observed?.Player.alignRight!)).toBeLessThan(0.1);
+    const forwardPlayer = forward.observed?.Player;
+    if (!forwardPlayer) {
+      throw new Error('expected an observation for Player');
+    }
+
+    expect(forwardPlayer.moved).toBe(true);
+    expect(forwardPlayer.alignForward!).toBeGreaterThan(0.9);
+    expect(Math.abs(forwardPlayer.alignRight!)).toBeLessThan(0.1);
 
     // Same facing (rotation 0) but the node slides +X → sideways across the body.
     const side = makeLiveNode({ rotation: { z: 0 } });
@@ -271,8 +276,13 @@ describe('GameInputService', () => {
       }
     );
     clearInterval(moverS);
-    expect(Math.abs(sideways.observed?.Player.alignForward!)).toBeLessThan(0.1);
-    expect(Math.abs(sideways.observed?.Player.alignRight!)).toBeGreaterThan(0.9);
+    const sidewaysPlayer = sideways.observed?.Player;
+    if (!sidewaysPlayer) {
+      throw new Error('expected an observation for Player');
+    }
+
+    expect(Math.abs(sidewaysPlayer.alignForward!)).toBeLessThan(0.1);
+    expect(Math.abs(sidewaysPlayer.alignRight!)).toBeGreaterThan(0.9);
   });
 
   it('expect: "forward" verdict passes along the nose and fails when sliding sideways', async () => {

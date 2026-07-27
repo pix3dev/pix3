@@ -91,7 +91,11 @@ export function atlasSizeOf(texture: Texture | null | undefined): AtlasSourceSiz
  * explicitly rather than relying on `Texture.copy`'s userData handling, which
  * varies across three.js versions.
  */
-export function stampAtlasView(texture: Texture, region: TextureRegion, size: AtlasSourceSize): void {
+export function stampAtlasView(
+  texture: Texture,
+  region: TextureRegion,
+  size: AtlasSourceSize
+): void {
   const userData = texture.userData as AtlasViewUserData;
   userData.pix3AtlasRegion = region;
   userData.pix3AtlasSize = size;

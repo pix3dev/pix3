@@ -147,7 +147,11 @@ export class SpineSkeletonView {
 
     // Re-set the animation (rather than poking trackTime) so mixing state, event
     // bookkeeping and the applied pose all restart from zero.
-    const restarted = this.object.state.setAnimation(trackIndex, animationName, entry?.loop ?? false);
+    const restarted = this.object.state.setAnimation(
+      trackIndex,
+      animationName,
+      entry?.loop ?? false
+    );
     restarted.mixDuration = 0;
     this.object.update(0);
   }

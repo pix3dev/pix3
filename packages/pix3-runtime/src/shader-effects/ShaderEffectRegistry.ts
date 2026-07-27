@@ -29,7 +29,9 @@ function ensureSeeded(): void {
  */
 export function registerShaderEffect(info: ShaderEffectTypeInfo): void {
   if (!IDENT_RE.test(info.key)) {
-    throw new Error(`[ShaderEffectRegistry] invalid effect key "${info.key}" (must match ${IDENT_RE})`);
+    throw new Error(
+      `[ShaderEffectRegistry] invalid effect key "${info.key}" (must match ${IDENT_RE})`
+    );
   }
   for (const p of info.params) {
     if (!IDENT_RE.test(p.key)) {

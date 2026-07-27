@@ -85,7 +85,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Position X',
             group: 'Position',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isPositionAxisEnabled('x'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isPositionAxisEnabled('x'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followPositionX = value;
@@ -99,7 +100,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Position Y',
             group: 'Position',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isPositionAxisEnabled('y'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isPositionAxisEnabled('y'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followPositionY = value;
@@ -113,7 +115,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Position Z',
             group: 'Position',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isPositionAxisEnabled('z'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isPositionAxisEnabled('z'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followPositionZ = value;
@@ -147,7 +150,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Rotation X',
             group: 'Rotation',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isRotationAxisEnabled('x'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isRotationAxisEnabled('x'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followRotationX = value;
@@ -161,7 +165,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Rotation Y',
             group: 'Rotation',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isRotationAxisEnabled('y'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isRotationAxisEnabled('y'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followRotationY = value;
@@ -175,7 +180,8 @@ export class FollowBehavior extends Script {
             label: 'Follow Rotation Z',
             group: 'Rotation',
           },
-          getValue: (component: unknown) => (component as FollowBehavior).isRotationAxisEnabled('z'),
+          getValue: (component: unknown) =>
+            (component as FollowBehavior).isRotationAxisEnabled('z'),
           setValue: (component: unknown, value: unknown) => {
             if (typeof value === 'boolean') {
               (component as FollowBehavior).config.followRotationZ = value;

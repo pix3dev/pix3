@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { NodeBase } from '../nodes/NodeBase';
 import { FreeOnSignalBehavior } from './FreeOnSignalBehavior';
 
-function attach(config?: Record<string, unknown>): { node: NodeBase; behavior: FreeOnSignalBehavior; free: ReturnType<typeof vi.fn> } {
+function attach(config?: Record<string, unknown>): {
+  node: NodeBase;
+  behavior: FreeOnSignalBehavior;
+  free: ReturnType<typeof vi.fn>;
+} {
   const node = new NodeBase({ id: 'fx', type: 'AnimatedSprite2D', name: 'FX' });
   const free = vi.fn();
   node.queueFree = free;

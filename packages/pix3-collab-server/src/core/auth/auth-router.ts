@@ -7,7 +7,7 @@ import { signToken, requireAuth, AuthenticatedRequest } from './auth-middleware.
 const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'none' as const : 'lax' as const,
+  sameSite: process.env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   path: '/',
 };
@@ -41,9 +41,12 @@ authRouter.post('/register', async (req: Request, res: Response) => {
     const id = crypto.randomUUID();
     const password_hash = await hashPassword(password);
 
-    db.prepare(
-      'INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)'
-    ).run(id, email, username, password_hash);
+    db.prepare('INSERT INTO users (id, email, username, password_hash) VALUES (?, ?, ?, ?)').run(
+      id,
+      email,
+      username,
+      password_hash
+    );
 
     const token = signToken({ userId: id, email });
     res.cookie('token', token, COOKIE_OPTIONS);

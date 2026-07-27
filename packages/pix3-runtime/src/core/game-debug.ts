@@ -229,13 +229,7 @@ export function isDirectionAxesEnabled(): boolean {
  * failures while cloning/loading the scene before any script ran; `tick` covers
  * an error escaping the per-frame update outside a single component.
  */
-export type ScriptErrorPhase =
-  | 'attach'
-  | 'start'
-  | 'update'
-  | 'detach'
-  | 'scene-start'
-  | 'tick';
+export type ScriptErrorPhase = 'attach' | 'start' | 'update' | 'detach' | 'scene-start' | 'tick';
 
 /**
  * A runtime script/lifecycle failure, in an editor-agnostic shape. The runtime

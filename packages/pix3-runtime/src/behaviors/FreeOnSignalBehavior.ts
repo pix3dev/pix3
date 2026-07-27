@@ -139,7 +139,8 @@ export class FreeOnSignalBehavior extends Script {
   }
 
   private getDelay(): number {
-    const parsed = typeof this.config.delay === 'number' ? this.config.delay : Number(this.config.delay);
+    const parsed =
+      typeof this.config.delay === 'number' ? this.config.delay : Number(this.config.delay);
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   }
 

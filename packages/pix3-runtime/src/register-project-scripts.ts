@@ -1,6 +1,13 @@
-import { Script, type PropertySchemaProvider, type ScriptComponent, ScriptRegistry } from '@pix3/runtime';
+import {
+  Script,
+  type PropertySchemaProvider,
+  type ScriptComponent,
+  ScriptRegistry,
+} from '@pix3/runtime';
 
-function isScriptCtor(value: unknown): value is (new (id: string, type: string) => ScriptComponent) & PropertySchemaProvider {
+function isScriptCtor(
+  value: unknown
+): value is (new (id: string, type: string) => ScriptComponent) & PropertySchemaProvider {
   if (typeof value !== 'function') {
     return false;
   }

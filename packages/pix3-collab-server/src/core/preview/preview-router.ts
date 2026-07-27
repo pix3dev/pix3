@@ -1,11 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { WebSocket } from 'ws';
 import { config } from '../../config.js';
-import {
-  previewSessionService,
-  type PreviewRole,
-  type PreviewSession,
-} from './preview-service.js';
+import { previewSessionService, type PreviewRole, type PreviewSession } from './preview-service.js';
 
 export const previewRouter = Router();
 
@@ -113,7 +109,12 @@ previewRouter.post('/sessions/:id/commands', async (req: Request, res: Response)
       return;
     }
 
-    res.json({ ok: true, action, capturedAt: screenshot.capturedAt, bytes: screenshot.data.length });
+    res.json({
+      ok: true,
+      action,
+      capturedAt: screenshot.capturedAt,
+      bytes: screenshot.data.length,
+    });
     return;
   }
 
@@ -132,7 +133,12 @@ previewRouter.post('/sessions/:id/commands', async (req: Request, res: Response)
       return;
     }
 
-    res.json({ ok: ack.ok !== false, action, result: ack.result ?? null, error: ack.error ?? null });
+    res.json({
+      ok: ack.ok !== false,
+      action,
+      result: ack.result ?? null,
+      error: ack.error ?? null,
+    });
     return;
   }
 
@@ -151,7 +157,12 @@ previewRouter.post('/sessions/:id/commands', async (req: Request, res: Response)
       return;
     }
 
-    res.json({ ok: ack.ok !== false, action, result: ack.result ?? null, error: ack.error ?? null });
+    res.json({
+      ok: ack.ok !== false,
+      action,
+      result: ack.result ?? null,
+      error: ack.error ?? null,
+    });
     return;
   }
 
@@ -260,9 +271,7 @@ function firstOpenPlayer(session: PreviewSession): WebSocket | null {
   return null;
 }
 
-function authenticateRequest(
-  req: Request
-): { session: PreviewSession; role: PreviewRole } | null {
+function authenticateRequest(req: Request): { session: PreviewSession; role: PreviewRole } | null {
   return previewSessionService.authenticate(req.params.id, extractToken(req));
 }
 

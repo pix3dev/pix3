@@ -89,23 +89,39 @@ describe('library-service store queries', () => {
 
   describe('listPublicItems', () => {
     beforeEach(() => {
-      seedItem('pub', { name: 'Neon Button', tags: ['ui'], type: 'sprite' }, {
-        categoryPath: 'ui/buttons',
-        updatedAt: 30,
-      });
-      seedItem('draft', { name: 'Hidden', type: 'sprite' }, {
-        status: 'draft',
-        categoryPath: 'ui',
-        updatedAt: 40,
-      });
-      seedItem('unlisted', { name: 'Secret', type: 'audio' }, {
-        status: 'unlisted',
-        updatedAt: 50,
-      });
-      seedItem('star', { name: 'Featured Pack', type: 'prefab' }, {
-        featured: true,
-        updatedAt: 10,
-      });
+      seedItem(
+        'pub',
+        { name: 'Neon Button', tags: ['ui'], type: 'sprite' },
+        {
+          categoryPath: 'ui/buttons',
+          updatedAt: 30,
+        }
+      );
+      seedItem(
+        'draft',
+        { name: 'Hidden', type: 'sprite' },
+        {
+          status: 'draft',
+          categoryPath: 'ui',
+          updatedAt: 40,
+        }
+      );
+      seedItem(
+        'unlisted',
+        { name: 'Secret', type: 'audio' },
+        {
+          status: 'unlisted',
+          updatedAt: 50,
+        }
+      );
+      seedItem(
+        'star',
+        { name: 'Featured Pack', type: 'prefab' },
+        {
+          featured: true,
+          updatedAt: 10,
+        }
+      );
     });
 
     it('hides everything but published items from non-admins', () => {
@@ -179,8 +195,9 @@ describe('library-service store queries', () => {
     });
 
     it('rejects a taxonomy deeper than two levels or with a bad parent', () => {
-      expect(() => upsertCategory({ id: 'ui/buttons/round', parentId: 'ui/buttons', label: 'R' }))
-        .toThrow(StoreCategoryError);
+      expect(() =>
+        upsertCategory({ id: 'ui/buttons/round', parentId: 'ui/buttons', label: 'R' })
+      ).toThrow(StoreCategoryError);
       expect(() => upsertCategory({ id: 'fx/glow', parentId: 'fx', label: 'Glow' })).toThrow(
         StoreCategoryError
       );

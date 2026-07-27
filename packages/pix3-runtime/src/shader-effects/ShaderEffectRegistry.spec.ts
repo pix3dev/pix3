@@ -40,9 +40,9 @@ describe('ShaderEffectRegistry', () => {
   });
 
   it('rejects a duplicate key', () => {
-    expect(() =>
-      registerShaderEffect(makeInfo({ id: 'test:dupKey', key: 'dissolve' }))
-    ).toThrow(/key "dissolve" already used/);
+    expect(() => registerShaderEffect(makeInfo({ id: 'test:dupKey', key: 'dissolve' }))).toThrow(
+      /key "dissolve" already used/
+    );
   });
 
   it('rejects an identifier-unsafe key', () => {

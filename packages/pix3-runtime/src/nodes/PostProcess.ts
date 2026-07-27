@@ -145,7 +145,10 @@ export class PostProcess extends NodeBase {
     this.bloomThresholdValue = asNum(props.bloomThreshold ?? p.bloomThreshold, d.bloomThreshold, 0);
     this.bloomSmoothingValue = asNum(props.bloomSmoothing ?? p.bloomSmoothing, d.bloomSmoothing, 0);
     this.bloomRadiusValue = asNum(props.bloomRadius ?? p.bloomRadius, d.bloomRadius, 0);
-    this.vignetteEnabledValue = asBool(props.vignetteEnabled ?? p.vignetteEnabled, d.vignetteEnabled);
+    this.vignetteEnabledValue = asBool(
+      props.vignetteEnabled ?? p.vignetteEnabled,
+      d.vignetteEnabled
+    );
     this.vignetteOffsetValue = asNum(props.vignetteOffset ?? p.vignetteOffset, d.vignetteOffset, 0);
     this.vignetteDarknessValue = asNum(
       props.vignetteDarkness ?? p.vignetteDarkness,

@@ -19,14 +19,15 @@ import { createPreviewRelayServer } from './sync/preview-relay.js';
 
 function isCollaborationUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
-  return requestUrl === config.COLLABORATION_PATH
-    || requestUrl.startsWith(`${config.COLLABORATION_PATH}?`);
+  return (
+    requestUrl === config.COLLABORATION_PATH ||
+    requestUrl.startsWith(`${config.COLLABORATION_PATH}?`)
+  );
 }
 
 function isPreviewUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
-  return requestUrl === config.PREVIEW_PATH
-    || requestUrl.startsWith(`${config.PREVIEW_PATH}?`);
+  return requestUrl === config.PREVIEW_PATH || requestUrl.startsWith(`${config.PREVIEW_PATH}?`);
 }
 
 function closeUpgradeSocket(socket: Socket): void {
@@ -58,10 +59,12 @@ export async function startServer(): Promise<void> {
 
   const app = express();
   app.use(cookieParser());
-  app.use(cors({
-    origin: true,
-    credentials: true,
-  }));
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+    })
+  );
   app.use(express.json());
 
   // Routes

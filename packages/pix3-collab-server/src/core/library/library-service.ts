@@ -371,9 +371,9 @@ function assertCategoryShape(
   if (id !== `${parentId}/${segments[1] ?? ''}`) {
     throw new StoreCategoryError(`Category id "${id}" must start with "${parentId}/"`);
   }
-  const parent = db
-    .prepare('SELECT id FROM library_categories WHERE id = ?')
-    .get(parentId) as { id: string } | undefined;
+  const parent = db.prepare('SELECT id FROM library_categories WHERE id = ?').get(parentId) as
+    | { id: string }
+    | undefined;
   if (!parent) {
     throw new StoreCategoryError(`Parent category "${parentId}" does not exist`);
   }
@@ -441,10 +441,7 @@ export function upsertCategory(input: StoreCategoryInput): StoreCategory {
  * Rename / reorder. `parentId` is not patchable on purpose: the id *is* the path, so a move
  * is a delete + recreate (which also has to re-bind the items).
  */
-export function updateCategory(
-  id: string,
-  patch: { label?: string; sortOrder?: number }
-): boolean {
+export function updateCategory(id: string, patch: { label?: string; sortOrder?: number }): boolean {
   const sets: string[] = [];
   const params: Array<string | number> = [];
   if (patch.label !== undefined) {
@@ -470,9 +467,7 @@ export function updateCategory(
 }
 
 function categoryExists(id: string): boolean {
-  return Boolean(
-    getDb().prepare('SELECT id FROM library_categories WHERE id = ?').get(id)
-  );
+  return Boolean(getDb().prepare('SELECT id FROM library_categories WHERE id = ?').get(id));
 }
 
 /**

@@ -71,9 +71,7 @@ describe('layoutLabelText', () => {
 });
 
 describe('paintLabelCanvas', () => {
-  const paint = (
-    overrides: Partial<Parameters<typeof paintLabelCanvas>[1]>
-  ): FillTextCall[] => {
+  const paint = (overrides: Partial<Parameters<typeof paintLabelCanvas>[1]>): FillTextCall[] => {
     const { ctx, calls } = fakeContext();
     paintLabelCanvas(ctx, {
       layout: layout('aaa\nbb'),

@@ -35,7 +35,12 @@ describe('PostProcess node', () => {
   });
 
   it('treats LUT as inactive until a source is provided', () => {
-    const pp = new PostProcess({ id: 'pp-3', name: 'PostFX', bloomEnabled: false, lutEnabled: true });
+    const pp = new PostProcess({
+      id: 'pp-3',
+      name: 'PostFX',
+      bloomEnabled: false,
+      lutEnabled: true,
+    });
     expect(pp.isActive()).toBe(false); // enabled but no src
 
     pp.lutSrc = 'res://luts/warm.cube';

@@ -40,7 +40,7 @@ npm run dev            # Vite dev server on port 8123
 npm run dev:collab     # Editor + collab server together (concurrently)
 npm run build          # tsc typecheck + Vite production build (prebuild stamps version)
 npm run test           # Vitest run (one-shot, happy-dom env)
-npm run lint           # ESLint over src
+npm run lint           # ESLint over src + both packages (runtime, collab-server)
 npm run lint:fix       # ESLint with --fix
 npm run type-check     # tsc --noEmit
 npm run format         # Prettier write over src

@@ -156,15 +156,15 @@ describe('collectEventKeysInRange', () => {
   });
 
   it('includes a key at exactly from with includeStart', () => {
-    expect(collectEventKeysInRange(track, 0, 0.5, { includeStart: true }).map(k => k.signal)).toEqual(
-      ['a', 'b']
-    );
+    expect(
+      collectEventKeysInRange(track, 0, 0.5, { includeStart: true }).map(k => k.signal)
+    ).toEqual(['a', 'b']);
   });
 
   it('collects across a loop wrap', () => {
-    expect(collectEventKeysInRange(track, 0.75, 0.25, { wrapDuration: 1 }).map(k => k.signal)).toEqual(
-      ['a', 'c']
-    );
+    expect(
+      collectEventKeysInRange(track, 0.75, 0.25, { wrapDuration: 1 }).map(k => k.signal)
+    ).toEqual(['a', 'c']);
   });
 
   it('skips disabled tracks', () => {

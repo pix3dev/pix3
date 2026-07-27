@@ -47,7 +47,9 @@ describe('Node2D anchor layout', () => {
     expect(yaml).not.toContain('offsetMin:');
     expect(yaml).not.toContain('offsetMax:');
 
-    const graph = await createLoader().parseScene(yaml, { filePath: 'res://scenes/main.pix3scene' });
+    const graph = await createLoader().parseScene(yaml, {
+      filePath: 'res://scenes/main.pix3scene',
+    });
     const loaded = graph.rootNodes[0] as Sprite2D;
 
     expect(loaded.layoutEnabled).toBe(true);
@@ -94,10 +96,7 @@ describe('Node2D anchor layout', () => {
       },
     });
 
-    group.applyAnchoredLayoutRecursive(
-      { width: 600, height: 300 },
-      { width: 400, height: 300 }
-    );
+    group.applyAnchoredLayoutRecursive({ width: 600, height: 300 }, { width: 400, height: 300 });
 
     expect(group.position.x).toBeCloseTo(0);
     expect(group.position.y).toBeCloseTo(0);

@@ -1365,7 +1365,9 @@ export class SceneLoader {
 
         if (thumbTexture) {
           try {
-            container.setScrollbarThumbTexture(await this.assetLoader.loadTexture(thumbTexture.url));
+            container.setScrollbarThumbTexture(
+              await this.assetLoader.loadTexture(thumbTexture.url)
+            );
           } catch (error) {
             console.warn(
               `[SceneLoader] Error loading scrollbar thumb texture for ScrollContainer2D "${container.nodeId}":`,
@@ -1375,7 +1377,9 @@ export class SceneLoader {
         }
         if (trackTexture) {
           try {
-            container.setScrollbarTrackTexture(await this.assetLoader.loadTexture(trackTexture.url));
+            container.setScrollbarTrackTexture(
+              await this.assetLoader.loadTexture(trackTexture.url)
+            );
           } catch (error) {
             console.warn(
               `[SceneLoader] Error loading scrollbar track texture for ScrollContainer2D "${container.nodeId}":`,

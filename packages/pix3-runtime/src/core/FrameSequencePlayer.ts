@@ -95,10 +95,7 @@ export class FrameSequencePlayer {
 
     // Catch-up loop: consume as many whole frame durations as have elapsed.
     for (;;) {
-      const frameDuration = Math.max(
-        MIN_FRAME_DURATION,
-        (1 / fps) * durationMultiplier(index)
-      );
+      const frameDuration = Math.max(MIN_FRAME_DURATION, (1 / fps) * durationMultiplier(index));
       if (this.timeAccumulator < frameDuration) {
         break;
       }

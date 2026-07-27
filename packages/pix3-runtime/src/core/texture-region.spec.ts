@@ -164,7 +164,13 @@ describe('Sprite2D textureRegion is transient (not serialized)', () => {
   it('serializes identically with and without an active region', () => {
     const saver = new SceneSaver();
     const build = () =>
-      new Sprite2D({ id: 'odometer', name: 'Digit', texturePath: 'res://ui/digits.png', width: 32, height: 48 });
+      new Sprite2D({
+        id: 'odometer',
+        name: 'Digit',
+        texturePath: 'res://ui/digits.png',
+        width: 32,
+        height: 48,
+      });
 
     const withoutRegion = build();
     const yamlWithout = saver.serializeScene({

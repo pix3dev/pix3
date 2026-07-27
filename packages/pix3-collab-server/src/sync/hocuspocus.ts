@@ -283,9 +283,9 @@ function loadStoredDocumentState(
   documentName: string,
   document: Y.Doc
 ): void {
-  const row = db
-    .prepare('SELECT data FROM documents WHERE name = ?')
-    .get(documentName) as { data: Buffer } | undefined;
+  const row = db.prepare('SELECT data FROM documents WHERE name = ?').get(documentName) as
+    | { data: Buffer }
+    | undefined;
 
   if (row) {
     Y.applyUpdate(document, row.data);

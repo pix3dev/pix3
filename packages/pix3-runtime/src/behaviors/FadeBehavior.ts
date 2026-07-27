@@ -200,8 +200,7 @@ export class FadeBehavior extends Script {
       return;
     }
 
-    const duration =
-      this.fadeDirection === 'in' ? this.getFadeInTime() : this.getFadeOutTime();
+    const duration = this.fadeDirection === 'in' ? this.getFadeInTime() : this.getFadeOutTime();
     const onComplete = () => this.onFadeComplete();
 
     if (this.fadeDirection === 'in') {

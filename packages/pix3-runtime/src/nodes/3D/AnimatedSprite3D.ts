@@ -1,10 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture, DoubleSide, Quaternion } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
-import {
-  coerceTextureResource,
-  type TextureResourceRef,
-} from '../../core/TextureResource';
+import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 
 export interface AnimatedSprite3DProps extends Omit<Node3DProps, 'type'> {

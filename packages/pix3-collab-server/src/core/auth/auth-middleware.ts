@@ -21,7 +21,9 @@ function resolveUserFromToken(token: string) {
   const payload = verifyToken(token);
   return getDb()
     .prepare('SELECT id, email, username, is_admin FROM users WHERE id = ?')
-    .get(payload.userId) as { id: string; email: string; username: string; is_admin: number } | undefined;
+    .get(payload.userId) as
+    | { id: string; email: string; username: string; is_admin: number }
+    | undefined;
 }
 
 export function signToken(payload: JwtPayload): string {

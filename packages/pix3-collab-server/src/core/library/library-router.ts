@@ -26,38 +26,34 @@ libraryRouter.get('/items', requireAuth, (req: AuthenticatedRequest, res: Respon
 });
 
 // GET /api/library/items/:id/files/* — download one bundle file (owner-only).
-libraryRouter.get(
-  '/items/:id/files/*',
-  requireAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    const itemId = req.params.id;
-    const row = getOwnerLibraryItem(req.user!.id, itemId);
-    if (!row || row.deleted === 1) {
-      res.status(404).json({ error: 'Item not found' });
-      return;
-    }
-
-    const filePath = (req.params as Record<string, string>)[0];
-    if (!filePath) {
-      res.status(400).json({ error: 'File path is required' });
-      return;
-    }
-
-    const itemDir = getItemDir(itemId);
-    const fullPath = resolveSafePath(itemDir, filePath);
-    if (!fullPath) {
-      res.status(400).json({ error: 'Invalid file path' });
-      return;
-    }
-
-    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
-      res.status(404).json({ error: 'File not found' });
-      return;
-    }
-
-    res.sendFile(fullPath);
+libraryRouter.get('/items/:id/files/*', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const itemId = req.params.id;
+  const row = getOwnerLibraryItem(req.user!.id, itemId);
+  if (!row || row.deleted === 1) {
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
-);
+
+  const filePath = (req.params as Record<string, string>)[0];
+  if (!filePath) {
+    res.status(400).json({ error: 'File path is required' });
+    return;
+  }
+
+  const itemDir = getItemDir(itemId);
+  const fullPath = resolveSafePath(itemDir, filePath);
+  if (!fullPath) {
+    res.status(400).json({ error: 'Invalid file path' });
+    return;
+  }
+
+  if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
+    res.status(404).json({ error: 'File not found' });
+    return;
+  }
+
+  res.sendFile(fullPath);
+});
 
 // POST /api/library/items/:id — upload/replace a whole bundle (owner-only).
 // multipart: `manifest` (JSON), `paths` (JSON string[] parallel to files), `files` (the blobs).

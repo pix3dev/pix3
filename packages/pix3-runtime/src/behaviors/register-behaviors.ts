@@ -111,10 +111,21 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
   registry.registerComponent({
     id: 'core:FreeOnSignal',
     displayName: 'Free on Signal',
-    description: 'Frees this node when a signal fires on it (e.g. animation-finished) — one-shot VFX lifecycle',
+    description:
+      'Frees this node when a signal fires on it (e.g. animation-finished) — one-shot VFX lifecycle',
     category: 'Lifecycle',
     componentClass: FreeOnSignalBehavior,
-    keywords: ['free', 'destroy', 'despawn', 'queuefree', 'one-shot', 'lifecycle', 'signal', 'vfx', 'finished'],
+    keywords: [
+      'free',
+      'destroy',
+      'despawn',
+      'queuefree',
+      'one-shot',
+      'lifecycle',
+      'signal',
+      'vfx',
+      'finished',
+    ],
   });
 
   registry.registerComponent({

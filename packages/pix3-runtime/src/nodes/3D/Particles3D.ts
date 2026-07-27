@@ -1428,7 +1428,8 @@ export class Particles3D extends Node3D {
           ui: {
             label: 'Enable Trails',
             group: 'Trails',
-            description: 'Draw a camera-facing ribbon behind each particle. Best with Simulation Space = world.',
+            description:
+              'Draw a camera-facing ribbon behind each particle. Best with Simulation Space = world.',
           },
           getValue: (node: unknown) => (node as Particles3D).trailEnabled,
           setValue: (node: unknown, value: unknown) => {
@@ -1511,7 +1512,8 @@ export class Particles3D extends Node3D {
           ui: {
             label: 'Sub Emitter',
             group: 'Sub Emitter',
-            description: 'Particles3D fired as a burst at each particle death (author it with Emission Rate = 0).',
+            description:
+              'Particles3D fired as a burst at each particle death (author it with Emission Rate = 0).',
             nodeTypes: ['Particles3D'],
           },
           getValue: (node: unknown) => (node as Particles3D).subEmitterId,

@@ -52,12 +52,7 @@ describe('InstancedMesh3D', () => {
     expect(node.mesh.instanceColor?.version ?? 0).toBeGreaterThan(colorVersionBefore);
 
     const expectedPosition = new Vector3(4, 5, 6);
-    const expectedRotation = new Quaternion(
-      0,
-      Math.sin(Math.PI / 4),
-      0,
-      Math.cos(Math.PI / 4)
-    );
+    const expectedRotation = new Quaternion(0, Math.sin(Math.PI / 4), 0, Math.cos(Math.PI / 4));
     const expectedScale = new Vector3(2, 2, 2);
     const expectedMatrix = new Matrix4();
     node.mesh.getMatrixAt(1, expectedMatrix);

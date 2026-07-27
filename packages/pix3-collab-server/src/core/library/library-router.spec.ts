@@ -10,11 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../../config.js';
 
 vi.mock('../auth/auth-middleware.js', () => ({
-  requireAuth: (
-    req: { user?: { id: string } },
-    _res: unknown,
-    next: () => void
-  ) => {
+  requireAuth: (req: { user?: { id: string } }, _res: unknown, next: () => void) => {
     req.user = { id: 'owner-1' };
     next();
   },

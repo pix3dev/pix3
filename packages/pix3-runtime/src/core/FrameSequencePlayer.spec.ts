@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  FrameSequencePlayer,
-  type FrameSequenceDescriptor,
-} from './FrameSequencePlayer';
+import { FrameSequencePlayer, type FrameSequenceDescriptor } from './FrameSequencePlayer';
 
 // fps 10 → each frame lasts 0.1s. Advancing by 0.1 crosses exactly one boundary.
 const linearLoop: FrameSequenceDescriptor = {
@@ -159,7 +156,7 @@ describe('FrameSequencePlayer', () => {
       fps: 10, // base 0.1s
       loop: true,
       playbackMode: 'linear',
-      frameDurationMultiplier: (i) => (i === 0 ? 2 : 1), // frame 0 dwells 0.2s
+      frameDurationMultiplier: i => (i === 0 ? 2 : 1), // frame 0 dwells 0.2s
     };
 
     // 0.1s is not enough to leave frame 0 (needs 0.2s).

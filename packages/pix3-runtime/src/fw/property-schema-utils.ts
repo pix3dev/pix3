@@ -44,9 +44,7 @@ export function getNodePropertySchema(node: NodeBase): PropertySchema {
       ? constructor.getPropertySchema()
       : { nodeType: 'Unknown', properties: [] };
 
-  const instance = (
-    node as Partial<InstancePropertySchemaProvider>
-  ).getInstancePropertySchema?.();
+  const instance = (node as Partial<InstancePropertySchemaProvider>).getInstancePropertySchema?.();
 
   if (!instance || instance.properties.length === 0) {
     return staticSchema;
