@@ -11,6 +11,7 @@ import {
   type QualitySettings,
 } from '@/core/ProjectManifest';
 import { createGlobMatcher } from '@/services/export/glob-match';
+import { collectNetKindPrefabPaths } from '@/core/net-kind-paths';
 
 interface BuildPackagePatch {
   sideEffects?: boolean;
@@ -1154,15 +1155,16 @@ export class ProjectBuildService {
    * - **Only shipped prefabs.** A path that reachability pruned is not in `assetPaths`, so it
    *   cannot be spawned and must not occupy an index.
    *
+   * The rules themselves live in `@/core/net-kind-paths`, shared with the editor's Play Online
+   * session, which derives the same table live from the project folder — two implementations of
+   * "which files are prefabs, in what order" is exactly how the two halves would drift apart.
+   *
    * The table is versioned with the `buildId`, and a later authored-binding segment (the Phase-3
    * mechanism that binds an authored scene node to an entity) appends *after* the prefabs so its
    * arrival cannot shift a single published kind.
    */
   private collectNetKindPrefabPaths(assetPaths: readonly string[]): string[] {
-    return assetPaths
-      .filter(path => this.isPrefabPath(path) && /\.(pix3scene|prefab)$/i.test(path))
-      .map(path => `res://${path}`)
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return collectNetKindPrefabPaths(assetPaths);
   }
 
   private buildSceneManifestTs(

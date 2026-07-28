@@ -110,6 +110,8 @@ export class PreviewHostService {
   };
   private readonly listeners = new Set<(state: PreviewHostState) => void>();
   private scriptBundle: { code: string; hash: string } | null = null;
+  /** Prefab paths in wire-`Kind` order; empty until an online session installs one. */
+  private netKindTable: string[] = [];
   private disposeProjectSubscription?: () => void;
   private disposeScenesSubscription?: () => void;
   private lastFileRefreshSignal = 0;
@@ -186,6 +188,20 @@ export class PreviewHostService {
   /** Broadcast a restart to all connected players. */
   requestPlayersRestart(): void {
     this.sendJson({ type: 'restart' });
+  }
+
+  /**
+   * Publishes the multiplayer kind table to joiners (plan decision D6).
+   *
+   * Set by {@link import('./OnlineSessionService').OnlineSessionService} when a room is created:
+   * every participant must resolve a wire `Kind` through the *same* list, so the host's scan is the
+   * only one that counts. Re-publishes immediately when a session is already live.
+   */
+  setNetKindTable(prefabPaths: readonly string[]): void {
+    this.netKindTable = [...prefabPaths];
+    if (this.state.status === 'online') {
+      void this.publishSessionState();
+    }
   }
 
   // ── Session / connection ───────────────────────────────────────────────────
@@ -499,6 +515,7 @@ export class PreviewHostService {
         maxPixelRatio: quality.maxPixelRatio,
       },
       scriptBundleHash,
+      netKindTable: this.netKindTable.length > 0 ? [...this.netKindTable] : undefined,
     };
   }
 

@@ -395,6 +395,24 @@ whose `kind` separates `'quota'` (this owner's 64-entity budget),
 `'entity-limit'` (the room's table) and `'kind-not-allowed'`;
 `network.despawn(netId)`.
 
+**Getting online in the editor: "Play Online"** (`game.start-online`, project menu
+or the Game tab). It scans the project for spawnable prefabs, installs that
+`netKindTable`, starts the preview relay, asks pix3-cloud for a room, joins it,
+and only then enters play mode — so a script's `onStart` already sees
+`net.isOnline` and nothing needs a "wait until connected" dance. A session card
+floats over the running game with the QR/join link, the roster, ping and the
+number of visible entities. The join link carries the **room id, never a token**:
+the player page mints its own guest token, and the kind table reaches it through
+the relay's session config, because every participant must resolve a wire `Kind`
+through the same list. The membership survives a scene restart and a
+tab⇄popout swap; it ends when play mode ends or you press Leave. Requires a
+pix3-cloud with `ROOMS_ADMIN_URL` / `ROOMS_SERVICE_TOKEN` / `ROOMS_JWT_SECRET`
+configured; without one the button reports `rooms_not_configured` and single-player
+Play is unaffected.
+
+`samples/MultiplayerArena` is the worked example of all of the above (8-player
+tag arena, no binary assets, runs offline as a single-player sandbox).
+
 ### Scene transitions (change the running scene)
 `await scene.changeScene('res://scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
 — Godot's `change_scene_to_file`. Loads the *saved* target file, tears down the

@@ -9,7 +9,9 @@ import { PreviewHostService } from '@/services/play/PreviewHostService';
 import { RuntimeErrorBridgeService } from '@/services/play/RuntimeErrorBridgeService';
 import { AgentChatService } from '@/services/agent/AgentChatService';
 import { LayoutManagerService } from '@/core/LayoutManager';
+import { OnlineSessionService } from '@/services/play/OnlineSessionService';
 import './pix3-remote-preview-card';
+import './pix3-online-session-card';
 
 interface AspectRatioPreset {
   readonly value: GameAspectRatio;
@@ -46,6 +48,9 @@ export class GameViewTab extends ComponentBase {
   @inject(AgentChatService)
   private readonly agentChat!: AgentChatService;
 
+  @inject(OnlineSessionService)
+  private readonly onlineSessionService!: OnlineSessionService;
+
   @state()
   private aspectRatio: GameAspectRatio = appState.ui.gameAspectRatio;
 
@@ -67,6 +72,10 @@ export class GameViewTab extends ComponentBase {
   @state()
   private isRemotePreviewActive = false;
 
+  /** True from the moment "Play Online" starts creating a room until the session is left. */
+  @state()
+  private isOnlineSessionActive = false;
+
   @state()
   private playModeError: PlayModeError | null = appState.ui.playModeError;
 
@@ -75,12 +84,16 @@ export class GameViewTab extends ComponentBase {
   private resizeObserver?: ResizeObserver;
   private disposeSubscription?: () => void;
   private disposePreviewSubscription?: () => void;
+  private disposeOnlineSubscription?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.startResizeObserver();
     this.disposePreviewSubscription = this.previewHostService.subscribe(state => {
       this.isRemotePreviewActive = state.status !== 'idle';
+    });
+    this.disposeOnlineSubscription = this.onlineSessionService.subscribe(state => {
+      this.isOnlineSessionActive = state.status !== 'idle';
     });
   }
 
@@ -93,6 +106,8 @@ export class GameViewTab extends ComponentBase {
     this.disposeSubscription?.();
     this.disposePreviewSubscription?.();
     this.disposePreviewSubscription = undefined;
+    this.disposeOnlineSubscription?.();
+    this.disposeOnlineSubscription = undefined;
   }
 
   protected firstUpdated(): void {
@@ -493,6 +508,13 @@ export class GameViewTab extends ComponentBase {
             <!-- Canvas will be attached here -->
           </div>
           ${this.playModeError ? this.renderErrorBanner(this.playModeError) : null}
+          <!-- Floats over the running game: an online session runs *while* the game does, so the
+               card cannot live in the idle placeholder the way remote preview's does. -->
+          ${this.isOnlineSessionActive
+            ? html`<div class="online-session-overlay">
+                <pix3-online-session-card></pix3-online-session-card>
+              </div>`
+            : null}
           ${this.isRunning
             ? null
             : this.isRemotePreviewActive

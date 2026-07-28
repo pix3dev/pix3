@@ -25,6 +25,14 @@ export interface PreviewSessionConfig {
   readonly quality: PreviewQualityConfig;
   /** sha-256 hex of the compiled user-script bundle, or null when the project has no scripts. */
   readonly scriptBundleHash: string | null;
+  /**
+   * Multiplayer kind table (plan decision D6): spawnable prefab paths in wire-`Kind` order.
+   *
+   * Sent by the host rather than derived by each player, because the index *is* the contract — a
+   * joiner that scanned its own copy of the project would happily spawn a different prefab for the
+   * same kind. Absent for a session that was never taken online.
+   */
+  readonly netKindTable?: readonly string[];
 }
 
 export interface PreviewLogEntryPayload {

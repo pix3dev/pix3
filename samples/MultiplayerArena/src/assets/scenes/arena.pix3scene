@@ -1,0 +1,353 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Multiplayer Arena
+  description: >-
+    Tag arena for up to 8 players. Press "Play Online" in the editor to create a room, then open the
+    join link on a second device; every client spawns its own avatar and the room host runs the tag
+    rules. Runs single-player offline too, which is what makes it a usable test bed.
+root:
+  - id: arena
+    type: Group2D
+    name: Arena
+    properties:
+      width: 1920
+      height: 1080
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: arena-controller
+        type: user:ArenaController
+        enabled: true
+        config:
+          playerPrefab: res://src/assets/prefabs/player.pix3scene
+          roundSeconds: 90
+          intermissionSeconds: 6
+          tagRadius: 58
+          tagCooldownSeconds: 1.5
+    children:
+      - id: field
+        type: ColorRect2D
+        name: Field
+        properties:
+          width: 1600
+          height: 900
+          color: "#101722"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: field-edge-top
+        type: ColorRect2D
+        name: Edge Top
+        properties:
+          width: 1600
+          height: 8
+          color: "#243349"
+          transform:
+            position: [0, 446]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: field-edge-bottom
+        type: ColorRect2D
+        name: Edge Bottom
+        properties:
+          width: 1600
+          height: 8
+          color: "#243349"
+          transform:
+            position: [0, -446]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: field-edge-left
+        type: ColorRect2D
+        name: Edge Left
+        properties:
+          width: 8
+          height: 900
+          color: "#243349"
+          transform:
+            position: [-796, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: field-edge-right
+        type: ColorRect2D
+        name: Edge Right
+        properties:
+          width: 8
+          height: 900
+          color: "#243349"
+          transform:
+            position: [796, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      # Spawn markers. ArenaController reads their positions by name order, so adding a ninth marker
+      # is all it takes to seat a ninth player.
+      - id: spawns
+        type: Group2D
+        name: Spawns
+        properties:
+          width: 0
+          height: 0
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: spawn-1
+            type: ColorRect2D
+            name: Spawn 1
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [-620, 300]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-2
+            type: ColorRect2D
+            name: Spawn 2
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [0, 340]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-3
+            type: ColorRect2D
+            name: Spawn 3
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [620, 300]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-4
+            type: ColorRect2D
+            name: Spawn 4
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [700, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-5
+            type: ColorRect2D
+            name: Spawn 5
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [620, -300]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-6
+            type: ColorRect2D
+            name: Spawn 6
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [0, -340]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-7
+            type: ColorRect2D
+            name: Spawn 7
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [-620, -300]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: spawn-8
+            type: ColorRect2D
+            name: Spawn 8
+            properties:
+              width: 20
+              height: 20
+              color: "#1b2635"
+              transform:
+                position: [-700, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      # Avatars are parented here so tree order (= 2D paint order) keeps every player above the
+      # field and below the HUD, whether it was spawned locally or instantiated by the binder.
+      - id: players
+        type: Group2D
+        name: Players
+        properties:
+          width: 0
+          height: 0
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud
+        type: CanvasLayer2D
+        name: HUD
+        properties:
+          width: 1920
+          height: 1080
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: arena-hud
+            type: user:ArenaHud
+            enabled: true
+            config:
+              refreshHz: 6
+        children:
+          - id: status-label
+            type: Label2D
+            name: Status
+            properties:
+              label: "Offline — single player"
+              labelFontSize: 26
+              labelColor: "#e8eef7"
+              labelAlign: left
+              transform:
+                position: [-900, 480]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: round-label
+            type: Label2D
+            name: Round
+            properties:
+              label: ""
+              labelFontSize: 30
+              labelColor: "#ffcf33"
+              labelAlign: center
+              transform:
+                position: [0, 480]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: scoreboard-label
+            type: Label2D
+            name: Scoreboard
+            properties:
+              label: ""
+              labelFontSize: 22
+              labelColor: "#c9d6e6"
+              labelAlign: right
+              transform:
+                position: [900, 430]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: feed-label
+            type: Label2D
+            name: Feed
+            properties:
+              label: ""
+              labelFontSize: 20
+              labelColor: "#8fa6c2"
+              labelAlign: left
+              transform:
+                position: [-900, -420]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: hint-label
+            type: Label2D
+            name: Hint
+            properties:
+              label: "WASD / arrows to move · 1-3 or the buttons to emote"
+              labelFontSize: 18
+              labelColor: "#5e7089"
+              labelAlign: center
+              transform:
+                position: [0, -500]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: move-stick
+            type: Joystick2D
+            name: Move Stick
+            properties:
+              radius: 90
+              axisHorizontal: Horizontal
+              axisVertical: Vertical
+              transform:
+                position: [-700, -330]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: emote-1
+            type: Button2D
+            name: Emote Hi
+            properties:
+              label: "Hi!"
+              width: 120
+              height: 56
+              buttonAction: arena_emote_0
+              backgroundColor: "#1b2635"
+              hoverColor: "#243349"
+              pressedColor: "#0d1117"
+              transform:
+                position: [560, -400]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: emote-2
+            type: Button2D
+            name: Emote Catch
+            properties:
+              label: "Catch me!"
+              width: 180
+              height: 56
+              buttonAction: arena_emote_1
+              backgroundColor: "#1b2635"
+              hoverColor: "#243349"
+              pressedColor: "#0d1117"
+              transform:
+                position: [720, -400]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: emote-3
+            type: Button2D
+            name: Emote Nice
+            properties:
+              label: "Nice!"
+              width: 130
+              height: 56
+              buttonAction: arena_emote_2
+              backgroundColor: "#1b2635"
+              hoverColor: "#243349"
+              pressedColor: "#0d1117"
+              transform:
+                position: [870, -400]
+                scale: [1, 1]
+                rotation: 0
+            children: []

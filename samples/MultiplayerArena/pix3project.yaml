@@ -1,0 +1,15 @@
+version: 1.0.0
+viewportBaseSize:
+  width: 1920
+  height: 1080
+textureFiltering: linear
+projectType: 2d
+targetPlatform: desktop
+quality:
+  antialias: true
+  shadows: false
+  maxPixelRatio: 2
+metadata:
+  projectName: Multiplayer Arena
+  templateId: multiplayer-arena-2d
+autoloads: []

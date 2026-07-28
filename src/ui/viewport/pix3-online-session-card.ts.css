@@ -1,0 +1,253 @@
+:host {
+  display: block;
+  width: 280px;
+  pointer-events: auto;
+}
+
+.online-card {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-pop);
+  color: var(--fg-0);
+  overflow: hidden;
+}
+
+.online-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.online-card.is-collapsed .online-card-header {
+  border-bottom: none;
+}
+
+.online-card-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.online-card-meta {
+  font-size: 11px;
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.online-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--fg-2);
+}
+
+.online-status-online {
+  background: var(--accent);
+}
+
+.online-status-starting,
+.online-status-reconnecting {
+  background: var(--warning, var(--accent));
+  animation: online-pulse 1.2s ease-in-out infinite;
+}
+
+.online-status-error {
+  background: var(--danger);
+}
+
+@keyframes online-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.online-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+.online-icon-button:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.online-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.online-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.online-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.online-stat-label {
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+
+.online-invite {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.online-qr {
+  display: flex;
+  padding: 6px;
+  border-radius: var(--radius-2);
+  background: #f5f7fa;
+}
+
+.online-qr canvas {
+  display: block;
+  width: 160px;
+  height: 160px;
+}
+
+.online-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+}
+
+.online-field-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+
+.online-link {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+}
+
+.online-peers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.online-peer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  font-size: 11px;
+}
+
+.online-peer.is-local {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.online-peer-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.online-peer-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.online-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+.online-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--danger);
+  word-break: break-word;
+}
+
+.online-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.online-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.online-btn:hover:not(:disabled) {
+  background: var(--bg-3, var(--bg-2));
+  border-color: var(--accent);
+}
+
+.online-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.online-btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
