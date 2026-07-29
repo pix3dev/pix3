@@ -65,6 +65,35 @@ A self-hosted Node.js server that enables real-time multiplayer editing and clou
 | Admin | `GET /api/admin/users`, `DELETE /api/admin/users/:id`, `GET /api/admin/projects`, `GET /api/admin/dashboard` |
 | Sync | WebSocket on `WS_PORT` (default 4000) — room format `project:{projectId}` |
 
+### CSRF protection on the cookie surface
+
+The session cookie is `SameSite=None` out of necessity — the editor is on `editor.pix3.dev`, the API on
+`cloud.pix3.dev`, and a `Strict`/`Lax` cookie would never be sent — so the cookie cannot be the defence
+and request provenance is checked instead (`core/auth/csrf-guard.ts`). A token scheme was rejected
+because the editor deploys separately: the day the server demanded a token, every cached client build
+would start failing writes.
+
+Unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`) on `/api/projects`, `/api/library` (store included) and
+`/api/admin` are allowed when the request has **no session cookie** (nothing to abuse), when
+`Sec-Fetch-Site` is `same-origin`/`same-site`/`none` (the admin panel, a dev server proxying `/api`, and
+`editor.pix3.dev` → `cloud.pix3.dev` — no allowlist needed for our own domains), when the `Origin` (or
+`Referer`) is allowlisted, or when neither header is present at all (curl, agents, CI — every browser
+attaches `Origin` to a cross-site write, so a header-less request is not the threat). Anything else gets
+`403 {"error":"csrf_origin_rejected"}` and a log line. Add a genuinely cross-site origin you trust to
+`CSRF_ALLOWED_ORIGINS`; `DASHBOARD_EDITOR_URL`, `PREVIEW_PUBLIC_URL` and `http://localhost:8123` are
+already covered.
+
+`/api/rooms` and `/api/preview` are deliberately **not** guarded: they are reached from arbitrary
+origins by design (a published game, a shared player link) and authorize with their own per-session
+tokens, so a provenance check there would break the feature while protecting nothing. `/api/auth` is out
+too — login and register do not act on an existing session.
+
+Still open, and a different problem: `cors({ origin: true, credentials: true })` lets **any** origin
+*read* cookie-authenticated responses. Closing that needs the rooms/preview clients to stop sending
+`credentials: 'include'` (they authenticate with Bearer tokens) before the server can stop returning
+`Access-Control-Allow-Credentials` to unknown origins — a coordinated client+server change, so it is not
+bundled with the guard above.
+
 ### Management dashboard
 
 `/admin` opens the admin panel and `/login` is its own sign-in page — the same `/api/auth` endpoints
@@ -105,6 +134,10 @@ HOCUSPOCUS_DB_PATH=./data/crdt.db
 PROJECTS_STORAGE_DIR=./data/projects
 JWT_SECRET=change-me
 PASSWORD_SALT_ROUNDS=10
+
+# Extra cross-site origins allowed to send cookie-authenticated writes (comma-separated).
+# Same-site and same-origin callers need no entry — see "CSRF protection on the cookie surface".
+CSRF_ALLOWED_ORIGINS=
 
 # Management dashboard (all optional; defaults shown)
 DASHBOARD_EDITOR_URL=https://editor.pix3.dev

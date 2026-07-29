@@ -8,6 +8,7 @@ import path from 'path';
 import { config } from './config.js';
 import { initDb } from './core/db.js';
 import { authRouter } from './core/auth/auth-router.js';
+import { createCsrfGuard } from './core/auth/csrf-guard.js';
 import { projectsRouter } from './core/projects/projects-router.js';
 import { storageRouter } from './core/storage/storage-router.js';
 import { libraryRouter } from './core/library/library-router.js';
@@ -72,6 +73,16 @@ export async function startServer(): Promise<void> {
     })
   );
   app.use(express.json());
+
+  // CSRF provenance check, mounted BEFORE the routers it protects so it runs on every write into them.
+  //
+  // The scope is exactly the surface where the session cookie grants privileges: projects (and their
+  // file storage), the library and the store, and the admin API. `/api/rooms` and `/api/preview` are
+  // left out on purpose — they are reached from arbitrary origins by design (a published game, a shared
+  // player link) and authorize with their own per-session tokens, so a provenance check there would
+  // break the feature while protecting nothing. `/api/auth` is out too: login and register do not act
+  // on an existing session.
+  app.use(['/api/projects', '/api/library', '/api/admin'], createCsrfGuard());
 
   // Routes
   app.use('/api/auth', authRouter);

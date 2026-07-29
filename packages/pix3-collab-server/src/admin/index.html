@@ -543,10 +543,14 @@
                             window.location.href = '/login';
                             return null;
                         }
-                        // 403 = аккаунт есть, но без флага администратора. Форма входа тут не поможет,
-                        // поэтому уводим с `denied=1`: страница объяснит тупик и предложит выйти,
-                        // вместо потока тостов «Admin access required» на каждый запрос.
+                        // 403 бывает двух видов, и путать их нельзя: «нет флага администратора» лечится
+                        // другим аккаунтом, а отказ CSRF-стража — это неверный origin, и уводить из-за
+                        // него на форму входа значило бы врать про причину.
                         if (response.status === 403) {
+                            const denied = await response.clone().json().catch(() => ({}));
+                            if (denied.error === 'csrf_origin_rejected') {
+                                throw new Error(denied.message || 'Запрос отклонён проверкой origin');
+                            }
                             window.location.href = '/login?denied=1';
                             return null;
                         }
@@ -631,6 +635,8 @@
                             return;
                         }
                         if (response.status === 403) {
+                            // Дашборд читает через GET, так что CSRF-страж его не касается: 403 здесь
+                            // может значить только отсутствие прав администратора.
                             window.location.href = '/login?denied=1';
                             return;
                         }
