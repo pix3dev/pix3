@@ -1,5 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import { config } from '../../config.js';
+import { normalizeOrigin as normalizeOriginValue, originTrust } from './origin-trust.js';
 
 /**
  * CSRF protection for the cookie-authenticated surface.
@@ -63,19 +63,15 @@ export interface CsrfRequestFacts {
   readonly referer: string | null;
 }
 
-/** Normalizes an origin string, or null when it is not a usable absolute URL. */
+/**
+ * Normalizes an origin string for the decision below.
+ *
+ * A literal `null` — what a sandboxed iframe or a `data:` document sends — is kept as the string
+ * `'null'` rather than folded into "absent": treating it as absent would let exactly those contexts
+ * fall through to the no-Origin pass.
+ */
 function normalizeOrigin(value: string | null): string | null {
-  if (!value || value === 'null') {
-    // Literal "null" is what a sandboxed iframe or a data: document sends. It is not a trustworthy
-    // origin, and treating it as absent would let it fall through to the no-Origin pass.
-    return value === 'null' ? 'null' : null;
-  }
-
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
-  }
+  return value === 'null' ? 'null' : normalizeOriginValue(value);
 }
 
 /** Decides one request. Pure, so the table of cases can be tested without an HTTP server. */
@@ -107,36 +103,6 @@ export function decideCsrf(
   return { allowed: false, reason: 'cross-site', origin };
 }
 
-/**
- * Origins trusted even when they are cross-site.
- *
- * Defaults cover the shapes we ship: the editor's own deployment, this server's public origin (the
- * admin panel is served from it), and the documented dev-server port for an editor pointed straight at
- * a remote backend without its `/api` proxy.
- */
-export function resolveAllowedOrigins(): Set<string> {
-  const configured = config.CSRF_ALLOWED_ORIGINS.split(',')
-    .map(entry => entry.trim())
-    .filter(entry => entry.length > 0);
-
-  const candidates = [
-    config.DASHBOARD_EDITOR_URL,
-    config.PREVIEW_PUBLIC_URL,
-    'http://localhost:8123',
-    ...configured,
-  ];
-
-  const origins = new Set<string>();
-  for (const candidate of candidates) {
-    const origin = normalizeOrigin(candidate);
-    if (origin !== null && origin !== 'null') {
-      origins.add(origin);
-    }
-  }
-
-  return origins;
-}
-
 /** Reads the facts the decision needs out of an Express request. */
 function readFacts(req: Request): CsrfRequestFacts {
   const cookies = (req as Request & { cookies?: Record<string, unknown> }).cookies;
@@ -152,11 +118,14 @@ function readFacts(req: Request): CsrfRequestFacts {
 }
 
 /**
- * Builds the middleware. The allowlist is resolved once at startup: it comes from configuration, and
- * re-parsing it per request would only hide a typo behind a moving target.
+ * Builds the middleware.
+ *
+ * The allowlist comes from {@link originTrust} — the same set CORS uses to decide who may read a
+ * cookie-authenticated response, because "may write as the user" and "may read as the user" must never
+ * drift apart.
  */
 export function createCsrfGuard(): RequestHandler {
-  const allowedOrigins = resolveAllowedOrigins();
+  const allowedOrigins = originTrust.trusted;
 
   return (req: Request, res: Response, next: NextFunction): void => {
     const verdict = decideCsrf(readFacts(req), allowedOrigins);
@@ -175,7 +144,7 @@ export function createCsrfGuard(): RequestHandler {
       error: CSRF_REJECTED_CODE,
       message:
         'This request carries a session cookie but comes from an origin this server does not trust. ' +
-        'Add it to CSRF_ALLOWED_ORIGINS if that is intentional.',
+        'Add it to TRUSTED_ORIGINS if that is intentional.',
     });
   };
 }

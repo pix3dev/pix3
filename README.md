@@ -65,34 +65,41 @@ A self-hosted Node.js server that enables real-time multiplayer editing and clou
 | Admin | `GET /api/admin/users`, `DELETE /api/admin/users/:id`, `GET /api/admin/projects`, `GET /api/admin/dashboard` |
 | Sync | WebSocket on `WS_PORT` (default 4000) — room format `project:{projectId}` |
 
-### CSRF protection on the cookie surface
+### Trusted origins: who may act as the signed-in user
 
 The session cookie is `SameSite=None` out of necessity — the editor is on `editor.pix3.dev`, the API on
-`cloud.pix3.dev`, and a `Strict`/`Lax` cookie would never be sent — so the cookie cannot be the defence
-and request provenance is checked instead (`core/auth/csrf-guard.ts`). A token scheme was rejected
-because the editor deploys separately: the day the server demanded a token, every cached client build
-would start failing writes.
+`cloud.pix3.dev`, and a `Strict`/`Lax` cookie would simply never be sent. So the cookie cannot be the
+defence, and **request provenance** is. One trust list (`core/auth/origin-trust.ts`) drives three
+consumers, deliberately, because they are three faces of one question:
 
-Unsafe methods (`POST`/`PUT`/`PATCH`/`DELETE`) on `/api/projects`, `/api/library` (store included) and
-`/api/admin` are allowed when the request has **no session cookie** (nothing to abuse), when
-`Sec-Fetch-Site` is `same-origin`/`same-site`/`none` (the admin panel, a dev server proxying `/api`, and
-`editor.pix3.dev` → `cloud.pix3.dev` — no allowlist needed for our own domains), when the `Origin` (or
-`Referer`) is allowlisted, or when neither header is present at all (curl, agents, CI — every browser
-attaches `Origin` to a cross-site write, so a header-less request is not the threat). Anything else gets
-`403 {"error":"csrf_origin_rejected"}` and a log line. Add a genuinely cross-site origin you trust to
-`CSRF_ALLOWED_ORIGINS`; `DASHBOARD_EDITOR_URL`, `PREVIEW_PUBLIC_URL` and `http://localhost:8123` are
-already covered.
+| Defence | Effect for an untrusted origin |
+|---|---|
+| CORS credentials | no `Access-Control-Allow-Credentials`, so a browser refuses to expose a cookie-authenticated response to the page — it cannot **read** your projects, library, store or admin data |
+| CSRF guard (`core/auth/csrf-guard.ts`) | `403 {"error":"csrf_origin_rejected"}` on writes to `/api/projects`, `/api/library` (store included) and `/api/admin` — it cannot **write** as you |
+| Room identity (`core/rooms/rooms-router.ts`) | a room token is minted for a **guest**, never for the cookie's account — it cannot **speak** as you |
 
-`/api/rooms` and `/api/preview` are deliberately **not** guarded: they are reached from arbitrary
-origins by design (a published game, a shared player link) and authorize with their own per-session
-tokens, so a provenance check there would break the feature while protecting nothing. `/api/auth` is out
-too — login and register do not act on an existing session.
+Trusted without configuration: this server's own public origin (`PREVIEW_PUBLIC_URL`), `DASHBOARD_EDITOR_URL`,
+same-site siblings of the server's host (`*.pix3.dev`), and the documented dev-server port
+`http://localhost:8123`. Anything else goes in `TRUSTED_ORIGINS` (comma-separated; the old
+`CSRF_ALLOWED_ORIGINS` name is still honoured).
 
-Still open, and a different problem: `cors({ origin: true, credentials: true })` lets **any** origin
-*read* cookie-authenticated responses. Closing that needs the rooms/preview clients to stop sending
-`credentials: 'include'` (they authenticate with Bearer tokens) before the server can stop returning
-`Access-Control-Allow-Credentials` to unknown origins — a coordinated client+server change, so it is not
-bundled with the guard above.
+Two passes are deliberate rather than sloppy. A request with **no session cookie** is not a threat —
+whatever the route needs it still demands. A request with **no `Origin` and no `Referer`** is not a
+browser: every browser attaches `Origin` to a cross-site write, so a header-less request cannot be a page
+acting for a user; it is curl, an agent or CI, and it keeps its account identity. The CSRF guard
+additionally trusts `Sec-Fetch-Site: same-origin`/`same-site`/`none`, which the browser sets and page
+script cannot forge.
+
+A token scheme (synchronizer or double-submit) was rejected on one point: the editor deploys separately
+from this server, so the day the server started demanding a token, every cached client build would fail
+writes until it reloaded. Provenance needs no client cooperation, which is what made it deployable on a
+live system.
+
+`/api/rooms` and `/api/preview` stay open to any origin — a published game and a shared player link are
+the feature — and they keep `Allow-Credentials` so clients already in the wild do not break. That is safe
+because they authorize with their own per-session tokens and, as the table says, an untrusted caller there
+is a guest: nothing cookie-derived is reachable. `/api/auth` is unguarded too, since login and register do
+not act on an existing session.
 
 ### Management dashboard
 
@@ -135,9 +142,11 @@ PROJECTS_STORAGE_DIR=./data/projects
 JWT_SECRET=change-me
 PASSWORD_SALT_ROUNDS=10
 
-# Extra cross-site origins allowed to send cookie-authenticated writes (comma-separated).
-# Same-site and same-origin callers need no entry — see "CSRF protection on the cookie surface".
-CSRF_ALLOWED_ORIGINS=
+# Origins allowed to act as the signed-in user (comma-separated): read cookie-authenticated
+# responses, write with the cookie, and mint a room token for the account. This server's own
+# origin, DASHBOARD_EDITOR_URL, same-site siblings and http://localhost:8123 need no entry.
+# See "Trusted origins". (CSRF_ALLOWED_ORIGINS is the old name, still honoured.)
+TRUSTED_ORIGINS=
 
 # Management dashboard (all optional; defaults shown)
 DASHBOARD_EDITOR_URL=https://editor.pix3.dev

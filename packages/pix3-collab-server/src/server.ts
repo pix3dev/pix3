@@ -9,6 +9,7 @@ import { config } from './config.js';
 import { initDb } from './core/db.js';
 import { authRouter } from './core/auth/auth-router.js';
 import { createCsrfGuard } from './core/auth/csrf-guard.js';
+import { originTrust } from './core/auth/origin-trust.js';
 import { projectsRouter } from './core/projects/projects-router.js';
 import { storageRouter } from './core/storage/storage-router.js';
 import { libraryRouter } from './core/library/library-router.js';
@@ -42,6 +43,43 @@ function closeUpgradeSocket(socket: Socket): void {
   socket.destroy();
 }
 
+/**
+ * Route prefixes that are public by design and authorize with their own per-session tokens: a published
+ * game creating a room, a shared player link driving a preview. They keep `Allow-Credentials`, because
+ * clients already in the wild send `credentials: 'include'` there and would break without it — and they
+ * can afford to, since `/api/rooms` only honours a cookie identity from a trusted origin (see
+ * `rooms-router`), so there is nothing cookie-derived for a stranger to read.
+ */
+const TOKEN_AUTHENTICATED_PREFIXES = ['/api/rooms', '/api/preview'] as const;
+
+/**
+ * Per-origin CORS.
+ *
+ * The origin is always reflected — the public API (store listings, room status, the player relay) must
+ * work from anywhere. What is *not* handed out freely is `Access-Control-Allow-Credentials`: without it a
+ * browser refuses to expose a credentialed response to the page, so an untrusted site can no longer read
+ * the signed-in user's projects, library or admin data even though the cookie is `SameSite=None` and
+ * still reaches us.
+ *
+ * This is the read-side twin of the CSRF guard, off the same trust list, and it is why the two must be
+ * changed together.
+ */
+function resolveCorsOptions(
+  req: IncomingMessage,
+  callback: (error: Error | null, options: cors.CorsOptions) => void
+): void {
+  const origin = req.headers.origin ?? null;
+  const requestPath = (req.url ?? '').split('?')[0];
+  const isPublicTokenPath = TOKEN_AUTHENTICATED_PREFIXES.some(prefix =>
+    requestPath.startsWith(prefix)
+  );
+
+  callback(null, {
+    origin: true,
+    credentials: originTrust.isTrusted(origin) || isPublicTokenPath,
+  });
+}
+
 function closeHttpServer(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close(error => {
@@ -66,12 +104,7 @@ export async function startServer(): Promise<void> {
 
   const app = express();
   app.use(cookieParser());
-  app.use(
-    cors({
-      origin: true,
-      credentials: true,
-    })
-  );
+  app.use(cors(resolveCorsOptions));
   app.use(express.json());
 
   // CSRF provenance check, mounted BEFORE the routers it protects so it runs on every write into them.

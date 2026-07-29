@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { config } from '../../config.js';
 import { attachOptionalAuth, type AuthenticatedRequest } from '../auth/auth-middleware.js';
+import { mayActAsUser } from '../auth/origin-trust.js';
 import {
   createFabricRoom,
   createGuestIdentity,
@@ -240,7 +241,16 @@ function sessionPayload(room: RoomSummary, identity: RoomIdentity): Record<strin
   };
 }
 
-/** A signed-in user speaks as themselves; everyone else gets a fresh guest subject. */
+/**
+ * A signed-in user speaks as themselves; everyone else gets a fresh guest subject.
+ *
+ * "Signed in" additionally requires a **trusted origin**. This endpoint is deliberately open to any
+ * origin — that is what makes a published game able to create rooms — and it hands back a signed room
+ * token. Honouring the cookie unconditionally would therefore let any page mint a token bound to a
+ * visitor's pix3 account and join a room as them. Downgrading to a guest costs an untrusted caller
+ * nothing that matters (the account only decides the `sub` and the default display name) and closes
+ * that entirely; an origin that legitimately needs account identity belongs in `TRUSTED_ORIGINS`.
+ */
 function resolveIdentity(
   req: AuthenticatedRequest,
   rawName: unknown,
@@ -248,7 +258,7 @@ function resolveIdentity(
 ): RoomIdentity {
   const requested = readString(rawName, MAX_DISPLAY_NAME);
 
-  if (req.user) {
+  if (req.user && mayActAsUser(req.headers.origin)) {
     return {
       sub: `user:${req.user.id}`,
       displayName: requested || req.user.username || 'Player',

@@ -8,11 +8,13 @@ export const config = {
   LIBRARY_STORAGE_DIR: process.env.LIBRARY_STORAGE_DIR || './data/library',
   JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-production',
   PASSWORD_SALT_ROUNDS: parseInt(process.env.PASSWORD_SALT_ROUNDS || '10', 10),
-  // Extra origins allowed to send cookie-authenticated writes (comma-separated). The session cookie
-  // must be SameSite=None for the editor to reach this API cross-site, so provenance is checked per
-  // request instead — see core/auth/csrf-guard.ts. Same-site and same-origin callers need no entry
-  // here; this is for a genuinely cross-site origin you choose to trust.
-  CSRF_ALLOWED_ORIGINS: process.env.CSRF_ALLOWED_ORIGINS || '',
+  // Origins allowed to act as the signed-in user (comma-separated): they may read cookie-authenticated
+  // responses (CORS credentials), write with the cookie (CSRF guard), and mint a room token for their
+  // account. This server's own public origin, DASHBOARD_EDITOR_URL, same-site siblings and the
+  // documented dev port are trusted without an entry — see core/auth/origin-trust.ts.
+  //
+  // CSRF_ALLOWED_ORIGINS is the previous name, still honoured so a deployed shared/.env keeps working.
+  TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS || process.env.CSRF_ALLOWED_ORIGINS || '',
   COLLABORATION_PATH: process.env.COLLABORATION_PATH || '/collaboration',
   PREVIEW_PATH: process.env.PREVIEW_PATH || '/preview',
   // Sliding TTL for anonymous preview sessions (any WS/HTTP activity extends it).

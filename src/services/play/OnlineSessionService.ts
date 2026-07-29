@@ -243,10 +243,11 @@ export class OnlineSessionService {
     }
 
     try {
+      // No `credentials: 'include'`: holding the host token IS the ownership proof this route checks,
+      // so sending the session cookie along would only hand it to an endpoint that has no use for it.
       await fetch(`${API_ORIGIN}/api/rooms/${encodeURIComponent(roomId)}`, {
         method: 'DELETE',
         headers: { authorization: `Bearer ${token}` },
-        credentials: 'include',
       });
     } catch (error) {
       this.logger.warn(
@@ -270,6 +271,9 @@ export class OnlineSessionService {
     // legitimately spawnable. A published build narrows this to what it actually ships.
     const allowedKinds = Array.from({ length: prefabCount }, (_, index) => index);
 
+    // The cookie IS wanted here: from a trusted origin it makes the host speak as the signed-in
+    // account rather than as a fresh guest. An untrusted origin is downgraded to a guest by the
+    // server, so sending it costs nothing there either.
     const response = await fetch(`${API_ORIGIN}/api/rooms`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
