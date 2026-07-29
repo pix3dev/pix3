@@ -269,6 +269,34 @@ export async function deleteFabricRoom(roomId: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * The fabric's own `GET /admin/stats`: version, commit, resource use, transport counters and every
+ * live room, passed through verbatim.
+ *
+ * Deliberately untyped beyond `Record`: this server does not interpret the fabric's operational
+ * numbers, it only relays them to the dashboard, and re-declaring that whole shape here would mean
+ * two definitions to keep in step for zero gain. The fabric's contract lives in its own repo.
+ */
+export async function fetchFabricStats(): Promise<Record<string, unknown>> {
+  const response = await fabricFetch('/admin/stats', { method: 'GET' });
+  const text = await response.text();
+
+  if (!response.ok) {
+    const status = response.status === 401 || response.status === 403 ? 502 : response.status;
+    throw new FabricError(
+      status,
+      response.status === 401 || response.status === 403 ? 'fabric_unauthorized' : 'fabric_error',
+      `The Room Fabric answered HTTP ${response.status} for /admin/stats.`
+    );
+  }
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new FabricError(502, 'fabric_error', 'The Room Fabric returned a body that is not JSON.');
+  }
+}
+
 async function fabricFetch(path: string, init: RequestInit): Promise<Response> {
   if (!isRoomsConfigured()) {
     throw new FabricError(

@@ -217,6 +217,39 @@ class PreviewSessionService {
     this.sessions.delete(sessionId);
   }
 
+  /**
+   * Live-session counts for the management dashboard. Read-only and allocation-light: it walks the
+   * session map, so it can be called on every dashboard poll without touching any socket.
+   */
+  snapshotStats(): {
+    sessions: number;
+    hosts: number;
+    players: number;
+    oldestSessionAgeSeconds: number | null;
+  } {
+    let hosts = 0;
+    let players = 0;
+    let oldestCreatedAt: number | null = null;
+
+    for (const session of this.sessions.values()) {
+      if (session.sockets.host) {
+        hosts += 1;
+      }
+      players += session.sockets.players.size;
+      if (oldestCreatedAt === null || session.createdAt < oldestCreatedAt) {
+        oldestCreatedAt = session.createdAt;
+      }
+    }
+
+    return {
+      sessions: this.sessions.size,
+      hosts,
+      players,
+      oldestSessionAgeSeconds:
+        oldestCreatedAt === null ? null : Math.round((Date.now() - oldestCreatedAt) / 1000),
+    };
+  }
+
   destroyAll(): void {
     for (const sessionId of Array.from(this.sessions.keys())) {
       this.destroySession(sessionId);

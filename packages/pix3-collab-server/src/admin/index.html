@@ -30,6 +30,13 @@
         body { background-color: #1a1a1a; color: #e5e5e5; }
         .tab-active { border-bottom: 2px solid #ffcf33; color: #ffcf33; }
         .glass-panel { background: rgba(45, 45, 45, 0.7); backdrop-filter: blur(10px); border: 1px solid #404040; }
+        /* Загрузка ресурсов: тонкая полоса вместо диаграммы — она читается в один взгляд и не требует библиотеки. */
+        .meter { height: 6px; border-radius: 3px; background: #1f1f1f; overflow: hidden; }
+        .meter > span { display: block; height: 100%; border-radius: 3px; transition: width .4s ease; }
+        .meter-ok > span { background: #4ade80; }
+        .meter-warn > span { background: #ffcf33; }
+        .meter-hot > span { background: #f87171; }
+        .status-dot { width: .625rem; height: .625rem; border-radius: 9999px; flex: none; }
     </style>
 </head>
 <body class="min-h-screen font-sans antialiased">
@@ -58,7 +65,12 @@
             
             <!-- Табы -->
             <div class="flex gap-6 mb-8 border-b border-gray-700">
-                <button 
+                <button
+                    @click="openDashboard"
+                    :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'dashboard' ? 'tab-active' : 'text-gray-400']">
+                    Дашборд
+                </button>
+                <button
                     @click="currentTab = 'users'"
                     :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'users' ? 'tab-active' : 'text-gray-400']">
                     Пользователи
@@ -73,6 +85,294 @@
                     :class="['pb-3 px-2 font-medium transition-colors hover:text-white', currentTab === 'audit' ? 'tab-active' : 'text-gray-400']">
                     Журнал стора
                 </button>
+            </div>
+
+            <!-- Вкладка: Дашборд -->
+            <div v-show="currentTab === 'dashboard'" class="space-y-6">
+
+                <!-- Панель управления обновлением -->
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="text-sm text-gray-400">
+                        <span v-if="dashboardError" class="text-red-400">{{ dashboardError }}</span>
+                        <span v-else-if="dashboard">Обновлено {{ formatTime(dashboard.generatedAt) }}</span>
+                        <span v-else>Загрузка...</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+                            <input type="checkbox" v-model="dashboardAutoRefresh" class="accent-pix3">
+                            Автообновление 5с
+                        </label>
+                        <button @click="fetchDashboard(true)" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded transition-colors" title="Обновить, включая версии в репозитории">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            Обновить
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 1. Статус сервисов -->
+                <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div v-for="service in dashboard?.services ?? []" :key="service.id" class="glass-panel rounded-lg p-5">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="status-dot" :class="statusDotClass(service.status)"></span>
+                                <h3 class="font-medium text-white truncate">{{ service.name }}</h3>
+                            </div>
+                            <span class="px-2 py-1 rounded text-xs font-medium whitespace-nowrap" :class="statusBadgeClass(service.status)">
+                                {{ statusLabel(service.status) }}
+                            </span>
+                        </div>
+
+                        <p v-if="service.url" class="mt-1 text-xs text-gray-500 font-mono truncate">{{ service.url }}</p>
+                        <p v-if="service.message" class="mt-2 text-xs text-red-300 break-words">{{ service.message }}</p>
+
+                        <dl class="mt-4 space-y-1.5 text-sm">
+                            <div v-if="service.version" class="flex justify-between gap-3">
+                                <dt class="text-gray-400">Версия</dt>
+                                <dd class="text-gray-200 font-mono text-xs text-right">{{ service.version }}</dd>
+                            </div>
+                            <div v-if="service.commit" class="flex justify-between gap-3">
+                                <dt class="text-gray-400">Коммит</dt>
+                                <dd class="text-gray-200 font-mono text-xs">{{ shortSha(service.commit) }}</dd>
+                            </div>
+                            <div v-if="service.uptimeSeconds !== null" class="flex justify-between gap-3">
+                                <dt class="text-gray-400">Uptime</dt>
+                                <dd class="text-gray-200">{{ formatDuration(service.uptimeSeconds) }}</dd>
+                            </div>
+                            <div v-for="figure in service.figures" :key="figure.label" class="flex justify-between gap-3">
+                                <dt class="text-gray-400">{{ figure.label }}</dt>
+                                <dd class="text-gray-200 font-mono text-xs text-right">{{ figure.value }}</dd>
+                            </div>
+                        </dl>
+
+                        <!-- Потребление ресурсов: только у сервисов, которые сами о себе отчитываются -->
+                        <div v-if="service.cpuPercent !== null || service.memoryBytes !== null" class="mt-4 space-y-3">
+                            <div v-if="service.cpuPercent !== null">
+                                <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                    <span>CPU</span>
+                                    <span class="font-mono text-gray-300">{{ formatPercent(service.cpuPercent) }}</span>
+                                </div>
+                                <div class="meter" :class="meterClass(service.cpuPercent)"><span :style="{ width: barWidth(service.cpuPercent) }"></span></div>
+                            </div>
+                            <div v-if="service.memoryBytes !== null">
+                                <div class="flex justify-between text-xs text-gray-400 mb-1">
+                                    <span>Память{{ service.memoryLimitBytes ? ' (лимит ' + formatBytes(service.memoryLimitBytes) + ')' : '' }}</span>
+                                    <span class="font-mono text-gray-300">{{ formatBytes(service.memoryBytes) }}</span>
+                                </div>
+                                <!-- Полоса только когда есть лимит: у Node-процесса потолка нет, и шкала «из чего»
+                                     была бы выдуманной — тогда достаточно самого числа. -->
+                                <div v-if="service.memoryLimitBytes" class="meter" :class="meterClass(ratioPercent(service.memoryBytes, service.memoryLimitBytes))">
+                                    <span :style="{ width: barWidth(ratioPercent(service.memoryBytes, service.memoryLimitBytes)) }"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Ресурсы сервера -->
+                <div v-for="host in dashboard?.hosts ?? []" :key="host.hostname + host.reportedBy" class="glass-panel rounded-lg overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-700 flex flex-wrap items-center justify-between gap-2">
+                        <h2 class="text-lg font-medium text-white">
+                            Сервер {{ host.hostname }}
+                            <span class="text-sm text-gray-500 font-normal">· {{ host.os }} · {{ host.cpuCount }} vCPU</span>
+                        </h2>
+                        <span class="text-sm text-gray-400">
+                            Uptime {{ formatDuration(host.uptimeSeconds) }}
+                            <span class="text-gray-600">· данные от {{ host.reportedBy }}</span>
+                        </span>
+                    </div>
+                    <div class="grid gap-6 p-6 md:grid-cols-3">
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span class="text-gray-400">CPU</span>
+                                <span class="font-mono text-gray-200">{{ formatPercent(host.cpuPercent) }}</span>
+                            </div>
+                            <div class="meter" :class="meterClass(host.cpuPercent)"><span :style="{ width: barWidth(host.cpuPercent) }"></span></div>
+                            <p class="mt-2 text-xs text-gray-500">
+                                load {{ formatLoad(host.load1) }} / {{ formatLoad(host.load5) }} / {{ formatLoad(host.load15) }}
+                                <span v-if="host.load1 !== null && host.cpuCount"> · на ядро {{ formatLoad(host.load1 / host.cpuCount) }}</span>
+                            </p>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span class="text-gray-400">Память</span>
+                                <span class="font-mono text-gray-200">
+                                    {{ formatBytes(usedBytes(host.memoryTotalBytes, host.memoryAvailableBytes)) }} / {{ formatBytes(host.memoryTotalBytes) }}
+                                </span>
+                            </div>
+                            <div class="meter" :class="meterClass(usedPercent(host.memoryTotalBytes, host.memoryAvailableBytes))">
+                                <span :style="{ width: barWidth(usedPercent(host.memoryTotalBytes, host.memoryAvailableBytes)) }"></span>
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500">свободно {{ formatBytes(host.memoryAvailableBytes) }} (MemAvailable)</p>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span class="text-gray-400">Диск</span>
+                                <span class="font-mono text-gray-200">
+                                    {{ formatBytes(usedBytes(host.diskTotalBytes, host.diskFreeBytes)) }} / {{ formatBytes(host.diskTotalBytes) }}
+                                </span>
+                            </div>
+                            <div class="meter" :class="meterClass(usedPercent(host.diskTotalBytes, host.diskFreeBytes))">
+                                <span :style="{ width: barWidth(usedPercent(host.diskTotalBytes, host.diskFreeBytes)) }"></span>
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500">свободно {{ formatBytes(host.diskFreeBytes) }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Версии: развёрнуто против репозитория -->
+                <div class="glass-panel rounded-lg overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-700 flex flex-wrap items-center justify-between gap-2">
+                        <h2 class="text-lg font-medium text-white">Версии</h2>
+                        <span class="text-xs text-gray-500">
+                            Репозитории прочитаны {{ formatTime(dashboard?.repo?.fetchedAt) }} · кэш 10 мин
+                        </span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="uppercase tracking-wider border-b border-gray-700 bg-gray-800/50 text-gray-400 text-xs">
+                                <tr>
+                                    <th class="px-6 py-3">Компонент</th>
+                                    <th class="px-6 py-3">Развёрнуто</th>
+                                    <th class="px-6 py-3">Коммит</th>
+                                    <th class="px-6 py-3">В репозитории</th>
+                                    <th class="px-6 py-3">HEAD</th>
+                                    <th class="px-6 py-3">Статус</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in dashboard?.versions ?? []" :key="row.component" class="border-b border-gray-800">
+                                    <td class="px-6 py-4 text-white font-medium">
+                                        {{ row.component }}
+                                        <!-- Предупреждение (например, расхождение общей версии с cloud) не должно
+                                             тонуть в сером мелком тексте: строка может быть «актуально» по коммиту
+                                             и всё равно требовать действия. -->
+                                        <p v-if="row.note" class="text-xs font-normal whitespace-normal max-w-xs" :class="row.noteSeverity === 'warn' ? 'text-amber-300' : 'text-gray-500'">{{ row.note }}</p>
+                                    </td>
+                                    <td class="px-6 py-4 text-gray-200 font-mono text-xs">{{ row.deployedVersion ?? '—' }}</td>
+                                    <td class="px-6 py-4 text-gray-400 font-mono text-xs">{{ shortSha(row.deployedCommit) }}</td>
+                                    <td class="px-6 py-4 text-gray-200 font-mono text-xs">{{ row.repoVersion ?? '—' }}</td>
+                                    <td class="px-6 py-4 text-gray-400 font-mono text-xs">{{ shortSha(row.repoCommit) }}</td>
+                                    <td class="px-6 py-4">
+                                        <span class="px-2 py-1 rounded text-xs font-medium" :class="versionStateClass(row.state)">
+                                            {{ versionStateLabel(row.state) }}
+                                        </span>
+                                        <span v-if="row.behindBy" class="ml-2 text-xs text-amber-200">отстаёт на {{ row.behindBy }}</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div v-if="dashboard?.repo?.pix3?.error || dashboard?.repo?.rooms?.error" class="px-6 py-3 border-t border-gray-700 text-xs text-amber-300">
+                        GitHub API недоступен: {{ dashboard?.repo?.pix3?.error || dashboard?.repo?.rooms?.error }} — сравнение по коммитам недоступно.
+                    </div>
+                </div>
+
+                <!-- 4. Подключения -->
+                <div class="grid gap-6 lg:grid-cols-2">
+                    <!-- Cloud: совместное редактирование + relay превью -->
+                    <div class="glass-panel rounded-lg overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-700">
+                            <h2 class="text-lg font-medium text-white">Подключения к cloud</h2>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4 px-6 py-4 border-b border-gray-800 text-center">
+                            <div>
+                                <p class="text-2xl font-semibold text-pix3">{{ dashboard?.cloud?.connections?.collaboration?.connections ?? 0 }}</p>
+                                <p class="text-xs text-gray-400 mt-1">сокеты редактора</p>
+                            </div>
+                            <div>
+                                <p class="text-2xl font-semibold text-white">{{ dashboard?.cloud?.connections?.collaboration?.documents ?? 0 }}</p>
+                                <p class="text-xs text-gray-400 mt-1">открытых проектов</p>
+                            </div>
+                            <div>
+                                <p class="text-2xl font-semibold text-white">{{ dashboard?.cloud?.connections?.preview?.sessions ?? 0 }}</p>
+                                <p class="text-xs text-gray-400 mt-1">сессий превью</p>
+                            </div>
+                        </div>
+                        <table class="w-full text-left text-sm">
+                            <thead class="uppercase tracking-wider border-b border-gray-700 bg-gray-800/50 text-gray-400 text-xs">
+                                <tr>
+                                    <th class="px-6 py-3">Проект</th>
+                                    <th class="px-6 py-3 text-right">Соединений</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-if="(dashboard?.cloud?.connections?.collaboration?.items ?? []).length === 0">
+                                    <td colspan="2" class="px-6 py-6 text-center text-gray-500">Нет активных сессий редактирования</td>
+                                </tr>
+                                <tr v-for="doc in dashboard?.cloud?.connections?.collaboration?.items ?? []" :key="doc.name" class="border-b border-gray-800">
+                                    <td class="px-6 py-3 font-mono text-xs text-gray-300">{{ doc.projectId ?? doc.name }}</td>
+                                    <td class="px-6 py-3 text-right text-gray-200">{{ doc.connections }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="px-6 py-3 border-t border-gray-800 text-xs text-gray-500">
+                            Превью: хостов {{ dashboard?.cloud?.connections?.preview?.hosts ?? 0 }},
+                            игроков {{ dashboard?.cloud?.connections?.preview?.players ?? 0 }}
+                            <span v-if="dashboard?.cloud?.connections?.preview?.oldestSessionAgeSeconds !== null">
+                                · старейшая сессия {{ formatDuration(dashboard?.cloud?.connections?.preview?.oldestSessionAgeSeconds) }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Rooms: игровые комнаты -->
+                    <div class="glass-panel rounded-lg overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-700">
+                            <h2 class="text-lg font-medium text-white">Подключения к rooms</h2>
+                        </div>
+                        <div v-if="!roomsStats" class="px-6 py-8 text-center text-gray-500">
+                            {{ dashboard?.rooms?.error || 'Room Fabric не отвечает' }}
+                        </div>
+                        <template v-else>
+                            <div class="grid grid-cols-3 gap-4 px-6 py-4 border-b border-gray-800 text-center">
+                                <div>
+                                    <p class="text-2xl font-semibold text-pix3">{{ roomsStats.connections?.active ?? 0 }}</p>
+                                    <p class="text-xs text-gray-400 mt-1">сокетов / лимит {{ roomsStats.connections?.maxTotal ?? '?' }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-2xl font-semibold text-white">{{ roomsStats.rooms?.count ?? 0 }}</p>
+                                    <p class="text-xs text-gray-400 mt-1">комнат / лимит {{ roomsStats.rooms?.maxRooms ?? '?' }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-2xl font-semibold text-white">{{ roomsStats.rooms?.players ?? 0 }}</p>
+                                    <p class="text-xs text-gray-400 mt-1">игроков в комнатах</p>
+                                </div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm whitespace-nowrap">
+                                    <thead class="uppercase tracking-wider border-b border-gray-700 bg-gray-800/50 text-gray-400 text-xs">
+                                        <tr>
+                                            <th class="px-6 py-3">Комната</th>
+                                            <th class="px-6 py-3">Проект</th>
+                                            <th class="px-6 py-3 text-right">Игроки</th>
+                                            <th class="px-6 py-3 text-right">Сущности</th>
+                                            <th class="px-6 py-3 text-right">Tick p99</th>
+                                            <th class="px-6 py-3 text-right">Исх./с</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-if="(roomsStats.rooms?.items ?? []).length === 0">
+                                            <td colspan="6" class="px-6 py-6 text-center text-gray-500">Живых комнат нет</td>
+                                        </tr>
+                                        <tr v-for="room in roomsStats.rooms?.items ?? []" :key="room.roomId" class="border-b border-gray-800">
+                                            <td class="px-6 py-3 font-mono text-xs text-gray-300">{{ room.roomId }}</td>
+                                            <td class="px-6 py-3 font-mono text-xs text-gray-400">{{ room.projectId || '—' }}</td>
+                                            <td class="px-6 py-3 text-right text-gray-200">{{ room.players }} / {{ room.maxPlayers }}</td>
+                                            <td class="px-6 py-3 text-right text-gray-200">{{ room.entities }}</td>
+                                            <td class="px-6 py-3 text-right text-gray-200">{{ formatMs(room.tickP99Ms) }}</td>
+                                            <td class="px-6 py-3 text-right text-gray-200">{{ formatBytes(room.bytesOutPerSecond) }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="px-6 py-3 border-t border-gray-800 text-xs text-gray-500">
+                                Всего принято {{ roomsStats.connections?.acceptedTotal ?? 0 }},
+                                отказов {{ roomsStats.connections?.rejectedTotal ?? 0 }},
+                                ошибок токена {{ roomsStats.connections?.authFailuresTotal ?? 0 }},
+                                дропнутых кадров {{ roomsStats.connections?.framesDroppedTotal ?? 0 }}
+                            </div>
+                        </template>
+                    </div>
+                </div>
             </div>
 
             <!-- Вкладка: Пользователи -->
@@ -213,11 +513,11 @@
     </div>
 
     <script>
-        const { createApp, ref, onMounted, nextTick } = Vue;
+        const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
 
         createApp({
             setup() {
-                const currentTab = ref('users');
+                const currentTab = ref('dashboard');
                 const users = ref([]);
                 const projects = ref([]);
                 const audit = ref([]);
@@ -302,6 +602,159 @@
                     }
                 };
 
+                // ── Дашборд ──────────────────────────────────────────────────────────────────
+                // Сервер собирает всё одним ответом (у него служебный токен фабрики и он один может
+                // прочитать version.json клиента — GitHub Pages не отдаёт CORS-заголовки).
+                const dashboard = ref(null);
+                const dashboardError = ref('');
+                const dashboardAutoRefresh = ref(true);
+                let dashboardTimer = null;
+
+                const roomsStats = computed(() => dashboard.value?.rooms?.stats ?? null);
+
+                // Обновление молча: ошибка живёт в собственной строке дашборда, а не в тостах —
+                // при автообновлении раз в 5 секунд тосты превратились бы в поток.
+                const fetchDashboard = async (force = false) => {
+                    try {
+                        const response = await fetch(force ? '/api/admin/dashboard?force=1' : '/api/admin/dashboard', {
+                            credentials: 'include',
+                        });
+                        if (response.status === 401) {
+                            window.location.href = '/login';
+                            return;
+                        }
+                        if (!response.ok) {
+                            throw new Error(`Ошибка ${response.status}`);
+                        }
+                        dashboard.value = await response.json();
+                        dashboardError.value = '';
+                    } catch (e) {
+                        dashboardError.value = `Не удалось получить данные: ${e.message}`;
+                    }
+                    nextTick(() => lucide.createIcons());
+                };
+
+                // Таймер живёт только пока вкладка открыта: закрытый дашборд не должен опрашивать
+                // фабрику и GitHub, а скрытая вкладка браузера всё равно душит интервалы.
+                const syncDashboardTimer = () => {
+                    const shouldPoll = dashboardAutoRefresh.value && currentTab.value === 'dashboard';
+                    if (shouldPoll && !dashboardTimer) {
+                        dashboardTimer = setInterval(() => fetchDashboard(false), 5000);
+                    } else if (!shouldPoll && dashboardTimer) {
+                        clearInterval(dashboardTimer);
+                        dashboardTimer = null;
+                    }
+                };
+
+                watch([dashboardAutoRefresh, currentTab], syncDashboardTimer);
+                onUnmounted(() => {
+                    if (dashboardTimer) clearInterval(dashboardTimer);
+                });
+
+                const openDashboard = () => {
+                    currentTab.value = 'dashboard';
+                    if (!dashboard.value) {
+                        fetchDashboard(false);
+                    }
+                };
+
+                const STATUS_LABELS = {
+                    ok: 'работает',
+                    degraded: 'с ошибками',
+                    unreachable: 'недоступен',
+                    not_configured: 'не настроен',
+                };
+
+                const statusLabel = (status) => STATUS_LABELS[status] ?? status;
+
+                const statusDotClass = (status) => {
+                    if (status === 'ok') return 'bg-green-400';
+                    if (status === 'degraded') return 'bg-amber-400';
+                    if (status === 'not_configured') return 'bg-gray-500';
+                    return 'bg-red-500';
+                };
+
+                const statusBadgeClass = (status) => {
+                    if (status === 'ok') return 'bg-green-900/40 text-green-200';
+                    if (status === 'degraded') return 'bg-amber-900/40 text-amber-200';
+                    if (status === 'not_configured') return 'bg-gray-700 text-gray-300';
+                    return 'bg-red-900/40 text-red-200';
+                };
+
+                const VERSION_STATE_LABELS = { current: 'актуально', stale: 'отстаёт', unknown: 'неизвестно' };
+                const versionStateLabel = (state) => VERSION_STATE_LABELS[state] ?? state;
+                const versionStateClass = (state) => {
+                    if (state === 'current') return 'bg-green-900/40 text-green-200';
+                    if (state === 'stale') return 'bg-amber-900/40 text-amber-200';
+                    return 'bg-gray-700 text-gray-300';
+                };
+
+                const formatBytes = (bytes) => {
+                    if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
+                    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+                    let value = bytes;
+                    let unit = 0;
+                    while (value >= 1024 && unit < units.length - 1) {
+                        value /= 1024;
+                        unit += 1;
+                    }
+                    return `${value >= 100 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+                };
+
+                const formatPercent = (value) =>
+                    value === null || value === undefined || !Number.isFinite(value) ? '—' : `${value.toFixed(1)}%`;
+
+                const formatLoad = (value) =>
+                    value === null || value === undefined || !Number.isFinite(value) ? '—' : value.toFixed(2);
+
+                const formatMs = (value) =>
+                    value === null || value === undefined || !Number.isFinite(value) ? '—' : `${value.toFixed(1)} мс`;
+
+                const formatDuration = (seconds) => {
+                    if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '—';
+                    const total = Math.max(0, Math.floor(seconds));
+                    const days = Math.floor(total / 86400);
+                    const hours = Math.floor((total % 86400) / 3600);
+                    const minutes = Math.floor((total % 3600) / 60);
+                    if (days > 0) return `${days}д ${hours}ч`;
+                    if (hours > 0) return `${hours}ч ${minutes}м`;
+                    if (minutes > 0) return `${minutes}м`;
+                    return `${total}с`;
+                };
+
+                const formatTime = (iso) => {
+                    if (!iso) return '—';
+                    const parsed = new Date(iso);
+                    return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleTimeString('ru-RU');
+                };
+
+                const shortSha = (sha) => (sha ? sha.slice(0, 7) : '—');
+
+                const usedBytes = (total, free) =>
+                    Number.isFinite(total) && Number.isFinite(free) ? Math.max(0, total - free) : null;
+
+                const usedPercent = (total, free) => {
+                    const used = usedBytes(total, free);
+                    return used === null || !total ? null : (used / total) * 100;
+                };
+
+                const ratioPercent = (value, limit) =>
+                    Number.isFinite(value) && Number.isFinite(limit) && limit > 0 ? (value / limit) * 100 : null;
+
+                // Порог 90% красный, 70% жёлтый: сервер одноядерный и делится с nginx, поэтому
+                // «горячо» начинается раньше, чем на выделенной машине.
+                const meterClass = (percent) => {
+                    if (percent === null || percent === undefined || !Number.isFinite(percent)) return 'meter-ok';
+                    if (percent >= 90) return 'meter-hot';
+                    if (percent >= 70) return 'meter-warn';
+                    return 'meter-ok';
+                };
+
+                const barWidth = (percent) => {
+                    if (percent === null || percent === undefined || !Number.isFinite(percent)) return '0%';
+                    return `${Math.min(100, Math.max(0, percent))}%`;
+                };
+
                 const AUDIT_LABELS = {
                     'item.upload': 'Загрузка бандла',
                     'item.publish': 'Публикация',
@@ -366,6 +819,8 @@
                 // Инициализация
                 onMounted(async () => {
                     await fetchMe();
+                    fetchDashboard(false);
+                    syncDashboardTimer();
                     fetchUsers();
                     fetchProjects();
                 });
@@ -375,7 +830,13 @@
                     audit, auditLoading, auditHasMore,
                     fetchUsers, fetchProjects, deleteUser, deleteProject, logout,
                     openAudit, fetchAudit, auditActionLabel, auditActionClass,
-                    formatAuditDate, formatAuditDetail
+                    formatAuditDate, formatAuditDetail,
+                    dashboard, dashboardError, dashboardAutoRefresh, roomsStats,
+                    fetchDashboard, openDashboard,
+                    statusLabel, statusDotClass, statusBadgeClass,
+                    versionStateLabel, versionStateClass,
+                    formatBytes, formatPercent, formatLoad, formatMs, formatDuration, formatTime,
+                    shortSha, usedBytes, usedPercent, ratioPercent, meterClass, barWidth
                 };
             }
         }).mount('#app');

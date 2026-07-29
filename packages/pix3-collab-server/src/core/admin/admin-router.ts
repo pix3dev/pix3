@@ -4,10 +4,33 @@ import path from 'path';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '../auth/auth-middleware.js';
 import { getDb } from '../db.js';
 import { config } from '../../config.js';
+import { buildDashboard } from './dashboard-service.js';
 
 export const adminRouter = Router();
 
 adminRouter.use(requireAuth, requireAdmin);
+
+/**
+ * GET /api/admin/dashboard — platform status in one body: every service, host headroom, deployed
+ * versions against the repositories, and live connection counts.
+ *
+ * Admin-only for two reasons: it reports host resources, and it is the read side of a service token
+ * (the fabric's) that no client may hold. `?force=1` bypasses the ten-minute repository-version cache.
+ */
+adminRouter.get('/dashboard', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const force = req.query.force === '1' || req.query.force === 'true';
+    res.json(await buildDashboard({ force }));
+  } catch (error) {
+    // buildDashboard degrades every component on its own, so reaching here means the aggregation
+    // itself broke — worth a log line and a 500 rather than a half-empty body.
+    console.error('[pix3-collab] dashboard assembly failed', error);
+    res.status(500).json({
+      error: 'dashboard_failed',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
 
 // GET /api/admin/users — list all users
 adminRouter.get('/users', (_req: AuthenticatedRequest, res: Response) => {

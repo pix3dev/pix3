@@ -62,8 +62,30 @@ A self-hosted Node.js server that enables real-time multiplayer editing and clou
 | Auth | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` |
 | Projects | `GET /api/projects`, `POST /api/projects`, `POST /api/projects/:id/share`, `DELETE /api/projects/:id/share`, `DELETE /api/projects/:id` |
 | Storage | `GET /api/projects/:id/manifest`, `GET /api/projects/:id/files/*`, `POST /api/projects/:id/files/*`, `DELETE /api/projects/:id/files/*` |
-| Admin | `GET /api/admin/users`, `DELETE /api/admin/users/:id`, `GET /api/admin/projects` |
+| Admin | `GET /api/admin/users`, `DELETE /api/admin/users/:id`, `GET /api/admin/projects`, `GET /api/admin/dashboard` |
 | Sync | WebSocket on `WS_PORT` (default 4000) — room format `project:{projectId}` |
+
+### Management dashboard
+
+`/admin` opens the admin panel; its first tab is a platform dashboard fed by one endpoint,
+`GET /api/admin/dashboard` (admin session required). It reports, in one body:
+
+- **Service status** — Cloud API, Yjs sync, preview relay, Room Fabric, and the client bundle on GitHub
+  Pages, each with the resource use it self-reports.
+- **Host headroom** — CPU (`/proc/stat` delta), load average, `MemAvailable`, and disk. `cloud.pix3.dev`
+  and `rooms.pix3.dev` are one machine today, so a second host block appears only if their hostnames
+  ever differ.
+- **Versions against the repositories** — deployed version and commit for each backend plus the client,
+  compared with `raw.githubusercontent.com` version files and the repositories' `HEAD` (cached 10 min;
+  `?force=1` re-reads). The deployed commit comes from the release path (`releases/<sha>/…`) or
+  `PIX3_RELEASE_SHA`; `pix3-rooms` stamps its own via `-p:SourceRevisionId`.
+- **Active connections** — collaboration sockets per open project, preview sessions, and every live room
+  on the fabric with players, entities, tick p99 and outbound throughput.
+
+This server is the aggregator because it is the only party holding the fabric's service token, and
+because Pages serves `version.json` without CORS headers — neither is readable from the browser. Every
+component degrades to its own status card; nothing here can fail the request. The fabric side is
+`GET /admin/stats` in the `pix3-rooms` repository.
 
 ### Environment Variables
 
@@ -75,6 +97,14 @@ HOCUSPOCUS_DB_PATH=./data/crdt.db
 PROJECTS_STORAGE_DIR=./data/projects
 JWT_SECRET=change-me
 PASSWORD_SALT_ROUNDS=10
+
+# Management dashboard (all optional; defaults shown)
+DASHBOARD_EDITOR_URL=https://editor.pix3.dev
+DASHBOARD_PIX3_REPO=pix3dev/pix3
+DASHBOARD_ROOMS_REPO=pix3dev/pix3-rooms
+DASHBOARD_REPO_BRANCH=main
+DASHBOARD_GITHUB_TOKEN=          # only raises GitHub's 60-req/hour anonymous API limit
+PIX3_RELEASE_SHA=                # set it if the deploy layout ever stops carrying the sha
 ```
 
 ### Running

@@ -44,4 +44,18 @@ export const config = {
   // Room creation is the expensive verb (a room is a thread on the fabric), so it
   // is bucketed per IP. Joins are not: they are bounded by the room's own caps.
   ROOMS_CREATE_PER_MINUTE: parseInt(process.env.ROOMS_CREATE_PER_MINUTE || '12', 10),
+
+  // ── Management dashboard (/api/admin/dashboard) ─────────────────────────────
+  // Where the deployed editor bundle is served from. The dashboard reads its
+  // `version.json` to report the CLIENT version, which no backend otherwise knows.
+  DASHBOARD_EDITOR_URL: (process.env.DASHBOARD_EDITOR_URL || 'https://editor.pix3.dev').replace(
+    /\/+$/,
+    ''
+  ),
+  // Repositories the deployed versions are compared against. Both are public, so the
+  // token is optional and only raises GitHub's 60-requests/hour anonymous API limit.
+  DASHBOARD_PIX3_REPO: process.env.DASHBOARD_PIX3_REPO || 'pix3dev/pix3',
+  DASHBOARD_ROOMS_REPO: process.env.DASHBOARD_ROOMS_REPO || 'pix3dev/pix3-rooms',
+  DASHBOARD_REPO_BRANCH: process.env.DASHBOARD_REPO_BRANCH || 'main',
+  DASHBOARD_GITHUB_TOKEN: process.env.DASHBOARD_GITHUB_TOKEN || '',
 } as const;

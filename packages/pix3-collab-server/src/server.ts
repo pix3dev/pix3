@@ -17,6 +17,11 @@ import { previewRouter } from './core/preview/preview-router.js';
 import { roomsRouter } from './core/rooms/rooms-router.js';
 import { createHocuspocusServer } from './sync/hocuspocus.js';
 import { createPreviewRelayServer } from './sync/preview-relay.js';
+import {
+  clearCollaborationServer,
+  registerCollaborationServer,
+} from './core/observability/connection-stats.js';
+import { resolveReleaseInfo } from './core/observability/release-info.js';
 
 function isCollaborationUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
@@ -96,13 +101,25 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // Health check
+  // Health check. Version and commit are additive: an unauthenticated caller learns nothing exploitable
+  // from them, and having them here means "which build is live?" can be answered without an admin login.
+  const release = await resolveReleaseInfo();
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', port: config.PORT });
+    res.json({
+      status: 'ok',
+      port: config.PORT,
+      version: release.version,
+      commit: release.commit,
+      uptimeSeconds: Math.round(process.uptime()),
+    });
   });
 
   const hocuspocus = createHocuspocusServer();
   const previewRelay = createPreviewRelayServer();
+
+  // The dashboard counts collaboration sockets, and this instance is otherwise local to this function.
+  registerCollaborationServer(hocuspocus.instance);
+
   const server = createServer(app);
 
   server.on('upgrade', async (request: IncomingMessage, socket: Socket, head: Buffer) => {
@@ -159,6 +176,7 @@ export async function startServer(): Promise<void> {
       console.log('[pix3-collab] HTTP server closed');
       await previewRelay.destroy();
       console.log('[pix3-collab] Preview relay closed');
+      clearCollaborationServer();
       await hocuspocus.destroy();
       console.log('[pix3-collab] Collaboration server closed');
       process.exit(0);
