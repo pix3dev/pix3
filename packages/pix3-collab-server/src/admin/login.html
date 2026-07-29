@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pix3 Collab - Вход в панель управления</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        pix3: {
+                            DEFAULT: '#ffcf33',
+                            dark: '#e6ba2e',
+                            darker: '#2d2d2d',
+                            darkest: '#1a1a1a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #1a1a1a; color: #e5e5e5; }
+        .glass-panel { background: rgba(45, 45, 45, 0.7); backdrop-filter: blur(10px); border: 1px solid #404040; }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <!--
+      Страница входа В САМУ АДМИНКУ. До неё авторизация жила только в редакторе, а `/admin` при 401
+      уводил на `/login`, которого не существовало, — то есть выйти из панели было можно, а вернуться нет.
+
+      Та же пара эндпоинтов, что у редактора (`POST /api/auth/login`, `GET /api/auth/me`), никакой
+      второй схемы аутентификации: токен приходит в HttpOnly-куке, JS его не видит и не хранит.
+    -->
+    <div id="app" class="min-h-screen flex items-center justify-center p-6" v-cloak>
+        <div class="w-full max-w-sm">
+
+            <div class="flex items-center gap-3 mb-8 justify-center">
+                <div class="w-9 h-9 rounded bg-pix3 flex items-center justify-center text-pix3-darkest font-bold">P3</div>
+                <h1 class="text-xl font-semibold text-white">Панель управления</h1>
+            </div>
+
+            <!-- Аккаунт есть, но прав администратора нет: показываем тупик явно, иначе /admin и /login
+                 гоняли бы друг к другу по кругу. -->
+            <div v-if="deniedUser" class="glass-panel rounded-lg p-6 text-center">
+                <div class="w-10 h-10 rounded-full bg-red-900/40 flex items-center justify-center mx-auto mb-4">
+                    <i data-lucide="shield-off" class="w-5 h-5 text-red-300"></i>
+                </div>
+                <h2 class="text-white font-medium mb-2">Нет прав администратора</h2>
+                <p class="text-sm text-gray-400 mb-6">
+                    Вы вошли как <span class="text-gray-200">{{ deniedUser.email }}</span>, но у этого аккаунта
+                    нет флага администратора. Панель доступна только администраторам.
+                </p>
+                <button @click="logout" :disabled="busy"
+                    class="w-full px-4 py-2.5 text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded transition-colors">
+                    Выйти и войти другим аккаунтом
+                </button>
+            </div>
+
+            <!-- Обычный вход -->
+            <form v-else @submit.prevent="submit" class="glass-panel rounded-lg p-6 space-y-4">
+                <div>
+                    <label for="email" class="block text-sm text-gray-400 mb-1.5">Email</label>
+                    <input id="email" v-model.trim="email" type="email" required autocomplete="email" autofocus
+                        :disabled="busy"
+                        class="w-full px-3 py-2.5 bg-pix3-darkest border border-gray-700 rounded text-white placeholder-gray-600 focus:border-pix3 focus:outline-none disabled:opacity-50"
+                        placeholder="you@example.com">
+                </div>
+
+                <div>
+                    <label for="password" class="block text-sm text-gray-400 mb-1.5">Пароль</label>
+                    <input id="password" v-model="password" type="password" required autocomplete="current-password"
+                        :disabled="busy"
+                        class="w-full px-3 py-2.5 bg-pix3-darkest border border-gray-700 rounded text-white placeholder-gray-600 focus:border-pix3 focus:outline-none disabled:opacity-50"
+                        placeholder="••••••••">
+                </div>
+
+                <p v-if="error" class="text-sm text-red-300 flex items-start gap-2">
+                    <i data-lucide="alert-circle" class="w-4 h-4 mt-0.5 flex-none"></i>
+                    <span>{{ error }}</span>
+                </p>
+
+                <button type="submit" :disabled="busy"
+                    class="w-full px-4 py-2.5 text-sm font-semibold text-pix3-darkest bg-pix3 hover:bg-pix3-dark disabled:opacity-60 rounded transition-colors">
+                    {{ busy ? 'Проверяем...' : 'Войти' }}
+                </button>
+
+                <p class="text-xs text-gray-500 text-center pt-2">
+                    Тот же аккаунт, что и в редакторе. Нужны права администратора.
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const email = ref('');
+                const password = ref('');
+                const error = ref('');
+                const busy = ref(false);
+                const deniedUser = ref(null);
+
+                const params = new URLSearchParams(window.location.search);
+
+                // Куда возвращаться после входа. Только относительный путь: `next=https://…` превратил бы
+                // страницу входа в открытый редирект на чужой сайт.
+                const nextPath = (() => {
+                    const raw = params.get('next') ?? '';
+                    return /^\/[^/\\]/.test(raw) ? raw : '/admin';
+                })();
+
+                // `?denied=1` ставит сама админка, получив 403. Тогда автопереход отключён: аккаунт-то есть,
+                // и отправить его обратно на /admin значило бы замкнуть цикл.
+                const deniedByPanel = params.get('denied') === '1';
+
+                const refreshIcons = () => nextTick(() => lucide.createIcons());
+
+                const readError = async (response, fallback) => {
+                    try {
+                        const data = await response.json();
+                        return typeof data?.error === 'string' ? data.error : fallback;
+                    } catch {
+                        return fallback;
+                    }
+                };
+
+                // Живая кука: администратора пускаем сразу, не-администратору объясняем, в чём дело.
+                const checkExistingSession = async () => {
+                    try {
+                        const response = await fetch('/api/auth/me', { credentials: 'include' });
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const user = await response.json();
+                        if (user?.is_admin && !deniedByPanel) {
+                            window.location.replace(nextPath);
+                            return;
+                        }
+                        if (!user?.is_admin) {
+                            deniedUser.value = user;
+                        }
+                    } catch {
+                        // Сервер недоступен — форма всё равно должна показаться.
+                    }
+                    refreshIcons();
+                };
+
+                const submit = async () => {
+                    busy.value = true;
+                    error.value = '';
+
+                    try {
+                        const response = await fetch('/api/auth/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({ email: email.value, password: password.value }),
+                        });
+
+                        if (response.status === 401) {
+                            // Одна формулировка на «нет такого email» и «пароль не тот» — как и в API,
+                            // чтобы форма не подтверждала существование аккаунта.
+                            error.value = 'Неверный email или пароль';
+                            return;
+                        }
+                        if (!response.ok) {
+                            error.value = await readError(response, `Ошибка ${response.status}`);
+                            return;
+                        }
+
+                        const user = await response.json();
+                        if (!user?.is_admin) {
+                            deniedUser.value = user;
+                            return;
+                        }
+
+                        window.location.replace(nextPath);
+                    } catch (e) {
+                        error.value = `Сервер не ответил: ${e.message}`;
+                    } finally {
+                        busy.value = false;
+                        password.value = '';
+                        refreshIcons();
+                    }
+                };
+
+                const logout = async () => {
+                    busy.value = true;
+                    try {
+                        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+                    } catch {
+                        // Даже если запрос не дошёл, форму показать надо.
+                    }
+                    // Перезагрузка без ?denied=, иначе следующий успешный вход снова упрётся в тупик.
+                    window.location.replace('/login');
+                };
+
+                onMounted(() => {
+                    checkExistingSession();
+                    refreshIcons();
+                });
+
+                return { email, password, error, busy, deniedUser, submit, logout };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

@@ -61,8 +61,10 @@ jobs:
             "$RELEASE_DIR/packages/pix3-collab-server/package.json"
           cp -R packages/pix3-collab-server/dist/. \
             "$RELEASE_DIR/packages/pix3-collab-server/dist/"
-          cp packages/pix3-collab-server/src/admin/index.html \
-            "$RELEASE_DIR/packages/pix3-collab-server/src/admin/index.html"
+          # The whole admin directory, not a named file: it now holds the panel AND its login page,
+          # and a copy step that lists filenames one by one is how a new page reaches production as a 404.
+          cp -R packages/pix3-collab-server/src/admin/. \
+            "$RELEASE_DIR/packages/pix3-collab-server/src/admin/"
 
           tar -C .deploy -czf .deploy/pix3-collab-server.tar.gz pix3-collab-server
 

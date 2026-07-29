@@ -85,20 +85,29 @@ export async function startServer(): Promise<void> {
   app.use('/api/preview', previewRouter);
   app.use('/api/rooms', roomsRouter);
 
-  // Admin UI
-  const adminPath = path.resolve('src/admin/index.html');
-  app.get('/admin', (_req, res) => {
-    if (fs.existsSync(adminPath)) {
-      res.sendFile(adminPath);
-    } else {
-      // Fallback for production/dist
-      const distAdminPath = path.resolve('dist/admin/index.html');
-      if (fs.existsSync(distAdminPath)) {
-        res.sendFile(distAdminPath);
-      } else {
-        res.status(404).send('Admin panel not found');
+  // Admin UI. Both pages are plain HTML files, served from src/ in development and from the copy the
+  // deploy places next to dist/ in production.
+  const sendAdminPage = (fileName: string, res: express.Response): void => {
+    for (const candidate of [`src/admin/${fileName}`, `dist/admin/${fileName}`]) {
+      const resolved = path.resolve(candidate);
+      if (fs.existsSync(resolved)) {
+        res.sendFile(resolved);
+        return;
       }
     }
+
+    res.status(404).send('Admin panel not found');
+  };
+
+  app.get('/admin', (_req, res) => {
+    sendAdminPage('index.html', res);
+  });
+
+  // The panel has always redirected here on 401 — and until now nothing answered, so signing out of
+  // the panel (or arriving with an expired cookie) was a dead end. It authenticates against the same
+  // /api/auth endpoints the editor uses; there is no second auth scheme.
+  app.get('/login', (_req, res) => {
+    sendAdminPage('login.html', res);
   });
 
   // Health check. Version and commit are additive: an unauthenticated caller learns nothing exploitable

@@ -67,8 +67,16 @@ A self-hosted Node.js server that enables real-time multiplayer editing and clou
 
 ### Management dashboard
 
-`/admin` opens the admin panel; its first tab is a platform dashboard fed by one endpoint,
-`GET /api/admin/dashboard` (admin session required). It reports, in one body:
+`/admin` opens the admin panel and `/login` is its own sign-in page — the same `/api/auth` endpoints
+the editor uses, no second auth scheme, token in the HttpOnly cookie. Both pages are plain HTML in
+`src/admin/`, so the deploy copies that whole directory (naming files one by one is how a new page
+reaches production as a 404). Three states are wired deliberately: no session → the form;
+authenticated but not an admin → `/login?denied=1` explains the dead end instead of bouncing back to
+`/admin` forever; live admin session on `/login` → straight into the panel. `?next=` accepts only a
+path, never an absolute or protocol-relative URL.
+
+The panel's first tab is a platform dashboard fed by one endpoint, `GET /api/admin/dashboard`
+(admin session required). It reports, in one body:
 
 - **Service status** — Cloud API, Yjs sync, preview relay, Room Fabric, and the client bundle on GitHub
   Pages, each with the resource use it self-reports.

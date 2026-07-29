@@ -543,6 +543,13 @@
                             window.location.href = '/login';
                             return null;
                         }
+                        // 403 = аккаунт есть, но без флага администратора. Форма входа тут не поможет,
+                        // поэтому уводим с `denied=1`: страница объяснит тупик и предложит выйти,
+                        // вместо потока тостов «Admin access required» на каждый запрос.
+                        if (response.status === 403) {
+                            window.location.href = '/login?denied=1';
+                            return null;
+                        }
                         if (!response.ok) {
                             const errorData = await response.json().catch(() => ({}));
                             throw new Error(errorData.error || `Ошибка ${response.status}`);
@@ -621,6 +628,10 @@
                         });
                         if (response.status === 401) {
                             window.location.href = '/login';
+                            return;
+                        }
+                        if (response.status === 403) {
+                            window.location.href = '/login?denied=1';
                             return;
                         }
                         if (!response.ok) {
