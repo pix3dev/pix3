@@ -9,6 +9,7 @@
   "scripts": {
     "prebuild": "node scripts/update-version.mjs",
     "dev": "vite",
+    "dev:prod": "vite --mode prod-backend",
     "dev:collab": "concurrently \"npm run dev:collab:server\" \"npm run dev\"",
     "dev:collab:server": "npm run dev -w packages/pix3-collab-server",
     "build": "tsc && vite build",

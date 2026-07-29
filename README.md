@@ -29,12 +29,13 @@ The **target platform** choice writes `projectType` / `targetPlatform` / `qualit
 
 **Remote Preview** (`Project → Start Remote Preview`) shares a live QR/link: a standalone player (`player.html`) streams the active scene, compiled scripts and every `res://` asset straight out of the open editor through a WebSocket relay on the collab server — nothing is uploaded; phones join over the same link. The editor pushes changes on every save, and an **agent HTTP API** (`/api/preview/sessions/:id/…`, token in `.pix3/preview-session.json`) lets a CLI agent reload its on-disk edits, restart players, read logs/metrics and take screenshots (see the `pix3-remote-preview` skill).
 
-A localhost editor can use the **cloud relay instead of a local collab server** — put in `.env.local`:
+A localhost editor can use the **cloud backend instead of a local collab server** — that is what `npm run dev:prod` is: the same dev server (HMR, your working tree) with `/api`, `/collaboration` and `/preview` proxied to `cloud.pix3.dev`, i.e. **live production data and your real account**. `npm run dev` is always the local backend. The two targets are committed as Vite mode files (`.env.development`, `.env.prod-backend`); a personal override goes in `.env.<mode>.local`, e.g.
 
 ```bash
-VITE_COLLAB_SERVER_URL=https://cloud.pix3.dev   # dev proxy target for /api, /collaboration, /preview
 VITE_PREVIEW_PLAYER_URL=https://editor.pix3.dev # optional: public player page for QR links (phones)
 ```
+
+Because dev always requests same-origin (`import.meta.env.DEV` stays true in `prod-backend` mode), there is no CORS preflight and the auth cookie — set without a `Domain`, so host-scoped to `localhost:8123` — is accepted over `http://localhost`. The one call that leaves the proxy is the room socket: the fabric hands back an absolute `wss://rooms.pix3.dev/ws`, so `http://localhost:8123` has to be in the fabric's `Rooms:Auth:AllowedOrigins`.
 
 The cloud server sets `PREVIEW_PUBLIC_URL=https://cloud.pix3.dev`, so join links carry `&relay=…` and players/agents connect to the cloud relay directly regardless of where the player page is served. In production builds the editor talks to `VITE_COLLAB_SERVER_URL` directly (same convention as the rest of the API).
 
@@ -209,7 +210,8 @@ To finish the custom domain setup:
 
 ## Scripts
 
-- `npm run dev` - Start Vite dev server with hot reload
+- `npm run dev` - Start Vite dev server with hot reload (local backend on `:4001`)
+- `npm run dev:prod` - Same dev server against the production backend on `cloud.pix3.dev`
 - `npm run build` - Build production bundle
 - `npm run test` - Run Vitest unit tests
 - `npm run lint` - Check code style and errors
