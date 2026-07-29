@@ -8,6 +8,7 @@
   },
   "scripts": {
     "prebuild": "node scripts/update-version.mjs",
+    "version:sync": "node scripts/update-version.mjs --sync-only",
     "dev": "vite",
     "dev:prod": "vite --mode prod-backend",
     "dev:collab": "concurrently \"npm run dev:collab:server\" \"npm run dev\"",

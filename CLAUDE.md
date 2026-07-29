@@ -71,6 +71,8 @@ This is an npm-workspaces monorepo plus one externally-linked consumer:
 
 After changing `pix3-runtime`, publish to consumers with `cd packages/pix3-runtime && npm run yalc:publish`, then `yalc update` in the consumer.
 
+**Versions in `packages/*` are lockstep with the editor** — the root `package.json` version is the single source of truth, and `prebuild` (or `npm run version:sync`) stamps it into every workspace package, so `@pix3/runtime@X.Y.Z` is by definition the engine that shipped with editor X.Y.Z. Never hand-edit a workspace package's `version`; bump the root and re-run the sync. The consequence to keep in mind: a lockstep number is a *product* version, so the runtime's minor digit promises nothing about API compatibility. `tools/pix3-agent-bridge` is exempt (its own cadence, its own `bridge-v*` tag). Releasing to npm is a `runtime-v<version>` tag or a manual run of `publish-packages.yml` (OIDC trusted publishing, no token) — it publishes whatever version the package.json carries.
+
 ### Path aliases (use these, never deep relative paths)
 
 `@/` → `src/`, plus `@/core`, `@/services`, `@/state`, `@/fw`. And `@pix3/runtime` → `packages/pix3-runtime/src`. Defined in `tsconfig.json`, `vite.config.ts`, and `vitest.config.ts` — keep all three in sync when adding an alias.

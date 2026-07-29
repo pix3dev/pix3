@@ -23,13 +23,26 @@ interface UpdateVersionArtifactsOptions {
 // @ts-expect-error Plain .mjs script module is exercised directly in this spec.
 import * as updateVersionModule from '../../../scripts/update-version.mjs';
 
-const { buildVersionManifest, buildVersionModule, readJsonFile, updateVersionArtifacts } =
-  updateVersionModule as {
-    buildVersionManifest: (version: string, build: number, publishedAt?: string) => VersionManifest;
-    buildVersionModule: (manifest: VersionManifest) => string;
-    readJsonFile: <T>(path: string, fallback: T) => Promise<T>;
-    updateVersionArtifacts: (options?: UpdateVersionArtifactsOptions) => Promise<VersionManifest>;
-  };
+interface SyncedWorkspaceVersion {
+  path: string;
+  name: string;
+  previous: string;
+  version: string;
+}
+
+const {
+  buildVersionManifest,
+  buildVersionModule,
+  readJsonFile,
+  syncWorkspaceVersions,
+  updateVersionArtifacts,
+} = updateVersionModule as {
+  buildVersionManifest: (version: string, build: number, publishedAt?: string) => VersionManifest;
+  buildVersionModule: (manifest: VersionManifest) => string;
+  readJsonFile: <T>(path: string, fallback: T) => Promise<T>;
+  syncWorkspaceVersions: (version: string, paths?: string[]) => Promise<SyncedWorkspaceVersion[]>;
+  updateVersionArtifacts: (options?: UpdateVersionArtifactsOptions) => Promise<VersionManifest>;
+};
 
 describe('update-version helpers', () => {
   it('builds a manifest with semver, build and displayVersion', () => {
@@ -93,6 +106,38 @@ describe('update-version helpers', () => {
     expect(persistedManifest.publishedAt).toBe('2026-04-07T10:00:00.000Z');
     expect(persistedSource).toContain('export const CURRENT_EDITOR_VERSION');
     expect(persistedSource).toContain('build: 5');
+  });
+
+  it('stamps the editor version into workspace packages, touching nothing else', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pix3-version-'));
+    const runtimePath = join(dir, 'runtime-package.json');
+    const serverPath = join(dir, 'server-package.json');
+
+    // CRLF and an unusual key order on purpose: a version stamp must not reformat the file, or one
+    // field's bump shows up as a whole-file diff on Windows checkouts.
+    await writeFile(
+      runtimePath,
+      '{\r\n  "name": "@pix3/runtime",\r\n  "version": "0.1.0",\r\n  "type": "module",\r\n  "dependencies": {\r\n    "yaml": "^2.3.4"\r\n  }\r\n}\r\n',
+      'utf8'
+    );
+    await writeFile(
+      serverPath,
+      '{\n  "name": "@pix3/collab-server",\n  "version": "1.2.0"\n}\n',
+      'utf8'
+    );
+
+    const changed = await syncWorkspaceVersions('1.2.0', [runtimePath, serverPath]);
+
+    // Only the package that was behind is reported, and rewritten.
+    expect(changed).toEqual([
+      { path: runtimePath, name: '@pix3/runtime', previous: '0.1.0', version: '1.2.0' },
+    ]);
+    expect(await readFile(runtimePath, 'utf8')).toBe(
+      '{\r\n  "name": "@pix3/runtime",\r\n  "version": "1.2.0",\r\n  "type": "module",\r\n  "dependencies": {\r\n    "yaml": "^2.3.4"\r\n  }\r\n}\r\n'
+    );
+    expect(await readFile(serverPath, 'utf8')).toBe(
+      '{\n  "name": "@pix3/collab-server",\n  "version": "1.2.0"\n}\n'
+    );
   });
 
   it('returns fallback when version manifest does not exist yet', async () => {
