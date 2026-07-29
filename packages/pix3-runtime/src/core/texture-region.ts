@@ -24,7 +24,9 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
  * sizes to (0,1]. Returns `null` when the input is missing, non-finite, or has a
  * non-positive size — callers treat `null` as "no region" (full texture).
  */
-export function sanitizeTextureRegion(region: TextureRegion | null | undefined): TextureRegion | null {
+export function sanitizeTextureRegion(
+  region: TextureRegion | null | undefined
+): TextureRegion | null {
   if (!region) {
     return null;
   }

@@ -11,6 +11,7 @@ import {
   type QualitySettings,
 } from '@/core/ProjectManifest';
 import { createGlobMatcher } from '@/services/export/glob-match';
+import { collectNetKindPrefabPaths } from '@/core/net-kind-paths';
 
 interface BuildPackagePatch {
   sideEffects?: boolean;
@@ -1009,7 +1010,13 @@ export class ProjectBuildService {
 
     files.set(
       'src/generated/scene-manifest.ts',
-      this.buildSceneManifestTs(scenePaths, entryScenePath, quality, localization)
+      this.buildSceneManifestTs(
+        scenePaths,
+        entryScenePath,
+        quality,
+        localization,
+        this.collectNetKindPrefabPaths(assetPaths)
+      )
     );
     files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usesSpine));
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
@@ -1136,11 +1143,36 @@ export class ProjectBuildService {
     return null;
   }
 
+  /**
+   * The multiplayer `kind ↔ prefab` table (plan decision D6).
+   *
+   * The wire `Kind` is a `u16` **index into this list**, and the room validates a spawn against an
+   * allowlist that is the same index set — so the order is a contract, not a detail. Two rules keep
+   * it one:
+   *
+   * - **Sorted by code point, not by locale.** `localeCompare` is locale- and ICU-version
+   *   dependent; two machines exporting the same project must not produce different kinds.
+   * - **Only shipped prefabs.** A path that reachability pruned is not in `assetPaths`, so it
+   *   cannot be spawned and must not occupy an index.
+   *
+   * The rules themselves live in `@/core/net-kind-paths`, shared with the editor's Play Online
+   * session, which derives the same table live from the project folder — two implementations of
+   * "which files are prefabs, in what order" is exactly how the two halves would drift apart.
+   *
+   * The table is versioned with the `buildId`, and a later authored-binding segment (the Phase-3
+   * mechanism that binds an authored scene node to an entity) appends *after* the prefabs so its
+   * arrival cannot shift a single published kind.
+   */
+  private collectNetKindPrefabPaths(assetPaths: readonly string[]): string[] {
+    return collectNetKindPrefabPaths(assetPaths);
+  }
+
   private buildSceneManifestTs(
     scenePaths: readonly string[],
     activeScenePath: string,
     quality: QualitySettings,
-    localization: RuntimeLocalizationConfig
+    localization: RuntimeLocalizationConfig,
+    netKindPrefabPaths: readonly string[]
   ): string {
     const scenePathsJson = JSON.stringify(scenePaths, null, 2);
     const activeJson = JSON.stringify(activeScenePath);
@@ -1155,11 +1187,17 @@ export class ProjectBuildService {
     );
     const localizationJson = localization ? JSON.stringify(localization, null, 2) : 'null';
 
+    const netKindTableJson = JSON.stringify({ prefabs: netKindPrefabPaths, authored: [] }, null, 2);
+
     return [
       'export const scenePaths = ' + scenePathsJson + ' as const;',
       'export const activeScenePath = ' + activeJson + ';',
       'export const runtimeQuality = ' + qualityJson + ' as const;',
       'export const runtimeLocalization = ' + localizationJson + ' as const;',
+      '// Multiplayer kind table (D6): the wire Kind is the index into `prefabs`. Sorted by code',
+      '// point so every export of this project agrees with the room allowlist; `authored` is the',
+      '// reserved Phase-3 segment and appends after the prefabs so no kind ever shifts.',
+      'export const netKindTable = ' + netKindTableJson + ' as const;',
       '',
     ].join('\n');
   }

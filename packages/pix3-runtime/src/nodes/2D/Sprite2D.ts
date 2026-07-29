@@ -139,7 +139,8 @@ export class Sprite2D extends Node2D implements InstancePropertySchemaProvider, 
       },
     });
     this.effectStack.install(this.material);
-    const effectEntries = props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
+    const effectEntries =
+      props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
     for (const entry of effectEntries ?? []) {
       if (entry && typeof entry.type === 'string') {
         this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });

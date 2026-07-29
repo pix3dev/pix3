@@ -274,3 +274,15 @@
   color: var(--fg-0);
   background: var(--bg-2);
 }
+
+/* Multiplayer session card — floats over the running game (Play Online, plan step 1.5).
+   `pointer-events: none` on the wrapper keeps the game clickable around the card. */
+.online-session-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  pointer-events: none;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+}

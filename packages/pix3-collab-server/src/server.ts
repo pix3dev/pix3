@@ -14,19 +14,21 @@ import { libraryRouter } from './core/library/library-router.js';
 import { storeRouter } from './core/library/store-router.js';
 import { adminRouter } from './core/admin/admin-router.js';
 import { previewRouter } from './core/preview/preview-router.js';
+import { roomsRouter } from './core/rooms/rooms-router.js';
 import { createHocuspocusServer } from './sync/hocuspocus.js';
 import { createPreviewRelayServer } from './sync/preview-relay.js';
 
 function isCollaborationUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
-  return requestUrl === config.COLLABORATION_PATH
-    || requestUrl.startsWith(`${config.COLLABORATION_PATH}?`);
+  return (
+    requestUrl === config.COLLABORATION_PATH ||
+    requestUrl.startsWith(`${config.COLLABORATION_PATH}?`)
+  );
 }
 
 function isPreviewUpgrade(request: IncomingMessage): boolean {
   const requestUrl = request.url ?? '';
-  return requestUrl === config.PREVIEW_PATH
-    || requestUrl.startsWith(`${config.PREVIEW_PATH}?`);
+  return requestUrl === config.PREVIEW_PATH || requestUrl.startsWith(`${config.PREVIEW_PATH}?`);
 }
 
 function closeUpgradeSocket(socket: Socket): void {
@@ -58,10 +60,12 @@ export async function startServer(): Promise<void> {
 
   const app = express();
   app.use(cookieParser());
-  app.use(cors({
-    origin: true,
-    credentials: true,
-  }));
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+    })
+  );
   app.use(express.json());
 
   // Routes
@@ -74,6 +78,7 @@ export async function startServer(): Promise<void> {
   app.use('/api/library', libraryRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api/preview', previewRouter);
+  app.use('/api/rooms', roomsRouter);
 
   // Admin UI
   const adminPath = path.resolve('src/admin/index.html');

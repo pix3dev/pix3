@@ -98,7 +98,17 @@ export * from './behaviors/PunchScaleBehavior';
 export * from './behaviors/PopInBehavior';
 export * from './behaviors/CameraBrainBehavior';
 export * from './behaviors/Hitbox2DBehavior';
+export * from './behaviors/NetworkedNodeBehavior';
+export * from './behaviors/ReplicatedTransformBehavior';
 export * from './core/Collision2DService';
+
+// Multiplayer session. The wire codec under `net/protocol` stays internal on purpose — the format
+// may change without a breaking-change semver event — but the session and its transport are the
+// surface a game and the three SceneRunner hosts talk to.
+export * from './net/NetworkService';
+export * from './net/WsTransport';
+export * from './net/net-kind-table';
+export * from './core/NetworkNodeBinder';
 
 // Keyframe animation
 export * from './animation/easing';

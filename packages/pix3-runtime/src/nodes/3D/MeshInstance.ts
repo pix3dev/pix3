@@ -1,4 +1,12 @@
-import { Mesh, Object3D, AnimationClip, AnimationMixer, AnimationAction, LoopOnce, LoopRepeat } from 'three';
+import {
+  Mesh,
+  Object3D,
+  AnimationClip,
+  AnimationMixer,
+  AnimationAction,
+  LoopOnce,
+  LoopRepeat,
+} from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
 
@@ -35,9 +43,8 @@ export class MeshInstance extends Node3D {
     this._isPlaying = props.isPlaying ?? true;
     this._isLoop = props.isLoop ?? true;
 
-    // Apply shadow properties to self
-    this.castShadow = this.castShadow;
-    this.receiveShadow = this.receiveShadow;
+    // Nothing to propagate here: the shadow flags are set above, and the loaded model's children
+    // get them from applyShadowPropertiesToChildren once the GLTF resolves.
   }
 
   get isPlaying(): boolean {

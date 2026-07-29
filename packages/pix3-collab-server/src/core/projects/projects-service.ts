@@ -85,7 +85,10 @@ function getUserByEmail(email: string): ProjectUserSuggestion | undefined {
 export function isAssignableProjectMemberRole(
   value: unknown
 ): value is AssignableProjectMemberRole {
-  return typeof value === 'string' && ASSIGNABLE_PROJECT_MEMBER_ROLES.has(value as AssignableProjectMemberRole);
+  return (
+    typeof value === 'string' &&
+    ASSIGNABLE_PROJECT_MEMBER_ROLES.has(value as AssignableProjectMemberRole)
+  );
 }
 
 export function listUserProjects(userId: string): ProjectRow[] {
@@ -101,15 +104,15 @@ export function listUserProjects(userId: string): ProjectRow[] {
 }
 
 export function getProject(projectId: string): ProjectRow | undefined {
-  return getDb()
-    .prepare('SELECT * FROM projects WHERE id = ?')
-    .get(projectId) as ProjectRow | undefined;
+  return getDb().prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as
+    | ProjectRow
+    | undefined;
 }
 
 export function getProjectByShareToken(token: string): ProjectRow | undefined {
-  return getDb()
-    .prepare('SELECT * FROM projects WHERE share_token = ?')
-    .get(token) as ProjectRow | undefined;
+  return getDb().prepare('SELECT * FROM projects WHERE share_token = ?').get(token) as
+    | ProjectRow
+    | undefined;
 }
 
 export function createProject(ownerId: string, name: string): ProjectRow {
@@ -121,9 +124,11 @@ export function createProject(ownerId: string, name: string): ProjectRow {
     'INSERT INTO projects (id, owner_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
   ).run(id, ownerId, name, now, now);
 
-  db.prepare(
-    'INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)'
-  ).run(id, ownerId, 'owner');
+  db.prepare('INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)').run(
+    id,
+    ownerId,
+    'owner'
+  );
 
   // Create project storage directory
   const projectDir = path.resolve(config.PROJECTS_STORAGE_DIR, id);
@@ -265,7 +270,10 @@ export function updateProjectMemberRole(
   }
 
   if (member.role === 'owner') {
-    throw new ProjectsServiceError('cannot-change-owner', 'The project owner role cannot be changed.');
+    throw new ProjectsServiceError(
+      'cannot-change-owner',
+      'The project owner role cannot be changed.'
+    );
   }
 
   getDb()
@@ -289,7 +297,9 @@ export function removeProjectMember(projectId: string, userId: string): void {
     throw new ProjectsServiceError('cannot-remove-owner', 'The project owner cannot be removed.');
   }
 
-  getDb().prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?').run(projectId, userId);
+  getDb()
+    .prepare('DELETE FROM project_members WHERE project_id = ? AND user_id = ?')
+    .run(projectId, userId);
   touchProject(projectId);
 }
 
@@ -346,7 +356,5 @@ export function resolveProjectAccess(
 }
 
 export function touchProject(projectId: string): void {
-  getDb()
-    .prepare('UPDATE projects SET updated_at = datetime(\'now\') WHERE id = ?')
-    .run(projectId);
+  getDb().prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(projectId);
 }

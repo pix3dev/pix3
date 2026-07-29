@@ -74,6 +74,7 @@ import { PublishToStoreCommand } from '@/features/library/PublishToStoreCommand'
 import { UndoCommand } from '@/features/history/UndoCommand';
 import { RedoCommand } from '@/features/history/RedoCommand';
 import { StartGameCommand } from '@/features/scripts/StartGameCommand';
+import { StartOnlineGameCommand } from '@/features/scripts/StartOnlineGameCommand';
 import { StartMainSceneGameCommand } from '@/features/scripts/StartMainSceneGameCommand';
 import { StopGameCommand } from '@/features/scripts/StopGameCommand';
 import { RestartGameCommand } from '@/features/scripts/RestartGameCommand';
@@ -375,6 +376,7 @@ export class Pix3EditorShell extends ComponentBase {
       this.editorTabService,
       this.gamePlaySessionService
     );
+    const startOnlineGameCommand = new StartOnlineGameCommand();
     const startMainSceneGameCommand = new StartMainSceneGameCommand(
       this.editorTabService,
       this.gamePlaySessionService
@@ -445,6 +447,7 @@ export class Pix3EditorShell extends ComponentBase {
       publishToLibraryCommand,
       publishToStoreCommand,
       startGameCommand,
+      startOnlineGameCommand,
       startMainSceneGameCommand,
       stopGameCommand,
       restartGameCommand,

@@ -191,7 +191,7 @@ export class Camera3D extends Node3D {
       this.camera.position.set(
         (Math.random() * 2 - 1) * amount,
         (Math.random() * 2 - 1) * amount,
-        (Math.random() * 2 - 1) * amount * 0.35,
+        (Math.random() * 2 - 1) * amount * 0.35
       );
 
       this.shakeRafId = requestAnimationFrame(tick);

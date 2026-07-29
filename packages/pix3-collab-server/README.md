@@ -101,6 +101,7 @@ Workflow `.github/workflows/deploy-collab-server.yml`:
 - упаковывает корневой `package.json` без editor `postinstall`, корневой `package-lock.json`, а также workspace `packages/pix3-collab-server` с `dist/`, `package.json` и `src/admin/index.html`;
 - загружает релиз на `cloud.pix3.dev` по SSH;
 - раскладывает релиз в `${DEPLOY_PATH}/releases/<sha>`;
+- апсертит `ROOMS_*` в `shared/.env` из окружения `production` (см. ниже) — до перезапуска сервиса;
 - привязывает `shared/.env` и `shared/data` внутрь `packages/pix3-collab-server`;
 - выполняет `npm ci --omit=dev --workspace packages/pix3-collab-server`;
 - переключает `${DEPLOY_PATH}/current` на `packages/pix3-collab-server` внутри нового релиза;
@@ -114,6 +115,19 @@ Workflow `.github/workflows/deploy-collab-server.yml`:
 - `COLLAB_DEPLOY_SSH_KEY`: приватный SSH-ключ для этого пользователя
 - `COLLAB_DEPLOY_PATH`: корневая директория деплоя, например `/opt/pix3-collab-server`
 - `COLLAB_DEPLOY_PORT`: SSH-порт, обычно `22`
+
+### Room Fabric: конфиг из GitHub, а не из SSH
+
+Ключи `ROOMS_*` (см. `.env.example`) деплой **апсертит** в `shared/.env` на хосте — остальные строки файла не трогает, пустые значения не пишет. Источник — secrets/variables репозитория (или окружения `production`, там они перекрывают репозиторные), так что менять их не нужно по SSH:
+
+| Где | Ключ | Значение |
+| --- | --- | --- |
+| secret | `ROOMS_SERVICE_TOKEN` | ровно то же, что `Rooms__Auth__ServiceToken` на фабрике |
+| secret | `ROOMS_JWT_SECRET` | HS256-секрет фабрики (`Rooms__Auth__JwtSecret`), ≥32 байт. Не нужен, если он равен `JWT_SECRET` из `shared/.env` |
+| variable | `ROOMS_ADMIN_URL` | по умолчанию `https://rooms.pix3.dev`; пустая строка выключает `/api/rooms` (503) |
+| variable | `ROOMS_WS_URL` | нужен только если WS-хост фабрики отличается от `ROOMS_ADMIN_URL`; иначе выводится как `wss://…/ws` |
+
+Значения едут на хост через stdin ssh — их нет ни в argv, ни в логе, ни в файле на диске. Пока `ROOMS_SERVICE_TOKEN` не заведён, шаг пишет warning, а `/api/rooms` отвечает 503 — «Play Online» в редакторе просто не создаёт комнату.
 
 ### Подготовка сервера
 

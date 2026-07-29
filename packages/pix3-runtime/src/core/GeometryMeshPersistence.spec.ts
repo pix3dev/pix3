@@ -164,7 +164,9 @@ describe('GeometryMesh material persistence', () => {
     });
     mesh.setAOMap(new Texture());
     const meshObj = mesh.children.find(c => (c as { isMesh?: boolean }).isMesh) as unknown as {
-      geometry: { getAttribute(name: string): { getX(i: number): number; getY(i: number): number } };
+      geometry: {
+        getAttribute(name: string): { getX(i: number): number; getY(i: number): number };
+      };
     };
     const uv1 = meshObj.geometry.getAttribute('uv1');
     // Each face's 4 verts should land in one of the 3x2 atlas cells; collect the

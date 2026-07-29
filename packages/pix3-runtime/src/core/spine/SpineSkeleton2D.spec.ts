@@ -200,9 +200,7 @@ describe('Spine atlas text parsing', () => {
   });
 
   it('resolves page names against the atlas directory', () => {
-    expect(resolveSpinePagePath('res://spine/hero.atlas', 'hero.png')).toBe(
-      'res://spine/hero.png'
-    );
+    expect(resolveSpinePagePath('res://spine/hero.atlas', 'hero.png')).toBe('res://spine/hero.png');
     expect(resolveSpinePagePath('res://spine/hero.atlas', './pages/hero.png')).toBe(
       'res://spine/pages/hero.png'
     );

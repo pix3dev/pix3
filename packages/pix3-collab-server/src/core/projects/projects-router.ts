@@ -167,7 +167,11 @@ projectsRouter.patch(
     }
 
     try {
-      const member = projectsService.updateProjectMemberRole(req.params.id, req.params.userId, role);
+      const member = projectsService.updateProjectMemberRole(
+        req.params.id,
+        req.params.userId,
+        role
+      );
       res.json(member);
     } catch (error) {
       handleProjectsServiceError(res, error);

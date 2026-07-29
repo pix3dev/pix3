@@ -424,7 +424,7 @@ export class Node2D extends NodeBase {
 
   protected setOpacityMaterialBase(material: Material, baseOpacity: number): void {
     material.userData.__pix3BaseOpacity = Node2D.clampOpacity(baseOpacity);
-    
+
     if (material.userData.__pix3OriginalTransparent === undefined) {
       material.userData.__pix3OriginalTransparent = material.transparent;
     }
@@ -440,7 +440,7 @@ export class Node2D extends NodeBase {
         ? Node2D.clampOpacity(baseOpacityRaw)
         : Node2D.clampOpacity(material.opacity);
     material.opacity = baseOpacity * this._computedOpacity;
-    
+
     const originalTransparent = material.userData.__pix3OriginalTransparent;
     material.transparent = originalTransparent || material.opacity < 1;
     material.needsUpdate = true;
@@ -588,7 +588,9 @@ export class Node2D extends NodeBase {
     this.ensureAuthoredLayoutSize();
 
     const authoredSize = this.getAuthoredLayoutSize();
-    const authoredReference = this.normalizeReferenceSize(referenceAuthoredSize ?? referenceCurrentSize);
+    const authoredReference = this.normalizeReferenceSize(
+      referenceAuthoredSize ?? referenceCurrentSize
+    );
     const currentReference = this.normalizeReferenceSize(referenceCurrentSize);
 
     const resolvedHorizontal = this.resolveHorizontalLayout(
@@ -723,7 +725,7 @@ export class Node2D extends NodeBase {
 
     // Enforce layer on all added objects and their descendants
     for (const obj of object) {
-      obj.traverse((child) => {
+      obj.traverse(child => {
         child.layers.set(LAYER_2D);
       });
 

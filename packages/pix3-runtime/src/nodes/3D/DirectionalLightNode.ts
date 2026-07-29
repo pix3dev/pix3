@@ -96,7 +96,13 @@ export class DirectionalLightNode extends Node3D {
           },
         }),
         defineProperty('shadowCameraSize', 'number', {
-          ui: { label: 'Shadow Area', group: 'Shadow', step: 1, precision: 0, description: 'Half-size of the shadow frustum (±units from center)' },
+          ui: {
+            label: 'Shadow Area',
+            group: 'Shadow',
+            step: 1,
+            precision: 0,
+            description: 'Half-size of the shadow frustum (±units from center)',
+          },
           getValue: (n: unknown) => (n as DirectionalLightNode).light.shadow.camera.right,
           setValue: (n: unknown, v: unknown) => {
             const node = n as DirectionalLightNode;
@@ -109,7 +115,13 @@ export class DirectionalLightNode extends Node3D {
           },
         }),
         defineProperty('shadowMapSize', 'number', {
-          ui: { label: 'Shadow Map Res', group: 'Shadow', step: 256, precision: 0, description: 'Shadow map resolution (pixels)' },
+          ui: {
+            label: 'Shadow Map Res',
+            group: 'Shadow',
+            step: 256,
+            precision: 0,
+            description: 'Shadow map resolution (pixels)',
+          },
           getValue: (n: unknown) => (n as DirectionalLightNode).light.shadow.mapSize.width,
           setValue: (n: unknown, v: unknown) => {
             const node = n as DirectionalLightNode;
@@ -118,7 +130,10 @@ export class DirectionalLightNode extends Node3D {
           },
         }),
       ],
-      groups: { Light: { label: 'Light', expanded: true }, Shadow: { label: 'Shadow', expanded: false } },
+      groups: {
+        Light: { label: 'Light', expanded: true },
+        Shadow: { label: 'Shadow', expanded: false },
+      },
     };
 
     return mergeSchemas(base, props);

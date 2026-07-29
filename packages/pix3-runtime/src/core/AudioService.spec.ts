@@ -126,14 +126,17 @@ describe('AudioService', () => {
     nowSpy.mockReturnValue(1000);
 
     const service = new AudioService();
-    const playback = service.play(createAudioBufferMock({ duration: 2, channels: 2, sampleRate: 48000 }), {
-      resourcePath: 'res://audio/hitStone.ogg',
-      sizeBytes: 64000,
-      volume: 0.35,
-      loop: true,
-      playbackRate: 1.15,
-      pan: 0.2,
-    });
+    const playback = service.play(
+      createAudioBufferMock({ duration: 2, channels: 2, sampleRate: 48000 }),
+      {
+        resourcePath: 'res://audio/hitStone.ogg',
+        sizeBytes: 64000,
+        volume: 0.35,
+        loop: true,
+        playbackRate: 1.15,
+        pan: 0.2,
+      }
+    );
 
     expect(service.getActivePlaybackSnapshot(1450)).toEqual([
       {
@@ -216,7 +219,9 @@ describe('AudioService', () => {
     const musicInput = ctx.createdGains[1];
     const sfxInput = ctx.createdGains[2];
 
-    service.play(createAudioBufferMock({ duration: 1, channels: 1, sampleRate: 44100 }), { bus: 'music' });
+    service.play(createAudioBufferMock({ duration: 1, channels: 1, sampleRate: 44100 }), {
+      bus: 'music',
+    });
     const musicPlaybackGain = ctx.createdGains[3];
     expect(musicPlaybackGain?.connect).toHaveBeenCalledWith(musicInput);
 
@@ -335,7 +340,9 @@ describe('AudioService', () => {
     // Snapshot/volume still apply (gain only) without throwing.
     expect(() => service.applySnapshot('muffled')).not.toThrow();
     expect(service.getActiveSnapshotName()).toBe('muffled');
-    expect(() => service.play(createAudioBufferMock({ duration: 1, channels: 1, sampleRate: 44100 }))).not.toThrow();
+    expect(() =>
+      service.play(createAudioBufferMock({ duration: 1, channels: 1, sampleRate: 44100 }))
+    ).not.toThrow();
 
     service.dispose();
   });

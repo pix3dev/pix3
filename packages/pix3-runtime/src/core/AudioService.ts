@@ -175,7 +175,11 @@ export class AudioService {
       return;
     }
     const scale = this.snapshots.get(this.activeSnapshotName)?.volumeScale?.[bus] ?? 1;
-    entry.input.gain.setTargetAtTime(entry.userVolume * scale, this.context.currentTime, timeConstantSec);
+    entry.input.gain.setTargetAtTime(
+      entry.userVolume * scale,
+      this.context.currentTime,
+      timeConstantSec
+    );
   }
 
   /**
@@ -295,7 +299,7 @@ export class AudioService {
     for (const playback of playbacks) {
       try {
         playback.stop();
-      } catch (err) {
+      } catch {
         // Ignore
       }
     }
@@ -352,7 +356,7 @@ export class AudioService {
     outputNode.connect(this.getBusInput(bus));
 
     let resolveEnded!: () => void;
-    const ended = new Promise<void>((resolve) => {
+    const ended = new Promise<void>(resolve => {
       resolveEnded = resolve;
     });
 
@@ -376,7 +380,7 @@ export class AudioService {
       stop: () => {
         try {
           source.stop();
-        } catch (err) {
+        } catch {
           // Ignore errors if already stopped
         } finally {
           finalize();
@@ -480,7 +484,7 @@ export class AudioService {
 
     const sanitized = resourcePath.split(/[?#]/, 1)[0] ?? resourcePath;
     const parts = sanitized.split(/[\\/]/).filter(Boolean);
-    return parts.length > 0 ? parts[parts.length - 1] ?? null : null;
+    return parts.length > 0 ? (parts[parts.length - 1] ?? null) : null;
   }
 
   private normalizePositiveNumber(value: number | undefined): number | null {
@@ -491,7 +495,10 @@ export class AudioService {
     return value;
   }
 
-  private computeBitrateKbps(durationSeconds: number | null, sizeBytes: number | undefined): number | null {
+  private computeBitrateKbps(
+    durationSeconds: number | null,
+    sizeBytes: number | undefined
+  ): number | null {
     if (
       typeof durationSeconds !== 'number' ||
       !Number.isFinite(durationSeconds) ||

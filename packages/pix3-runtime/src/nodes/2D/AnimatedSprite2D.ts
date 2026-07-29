@@ -70,7 +70,8 @@ export class AnimatedSprite2D
     super(props, 'AnimatedSprite2D');
 
     this.animationResourcePath =
-      typeof props.animationResourcePath === 'string' && props.animationResourcePath.trim().length > 0
+      typeof props.animationResourcePath === 'string' &&
+      props.animationResourcePath.trim().length > 0
         ? props.animationResourcePath.trim()
         : null;
     this.currentClip = typeof props.currentClip === 'string' ? props.currentClip.trim() : '';
@@ -117,7 +118,8 @@ export class AnimatedSprite2D
       },
     });
     this.effectStack.install(this.material);
-    const effectEntries = props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
+    const effectEntries =
+      props.effects ?? (this.properties.effects as ShaderEffectEntry[] | undefined);
     for (const entry of effectEntries ?? []) {
       if (entry && typeof entry.type === 'string') {
         this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
@@ -405,7 +407,7 @@ export class AnimatedSprite2D
 
   private refreshTexturePresentation(): void {
     const currentFrame = this.getCurrentFrameData();
-    const frameTexture = currentFrame ? this.frameTextures.get(this._currentFrame) ?? null : null;
+    const frameTexture = currentFrame ? (this.frameTextures.get(this._currentFrame) ?? null) : null;
     const usesSequenceTexture = isSequenceAnimationFrame(currentFrame) && Boolean(frameTexture);
     const texture = usesSequenceTexture ? frameTexture : this.spritesheetTexture;
 

@@ -149,6 +149,8 @@ effect. Registered in
 | `core:PopIn` | Spawn pop-in scale with overshoot (juice) |
 | `core:CameraBrain` | Blend the render camera between virtual cameras (§4) |
 | `core:Hitbox2D` | Queryable 2D collision shape (rect/circle, group tag) — see §4 "2D collision" |
+| `core:NetworkedNode` | Bind this node to a replicated entity — spawn one for the local player, adopt a peer's — see §4 "Multiplayer replication" |
+| `core:ReplicatedTransform` | Replicate position/rotation: owner publishes quantized, peers interpolate on a timed buffer |
 
 Most juice behaviors have a `triggerEvent` (a signal name) and/or `playOnStart`,
 so a keyframe **event track** or a script `emit()` can fire them.
@@ -357,6 +359,60 @@ root), inherits `input`/`scene`, honors `initiallyVisible`, and its components
 frame, components get a proper `onDetach`); immediate `node.dispose()` is for
 teardown outside the tick.
 
+### Multiplayer replication (`scene.network`, `scene.netNodes`)
+The session is `this.scene.network` — offline-safe, host-owned, and it survives
+`changeScene` (it is installed at the three `SceneRunner` bootstraps, not by the
+scene). `network.connect({url, token, roomId})` joins a pix3-rooms room; then
+`isOnline`, `clientId`, `isHost`, `rtt`, `peers`, `vars`, `on/emit` (signals) and
+`entities` are live.
+
+**Everything networked is spawned** — an authored node has no network identity of
+its own. Attach **`core:NetworkedNode`** to a *prefab* that is also listed in the
+build's `netKindTable` (the exporter emits it from the project's prefabs, sorted;
+`registerNetworkPrefab(path)` is the fallback for a session with no built
+manifest). On start it sends a spawn request and binds the `netId` the fabric
+mints; when a *peer's* entity arrives instead, `scene.netNodes`
+(`NetworkNodeBinder`) instantiates that same prefab with instance id
+`net:<netId>` — which is what makes every client derive identical child ids — and
+the component adopts the binding rather than spawning a duplicate. `isMine`,
+`ownerId` and `ownership` (`owned` / `shared` / `transferable`) come off the
+replicated flags byte; `despawnOnDetach` (default on) means a `changeScene` or a
+`queueFree` releases the entity.
+
+Add **`core:ReplicatedTransform`** for movement. The owner publishes **quantized**
+values and renders the node from the **dequantized** ones, so it sees exactly what
+its peers do; remote copies render on a timed snapshot buffer at roughly two room
+ticks of delay plus measured jitter, and the wire's `Teleport` bit snaps instead of
+sliding. Two interactions worth knowing: it **turns anchored 2D layout off** on its
+node (the per-frame anchor reflow and a replicated position cannot both own the
+transform), and a camera following a *remote* node should use little or no
+`followDamping` — the interpolation buffer is already the smoothing, and damping on
+top of it is pure added latency.
+
+Spawn/despawn from a script: `await network.spawn('res://prefabs/bomb.pix3scene',
+{ position, ownership })` → the minted `netId`, or a typed `NetworkSpawnError`
+whose `kind` separates `'quota'` (this owner's 64-entity budget),
+`'entity-limit'` (the room's table) and `'kind-not-allowed'`;
+`network.despawn(netId)`.
+
+**Getting online in the editor: "Play Online"** (`game.start-online`, project menu
+or the Game tab). It scans the project for spawnable prefabs, installs that
+`netKindTable`, starts the preview relay, asks pix3-cloud for a room, joins it,
+and only then enters play mode — so a script's `onStart` already sees
+`net.isOnline` and nothing needs a "wait until connected" dance. A session card
+floats over the running game with the QR/join link, the roster, ping and the
+number of visible entities. The join link carries the **room id, never a token**:
+the player page mints its own guest token, and the kind table reaches it through
+the relay's session config, because every participant must resolve a wire `Kind`
+through the same list. The membership survives a scene restart and a
+tab⇄popout swap; it ends when play mode ends or you press Leave. Requires a
+pix3-cloud with `ROOMS_ADMIN_URL` / `ROOMS_SERVICE_TOKEN` / `ROOMS_JWT_SECRET`
+configured; without one the button reports `rooms_not_configured` and single-player
+Play is unaffected.
+
+`samples/MultiplayerArena` is the worked example of all of the above (8-player
+tag arena, no binary assets, runs offline as a single-player sandbox).
+
 ### Scene transitions (change the running scene)
 `await scene.changeScene('res://scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
 — Godot's `change_scene_to_file`. Loads the *saved* target file, tears down the
@@ -401,7 +457,7 @@ scope (agent HTTP/preview commands) arrives in Phase 2 — see `.plans/asset-lib
 Inside any `Script` subclass:
 
 - `this.node` — the owning `NodeBase` (transform, `visible`, `getComponent`, `addComponent`, `connect`/`emit`, `findById`/`findByName`/`findByPath`, `children`, `parentNode`). `getComponent<T>(type: new (...args) => T): T | null` takes the component **class**, not a string ID — `node.getComponent(CarController)`, importing the class by relative path (`./CarController`). There is no string-based lookup (`getComponent('user:CarController')` fails); `user:*` IDs are for `add_component`/scene YAML only. To fetch by hand: `node.components.find(c => c instanceof CarController)`.
-- `this.scene` — the `SceneService` (all of §4's `scene.*` APIs, plus `getActiveCamera()`, `getActiveCamera2D()`, `findNode(query)`, `getRootNodes()`, `getViewportInfo()`/`onViewportChanged()`/`isPortrait()`, `raycastViewport(nx,ny)`, `getAudioService`/`getAssetLoader`/`getResourceManager`/`getECSService`). May be `undefined` in some editor previews — guard it.
+- `this.scene` — the `SceneService` (all of §4's `scene.*` APIs, plus `getActiveCamera()`, `getActiveCamera2D()`, `findNode(query)`, `getRootNodes()`, `getViewportInfo()`/`onViewportChanged()`/`isPortrait()`, `raycastViewport(nx,ny)`, `getAudioService`/`getAssetLoader`/`getResourceManager`/`getECSService`, plus `network` and `netNodes` for multiplayer). May be `undefined` in some editor previews — guard it.
 - `this.input` — the `InputService` (§4 Input).
 - `this.findNode(query)` — resolve another node by id / name / slash-path, or `null` if absent (`get_node_or_null`).
 - `this.getNode(query)` — same lookup but **throws** if the node is missing (`get_node`). In the in-editor code editor the argument autocompletes to the node names/paths of the open scenes and the return type is the exact node type (`this.getNode('Hero')` → `Sprite2D`), à la Godot's `$Node` / WPF `x:Name`. Any other string resolves to `NodeBase`, so a script reused in a scene that lacks the name still type-checks — the names are hints, never constraints. (Typed names come from the editor augmenting `SceneNodeNames`; it's empty in exported games, where only `getNode<T>(query)` applies.)

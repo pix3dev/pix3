@@ -3,6 +3,7 @@ import { subscribe } from 'valtio/vanilla';
 import {
   AssetLoader,
   AudioService,
+  NetworkService,
   RuntimeRenderer,
   SceneManager,
   SceneRunner,
@@ -83,6 +84,13 @@ export class GamePlaySessionService {
   private popoutWindowResizeHandler?: () => void;
   private runner?: SceneRunner;
   private renderer?: RuntimeRenderer;
+  /**
+   * The multiplayer session (plan decision D5). Owned by this service rather than by a runner, so it
+   * outlives `changeScene` and every play/restart cycle; a stopped play session leaves the room but
+   * keeps the object, and "Play Online" (Phase 1.5) drives it from the Game tab. Nothing connects on
+   * its own.
+   */
+  private networkService?: NetworkService;
   private focusCleanup?: () => void;
   private focusPauseSuppressed = false;
   private syncPromise: Promise<void> = Promise.resolve();
@@ -126,7 +134,24 @@ export class GamePlaySessionService {
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
     this.detachRuntime();
+    this.networkService?.dispose();
+    this.networkService = undefined;
     this.closePopoutWindow();
+  }
+
+  /**
+   * The play session's multiplayer membership (plan decision D5).
+   *
+   * Exposed because "Play Online" has to join the room *before* the scene starts — a script's
+   * `onStart` must already see `net.isOnline`. Created lazily here and installed into whichever
+   * runner starts next, so the caller never has to care which order the two happen in.
+   */
+  getNetworkService(): NetworkService {
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    this.runner?.setNetworkService(this.networkService);
+    return this.networkService;
   }
 
   getAspectRatio(): GameAspectRatio {
@@ -260,6 +285,9 @@ export class GamePlaySessionService {
   private async syncRuntimeToUiState(): Promise<void> {
     if (!appState.ui.isPlaying) {
       this.detachRuntime();
+      // Play mode ended (not a restart, not a host swap): leave the room. The session object stays
+      // so the Game tab can start a new one without re-wiring.
+      this.networkService?.disconnect();
       this.updateHostRunningState(false);
       // Play mode has ended; the banner ("the game may have stopped updating")
       // no longer applies. The failure is retained in the Logs panel.
@@ -332,6 +360,10 @@ export class GamePlaySessionService {
 
     this.renderer = renderer;
     this.runner = runner;
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    runner.setNetworkService(this.networkService);
     // Phase 3: enable the 2D quad batcher for this run (flag-gated; off is
     // byte-identical to individual-mesh rendering).
     runner.setBatching2DEnabled(isBatch2DEnabled());
@@ -390,6 +422,12 @@ export class GamePlaySessionService {
     // Keep atlasing strictly play-mode-scoped: edit-mode texture loads on the
     // shared AssetLoader must always get raw standalone textures.
     this.assetLoader.setAtlasResolver(null);
+
+    // The room membership deliberately survives this: `detachRuntime` also runs on a restart and on
+    // a host swap (tab ⇄ popout), and dropping everyone out of the room because a level reloaded is
+    // exactly the bug D5 exists to prevent. Leaving is tied to play mode *ending* — see
+    // `syncRuntimeToUiState` — and to `dispose`. Entities the departing scene owned are despawned by
+    // each `core:NetworkedNode`'s `despawnOnDetach`, so no ghosts survive the reload.
 
     if (this.runner) {
       this.runner.stop();

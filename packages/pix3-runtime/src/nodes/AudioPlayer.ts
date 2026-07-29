@@ -32,7 +32,9 @@ export class AudioPlayer extends NodeBase {
     this.loop = AudioPlayer.toBoolean(props.loop ?? this.properties.loop, false);
     this.volume = AudioPlayer.clampVolume(props.volume ?? this.properties.volume, 1);
     this.bus = AudioPlayer.normalizeBus(props.bus ?? this.properties.bus);
-    this.pitchVariation = AudioPlayer.clampVariation(props.pitchVariation ?? this.properties.pitchVariation);
+    this.pitchVariation = AudioPlayer.clampVariation(
+      props.pitchVariation ?? this.properties.pitchVariation
+    );
     this.volumeVariation = AudioPlayer.clampVariation(
       props.volumeVariation ?? this.properties.volumeVariation
     );

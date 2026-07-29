@@ -459,7 +459,7 @@ export class GeometryMesh
   }
 
   private get _mesh(): Mesh | undefined {
-    return (this.children as unknown as Mesh[]).find((c) => c instanceof Mesh);
+    return (this.children as unknown as Mesh[]).find(c => c instanceof Mesh);
   }
 
   private get _stdMaterial(): MeshStandardMaterial | undefined {
@@ -544,7 +544,8 @@ export class GeometryMesh
         defineProperty('map', 'object', {
           ui: {
             label: 'Albedo Map',
-            description: 'Diffuse texture (res://). Required for the UV Scroll effect to be visible.',
+            description:
+              'Diffuse texture (res://). Required for the UV Scroll effect to be visible.',
             group: 'Material',
             editor: 'texture-resource',
             resourceType: 'texture',

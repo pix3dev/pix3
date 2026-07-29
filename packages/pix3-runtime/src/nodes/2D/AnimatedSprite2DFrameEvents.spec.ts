@@ -83,7 +83,12 @@ describe('AnimatedSprite2D frame events', () => {
 });
 
 function makeOneShotSprite(): AnimatedSprite2D {
-  const sprite = new AnimatedSprite2D({ id: 'b', name: 'B', currentClip: 'burst', isPlaying: true });
+  const sprite = new AnimatedSprite2D({
+    id: 'b',
+    name: 'B',
+    currentClip: 'burst',
+    isPlaying: true,
+  });
   sprite.setAnimationResource(
     normalizeAnimationResource({
       version: '1.0.0',

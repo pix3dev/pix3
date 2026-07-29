@@ -28,9 +28,12 @@ public/esbuild.wasm
 
 .chrome_debug_profile
 
-# Environment variables
+# Environment variables. Mode files (.env.development, .env.prod-backend) are COMMITTED — they
+# hold the shared dev/prod backend targets, no secrets. Personal overrides go in *.local, which
+# Vite loads last and git never sees.
 .env
 .env.local
+.env.*.local
 
 # Collab server runtime data
 packages/pix3-collab-server/data/

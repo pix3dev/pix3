@@ -8,6 +8,7 @@ import {
   AudioService,
   getGameDebug,
   installAtlasFromManifest,
+  NetworkService,
   registerBuiltInScripts,
   RuntimeRenderer,
   SceneLoader,
@@ -16,6 +17,7 @@ import {
   SceneSaver,
   Script,
   ScriptRegistry,
+  setNetworkPrefabTable,
   type ScriptComponent,
   type PropertySchemaProvider,
   type SceneRunnerFrameSample,
@@ -109,6 +111,15 @@ class PreviewPlayerApp {
   private scriptBundle: { code: string; hash: string } | null = null;
   private scriptModule: { exports: Record<string, unknown>; hash: string } | null = null;
   private stack: RuntimeStack | null = null;
+  /**
+   * The multiplayer session (plan decision D5). Owned by the player, not by a runner, so it survives
+   * `changeScene` and a hot restart of the preview stack. Nothing connects on its own.
+   */
+  private networkService: NetworkService | null = null;
+  /** Room named by the join link (`&room=…`), or null for a plain single-player preview. */
+  private readonly room: { roomId: string; displayName: string } | null;
+  /** Where room tokens are minted — the same pix3-cloud that serves the relay. */
+  private readonly cloudOrigin: string;
   private startTimer: number | null = null;
   private startGeneration = 0;
   private starting = false;
@@ -124,8 +135,18 @@ class PreviewPlayerApp {
   private lastSample: SceneRunnerFrameSample | null = null;
   private lastMetricsFlush = performance.now();
 
-  constructor(ui: PlayerUi, sessionId: string, token: string, relayOrigin: string | null) {
+  constructor(
+    ui: PlayerUi,
+    sessionId: string,
+    token: string,
+    relayOrigin: string | null,
+    room: { roomId: string; displayName: string } | null
+  ) {
     this.ui = ui;
+    this.room = room;
+    // pix3-cloud mints the room token and it also hosts the relay, so the relay origin from the
+    // join link is the same origin the token comes from.
+    this.cloudOrigin = relayOrigin || location.origin;
     this.client = new PreviewPlayerClient(
       sessionId,
       // An explicit relay origin in the join link (set when the preview server
@@ -301,6 +322,19 @@ class PreviewPlayerApp {
       width: config.viewportBaseSize.width,
       height: config.viewportBaseSize.height,
     });
+
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    runner.setNetworkService(this.networkService);
+
+    // Join before the first frame: a script's `onStart` must already see `net.isOnline`, otherwise
+    // every game needs a "wait until connected" dance of its own. A failure here is reported and
+    // the scene still runs — single-player is a better outcome than a black screen.
+    await this.ensureRoomJoined(config);
+    if (generation !== this.startGeneration) {
+      return;
+    }
 
     const disposeFrameSubscription = runner.subscribeFrameStats(sample => {
       this.onFrameSample(sample, renderer);
@@ -484,11 +518,70 @@ class PreviewPlayerApp {
     }
   }
 
+  /**
+   * Joins the room named in the join link, once per page load.
+   *
+   * The link carries a room id but never a token: this page asks pix3-cloud for its own guest
+   * token, so a shared link cannot be replayed as somebody else's identity and expiry is per player.
+   * The kind table comes from the host's session config for the same reason — every participant must
+   * resolve a wire `Kind` through one list (D6).
+   */
+  private async ensureRoomJoined(config: PreviewSessionConfig): Promise<void> {
+    const network = this.networkService;
+    if (!this.room || !network || network.isOnline || network.status === 'connecting') {
+      return;
+    }
+
+    if (config.netKindTable && config.netKindTable.length > 0) {
+      setNetworkPrefabTable(config.netKindTable);
+    }
+
+    try {
+      const response = await fetch(
+        `${this.cloudOrigin}/api/rooms/${encodeURIComponent(this.room.roomId)}/token`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName: this.room.displayName }),
+        }
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        wsUrl?: string;
+        token?: string;
+        message?: string;
+        room?: { roomId?: string };
+      } | null;
+
+      if (!response.ok || !payload?.wsUrl || !payload.token) {
+        throw new Error(payload?.message ?? `HTTP ${response.status}`);
+      }
+
+      await network.connect({
+        url: payload.wsUrl,
+        token: payload.token,
+        roomId: this.room.roomId,
+        displayName: this.room.displayName,
+      });
+      this.client.reportLog(
+        'info',
+        `Joined room ${this.room.roomId} as client ${network.clientId}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.client.reportLog('error', `Could not join room ${this.room.roomId}: ${message}`);
+    }
+  }
+
   private teardownStack(): void {
     if (!this.stack) {
       return;
     }
 
+    // The room membership deliberately survives this. A player's stack is torn down and rebuilt on
+    // every `scene-updated` the editor pushes, and leaving the room each time would mint a new
+    // client id, drop the roster and re-spawn every avatar for everyone else. Entities this stack
+    // owned are despawned by `core:NetworkedNode`'s `despawnOnDetach` as its nodes dispose; the
+    // socket itself closes with the page.
     this.stack.disposeFrameSubscription();
     this.stack.runner.stop();
     this.stack.renderer.dispose();
@@ -634,7 +727,15 @@ function bootstrap(): void {
     return;
   }
 
-  const playerApp = new PreviewPlayerApp(ui, sessionId, token, relayOrigin);
+  // `&room=…` turns a preview into a multiplayer join. The name is optional and exists mostly so two
+  // tabs on one machine are distinguishable while testing.
+  const roomId = (params.get('room') ?? '').trim();
+  const displayName = (params.get('name') ?? '').trim().slice(0, 32);
+  const room = /^[A-Za-z0-9_-]{1,64}$/.test(roomId)
+    ? { roomId, displayName: displayName || 'Player' }
+    : null;
+
+  const playerApp = new PreviewPlayerApp(ui, sessionId, token, relayOrigin, room);
   playerApp.start();
 }
 

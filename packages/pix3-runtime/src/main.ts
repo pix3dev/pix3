@@ -4,6 +4,7 @@ import {
   AssetLoader,
   AudioService,
   installAtlasFromManifest,
+  NetworkService,
   registerBuiltInScripts,
   ResourceManager,
   RuntimeRenderer,
@@ -12,12 +13,14 @@ import {
   SceneRunner,
   SceneSaver,
   ScriptRegistry,
+  setNetworkPrefabTable,
 } from '@pix3/runtime';
 import {
   activeScenePath,
   scenePaths,
   runtimeQuality,
   runtimeLocalization,
+  netKindTable,
 } from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
@@ -38,6 +41,10 @@ async function bootstrap(): Promise<void> {
   const scriptRegistry = new ScriptRegistry();
   registerBuiltInScripts(scriptRegistry);
   registerProjectScripts(scriptRegistry);
+
+  // Wire `Kind` ↔ prefab path for multiplayer spawns (D6). Installed before any scene runs, because
+  // a kind that changes mid-session repoints entities every peer already spawned.
+  setNetworkPrefabTable(netKindTable);
 
   const assetLoader = new AssetLoader(resourceManager, audioService);
   const sceneLoader = new SceneLoader(assetLoader, scriptRegistry, resourceManager);
@@ -61,6 +68,9 @@ async function bootstrap(): Promise<void> {
   renderer.attach(app);
 
   const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);
+  // Multiplayer session (D5): owned here, not by the scene, so it survives `changeScene`. Offline
+  // and inert until a game script calls `this.scene.network.connect(...)`.
+  runner.setNetworkService(new NetworkService());
   runner.setBatching2DEnabled(true);
   if (runtimeLocalization) {
     // Baked from pix3project.yaml (or auto-discovered locales/) at export time;

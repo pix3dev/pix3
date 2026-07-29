@@ -4,6 +4,8 @@ import type { Camera2D } from '../nodes/2D/Camera2D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { Collision2DService } from './Collision2DService';
+import { NetworkService } from '../net/NetworkService';
+import { NetworkNodeBinder } from './NetworkNodeBinder';
 import { GameTime } from './GameTime';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
@@ -71,8 +73,18 @@ export interface SceneServiceDelegate {
    * graph in the shared SceneManager — the runner owns it exclusively.
    */
   loadAndStartScene(path: string): Promise<void>;
-  /** Spawn a prefab scene into the running graph (see SceneService.instantiate). */
-  instantiatePrefab?(path: string, parent?: NodeBase | null): Promise<NodeBase>;
+  /**
+   * Spawn a prefab scene into the running graph (see SceneService.instantiate).
+   *
+   * `instanceId` overrides the runner's own `spawn-<n>` counter. Replication needs it: passing
+   * `net:<netId>` makes every client derive identical child ids for the same entity, which is what
+   * lets a spawned child be addressed as `(rootNetId, childPath)` (plan decision D6).
+   */
+  instantiatePrefab?(
+    path: string,
+    parent?: NodeBase | null,
+    instanceId?: string
+  ): Promise<NodeBase>;
 }
 
 /** Options for {@link SceneService.changeScene}. */
@@ -126,6 +138,14 @@ export class SceneService {
   private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
   private collision2dService: Collision2DService | null = null;
+  /**
+   * The multiplayer session. Owned by the SceneRunner **host** (see plan decision D5), installed via
+   * {@link setNetworkService}, and deliberately not tied to the scene: it must survive `changeScene`.
+   * Lazily replaced by an offline no-op instance when no host installed one.
+   */
+  private networkService: NetworkService | null = null;
+  /** Scene-scoped entity↔node bindings; see {@link netNodes}. Recreated per scene, unlike the session. */
+  private networkNodeBinder: NetworkNodeBinder | null = null;
   private readonly scratchPointerUnproject = new Vector3();
   /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
   private changeScenePromise: Promise<void> | null = null;
@@ -141,6 +161,12 @@ export class SceneService {
    */
   setDelegate(delegate: SceneServiceDelegate | null): void {
     this.delegate = delegate;
+    if (!delegate) {
+      // The graph this binder's nodes live in is being torn down. The *entities* survive (the
+      // session outlives the scene), so remote ones go back on its pending list and are
+      // re-instantiated into whatever scene runs next.
+      this.networkNodeBinder?.handleSceneStopped();
+    }
   }
 
   /**
@@ -160,6 +186,12 @@ export class SceneService {
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
     this.collision2dService = null;
+    // Scene state, unlike the session below: its bindings point at nodes that are going away.
+    this.networkNodeBinder?.dispose();
+    this.networkNodeBinder = null;
+    // `networkService` is deliberately left alone: the host owns its lifetime (D5) and the session
+    // must outlive scene teardown. Dropping the reference here would silently hand scripts an
+    // offline stub while a real room membership is still live.
     this.fadeOverlay?.remove();
     this.fadeOverlay = null;
     this.flashOverlay?.remove();
@@ -261,6 +293,57 @@ export class SceneService {
   }
 
   /**
+   * The multiplayer session — `this.scene.network.connect(...)`, `net.isOnline`, `net.on/emit`,
+   * `net.vars`. Every member is offline-safe, so a single-player game may touch it freely: reads
+   * return sane defaults and writes are no-ops until something calls `connect()`.
+   *
+   * Unlike {@link collision2d}, the session is **not** scene state. A host (the runtime bootstrap,
+   * the editor's play session, the preview player) constructs one and installs it with
+   * {@link setNetworkService}; it then outlives every `changeScene`, because leaving a room just
+   * because the game switched levels is exactly the bug D5 exists to prevent. When no host installed
+   * one, this getter lazily creates a private, permanently-offline instance so scripts still work.
+   */
+  get network(): NetworkService {
+    if (!this.networkService) {
+      this.networkService = new NetworkService();
+    }
+    return this.networkService;
+  }
+
+  /**
+   * Installs the host-owned network session. Call once, before the first scene starts; the host keeps
+   * ownership and is responsible for `dispose()`. Passing `null` detaches, after which the getter
+   * falls back to a fresh offline instance.
+   */
+  setNetworkService(service: NetworkService | null): void {
+    this.networkService = service;
+    // The binder holds a subscription to the *old* session; a new one needs a new binder.
+    this.networkNodeBinder?.dispose();
+    this.networkNodeBinder = null;
+    if (service) {
+      // Created eagerly, not on first use: a peer's avatar must appear even in a scene that has no
+      // networked node of its own, and the binder is what listens for the entity that carries it.
+      void this.netNodes;
+    }
+  }
+
+  /**
+   * Binds replicated entities to scene nodes — `this.scene.netNodes.getNode(netId)`,
+   * `getNetId(node)`, `bind(...)`. Unlike {@link network}, this **is** scene state: it instantiates a
+   * peer's prefab when its entity enters and frees it when it leaves, so it is recreated per scene.
+   * `core:NetworkedNode` and `core:ReplicatedTransform` are the components that drive it.
+   */
+  get netNodes(): NetworkNodeBinder {
+    if (!this.networkNodeBinder) {
+      this.networkNodeBinder = new NetworkNodeBinder({
+        network: this.network,
+        instantiate: (path, options) => this.instantiate(path, options),
+      });
+    }
+    return this.networkNodeBinder;
+  }
+
+  /**
    * Current pointer position (mouse or touch — unified by InputService) in 2D
    * world/design coordinates (origin center, Y up), or `null` when no scene is
    * running. Unprojects through the live 2D camera, so it stays correct while a
@@ -317,7 +400,7 @@ export class SceneService {
    */
   async instantiate(
     path: string,
-    options: { parent?: NodeBase | string | null } = {}
+    options: { parent?: NodeBase | string | null; instanceId?: string } = {}
   ): Promise<NodeBase> {
     if (!this.delegate?.instantiatePrefab) {
       throw new Error('[SceneService] instantiate requires a running scene.');
@@ -331,7 +414,7 @@ export class SceneService {
     } else {
       parent = options.parent ?? null;
     }
-    return this.delegate.instantiatePrefab(path, parent);
+    return this.delegate.instantiatePrefab(path, parent, options.instanceId);
   }
 
   /** The live InputService for the running scene, or null (editor previews). */

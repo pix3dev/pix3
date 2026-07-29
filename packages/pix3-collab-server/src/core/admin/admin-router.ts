@@ -12,7 +12,9 @@ adminRouter.use(requireAuth, requireAdmin);
 // GET /api/admin/users — list all users
 adminRouter.get('/users', (_req: AuthenticatedRequest, res: Response) => {
   const users = getDb()
-    .prepare('SELECT id, email, username, avatar_url, is_admin, created_at FROM users ORDER BY created_at DESC')
+    .prepare(
+      'SELECT id, email, username, avatar_url, is_admin, created_at FROM users ORDER BY created_at DESC'
+    )
     .all();
   res.json(users);
 });
@@ -29,9 +31,9 @@ adminRouter.delete('/users/:id', (req: AuthenticatedRequest, res: Response) => {
   const db = getDb();
 
   // Find user's owned projects to clean up storage
-  const ownedProjects = db
-    .prepare('SELECT id FROM projects WHERE owner_id = ?')
-    .all(targetId) as { id: string }[];
+  const ownedProjects = db.prepare('SELECT id FROM projects WHERE owner_id = ?').all(targetId) as {
+    id: string;
+  }[];
 
   for (const project of ownedProjects) {
     const dir = path.resolve(config.PROJECTS_STORAGE_DIR, project.id);

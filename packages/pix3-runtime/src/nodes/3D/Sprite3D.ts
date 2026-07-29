@@ -10,10 +10,7 @@ import {
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
-import {
-  coerceTextureResource,
-  type TextureResourceRef,
-} from '../../core/TextureResource';
+import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { getNaturalTextureSize } from '../../core/texture-natural-size';
 
 export interface Sprite3DProps extends Omit<Node3DProps, 'type'> {
@@ -114,7 +111,9 @@ export class Sprite3D extends Node3D {
       };
       const { width: w, height: h } = getNaturalTextureSize(img);
 
-      console.log(`[Sprite3D] Texture loaded: ${w}x${h} for node "${this.name}" (natural=${img.naturalWidth}x${img.naturalHeight})`);
+      console.log(
+        `[Sprite3D] Texture loaded: ${w}x${h} for node "${this.name}" (natural=${img.naturalWidth}x${img.naturalHeight})`
+      );
 
       if (w && h) {
         this.textureAspectRatio = w / h;

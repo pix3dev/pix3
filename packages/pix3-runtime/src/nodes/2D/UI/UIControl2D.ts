@@ -177,7 +177,9 @@ export abstract class UIControl2D extends Node2D {
     isDown: boolean
   ): void {
     const pointerPos = new Vector2(pointerWorldX, pointerWorldY);
-    const isInBounds = this.isPointerAllowedByAncestorScrollContainers(pointerPos) && this.isPointInBounds(pointerPos);
+    const isInBounds =
+      this.isPointerAllowedByAncestorScrollContainers(pointerPos) &&
+      this.isPointInBounds(pointerPos);
 
     // Handle hover state
     if (isInBounds && !this.isHovering && this.enabled) {
@@ -236,7 +238,10 @@ export abstract class UIControl2D extends Node2D {
     let currentParent = this.parent;
     while (currentParent) {
       if (currentParent instanceof ScrollContainer2D) {
-        if (!currentParent.isPointInViewportBounds(pointerPos) || currentParent.hasActivePointerCapture()) {
+        if (
+          !currentParent.isPointInViewportBounds(pointerPos) ||
+          currentParent.hasActivePointerCapture()
+        ) {
           return false;
         }
       }

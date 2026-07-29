@@ -20,6 +20,8 @@ import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
 import { CameraBrainBehavior } from './CameraBrainBehavior';
 import { Hitbox2DBehavior } from './Hitbox2DBehavior';
+import { NetworkedNodeBehavior } from './NetworkedNodeBehavior';
+import { ReplicatedTransformBehavior } from './ReplicatedTransformBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
 
 /**
@@ -111,10 +113,21 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
   registry.registerComponent({
     id: 'core:FreeOnSignal',
     displayName: 'Free on Signal',
-    description: 'Frees this node when a signal fires on it (e.g. animation-finished) — one-shot VFX lifecycle',
+    description:
+      'Frees this node when a signal fires on it (e.g. animation-finished) — one-shot VFX lifecycle',
     category: 'Lifecycle',
     componentClass: FreeOnSignalBehavior,
-    keywords: ['free', 'destroy', 'despawn', 'queuefree', 'one-shot', 'lifecycle', 'signal', 'vfx', 'finished'],
+    keywords: [
+      'free',
+      'destroy',
+      'despawn',
+      'queuefree',
+      'one-shot',
+      'lifecycle',
+      'signal',
+      'vfx',
+      'finished',
+    ],
   });
 
   registry.registerComponent({
@@ -161,6 +174,48 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Physics',
     componentClass: Hitbox2DBehavior,
     keywords: ['hitbox', 'collision', 'collider', 'area', '2d', 'overlap', 'raycast', 'hit'],
+  });
+
+  registry.registerComponent({
+    id: 'core:NetworkedNode',
+    displayName: 'Networked Node',
+    description:
+      'Binds this node to a replicated entity — spawns one for the local player, or adopts the ' +
+      'entity a peer spawned',
+    category: 'Network',
+    componentClass: NetworkedNodeBehavior,
+    keywords: [
+      'network',
+      'multiplayer',
+      'net',
+      'entity',
+      'spawn',
+      'despawn',
+      'owner',
+      'authority',
+      'online',
+    ],
+  });
+
+  registry.registerComponent({
+    id: 'core:ReplicatedTransform',
+    displayName: 'Replicated Transform',
+    description:
+      "Replicates this node's position and rotation: the owner publishes quantized values, peers " +
+      'render them on a timed interpolation buffer',
+    category: 'Network',
+    componentClass: ReplicatedTransformBehavior,
+    keywords: [
+      'network',
+      'multiplayer',
+      'replicate',
+      'transform',
+      'position',
+      'sync',
+      'interpolation',
+      'lerp',
+      'online',
+    ],
   });
 
   console.log('[ScriptRegistry] Registered built-in script components');

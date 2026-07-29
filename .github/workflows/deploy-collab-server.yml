@@ -75,6 +75,75 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
+      # Room Fabric wiring, delivered from the `production` environment instead of living only in
+      # the host's hand-edited shared/.env. `/api/rooms` answers 503 unless BOTH ROOMS_ADMIN_URL
+      # and ROOMS_SERVICE_TOKEN are set, so a config that is only reachable over SSH is a config
+      # that stays unset. Runs BEFORE the release step, which is what restarts the service.
+      #
+      # An empty value is SKIPPED, never written: writing ROOMS_SERVICE_TOKEN= would silently
+      # disable room minting on a host where the token was already correct.
+      #
+      # The merge script goes over first and the VALUES follow on its stdin — never in argv (any
+      # user on the host can read /proc/*/cmdline), never in a file of their own (a cancelled run
+      # between two ssh calls would leave the token lying in /tmp), never in the log.
+      - name: Sync Room Fabric settings into shared/.env
+        env:
+          ROOMS_ADMIN_URL: ${{ vars.ROOMS_ADMIN_URL || 'https://rooms.pix3.dev' }}
+          ROOMS_WS_URL: ${{ vars.ROOMS_WS_URL }}
+          ROOMS_SERVICE_TOKEN: ${{ secrets.ROOMS_SERVICE_TOKEN }}
+          ROOMS_JWT_SECRET: ${{ secrets.ROOMS_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          FRAGMENT="$(mktemp)"
+          chmod 600 "$FRAGMENT"
+          for key in ROOMS_ADMIN_URL ROOMS_WS_URL ROOMS_SERVICE_TOKEN ROOMS_JWT_SECRET; do
+            value="${!key}"
+            if [ -n "${value}" ]; then
+              printf '%s=%s\n' "$key" "$value" >> "$FRAGMENT"
+              echo "will set ${key}"
+            fi
+          done
+
+          if [ ! -s "$FRAGMENT" ]; then
+            echo "::warning::No ROOMS_* values configured; leaving shared/.env untouched."
+            exit 0
+          fi
+          if ! grep -q '^ROOMS_SERVICE_TOKEN=' "$FRAGMENT"; then
+            echo "::warning::ROOMS_SERVICE_TOKEN is not set in the production environment. Room minting stays disabled unless shared/.env already carries it. It must equal Rooms__Auth__ServiceToken on the fabric."
+          fi
+
+          REMOTE_SCRIPT="/tmp/pix3-rooms-env-merge-${GITHUB_SHA}.sh"
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "umask 077; cat > '${REMOTE_SCRIPT}'" <<'EOF'
+          set -euo pipefail
+
+          ENV_FILE="${DEPLOY_ROOT}/shared/.env"
+          if [ ! -f "${ENV_FILE}" ]; then
+            echo "Missing shared/.env on remote host" >&2
+            exit 1
+          fi
+
+          umask 077
+          FRAGMENT="$(mktemp)"
+          MERGED="$(mktemp)"
+          trap 'rm -f "${FRAGMENT}" "${MERGED}" "$0"' EXIT
+
+          cat > "${FRAGMENT}"
+
+          # Drop the keys about to be rewritten, keep every other line verbatim (comments included).
+          KEY_PATTERN="^($(cut -d= -f1 "${FRAGMENT}" | paste -sd'|' -))="
+          grep -v -E "${KEY_PATTERN}" "${ENV_FILE}" > "${MERGED}" || true
+          cat "${FRAGMENT}" >> "${MERGED}"
+          # Redirect INTO the existing file rather than mv over it, so owner/mode survive.
+          cat "${MERGED}" > "${ENV_FILE}"
+
+          echo "shared/.env keys: $(cut -d= -f1 "${ENV_FILE}" | grep -v '^#' | sort | paste -sd' ' -)"
+          EOF
+
+          ssh -p "${DEPLOY_PORT:-22}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_ROOT='${DEPLOY_PATH}' bash '${REMOTE_SCRIPT}'" < "$FRAGMENT"
+          rm -f "$FRAGMENT"
+
       - name: Upload release bundle
         run: |
           set -euo pipefail

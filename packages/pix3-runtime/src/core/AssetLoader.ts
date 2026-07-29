@@ -11,10 +11,7 @@ import {
 } from 'three';
 import { AudioService } from './AudioService';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import {
-  normalizeAnimationResource,
-  type AnimationResource,
-} from './AnimationResource';
+import { normalizeAnimationResource, type AnimationResource } from './AnimationResource';
 import { configure2DTexture } from './configure-2d-texture';
 import { applyTextureRegionToTexture } from './texture-region';
 import { stampAtlasView, type AtlasFrame, type AtlasResolver } from './atlas-frame-map';

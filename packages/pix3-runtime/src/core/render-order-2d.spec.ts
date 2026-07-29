@@ -96,6 +96,8 @@ describe('assign2DRenderOrder', () => {
 
     // Re-running must not change the result.
     assign2DRenderOrder([parent, sibling]);
-    expect([singleMeshOrder(parent), singleMeshOrder(child), singleMeshOrder(sibling)]).toEqual(first);
+    expect([singleMeshOrder(parent), singleMeshOrder(child), singleMeshOrder(sibling)]).toEqual(
+      first
+    );
   });
 });

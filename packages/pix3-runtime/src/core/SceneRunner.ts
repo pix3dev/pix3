@@ -14,6 +14,7 @@ import { SceneManager } from './SceneManager';
 import { RuntimeRenderer } from './RuntimeRenderer';
 import { InputService } from './InputService';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
+import type { NetworkService } from '../net/NetworkService';
 import { AudioService, type ActiveAudioPlaybackSnapshot } from './AudioService';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
@@ -206,6 +207,18 @@ export class SceneRunner {
   }
 
   /**
+   * Install the host-owned multiplayer session, reachable from scripts as
+   * `this.scene.network`. The host constructs it (plan decision D5: the three
+   * SceneRunner bootstraps), keeps ownership, and disposes it — the runner only
+   * hands it to the SceneService, where it survives every `changeScene`.
+   * Nothing auto-connects; a session starts only when something calls
+   * `network.connect(...)`.
+   */
+  setNetworkService(service: NetworkService | null): void {
+    this.sceneService.setNetworkService(service);
+  }
+
+  /**
    * Enable/disable the Phase-3 2D quad batcher for this runner. Set before
    * `startScene`. When off, the 2D pass is byte-identical to the pre-batching
    * path (source meshes render individually).
@@ -291,12 +304,18 @@ export class SceneRunner {
    * tick), and honors `initiallyVisible`. Default parent is the first scene
    * root node; despawn with `node.dispose()`.
    */
-  async instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
+  async instantiatePrefab(
+    path: string,
+    parent?: NodeBase | null,
+    instanceIdOverride?: string
+  ): Promise<NodeBase> {
     if (!this.isRunning || !this.runtimeGraph) {
       throw new Error('[SceneRunner] instantiatePrefab requires a running scene.');
     }
     this.spawnCounter += 1;
-    const instanceId = `spawn-${this.spawnCounter}`;
+    // A caller-supplied id is how replication makes the same entity derive the same child ids on
+    // every client (`net:<netId>`); everything else gets the local counter.
+    const instanceId = instanceIdOverride?.trim() || `spawn-${this.spawnCounter}`;
     const node = await this.sceneManager.instantiatePrefab(path, instanceId);
 
     const target = parent ?? this.runtimeGraph.rootNodes[0] ?? null;
@@ -1349,8 +1368,12 @@ export class SceneRunner {
       loadAndStartScene(path: string): Promise<void> {
         return runner.loadAndStartScene(path);
       },
-      instantiatePrefab(path: string, parent?: NodeBase | null): Promise<NodeBase> {
-        return runner.instantiatePrefab(path, parent);
+      instantiatePrefab(
+        path: string,
+        parent?: NodeBase | null,
+        instanceId?: string
+      ): Promise<NodeBase> {
+        return runner.instantiatePrefab(path, parent, instanceId);
       },
     });
   }

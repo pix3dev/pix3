@@ -171,16 +171,29 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
       const hw = size.width / 2;
       const hh = size.height / 2;
       points.push(
-        offset.x - hw, offset.y - hh, 0,
-        offset.x + hw, offset.y - hh, 0,
-        offset.x + hw, offset.y + hh, 0,
-        offset.x - hw, offset.y + hh, 0
+        offset.x - hw,
+        offset.y - hh,
+        0,
+        offset.x + hw,
+        offset.y - hh,
+        0,
+        offset.x + hw,
+        offset.y + hh,
+        0,
+        offset.x - hw,
+        offset.y + hh,
+        0
       );
     }
 
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new Float32BufferAttribute(points, 3));
-    const material = new LineBasicMaterial({ color: 0x7df9ff, depthTest: false, transparent: true, opacity: 0.9 });
+    const material = new LineBasicMaterial({
+      color: 0x7df9ff,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.9,
+    });
     const line = new LineLoop(geometry, material);
     line.renderOrder = 5000;
     line.userData[OVERLAY_2D_FLAG] = true;

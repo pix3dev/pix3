@@ -150,7 +150,10 @@ class PreviewSessionService {
     return session;
   }
 
-  authenticate(sessionId: string, token: string): { session: PreviewSession; role: PreviewRole } | null {
+  authenticate(
+    sessionId: string,
+    token: string
+  ): { session: PreviewSession; role: PreviewRole } | null {
     const session = this.getSession(sessionId);
     if (!session || !token) {
       return null;

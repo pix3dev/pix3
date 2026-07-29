@@ -153,7 +153,9 @@ describe('runMigrations', () => {
       )
       .run();
     migrated.prepare(`DELETE FROM library_categories WHERE id = 'ui'`).run();
-    expect(migrated.prepare('SELECT COUNT(*) AS n FROM library_categories').get()).toEqual({ n: 0 });
+    expect(migrated.prepare('SELECT COUNT(*) AS n FROM library_categories').get()).toEqual({
+      n: 0,
+    });
   });
 
   it('carries legacy rows over and is idempotent', () => {
@@ -162,11 +164,13 @@ describe('runMigrations', () => {
     runMigrations(migrated);
     runMigrations(migrated);
 
-    expect(migrated.prepare('SELECT manifest FROM library_items WHERE id = ?').get('legacy-1')).toEqual(
-      { manifest: '{"id":"legacy-1"}' }
-    );
+    expect(
+      migrated.prepare('SELECT manifest FROM library_items WHERE id = ?').get('legacy-1')
+    ).toEqual({ manifest: '{"id":"legacy-1"}' });
     // A repeated ADD COLUMN would have thrown; a repeated rebuild would have duplicated columns.
-    expect(tableColumns(migrated, 'library_items').filter(name => name === 'status')).toHaveLength(1);
+    expect(tableColumns(migrated, 'library_items').filter(name => name === 'status')).toHaveLength(
+      1
+    );
     expect(migrated.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 

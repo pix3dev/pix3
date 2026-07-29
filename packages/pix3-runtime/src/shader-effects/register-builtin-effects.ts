@@ -4,7 +4,11 @@
  * without an import cycle.
  */
 import { Color, Vector2 } from 'three';
-import type { ShaderEffectTickContext, ShaderEffectTypeInfo, ShaderEffectVector2 } from './shader-effect-types';
+import type {
+  ShaderEffectTickContext,
+  ShaderEffectTypeInfo,
+  ShaderEffectVector2,
+} from './shader-effect-types';
 
 /**
  * Dissolve — noise-thresholded `discard` with an emissive glowing edge.
@@ -15,7 +19,8 @@ const DISSOLVE: ShaderEffectTypeInfo = {
   id: 'core:dissolve',
   key: 'dissolve',
   displayName: 'Dissolve',
-  description: 'Noise-thresholded discard with a glowing edge. Animate Amount 0→1 to dissolve away.',
+  description:
+    'Noise-thresholded discard with a glowing edge. Animate Amount 0→1 to dissolve away.',
   category: 'Surface',
   keywords: ['dissolve', 'disintegrate', 'erode', 'discard', 'burn'],
   define: 'PIX3_FX_DISSOLVE',
@@ -107,7 +112,13 @@ uniform float uPix3RimPower;`,
     },
   ],
   params: [
-    { key: 'color', type: 'color', default: '#ffffff', uniform: 'uPix3RimColor', ui: { label: 'Color' } },
+    {
+      key: 'color',
+      type: 'color',
+      default: '#ffffff',
+      uniform: 'uPix3RimColor',
+      ui: { label: 'Color' },
+    },
     {
       key: 'intensity',
       type: 'number',
@@ -198,7 +209,13 @@ uniform float uPix3FlashAmount;`,
     },
   ],
   params: [
-    { key: 'color', type: 'color', default: '#ffffff', uniform: 'uPix3FlashColor', ui: { label: 'Color' } },
+    {
+      key: 'color',
+      type: 'color',
+      default: '#ffffff',
+      uniform: 'uPix3FlashColor',
+      ui: { label: 'Color' },
+    },
     {
       key: 'amount',
       type: 'number',
@@ -224,7 +241,17 @@ const ADJUST: ShaderEffectTypeInfo = {
   displayName: 'Adjust (Brightness/Contrast/Saturation)',
   description: 'Brightness, contrast and saturation grade on the base color.',
   category: 'Color',
-  keywords: ['adjust', 'brightness', 'contrast', 'saturation', 'darken', 'lighten', 'hover', 'grade', 'hsl'],
+  keywords: [
+    'adjust',
+    'brightness',
+    'contrast',
+    'saturation',
+    'darken',
+    'lighten',
+    'hover',
+    'grade',
+    'hsl',
+  ],
   define: 'PIX3_FX_ADJUST',
   targets: ['basic', 'standard'],
   fragmentPars: /* glsl */ `
@@ -330,7 +357,13 @@ uniform float uPix3TintAmount;`,
     },
   ],
   params: [
-    { key: 'color', type: 'color', default: '#ffffff', uniform: 'uPix3TintColor', ui: { label: 'Color' } },
+    {
+      key: 'color',
+      type: 'color',
+      default: '#ffffff',
+      uniform: 'uPix3TintColor',
+      ui: { label: 'Color' },
+    },
     {
       key: 'amount',
       type: 'number',
