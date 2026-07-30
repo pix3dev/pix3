@@ -90,6 +90,19 @@
       color: rgba(245, 247, 250, 0.72);
       word-break: break-word;
     }
+
+    /* Which build is actually serving this page. Lives inside the overlay, so it is readable while
+       the player loads or waits and disappears with it once the game paints. */
+    #player-version {
+      position: absolute;
+      right: 12px;
+      bottom: 10px;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+      color: rgba(245, 247, 250, 0.38);
+      pointer-events: none;
+    }
   </style>
   <script type="module" src="/src/player/player-main.ts"></script>
 </head>
@@ -102,6 +115,7 @@
       <p id="player-status-title">Loading…</p>
       <p id="player-status-detail">Preparing the preview player.</p>
     </div>
+    <div id="player-version"></div>
   </div>
 </body>
 

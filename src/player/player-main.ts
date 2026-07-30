@@ -30,6 +30,7 @@ import {
 } from '@/core/remote-preview/protocol';
 import { PreviewPlayerClient, type PreviewConnectionState } from './PreviewPlayerClient';
 import { RemoteResourceManager } from './RemoteResourceManager';
+import { CURRENT_EDITOR_VERSION } from '@/version';
 
 installRuntimeImportMap();
 registerSpineModuleLoader();
@@ -703,7 +704,28 @@ function stringifyLogArgument(value: unknown): string {
   }
 }
 
+/**
+ * Says which build is serving this page, in the console and in the overlay's corner.
+ *
+ * The player is deployed independently of whoever hosts the session — an editor on localhost can
+ * hand its join link to `editor.pix3.dev`, whose bundle may be older than the runtime the host is
+ * running. When the two disagree the symptoms look like game bugs, so the version has to be the
+ * first thing anyone reads. `CURRENT_EDITOR_VERSION` is stamped by `prebuild`, and the runtime
+ * ships lockstep with it, so one number identifies both.
+ */
+function announceBuildVersion(): void {
+  const { displayVersion } = CURRENT_EDITOR_VERSION;
+  console.log(`[Pix3 Player] ${displayVersion} — ${location.origin}`);
+
+  const badge = document.getElementById('player-version');
+  if (badge) {
+    badge.textContent = displayVersion;
+  }
+}
+
 function bootstrap(): void {
+  announceBuildVersion();
+
   const app = document.getElementById('app');
   const overlay = document.getElementById('player-overlay');
   const statusTitle = document.getElementById('player-status-title');
