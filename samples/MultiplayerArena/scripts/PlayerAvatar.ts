@@ -209,9 +209,10 @@ export class PlayerAvatar extends Script implements ArenaAvatar {
     if (!label) {
       return;
     }
-    const name = this.isMine
-      ? `${peerName(network?.peers ?? [], clientId)} (you)`
-      : peerName(network?.peers ?? [], clientId);
+    // Offline there is no client id, so `peerName` already answers "you" — appending the marker
+    // then reads "you (you)".
+    const base = peerName(network?.peers ?? [], clientId);
+    const name = this.isMine && base !== 'you' ? `${base} (you)` : base;
     if (name !== this.lastName) {
       this.lastName = name;
       this.setLabelText(label, name);

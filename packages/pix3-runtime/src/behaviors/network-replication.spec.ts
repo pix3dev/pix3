@@ -297,6 +297,9 @@ function createHarness(): Harness {
       return Promise.resolve(node);
     })
   );
+  // What `SceneRunner.runGraph` says once the graph is live. The binder refuses to spawn a remote
+  // prefab before it, so a harness that stops at `setDelegate` is a scene that never started.
+  scene.handleSceneStarted();
 
   return harness;
 }
@@ -498,6 +501,35 @@ describe('networked node replication', () => {
       const disposed = vi.spyOn(remoteNode, 'dispose');
       NodeBase.flushFreeQueue();
       expect(disposed).toHaveBeenCalled();
+    });
+
+    it('holds an enter that lands before the scene runs, and spawns it when the scene starts', async () => {
+      // The join order guarantees this window: the session connects first (a script's onStart must
+      // already see `net.isOnline`), so the first snapshot routinely arrives while the scene is
+      // still loading. It must be held, not dropped and not counted as a failure.
+      const h = await createJoinedHarness();
+      h.scene.setDelegate(null);
+      h.scene.setDelegate(
+        createDelegate((path, _parent, instanceId) => {
+          const node = h.prefabFactory(path, instanceId);
+          node.scene = h.scene;
+          h.instantiated.push({ path, instanceId, node });
+          return Promise.resolve(node);
+        })
+      );
+      const netId = packNetId(14, 2);
+
+      h.socket().deliver(snapshotFrame(0, [{ netId, state: entityAt(0, 0, { kind: 0 }) }]));
+      await flushMicrotasks();
+
+      expect(h.instantiated).toHaveLength(0);
+      expect(h.scene.netNodes.stats.instantiateFailures).toBe(0);
+
+      h.scene.handleSceneStarted();
+      await flushMicrotasks();
+
+      expect(h.instantiated).toHaveLength(1);
+      expect(h.scene.netNodes.getNode(netId)).toBe(h.instantiated[0].node);
     });
 
     it('ignores an enter whose kind is not in this build', async () => {

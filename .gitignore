@@ -38,4 +38,8 @@ public/esbuild.wasm
 # Collab server runtime data
 packages/pix3-collab-server/data/
 packages/pix3-collab-server/projects/
+
+# Per-project editor metadata. `preview-session.json` carries live relay tokens, so a sample
+# project opened in the editor must not drag them into a commit.
+.pix3/
 repomix-output.xml

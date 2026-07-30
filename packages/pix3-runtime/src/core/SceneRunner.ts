@@ -314,8 +314,11 @@ export class SceneRunner {
     }
     this.spawnCounter += 1;
     // A caller-supplied id is how replication makes the same entity derive the same child ids on
-    // every client (`net:<netId>`); everything else gets the local counter.
-    const instanceId = instanceIdOverride?.trim() || `spawn-${this.spawnCounter}`;
+    // every client (`net:<netId>`); everything else gets the local counter. Colon-namespaced for
+    // the same reason `net:` is: authored ids never contain one, and an authored scene is free to
+    // call its own nodes `spawn-1` — two live nodes sharing an id turns every lookup by id
+    // (`findNode`, `getLiveNodeById`, node queries) into a coin flip.
+    const instanceId = instanceIdOverride?.trim() || `spawn:${this.spawnCounter}`;
     const node = await this.sceneManager.instantiatePrefab(path, instanceId);
 
     const target = parent ?? this.runtimeGraph.rootNodes[0] ?? null;
@@ -413,11 +416,21 @@ export class SceneRunner {
 
     this.ecsService.beginScene(this.sceneService, this.inputService);
 
+    // Marked running BEFORE the pre-roll tick, because that tick is where every
+    // component's `onStart` fires — and `onStart` is the documented place to
+    // spawn (`scene.instantiate`), which refuses to run on a scene that is not
+    // running yet. Nothing else can observe the flag in between: `updateNodes`
+    // is synchronous and the rAF loop starts below.
+    this.isRunning = true;
+
     // Initial tick to update transforms before render
     this.updateNodes(0);
     this.flushInstancedNodes();
 
-    this.isRunning = true;
+    // Entities the session already knew about — a snapshot can land while the scene is still
+    // loading — are only bindable now that a graph exists to instantiate them into.
+    this.sceneService.handleSceneStarted();
+
     this.clock.start();
     this.tick();
   }

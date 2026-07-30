@@ -53,7 +53,7 @@ export function getNodeVisuals(node: NodeBase): { color: string; icon: string } 
     return { color: NODE_2D_COLOR, icon: 'ui-button' };
   }
   if (node instanceof Label2D) {
-    return { color: NODE_2D_COLOR, icon: 'text' };
+    return { color: NODE_2D_COLOR, icon: 'type' };
   }
   if (node instanceof Slider2D) {
     return { color: NODE_2D_COLOR, icon: 'ui-slider' };

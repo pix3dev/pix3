@@ -76,7 +76,7 @@ export interface SceneServiceDelegate {
   /**
    * Spawn a prefab scene into the running graph (see SceneService.instantiate).
    *
-   * `instanceId` overrides the runner's own `spawn-<n>` counter. Replication needs it: passing
+   * `instanceId` overrides the runner's own `spawn:<n>` counter. Replication needs it: passing
    * `net:<netId>` makes every client derive identical child ids for the same entity, which is what
    * lets a spawned child be addressed as `(rootNetId, childPath)` (plan decision D6).
    */
@@ -146,6 +146,8 @@ export class SceneService {
   private networkService: NetworkService | null = null;
   /** Scene-scoped entity↔node bindings; see {@link netNodes}. Recreated per scene, unlike the session. */
   private networkNodeBinder: NetworkNodeBinder | null = null;
+  /** True between {@link handleSceneStarted} and the delegate going away; gates remote spawning. */
+  private sceneRunning = false;
   private readonly scratchPointerUnproject = new Vector3();
   /** Non-null while a {@link changeScene} transition is in flight (re-entrancy guard). */
   private changeScenePromise: Promise<void> | null = null;
@@ -162,11 +164,24 @@ export class SceneService {
   setDelegate(delegate: SceneServiceDelegate | null): void {
     this.delegate = delegate;
     if (!delegate) {
+      this.sceneRunning = false;
       // The graph this binder's nodes live in is being torn down. The *entities* survive (the
       // session outlives the scene), so remote ones go back on its pending list and are
       // re-instantiated into whatever scene runs next.
       this.networkNodeBinder?.handleSceneStopped();
     }
+  }
+
+  /**
+   * Called by SceneRunner once the new scene is running and every component has had its `onStart`.
+   * The counterpart of the teardown branch in {@link setDelegate}: a snapshot that landed while the
+   * scene was still loading left its entities on the binder's pending list, and this is the moment
+   * they can finally be instantiated. Without it, a peer's avatar only appears on the next entity
+   * change — or never, in a scene that has no networked node of its own to trigger a reconcile.
+   */
+  handleSceneStarted(): void {
+    this.sceneRunning = true;
+    this.networkNodeBinder?.reconcile();
   }
 
   /**
@@ -316,6 +331,14 @@ export class SceneService {
    * falls back to a fresh offline instance.
    */
   setNetworkService(service: NetworkService | null): void {
+    if (service !== null && service === this.networkService) {
+      // Re-installing the SAME session must be a no-op. Hosts call this from a getter (the editor's
+      // `GamePlaySessionService.getNetworkService`, which the Play Online card polls once a second),
+      // and tearing the binder down would drop every entity↔node binding: peers' avatars would stop
+      // receiving transforms and the next reconcile would spawn duplicates of nodes still in the
+      // scene. Only an actual session swap invalidates the binder.
+      return;
+    }
     this.networkService = service;
     // The binder holds a subscription to the *old* session; a new one needs a new binder.
     this.networkNodeBinder?.dispose();
@@ -338,6 +361,7 @@ export class SceneService {
       this.networkNodeBinder = new NetworkNodeBinder({
         network: this.network,
         instantiate: (path, options) => this.instantiate(path, options),
+        isSceneRunning: () => this.sceneRunning,
       });
     }
     return this.networkNodeBinder;

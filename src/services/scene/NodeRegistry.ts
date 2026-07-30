@@ -210,7 +210,7 @@ export class NodeRegistry {
       subcategory: 'UI',
       commandClass: CreateLabel2DCommand,
       color: '#96cbf6ff',
-      icon: 'text',
+      icon: 'type',
       keywords: ['create', 'label', 'text', '2d', 'ui', 'add'],
       order: 4.5,
     });

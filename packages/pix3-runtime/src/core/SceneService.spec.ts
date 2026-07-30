@@ -6,6 +6,7 @@ import { ResourceManager } from './ResourceManager';
 import { GameTime } from './GameTime';
 import { InputService } from './InputService';
 import { SceneService, type FrameProfilerActivity } from './SceneService';
+import { NetworkService } from '../net/NetworkService';
 
 describe('SceneService viewport API', () => {
   const originalInnerWidth = window.innerWidth;
@@ -321,5 +322,35 @@ describe('SceneService.changeScene', () => {
 
     await expect(promise).resolves.toBeUndefined();
     expect(loadAndStartScene).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SceneService network session installation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the binder — and its bindings — when the SAME session is re-installed', () => {
+    // The editor's Play Online card polls `getNetworkService()` once a second, and that getter
+    // re-installs the session. Dropping the binder there would unbind every peer's avatar (they
+    // stop receiving transforms) and let the next reconcile spawn duplicates.
+    const service = new SceneService();
+    const session = new NetworkService();
+
+    service.setNetworkService(session);
+    const binder = service.netNodes;
+    service.setNetworkService(session);
+
+    expect(service.netNodes).toBe(binder);
+  });
+
+  it('replaces the binder when a DIFFERENT session is installed', () => {
+    const service = new SceneService();
+
+    service.setNetworkService(new NetworkService());
+    const binder = service.netNodes;
+    service.setNetworkService(new NetworkService());
+
+    expect(service.netNodes).not.toBe(binder);
   });
 });

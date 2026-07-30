@@ -38,6 +38,13 @@ export interface NetworkNodeBinderHost {
     path: string,
     options?: { parent?: NodeBase | string | null; instanceId?: string }
   ): Promise<NodeBase>;
+  /**
+   * False while no scene is running (still loading, or stopped). A snapshot routinely lands in that
+   * window — the session connects before the scene starts — and attempting the spawn then is a
+   * guaranteed failure, so the entity just stays pending until the scene reports it is running.
+   * Optional: a host that does not implement it is treated as always running.
+   */
+  isSceneRunning?(): boolean;
 }
 
 interface Binding {
@@ -264,6 +271,12 @@ export class NetworkNodeBinder {
   }
 
   private async instantiateRemote(netId: number, kind: number): Promise<void> {
+    if (this.host.isSceneRunning && !this.host.isSceneRunning()) {
+      // Not a failure, and not worth a warning: `netId` stays pending and the scene reconciles the
+      // whole pending set the moment it starts running.
+      return;
+    }
+
     const prefabPath = this.host.network.kinds.prefabPathOf(kind);
     if (!prefabPath) {
       // Nothing to retry: the build simply does not know this kind. Counted, never fatal — the rest

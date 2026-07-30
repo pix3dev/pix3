@@ -190,7 +190,8 @@ export class Label2D extends UIControl2D {
     const dpr = Math.max(1, Math.min(3, dprRaw));
     const pixelWidth = Math.max(1, Math.round(boxWidth * dpr));
     const pixelHeight = Math.max(1, Math.round(boxHeight * dpr));
-    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    const canvasResized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
+    if (canvasResized) {
       canvas.width = pixelWidth;
       canvas.height = pixelHeight;
     }
@@ -207,9 +208,13 @@ export class Label2D extends UIControl2D {
       this.typewriterActive = false;
     }
 
-    // Recreate the texture only when the backing canvas is new; repaints of
-    // the same canvas just need a needsUpdate flip.
-    if (!this.labelTexture || this.labelTexture.image !== canvas) {
+    // Recreate the texture when the backing canvas is new **or when it changed size**; repaints of
+    // a same-sized canvas just need a needsUpdate flip. The size case is not an optimization: a
+    // mipmap-free texture is uploaded through immutable storage (`texStorage2D` + a sub-image
+    // copy), so a grown canvas overflows the allocation the GPU still has — the driver rejects the
+    // copy (`glCopySubTextureCHROMIUM: Offset overflows texture dimensions`) and the label keeps
+    // painting the previous text underneath the new one ("13s left" over "…lefteft").
+    if (!this.labelTexture || this.labelTexture.image !== canvas || canvasResized) {
       this.labelTexture?.dispose();
       this.labelTexture = new CanvasTexture(canvas);
       configure2DTexture(this.labelTexture);

@@ -617,6 +617,41 @@ describe('SceneRunner scene transitions (loadAndStartScene)', () => {
     runner.stop();
   });
 
+  it('is already running when the first onStart fires, so a script can spawn from onStart', async () => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1 as unknown as number);
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+
+    // `scene.instantiate` refuses to run on a scene that is not running yet, and onStart is the
+    // documented place to spawn — so the flag must already be true in the pre-roll tick that
+    // fires every component's onStart.
+    class SpawnOnStartScript extends Script {
+      runningAtStart: boolean | null = null;
+
+      override onStart(): void {
+        this.runningAtStart = runner.running;
+      }
+    }
+
+    const rootNode = new NodeBase({ id: 'runtime-root', name: 'Runtime Root' });
+    const script = new SpawnOnStartScript('spawn-on-start', 'SpawnOnStartScript');
+    rootNode.addComponent(script);
+
+    await (runner as unknown as { runGraph: (graph: SceneGraph) => Promise<void> }).runGraph({
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [rootNode],
+      nodeMap: new Map([[rootNode.nodeId, rootNode]]),
+    });
+
+    expect(script.runningAtStart).toBe(true);
+    runner.stop();
+  });
+
   it('reads + parses the target and hands it to runGraph WITHOUT registering it in the SceneManager', async () => {
     const audioService = new AudioService();
     const resourceManager = new InMemoryResourceManager({
