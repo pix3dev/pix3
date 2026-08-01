@@ -18,6 +18,7 @@ import { IconService } from '@/services/editor/IconService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { OperationService } from '@/services/core/OperationService';
 import { readBlobSize, sliceImageBlob } from '@/services/image-gen/image-ops';
+import { StageZoomPanController, type StageViewport } from '@/ui/shared/stage-zoom-pan';
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
@@ -166,7 +167,15 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   private editMode: AnimationEditMode = 'anchor';
 
   @state()
-  private stageZoom = 1;
+  /**
+   * Zoom/pan of the frame stage. Shared with the Sprite Editor's canvas so both
+   * surfaces agree on wheel-zoom-to-cursor and pan feel (`src/ui/shared/`).
+   */
+  private readonly stageView = new StageZoomPanController({
+    minZoom: 0.1,
+    maxZoom: 16,
+    onChange: () => this.requestUpdate(),
+  });
 
   @state()
   private textureDimensions: TextureDimensions = { width: 0, height: 0 };
@@ -401,7 +410,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
         <span>${clipLabel}</span>
         <span>${frameLabel}</span>
         <span>${sizeLabel}</span>
-        <span>${Math.round(this.stageZoom * 100)}%</span>
+        <span>${Math.round(this.stageView.zoom * 100)}%</span>
         <span>${this.resource?.clips.length ?? 0} clips</span>
         <span>${clipFrames.length} frames</span>
       </div>
@@ -419,8 +428,9 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     const metrics = this.getFrameMetrics(previewFrame);
-    const zoomedWidth = metrics.frameWidth * this.stageZoom;
-    const zoomedHeight = metrics.frameHeight * this.stageZoom;
+    const zoom = this.stageView.zoom;
+    const zoomedWidth = metrics.frameWidth * zoom;
+    const zoomedHeight = metrics.frameHeight * zoom;
     const polygonPoints = previewFrame.collisionPolygon
       .map(point => `${point.x},${point.y}`)
       .join(' ');
@@ -430,8 +440,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     return html`
       <div class="stage-shell">
-        <div class="stage-scroll">
-          <div class="stage-artboard">
+        <div class="stage-scroll" @wheel=${(event: WheelEvent) => this.onStageWheel(event)}>
+          <div
+            class="stage-artboard ${this.stageView.isPanning ? 'is-panning' : ''}"
+            style=${`transform: translate(${this.stageView.panX}px, ${this.stageView.panY}px);`}
+          >
             <div
               class="stage-frame"
               style=${`width:${zoomedWidth}px; height:${zoomedHeight}px;`}
@@ -729,12 +742,47 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private onAdjustZoom(direction: -1 | 1): void {
-    const nextZoom = this.stageZoom + direction * 0.25;
-    this.stageZoom = Math.min(8, Math.max(0.5, Number(nextZoom.toFixed(2))));
+    this.stageView.adjustZoom(direction * 2);
   }
 
   private onResetZoom(): void {
-    this.stageZoom = 1;
+    this.stageView.reset();
+  }
+
+  /**
+   * Wheel over the stage zooms around the cursor. The stage frame is *sized* by
+   * zoom (so percentage-positioned overlays keep working), and the pan lives on
+   * the artboard's transform — so the untranslated content origin the controller
+   * expects is the frame rect minus the current pan.
+   */
+  private onStageWheel(event: WheelEvent): void {
+    const viewport = this.getStageViewport();
+    if (!viewport) {
+      return;
+    }
+    event.preventDefault();
+    this.stageView.zoomAtPointer(event, viewport);
+  }
+
+  private getStageViewport(): StageViewport | null {
+    const frameElement = this.querySelector('.stage-frame');
+    const frame = this.getSelectedFrame();
+    if (!frameElement || !frame) {
+      return null;
+    }
+
+    const rect = frameElement.getBoundingClientRect();
+    const metrics = this.getFrameMetrics(frame);
+    return {
+      rect: new DOMRect(
+        rect.left - this.stageView.panX,
+        rect.top - this.stageView.panY,
+        rect.width,
+        rect.height
+      ),
+      contentWidth: metrics.frameWidth,
+      contentHeight: metrics.frameHeight,
+    };
   }
 
   private onSelectFrame(event: MouseEvent, index: number): void {
@@ -1111,6 +1159,13 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private onStagePointerDown(event: PointerEvent): void {
+    // Middle-drag (or Alt+left) pans instead of editing — the tool keeps plain
+    // left-drag.
+    if (this.stageView.beginPan(event)) {
+      event.preventDefault();
+      return;
+    }
+
     const frame = this.getSelectedFrame();
     if (!frame) {
       return;
@@ -1163,6 +1218,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private onStagePointerMove(event: PointerEvent): void {
+    if (this.stageView.updatePan(event)) {
+      return;
+    }
+
     const dragState = this.stageDragState;
     const frame = this.getSelectedFrame();
     if (!dragState || !frame || dragState.pointerId !== event.pointerId || !this.frameDraft) {
@@ -1208,6 +1267,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private async onStagePointerUp(event: PointerEvent): Promise<void> {
+    if (this.stageView.endPan(event)) {
+      return;
+    }
+
     const dragState = this.stageDragState;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;

@@ -280,6 +280,14 @@ pix3-animation-panel .stage-artboard {
   padding: 0.9rem;
 }
 
+pix3-animation-panel .stage-artboard.is-panning {
+  cursor: grabbing;
+}
+
+pix3-animation-panel .stage-artboard.is-panning .stage-frame {
+  cursor: grabbing;
+}
+
 pix3-animation-panel .anchor-tools {
   display: flex;
   flex-direction: column;
