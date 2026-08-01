@@ -226,6 +226,20 @@ pix3-assets-content .thumb img {
   object-fit: contain;
 }
 
+/* Frame-count badge on a collapsed managed sprite folder. */
+pix3-assets-content .sprite-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 0.65rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 pix3-assets-content .text-thumb {
   display: block;
   width: 100%;

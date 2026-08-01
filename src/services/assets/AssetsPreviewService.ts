@@ -13,6 +13,7 @@ import {
   normalizeAnimationResource,
   type AnimationResource,
 } from '@pix3/runtime';
+import { isManagedSpriteFolder } from '@/features/scene/animation-asset-utils';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
@@ -86,6 +87,16 @@ export interface AssetPreviewItem {
   readonly name: string;
   readonly path: string;
   readonly kind: FileSystemHandleKind;
+  /**
+   * Set only on a **collapsed managed sprite folder**: the real folder path this
+   * item stands in for. The item otherwise behaves exactly like the folder's
+   * `.pix3anim` (same `path`, drag payload, double-click target, preview), so a
+   * sprite reads as one object instead of a folder full of numbered PNGs. Use
+   * this to navigate into the raw files ("Show files").
+   */
+  readonly spriteFolderPath?: string;
+  /** Frame count of a collapsed sprite folder's first clip; badge on the card. */
+  readonly spriteFrameCount?: number;
   readonly previewType: AssetPreviewType;
   readonly thumbnailUrl: string | null;
   readonly previewUrl: string | null;
@@ -157,6 +168,17 @@ export class AssetsPreviewService {
   private requestVersion = 0;
   private disposeProjectSubscription?: () => void;
   private thumbnailWorkerPromise: Promise<void> | null = null;
+  /**
+   * Collapse managed sprite folders into single sprite cards. On by default
+   * (design decision §8.11.6); the Assets panel header toggles it.
+   */
+  private collapseSpriteFolders = true;
+  /**
+   * Managed-folder verdicts by folder path (`null` = not managed). The predicate
+   * costs a `listDirectory` + one `.pix3anim` read per folder, so it is cached
+   * and dropped whenever the folder contents could have changed.
+   */
+  private readonly spriteFolderCache = new Map<string, string | null>();
 
   constructor() {
     this.disposeProjectSubscription = subscribe(appState.project, () => {
@@ -254,7 +276,22 @@ export class AssetsPreviewService {
     if (!this.state.selectedFolderPath) {
       return;
     }
+    // Contents may have changed — a folder can become (or stop being) managed.
+    this.spriteFolderCache.clear();
     await this.loadFolder(this.state.selectedFolderPath);
+  }
+
+  /** Whether managed sprite folders render as one sprite card. */
+  public getCollapseSpriteFolders(): boolean {
+    return this.collapseSpriteFolders;
+  }
+
+  public async setCollapseSpriteFolders(collapse: boolean): Promise<void> {
+    if (this.collapseSpriteFolders === collapse) {
+      return;
+    }
+    this.collapseSpriteFolders = collapse;
+    await this.refreshCurrentFolder();
   }
 
   public dispose(): void {
@@ -281,6 +318,7 @@ export class AssetsPreviewService {
       this.state.isLoading = false;
       this.state.folderItemCount = null;
       this.state.folderSizeBytes = null;
+      this.spriteFolderCache.clear();
       this.notify();
       return;
     }
@@ -413,6 +451,99 @@ export class AssetsPreviewService {
     }
   }
 
+  /**
+   * Collapse a **managed sprite folder** into a single card (§8.2/§8.5 of the
+   * sprite-editor design): one folder holding exactly one `.pix3anim` whose frame
+   * textures all live beside it *is* one sprite, and showing it as a folder full
+   * of numbered PNGs is the Construct-3 illusion breaking.
+   *
+   * The returned item deliberately carries the `.pix3anim`'s own `path`, so every
+   * existing `.pix3anim` behaviour — drag payload, double-click → animation
+   * editor, flipbook preview, inspector binding — works with no further wiring.
+   * `spriteFolderPath` is how a caller gets back to the raw files.
+   *
+   * Returns `null` for anything that isn't managed, which keeps hand-organised
+   * layouts rendering exactly as before.
+   */
+  private async tryBuildSpriteFolderItem(
+    name: string,
+    path: string
+  ): Promise<AssetPreviewItem | null> {
+    const normalizedPath = this.normalizePath(path);
+    const cached = this.spriteFolderCache.get(normalizedPath);
+    const animationPath =
+      cached !== undefined ? cached : await this.resolveManagedSpriteAnimation(normalizedPath);
+    this.spriteFolderCache.set(normalizedPath, animationPath);
+    if (!animationPath) {
+      return null;
+    }
+
+    let blob: Blob | null = null;
+    try {
+      blob = await this.storage.readBlob(animationPath);
+    } catch {
+      return null;
+    }
+
+    const animation = await this.buildAnimationPreview(blob, 1);
+    return {
+      name,
+      path: animationPath,
+      kind: 'file',
+      extension: 'pix3anim',
+      previewType: 'animation',
+      thumbnailUrl: null,
+      previewUrl: null,
+      previewText: null,
+      thumbnailStatus: animation && animation.frames.length > 0 ? 'ready' : 'error',
+      iconName: 'film',
+      sizeBytes: null,
+      width: null,
+      height: null,
+      durationSeconds: animation ? this.getAnimationDuration(animation) : null,
+      channelCount: null,
+      sampleRate: null,
+      lastModified: blob instanceof File ? blob.lastModified : null,
+      animation,
+      spriteFolderPath: normalizedPath,
+      spriteFrameCount: animation?.frameCount ?? 0,
+    };
+  }
+
+  /**
+   * The `.pix3anim` path of a managed sprite folder, or `null`. Managed means:
+   * exactly one `.pix3anim` directly in the folder, and every frame texture it
+   * references resolves inside that same folder.
+   */
+  private async resolveManagedSpriteAnimation(folderPath: string): Promise<string | null> {
+    let entries: Awaited<ReturnType<typeof this.projectService.listDirectory>>;
+    try {
+      entries = await this.projectService.listDirectory(folderPath);
+    } catch {
+      return null;
+    }
+
+    const animations = entries.filter(
+      entry => entry.kind === 'file' && this.getExtension(entry.name) === 'pix3anim'
+    );
+    if (animations.length !== 1) {
+      return null;
+    }
+
+    const animationPath = animations[0].path;
+    try {
+      const resource = normalizeAnimationResource(
+        JSON.parse(await this.storage.readTextFile(animationPath))
+      );
+      const framePaths = resource.clips.flatMap(clip =>
+        clip.frames.map(frame => getAnimationFrameTexturePath(resource, frame))
+      );
+      return isManagedSpriteFolder(animationPath, framePaths) ? animationPath : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async buildPreviewItem(
     name: string,
     path: string,
@@ -420,6 +551,13 @@ export class AssetsPreviewService {
   ): Promise<AssetPreviewItem> {
     const extension = this.getExtension(name);
     if (kind === 'directory') {
+      const collapsed = this.collapseSpriteFolders
+        ? await this.tryBuildSpriteFolderItem(name, path)
+        : null;
+      if (collapsed) {
+        return collapsed;
+      }
+
       return {
         name,
         path,

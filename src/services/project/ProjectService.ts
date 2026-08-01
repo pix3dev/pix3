@@ -51,6 +51,11 @@ export interface AssetBrowserPersistedState {
   contentView?: 'grid' | 'list';
   /** Width in px of the unified Assets panel's folder-tree pane (Phase 4). */
   treePaneWidth?: number;
+  /**
+   * Render managed sprite folders (one `.pix3anim` + its frames) as a single
+   * sprite card instead of a folder. Defaults to true.
+   */
+  collapseSpriteFolders?: boolean;
 }
 
 export interface RecentProjectEntry {
@@ -150,6 +155,8 @@ export class ProjectService {
         thumbnailSize: patch.thumbnailSize ?? current?.thumbnailSize ?? 104,
         contentView: patch.contentView ?? current?.contentView ?? 'grid',
         treePaneWidth: patch.treePaneWidth ?? current?.treePaneWidth,
+        collapseSpriteFolders:
+          patch.collapseSpriteFolders ?? current?.collapseSpriteFolders ?? true,
         savedAt: Date.now(),
       };
       localStorage.setItem(key, JSON.stringify(state));
@@ -192,6 +199,8 @@ export class ProjectService {
           typeof parsed.treePaneWidth === 'number' && Number.isFinite(parsed.treePaneWidth)
             ? parsed.treePaneWidth
             : undefined,
+        collapseSpriteFolders:
+          typeof parsed.collapseSpriteFolders === 'boolean' ? parsed.collapseSpriteFolders : true,
       };
     } catch {
       return null;

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAnimationFrameResourcePath,
+  buildManagedSpriteAssetPath,
   createDefaultAnimationResource,
   deriveAnimationAssetStem,
   getAnimationAssetDirectory,
+  isManagedSpriteFolder,
   normalizeAnimationAssetPath,
 } from './animation-asset-utils';
 
@@ -43,6 +45,40 @@ describe('animation asset utils', () => {
     expect(buildAnimationFrameResourcePath(explicitPath, 2, { clipName: '   ' })).toBe(
       'res://sprites/character/frame_0002.png'
     );
+  });
+
+  it('derives the managed sprite folder path from an image', () => {
+    expect(buildManagedSpriteAssetPath('res://sprites/hero.png')).toBe(
+      'res://sprites/hero/hero.pix3anim'
+    );
+    expect(buildManagedSpriteAssetPath('sprites/ui/button@2x.webp')).toBe(
+      'res://sprites/ui/button@2x/button@2x.pix3anim'
+    );
+    expect(buildManagedSpriteAssetPath('hero.png')).toBe('res://hero/hero.pix3anim');
+  });
+
+  it('recognises a managed sprite folder only when every frame lives beside the resource', () => {
+    const assetPath = 'res://sprites/hero/hero.pix3anim';
+
+    expect(
+      isManagedSpriteFolder(assetPath, [
+        'res://sprites/hero/idle_0001.png',
+        'res://sprites/hero/run_0001.png',
+      ])
+    ).toBe(true);
+    // One frame reaching outside the folder makes the whole thing unmanaged.
+    expect(
+      isManagedSpriteFolder(assetPath, [
+        'res://sprites/hero/idle_0001.png',
+        'res://sprites/shared/shadow.png',
+      ])
+    ).toBe(false);
+    // A nested subfolder is outside too.
+    expect(isManagedSpriteFolder(assetPath, ['res://sprites/hero/idle/0001.png'])).toBe(false);
+    // Nothing to judge → not managed.
+    expect(isManagedSpriteFolder(assetPath, [])).toBe(false);
+    // Scheme-less frame paths normalize to res:// before comparison.
+    expect(isManagedSpriteFolder(assetPath, ['sprites/hero/idle_0001.png'])).toBe(true);
   });
 
   it('creates sequence-first default resources', () => {
