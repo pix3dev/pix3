@@ -26,6 +26,8 @@ import type {
 import {
   AnimatedSprite2D,
   SceneManager,
+  collectClipPointNames,
+  findAnimationFramePoint,
   getAnimationFrameTexturePath,
   isSequenceAnimationFrame,
   normalizeAnimationResource,
@@ -56,7 +58,7 @@ const IMAGE_EXTENSIONS = new Set([
   'avif',
 ]);
 
-type AnimationEditMode = 'anchor' | 'polygon' | 'bbox';
+type AnimationEditMode = 'anchor' | 'polygon' | 'bbox' | 'points';
 
 interface TextureDimensions {
   width: number;
@@ -73,7 +75,13 @@ interface StageDragState {
   mode: AnimationEditMode;
   origin: StagePoint;
   vertexIndex?: number;
+  /** Points mode: name of the point being dragged, and whether it's the angle handle. */
+  pointName?: string;
+  pointAngleHandle?: boolean;
 }
+
+/** Length (frame px) of the direction handle drawn from a point in points mode. */
+const POINT_ANGLE_HANDLE_LENGTH = 28;
 
 interface AnchorPreset {
   label: string;
@@ -138,6 +146,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
   @state()
   private texturePreviewUrl = '';
+
+  /** Points mode: the point highlighted on the stage and in the list. */
+  @state()
+  private selectedPointName: string | null = null;
 
   @state()
   private errorMessage: string | null = null;
@@ -351,6 +363,13 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
           false,
           this.editMode === 'bbox'
         )}
+        ${this.renderToolbarButton(
+          'map-pin',
+          'Frame points mode (named sockets)',
+          () => this.onSetEditMode('points'),
+          false,
+          this.editMode === 'points'
+        )}
 
         <span class="editor-toolbar-separator" aria-hidden="true"></span>
 
@@ -502,6 +521,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
                     ></circle>
                   `
                 )}
+                ${this.renderFramePointOverlay(previewFrame, metrics)}
               </svg>
               <div
                 class="stage-anchor ${this.editMode === 'anchor' ? 'is-editable' : ''}"
@@ -511,8 +531,144 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
             </div>
           </div>
         </div>
-        ${this.renderAnchorTools(selectedFrame)}
+        ${this.renderAnchorTools(selectedFrame)} ${this.renderPointTools(selectedFrame)}
       </div>
+    `;
+  }
+
+  /**
+   * Points-mode side panel: the union of point names across the clip, so adding
+   * one seeds it into every frame and the list doesn't flicker as you scrub.
+   */
+  private renderPointTools(selectedFrame: AnimationFrame | null) {
+    if (this.editMode !== 'points' || !selectedFrame) {
+      return null;
+    }
+
+    const names = collectClipPointNames(this.getActiveClip());
+    return html`
+      <div class="anchor-tools" aria-label="Frame point tools">
+        <div class="anchor-tools-header">
+          <span class="anchor-tools-title">Points</span>
+          <span class="anchor-tools-value">${names.length}</span>
+        </div>
+        <div class="anchor-tools-body">
+          ${names.length === 0
+            ? html`<p class="point-tools-hint">
+                Add a named socket (muzzle, hand) and drag it per frame. Scripts read it with
+                <code>getFramePoint()</code>.
+              </p>`
+            : html`
+                <ul class="point-list">
+                  ${names.map(name => {
+                    const point = findAnimationFramePoint(selectedFrame, name);
+                    return html`
+                      <li class="point-list-item ${point ? '' : 'is-missing'}">
+                        <input
+                          class="point-list-name"
+                          type="text"
+                          .value=${name}
+                          aria-label=${`Point name: ${name}`}
+                          title=${point
+                            ? `${(point.x * 100).toFixed(0)}%, ${(point.y * 100).toFixed(0)}%, ${Math.round(point.angle ?? 0)}°`
+                            : 'Not defined on this frame'}
+                          ?data-selected=${this.selectedPointName === name}
+                          @focus=${() => {
+                            this.selectedPointName = name;
+                          }}
+                          @change=${(event: Event) =>
+                            void this.onRenamePoint(
+                              name,
+                              (event.target as HTMLInputElement).value
+                            )}
+                        />
+                        <button
+                          type="button"
+                          class="point-list-action"
+                          title="Copy this frame's position to every frame of the clip"
+                          @click=${() => void this.onCopyPointToClip(name)}
+                        >
+                          ${this.iconService.getIcon('copy', 12)}
+                        </button>
+                        <button
+                          type="button"
+                          class="point-list-action is-danger"
+                          title="Remove from every frame of the clip"
+                          @click=${() => void this.onRemovePoint(name)}
+                        >
+                          ${this.iconService.getIcon('trash-2', 12)}
+                        </button>
+                      </li>
+                    `;
+                  })}
+                </ul>
+              `}
+          <button
+            type="button"
+            class="anchor-action-button"
+            title="Add a named point to every frame of this clip"
+            @click=${() => void this.onAddPoint()}
+          >
+            Add point
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Named frame points drawn on the stage: a dot per point plus a direction
+   * handle for its angle. The previous frame's points ghost behind them (a
+   * mini onion-skin) so a socket can be kept continuous while animating.
+   */
+  private renderFramePointOverlay(
+    frame: AnimationFrame,
+    metrics: { frameWidth: number; frameHeight: number }
+  ) {
+    const points = frame.points ?? [];
+    const editable = this.editMode === 'points';
+    if (points.length === 0 && !editable) {
+      return null;
+    }
+
+    const toStage = (point: { x: number; y: number }) => ({
+      x: point.x * metrics.frameWidth,
+      y: point.y * metrics.frameHeight,
+    });
+
+    const previousFrame = editable
+      ? (this.getActiveClip()?.frames[this.previewFrameIndex - 1] ?? null)
+      : null;
+
+    return html`
+      ${(previousFrame?.points ?? []).map(point => {
+        const at = toStage(point);
+        return html`<circle class="stage-point stage-point--ghost" cx=${at.x} cy=${at.y} r="3" />`;
+      })}
+      ${points.map(point => {
+        const at = toStage(point);
+        const angleRadians = ((point.angle ?? 0) * Math.PI) / 180;
+        return html`
+          <line
+            class="stage-point-angle ${editable ? 'is-editable' : ''}"
+            x1=${at.x}
+            y1=${at.y}
+            x2=${at.x + Math.cos(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
+            y2=${at.y + Math.sin(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
+            data-point-angle=${point.name}
+          />
+          <circle
+            class="stage-point ${editable ? 'is-editable' : ''} ${this.selectedPointName ===
+            point.name
+              ? 'is-selected'
+              : ''}"
+            cx=${at.x}
+            cy=${at.y}
+            r="5"
+            data-point-name=${point.name}
+          />
+        `;
+      })}
     `;
   }
 
@@ -1057,6 +1213,111 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     );
   }
 
+  /**
+   * Add a named point to **every** frame of the clip at the same normalized spot.
+   * A point that exists on only some frames is almost always an accident; scripts
+   * read it by name every tick and a hole reads as "the socket vanished".
+   */
+  private async onAddPoint(): Promise<void> {
+    const clip = this.getActiveClip();
+    if (!clip) {
+      return;
+    }
+
+    const existing = new Set(collectClipPointNames(clip));
+    let suggestion = 'point';
+    for (let index = 1; existing.has(suggestion); index += 1) {
+      suggestion = `point${index}`;
+    }
+
+    // Auto-named like clips are; the list row is an input, so renaming is inline.
+    const name = suggestion;
+    this.frameDraft = null;
+    this.selectedPointName = name;
+    await this.applyClipUpdate(
+      candidate => ({
+        ...candidate,
+        frames: candidate.frames.map(frame => ({
+          ...frame,
+          points: [...(frame.points ?? []), { name, x: 0.5, y: 0.5, angle: 0 }],
+        })),
+      }),
+      `Add frame point "${name}": ${this.activeClipName}`
+    );
+  }
+
+  private async onRenamePoint(name: string, rawNextName: string): Promise<void> {
+    const nextName = rawNextName.trim();
+    const clip = this.getActiveClip();
+    if (!clip || !nextName || nextName === name) {
+      // Restore the input to the stored name on an empty/no-op edit.
+      this.requestUpdate();
+      return;
+    }
+    if (collectClipPointNames(clip).includes(nextName)) {
+      this.requestUpdate();
+      return;
+    }
+
+    this.frameDraft = null;
+    this.selectedPointName = nextName;
+    await this.applyClipUpdate(
+      candidate => ({
+        ...candidate,
+        frames: candidate.frames.map(frame => ({
+          ...frame,
+          points: (frame.points ?? []).map(point =>
+            point.name === name ? { ...point, name: nextName } : point
+          ),
+        })),
+      }),
+      `Rename frame point: ${name} -> ${nextName}`
+    );
+  }
+
+  private async onRemovePoint(name: string): Promise<void> {
+    this.frameDraft = null;
+    if (this.selectedPointName === name) {
+      this.selectedPointName = null;
+    }
+    await this.applyClipUpdate(
+      clip => ({
+        ...clip,
+        frames: clip.frames.map(frame => ({
+          ...frame,
+          points: (frame.points ?? []).filter(point => point.name !== name),
+        })),
+      }),
+      `Remove frame point "${name}": ${this.activeClipName}`
+    );
+  }
+
+  /** Stamp the selected frame's version of a point onto every frame of the clip. */
+  private async onCopyPointToClip(name: string): Promise<void> {
+    const source = findAnimationFramePoint(this.getSelectedFrame(), name);
+    if (!source) {
+      return;
+    }
+
+    this.frameDraft = null;
+    await this.applyClipUpdate(
+      clip => ({
+        ...clip,
+        frames: clip.frames.map(frame => {
+          const points = frame.points ?? [];
+          const replacement = { ...source };
+          return {
+            ...frame,
+            points: points.some(point => point.name === name)
+              ? points.map(point => (point.name === name ? replacement : point))
+              : [...points, replacement],
+          };
+        }),
+      }),
+      `Copy frame point "${name}" to clip: ${this.activeClipName}`
+    );
+  }
+
   private async onApplySelectedAnchorToActiveClip(): Promise<void> {
     const anchor = this.getSelectedAnchor();
     if (!anchor) {
@@ -1180,7 +1441,23 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     const draft = this.cloneFrame(frame);
     this.frameDraft = draft;
 
-    if (this.editMode === 'anchor') {
+    if (this.editMode === 'points') {
+      const angleHandleName = target.getAttribute('data-point-angle');
+      const pointName = target.getAttribute('data-point-name') ?? angleHandleName;
+      if (!pointName) {
+        // Empty stage click in points mode: nothing to grab.
+        this.frameDraft = null;
+        return;
+      }
+      this.selectedPointName = pointName;
+      this.stageDragState = {
+        pointerId: event.pointerId,
+        mode: 'points',
+        origin: point,
+        pointName,
+        pointAngleHandle: Boolean(angleHandleName),
+      };
+    } else if (this.editMode === 'anchor') {
       draft.anchor = this.toNormalizedAnchor(point, frame);
       this.stageDragState = {
         pointerId: event.pointerId,
@@ -1230,6 +1507,35 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     const point = this.getStageLocalPoint(event, frame);
     if (!point) {
+      return;
+    }
+
+    if (dragState.mode === 'points') {
+      const pointName = dragState.pointName;
+      if (!pointName) {
+        return;
+      }
+      const metrics = this.getFrameMetrics(frame);
+      this.frameDraft = {
+        ...this.frameDraft,
+        points: (this.frameDraft.points ?? []).map(candidate => {
+          if (candidate.name !== pointName) {
+            return candidate;
+          }
+          if (!dragState.pointAngleHandle) {
+            return {
+              ...candidate,
+              x: Number((point.x / metrics.frameWidth).toFixed(4)),
+              y: Number((point.y / metrics.frameHeight).toFixed(4)),
+            };
+          }
+          // Dragging the handle rotates the point around itself.
+          const originX = candidate.x * metrics.frameWidth;
+          const originY = candidate.y * metrics.frameHeight;
+          const angle = (Math.atan2(point.y - originY, point.x - originX) * 180) / Math.PI;
+          return { ...candidate, angle: Math.round(angle) };
+        }),
+      };
       return;
     }
 
@@ -1333,6 +1639,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       anchor: { ...frame.anchor },
       boundingBox: { ...frame.boundingBox },
       collisionPolygon: frame.collisionPolygon.map(point => ({ ...point })),
+      points: (frame.points ?? []).map(point => ({ ...point })),
     };
   }
 

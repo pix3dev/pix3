@@ -472,6 +472,108 @@ pix3-animation-panel .stage-anchor.is-editable {
   cursor: grab;
 }
 
+/* Named frame points (sockets) --------------------------------------------- */
+pix3-animation-panel .stage-point {
+  fill: var(--accent);
+  stroke: var(--bg-0);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-animation-panel .stage-point.is-editable {
+  cursor: grab;
+}
+
+pix3-animation-panel .stage-point.is-selected {
+  stroke: var(--fg-0);
+  stroke-width: 2.5;
+}
+
+/* Previous frame's points — a mini onion-skin for keeping a socket continuous. */
+pix3-animation-panel .stage-point--ghost {
+  fill: var(--accent);
+  opacity: 0.28;
+  stroke: none;
+}
+
+pix3-animation-panel .stage-point-angle {
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-animation-panel .stage-point-angle.is-editable {
+  cursor: crosshair;
+}
+
+pix3-animation-panel .point-tools-hint {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+
+pix3-animation-panel .point-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-animation-panel .point-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* A point the current frame doesn't define — still listed (the clip has it). */
+pix3-animation-panel .point-list-item.is-missing {
+  opacity: 0.5;
+}
+
+pix3-animation-panel .point-list-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-animation-panel .point-list-name[data-selected] {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-animation-panel .point-list-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+pix3-animation-panel .point-list-action:hover,
+pix3-animation-panel .point-list-action:focus-visible {
+  color: var(--fg-0);
+  background: var(--bg-2);
+  outline: none;
+}
+
+pix3-animation-panel .point-list-action.is-danger:hover,
+pix3-animation-panel .point-list-action.is-danger:focus-visible {
+  color: var(--danger);
+}
+
 pix3-animation-panel .editor-status-row {
   display: flex;
   flex-wrap: wrap;
