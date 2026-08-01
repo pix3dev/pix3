@@ -1,6 +1,8 @@
 # Model Lab — in-editor 3D asset & scene generator (img2threejs-style)
 
-Status: PLANNED
+Status (2026-08-01): **Phases 1–6 shipped** (core pipeline + panel `src/ui/model-lab/`, merged to
+`main`); node-ops lane and the "Backlog" section below are unscheduled. The priority backlog item
+is **B0 — neural image→3D provider** (procedural reconstruction loses to dedicated 3D generators).
 Reference: https://github.com/hoainho/img2threejs (studied from local copy)
 
 Two lanes share one pipeline skeleton (staged passes + compile/validate + render + vision

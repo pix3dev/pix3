@@ -4,33 +4,561 @@
   "clips": [
     {
       "name": "burst",
+      "frames": [
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0059.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0060.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0061.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0062.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0063.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0064.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0065.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0066.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0067.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0068.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0069.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0070.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0071.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0072.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0073.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0074.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0075.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0076.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0077.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0078.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0079.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        },
+        {
+          "textureIndex": 0,
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "repeat": {
+            "x": 0,
+            "y": 0
+          },
+          "durationMultiplier": 1,
+          "anchor": {
+            "x": 0.5,
+            "y": 0.5
+          },
+          "texturePath": "res://src/assets/textures/sfx/boom1/ex0080.png",
+          "boundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 0,
+            "height": 0
+          },
+          "collisionPolygon": [],
+          "events": []
+        }
+      ],
       "fps": 26,
       "loop": false,
-      "playbackMode": "normal",
-      "frames": [
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0059.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0060.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0061.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0062.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0063.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0064.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0065.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0066.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0067.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0068.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0069.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0070.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0071.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0072.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0073.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0074.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0075.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0076.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0077.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0078.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0079.png" },
-        { "texturePath": "res://src/assets/textures/sfx/boom1/ex0080.png" }
-      ]
+      "playbackMode": "normal"
     }
   ]
 }

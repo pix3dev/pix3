@@ -100,4 +100,70 @@ describe('assign2DRenderOrder', () => {
       first
     );
   });
+
+  it('lifts a node above a later sibling when zIndex is raised', () => {
+    const back = new Sprite2D({ id: 'back', name: 'Back' });
+    const front = new Sprite2D({ id: 'front', name: 'Front' });
+
+    assign2DRenderOrder([back, front]);
+    expect(singleMeshOrder(back)).toBeLessThan(singleMeshOrder(front));
+
+    back.zIndex = 1;
+    assign2DRenderOrder([back, front]);
+
+    expect(singleMeshOrder(back)).toBeGreaterThan(singleMeshOrder(front));
+    // Persisted for free by SceneSaver, which spreads `properties`.
+    expect(back.properties.zIndex).toBe(1);
+
+    // Back to the default → the plain DFS order returns, and the property is dropped.
+    back.zIndex = 0;
+    assign2DRenderOrder([back, front]);
+    expect(singleMeshOrder(back)).toBeLessThan(singleMeshOrder(front));
+    expect('zIndex' in back.properties).toBe(false);
+  });
+
+  it('inherits zIndex down the subtree by default and takes it absolute when zAsRelative is off', () => {
+    const lifted = new Sprite2D({ id: 'lifted', name: 'Lifted' });
+    const insideLifted = new Sprite2D({ id: 'inside', name: 'Inside' });
+    lifted.add(insideLifted);
+    lifted.zIndex = 5;
+
+    const later = new Sprite2D({ id: 'later', name: 'Later' });
+    const escapee = new Sprite2D({ id: 'escapee', name: 'Escapee' });
+    lifted.add(escapee);
+
+    assign2DRenderOrder([lifted, later]);
+    // The whole lifted subtree floats above the later sibling.
+    expect(singleMeshOrder(insideLifted)).toBeGreaterThan(singleMeshOrder(later));
+
+    // Absolute z opts the child out of its parent's offset.
+    escapee.zAsRelative = false;
+    assign2DRenderOrder([lifted, later]);
+    expect(singleMeshOrder(escapee)).toBeLessThan(singleMeshOrder(lifted));
+    expect(escapee.properties.zAsRelative).toBe(false);
+  });
+
+  it('reads an authored zIndex out of the serialized properties bag', () => {
+    const authored = new Sprite2D({
+      id: 'authored',
+      name: 'Authored',
+      properties: { zIndex: 3, zAsRelative: false },
+    });
+
+    expect(authored.zIndex).toBe(3);
+    expect(authored.zAsRelative).toBe(false);
+  });
+
+  it('clamps zIndex to the Godot-compatible integer range', () => {
+    const node = new Sprite2D({ id: 'clamp', name: 'Clamp' });
+
+    node.zIndex = 1.7;
+    expect(node.zIndex).toBe(2);
+
+    node.zIndex = 99999;
+    expect(node.zIndex).toBe(4096);
+
+    node.zIndex = Number.NaN;
+    expect(node.zIndex).toBe(0);
+  });
 });

@@ -203,7 +203,7 @@ export class Checkbox2D extends UIControl2D {
         },
         {
           name: 'uncheckedColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Unchecked Color', group: 'Checkbox' },
           getValue: n => (n as Checkbox2D).uncheckedColor,
           setValue: (n, v) => {
@@ -216,7 +216,7 @@ export class Checkbox2D extends UIControl2D {
         },
         {
           name: 'checkedColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Checked Color', group: 'Checkbox' },
           getValue: n => (n as Checkbox2D).checkedColor,
           setValue: (n, v) => {
@@ -229,7 +229,7 @@ export class Checkbox2D extends UIControl2D {
         },
         {
           name: 'checkmarkColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Checkmark Color', group: 'Checkbox' },
           getValue: n => (n as Checkbox2D).checkmarkColor,
           setValue: (n, v) => {

@@ -1,6 +1,8 @@
 # Фичи других движков: что перенять, что уже есть, что пропустить
 
-Аудит против Godot, Unity (+Cinemachine/DOTween/Feel), Unreal, Cocos Creator, Defold, Phaser и практик playable-индустрии (Luna, Playable Factory). Статусы проверены по коду (`d591e68`). Вердикт = куда пункт ложится в [ROADMAP.md](ROADMAP.md).
+Аудит против Godot, Unity (+Cinemachine/DOTween/Feel), Unreal, Cocos Creator, Defold, Phaser и практик playable-индустрии (Luna, Playable Factory). Вердикт = куда пункт ложится в [ROADMAP.md](ROADMAP.md).
+
+> **Колонка «В Pix3» — снимок на момент аудита (`d591e68`), она не переписывается по мере реализации.** С тех пор закрыты, в частности: P0.1 vcams, P0.2 post-processing, P0.3 juice/timeScale, P0.4 event-треки, P0.5 hot reload, минификация экспорта, шейдер-эффекты, аудио-шины, trails/sub-emitters, flipbook-события, drag&drop ассетов во viewport. **Актуальный статус любого пункта — в [ROADMAP.md](ROADMAP.md) и [TODO.md](TODO.md).**
 
 **Сюрпризы аудита — уже есть в Pix3** (не тратить время): nine-slice ([TiledSprite2D](../packages/pix3-runtime/src/core/tiled-sprite-geometry.ts), паритет с Godot NinePatchRect) · виртуальный джойстик ([Joystick2D](../packages/pix3-runtime/src/nodes/2D/UI/Joystick2D.ts)) · префабы с overrides ([prefab-utils](../src/features/scene/prefab-utils.ts)) · сигналы/группы/автолоады (Godot-паритет) · flipbook-анимации с per-frame коллизией · ECS-инстансинг · undo/redo через operations · **встроенная AI-генерация ассетов** (такого нет ни в одном движке из списка) · iOS haptics в экспорте.
 

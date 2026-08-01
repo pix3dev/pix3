@@ -32,6 +32,45 @@ interface AssignContext {
   next: number;
 }
 
+/**
+ * One stamping step: a mesh subtree that must receive a contiguous block of
+ * `renderOrder` values, tagged with the effective z of the node that owns it and
+ * with that node's inherited visibility.
+ */
+interface PaintUnit {
+  /** Nulled after stamping so a pooled entry never pins a removed mesh alive. */
+  obj: Object3D | null;
+  z: number;
+  visible: boolean;
+}
+
+interface CollectContext {
+  units: PaintUnit[];
+  count: number;
+  /** Set when any node carries a non-default z, i.e. the DFS order needs a sort. */
+  needsSort: boolean;
+}
+
+/**
+ * Reused across calls so the common (all-default z) path allocates nothing in
+ * steady state — this walk runs every frame in the runtime. Entries are recycled
+ * by overwriting their fields; `count` is the live length. Safe as module state
+ * because the walk is synchronous and never re-entrant.
+ */
+const unitPool: PaintUnit[] = [];
+
+function pushUnit(ctx: CollectContext, obj: Object3D, z: number, visible: boolean): void {
+  const existing = ctx.units[ctx.count];
+  if (existing) {
+    existing.obj = obj;
+    existing.z = z;
+    existing.visible = visible;
+  } else {
+    ctx.units.push({ obj, z, visible });
+  }
+  ctx.count++;
+}
+
 interface NodeMeshGroups {
   childNodes: Node2D[];
   own: Object3D[];
@@ -92,28 +131,32 @@ function assignMeshSubtree(
   }
 }
 
-function assignNode(
+function collectNode(
   node: Node2D,
-  ctx: AssignContext,
+  ctx: CollectContext,
   parentVisible: boolean,
-  sink?: RenderOrder2DSink
+  parentZ: number
 ): void {
   const { childNodes, own, overlay } = collectGroups(node);
   const nodeVisible = parentVisible && node.visible !== false;
+  const z = node.zAsRelative ? parentZ + node.zIndex : node.zIndex;
+  if (z !== 0) {
+    ctx.needsSort = true;
+  }
 
   // 1. The node's own meshes render below its children, in authored order.
   for (const mesh of sortByAuthoredOrder(own)) {
-    assignMeshSubtree(mesh, ctx, nodeVisible, sink);
+    pushUnit(ctx, mesh, z, nodeVisible);
   }
 
   // 2. Child nodes (and their subtrees) render on top, in hierarchy order.
   for (const child of childNodes) {
-    assignNode(child, ctx, nodeVisible, sink);
+    collectNode(child, ctx, nodeVisible, z);
   }
 
   // 3. Flagged overlay meshes render above the whole subtree (e.g. scrollbars).
   for (const mesh of sortByAuthoredOrder(overlay)) {
-    assignMeshSubtree(mesh, ctx, nodeVisible, sink);
+    pushUnit(ctx, mesh, z, nodeVisible);
   }
 }
 
@@ -128,12 +171,37 @@ function assignNode(
  * 2D render list falls back to three.js's stable sort (object creation id) for
  * equal-`renderOrder`, equal-depth meshes, which does not match the hierarchy
  * the user authored.
+ *
+ * `Node2D.zIndex` overrides that hierarchy order: nodes are bucketed by effective
+ * z (inherited when `zAsRelative`, the default) and the DFS order only breaks ties
+ * inside a bucket. With every node at the default z the sort is skipped entirely
+ * and the result is exactly the plain DFS order.
  */
 export function assign2DRenderOrder(roots: readonly Object3D[], sink?: RenderOrder2DSink): void {
-  const ctx: AssignContext = { next: 0 };
+  const collect: CollectContext = { units: unitPool, count: 0, needsSort: false };
   for (const root of roots) {
     if (root instanceof Node2D) {
-      assignNode(root, ctx, true, sink);
+      collectNode(root, collect, true, 0);
     }
+  }
+
+  // `Array.prototype.sort` is stable (ES2019+), so equal-z units keep DFS order.
+  // The slice is the only allocation on this path and only happens when z-order
+  // is actually in use.
+  const units = collect.needsSort
+    ? unitPool.slice(0, collect.count).sort((a, b) => a.z - b.z)
+    : unitPool;
+
+  const ctx: AssignContext = { next: 0 };
+  for (let i = 0; i < collect.count; i++) {
+    const obj = units[i].obj;
+    if (obj) {
+      assignMeshSubtree(obj, ctx, units[i].visible, sink);
+    }
+  }
+
+  // Drop references so the pool does not pin removed meshes alive between frames.
+  for (let i = 0; i < collect.count; i++) {
+    unitPool[i].obj = null;
   }
 }

@@ -723,7 +723,7 @@ export class InspectorPropertyRenderers {
         <div class="property-group component-property-group">
           <span class="property-label">${label}</span>
           <select
-            class="property-select"
+            class="property-select property-select--enum"
             ?disabled=${readOnly}
             @change=${(e: Event) =>
               this.host.applyComponentPropertyChange(
@@ -774,20 +774,25 @@ export class InspectorPropertyRenderers {
         `;
       }
 
+      // Script/behaviour tuning knobs get the same drag-to-scrub field as node
+      // properties — these are the values users iterate on most.
+      const numericValue = Number.parseFloat(state.value);
       return html`
         <div class="property-group component-property-group">
           <span class="property-label">${label}${prop.ui?.unit ? ` (${prop.ui.unit})` : ''}</span>
-          <input
-            type="number"
-            step=${prop.ui?.step ?? 0.01}
-            class="property-input property-input--number ${state.isValid
-              ? ''
-              : 'property-input--invalid'}"
-            .value=${state.value}
+          <pix3-number-field
+            .value=${Number.isFinite(numericValue) ? numericValue : 0}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .min=${typeof prop.ui?.min === 'number' ? prop.ui.min : Number.NEGATIVE_INFINITY}
+            .max=${typeof prop.ui?.max === 'number' ? prop.ui.max : Number.POSITIVE_INFINITY}
+            .sensitivity=${getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @input=${(e: Event) => this.host.handleComponentPropertyInput(component.id, prop, e)}
-            @blur=${(e: Event) => this.host.handleComponentPropertyBlur(component.id, prop, e)}
-          />
+            @preview-change=${(e: CustomEvent<{ value: number }>) =>
+              this.host.handleComponentSliderPreview(component.id, prop, e.detail.value)}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.host.handleComponentSliderCommit(component.id, prop, e.detail.value)}
+          ></pix3-number-field>
         </div>
       `;
     }
@@ -1290,7 +1295,7 @@ export class InspectorPropertyRenderers {
         <div class="property-group">
           ${labelTemplate}
           <select
-            class="property-select"
+            class="property-select property-select--enum"
             ?disabled=${readOnly}
             @change=${(e: Event) =>
               this.host.applyPropertyChange(prop.name, (e.target as HTMLSelectElement).value)}
@@ -1366,6 +1371,10 @@ export class InspectorPropertyRenderers {
         `;
       }
 
+      // Plain scalar: same drag-to-scrub field the transform rows use, so every
+      // numeric property in the inspector behaves the same way (drag to scrub,
+      // click to type, Shift/Ctrl for fine/coarse).
+      const numericValue = Number.parseFloat(state.value);
       return html`
         <div class="property-group">
           ${this.renderPropertyLabel(
@@ -1373,17 +1382,19 @@ export class InspectorPropertyRenderers {
             `${label}${prop.ui?.unit ? ` (${prop.ui.unit})` : ''}`,
             isOverridden
           )}
-          <input
-            type="number"
-            step=${prop.ui?.step ?? 0.01}
-            class="property-input property-input--number ${state.isValid
-              ? ''
-              : 'property-input--invalid'}"
-            .value=${state.value}
+          <pix3-number-field
+            .value=${Number.isFinite(numericValue) ? numericValue : 0}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .min=${typeof prop.ui?.min === 'number' ? prop.ui.min : Number.NEGATIVE_INFINITY}
+            .max=${typeof prop.ui?.max === 'number' ? prop.ui.max : Number.POSITIVE_INFINITY}
+            .sensitivity=${getScrubSensitivity(prop)}
             ?disabled=${readOnly}
-            @input=${(e: Event) => this.host.handlePropertyInput(prop.name, e)}
-            @blur=${(e: Event) => this.host.handlePropertyBlur(prop.name, e)}
-          />
+            @preview-change=${(e: CustomEvent<{ value: number }>) =>
+              this.host.handleSliderPreview(prop.name, e.detail.value)}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.host.handleSliderCommit(prop.name, e.detail.value)}
+          ></pix3-number-field>
         </div>
       `;
     }

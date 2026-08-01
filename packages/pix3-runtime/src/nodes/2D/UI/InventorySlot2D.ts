@@ -267,7 +267,7 @@ export class InventorySlot2D extends UIControl2D {
         },
         {
           name: 'backdropColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Backdrop Color', group: 'Slot' },
           getValue: n => (n as InventorySlot2D).backdropColor,
           setValue: (n, v) => {
@@ -280,7 +280,7 @@ export class InventorySlot2D extends UIControl2D {
         },
         {
           name: 'borderColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Border Color', group: 'Slot' },
           getValue: n => (n as InventorySlot2D).borderColor,
           setValue: (n, v) => {
@@ -293,7 +293,7 @@ export class InventorySlot2D extends UIControl2D {
         },
         {
           name: 'selectionColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Selection Color', group: 'Slot' },
           getValue: n => (n as InventorySlot2D).selectionColor,
           setValue: (n, v) => {

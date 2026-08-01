@@ -254,7 +254,7 @@ export class Slider2D extends UIControl2D {
         },
         {
           name: 'trackBackgroundColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Background Color', group: 'Slider' },
           getValue: n => (n as Slider2D).trackBackgroundColor,
           setValue: (n, v) => {
@@ -265,7 +265,7 @@ export class Slider2D extends UIControl2D {
         },
         {
           name: 'trackFilledColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Filled Color', group: 'Slider' },
           getValue: n => (n as Slider2D).trackFilledColor,
           setValue: (n, v) => {
@@ -276,7 +276,7 @@ export class Slider2D extends UIControl2D {
         },
         {
           name: 'handleColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Handle Color', group: 'Slider' },
           getValue: n => (n as Slider2D).handleColor,
           setValue: (n, v) => {

@@ -177,6 +177,9 @@ export class Viewport2DProxyRegistry {
    * here. Within one visual, meshes keep their authored stacking (e.g. control
    * skin below its label) because the rebase sorts by the previous values —
    * the same idempotency argument as the runtime pass.
+   *
+   * `Node2D.zIndex` overrides the hierarchy order here exactly as it does in the
+   * runtime: visuals are bucketed by effective z, DFS order breaks ties.
    */
   assignRenderOrder(rootNodes: readonly NodeBase[]): void {
     const visualRoots = new Set<THREE.Object3D>([
@@ -216,22 +219,42 @@ export class Viewport2DProxyRegistry {
         });
     };
 
-    const visitNode = (node: NodeBase): void => {
+    // Collect the visuals in DFS order first, tagged with each node's effective
+    // z, then stamp them in paint order. With every node at the default z the
+    // sort is skipped and this is the plain DFS walk it has always been.
+    const ordered: Array<{ visualRoot: THREE.Group; z: number }> = [];
+    let needsSort = false;
+
+    const visitNode = (node: NodeBase, parentZ: number): void => {
+      let z = parentZ;
       if (node instanceof Node2D) {
+        z = node.zAsRelative ? parentZ + node.zIndex : node.zIndex;
+        if (z !== 0) {
+          needsSort = true;
+        }
         const visualRoot = this.getVisualRoot(node.nodeId);
         if (visualRoot) {
-          assignVisual(visualRoot);
+          ordered.push({ visualRoot, z });
         }
       }
       for (const child of node.children) {
         if (child instanceof NodeBase) {
-          visitNode(child);
+          visitNode(child, z);
         }
       }
     };
 
     for (const node of rootNodes) {
-      visitNode(node);
+      visitNode(node, 0);
+    }
+
+    if (needsSort) {
+      // Stable sort — equal-z visuals keep their DFS order.
+      ordered.sort((a, b) => a.z - b.z);
+    }
+
+    for (const entry of ordered) {
+      assignVisual(entry.visualRoot);
     }
   }
 

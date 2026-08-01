@@ -377,7 +377,7 @@ export class Button2D
         },
         {
           name: 'backgroundColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Color', group: 'Button' },
           getValue: n => (n as Button2D).backgroundColor,
           setValue: (n, v) => {
@@ -388,7 +388,7 @@ export class Button2D
         },
         {
           name: 'hoverColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Hover Color', group: 'Button' },
           getValue: n => (n as Button2D).hoverColor,
           setValue: (n, v) => {
@@ -399,7 +399,7 @@ export class Button2D
         },
         {
           name: 'pressedColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Pressed Color', group: 'Button' },
           getValue: n => (n as Button2D).pressedColor,
           setValue: (n, v) => {

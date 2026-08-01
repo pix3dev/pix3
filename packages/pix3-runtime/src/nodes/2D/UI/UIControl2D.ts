@@ -441,7 +441,7 @@ export abstract class UIControl2D extends Node2D {
         },
         {
           name: 'labelColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Font Color', group: 'Label' },
           getValue: n => (n as UIControl2D).labelColor,
           setValue: (n, v) => {
@@ -454,8 +454,12 @@ export abstract class UIControl2D extends Node2D {
         },
         {
           name: 'labelAlign',
-          type: 'string',
-          ui: { label: 'Alignment', group: 'Label', description: 'left, center, or right' },
+          type: 'select',
+          ui: {
+            label: 'Alignment',
+            group: 'Label',
+            options: ['left', 'center', 'right'],
+          },
           getValue: n => (n as UIControl2D).labelAlign,
           setValue: (n, v) => {
             const control = n as UIControl2D;

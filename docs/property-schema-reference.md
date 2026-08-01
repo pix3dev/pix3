@@ -80,6 +80,12 @@ same objects; `mergeSchemas(base, extended)` is the helper the spread above does
 
 `PropertyType` union: `'string' | 'number' | 'boolean' | 'vector2' | 'vector3' | 'euler' | 'color' | 'enum' | 'object'` (authoritative list in `property-schema.ts`).
 
+The type picks the Inspector editor, so declaring the *narrow* one matters even when the stored
+value is a string: a hex colour typed `'string'` renders as a full-width text box with no swatch,
+while `'color'` gets the picker + a compact hex field; a fixed value set typed `'string'` renders as
+free text, while `'select'`/`'enum'` (with `ui.options`) gets a dropdown. Numbers, colours and enums
+are also width-capped in the Inspector — only text and resource pickers span the row.
+
 ```typescript
 interface PropertyDefinition {
   name: string;                     // property key, dotted for components (e.g. "position.x")

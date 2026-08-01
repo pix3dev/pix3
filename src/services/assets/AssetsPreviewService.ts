@@ -8,11 +8,17 @@ import { resolveThumbnailGenerator } from '@/services/assets/ThumbnailGenerator'
 import { resolveSceneThumbnailGenerator } from '@/services/scene/SceneThumbnailGenerator';
 import { analyzeAudioBlob } from '@/services/assets/audio-preview-utils';
 import { computeDirectoryStats } from '@/services/assets/asset-folder-stats';
+import {
+  getAnimationFrameTexturePath,
+  normalizeAnimationResource,
+  type AnimationResource,
+} from '@pix3/runtime';
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg']);
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
 const SCENE_EXTENSIONS = new Set(['pix3scene']);
+const ANIMATION_EXTENSIONS = new Set(['pix3anim']);
 // Script/source files render as a plain file-type icon instead of a code
 // preview: a shrunk-down slice of source is unreadable and reads as visual
 // noise ("a bunch of compressed strips"). Data/prose text formats below keep
@@ -31,12 +37,49 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
   'less',
 ]);
 
-export type AssetPreviewType = 'image' | 'model' | 'scene' | 'audio' | 'text' | 'icon';
+export type AssetPreviewType =
+  | 'image'
+  | 'model'
+  | 'scene'
+  | 'audio'
+  | 'animation'
+  | 'text'
+  | 'icon';
 export type AssetThumbnailStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** Preview types whose thumbnails are rendered offscreen on demand. */
 function isRenderedThumbnailType(previewType: AssetPreviewType): boolean {
   return previewType === 'model' || previewType === 'scene';
+}
+
+/**
+ * One flipbook frame, resolved for display: the object URL of its source image
+ * plus the UV sub-rect to show. Sequence clips (one PNG per frame) get a full
+ * 1×1 rect on their own URL; sheet clips share one URL and differ by rect.
+ */
+export interface AnimationPreviewFrame {
+  readonly url: string;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly repeatX: number;
+  readonly repeatY: number;
+  readonly durationMultiplier: number;
+}
+
+/**
+ * Playable preview of a `.pix3anim`'s first clip. Only the first frame is
+ * resolved when the folder loads (one blob read per animation, like an image
+ * thumbnail); the rest arrive through {@link AssetsPreviewService.requestAnimationFrames}
+ * when the user actually starts the preview.
+ */
+export interface AnimationPreviewData {
+  readonly clipName: string;
+  readonly fps: number;
+  readonly loop: boolean;
+  readonly pingPong: boolean;
+  readonly frameCount: number;
+  readonly frames: readonly AnimationPreviewFrame[];
+  readonly framesLoaded: boolean;
 }
 
 export interface AssetPreviewItem {
@@ -57,6 +100,8 @@ export interface AssetPreviewItem {
   readonly channelCount: number | null;
   readonly sampleRate: number | null;
   readonly lastModified: number | null;
+  /** Flipbook preview data; non-null only for `previewType === 'animation'`. */
+  readonly animation: AnimationPreviewData | null;
 }
 
 export interface AssetsPreviewSnapshot {
@@ -393,6 +438,7 @@ export class AssetsPreviewService {
         channelCount: null,
         sampleRate: null,
         lastModified: null,
+        animation: null,
       };
     }
 
@@ -428,6 +474,7 @@ export class AssetsPreviewService {
           channelCount: null,
           sampleRate: null,
           lastModified,
+          animation: null,
         };
       }
     }
@@ -455,6 +502,34 @@ export class AssetsPreviewService {
           channelCount: analysis.channelCount,
           sampleRate: analysis.sampleRate,
           lastModified,
+          animation: null,
+        };
+      }
+    }
+
+    if (ANIMATION_EXTENSIONS.has(extension)) {
+      if (fileBlob) {
+        // Only the first frame is resolved here — see AnimationPreviewData.
+        const animation = await this.buildAnimationPreview(fileBlob, 1);
+        return {
+          name,
+          path,
+          kind,
+          extension,
+          previewType: 'animation',
+          thumbnailUrl: null,
+          previewUrl: null,
+          previewText: null,
+          thumbnailStatus: animation && animation.frames.length > 0 ? 'ready' : 'error',
+          iconName: 'activity',
+          sizeBytes,
+          width: null,
+          height: null,
+          durationSeconds: animation ? this.getAnimationDuration(animation) : null,
+          channelCount: null,
+          sampleRate: null,
+          lastModified,
+          animation,
         };
       }
     }
@@ -480,6 +555,7 @@ export class AssetsPreviewService {
         channelCount: null,
         sampleRate: null,
         lastModified,
+        animation: null,
       };
     }
 
@@ -505,6 +581,7 @@ export class AssetsPreviewService {
         channelCount: null,
         sampleRate: null,
         lastModified,
+        animation: null,
       };
     }
 
@@ -530,6 +607,7 @@ export class AssetsPreviewService {
         channelCount: null,
         sampleRate: null,
         lastModified,
+        animation: null,
       };
     }
 
@@ -551,6 +629,7 @@ export class AssetsPreviewService {
       channelCount: null,
       sampleRate: null,
       lastModified,
+      animation: null,
     };
   }
 
@@ -779,6 +858,157 @@ export class AssetsPreviewService {
     return snippet.length > 280 ? `${snippet.slice(0, 277)}...` : snippet;
   }
 
+  /**
+   * Parses a `.pix3anim` and resolves the first clip's frames for display.
+   *
+   * `frameLimit` caps how many frames get a loaded image: the folder scan asks
+   * for 1 (the card thumbnail), the play affordance asks for all of them. Frames
+   * are deduplicated by texture path, so a sheet-based clip costs a single blob
+   * read no matter how many frames it has.
+   */
+  private async buildAnimationPreview(
+    fileBlob: Blob,
+    frameLimit: number
+  ): Promise<AnimationPreviewData | null> {
+    let resource: AnimationResource;
+    try {
+      resource = normalizeAnimationResource(JSON.parse(await fileBlob.text()));
+    } catch {
+      return null;
+    }
+
+    const clip = resource.clips[0];
+    if (!clip || clip.frames.length === 0) {
+      return null;
+    }
+
+    const wanted = Math.max(0, Math.min(frameLimit, clip.frames.length));
+    const urlByTexturePath = new Map<string, string | null>();
+    const frames: AnimationPreviewFrame[] = [];
+
+    for (const frame of clip.frames.slice(0, wanted)) {
+      const texturePath = getAnimationFrameTexturePath(resource, frame);
+      if (!texturePath) {
+        continue;
+      }
+
+      let url = urlByTexturePath.get(texturePath);
+      if (url === undefined) {
+        url = await this.loadResourceObjectUrl(texturePath);
+        urlByTexturePath.set(texturePath, url);
+      }
+      if (!url) {
+        continue;
+      }
+
+      // A sequence frame carries no sub-rect (repeat defaults to 0) — show the
+      // whole image; a sheet frame carries the UV rect the runtime samples.
+      const hasRect = frame.repeat.x > 0 && frame.repeat.y > 0;
+      frames.push({
+        url,
+        offsetX: hasRect ? frame.offset.x : 0,
+        offsetY: hasRect ? frame.offset.y : 0,
+        repeatX: hasRect ? frame.repeat.x : 1,
+        repeatY: hasRect ? frame.repeat.y : 1,
+        durationMultiplier: frame.durationMultiplier,
+      });
+    }
+
+    return {
+      clipName: clip.name,
+      fps: clip.fps,
+      loop: clip.loop,
+      pingPong: clip.playbackMode === 'ping-pong',
+      frameCount: clip.frames.length,
+      frames,
+      framesLoaded: frames.length >= clip.frames.length,
+    };
+  }
+
+  /** Total clip length in seconds, honouring per-frame duration multipliers. */
+  private getAnimationDuration(animation: AnimationPreviewData): number | null {
+    if (animation.fps <= 0 || animation.frameCount === 0) {
+      return null;
+    }
+    // Only the loaded frames carry their multiplier; assume 1 for the rest so the
+    // card can show a length before the full clip is fetched.
+    const loadedTotal = animation.frames.reduce(
+      (total, frame) => total + frame.durationMultiplier,
+      0
+    );
+    const assumed = Math.max(0, animation.frameCount - animation.frames.length);
+    return (loadedTotal + assumed) / animation.fps;
+  }
+
+  private async loadResourceObjectUrl(resourcePath: string): Promise<string | null> {
+    const relativePath = this.normalizePath(resourcePath.replace(/^res:\/\//, ''));
+    try {
+      const blob = await this.storage.readBlob(relativePath);
+      if (!blob) {
+        return null;
+      }
+      // Deliberately NOT tracked here: the folder scan clears `objectUrls`
+      // after building every item, so URLs are registered by `trackBlobUrls`
+      // once the new item list is accepted (`requestAnimationFrames` tracks its
+      // own).
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Loads the remaining frames of an animation asset so it can actually play.
+   * No-op once the clip is fully loaded — the panel calls this every time the
+   * user hits play.
+   */
+  public async requestAnimationFrames(path: string): Promise<void> {
+    const normalizedPath = this.normalizePath(path);
+    const requestVersion = this.requestVersion;
+    const item = this.state.items.find(entry => this.normalizePath(entry.path) === normalizedPath);
+    if (!item || item.kind !== 'file' || !item.animation || item.animation.framesLoaded) {
+      return;
+    }
+
+    let fileBlob: Blob | null = null;
+    try {
+      fileBlob = await this.storage.readBlob(item.path);
+    } catch {
+      fileBlob = null;
+    }
+    if (!fileBlob || requestVersion !== this.requestVersion) {
+      return;
+    }
+
+    const animation = await this.buildAnimationPreview(fileBlob, Number.POSITIVE_INFINITY);
+    if (!animation || requestVersion !== this.requestVersion) {
+      return;
+    }
+
+    const index = this.state.items.findIndex(
+      entry => this.normalizePath(entry.path) === normalizedPath
+    );
+    if (index < 0) {
+      return;
+    }
+
+    const next = { ...this.state.items[index], animation };
+    // The re-read produced fresh URLs for every frame, including the one the
+    // card is showing right now — track them and let the previous frame-0 URL
+    // die with the folder (revoking it here would blank the visible thumbnail
+    // until Lit's next update).
+    this.trackBlobUrls([next]);
+    this.state.items = [
+      ...this.state.items.slice(0, index),
+      next,
+      ...this.state.items.slice(index + 1),
+    ];
+    if (this.state.selectedItemPath === normalizedPath) {
+      this.state.selectedItem = next;
+    }
+    this.notify();
+  }
+
   private getExtension(name: string): string {
     const lastDot = name.lastIndexOf('.');
     if (lastDot < 0 || lastDot === name.length - 1) {
@@ -863,6 +1093,13 @@ export class AssetsPreviewService {
       if (item.previewUrl?.startsWith('blob:')) {
         this.objectUrls.add(item.previewUrl);
       }
+      // Frame URLs are deduplicated per texture, so the Set collapses the
+      // repeats a sheet-based clip produces.
+      for (const frame of item.animation?.frames ?? []) {
+        if (frame.url.startsWith('blob:')) {
+          this.objectUrls.add(frame.url);
+        }
+      }
     }
   }
 
@@ -873,6 +1110,12 @@ export class AssetsPreviewService {
       }
       if (item.previewUrl?.startsWith('blob:')) {
         URL.revokeObjectURL(item.previewUrl);
+      }
+      for (const frame of item.animation?.frames ?? []) {
+        if (frame.url.startsWith('blob:')) {
+          URL.revokeObjectURL(frame.url);
+          this.objectUrls.delete(frame.url);
+        }
       }
     }
   }

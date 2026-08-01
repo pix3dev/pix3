@@ -227,7 +227,7 @@ export class Bar2D extends UIControl2D {
         },
         {
           name: 'backBackgroundColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Background Color', group: 'Bar' },
           getValue: n => (n as Bar2D).backBackgroundColor,
           setValue: (n, v) => {
@@ -238,7 +238,7 @@ export class Bar2D extends UIControl2D {
         },
         {
           name: 'barColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Bar Color', group: 'Bar' },
           getValue: n => (n as Bar2D).barColor,
           setValue: (n, v) => {
@@ -269,7 +269,7 @@ export class Bar2D extends UIControl2D {
         },
         {
           name: 'borderColor',
-          type: 'string',
+          type: 'color',
           ui: { label: 'Border Color', group: 'Bar' },
           getValue: n => (n as Bar2D).borderColor,
           setValue: (n, v) => {

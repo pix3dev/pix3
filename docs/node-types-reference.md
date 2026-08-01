@@ -51,11 +51,20 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 | `position` | Vector2 | (0, 0) | X and Y coordinates |
 | `rotation` | number | 0 | Rotation in degrees |
 | `scale` | Vector2 | (1, 1) | X and Y scale factors |
+| `opacity` | number | 1 | Local opacity multiplier, inherited by child 2D nodes |
+| `zIndex` | number | 0 | Draw-order override, `-4096..4096` (integer). Higher draws on top |
+| `zAsRelative` | boolean | true | Add `zIndex` to the parent's effective z instead of treating it as absolute |
 
 **Usage Notes:**
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
 - Rotation is clockwise, in degrees
+- **Draw order:** by default the 2D pass paints in scene-tree DFS order (a later/deeper node draws
+  on top — Godot-like). `zIndex` lifts a node out of that order without moving it in the tree:
+  nodes are bucketed by *effective* z first, and tree order only breaks ties inside a bucket. With
+  `zAsRelative` (the default) a subtree keeps its internal layering wherever it is reparented; set
+  it to `false` for an "always on top" overlay that must not inherit an ancestor's offset. Both
+  fields serialize only when non-default, so scenes that never touch z-order are unchanged.
 
 ---
 

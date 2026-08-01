@@ -94,6 +94,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 6. **Async Safety**: Use `CommandDispatcher` to handle command execution flow and errors.
 7. **Proactiveness**: If a command requires a service, check its availability and register if necessary.
 8. **Documentation**: Keep the canonical doc set current; do **not** add new `.md` files. The set is `README.md`, `AGENTS.md`, `CLAUDE.md`, and under `docs/`: `pix3-specification.md`, `nodes-and-systems.md`, `node-types-reference.md`, `property-schema-reference.md`, `architecture.md`. New material = a section in one of these + a row in CLAUDE.md's doc router (not a new file).
+9. **Plans**: Planning documents are the one exception to rule 8, and they all live in `.plans/` — active plans plus the operational `TODO.md` in the folder root, finished ones moved to `.plans/done/` via `git mv`. Never create a plan/TODO file at the repository root.
 
 ## Development Commands
 

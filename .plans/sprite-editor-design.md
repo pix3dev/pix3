@@ -1,6 +1,9 @@
 # Sprite Editor — design for renaming, double-click open, and animation-editor merge
 
-Status: design (no code). Scope: rename "Asset Generator" → "Sprite Editor", make double-clicking an
+Status (2026-08-01): **Phase 1 shipped** (commit `53e6c07` — rename + double-click open,
+`src/ui/sprite-editor/`, `OpenSpriteEditorCommand`). Phase 2 (shared slicing module +
+"Create Animation from image") and Phase 3 (gated shell-merge with the flipbook editor) остаются.
+Scope: rename "Asset Generator" → "Sprite Editor", make double-clicking an
 image asset open it, and evaluate/design a Construct-3-style merge with the flipbook animation editor.
 
 ---

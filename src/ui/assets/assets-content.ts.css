@@ -246,7 +246,19 @@ pix3-assets-content .icon {
   color: var(--fg-1);
 }
 
-pix3-assets-content .audio-play-btn {
+/* Flipbook frame: one image (sequence clip) or a UV sub-rect of a sheet, sized
+   and positioned by the inline background-* the renderer computes. */
+pix3-assets-content .anim-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-color: var(--bg-0);
+  image-rendering: auto;
+}
+
+pix3-assets-content .audio-play-btn,
+pix3-assets-content .anim-play-btn {
   position: absolute;
   bottom: 0.3rem;
   right: 0.3rem;
@@ -264,14 +276,17 @@ pix3-assets-content .audio-play-btn {
 }
 
 pix3-assets-content .audio-play-btn:hover,
-pix3-assets-content .audio-play-btn.is-playing {
+pix3-assets-content .anim-play-btn:hover,
+pix3-assets-content .audio-play-btn.is-playing,
+pix3-assets-content .anim-play-btn.is-playing {
   background: var(--accent);
   color: var(--accent-fg);
   transform: scale(1.06);
 }
 
 /* List-view variant: sits in the row flow instead of over a thumbnail. */
-pix3-assets-content .audio-play-btn.is-inline {
+pix3-assets-content .audio-play-btn.is-inline,
+pix3-assets-content .anim-play-btn.is-inline {
   position: static;
   flex: 0 0 auto;
   width: 1.35rem;
@@ -280,7 +295,8 @@ pix3-assets-content .audio-play-btn.is-inline {
   color: var(--fg-2);
 }
 
-pix3-assets-content .audio-play-btn.is-inline svg {
+pix3-assets-content .audio-play-btn.is-inline svg,
+pix3-assets-content .anim-play-btn.is-inline svg {
   width: 0.9rem;
   height: 0.9rem;
 }

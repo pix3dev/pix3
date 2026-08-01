@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AnimationPreviewData,
   AssetPreviewItem,
   AssetsPreviewSnapshot,
   AssetsPreviewService,
@@ -196,6 +197,108 @@ describe('AssetsContent (Phase 3 header)', () => {
 
     expect(panel.querySelector('.audio-play-btn.is-playing')).toBeNull();
     expect(panel.querySelector('.audio-progress')).toBeNull();
+  });
+
+  it('plays a flipbook asset from its card and stops on the second click', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+      const { assetsPreviewService } = stubServices(
+        panel,
+        createSnapshot({ items: [animationItem()] })
+      );
+
+      document.body.appendChild(panel);
+      await panel.updateComplete;
+
+      // Idle card shows the first frame and the clip summary.
+      const firstFrame = panel.querySelector<HTMLElement>('.anim-frame');
+      expect(firstFrame?.style.backgroundImage).toContain('blob:f0');
+      expect(panel.querySelector('.meta')?.textContent).toContain('burst · 10 fps · 3 frames');
+
+      const toggle = panel.querySelector<HTMLElement>('.anim-play-btn');
+      toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await panel.updateComplete;
+
+      expect(panel.querySelector('.anim-play-btn.is-playing')).not.toBeNull();
+      // Remaining frames are fetched lazily when playback starts.
+      expect(assetsPreviewService.requestAnimationFrames).toHaveBeenCalledWith(
+        'animations/boom.pix3anim'
+      );
+
+      // 10 fps → one frame per 100 ms, wrapping back to frame 0 after the last.
+      vi.advanceTimersByTime(100);
+      await panel.updateComplete;
+      expect(panel.querySelector<HTMLElement>('.anim-frame')?.style.backgroundImage).toContain(
+        'blob:f1'
+      );
+
+      vi.advanceTimersByTime(200);
+      await panel.updateComplete;
+      expect(panel.querySelector<HTMLElement>('.anim-frame')?.style.backgroundImage).toContain(
+        'blob:f0'
+      );
+
+      toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await panel.updateComplete;
+
+      expect(panel.querySelector('.anim-play-btn.is-playing')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops a non-looping flipbook at its last frame', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+      stubServices(panel, createSnapshot({ items: [animationItem({ loop: false })] }));
+
+      document.body.appendChild(panel);
+      await panel.updateComplete;
+
+      panel
+        .querySelector<HTMLElement>('.anim-play-btn')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await panel.updateComplete;
+
+      vi.advanceTimersByTime(1000);
+      await panel.updateComplete;
+
+      expect(panel.querySelector('.anim-play-btn.is-playing')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('toggles the selected flipbook with Space and shows an inline toggle in list view', async () => {
+    vi.useFakeTimers();
+    try {
+      const panel = document.createElement('pix3-assets-content') as AssetsContentElement;
+      stubServices(panel, createSnapshot({ items: [animationItem()] }), {
+        thumbnailSize: 104,
+        contentView: 'list',
+      });
+
+      document.body.appendChild(panel);
+      await panel.updateComplete;
+
+      const row = panel.querySelector('.assets-list-row');
+      expect(row?.querySelector('.anim-play-btn.is-inline')).not.toBeNull();
+      expect(row?.querySelector('.row-dim')?.textContent).toContain('3 frames');
+
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await panel.updateComplete;
+
+      const keyDown = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+      row?.dispatchEvent(keyDown);
+      await panel.updateComplete;
+
+      expect(keyDown.defaultPrevented).toBe(true);
+      expect(panel.querySelector('.anim-play-btn.is-playing')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops the preview when playback ends', async () => {
@@ -635,7 +738,7 @@ function stubServices(
   const listeners: Array<(value: AssetsPreviewSnapshot) => void> = [];
   const assetsPreviewService: Pick<
     AssetsPreviewService,
-    'subscribe' | 'selectItem' | 'requestThumbnail'
+    'subscribe' | 'selectItem' | 'requestThumbnail' | 'requestAnimationFrames'
   > = {
     subscribe(listener: (value: AssetsPreviewSnapshot) => void) {
       listeners.push(listener);
@@ -654,6 +757,7 @@ function stubServices(
       listeners.forEach(listener => listener(echoed));
     }),
     requestThumbnail: vi.fn(),
+    requestAnimationFrames: vi.fn(async () => undefined),
   };
   // Exposed so a test can push an externally-driven snapshot (see `notifyListeners`).
   Object.defineProperty(assetsPreviewService, '__listeners', { value: listeners });
@@ -692,6 +796,33 @@ function stubServices(
   }
 
   return { assetsPreviewService, projectService };
+}
+
+function animationItem(overrides: Partial<AnimationPreviewData> = {}): AssetPreviewItem {
+  return createItem({
+    name: 'boom.pix3anim',
+    path: 'animations/boom.pix3anim',
+    kind: 'file',
+    extension: 'pix3anim',
+    previewType: 'animation',
+    thumbnailStatus: 'ready',
+    iconName: 'activity',
+    sizeBytes: 2048,
+    animation: {
+      clipName: 'burst',
+      fps: 10,
+      loop: true,
+      pingPong: false,
+      frameCount: 3,
+      framesLoaded: true,
+      frames: [frame('blob:f0'), frame('blob:f1'), frame('blob:f2')],
+      ...overrides,
+    },
+  });
+}
+
+function frame(url: string) {
+  return { url, offsetX: 0, offsetY: 0, repeatX: 1, repeatY: 1, durationMultiplier: 1 };
 }
 
 function audioItem(): AssetPreviewItem {
@@ -742,5 +873,6 @@ function createItem(
     channelCount: overrides.channelCount ?? null,
     sampleRate: overrides.sampleRate ?? null,
     lastModified: overrides.lastModified ?? null,
+    animation: overrides.animation ?? null,
   };
 }

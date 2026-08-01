@@ -13,6 +13,15 @@ pix3-panel {
   flex-direction: column;
   gap: 0.85rem;
   font-family: var(--font-ui);
+  /* Every numeric editor is capped at this width instead of stretching to the
+     panel edge: it fits the values we actually show and keeps a row scannable
+     (label → number) instead of parking one digit at the far right. Text and
+     resource pickers still take the remaining space. */
+  --inspector-number-width: 100px;
+  --inspector-number-gap: 0.35rem;
+  /* Enum dropdowns and colour pickers are content-sized too — a three-word enum
+     or a `#rrggbbaa` swatch never needs the whole row. */
+  --inspector-select-width: 160px;
 }
 
 .property-section {
@@ -683,6 +692,27 @@ pix3-panel {
   min-width: 0;
 }
 
+/* Number width cap (see --inspector-number-width). A vector editor is capped as
+   a whole — its inner fields are in shadow DOM and split the space evenly, so
+   n fields + the gaps between them land each field on the same width as a
+   standalone one. */
+.property-group pix3-number-field {
+  flex: 0 1 var(--inspector-number-width);
+  max-width: var(--inspector-number-width);
+}
+
+.property-group pix3-vector2-editor {
+  max-width: calc(2 * var(--inspector-number-width) + var(--inspector-number-gap));
+}
+
+.property-group pix3-vector3-editor,
+.property-group pix3-euler-editor {
+  max-width: calc(3 * var(--inspector-number-width) + 2 * var(--inspector-number-gap));
+}
+
+/* The slider keeps the row: only its numeric box follows the cap (set inside
+   the editor), so the track stays as wide as the panel allows. */
+
 .property-label {
   font-size: 13px;
   color: var(--fg-2);
@@ -765,7 +795,8 @@ pix3-panel {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 1;
+  /* Swatch + a fixed-width hex field; no reason to span the row. */
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -1110,6 +1141,14 @@ pix3-panel {
   font-size: 13px;
 }
 
+/* An enum picker is as wide as its longest option, not as wide as the panel;
+   node-reference pickers keep the full row (their options are "Name (Type)"). */
+.property-select--enum {
+  flex: 0 1 var(--inspector-select-width);
+  min-width: 0;
+  max-width: var(--inspector-select-width);
+}
+
 .property-select:focus {
   outline: none;
   border-color: var(--accent);
@@ -1142,9 +1181,17 @@ pix3-panel {
   color: var(--fg-2);
 }
 
+/* Width comes from the shared number cap above; only the shrink behaviour is
+   local to the size row. */
 .size-inline-input {
-  flex: 1;
   min-width: 0;
+}
+
+/* Keep the W/H pair together on the left instead of spreading across the row.
+   The basis is spelled out because an `auto` one would resolve to the fields'
+   *content* width (a few digits), not to their 100px flex basis. */
+.size-inline-editor {
+  flex: 0 1 calc(2 * var(--inspector-number-width) + var(--inspector-number-gap));
 }
 
 .size-inline-unit {

@@ -5,6 +5,7 @@ import {
 } from '@/services/assets/AssetFileActivationService';
 import {
   AssetsPreviewService,
+  type AnimationPreviewData,
   type AssetPreviewItem,
   type AssetsPreviewSnapshot,
 } from '@/services/assets/AssetsPreviewService';
@@ -111,6 +112,20 @@ export class AssetsContent extends ComponentBase {
   @state()
   private playbackDuration = 0;
 
+  /** Path of the flipbook asset currently playing (null = none). */
+  @state()
+  private playingAnimationPath: string | null = null;
+
+  /** Frame shown by the running flipbook preview. */
+  @state()
+  private animationFrameIndex = 0;
+
+  /** Timer of the running flipbook preview; one clip plays at a time. */
+  private animationTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Ping-pong direction of the running flipbook preview (+1 forward, -1 back). */
+  private animationStep = 1;
+
   private disposePreviewSubscription?: () => void;
   private disposeProjectSubscription?: () => void;
   private lastProjectId: string | null = null;
@@ -154,11 +169,20 @@ export class AssetsContent extends ComponentBase {
       if (snapshot.selectedFolderPath !== this.lastPreviewFolderPath) {
         this.lastPreviewFolderPath = snapshot.selectedFolderPath;
         this.stopAudioPreview();
-      } else if (
-        this.playingAudioPath &&
-        !snapshot.items.some(entry => entry.path === this.playingAudioPath)
-      ) {
-        this.stopAudioPreview();
+        this.stopAnimationPreview();
+      } else {
+        if (
+          this.playingAudioPath &&
+          !snapshot.items.some(entry => entry.path === this.playingAudioPath)
+        ) {
+          this.stopAudioPreview();
+        }
+        if (
+          this.playingAnimationPath &&
+          !snapshot.items.some(entry => entry.path === this.playingAnimationPath)
+        ) {
+          this.stopAnimationPreview();
+        }
       }
       // Mirror an externally-driven selection (reveal from Scene Tree / selection in Asset
       // Browser) into the local highlight set. Only react when the service's selected item
@@ -206,6 +230,7 @@ export class AssetsContent extends ComponentBase {
     window.removeEventListener('keydown', this.onGlobalKeyDown);
     this.contextMenuPortal.close();
     this.stopAudioPreview();
+    this.stopAnimationPreview();
     this.audioPreviewEl = null;
     super.disconnectedCallback();
   }
@@ -554,21 +579,24 @@ export class AssetsContent extends ComponentBase {
         <span class="thumb">
           ${item.previewType === 'text' && item.previewText
             ? html`<span class="text-thumb">${item.previewText}</span>`
-            : item.thumbnailUrl
-              ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
-              : html`
-                  <span class="icon">${this.iconService.getIcon(item.iconName, 24)}</span>
-                  ${(item.previewType === 'model' || item.previewType === 'scene') &&
-                  item.thumbnailStatus === 'loading'
-                    ? html`<span class="thumb-spinner" aria-hidden="true"></span>`
-                    : null}
-                `}
+            : this.isAnimationPreviewable(item)
+              ? this.renderAnimationFrame(item)
+              : item.thumbnailUrl
+                ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
+                : html`
+                    <span class="icon">${this.iconService.getIcon(item.iconName, 24)}</span>
+                    ${(item.previewType === 'model' || item.previewType === 'scene') &&
+                    item.thumbnailStatus === 'loading'
+                      ? html`<span class="thumb-spinner" aria-hidden="true"></span>`
+                      : null}
+                  `}
           ${this.isAudioPreviewable(item)
             ? html`${this.renderAudioToggle(item, '')}
               ${this.playingAudioPath === item.path
                 ? this.renderAudioProgress('audio-progress')
                 : null}`
             : null}
+          ${this.isAnimationPreviewable(item) ? this.renderAnimationToggle(item, '') : null}
         </span>
         <span class="name">${item.name}</span>
         ${this.renderItemMeta(item)}
@@ -582,7 +610,12 @@ export class AssetsContent extends ComponentBase {
       return null;
     }
     const sizeLabel = item.sizeBytes !== null ? this.formatFileSize(item.sizeBytes) : '';
-    const timeLabel = item.previewType === 'audio' ? this.buildAudioTimeLabel(item) : '';
+    const timeLabel =
+      item.previewType === 'audio'
+        ? this.buildAudioTimeLabel(item)
+        : item.animation
+          ? this.buildAnimationLabel(item.animation)
+          : '';
     const label = [timeLabel, sizeLabel].filter(part => part.length > 0).join(' · ');
     return label ? html`<span class="meta">${label}</span>` : null;
   }
@@ -590,13 +623,17 @@ export class AssetsContent extends ComponentBase {
   private renderListRow(item: AssetPreviewItem) {
     const isSelected = this.selectedPaths.has(item.path);
     const isAudio = this.isAudioPreviewable(item);
+    const isAnimation = this.isAnimationPreviewable(item);
     const isPlaying = this.playingAudioPath === item.path;
-    // Audio rows have no pixel dimensions, so the same column carries the clock.
+    // Audio/animation rows have no pixel dimensions, so the same column carries
+    // the clock / the clip summary.
     const dimensions = isAudio
       ? this.buildAudioTimeLabel(item)
-      : item.width !== null && item.height !== null
-        ? `${item.width}×${item.height}`
-        : '';
+      : item.animation
+        ? this.buildAnimationLabel(item.animation)
+        : item.width !== null && item.height !== null
+          ? `${item.width}×${item.height}`
+          : '';
     const isDropTarget = this.dropTargetPath === item.path && this.isDropTargetItem(item);
     return html`
       <button
@@ -625,12 +662,15 @@ export class AssetsContent extends ComponentBase {
         }}
       >
         ${isAudio ? this.renderAudioToggle(item, 'is-inline') : null}
+        ${isAnimation ? this.renderAnimationToggle(item, 'is-inline') : null}
         <span class="row-thumb">
-          ${item.thumbnailUrl
-            ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
-            : html`<span class="icon"
-                >${this.iconService.getIcon(item.iconName, IconSize.MEDIUM)}</span
-              >`}
+          ${isAnimation
+            ? this.renderAnimationFrame(item)
+            : item.thumbnailUrl
+              ? html`<img src=${item.thumbnailUrl} alt=${item.name} loading="lazy" />`
+              : html`<span class="icon"
+                  >${this.iconService.getIcon(item.iconName, IconSize.MEDIUM)}</span
+                >`}
         </span>
         <span class="row-name">${item.name}</span>
         <span class="row-dim">${dimensions}</span>
@@ -652,6 +692,13 @@ export class AssetsContent extends ComponentBase {
       (event.target as HTMLElement | null)?.closest('.audio-play-btn')
     ) {
       this.toggleAudioPreview(item);
+      return;
+    }
+    if (
+      item.previewType === 'animation' &&
+      (event.target as HTMLElement | null)?.closest('.anim-play-btn')
+    ) {
+      this.toggleAnimationPreview(item);
       return;
     }
     this.updateSelectionFromClick(event, item);
@@ -681,10 +728,26 @@ export class AssetsContent extends ComponentBase {
       this.toggleAudioPreview(selected);
       return;
     }
-    if (this.playingAudioPath) {
+    const selectedAnimation = this.findSelectedAnimationItem();
+    if (selectedAnimation) {
+      event.preventDefault();
+      this.toggleAnimationPreview(selectedAnimation);
+      return;
+    }
+    if (this.playingAudioPath || this.playingAnimationPath) {
       event.preventDefault();
       this.stopAudioPreview();
+      this.stopAnimationPreview();
     }
+  }
+
+  /** The single selected item, when it is a previewable flipbook animation. */
+  private findSelectedAnimationItem(): AssetPreviewItem | null {
+    if (!this.lastSelectedPath) {
+      return null;
+    }
+    const item = this.snapshot.items.find(candidate => candidate.path === this.lastSelectedPath);
+    return item && this.isAnimationPreviewable(item) ? item : null;
   }
 
   /** The single selected item, when it is a previewable audio file. */
@@ -766,6 +829,132 @@ export class AssetsContent extends ComponentBase {
 
   private isAudioPreviewable(item: AssetPreviewItem): boolean {
     return item.kind === 'file' && item.previewType === 'audio' && !!item.previewUrl;
+  }
+
+  private isAnimationPreviewable(item: AssetPreviewItem): boolean {
+    return (
+      item.kind === 'file' &&
+      item.previewType === 'animation' &&
+      (item.animation?.frames.length ?? 0) > 0
+    );
+  }
+
+  /**
+   * One flipbook frame as a cropped background: sequence clips carry a full-image
+   * rect, sheet clips a UV sub-rect. UV origin is bottom-left (GL), CSS's is
+   * top-left, hence the flipped Y.
+   */
+  private renderAnimationFrame(item: AssetPreviewItem) {
+    const animation = item.animation;
+    const frames = animation?.frames ?? [];
+    if (frames.length === 0) {
+      return html`<span class="icon">${this.iconService.getIcon(item.iconName, 24)}</span>`;
+    }
+    const isPlaying = this.playingAnimationPath === item.path;
+    const frame = frames[isPlaying ? this.animationFrameIndex % frames.length : 0];
+    const sizeX = frame.repeatX > 0 ? 100 / frame.repeatX : 100;
+    const sizeY = frame.repeatY > 0 ? 100 / frame.repeatY : 100;
+    // background-position in percent positions the scaled image so the wanted
+    // sub-rect lands in the box: p = offset / (1 - repeat) in UV terms.
+    const posX = frame.repeatX < 1 ? (frame.offsetX / (1 - frame.repeatX)) * 100 : 0;
+    const uvTop = 1 - frame.offsetY - frame.repeatY;
+    const posY = frame.repeatY < 1 ? (uvTop / (1 - frame.repeatY)) * 100 : 0;
+    return html`<span
+      class="anim-frame"
+      role="img"
+      aria-label=${item.name}
+      style=${`background-image:url("${frame.url}");background-size:${sizeX}% ${sizeY}%;background-position:${posX}% ${posY}%`}
+    ></span>`;
+  }
+
+  /** Play/stop affordance for a flipbook asset (shares the audio pill styling). */
+  private renderAnimationToggle(item: AssetPreviewItem, extraClass: string) {
+    const isPlaying = this.playingAnimationPath === item.path;
+    return html`<span
+      class="anim-play-btn ${extraClass} ${isPlaying ? 'is-playing' : ''}"
+      aria-hidden="true"
+      title=${isPlaying ? 'Stop preview' : 'Play preview (Space)'}
+      >${this.iconService.getIcon(isPlaying ? 'stop' : 'play', 18)}</span
+    >`;
+  }
+
+  /** `walk · 12 fps · 8 frames` under the card. */
+  private buildAnimationLabel(animation: AnimationPreviewData): string {
+    const frames = `${animation.frameCount} ${animation.frameCount === 1 ? 'frame' : 'frames'}`;
+    return [animation.clipName, `${animation.fps} fps`, frames].filter(Boolean).join(' · ');
+  }
+
+  private toggleAnimationPreview(item: AssetPreviewItem): void {
+    if (this.playingAnimationPath === item.path) {
+      this.stopAnimationPreview();
+      return;
+    }
+    this.stopAnimationPreview();
+    this.playingAnimationPath = item.path;
+    this.animationFrameIndex = 0;
+    this.animationStep = 1;
+    // Frames past the first are fetched on demand; the preview starts on the
+    // frames already loaded and picks up the rest when the snapshot lands.
+    void this.assetsPreviewService.requestAnimationFrames(item.path);
+    this.scheduleAnimationFrame();
+  }
+
+  /**
+   * Advances the running clip. Re-reads the item from the snapshot each tick so
+   * the lazily-loaded frames join the playback as soon as they arrive; the delay
+   * honours the clip fps and the frame's duration multiplier.
+   */
+  private scheduleAnimationFrame(): void {
+    if (this.animationTimer !== null) {
+      clearTimeout(this.animationTimer);
+      this.animationTimer = null;
+    }
+    const item = this.snapshot.items.find(entry => entry.path === this.playingAnimationPath);
+    const animation = item?.animation;
+    if (!animation || animation.frames.length === 0) {
+      this.stopAnimationPreview();
+      return;
+    }
+
+    const frames = animation.frames;
+    const current = frames[Math.min(this.animationFrameIndex, frames.length - 1)];
+    const fps = animation.fps > 0 ? animation.fps : 12;
+    const delayMs = (1000 / fps) * Math.max(0.001, current.durationMultiplier);
+
+    this.animationTimer = setTimeout(() => {
+      this.animationTimer = null;
+      const nextIndex = this.animationFrameIndex + this.animationStep;
+      if (nextIndex >= frames.length || nextIndex < 0) {
+        if (!animation.loop) {
+          this.stopAnimationPreview();
+          return;
+        }
+        if (animation.pingPong && frames.length > 1) {
+          this.animationStep = -this.animationStep;
+          this.animationFrameIndex = Math.min(
+            frames.length - 1,
+            Math.max(0, this.animationFrameIndex + this.animationStep)
+          );
+        } else {
+          this.animationFrameIndex = 0;
+        }
+      } else {
+        this.animationFrameIndex = nextIndex;
+      }
+      this.scheduleAnimationFrame();
+    }, delayMs);
+  }
+
+  private stopAnimationPreview(): void {
+    if (this.animationTimer !== null) {
+      clearTimeout(this.animationTimer);
+      this.animationTimer = null;
+    }
+    if (this.playingAnimationPath !== null) {
+      this.playingAnimationPath = null;
+    }
+    this.animationFrameIndex = 0;
+    this.animationStep = 1;
   }
 
   /** Play/stop affordance drawn over an audio thumbnail (grid) or inline (list). */
@@ -1030,7 +1219,10 @@ export class AssetsContent extends ComponentBase {
   }
 
   private async onItemDoubleClick(event: MouseEvent, item: AssetPreviewItem): Promise<void> {
-    // The audio play/stop affordance handles its own clicks; don't also activate.
+    // The play/stop affordances handle their own clicks; don't also activate.
+    if ((event.target as HTMLElement | null)?.closest('.anim-play-btn')) {
+      return;
+    }
     if (
       item.previewType === 'audio' &&
       (event.target as HTMLElement | null)?.closest('.audio-play-btn')

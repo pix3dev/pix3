@@ -323,15 +323,17 @@ describe('InspectorPanel camera projection editor', () => {
     const projectionSelect = selects.find(select =>
       Array.from(select.options).some(option => option.value === 'orthographic')
     );
-    const numberInputs = Array.from(
-      panel.querySelectorAll('input[type="number"]')
-    ) as HTMLInputElement[];
-    const fovInput = numberInputs.find(input => input.value === '60');
+    // Scalar numbers render as the drag-to-scrub field, not a raw <input type=number>.
+    const numberFields = Array.from(panel.querySelectorAll('pix3-number-field')) as Array<
+      HTMLElement & { value: number; disabled: boolean }
+    >;
+    const fovField = numberFields.find(field => field.value === 60);
 
     expect(projectionSelect).toBeInstanceOf(HTMLSelectElement);
     expect((projectionSelect as HTMLSelectElement).value).toBe('orthographic');
-    expect(fovInput).toBeInstanceOf(HTMLInputElement);
-    expect((fovInput as HTMLInputElement).disabled).toBe(true);
+    expect(panel.querySelector('input[type="number"]')).toBeNull();
+    expect(fovField).toBeDefined();
+    expect(fovField?.disabled).toBe(true);
   });
 });
 

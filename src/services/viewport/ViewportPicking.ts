@@ -271,19 +271,37 @@ export class ViewportPicking {
    * the frontmost node under the pointer during 2D hit-testing.
    */
   private build2DPaintOrderIndex(rootNodes: readonly NodeBase[]): Map<string, number> {
-    const index = new Map<string, number>();
-    let next = 0;
-    const visit = (node: NodeBase): void => {
-      index.set(node.nodeId, next++);
+    // Same two-step as the render-order pass: DFS first, then bucket by the
+    // node's effective `zIndex` so a z-lifted node is picked as the frontmost
+    // one even though it sits earlier in the tree.
+    const dfs: Array<{ nodeId: string; z: number }> = [];
+    let needsSort = false;
+    const visit = (node: NodeBase, parentZ: number): void => {
+      let z = parentZ;
+      if (node instanceof Node2D) {
+        z = node.zAsRelative ? parentZ + node.zIndex : node.zIndex;
+        if (z !== 0) {
+          needsSort = true;
+        }
+      }
+      dfs.push({ nodeId: node.nodeId, z });
       for (const child of node.children) {
         if (child instanceof NodeBase) {
-          visit(child);
+          visit(child, z);
         }
       }
     };
     for (const node of rootNodes) {
-      visit(node);
+      visit(node, 0);
     }
+
+    if (needsSort) {
+      // Stable sort — equal-z nodes keep their DFS order.
+      dfs.sort((a, b) => a.z - b.z);
+    }
+
+    const index = new Map<string, number>();
+    dfs.forEach((entry, order) => index.set(entry.nodeId, order));
     return index;
   }
 

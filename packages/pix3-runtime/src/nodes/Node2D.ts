@@ -34,7 +34,12 @@ export interface Node2DProps extends Omit<NodeBaseProps, 'type'> {
   rotation?: number; // degrees
   opacity?: number;
   layout?: Node2DLayoutConfig;
+  zIndex?: number;
+  zAsRelative?: boolean;
 }
+
+/** Godot-compatible bound for {@link Node2D.zIndex}. */
+export const Z_INDEX_LIMIT = 4096;
 
 export class Node2D extends NodeBase {
   /** Shared scratch for pointer unprojection (single-threaded, reused per call). */
@@ -47,6 +52,8 @@ export class Node2D extends NodeBase {
   isCanvasLayer = false;
   private _opacity: number;
   private _computedOpacity: number;
+  private _zIndex: number;
+  private _zAsRelative: boolean;
   private _layoutEnabled: boolean;
   private _horizontalAlign: Node2DHorizontalAlign;
   private _verticalAlign: Node2DVerticalAlign;
@@ -99,6 +106,18 @@ export class Node2D extends NodeBase {
       this.properties.opacity = this._opacity;
     }
 
+    // Draw-order override. Authored values arrive in `properties` (the loader
+    // hands the raw YAML bag to every node type), so reading them here covers
+    // every Node2D subclass without touching SceneLoader.
+    this._zIndex = Node2D.clampZIndex(props.zIndex ?? this.properties.zIndex);
+    this._zAsRelative =
+      typeof props.zAsRelative === 'boolean'
+        ? props.zAsRelative
+        : typeof this.properties.zAsRelative === 'boolean'
+          ? this.properties.zAsRelative
+          : true;
+    this.syncZOrderProperties();
+
     this.syncLayoutProperties();
   }
 
@@ -122,6 +141,55 @@ export class Node2D extends NodeBase {
 
   get computedOpacity(): number {
     return this._computedOpacity;
+  }
+
+  /**
+   * Draw-order override for the 2D pass (Godot `z_index`). Higher draws on top.
+   *
+   * The 2D pass has no depth test, so paint order is normally the scene-tree DFS
+   * order (see `assign2DRenderOrder`). `zIndex` lifts a node out of that order
+   * without moving it in the tree: nodes are bucketed by effective z first, and
+   * tree order only breaks ties inside a bucket.
+   */
+  get zIndex(): number {
+    return this._zIndex;
+  }
+
+  set zIndex(value: number) {
+    const next = Node2D.clampZIndex(value);
+    if (this._zIndex === next) {
+      return;
+    }
+    this._zIndex = next;
+    this.syncZOrderProperties();
+  }
+
+  /**
+   * When `true` (the default, as in Godot) {@link zIndex} is added to the parent's
+   * effective z, so a subtree keeps its internal layering wherever it is reparented.
+   * When `false` the node's `zIndex` is absolute — use it for "always on top"
+   * overlays that must not inherit an ancestor's offset.
+   */
+  get zAsRelative(): boolean {
+    return this._zAsRelative;
+  }
+
+  set zAsRelative(value: boolean) {
+    const next = Boolean(value);
+    if (this._zAsRelative === next) {
+      return;
+    }
+    this._zAsRelative = next;
+    this.syncZOrderProperties();
+  }
+
+  /** Effective (inherited) z used by the render-order walk. */
+  get effectiveZIndex(): number {
+    if (!this._zAsRelative) {
+      return this._zIndex;
+    }
+    const parent = this.parent;
+    return parent instanceof Node2D ? parent.effectiveZIndex + this._zIndex : this._zIndex;
   }
 
   get layoutEnabled(): boolean {
@@ -704,6 +772,33 @@ export class Node2D extends NodeBase {
     }
   }
 
+  private static clampZIndex(value: unknown): number {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numeric)) {
+      return 0;
+    }
+    return Math.max(-Z_INDEX_LIMIT, Math.min(Z_INDEX_LIMIT, Math.round(numeric)));
+  }
+
+  /**
+   * Mirrors the z-order fields into `properties` so SceneSaver persists them for
+   * free (it spreads `node.properties`). Defaults are deleted rather than written,
+   * so scenes that never touch z-order serialize exactly as before.
+   */
+  private syncZOrderProperties(): void {
+    if (this._zIndex !== 0) {
+      this.properties.zIndex = this._zIndex;
+    } else {
+      delete this.properties.zIndex;
+    }
+
+    if (!this._zAsRelative) {
+      this.properties.zAsRelative = false;
+    } else {
+      delete this.properties.zAsRelative;
+    }
+  }
+
   private syncLayoutProperties(): void {
     if (!this._layoutEnabled) {
       delete this.properties.layout;
@@ -829,6 +924,37 @@ export class Node2D extends NodeBase {
           },
         },
         {
+          name: 'zIndex',
+          type: 'number',
+          ui: {
+            label: 'Z Index',
+            description:
+              'Draw-order override for the 2D pass. Higher draws on top; ties keep scene-tree order',
+            group: 'Ordering',
+            step: 1,
+            precision: 0,
+            min: -Z_INDEX_LIMIT,
+            max: Z_INDEX_LIMIT,
+          },
+          getValue: (node: unknown) => (node as Node2D).zIndex,
+          setValue: (node: unknown, value: unknown) => {
+            (node as Node2D).zIndex = Number(value);
+          },
+        },
+        {
+          name: 'zAsRelative',
+          type: 'boolean',
+          ui: {
+            label: 'Z Relative',
+            description: "Add Z Index to the parent's effective z instead of using it as absolute",
+            group: 'Ordering',
+          },
+          getValue: (node: unknown) => (node as Node2D).zAsRelative,
+          setValue: (node: unknown, value: unknown) => {
+            (node as Node2D).zAsRelative = Boolean(value);
+          },
+        },
+        {
           name: 'layoutEnabled',
           type: 'boolean',
           ui: {
@@ -882,6 +1008,11 @@ export class Node2D extends NodeBase {
         Style: {
           label: 'Style',
           description: '2D visual styling properties',
+          expanded: false,
+        },
+        Ordering: {
+          label: 'Ordering',
+          description: 'Draw order within the 2D pass',
           expanded: false,
         },
         Anchor: {
