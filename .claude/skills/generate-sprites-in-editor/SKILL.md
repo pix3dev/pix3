@@ -310,6 +310,13 @@ the edited scene from disk:
 - `addReferenceFromProject` / `onSaveToProject` / `aspectRatio` / `saveName` /
   `references` / `generating` / `current` are all real (TS-`private` ≠ runtime-private)
   and reachable on the panel element in dev builds.
+- Generated a spritesheet? `onSliceIntoFrames()` writes its cells into
+  `<name>_frames/`, and `onCreateAnimation()` builds a managed sprite folder
+  (`<dir>/<stem>/<stem>.pix3anim` + `idle_<nnnn>.png`) and opens the animation
+  editor on it. Both need the image **saved into the project first** — they act on
+  `panel.boundImagePath`, so a purely in-memory generation has nothing to slice.
+  Both open the shared slice dialog, so confirm it via
+  `document.querySelector('pix3-animation-auto-slice-dialog')` before awaiting.
 - After a page reload the panel's references/history reset — re-add references.
 - Design canvas size is in `pix3project.yaml` (`viewportBaseSize`); DeepCore is
   1080×1080.

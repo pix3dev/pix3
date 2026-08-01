@@ -259,7 +259,10 @@ function normalizeFrame(frame: unknown): AnimationFrame {
         )
       : [],
     events: normalizeFrameEvents((candidate as { events?: unknown }).events),
-    sourceSize: normalizeSourceSize((candidate as { sourceSize?: unknown }).sourceSize, boundingBox),
+    sourceSize: normalizeSourceSize(
+      (candidate as { sourceSize?: unknown }).sourceSize,
+      boundingBox
+    ),
     points: normalizeFramePoints((candidate as { points?: unknown }).points),
   };
 }

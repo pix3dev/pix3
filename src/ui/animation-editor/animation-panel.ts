@@ -577,10 +577,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
                             this.selectedPointName = name;
                           }}
                           @change=${(event: Event) =>
-                            void this.onRenamePoint(
-                              name,
-                              (event.target as HTMLInputElement).value
-                            )}
+                            void this.onRenamePoint(name, (event.target as HTMLInputElement).value)}
                         />
                         <button
                           type="button"
@@ -643,7 +640,12 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     return html`
       ${(previousFrame?.points ?? []).map(point => {
         const at = toStage(point);
-        return html`<circle class="stage-point stage-point--ghost" cx=${at.x} cy=${at.y} r="3" />`;
+        return html`<circle
+          class="stage-point stage-point--ghost"
+          cx=${at.x}
+          cy=${at.y}
+          r="3"
+        ></circle>`;
       })}
       ${points.map(point => {
         const at = toStage(point);
@@ -656,7 +658,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
             x2=${at.x + Math.cos(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
             y2=${at.y + Math.sin(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
             data-point-angle=${point.name}
-          />
+          ></line>
           <circle
             class="stage-point ${editable ? 'is-editable' : ''} ${this.selectedPointName ===
             point.name
@@ -666,7 +668,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
             cy=${at.y}
             r="5"
             data-point-name=${point.name}
-          />
+          ></circle>
         `;
       })}
     `;

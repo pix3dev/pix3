@@ -1,8 +1,31 @@
 # Sprite Editor — design for renaming, double-click open, and animation-editor merge
 
-Status (2026-08-02): **Phase 1 shipped** (commit `53e6c07` — rename + double-click open,
-`src/ui/sprite-editor/`, `OpenSpriteEditorCommand`). Phase 2 (shared slicing module +
-"Create Animation from image") and Phase 3 (shell-merge with the flipbook editor) остаются.
+Status (2026-08-02, branch `feat/sprite-editor-unified`):
+
+- ✅ **Phase 1** — rename + double-click open (`53e6c07`).
+- ✅ **Phase 2 + riders A/B** — shared `sliceImageBlob`, generalised auto-slice dialog,
+  Sprite Editor "Slice into frames" / "Create animation", clip-scoped frame file names,
+  OS-file drop on the animation editor (+ insert-before-frame).
+- ✅ **Runtime R1** — node `anchor`, `sizeMode`, per-frame `sourceSize`, one shared layout
+  resolver applied by both the runtime node and the editor proxy.
+- ✅ **Runtime R2** — named frame points (`points`, `getFramePoint`/`getFramePointWorld`,
+  `core:PointAttachment`) **plus the points authoring tool**, which landed on the existing
+  animation stage rather than waiting for the unified canvas, so the API is reachable today.
+- ✅ **Phase 3a** — `StageZoomPanController`, adopted by the animation stage (wheel
+  zoom-to-cursor + pan). The Sprite Editor's crop overlay keeps its letterboxed object-fit
+  math; adopting the controller there is coupled to 3b/3c.
+- ✅ **Phase 3d** — `OpenSpriteEditorForNodeCommand` + viewport / scene-tree / inspector
+  double-click entry points.
+- ✅ **Phase 4** — managed sprite folders collapse to one card in the Assets pane.
+- ❌ **Phase 3b/3c** — decomposing `animation-panel.ts` (~2 400 lines) into a document
+  controller + timeline + clips-rail components and composing them around ONE canvas, with
+  the anchor/bbox/polygon/points overlays ported onto the Sprite Editor canvas on top of
+  `StageZoomPanController`, old panel kept as the render host until parity. **The big one**;
+  it wants a live editor to verify against, not a blind refactor.
+- ❌ **Phase 5** — place mode + history-to-frame (needs 3a–3c).
+- ❌ **Phase 6** — power tools (auto collision polygon, chroma key, video import, bulk frame
+  ops, "Trim frames").
+
 **§8 (2026-08-02) revises the Phase-3 target UX** from mode-tabs to a Construct-3-style
 single-canvas editor and adds Phases 4–6 (scene-node entry, file-layout convention,
 navigator grouping, generation-fit UX, power tools). §§1–7 remain valid except where §8

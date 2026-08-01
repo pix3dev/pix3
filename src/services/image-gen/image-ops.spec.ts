@@ -28,38 +28,36 @@ describe('sliceImageBlob', () => {
       close: () => {},
     }));
 
-    createElementSpy = vi
-      .spyOn(document, 'createElement')
-      .mockImplementation((tagName: string) => {
-        if (tagName !== 'canvas') {
-          throw new Error(`unexpected createElement(${tagName})`);
-        }
-        const canvas = {
-          width: 0,
-          height: 0,
-          getContext: () => ({
-            imageSmoothingEnabled: false,
-            imageSmoothingQuality: 'low',
-            drawImage: (
-              _bitmap: unknown,
-              sx: number,
-              sy: number,
-              sw: number,
-              sh: number,
-              _dx: number,
-              _dy: number,
-              dw: number,
-              dh: number
-            ) => {
-              drawCalls.push({ sx, sy, sw, sh, dw, dh });
-            },
-          }),
-          toBlob: (callback: (blob: Blob | null) => void) => {
-            callback(new Blob([`cell-${drawCalls.length}`], { type: 'image/png' }));
+    createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      if (tagName !== 'canvas') {
+        throw new Error(`unexpected createElement(${tagName})`);
+      }
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          imageSmoothingEnabled: false,
+          imageSmoothingQuality: 'low',
+          drawImage: (
+            _bitmap: unknown,
+            sx: number,
+            sy: number,
+            sw: number,
+            sh: number,
+            _dx: number,
+            _dy: number,
+            dw: number,
+            dh: number
+          ) => {
+            drawCalls.push({ sx, sy, sw, sh, dw, dh });
           },
-        };
-        return canvas as unknown as HTMLElement;
-      }) as unknown as ReturnType<typeof vi.spyOn>;
+        }),
+        toBlob: (callback: (blob: Blob | null) => void) => {
+          callback(new Blob([`cell-${drawCalls.length}`], { type: 'image/png' }));
+        },
+      };
+      return canvas as unknown as HTMLElement;
+    }) as unknown as ReturnType<typeof vi.spyOn>;
   });
 
   afterEach(() => {

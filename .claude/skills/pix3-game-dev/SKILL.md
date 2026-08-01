@@ -34,6 +34,10 @@ capability inventory is the catalog — start there every time.
      One-shot VFX (impact flash, poof, muzzle burst): `loop: false` +
      `freeOnFinish: true` (the node self-destructs when the clip ends — no
      component). **Never** a Script that `setTexture()`s frames on a timer.
+   - Something that must follow a moving point ON the art (muzzle flash on a
+     barrel, an item in a hand through a walk cycle) → a **named frame point**
+     read with `getFramePoint(name)`, or the `core:PointAttachment` component on
+     the child. **Never** hard-coded per-frame offsets in a script.
    - Camera follow / cut / blend → `Camera3D` + `core:CameraBrain` +
      `VirtualCamera3D` (priority-driven). Programmatic blend:
      `brain.overrideNextBlend`.
@@ -51,6 +55,8 @@ capability inventory is the catalog — start there every time.
    without that line is a defect (reviewers grep for it). **Reimplementation
    smells** — if your draft contains one of these, stop, a built-in exists:
    - `setTexture(...)` on a timer / a frame counter → `AnimatedSprite2D` + `.pix3anim`
+   - a per-frame lookup table of attachment offsets → `AnimationFrame.points` +
+     `getFramePoint()` / `core:PointAttachment`
    - hand-lerping opacity / scale / position over time → `core:Fade` / `core:PopIn` /
      `core:PunchScale` / `core:AnimationPlayer`
    - a time-accumulator whose only job is to `queueFree()` at the end → `core:FreeOnSignal`

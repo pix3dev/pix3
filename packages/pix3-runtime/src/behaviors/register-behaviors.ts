@@ -181,7 +181,7 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     id: 'core:PointAttachment',
     displayName: 'Point Attachment',
     description:
-      "Keeps this node on a named frame point of a parent AnimatedSprite2D (hand socket, muzzle) " +
+      'Keeps this node on a named frame point of a parent AnimatedSprite2D (hand socket, muzzle) ' +
       'every tick',
     category: 'Animation',
     componentClass: PointAttachmentBehavior,

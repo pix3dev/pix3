@@ -1034,10 +1034,7 @@ export class Viewport2DProxyRegistry {
    * applied here too, from the same shared resolver, or the editor and the
    * running game disagree about where a frame sits.
    */
-  private applyAnimatedSprite2DFrameLayout(
-    node: AnimatedSprite2D,
-    visualRoot: THREE.Group
-  ): void {
+  private applyAnimatedSprite2DFrameLayout(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
     const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
     if (!sizeGroup) {
       return;

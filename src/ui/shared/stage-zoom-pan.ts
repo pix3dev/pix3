@@ -124,7 +124,11 @@ export class StageZoomPanController {
   zoomAtPointer(event: WheelEvent, viewport: StageViewport): void {
     const previousZoom = this._zoom;
     const notches = -Math.sign(event.deltaY);
-    const nextZoom = clamp(previousZoom * Math.pow(this.wheelStep, notches), this.minZoom, this.maxZoom);
+    const nextZoom = clamp(
+      previousZoom * Math.pow(this.wheelStep, notches),
+      this.minZoom,
+      this.maxZoom
+    );
     if (nextZoom === previousZoom) {
       return;
     }

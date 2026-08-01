@@ -40,7 +40,10 @@ describe('animation asset utils', () => {
       'res://sprites/character/run_0001.png'
     );
     expect(
-      buildAnimationFrameResourcePath(explicitPath, 3, { clipName: 'Attack Combo!', extension: 'webp' })
+      buildAnimationFrameResourcePath(explicitPath, 3, {
+        clipName: 'Attack Combo!',
+        extension: 'webp',
+      })
     ).toBe('res://sprites/character/attack_combo_0003.webp');
     expect(buildAnimationFrameResourcePath(explicitPath, 2, { clipName: '   ' })).toBe(
       'res://sprites/character/frame_0002.png'

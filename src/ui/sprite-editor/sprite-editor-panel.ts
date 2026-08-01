@@ -1922,7 +1922,10 @@ export class SpriteEditorPanel extends ComponentBase {
         const framePath = `${folder}/frame_${String(index + 1).padStart(4, '0')}.png`;
         await this.storage.writeBinaryFile(framePath, await cell.arrayBuffer());
       }
-      this.sliceStatus = { text: `Sliced into ${cells.length} frames in ${folder}/`, isError: false };
+      this.sliceStatus = {
+        text: `Sliced into ${cells.length} frames in ${folder}/`,
+        isError: false,
+      };
     } catch (error) {
       this.sliceStatus = { text: `Slice failed: ${describeError(error)}`, isError: true };
     } finally {
@@ -1989,9 +1992,7 @@ export class SpriteEditorPanel extends ComponentBase {
               texturePath,
               boundingBox: { x: 0, y: 0, width: 0, height: 0 },
               collisionPolygon: [],
-              sourceSize: cellSize
-                ? { width: cellSize.width, height: cellSize.height }
-                : undefined,
+              sourceSize: cellSize ? { width: cellSize.width, height: cellSize.height } : undefined,
             })),
           },
         ],
@@ -2017,7 +2018,10 @@ export class SpriteEditorPanel extends ComponentBase {
       };
       await this.editorTabs.focusOrOpenAnimation(assetPath);
     } catch (error) {
-      this.sliceStatus = { text: `Create animation failed: ${describeError(error)}`, isError: true };
+      this.sliceStatus = {
+        text: `Create animation failed: ${describeError(error)}`,
+        isError: true,
+      };
     } finally {
       this.sliceBusy = false;
     }

@@ -12,9 +12,7 @@ const viewport = (overrides: Partial<StageViewport> = {}): StageViewport => ({
 const wheel = (deltaY: number, clientX: number, clientY: number): WheelEvent =>
   ({ deltaY, clientX, clientY }) as WheelEvent;
 
-const pointer = (
-  overrides: Partial<PointerEvent> & { pointerId: number }
-): PointerEvent =>
+const pointer = (overrides: Partial<PointerEvent> & { pointerId: number }): PointerEvent =>
   ({
     button: 1,
     clientX: 0,
