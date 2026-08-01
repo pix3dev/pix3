@@ -1,4 +1,4 @@
-import type { AnimationFrame, AnimationSize } from './AnimationResource';
+import type { AnimationFrame, AnimationFramePoint, AnimationSize } from './AnimationResource';
 
 /**
  * How a frame's raster fills the node's box.
@@ -99,5 +99,31 @@ export function resolveAnimatedSpriteFrameLayout(
     offsetX: (0.5 - input.anchor.x) * nodeWidth + (0.5 - frameAnchorX) * width,
     // Frame anchor y is top-down while local space is y-up, hence the flipped term.
     offsetY: (0.5 - input.anchor.y) * nodeHeight + (frameAnchorY - 0.5) * height,
+  };
+}
+
+/** A frame point resolved into node-local space. */
+export interface ResolvedFramePoint {
+  x: number;
+  y: number;
+  /** Degrees, clockwise, 0 = pointing right. */
+  angle: number;
+}
+
+/**
+ * Map a frame point's normalized frame-space coordinates onto the laid-out quad,
+ * yielding node-local coordinates directly usable as a child node's position.
+ * Composed through the same layout as the visible pixels, so a point stays glued
+ * to the art through `sizeMode`, per-clip scaling, and both anchors.
+ */
+export function resolveFramePointToLocal(
+  point: AnimationFramePoint,
+  layout: AnimatedSpriteFrameLayout
+): ResolvedFramePoint {
+  return {
+    x: layout.offsetX + (point.x - 0.5) * layout.width,
+    // Point y is top-down (frame space); local space is y-up.
+    y: layout.offsetY + (0.5 - point.y) * layout.height,
+    angle: point.angle ?? 0,
   };
 }

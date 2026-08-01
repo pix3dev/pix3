@@ -33,6 +33,23 @@ export interface AnimationSize {
   height: number;
 }
 
+/**
+ * A named point that lives in frame space and moves (and rotates) across frames —
+ * a muzzle on a gun barrel, a hand socket an item follows through a walk cycle.
+ * Construct 3 calls these "image points"; the `angle` makes ours a full 2D socket
+ * (a direction, not just a position).
+ *
+ * Coordinates are normalized to the frame rect with y measured from the top, the
+ * same convention as {@link AnimationFrame.anchor} (the UI shows pixels). `angle`
+ * is in degrees, clockwise, 0 = pointing right.
+ */
+export interface AnimationFramePoint {
+  name: string;
+  x: number;
+  y: number;
+  angle?: number;
+}
+
 export interface AnimationFrame {
   textureIndex: number;
   offset: AnimationVector2;
@@ -65,6 +82,12 @@ export interface AnimationFrame {
    * makes the frame fall back to stretch layout, so legacy files keep working.
    */
   sourceSize?: AnimationSize;
+  /**
+   * Named sockets in this frame's space. Optional in authored files;
+   * `normalizeFrame` materializes `[]` and de-duplicates names within a frame
+   * (first occurrence wins), so runtime frames always carry the field.
+   */
+  points?: AnimationFramePoint[];
 }
 
 export interface AnimationClip {
@@ -159,6 +182,37 @@ function normalizeFrameEvents(value: unknown): AnimationFrameEvent[] {
   return events;
 }
 
+function normalizeFramePoints(value: unknown): AnimationFramePoint[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const points: AnimationFramePoint[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const candidate = typeof entry === 'object' && entry !== null ? entry : {};
+    const name =
+      typeof (candidate as { name?: unknown }).name === 'string'
+        ? (candidate as { name: string }).name.trim()
+        : '';
+    // A point is addressed by name, so an unnamed or duplicate one is unusable.
+    if (name.length === 0 || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+
+    const angle = normalizeFiniteNumber((candidate as { angle?: unknown }).angle);
+    points.push({
+      name,
+      x: normalizeFiniteNumber((candidate as { x?: unknown }).x, 0.5),
+      y: normalizeFiniteNumber((candidate as { y?: unknown }).y, 0.5),
+      ...(angle !== 0 ? { angle } : {}),
+    });
+  }
+
+  return points;
+}
+
 function normalizeSourceSize(value: unknown, boundingBox: AnimationBoundingBox): AnimationSize {
   const candidate = typeof value === 'object' && value !== null ? value : null;
   const width = Math.max(0, normalizeFiniteNumber((candidate as { width?: unknown })?.width));
@@ -206,7 +260,34 @@ function normalizeFrame(frame: unknown): AnimationFrame {
       : [],
     events: normalizeFrameEvents((candidate as { events?: unknown }).events),
     sourceSize: normalizeSourceSize((candidate as { sourceSize?: unknown }).sourceSize, boundingBox),
+    points: normalizeFramePoints((candidate as { points?: unknown }).points),
   };
+}
+
+/** Look up a named point on a frame, or `null` when the frame doesn't define it. */
+export function findAnimationFramePoint(
+  frame: AnimationFrame | null | undefined,
+  name: string
+): AnimationFramePoint | null {
+  if (!frame?.points || name.length === 0) {
+    return null;
+  }
+  return frame.points.find(point => point.name === name) ?? null;
+}
+
+/** Every point name defined anywhere in a clip, in first-seen order. */
+export function collectClipPointNames(clip: AnimationClip | null | undefined): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const frame of clip?.frames ?? []) {
+    for (const point of frame.points ?? []) {
+      if (!seen.has(point.name)) {
+        seen.add(point.name);
+        names.push(point.name);
+      }
+    }
+  }
+  return names;
 }
 
 function normalizeClip(clip: unknown, index: number): AnimationClip {

@@ -1,4 +1,4 @@
-import { Mesh, MeshBasicMaterial, Texture } from 'three';
+import { Euler, MathUtils, Matrix4, Mesh, MeshBasicMaterial, Texture, Vector3 } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import { configure2DTexture } from '../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
@@ -19,7 +19,9 @@ import {
 } from '../../shader-effects/ShaderEffectStack';
 import type { AttachedShaderEffect } from '../../shader-effects/shader-effect-types';
 import {
+  collectClipPointNames,
   findAnimationClip,
+  findAnimationFramePoint,
   isSequenceAnimationFrame,
   type AnimationClip,
   type AnimationFrame,
@@ -29,11 +31,19 @@ import {
 import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 import {
   resolveAnimatedSpriteFrameLayout,
+  resolveFramePointToLocal,
   type AnimatedSpriteAnchor2D,
+  type AnimatedSpriteFrameLayout,
   type AnimatedSpriteSizeMode,
+  type ResolvedFramePoint,
 } from '../../core/animated-sprite-layout';
 
 export type { AnimatedSpriteAnchor2D, AnimatedSpriteSizeMode };
+
+// Reused across frame-point queries, which scripts may run every tick.
+const FRAME_POINT_SCRATCH = new Vector3();
+const FRAME_POINT_MATRIX_SCRATCH = new Matrix4();
+const FRAME_POINT_EULER_SCRATCH = new Euler();
 
 export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   animationResourcePath?: string | null;
@@ -598,6 +608,22 @@ export class AnimatedSprite2D
     return null;
   }
 
+  /** Layout of one frame's quad, resolved through the shared editor/runtime math. */
+  private resolveFrameLayout(
+    frame: AnimationFrame | null,
+    frameIndex: number
+  ): AnimatedSpriteFrameLayout {
+    return resolveAnimatedSpriteFrameLayout({
+      nodeWidth: this.width,
+      nodeHeight: this.height,
+      anchor: this.anchor,
+      sizeMode: this.sizeMode,
+      frame,
+      frameSourceSize: this.resolveFrameSourceSize(frame, frameIndex),
+      clipFirstFrameSourceSize: this.resolveFrameSourceSize(this.activeClip?.frames[0] ?? null, 0),
+    });
+  }
+
   /**
    * Size and place the quad for the current frame. The math is shared with the
    * editor's proxy visuals via {@link resolveAnimatedSpriteFrameLayout} — the
@@ -605,22 +631,71 @@ export class AnimatedSprite2D
    */
   private updateSize(): void {
     const frame = this.getCurrentFrameData();
-    const layout = resolveAnimatedSpriteFrameLayout({
-      nodeWidth: this.width,
-      nodeHeight: this.height,
-      anchor: this.anchor,
-      sizeMode: this.sizeMode,
-      frame,
-      frameSourceSize: this.resolveFrameSourceSize(frame, this._currentFrame),
-      clipFirstFrameSourceSize: this.resolveFrameSourceSize(
-        this.activeClip?.frames[0] ?? null,
-        0
-      ),
-    });
+    const layout = this.resolveFrameLayout(frame, this._currentFrame);
 
     // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
     this.mesh.scale.set(layout.width, layout.height, 1);
     this.mesh.position.set(layout.offsetX, layout.offsetY, 0);
+  }
+
+  /**
+   * Where a named frame point currently sits, in **node-local** space — directly
+   * usable as a child node's position (a muzzle flash, a held item). Returns
+   * `null` when the frame doesn't define the point.
+   *
+   * The result is composed through the same presentation math as the visible
+   * pixels (sizeMode, per-clip scale, frame anchor, node anchor), so the point
+   * stays glued to the art as frames change size.
+   *
+   * @param frameIndex Frame to read; defaults to the frame showing right now.
+   */
+  getFramePoint(name: string, frameIndex: number = this._currentFrame): ResolvedFramePoint | null {
+    const frames = this.activeClip?.frames ?? [];
+    if (frames.length === 0) {
+      return null;
+    }
+    const index = Math.max(0, Math.min(Math.floor(frameIndex), frames.length - 1));
+    const frame = frames[index] ?? null;
+    const point = findAnimationFramePoint(frame, name);
+    if (!point) {
+      return null;
+    }
+
+    return resolveFramePointToLocal(point, this.resolveFrameLayout(frame, index));
+  }
+
+  /**
+   * {@link getFramePoint} in world space: the point transformed by this node's
+   * world matrix, with the node's world Z-rotation added to the point's angle.
+   * `null` when the point doesn't exist on the current frame.
+   */
+  getFramePointWorld(
+    name: string,
+    frameIndex: number = this._currentFrame
+  ): { x: number; y: number; z: number; angle: number } | null {
+    const local = this.getFramePoint(name, frameIndex);
+    if (!local) {
+      return null;
+    }
+
+    this.updateWorldMatrix(true, false);
+    const world = FRAME_POINT_SCRATCH.set(local.x, local.y, 0).applyMatrix4(this.matrixWorld);
+    // Only the Z rotation is meaningful for 2D; read it off the world matrix so
+    // parent rotations accumulate.
+    FRAME_POINT_MATRIX_SCRATCH.extractRotation(this.matrixWorld);
+    FRAME_POINT_EULER_SCRATCH.setFromRotationMatrix(FRAME_POINT_MATRIX_SCRATCH);
+
+    return {
+      x: world.x,
+      y: world.y,
+      z: world.z,
+      angle: local.angle + MathUtils.radToDeg(FRAME_POINT_EULER_SCRATCH.z),
+    };
+  }
+
+  /** Names of every point defined anywhere in the active clip, in first-seen order. */
+  getClipPointNames(): string[] {
+    return collectClipPointNames(this.activeClip);
   }
 
   protected override disposeResources(): void {
