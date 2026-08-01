@@ -28,6 +28,23 @@ describe('animation asset utils', () => {
     );
   });
 
+  it('scopes frame file names by clip so clips cannot overwrite each other', () => {
+    const explicitPath = 'res://sprites/character/character.pix3anim';
+
+    expect(buildAnimationFrameResourcePath(explicitPath, 1, { clipName: 'idle' })).toBe(
+      'res://sprites/character/idle_0001.png'
+    );
+    expect(buildAnimationFrameResourcePath(explicitPath, 1, { clipName: 'run' })).toBe(
+      'res://sprites/character/run_0001.png'
+    );
+    expect(
+      buildAnimationFrameResourcePath(explicitPath, 3, { clipName: 'Attack Combo!', extension: 'webp' })
+    ).toBe('res://sprites/character/attack_combo_0003.webp');
+    expect(buildAnimationFrameResourcePath(explicitPath, 2, { clipName: '   ' })).toBe(
+      'res://sprites/character/frame_0002.png'
+    );
+  });
+
   it('creates sequence-first default resources', () => {
     const resource = createDefaultAnimationResource(
       'res://src/assets/animations/player/frame_0001.png',

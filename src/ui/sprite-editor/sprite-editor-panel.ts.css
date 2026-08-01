@@ -62,6 +62,27 @@ pix3-sprite-editor-panel .ag-save-wrap {
   display: inline-flex;
 }
 
+/* Slice / create-animation outcome strip, directly under the toolbar. */
+pix3-sprite-editor-panel .ag-slice-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line-1);
+}
+
+pix3-sprite-editor-panel .ag-slice-status.is-error {
+  color: var(--danger);
+  background: transparent;
+}
+
+pix3-sprite-editor-panel .ag-slice-status-close {
+  margin-left: auto;
+}
+
 pix3-sprite-editor-panel .ag-save-button.is-open {
   border-color: var(--accent);
   color: var(--accent);

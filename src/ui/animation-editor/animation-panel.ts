@@ -7,6 +7,7 @@ import {
   buildAnimationFrameResourcePath,
   deriveAnimationDocumentId,
   normalizeAnimationAssetPath,
+  sanitizeFrameFilePrefix,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
 import { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
@@ -16,6 +17,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService } from '@/services/editor/IconService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { OperationService } from '@/services/core/OperationService';
+import { sliceImageBlob } from '@/services/image-gen/image-ops';
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
@@ -1389,6 +1391,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     return (
+      types.has('Files') ||
       types.has(ASSET_RESOURCE_LIST_MIME) ||
       types.has(ASSET_PATH_LIST_MIME) ||
       types.has(ASSET_RESOURCE_MIME) ||
@@ -1396,6 +1399,64 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       types.has('text/uri-list') ||
       types.has('text/plain')
     );
+  }
+
+  /** Image files dragged in from the OS (as opposed to project assets, which arrive as paths). */
+  private getDroppedImageFiles(event: DragEvent): File[] {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    return files.filter(
+      file => file.type.startsWith('image/') || this.hasSupportedImageExtension(file.name)
+    );
+  }
+
+  /**
+   * Highest `<clip>_<nnnn>` number already referenced by the document, so imports keep counting up
+   * instead of overwriting files that earlier slices produced.
+   */
+  private nextFrameFileNumber(clipName: string): number {
+    const prefix = sanitizeFrameFilePrefix(clipName);
+    const pattern = new RegExp(`/${prefix}_(\\d+)\\.[^./]+$`, 'i');
+    let highest = 0;
+
+    for (const clip of this.resource?.clips ?? []) {
+      for (const frame of clip.frames) {
+        const match = pattern.exec(getAnimationFrameTexturePath(this.resource, frame));
+        if (match) {
+          highest = Math.max(highest, Number(match[1]) || 0);
+        }
+      }
+    }
+
+    return highest + 1;
+  }
+
+  /**
+   * Copy OS-dropped images into the animation's own folder as `<clip>_<nnnn>.<ext>` (the managed
+   * sprite-folder convention), so a drag from the desktop lands as project files the resource can
+   * reference. Returns the written resource paths in drop order.
+   */
+  private async importDroppedImageFiles(files: File[]): Promise<string[]> {
+    const assetPath = this.assetPath ? normalizeAnimationAssetPath(this.assetPath) : '';
+    if (!assetPath || files.length === 0) {
+      return [];
+    }
+
+    const clipName = this.activeClipName || this.resource?.clips[0]?.name || 'idle';
+    let frameNumber = this.nextFrameFileNumber(clipName);
+    const written: string[] = [];
+
+    for (const file of files) {
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      const framePath = buildAnimationFrameResourcePath(assetPath, frameNumber, {
+        clipName,
+        extension: extension && IMAGE_EXTENSIONS.has(extension) ? extension : 'png',
+      });
+      await this.projectStorage.writeBinaryFile(framePath, await file.arrayBuffer());
+      written.push(framePath);
+      frameNumber += 1;
+    }
+
+    return written;
   }
 
   private async syncFromResourceContext(preserveClip: boolean): Promise<void> {
@@ -1856,7 +1917,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     return this.selectedFrameIndex >= 0 ? [this.selectedFrameIndex] : [];
   }
 
-  private async onAddFrameTextures(texturePaths: string[]): Promise<void> {
+  /**
+   * Append (or, with `insertAtIndex`, splice in) frames referencing the given textures. Dropping
+   * onto a frame card inserts before it; dropping anywhere else in the editor appends.
+   */
+  private async onAddFrameTextures(texturePaths: string[], insertAtIndex?: number): Promise<void> {
     if (!this.resource || !this.activeClipName) {
       return;
     }
@@ -1880,11 +1945,18 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     await this.applyResourceUpdate(
       resource => ({
         ...resource,
-        clips: resource.clips.map(existingClip =>
-          existingClip.name === this.activeClipName
-            ? { ...existingClip, frames: [...existingClip.frames, ...generatedFrames] }
-            : existingClip
-        ),
+        clips: resource.clips.map(existingClip => {
+          if (existingClip.name !== this.activeClipName) {
+            return existingClip;
+          }
+          const frames = [...existingClip.frames];
+          const at =
+            insertAtIndex === undefined
+              ? frames.length
+              : Math.min(Math.max(0, insertAtIndex), frames.length);
+          frames.splice(at, 0, ...generatedFrames);
+          return { ...existingClip, frames };
+        }),
       }),
       `Add ${generatedFrames.length} frame texture${generatedFrames.length === 1 ? '' : 's'}: ${this.activeClipName}`,
       this.activeClipName
@@ -1945,7 +2017,8 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       texturePath,
       columns,
       rows,
-      clip.frames.length + 1
+      clip.frames.length + 1,
+      clip.name
     );
     const generatedFrames: AnimationFrame[] = generatedTexturePaths.map(textureResourcePath => ({
       textureIndex: 0,
@@ -1972,11 +2045,17 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     );
   }
 
+  /**
+   * Cut the bound spritesheet into per-frame PNG files inside the animation's folder. Cell
+   * extraction is the shared pure {@link sliceImageBlob}; this method owns only the
+   * `.pix3anim`-specific naming (clip-scoped so two clips can't overwrite each other) and writing.
+   */
   private async sliceSpritesheetIntoFrameFiles(
     texturePath: string,
     columns: number,
     rows: number,
-    startFrameNumber: number
+    startFrameNumber: number,
+    clipName: string
   ): Promise<string[]> {
     const assetPath = this.assetPath ? normalizeAnimationAssetPath(this.assetPath) : '';
     if (!assetPath) {
@@ -1984,74 +2063,20 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     const sourceBlob = await this.projectStorage.readBlob(texturePath);
-    const sourceUrl = URL.createObjectURL(sourceBlob);
+    const cells = await sliceImageBlob(sourceBlob, { columns, rows });
+    const generatedPaths: string[] = [];
 
-    try {
-      const image = await this.loadImageElement(sourceUrl);
-      const cellWidth = image.naturalWidth / columns;
-      const cellHeight = image.naturalHeight / rows;
-      const generatedPaths: string[] = [];
-
-      for (let row = 0; row < rows; row += 1) {
-        for (let column = 0; column < columns; column += 1) {
-          const frameCanvas = document.createElement('canvas');
-          frameCanvas.width = Math.max(1, Math.round(cellWidth));
-          frameCanvas.height = Math.max(1, Math.round(cellHeight));
-
-          const context = frameCanvas.getContext('2d');
-          if (!context) {
-            throw new Error('Failed to create 2D canvas context while slicing spritesheet.');
-          }
-
-          context.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
-          context.drawImage(
-            image,
-            column * cellWidth,
-            row * cellHeight,
-            cellWidth,
-            cellHeight,
-            0,
-            0,
-            frameCanvas.width,
-            frameCanvas.height
-          );
-
-          const frameBlob = await this.canvasToBlob(frameCanvas);
-          const framePath = buildAnimationFrameResourcePath(
-            assetPath,
-            startFrameNumber + generatedPaths.length
-          );
-          await this.projectStorage.writeBinaryFile(framePath, await frameBlob.arrayBuffer());
-          generatedPaths.push(framePath);
-        }
-      }
-
-      return generatedPaths;
-    } finally {
-      URL.revokeObjectURL(sourceUrl);
+    for (const cell of cells) {
+      const framePath = buildAnimationFrameResourcePath(
+        assetPath,
+        startFrameNumber + generatedPaths.length,
+        { clipName }
+      );
+      await this.projectStorage.writeBinaryFile(framePath, await cell.arrayBuffer());
+      generatedPaths.push(framePath);
     }
-  }
 
-  private loadImageElement(sourceUrl: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error(`Failed to load image from ${sourceUrl}`));
-      image.src = sourceUrl;
-    });
-  }
-
-  private canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      canvas.toBlob(blob => {
-        if (blob) {
-          resolve(blob);
-          return;
-        }
-
-        reject(new Error('Failed to encode sliced frame to PNG.'));
-      }, 'image/png');
-    });
+    return generatedPaths;
   }
 
   private async onUpdateTexturePath(nextTexturePath: string): Promise<void> {
@@ -2081,7 +2106,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     const clipName = this.activeClipName || this.resource?.clips[0]?.name || 'idle';
     const result = await this.animationAutoSliceDialogService.showDialog({
       texturePath,
-      clipName,
+      contextLabel: clipName,
       defaultColumns: this.slicerColumns,
       defaultRows: this.slicerRows,
     });
@@ -2309,7 +2334,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     this.textureDragDepth = 0;
     this.isTextureDragOver = false;
 
-    const texturePaths = this.getDroppedTextureResources(event);
+    const droppedFiles = this.getDroppedImageFiles(event);
+    const texturePaths =
+      droppedFiles.length > 0
+        ? await this.importDroppedImageFiles(droppedFiles)
+        : this.getDroppedTextureResources(event);
     if (texturePaths.length === 0) {
       return;
     }
@@ -2338,13 +2367,14 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private onFrameDragOver(event: DragEvent, frameIndex: number): void {
-    if (this.draggedFrameIndex < 0) {
+    const isReorder = this.draggedFrameIndex >= 0;
+    if (!isReorder && !this.isPotentialTextureDrag(event)) {
       return;
     }
 
     event.preventDefault();
     if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'move';
+      event.dataTransfer.dropEffect = isReorder ? 'move' : 'copy';
     }
     this.dragOverFrameIndex = frameIndex;
   }
@@ -2356,15 +2386,36 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private async onFrameDrop(event: DragEvent, frameIndex: number): Promise<void> {
-    if (this.draggedFrameIndex < 0) {
+    if (this.draggedFrameIndex >= 0) {
+      event.preventDefault();
+      const fromIndex = this.draggedFrameIndex;
+      this.draggedFrameIndex = -1;
+      this.dragOverFrameIndex = -1;
+      await this.reorderFrame(fromIndex, frameIndex);
+      return;
+    }
+
+    // Not a reorder: an asset or OS file dropped onto a card inserts new frames before it.
+    if (!this.isPotentialTextureDrag(event)) {
       return;
     }
 
     event.preventDefault();
-    const fromIndex = this.draggedFrameIndex;
-    this.draggedFrameIndex = -1;
+    event.stopPropagation();
     this.dragOverFrameIndex = -1;
-    await this.reorderFrame(fromIndex, frameIndex);
+    this.textureDragDepth = 0;
+    this.isTextureDragOver = false;
+
+    const droppedFiles = this.getDroppedImageFiles(event);
+    const texturePaths =
+      droppedFiles.length > 0
+        ? await this.importDroppedImageFiles(droppedFiles)
+        : this.getDroppedTextureResources(event);
+    if (texturePaths.length === 0) {
+      return;
+    }
+
+    await this.onAddFrameTextures(texturePaths, frameIndex);
   }
 
   private onFrameDragEnd(): void {

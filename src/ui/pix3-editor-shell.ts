@@ -1499,7 +1499,14 @@ export class Pix3EditorShell extends ComponentBase {
         <pix3-animation-auto-slice-dialog
           .dialogId=${this.activeAnimationAutoSliceDialog.id}
           .texturePath=${this.activeAnimationAutoSliceDialog.params.texturePath}
-          .clipName=${this.activeAnimationAutoSliceDialog.params.clipName}
+          .contextLabel=${this.activeAnimationAutoSliceDialog.params.contextLabel}
+          .contextCaption=${this.activeAnimationAutoSliceDialog.params.contextCaption ??
+          'Active clip'}
+          .confirmNote=${this.activeAnimationAutoSliceDialog.params.confirmNote ??
+          'Confirm to append the generated frame sequence to the active clip.'}
+          .confirmLabel=${this.activeAnimationAutoSliceDialog.params.confirmLabel ?? 'Slice Frames'}
+          .cancelLabel=${this.activeAnimationAutoSliceDialog.params.cancelLabel ??
+          'Keep Without Slicing'}
           .defaultColumns=${this.activeAnimationAutoSliceDialog.params.defaultColumns || 1}
           .defaultRows=${this.activeAnimationAutoSliceDialog.params.defaultRows || 1}
         ></pix3-animation-auto-slice-dialog>

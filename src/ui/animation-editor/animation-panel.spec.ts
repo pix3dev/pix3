@@ -725,7 +725,7 @@ describe('AnimationPanel', () => {
 
     expect(showDialog).toHaveBeenCalledWith({
       texturePath: 'res://textures/player.png',
-      clipName: 'idle',
+      contextLabel: 'idle',
       defaultColumns: 1,
       defaultRows: 1,
     });

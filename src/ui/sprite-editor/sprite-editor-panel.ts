@@ -20,7 +20,17 @@ import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { AssetLibraryService } from '@/services/library/AssetLibraryService';
+import { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
+import { CreateAnimationAssetCommand } from '@/features/scene/CreateAnimationAssetCommand';
+import {
+  buildAnimationFrameResourcePath,
+  buildManagedSpriteAssetPath,
+  getAnimationAssetDirectory,
+  deriveAnimationAssetStem,
+} from '@/features/scene/animation-asset-utils';
+import { normalizeAnimationResource } from '@pix3/runtime';
 import {
   getDroppedAssetResourcePath,
   hasAssetDragData,
@@ -32,6 +42,7 @@ import {
   resizeImageBlob,
   rotateImageBlob,
   scaledDimensions,
+  sliceImageBlob,
   type FlipAxis,
 } from '@/services/image-gen/image-ops';
 import './sprite-editor-panel.ts.css';
@@ -129,6 +140,12 @@ export class SpriteEditorPanel extends ComponentBase {
   @inject(IconService)
   private readonly icons!: IconService;
 
+  @inject(AnimationAutoSliceDialogService)
+  private readonly sliceDialog!: AnimationAutoSliceDialogService;
+
+  @inject(EditorTabService)
+  private readonly editorTabs!: EditorTabService;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -169,6 +186,13 @@ export class SpriteEditorPanel extends ComponentBase {
   @state() private cropRect: CropRect | null = null;
   /** True while a rotate/flip transform is re-encoding the current image. */
   @state() private transformBusy = false;
+  /** True while a slice / create-animation run is writing frame files. */
+  @state() private sliceBusy = false;
+  /** Outcome of the last slice / create-animation run, shown under the toolbar. */
+  @state() private sliceStatus: { text: string; isError: boolean } | null = null;
+  /** Grid the slice dialog opens with; remembered per panel instance. */
+  private sliceColumns = 4;
+  private sliceRows = 1;
 
   private readonly cropOverlayRef = createRef<HTMLDivElement>();
   private readonly cropImageRef = createRef<HTMLImageElement>();
@@ -357,7 +381,7 @@ export class SpriteEditorPanel extends ComponentBase {
         @dragleave=${this.onDragLeave}
         @drop=${this.onDrop}
       >
-        ${this.renderToolbar()}
+        ${this.renderToolbar()} ${this.renderSliceStatus()}
         <div class="ag-workspace">
           ${this.renderSidebar()}
           <main class="ag-main">${this.renderStage()}</main>
@@ -380,7 +404,7 @@ export class SpriteEditorPanel extends ComponentBase {
           aria-label="AI generation settings"
           @click=${this.openSettings}
         >
-          ⚙
+          ${this.icons.getIcon('settings', IconSize.SMALL)}
         </button>
         <div class="ag-toolbar-spacer"></div>
         <button
@@ -389,7 +413,7 @@ export class SpriteEditorPanel extends ComponentBase {
           @click=${this.onToggleCrop}
           ?disabled=${!this.current || this.bgBusy || this.generating}
         >
-          ✂ Crop
+          ${this.icons.getIcon('crop', IconSize.SMALL)} Crop
         </button>
         <button
           class="ag-toolbar-button"
@@ -437,9 +461,65 @@ export class SpriteEditorPanel extends ComponentBase {
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>
-        ${this.renderSaveMenu()}
+        ${this.renderSpritesheetActions()} ${this.renderSaveMenu()}
       </header>
     `;
+  }
+
+  /**
+   * Spritesheet actions. Both need the image to exist as a project file (the frame files are
+   * written next to it), so they stay disabled until the panel is bound to one — save the image
+   * first and the tab rebinds.
+   */
+  private renderSpritesheetActions() {
+    const busy = this.sliceBusy || this.bgBusy || this.generating || this.cropMode;
+    const canSlice = Boolean(this.boundImagePath) && !busy;
+    const hint = this.boundImagePath
+      ? undefined
+      : 'Save the image into the project first — frame files are written next to it.';
+
+    return html`
+      <button
+        class="ag-icon-button"
+        title=${hint ?? 'Slice this spritesheet into individual frame files'}
+        aria-label="Slice into frames"
+        @click=${this.onSliceIntoFrames}
+        ?disabled=${!canSlice}
+      >
+        ${this.icons.getIcon('grid', IconSize.SMALL)}
+      </button>
+      <button
+        class="ag-icon-button"
+        title=${hint ?? 'Create an animation (sprite folder) from this image'}
+        aria-label="Create animation"
+        @click=${this.onCreateAnimation}
+        ?disabled=${!canSlice}
+      >
+        ${this.icons.getIcon('film', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  private renderSliceStatus() {
+    if (this.sliceBusy) {
+      return html`<div class="ag-slice-status">Writing frame files…</div>`;
+    }
+    if (!this.sliceStatus) {
+      return null;
+    }
+    return html`<div class="ag-slice-status ${this.sliceStatus.isError ? 'is-error' : ''}">
+      ${this.sliceStatus.text}
+      <button
+        class="ag-icon-button ag-slice-status-close"
+        title="Dismiss"
+        aria-label="Dismiss"
+        @click=${() => {
+          this.sliceStatus = null;
+        }}
+      >
+        ${this.icons.getIcon('x', IconSize.SMALL)}
+      </button>
+    </div>`;
   }
 
   private renderSaveMenu() {
@@ -451,7 +531,8 @@ export class SpriteEditorPanel extends ComponentBase {
           ?disabled=${!this.current || this.cropMode}
           @click=${this.toggleSavePopover}
         >
-          💾 Save ▾
+          ${this.icons.getIcon('save', IconSize.SMALL)} Save
+          ${this.icons.getIcon('chevron-down', IconSize.SMALL)}
         </button>
         ${this.savePopoverOpen && this.current ? this.renderSavePopover() : null}
       </div>
@@ -1772,6 +1853,167 @@ export class SpriteEditorPanel extends ComponentBase {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
+  }
+
+  // -- spritesheet actions ----------------------------------------------------
+
+  /**
+   * Ask for a slice grid. Shares the animation editor's dialog (generalised in Phase 2) so the
+   * grid preview/overlay is identical wherever slicing is offered.
+   */
+  private async askForSliceGrid(
+    copy: Pick<
+      Parameters<AnimationAutoSliceDialogService['showDialog']>[0],
+      'contextCaption' | 'confirmNote' | 'confirmLabel' | 'cancelLabel'
+    >
+  ): Promise<{ columns: number; rows: number } | null> {
+    const imagePath = this.boundImagePath;
+    if (!imagePath) {
+      return null;
+    }
+    const result = await this.sliceDialog.showDialog({
+      texturePath: imagePath,
+      contextLabel: deriveNodeName(imagePath),
+      defaultColumns: this.sliceColumns,
+      defaultRows: this.sliceRows,
+      ...copy,
+    });
+    if (!result) {
+      return null;
+    }
+    this.sliceColumns = result.columns;
+    this.sliceRows = result.rows;
+    return result;
+  }
+
+  /**
+   * Cut the bound image into individual PNG files in a `<name>_frames/` folder next to it. Pure
+   * file output — no `.pix3anim` and no scene mutation, so no Command/Operation (matching the
+   * Save-to-project precedent: project-file writes are not undoable app-state mutations).
+   */
+  private async onSliceIntoFrames(): Promise<void> {
+    const imagePath = this.boundImagePath;
+    if (!imagePath || this.sliceBusy) {
+      return;
+    }
+    const stem = deriveNodeName(imagePath);
+    const relative = normalizeRelativePath(imagePath);
+    const slashIndex = relative.lastIndexOf('/');
+    const folder = `${slashIndex >= 0 ? `${relative.slice(0, slashIndex)}/` : ''}${stem}_frames`;
+
+    const grid = await this.askForSliceGrid({
+      contextCaption: 'Spritesheet',
+      confirmNote: `Frames are written to ${folder}/frame_0001.png …`,
+      confirmLabel: 'Slice Into Files',
+      cancelLabel: 'Cancel',
+    });
+    if (!grid) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const source = this.current?.blob ?? (await this.storage.readBlob(imagePath));
+      const cells = await sliceImageBlob(source, grid);
+      await this.ensureParentDirectory(`${folder}/frame.png`);
+      for (const [index, cell] of cells.entries()) {
+        const framePath = `${folder}/frame_${String(index + 1).padStart(4, '0')}.png`;
+        await this.storage.writeBinaryFile(framePath, await cell.arrayBuffer());
+      }
+      this.sliceStatus = { text: `Sliced into ${cells.length} frames in ${folder}/`, isError: false };
+    } catch (error) {
+      this.sliceStatus = { text: `Slice failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  }
+
+  /**
+   * Turn the bound image into a **managed sprite folder**: `<dir>/<stem>/<stem>.pix3anim` plus
+   * `<clip>_<nnnn>.png` frame files, then open the animation editor on it. A 1×1 grid is a valid
+   * answer — it produces a one-frame clip from a single image.
+   */
+  private async onCreateAnimation(): Promise<void> {
+    const imagePath = this.boundImagePath;
+    if (!imagePath || this.sliceBusy) {
+      return;
+    }
+    const assetPath = buildManagedSpriteAssetPath(imagePath);
+    const folder = getAnimationAssetDirectory(assetPath).replace(/^res:\/\//, '');
+    const clipName = 'idle';
+
+    const grid = await this.askForSliceGrid({
+      contextCaption: 'New animation',
+      confirmNote: `Creates ${folder}/${deriveAnimationAssetStem(assetPath)}.pix3anim with the frames beside it.`,
+      confirmLabel: 'Create Animation',
+      cancelLabel: 'Cancel',
+    });
+    if (!grid) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const source = this.current?.blob ?? (await this.storage.readBlob(imagePath));
+      const cells = await sliceImageBlob(source, grid);
+      await this.ensureParentDirectory(`${folder}/frame.png`);
+
+      const framePaths: string[] = [];
+      for (const [index, cell] of cells.entries()) {
+        const framePath = buildAnimationFrameResourcePath(assetPath, index + 1, { clipName });
+        await this.storage.writeBinaryFile(framePath, await cell.arrayBuffer());
+        framePaths.push(framePath);
+      }
+
+      const resource = normalizeAnimationResource({
+        version: '1.0.0',
+        texturePath: '',
+        clips: [
+          {
+            name: clipName,
+            fps: 12,
+            loop: true,
+            playbackMode: 'normal',
+            frames: framePaths.map(texturePath => ({
+              textureIndex: 0,
+              offset: { x: 0, y: 0 },
+              repeat: { x: 1, y: 1 },
+              durationMultiplier: 1,
+              anchor: { x: 0.5, y: 0.5 },
+              texturePath,
+              boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+              collisionPolygon: [],
+            })),
+          },
+        ],
+      });
+
+      const didMutate = await this.commandDispatcher.execute(
+        new CreateAnimationAssetCommand({
+          assetPath,
+          texturePath: '',
+          initialClipName: clipName,
+          resource,
+          overwrite: true,
+        })
+      );
+      if (!didMutate) {
+        this.sliceStatus = { text: 'Could not create the animation asset.', isError: true };
+        return;
+      }
+
+      this.sliceStatus = {
+        text: `Created a ${framePaths.length}-frame animation in ${folder}/`,
+        isError: false,
+      };
+      await this.editorTabs.focusOrOpenAnimation(assetPath);
+    } catch (error) {
+      this.sliceStatus = { text: `Create animation failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
   }
 
   // -- history ---------------------------------------------------------------

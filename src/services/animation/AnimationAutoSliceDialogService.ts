@@ -2,7 +2,19 @@ import { injectable } from '@/fw/di';
 
 export interface AnimationAutoSliceDialogParams {
   texturePath: string;
-  clipName: string;
+  /**
+   * What the slice is being performed for — an animation clip name when the animation editor asks,
+   * the image name when the Sprite Editor's "Slice…" action asks. Shown under {@link contextCaption}.
+   */
+  contextLabel: string;
+  /** Caption above {@link contextLabel}. Defaults to `Active clip`. */
+  contextCaption?: string;
+  /** Sentence describing what confirming does. Defaults to the animation-clip wording. */
+  confirmNote?: string;
+  /** Confirm button label. Defaults to `Slice Frames`. */
+  confirmLabel?: string;
+  /** Cancel button label. Defaults to `Keep Without Slicing`. */
+  cancelLabel?: string;
   defaultColumns?: number;
   defaultRows?: number;
 }
