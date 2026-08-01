@@ -1,8 +1,13 @@
 # Sprite Editor — design for renaming, double-click open, and animation-editor merge
 
-Status (2026-08-01): **Phase 1 shipped** (commit `53e6c07` — rename + double-click open,
+Status (2026-08-02): **Phase 1 shipped** (commit `53e6c07` — rename + double-click open,
 `src/ui/sprite-editor/`, `OpenSpriteEditorCommand`). Phase 2 (shared slicing module +
-"Create Animation from image") and Phase 3 (gated shell-merge with the flipbook editor) остаются.
+"Create Animation from image") and Phase 3 (shell-merge with the flipbook editor) остаются.
+**§8 (2026-08-02) revises the Phase-3 target UX** from mode-tabs to a Construct-3-style
+single-canvas editor and adds Phases 4–6 (scene-node entry, file-layout convention,
+navigator grouping, generation-fit UX, power tools). §§1–7 remain valid except where §8
+explicitly overrides (§8.3 overrides §3.2's mode-tab layout; the shell/two-tab-types/two-document
+decisions all survive).
 Scope: rename "Asset Generator" → "Sprite Editor", make double-clicking an
 image asset open it, and evaluate/design a Construct-3-style merge with the flipbook animation editor.
 
@@ -444,3 +449,295 @@ opening is non-mutating (`didMutate: false` pattern like `OpenSpriteEditorComman
    what is a pure function — rejected per existing image-ops precedent.
 7. **`SUPPORTED_IMAGE_EXTENSIONS` bug** — fix in Phase 1 (`webm`/`aif` → real image extensions,
    aligned with animation panel's set, shared constant in `src/ui/shared/`).
+
+---
+
+## 8. Revision 2026-08-02 — Construct-3-grade unified UX (full product target)
+
+Product goal restated: editing sprites (static AND animated) must feel like Construct 3's sprite
+editor — double-click the object, edit in one place, never think about texture files — while keeping
+Pix3's extra layer (AI generation) and its file-based reality (textures are ordinary project files,
+`.pix3anim` is a separate meta document).
+
+### 8.0 Resolving the core contradiction: convention + presentation, not ownership
+
+Construct 3 hides files because the object *owns* its rasters. Pix3 must not adopt ownership (files
+are the interop story: git, external editors, agent tools, atlas, export pruning). Instead the
+"files disappear" feeling is produced by three cooperating layers:
+
+1. **A managed folder convention** (§8.2): every animated sprite lives in one folder; the editor
+   creates/names files there so the user never picks paths in the happy flow.
+2. **Navigator grouping** (§8.5): a managed folder renders as ONE item in the Asset Browser, like a
+   single sprite object. Files are still reachable (expand), never load-bearing for the UX.
+3. **The unified editor** (§8.3): one tab, one canvas, clips + timeline visible only when the bound
+   resource is animated. All raster edits and generation happen against "the current frame", and the
+   editor does the file writes.
+
+Files stay the source of truth; unmanaged/hand-placed layouts keep working (a `.pix3anim` may
+reference any path — such resources simply don't collapse in the navigator and skip
+convention-dependent bulk tools). This is the same hybrid Godot/Unity strike zone the engine already
+uses elsewhere.
+
+### 8.1 Entry points — double-click the node opens the Sprite Editor
+
+Target: dblclick a `Sprite2D`/`AnimatedSprite2D` anywhere → the unified editor opens bound to that
+node's texture (Sprite2D) or `animationResourcePath` (AnimatedSprite2D).
+
+- **Viewport.** Double-click currently drills selection scope (Figma model,
+  `SelectionScopeResolver.resolveDoubleClick`, `src/features/selection/SelectionScopeResolver.ts`
+  :142, dispatched from `src/ui/viewport/editor-tab.ts` :1256/:1321). Rule that keeps both:
+  *double-click drills while there is somewhere to drill; double-clicking a node that is already the
+  direct selection and has no drillable children opens its editor* — exactly Figma's
+  "double-click again to enter vector-edit mode". Implementation: when `resolveDoubleClick` returns
+  a no-op resolution (hit node already directly selected), dispatch
+  `OpenSpriteEditorForNodeCommand`. Applies only to Sprite2D/AnimatedSprite2D (later: TileMap etc.).
+- **Scene tree.** Precedent exists: dblclick on a prefab node opens the prefab tab
+  (`scene-tree-node.ts` :540–549 `node-open-prefab`). Add the same for sprite nodes →
+  `node-open-sprite-editor` event → shell dispatches the command. Prefab check keeps precedence.
+- **Inspector.** Already there (animation asset property dblclick → editor,
+  `property-editors.ts` :1638). Add the same affordance on Sprite2D's texture property → Sprite
+  Editor (today it opens nothing).
+- **Asset Browser.** Already there (Phase 1): image dblclick → Sprite Editor; `.pix3anim` dblclick →
+  animation editor (post-§8.3: the same unified editor in animation mode).
+- New command `editor.open-sprite-editor-for-node` (`src/features/editor/`): resolves the node's
+  bound resource; `AnimatedSprite2D` without a resource → run the existing
+  `CreateAndBindAnimationAssetCommand` flow (inspector already does this); `Sprite2D` with no
+  texture → open empty editor with the node remembered for "Insert/Apply".
+
+### 8.2 File-layout convention (managed sprite folder)
+
+Decision needed by the user; **recommended: folder-per-sprite, clip-prefixed frames** —
+
+```
+sprites/character/character.pix3anim     ← one resource, ALL clips of this sprite
+sprites/character/idle_0001.png
+sprites/character/idle_0002.png
+sprites/character/run_0001.png
+```
+
+Rationale against the alternatives:
+
+- `sprites/character/idle/0001.png` (folder-per-clip) does not match the data model — ONE
+  `.pix3anim` holds many clips, so per-clip folders orphan the meta file and break the "one folder =
+  one sprite item" grouping rule.
+- `sprites/character_idle_0001.png` (flat + name mangling) makes navigator grouping heuristic
+  (prefix parsing) instead of structural (folder), and scales badly past ~3 sprites per folder.
+- Current `frame_0001.png` naming (`buildAnimationFrameResourcePath`,
+  `src/features/scene/animation-asset-utils.ts` :46) **collides across clips** — two clips sliced in
+  the same folder overwrite each other. Fix regardless of the rest: signature gains a `clipName`
+  → `<clip>_<nnnn>.png` (existing files keep working — paths are stored in the `.pix3anim`, the
+  builder only names NEW files).
+
+"Managed" predicate (used by grouping + bulk tools): a folder containing exactly one `.pix3anim`
+whose frame texturePaths all resolve inside that folder. Pure function next to
+`animation-asset-utils.ts`; no registry, no meta flags.
+
+Import flows that must land files by convention:
+
+- OS-file drop into the editor canvas/timeline (§8.4) → copy into the sprite's folder as next
+  `<clip>_<nnnn>.png` (reuse write pipeline of `pix3-asset-import-dialog.ts` :246/:418).
+- Generation "Apply to frame" (§8.6) → same naming, overwrite-in-place when replacing an existing
+  frame's file (only if that file is inside the managed folder AND referenced by exactly one frame —
+  else write a new file; shared-frame aliasing must never silently mutate siblings).
+- Project-asset drops from outside the managed folder do NOT copy — the frame references the
+  original path (cheap, non-destructive; the folder simply becomes unmanaged if the user cares).
+  Offer "Copy into sprite folder" as a context action on such frames later.
+
+### 8.3 Unified editor layout (overrides §3.2's mode-tab design; keeps its architecture decisions)
+
+```
+┌ toolbar: select | crop | rotate/flip | anchor | polygon | generate | bg-remove | save ─┐
+│ clips rail   │                                                                         │
+│ (anim only)  │                     canvas / stage                                      │
+│ + add/del/   │       (image + overlay layers; zoom/pan)                                │
+│   rename     │                                                                         │
+├─ timeline (anim only): frame thumbs, drag-reorder, fps/loop/ping-pong, play preview ───┤
+```
+
+- Static image bound → canvas only; a "Create animation" affordance sits where the clips rail would
+  be (runs the §4.2 flow, rebinding the same tab).
+- `.pix3anim` bound → clips rail + timeline appear; **selecting a frame binds the canvas to that
+  frame's texture**; raster tools then edit that file (write-back = existing Overwrite pipeline +
+  texture-URL invalidation, §5 last row).
+- What §3.2 got right and survives: shell component; TWO tab types (`animation` +
+  `sprite-editor`) pointing at one shell tag (zero session migration); two documents with separate
+  undo/dirty regimes; `AnimationInspectorController` registration stays on the animation logic.
+- What changes vs §3.2: the flipbook editor's **stage dies**. Hosting two intact panels can't
+  produce one-canvas UX. Honest decomposition of `animation-panel.ts` (~2 400 lines):
+  1. **Document controller** (clip/frame CRUD via `UpdateAnimationDocumentOperation`, resource
+     sync `syncFromDocumentState` :1413) → plain class `animation-document-controller.ts`.
+  2. **Frame timeline** (strip markup :586+, reorder DnD :2287–2347, preview ticker :799–867) →
+     `<pix3-sprite-timeline>` component.
+  3. **Clips rail** (clip list + CRUD) → `<pix3-sprite-clips-rail>` component.
+  4. **Stage overlays** (anchor/bbox/collision-polygon editing, `AnimationEditMode`) → ported onto
+     the sprite-editor canvas as overlay layers next to the existing crop overlay. This is the
+     riskiest chunk — the two stages use different coordinate models (letterboxed object-fit vs
+     zoom-to-cursor); unify on the §4.3 `StageZoomPanController` FIRST, then port overlays.
+  5. The old `<pix3-animation-panel>` remains temporarily as the render host wired to the same
+     controller, and is deleted once the shell reaches parity (auto-slice prompt, spritesheet
+     UV-window frames `offset`/`repeat`, per-frame events).
+- Anchor tool scoping: per-frame anchor is a `.pix3anim` concept. For a static Sprite2D the anchor
+  tool edits the NODE's anchor property (via `UpdateObjectPropertyOperation`) when the editor was
+  opened from a node, and is hidden when opened from a bare file. Collision polygon: anim-frames
+  only (static Sprite2D has no polygon property today — out of scope).
+
+### 8.4 Drag & drop matrix (target behavior)
+
+| Source ↓ / Target → | Canvas | Timeline (between frames / on a frame) |
+| --- | --- | --- |
+| Asset Browser / Library (project asset) | Replace current frame's texture ref (static: rebind image) | Insert frame at gap / replace frame's texture ref — **already works** (`animation-panel.ts` :1366–1399, frame targets :586–594); port to the new timeline component |
+| OS file | Import by convention (§8.2) → replace current frame / rebind | Import by convention → insert/replace |
+| Generation history entry | Enter place-mode (§8.6) on current frame | Insert as new frame at drop position (place-mode if size mismatch) |
+
+OS-drop plumbing: `getAsFile()` handling exists in the sprite editor (:1092) and the import dialog —
+the timeline component reuses the same normalize→copy→reference chain.
+
+### 8.5 Navigator grouping (Asset Browser)
+
+A managed sprite folder (§8.2 predicate) renders in `assets-content.ts` / `asset-tree.ts` as a
+single item: film icon (IconService), sprite name, frame-count badge; dblclick → unified editor on
+the `.pix3anim`; drag = drag of the `.pix3anim` (existing drop sites for `.pix3anim` keep working —
+inspector binding, scene drop creating AnimatedSprite2D). Expand affordance (chevron / "Show
+files" context item) reveals the raw files. Reuse the virtual-node machinery from the by-type
+category grouping (`src/core/asset-categories.ts` precedent, `category:<id>` nodes) — this is a
+second producer of virtual nodes, so hoist whatever is category-specific. Move/rename of the folder
+item moves the folder (ProjectService already remaps references on move). Gate: compute the managed
+predicate lazily per visible folder (it reads one `.pix3anim`), cache by folder mtime.
+
+### 8.6 Generation-into-frame ("place mode") + history paste
+
+Today generation replaces the whole canvas image. New per-frame flow when a generated/pasted image's
+size ≠ current frame size — an iOS-photo-crop-style **place mode** on the canvas:
+
+- incoming image rendered over the frame rect with drag/scale (wheel + corner handles) transform;
+- quick actions: **Fit** (contain), **Fill** (cover), **Resize frame to image** (canvas grows; for
+  anim frames this just means the new file is bigger — per-frame display sizing arrives with the
+  runtime `native` size mode, §8.8);
+- **Apply** = destructive bake: composite to a frame-sized PNG → write by convention (§8.2) →
+  frame references it. Non-destructive UV placement via the existing `offset`/`repeat` frame fields
+  is possible but rejected for v1: it complicates every downstream consumer (atlas, export, editor
+  proxies) for a transform the user thinks of as "committed".
+- Paste from history: the generation-history rail (GenerationHistoryService) gets "Apply to current
+  frame" and drag-to-timeline (§8.4). Style-reference workflow (existing) is unaffected.
+
+### 8.7 Power tools (backlog, post-Phase 5 — each is a toolbar action + dialog service)
+
+- **Auto collision polygon**: alpha channel (or bg-removal ISNet mask for opaque images) → marching
+  squares contour → Douglas-Peucker simplify → `collisionPolygon`. Synergy: BackgroundRemovalService
+  already produces the mask.
+- **Chroma key**: color-pick + tolerance → alpha; pure function in `image-ops.ts`, bulk-applicable.
+- **Video import**: `<video>` + canvas frame extraction (fps picker, in-range trim) → frames by
+  convention. Browser-only, no ffmpeg.
+- **Bulk frame ops**: delete even/odd, apply raster op to all frames of a clip (map `image-ops`
+  functions over frame files; managed-folder-only).
+
+### 8.8 Per-frame anchor — close the runtime gap (confirmed direction 2026-08-02)
+
+**Finding:** `AnimationFrame.anchor` exists in the schema
+(`packages/pix3-runtime/src/core/AnimationResource.ts` :35, default 0.5/0.5) and is editable in the
+animation panel, but **the runtime never applies it** — `AnimatedSprite2D.refreshTexturePresentation`
+(`packages/pix3-runtime/src/nodes/2D/AnimatedSprite2D.ts` :408) only swaps texture/UV; the mesh is
+always a centered `width×height` quad (:106–108), and the node has no anchor property at all
+(`Sprite2D` does: mesh-position offset, `Sprite2D.ts` :219–223). Every frame is also stretched to
+the node's width/height, so tightly-cropped frames of differing sizes cannot align today.
+
+**Semantics (the explosion use case):** the frame anchor is the frame's own origin — the point in
+the (possibly cropped) raster that must land on the node's position every frame. Cropping a frame
+tighter then moving its anchor to the explosion's center keeps the animation visually identical
+while the PNGs (and later the atlas) shrink. Node-level anchor stays a separate, global offset
+(same meaning as `Sprite2D.anchor`); the two compose.
+
+Runtime work (all mirrored by the editor viewport proxy — the editor draws SEPARATE proxy meshes,
+so `Viewport2DProxyRegistry`/`ViewportRenderService` must apply identical math):
+
+1. `AnimatedSprite2D` gains `anchor` (node-level, same prop/schema/mesh-offset pattern as
+   `Sprite2D` :219–227) — orthogonal to the per-frame anchor, applied additively.
+2. **`sizeMode: 'stretch' | 'native'`** node property, default `'stretch'` (= today, full
+   back-compat for existing content):
+   - `stretch`: frame fills `width×height`; per-frame anchor offsets the quad within the node —
+     `mesh.position += ((0.5 − frameAnchor.x)·width, (0.5 − frameAnchor.y)·height)`.
+   - `native`: each frame renders at `sourceSize × clipScale`, anchor-aligned;
+     `clipScale = node.width ÷ sourceSize.width` of the clip's first frame (so resizing the node
+     scales the whole animation uniformly and mixed-size frames keep their relative proportions).
+3. **`sourceSize` per frame** (px, optional in the schema; `normalizeFrame` materializes from
+   boundingBox-or-zero): stamped by the editor whenever a frame is added/replaced/cropped, so
+   layout never waits on texture loads (a `0×0` sourceSize falls back to stretch for that frame —
+   legacy files keep working).
+4. Yalc-publish + DeepCore sanity check; `docs/node-types-reference.md` + spec update.
+
+**Auto-crop synergy (add to §8.7 backlog):** "Trim frames" bulk tool — detect transparent margins
+across a clip, crop each PNG, recompute each frame's anchor so the on-screen result is pixel-
+identical, stamp new sourceSizes. This is what makes the atlas-packing win real with one click.
+
+### 8.9 Named frame points ("image points", Construct-3 idea + rotation)
+
+Per-frame named points that live in frame space and move (and rotate) across frames — muzzle-flash
+spawn on a barrel, a hand socket that an item follows during a walk cycle.
+
+- **Schema** (additive, no version bump):
+  `AnimationFrame.points?: { name: string; x: number; y: number; angle?: number }[]` — coords
+  normalized to the frame rect (same convention as `anchor`; the UI displays px), `angle` in
+  degrees, default 0. Going past Construct 3: the angle makes a point a full 2D socket (muzzle
+  *direction*, hand *orientation*), not just a position. `normalizeFrame` materializes `[]`,
+  dedupes names within a frame.
+- **Runtime API** (`AnimatedSprite2D`):
+  - `getFramePoint(name, frameIndex?)` → `{ x, y, angle } | null` in **node-local space** —
+    composed through the same presentation math as §8.8 (sizeMode, clipScale, frame anchor,
+    node anchor), so the returned point is directly usable as a child-node position;
+  - `getFramePointWorld(name)` → world-space position + accumulated angle;
+  - frame events (§`AnimationFrameEvent`, already shipped) compose naturally: an `emit`-ing frame
+    fires `muzzle-flash`, the handler reads `getFramePoint('muzzle')` — no new event plumbing.
+- **`core:PointAttachment` script component** (the "item in hand" case): attaches the host node to
+  a named point of its parent `AnimatedSprite2D` every tick — properties `point: string`,
+  `applyRotation: boolean`, `offset: Vector2`. Ships after the runtime API; registered like other
+  `core:` scripts.
+- **Editor (unified-canvas tool, Phase 3 overlay family):** points list per clip (union of frame
+  point names; adding a point inserts it into every frame of the clip at the same normalized spot);
+  drag per frame; small direction-arrow handle for angle; ghost of the previous frame's points
+  (mini onion-skin) for continuity while animating; "copy to next frame / all frames" context
+  actions. Rendered as one more overlay layer next to anchor/bbox/polygon.
+
+### 8.10 Revised phasing (supersedes §6 for Phases ≥ 3)
+
+- **Phase 2 — unchanged from §6 plus two riders** *(small, do first)*: `sliceImageBlob` extraction,
+  auto-slice dialog generalization, "Slice…" + "Create Animation…" in the sprite editor; **rider A**:
+  `buildAnimationFrameResourcePath` gains `clipName` (kills the cross-clip collision now); **rider
+  B**: OS-file drop on the (still separate) animation panel via the §8.2 import path — immediate UX
+  win, survives Phase 3 intact.
+- **Phase 3 — unified shell** *(the big one; internally staged)*:
+  3a. `StageZoomPanController` extraction + adoption by the image canvas (prereq for overlay port).
+  3b. Decompose animation panel per §8.3 (controller / timeline / clips rail), old panel still the host.
+  3c. Shell tab: canvas + rails composition, frame→canvas binding, overwrite→invalidate loop, both
+      tab types → shell tag. Old animation panel deleted at parity.
+  3d. Entry points (§8.1): viewport drill-terminal dblclick, scene-tree dblclick, inspector texture
+      dblclick, `OpenSpriteEditorForNodeCommand`.
+- **Phase 4 — navigator grouping** (§8.5). Independent of Phase 3; can run in parallel after Phase 2.
+- **Phase 5 — place mode + history-to-frame** (§8.6). Needs 3a–3c.
+- **Phase 6 — power tools** (§8.7 + "Trim frames" from §8.8), pulled by real usage, order flexible.
+- **Runtime track** (in `packages/pix3-runtime`, parallel to the editor phases; each step ends with
+  `yalc:publish` + DeepCore check):
+  - **R1 — frame presentation** (§8.8): node `anchor`, `sizeMode`, per-frame `sourceSize`, apply
+    per-frame anchor in `refreshTexturePresentation`/mesh transform; editor proxy parity in
+    `Viewport2DProxyRegistry`/`ViewportRenderService`. Do alongside Phase 3a–3b — the unified
+    canvas's anchor tool must preview against the REAL semantics, not the ignored field.
+  - **R2 — named points** (§8.9): schema + normalizer + `getFramePoint`/`getFramePointWorld` +
+    `core:PointAttachment`. Before the points overlay tool lands (Phase 3d/5 window).
+
+### 8.11 Decisions (user-confirmed status 2026-08-02)
+
+1. ✅ **File convention** — folder-per-sprite + `<clip>_<nnnn>.png` (§8.2). Confirmed 2026-08-02;
+   document as the project convention (spec + `pix3-game-dev` skill).
+2. ✅ **Viewport dblclick overload** — drill-until-leaf-then-open (§8.1). Confirmed 2026-08-02.
+3. ✅ **Frame anchor semantics** — per-frame anchor = frame's own origin (crop-friendly, §8.8);
+   node anchor = global offset, composes on top; named points get position + angle (§8.9).
+   Confirmed 2026-08-02 (user supplied the semantics).
+4. **Place-mode bake** — destructive bake v1, UV placement rejected (§8.6).
+5. **Static-sprite anchor tool** — edits the node property when node-bound, hidden otherwise (§8.3).
+6. **Grouping default** — managed folders collapse by default with a global toggle in the Assets
+   panel header (mirrors the existing folders/by-type toggle).
+7. **`sizeMode` default** — `'stretch'` for back-compat; the editor sets `'native'` on newly
+   created AnimatedSprite2D nodes (recommended — new content gets the good semantics, old scenes
+   render unchanged).
+8. **Point coordinate space** — stored normalized to the frame rect (consistent with `anchor`),
+   displayed in px in the UI (Construct-3 habit). Crop/resize tools recompute both anchor and
+   points, so either storage works; normalized keeps the schema uniform.
