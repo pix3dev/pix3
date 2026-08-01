@@ -703,6 +703,16 @@ export class InspectorPanel extends ComponentBase {
     void this.applyPropertyChange(propertyName, animationUrl);
   }
 
+  /** Double-clicking a texture property opens that image in the Sprite Editor. */
+  onOpenTextureResource(resourcePath: string): void {
+    const trimmedResourcePath = resourcePath.trim();
+    if (!trimmedResourcePath) {
+      return;
+    }
+
+    void this.editorTabService.focusOrOpenSpriteEditor(trimmedResourcePath);
+  }
+
   onOpenAnimationResource(resourcePath: string): void {
     const trimmedResourcePath = resourcePath.trim();
     if (!trimmedResourcePath) {

@@ -89,7 +89,7 @@ export class PointAttachmentBehavior extends Script {
     this.sprite = null;
   }
 
-  override onUpdate(): void {
+  override onUpdate(_dt: number): void {
     const node = this.node;
     if (!node || !(node instanceof Node2D) || this.point.length === 0) {
       return;

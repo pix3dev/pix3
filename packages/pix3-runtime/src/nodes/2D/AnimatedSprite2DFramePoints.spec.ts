@@ -102,10 +102,10 @@ describe('AnimatedSprite2D frame points', () => {
 describe('core:PointAttachment', () => {
   it('parks a child node on the named point every tick', () => {
     const sprite = makeSprite();
-    const item = new Node2D({ id: 'item', name: 'Item', type: 'Node2D' });
+    const item = new Node2D({ id: 'item', name: 'Item' });
     sprite.add(item);
 
-    const behavior = new PointAttachmentBehavior();
+    const behavior = new PointAttachmentBehavior('attach', 'core:PointAttachment');
     behavior.point = 'hand';
     behavior.applyRotation = false;
     item.addComponent(behavior);
@@ -117,10 +117,10 @@ describe('core:PointAttachment', () => {
 
   it('applies the point angle and the configured offset', () => {
     const sprite = makeSprite();
-    const flash = new Node2D({ id: 'flash', name: 'Flash', type: 'Node2D' });
+    const flash = new Node2D({ id: 'flash', name: 'Flash' });
     sprite.add(flash);
 
-    const behavior = new PointAttachmentBehavior();
+    const behavior = new PointAttachmentBehavior('attach', 'core:PointAttachment');
     behavior.point = 'muzzle';
     behavior.offsetX = 5;
     flash.addComponent(behavior);
@@ -133,11 +133,11 @@ describe('core:PointAttachment', () => {
   it('leaves the node alone on a frame that does not define the point', () => {
     const sprite = makeSprite();
     sprite.currentFrame = 1;
-    const item = new Node2D({ id: 'item', name: 'Item', type: 'Node2D' });
+    const item = new Node2D({ id: 'item', name: 'Item' });
     item.position.set(7, 9, 0);
     sprite.add(item);
 
-    const behavior = new PointAttachmentBehavior();
+    const behavior = new PointAttachmentBehavior('attach', 'core:PointAttachment');
     behavior.point = 'hand';
     item.addComponent(behavior);
     behavior.onUpdate(0.016);

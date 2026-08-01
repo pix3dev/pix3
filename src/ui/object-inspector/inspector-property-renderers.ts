@@ -995,6 +995,8 @@ export class InspectorPropertyRenderers {
               })}
             @texture-drop=${(event: CustomEvent<{ event: DragEvent }>) =>
               this.host.onTextureResourceDrop(prop.name, event.detail.event)}
+            @open-request=${(event: CustomEvent<{ url: string }>) =>
+              this.host.onOpenTextureResource(event.detail.url)}
           ></pix3-texture-resource-editor>
         </div>
       `;

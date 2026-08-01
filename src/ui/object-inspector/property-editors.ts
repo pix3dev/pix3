@@ -826,6 +826,22 @@ export class TextureResourceEditor extends ComponentBase {
     );
   }
 
+  /** Double-click the preview or the path → edit the image (mirrors the animation editor). */
+  private emitOpenRequest(): void {
+    const resourceUrl = this.resourceUrl.trim();
+    if (!resourceUrl) {
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent('open-request', {
+        detail: { url: resourceUrl },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   protected render() {
     const fileSizeStr =
       this.fileSize > 0
@@ -838,9 +854,11 @@ export class TextureResourceEditor extends ComponentBase {
       <div class="editor-row">
         <div
           class="preview ${this.isDragOver ? 'is-dragover' : ''}"
+          title=${this.resourceUrl ? 'Double-click to edit in the Sprite Editor' : ''}
           @dragover=${(event: DragEvent) => this.onDragOver(event)}
           @dragleave=${() => this.onDragLeave()}
           @drop=${(event: DragEvent) => this.onDrop(event)}
+          @dblclick=${() => this.emitOpenRequest()}
         >
           ${this.previewUrl
             ? html`<img src=${this.previewUrl} alt="Texture preview" />`
@@ -872,6 +890,7 @@ export class TextureResourceEditor extends ComponentBase {
           ?disabled=${this.disabled}
           placeholder="res://path/to/texture.png"
           @change=${(e: Event) => this.emitChange((e.target as HTMLInputElement).value)}
+          @dblclick=${() => this.emitOpenRequest()}
         />
         <button
           type="button"
