@@ -17,7 +17,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService } from '@/services/editor/IconService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { OperationService } from '@/services/core/OperationService';
-import { sliceImageBlob } from '@/services/image-gen/image-ops';
+import { readBlobSize, sliceImageBlob } from '@/services/image-gen/image-ops';
 import type {
   AnimationInspectorController,
   AnimationInspectorSnapshot,
@@ -32,6 +32,7 @@ import {
   type AnimationFrame,
   type AnimationPlaybackMode,
   type AnimationResource,
+  type AnimationSize,
 } from '@pix3/runtime';
 
 import './animation-panel.ts.css';
@@ -1401,6 +1402,22 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     );
   }
 
+  /**
+   * Intrinsic pixel size of a frame's raster, stamped into the document so
+   * `sizeMode: 'native'` layout never has to wait on a texture load. Undefined
+   * when the file can't be read or decoded — the frame then falls back to
+   * stretch layout, exactly as legacy content does.
+   */
+  private async readFrameSourceSize(texturePath: string): Promise<AnimationSize | undefined> {
+    try {
+      const blob = await this.projectStorage.readBlob(texturePath);
+      const size = await readBlobSize(blob);
+      return size ? { width: size.width, height: size.height } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Image files dragged in from the OS (as opposed to project assets, which arrive as paths). */
   private getDroppedImageFiles(event: DragEvent): File[] {
     const files = Array.from(event.dataTransfer?.files ?? []);
@@ -1931,7 +1948,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
-    const generatedFrames: AnimationFrame[] = normalizedTexturePaths.map(texturePath => ({
+    const sourceSizes = await Promise.all(
+      normalizedTexturePaths.map(texturePath => this.readFrameSourceSize(texturePath))
+    );
+    const generatedFrames: AnimationFrame[] = normalizedTexturePaths.map((texturePath, index) => ({
       textureIndex: 0,
       offset: { x: 0, y: 0 },
       repeat: { x: 1, y: 1 },
@@ -1940,6 +1960,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       texturePath,
       boundingBox: { x: 0, y: 0, width: 0, height: 0 },
       collisionPolygon: [],
+      sourceSize: sourceSizes[index],
     }));
 
     await this.applyResourceUpdate(
@@ -2013,22 +2034,23 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
-    const generatedTexturePaths = await this.sliceSpritesheetIntoFrameFiles(
+    const sliced = await this.sliceSpritesheetIntoFrameFiles(
       texturePath,
       columns,
       rows,
       clip.frames.length + 1,
       clip.name
     );
-    const generatedFrames: AnimationFrame[] = generatedTexturePaths.map(textureResourcePath => ({
+    const generatedFrames: AnimationFrame[] = sliced.map(cell => ({
       textureIndex: 0,
       offset: { x: 0, y: 0 },
       repeat: { x: 1, y: 1 },
       durationMultiplier: 1,
       anchor: { ...DEFAULT_FRAME_ANCHOR },
-      texturePath: textureResourcePath,
+      texturePath: cell.texturePath,
       boundingBox: { x: 0, y: 0, width: 0, height: 0 },
       collisionPolygon: [],
+      sourceSize: cell.sourceSize,
     }));
 
     await this.applyResourceUpdate(
@@ -2056,7 +2078,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     rows: number,
     startFrameNumber: number,
     clipName: string
-  ): Promise<string[]> {
+  ): Promise<Array<{ texturePath: string; sourceSize?: AnimationSize }>> {
     const assetPath = this.assetPath ? normalizeAnimationAssetPath(this.assetPath) : '';
     if (!assetPath) {
       return [];
@@ -2064,19 +2086,24 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     const sourceBlob = await this.projectStorage.readBlob(texturePath);
     const cells = await sliceImageBlob(sourceBlob, { columns, rows });
-    const generatedPaths: string[] = [];
+    // Every cell of a grid slice is the same size — decode one, stamp all.
+    const cellSize = cells.length > 0 ? await readBlobSize(cells[0]) : null;
+    const generated: Array<{ texturePath: string; sourceSize?: AnimationSize }> = [];
 
     for (const cell of cells) {
       const framePath = buildAnimationFrameResourcePath(
         assetPath,
-        startFrameNumber + generatedPaths.length,
+        startFrameNumber + generated.length,
         { clipName }
       );
       await this.projectStorage.writeBinaryFile(framePath, await cell.arrayBuffer());
-      generatedPaths.push(framePath);
+      generated.push({
+        texturePath: framePath,
+        sourceSize: cellSize ? { width: cellSize.width, height: cellSize.height } : undefined,
+      });
     }
 
-    return generatedPaths;
+    return generated;
   }
 
   private async onUpdateTexturePath(nextTexturePath: string): Promise<void> {

@@ -27,11 +27,26 @@ export interface AnimationFrameEvent {
   args: string;
 }
 
+/** Intrinsic pixel size of a frame's raster. `0×0` means "unknown". */
+export interface AnimationSize {
+  width: number;
+  height: number;
+}
+
 export interface AnimationFrame {
   textureIndex: number;
   offset: AnimationVector2;
   repeat: AnimationVector2;
   durationMultiplier: number;
+  /**
+   * The frame's own origin, normalized to the frame rect with **y measured from
+   * the top** (same convention as `boundingBox` and `collisionPolygon`; the
+   * editor's overlay places its marker at `top: anchor.y * 100%`). This is the
+   * point in the — possibly tightly cropped — raster that lands on the node's
+   * position, so cropping a frame and moving its anchor keeps the animation
+   * visually identical while the PNG shrinks. Composes with the node-level
+   * `AnimatedSprite2D.anchor`, which is a separate global offset.
+   */
   anchor: AnimationVector2;
   texturePath: string;
   boundingBox: AnimationBoundingBox;
@@ -42,6 +57,14 @@ export interface AnimationFrame {
    * materializes it to `[]`, so runtime (loaded) frames always carry the field.
    */
   events?: AnimationFrameEvent[];
+  /**
+   * Intrinsic pixel size of this frame's raster, stamped by the editor whenever a
+   * frame is added / replaced / cropped so `sizeMode: 'native'` layout never has
+   * to wait on a texture load. Optional in authored files; `normalizeFrame`
+   * materializes it (falling back to the bounding box, then `0×0`). A `0×0` size
+   * makes the frame fall back to stretch layout, so legacy files keep working.
+   */
+  sourceSize?: AnimationSize;
 }
 
 export interface AnimationClip {
@@ -136,6 +159,20 @@ function normalizeFrameEvents(value: unknown): AnimationFrameEvent[] {
   return events;
 }
 
+function normalizeSourceSize(value: unknown, boundingBox: AnimationBoundingBox): AnimationSize {
+  const candidate = typeof value === 'object' && value !== null ? value : null;
+  const width = Math.max(0, normalizeFiniteNumber((candidate as { width?: unknown })?.width));
+  const height = Math.max(0, normalizeFiniteNumber((candidate as { height?: unknown })?.height));
+  if (width > 0 && height > 0) {
+    return { width, height };
+  }
+
+  // No explicit size: the bounding box is the best available description of the
+  // frame's extent (the editor authors it in source pixels). Zero when neither
+  // is known — callers treat that as "unknown" and fall back to stretch layout.
+  return { width: boundingBox.width, height: boundingBox.height };
+}
+
 function normalizePlaybackMode(value: unknown): AnimationPlaybackMode {
   return value === 'ping-pong' ? 'ping-pong' : 'normal';
 }
@@ -146,6 +183,7 @@ function normalizeFrame(frame: unknown): AnimationFrame {
     typeof (candidate as { textureIndex?: unknown }).textureIndex === 'number'
       ? Math.max(0, Math.floor((candidate as { textureIndex: number }).textureIndex))
       : 0;
+  const boundingBox = normalizeBoundingBox((candidate as { boundingBox?: unknown }).boundingBox);
 
   return {
     textureIndex,
@@ -160,13 +198,14 @@ function normalizeFrame(frame: unknown): AnimationFrame {
       typeof (candidate as { texturePath?: unknown }).texturePath === 'string'
         ? (candidate as { texturePath: string }).texturePath.trim()
         : '',
-    boundingBox: normalizeBoundingBox((candidate as { boundingBox?: unknown }).boundingBox),
+    boundingBox,
     collisionPolygon: Array.isArray((candidate as { collisionPolygon?: unknown }).collisionPolygon)
       ? ((candidate as { collisionPolygon: unknown[] }).collisionPolygon ?? []).map(
           normalizePolygonPoint
         )
       : [],
     events: normalizeFrameEvents((candidate as { events?: unknown }).events),
+    sourceSize: normalizeSourceSize((candidate as { sourceSize?: unknown }).sourceSize, boundingBox),
   };
 }
 

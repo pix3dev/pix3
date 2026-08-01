@@ -517,6 +517,19 @@ export class SceneSaver {
       props.width = node.width;
       props.height = node.height;
       props.color = node.color;
+      if (node.sizeMode === 'native') {
+        props.sizeMode = 'native';
+      } else {
+        delete props.sizeMode;
+      }
+      if (node.anchor.x !== 0.5 || node.anchor.y !== 0.5) {
+        props.anchor = [
+          Math.round(node.anchor.x * 1000) / 1000,
+          Math.round(node.anchor.y * 1000) / 1000,
+        ];
+      } else {
+        delete props.anchor;
+      }
       delete props.effects;
       const animFx = node.getShaderEffectStack();
       if (!animFx.isEmpty) {

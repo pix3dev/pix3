@@ -7,7 +7,7 @@ import {
   composeTextureRegion,
   type TextureRegion,
 } from '../../core/texture-region';
-import { baseRegionOf, copyAtlasMetadata } from '../../core/atlas-frame-map';
+import { atlasSizeOf, baseRegionOf, copyAtlasMetadata } from '../../core/atlas-frame-map';
 import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
@@ -24,8 +24,16 @@ import {
   type AnimationClip,
   type AnimationFrame,
   type AnimationResource,
+  type AnimationSize,
 } from '../../core/AnimationResource';
 import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
+import {
+  resolveAnimatedSpriteFrameLayout,
+  type AnimatedSpriteAnchor2D,
+  type AnimatedSpriteSizeMode,
+} from '../../core/animated-sprite-layout';
+
+export type { AnimatedSpriteAnchor2D, AnimatedSpriteSizeMode };
 
 export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   animationResourcePath?: string | null;
@@ -37,6 +45,10 @@ export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   width?: number;
   height?: number;
   color?: string;
+  /** Node-level pivot; composes on top of the per-frame anchor. */
+  anchor?: AnimatedSpriteAnchor2D | [number, number];
+  /** Frame sizing policy. Defaults to `stretch` for back-compat. */
+  sizeMode?: AnimatedSpriteSizeMode;
   /** Registry-backed shader effects attached to this sprite's material. */
   effects?: ShaderEffectEntry[];
 }
@@ -52,6 +64,9 @@ export class AnimatedSprite2D
   width: number;
   height: number;
   color: string;
+  /** Node-level pivot (y up), same meaning as `Sprite2D.anchor`. */
+  anchor: AnimatedSpriteAnchor2D;
+  sizeMode: AnimatedSpriteSizeMode;
 
   private _currentFrame: number;
   private readonly frameSequencePlayer = new FrameSequencePlayer();
@@ -80,6 +95,8 @@ export class AnimatedSprite2D
     this.width = props.width ?? 64;
     this.height = props.height ?? 64;
     this.color = props.color ?? '#ffffff';
+    this.anchor = AnimatedSprite2D.normalizeAnchor(props.anchor);
+    this.sizeMode = props.sizeMode === 'native' ? 'native' : 'stretch';
     this._currentFrame = Math.max(0, Math.floor(props.currentFrame ?? 0));
     this.isContainer = false;
 
@@ -105,8 +122,8 @@ export class AnimatedSprite2D
     // Size is mesh.scale over the shared unit quad (see SHARED_UNIT_QUAD_GEOMETRY).
     this.mesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.material);
     this.mesh.name = `${this.name}-Mesh`;
-    this.mesh.scale.set(this.width, this.height, 1);
     this.mesh.userData[BATCHABLE_2D_KEY] = true;
+    this.updateSize();
     this.add(this.mesh);
 
     // Shader effects: install before attaching, then attach authored entries.
@@ -305,6 +322,46 @@ export class AnimatedSprite2D
           },
         },
         {
+          name: 'sizeMode',
+          type: 'enum',
+          ui: {
+            label: 'Size Mode',
+            description:
+              'Stretch: every frame fills Width×Height. Native: each frame renders at its own pixel size, scaled uniformly from the clip’s first frame.',
+            group: 'Size',
+            options: { Stretch: 'stretch', Native: 'native' },
+          },
+          getValue: (node: unknown) => (node as AnimatedSprite2D).sizeMode,
+          setValue: (node: unknown, value: unknown) => {
+            const sprite = node as AnimatedSprite2D;
+            sprite.sizeMode = value === 'native' ? 'native' : 'stretch';
+            sprite.properties.sizeMode = sprite.sizeMode;
+            sprite.updateSize();
+          },
+        },
+        {
+          name: 'anchor',
+          type: 'vector2',
+          ui: {
+            label: 'Pivot',
+            description:
+              'Normalized node pivot. Composes on top of each frame’s own anchor, which is edited in the Sprite Editor.',
+            group: 'Size',
+            step: 0.01,
+            precision: 2,
+          },
+          getValue: (node: unknown) => {
+            const anchor = (node as AnimatedSprite2D).anchor;
+            return { x: anchor.x, y: anchor.y };
+          },
+          setValue: (node: unknown, value: unknown) => {
+            const sprite = node as AnimatedSprite2D;
+            const anchor = value as { x: number; y: number };
+            sprite.setAnchor({ x: anchor.x, y: anchor.y });
+            sprite.properties.anchor = { x: sprite.anchor.x, y: sprite.anchor.y };
+          },
+        },
+        {
           name: 'color',
           type: 'color',
           ui: { label: 'Color', group: 'Style' },
@@ -406,6 +463,10 @@ export class AnimatedSprite2D
   }
 
   private refreshTexturePresentation(): void {
+    // Frame geometry (native sizing + both anchors) depends on which frame is
+    // showing, so it is re-derived on every presentation refresh.
+    this.updateSize();
+
     const currentFrame = this.getCurrentFrameData();
     const frameTexture = currentFrame ? (this.frameTextures.get(this._currentFrame) ?? null) : null;
     const usesSequenceTexture = isSequenceAnimationFrame(currentFrame) && Boolean(frameTexture);
@@ -490,9 +551,76 @@ export class AnimatedSprite2D
     return nextTexture;
   }
 
+  private static normalizeAnchor(
+    anchor: AnimatedSpriteAnchor2D | [number, number] | undefined
+  ): AnimatedSpriteAnchor2D {
+    if (!anchor) {
+      return { x: 0.5, y: 0.5 };
+    }
+    const [rawX, rawY] = Array.isArray(anchor) ? anchor : [anchor.x, anchor.y];
+    const x = Number(rawX);
+    const y = Number(rawY);
+    return { x: Number.isFinite(x) ? x : 0.5, y: Number.isFinite(y) ? y : 0.5 };
+  }
+
+  /** Set the node-level pivot (composes on top of the per-frame anchor). */
+  setAnchor(value: AnimatedSpriteAnchor2D | [number, number]): void {
+    this.anchor = AnimatedSprite2D.normalizeAnchor(value);
+    this.updateSize();
+  }
+
+  /**
+   * The frame's intrinsic pixel size: the authored `sourceSize` first (stamped by
+   * the editor, so layout never waits on I/O), then the atlas view's recorded
+   * source size, then a plain texture's own image dimensions. `null` when nothing
+   * knows — the caller falls back to stretch layout for that frame.
+   */
+  private resolveFrameSourceSize(
+    frame: AnimationFrame | null,
+    frameIndex: number
+  ): AnimationSize | null {
+    const authored = frame?.sourceSize;
+    if (authored && authored.width > 0 && authored.height > 0) {
+      return authored;
+    }
+
+    const texture = this.frameTextures.get(frameIndex) ?? this.spritesheetTexture;
+    const atlasSize = atlasSizeOf(texture);
+    if (atlasSize && atlasSize.width > 0 && atlasSize.height > 0) {
+      return atlasSize;
+    }
+
+    const image = texture?.image as { width?: number; height?: number } | undefined;
+    if (image && Number(image.width) > 0 && Number(image.height) > 0) {
+      return { width: Number(image.width), height: Number(image.height) };
+    }
+
+    return null;
+  }
+
+  /**
+   * Size and place the quad for the current frame. The math is shared with the
+   * editor's proxy visuals via {@link resolveAnimatedSpriteFrameLayout} — the
+   * editor draws separate meshes, so parity has to come from one implementation.
+   */
   private updateSize(): void {
+    const frame = this.getCurrentFrameData();
+    const layout = resolveAnimatedSpriteFrameLayout({
+      nodeWidth: this.width,
+      nodeHeight: this.height,
+      anchor: this.anchor,
+      sizeMode: this.sizeMode,
+      frame,
+      frameSourceSize: this.resolveFrameSourceSize(frame, this._currentFrame),
+      clipFirstFrameSourceSize: this.resolveFrameSourceSize(
+        this.activeClip?.frames[0] ?? null,
+        0
+      ),
+    });
+
     // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
-    this.mesh.scale.set(this.width, this.height, 1);
+    this.mesh.scale.set(layout.width, layout.height, 1);
+    this.mesh.position.set(layout.offsetX, layout.offsetY, 0);
   }
 
   protected override disposeResources(): void {

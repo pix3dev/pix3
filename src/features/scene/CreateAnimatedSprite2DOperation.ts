@@ -54,7 +54,13 @@ export class CreateAnimatedSprite2DOperation extends CreateNodeOperationBase<Cre
       currentClip: params.currentClip,
       width: 64,
       height: 64,
+      // New content gets the good semantics: each frame renders at its own pixel
+      // size (uniformly scaled from the clip's first frame) and per-frame anchors
+      // do what they say. `stretch` stays the class default so existing scenes,
+      // which were authored against it, render unchanged.
+      sizeMode: 'native',
     });
+    node.properties.sizeMode = 'native';
     return node as SceneGraph['rootNodes'][0];
   }
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { AnimationResource } from '@pix3/runtime';
-import { AnimatedSprite2D } from '@pix3/runtime';
+import type { AnimationFrame, AnimationResource } from '@pix3/runtime';
+import { AnimatedSprite2D, resolveAnimatedSpriteFrameLayout } from '@pix3/runtime';
 import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
@@ -1020,14 +1020,72 @@ export class Viewport2DProxyRegistry {
   syncAnimatedSprite2DVisual(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
     this.apply2DVisualTransform(node, visualRoot);
 
+    visualRoot.visible = node.visible;
+    // Material sync resolves the frame + texture the layout depends on, so run it
+    // before sizing the quad.
+    this.syncAnimatedSprite2DMaterial(node, visualRoot);
+    this.applyAnimatedSprite2DFrameLayout(node, visualRoot);
+    this.apply2DVisualOpacity(node, visualRoot);
+  }
+
+  /**
+   * Editor-side counterpart to `AnimatedSprite2D.updateSize` — the viewport draws
+   * separate proxy meshes, so the per-frame anchor / `sizeMode` math must be
+   * applied here too, from the same shared resolver, or the editor and the
+   * running game disagree about where a frame sits.
+   */
+  private applyAnimatedSprite2DFrameLayout(
+    node: AnimatedSprite2D,
+    visualRoot: THREE.Group
+  ): void {
     const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
-    if (sizeGroup) {
-      sizeGroup.scale.set(node.width ?? 64, node.height ?? 64, 1);
+    if (!sizeGroup) {
+      return;
     }
 
-    visualRoot.visible = node.visible;
-    this.syncAnimatedSprite2DMaterial(node, visualRoot);
-    this.apply2DVisualOpacity(node, visualRoot);
+    const resource = (visualRoot.userData.animationResource as AnimationResource | null) ?? null;
+    const clip = findAnimationClip(resource, node.currentClip);
+    const frames = clip?.frames ?? [];
+    const frame =
+      frames.length > 0
+        ? (frames[Math.max(0, Math.min(node.currentFrame, frames.length - 1))] ?? null)
+        : null;
+    const texture = (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
+
+    const layout = resolveAnimatedSpriteFrameLayout({
+      nodeWidth: node.width ?? 64,
+      nodeHeight: node.height ?? 64,
+      anchor: node.anchor,
+      sizeMode: node.sizeMode,
+      frame,
+      frameSourceSize: this.resolveProxyFrameSourceSize(frame, texture),
+      clipFirstFrameSourceSize: this.resolveProxyFrameSourceSize(frames[0] ?? null, texture),
+    });
+
+    sizeGroup.scale.set(layout.width, layout.height, 1);
+    sizeGroup.position.set(layout.offsetX, layout.offsetY, 0);
+  }
+
+  /**
+   * Frame pixel size for proxy layout: the authored `sourceSize` first, then the
+   * loaded texture's own image dimensions. Mirrors the runtime's resolution order
+   * minus the atlas branch (editor proxies load raw textures, never atlas views).
+   */
+  private resolveProxyFrameSourceSize(
+    frame: AnimationFrame | null,
+    texture: THREE.Texture | null
+  ): { width: number; height: number } | null {
+    const authored = frame?.sourceSize;
+    if (authored && authored.width > 0 && authored.height > 0) {
+      return authored;
+    }
+
+    const image = texture?.image as { width?: number; height?: number } | undefined;
+    if (image && Number(image.width) > 0 && Number(image.height) > 0) {
+      return { width: Number(image.width), height: Number(image.height) };
+    }
+
+    return null;
   }
 
   private syncAnimatedSprite2DMaterial(node: AnimatedSprite2D, visualRoot: THREE.Group): void {

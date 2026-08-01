@@ -39,6 +39,7 @@ import {
 } from '@/ui/shared/asset-drag-drop';
 import {
   flipImageBlob,
+  readBlobSize,
   resizeImageBlob,
   rotateImageBlob,
   scaledDimensions,
@@ -1960,6 +1961,9 @@ export class SpriteEditorPanel extends ComponentBase {
       const cells = await sliceImageBlob(source, grid);
       await this.ensureParentDirectory(`${folder}/frame.png`);
 
+      // Every cell of a grid slice is the same size — decode one and stamp all
+      // frames with it so `sizeMode: 'native'` layout never waits on a load.
+      const cellSize = cells.length > 0 ? await readBlobSize(cells[0]) : null;
       const framePaths: string[] = [];
       for (const [index, cell] of cells.entries()) {
         const framePath = buildAnimationFrameResourcePath(assetPath, index + 1, { clipName });
@@ -1985,6 +1989,9 @@ export class SpriteEditorPanel extends ComponentBase {
               texturePath,
               boundingBox: { x: 0, y: 0, width: 0, height: 0 },
               collisionPolygon: [],
+              sourceSize: cellSize
+                ? { width: cellSize.width, height: cellSize.height }
+                : undefined,
             })),
           },
         ],
