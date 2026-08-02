@@ -1,15 +1,4 @@
-import { subscribe } from 'valtio/vanilla';
-
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { UpdateAnimationDocumentOperation } from '@/features/properties/UpdateAnimationDocumentOperation';
-import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
-import {
-  buildAnimationFrameResourcePath,
-  deriveAnimationDocumentId,
-  normalizeAnimationAssetPath,
-  sanitizeFrameFilePrefix,
-} from '@/features/scene/animation-asset-utils';
-import { appState } from '@/state';
 import { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
 import { AnimationEditorService } from '@/services/animation/AnimationEditorService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
@@ -17,25 +6,22 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService } from '@/services/editor/IconService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { OperationService } from '@/services/core/OperationService';
-import { readBlobSize, sliceImageBlob } from '@/services/image-gen/image-ops';
-import { StageZoomPanController, type StageViewport } from '@/ui/shared/stage-zoom-pan';
-import type {
-  AnimationInspectorController,
-  AnimationInspectorSnapshot,
-} from '@/services/animation/AnimationEditorService';
 import {
-  AnimatedSprite2D,
+  StageZoomPanController,
+  type StagePoint,
+  type StageViewport,
+} from '@/ui/shared/stage-zoom-pan';
+import {
+  AnimationDocumentController,
+  hasSupportedImageExtension,
+} from '@/ui/sprite-editor/animation-document-controller';
+import {
   SceneManager,
   collectClipPointNames,
   findAnimationFramePoint,
-  getAnimationFrameTexturePath,
   isSequenceAnimationFrame,
-  normalizeAnimationResource,
   type AnimationClip,
   type AnimationFrame,
-  type AnimationPlaybackMode,
-  type AnimationResource,
-  type AnimationSize,
 } from '@pix3/runtime';
 
 import './animation-panel.ts.css';
@@ -45,30 +31,8 @@ const ASSET_PATH_MIME = 'application/x-pix3-asset-path';
 const ASSET_RESOURCE_LIST_MIME = 'application/x-pix3-asset-resource-list';
 const ASSET_PATH_LIST_MIME = 'application/x-pix3-asset-path-list';
 const FRAME_REORDER_MIME = 'application/x-pix3-animation-frame-reorder';
-const IMAGE_EXTENSIONS = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'svg',
-  'tif',
-  'tiff',
-  'avif',
-]);
 
 type AnimationEditMode = 'anchor' | 'polygon' | 'bbox' | 'points';
-
-interface TextureDimensions {
-  width: number;
-  height: number;
-}
-
-interface StagePoint {
-  x: number;
-  y: number;
-}
 
 interface StageDragState {
   pointerId: number;
@@ -89,8 +53,6 @@ interface AnchorPreset {
   anchor: StagePoint;
 }
 
-const DEFAULT_FRAME_ANCHOR: StagePoint = { x: 0.5, y: 0.5 };
-
 const ANCHOR_PRESETS: readonly AnchorPreset[] = [
   { label: '↖', title: 'Top left', anchor: { x: 0, y: 0 } },
   { label: '↑', title: 'Top center', anchor: { x: 0.5, y: 0 } },
@@ -103,8 +65,14 @@ const ANCHOR_PRESETS: readonly AnchorPreset[] = [
   { label: '↘', title: 'Bottom right', anchor: { x: 1, y: 1 } },
 ];
 
+/**
+ * Render host for the animation editor. The document itself — clips, frames,
+ * selection, the preview transport and every mutation — lives in
+ * {@link AnimationDocumentController}; this component owns markup, the stage
+ * pointer/drag machinery and the rAF ticker that drives preview playback.
+ */
 @customElement('pix3-animation-panel')
-export class AnimationPanel extends ComponentBase implements AnimationInspectorController {
+export class AnimationPanel extends ComponentBase {
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -135,45 +103,12 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   @inject(IconService)
   private readonly iconService!: IconService;
 
-  @state()
-  private assetPath: string | null = null;
-
-  @state()
-  private resource: AnimationResource | null = null;
-
-  @state()
-  private activeClipName = '';
-
-  @state()
-  private texturePreviewUrl = '';
-
   /** Points mode: the point highlighted on the stage and in the list. */
   @state()
   private selectedPointName: string | null = null;
 
   @state()
-  private errorMessage: string | null = null;
-
-  @state()
-  private slicerColumns = 1;
-
-  @state()
-  private slicerRows = 1;
-
-  @state()
   private isTextureDragOver = false;
-
-  @state()
-  private selectedFrameIndex = -1;
-
-  @state()
-  private selectedFrameIndices: number[] = [];
-
-  @state()
-  private previewFrameIndex = -1;
-
-  @state()
-  private isPreviewPlaying = false;
 
   @state()
   private editMode: AnimationEditMode = 'anchor';
@@ -189,89 +124,68 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     onChange: () => this.requestUpdate(),
   });
 
-  @state()
-  private textureDimensions: TextureDimensions = { width: 0, height: 0 };
-
-  @state()
-  private frameDraft: AnimationFrame | null = null;
-
-  private disposeTabsSubscription?: () => void;
-  private disposeProjectSubscription?: () => void;
-  private disposeAnimationsSubscription?: () => void;
-  private animationId: string | null = null;
-  private loadToken = 0;
+  private documentController: AnimationDocumentController | null = null;
+  private disposeControllerSubscription?: () => void;
   private playbackFrameHandle: number | null = null;
   private playbackLastTimestamp: number | null = null;
-  private previewElapsedSeconds = 0;
-  private previewDirection = 1;
   private stageDragState: StageDragState | null = null;
   private textureDragDepth = 0;
   private draggedFrameIndex = -1;
   private dragOverFrameIndex = -1;
-  private selectionAnchorFrameIndex = -1;
-  private previewTexturePath = '';
-  private readonly texturePreviewCache = new Map<string, string>();
-  private readonly textureDimensionsCache = new Map<string, TextureDimensions>();
-  private readonly texturePreviewLoads = new Map<string, Promise<void>>();
-  private readonly inspectorListeners = new Set<() => void>();
+
+  /**
+   * Created on first use rather than in the constructor: `@inject` is a prototype
+   * accessor that resolves through the container on read, so the deps object must
+   * not be built before the container is ready (or before a spec has swapped a
+   * service out).
+   */
+  private get controller(): AnimationDocumentController {
+    if (!this.documentController) {
+      this.documentController = new AnimationDocumentController(
+        {
+          operations: this.operations,
+          commandDispatcher: this.commandDispatcher,
+          projectStorage: this.projectStorage,
+          animationEditorService: this.animationEditorService,
+          autoSliceDialog: this.animationAutoSliceDialogService,
+          dialogService: this.dialogService,
+          sceneManager: this.sceneManager,
+        },
+        this.tabId,
+        this.resourcePath
+      );
+    }
+
+    return this.documentController;
+  }
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.disposeTabsSubscription = subscribe(appState.tabs, () => {
-      void this.syncFromResourceContext(true);
-    });
-    this.disposeProjectSubscription = subscribe(appState.project, () => {
-      void this.syncFromResourceContext(true);
-    });
-    this.disposeAnimationsSubscription = subscribe(appState.animations, () => {
-      void this.syncFromDocumentState(true);
-    });
-    void this.syncFromResourceContext(false);
+    const controller = this.controller;
+    controller.setContext(this.tabId, this.resourcePath);
+    this.disposeControllerSubscription = controller.subscribe(() => this.onControllerChanged());
+    controller.attach();
   }
 
   protected updated(changedProperties: Map<PropertyKey, unknown>): void {
     if (changedProperties.has('tabId') || changedProperties.has('resourcePath')) {
-      void this.syncFromResourceContext(false);
-    }
-
-    if (
-      changedProperties.has('assetPath') ||
-      changedProperties.has('resource') ||
-      changedProperties.has('activeClipName') ||
-      changedProperties.has('selectedFrameIndex')
-    ) {
-      this.notifyInspectorListeners();
-    }
-
-    if (
-      changedProperties.has('resource') ||
-      changedProperties.has('activeClipName') ||
-      changedProperties.has('selectedFrameIndex') ||
-      changedProperties.has('previewFrameIndex')
-    ) {
-      void this.syncPreviewTexture();
+      this.controller.setContext(this.tabId, this.resourcePath);
     }
   }
 
   disconnectedCallback(): void {
-    this.stopPreviewPlayback();
-    this.disposeTabsSubscription?.();
-    this.disposeProjectSubscription?.();
-    this.disposeAnimationsSubscription?.();
-    this.disposeTabsSubscription = undefined;
-    this.disposeProjectSubscription = undefined;
-    this.disposeAnimationsSubscription = undefined;
-    if (this.animationEditorService.getActiveController() === this) {
-      this.animationEditorService.setActiveController(null);
-    }
-    this.clearTexturePreviewCache();
+    this.stopPlaybackTicker();
+    this.disposeControllerSubscription?.();
+    this.disposeControllerSubscription = undefined;
+    this.documentController?.dispose();
     super.disconnectedCallback();
   }
 
   protected render() {
-    const activeClip = this.getActiveClip();
+    const controller = this.controller;
+    const activeClip = controller.activeClip;
     const clipFrames = activeClip?.frames ?? [];
-    const previewFrame = this.getPreviewFrame(activeClip);
+    const previewFrame = controller.previewFrame;
 
     return html`
       <section
@@ -282,8 +196,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
         @dragleave=${(event: DragEvent) => this.onEditorDragLeave(event)}
         @drop=${(event: DragEvent) => this.onEditorDrop(event)}
       >
-        ${this.errorMessage ? html`<div class="error-state">${this.errorMessage}</div>` : null}
-        ${!this.assetPath && !this.errorMessage
+        ${controller.errorMessage
+          ? html`<div class="error-state">${controller.errorMessage}</div>`
+          : null}
+        ${!controller.assetPath && !controller.errorMessage
           ? html`<div class="empty-state">
               Open a <code>.pix3anim</code> asset from the Asset Browser or double-click the
               animation resource field in the Inspector.
@@ -302,7 +218,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
               </div>
             `
           : null}
-        ${this.assetPath && this.resource
+        ${controller.assetPath && controller.resource
           ? html`
               <div class="editor-workspace">
                 ${this.renderEditorToolbar(clipFrames.length)}
@@ -325,11 +241,12 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private renderEditorToolbar(frameCount: number) {
+    const controller = this.controller;
     return html`
       <div class="editor-toolbar" aria-label="Animation editor toolbar">
         ${this.renderToolbarButton(
-          this.isPreviewPlaying ? 'pause' : 'play',
-          this.isPreviewPlaying ? 'Pause playback' : 'Play preview',
+          controller.isPreviewPlaying ? 'pause' : 'play',
+          controller.isPreviewPlaying ? 'Pause playback' : 'Play preview',
           () => this.onTogglePlayback(),
           frameCount === 0
         )}
@@ -381,11 +298,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
         ${this.renderToolbarButton(
           'trash-2',
-          this.getSelectedFrameIndices().length > 1
+          controller.getSelectedFrameIndices().length > 1
             ? 'Delete selected frames'
             : 'Delete selected frame',
-          () => void this.onRemoveSelectedFrame(),
-          frameCount === 0 || this.getSelectedFrameIndices().length === 0
+          () => void controller.removeSelectedFrames(),
+          frameCount === 0 || controller.getSelectedFrameIndices().length === 0
         )}
       </div>
     `;
@@ -417,9 +334,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     clipFrames: AnimationFrame[],
     previewFrame: AnimationFrame | null
   ) {
-    const metrics = previewFrame ? this.getFrameMetrics(previewFrame) : null;
+    const controller = this.controller;
+    const metrics = previewFrame ? controller.getFrameMetrics(previewFrame) : null;
     const frameLabel = previewFrame
-      ? `Frame ${this.previewFrameIndex + 1}/${clipFrames.length}`
+      ? `Frame ${controller.previewFrameIndex + 1}/${clipFrames.length}`
       : 'No frame';
     const sizeLabel = metrics ? `${metrics.frameWidth} x ${metrics.frameHeight}px` : 'No size';
     const clipLabel = activeClip ? activeClip.name : 'No clip';
@@ -430,7 +348,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
         <span>${frameLabel}</span>
         <span>${sizeLabel}</span>
         <span>${Math.round(this.stageView.zoom * 100)}%</span>
-        <span>${this.resource?.clips.length ?? 0} clips</span>
+        <span>${controller.resource?.clips.length ?? 0} clips</span>
         <span>${clipFrames.length} frames</span>
       </div>
     `;
@@ -446,7 +364,8 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       `;
     }
 
-    const metrics = this.getFrameMetrics(previewFrame);
+    const controller = this.controller;
+    const metrics = controller.getFrameMetrics(previewFrame);
     const zoom = this.stageView.zoom;
     const zoomedWidth = metrics.frameWidth * zoom;
     const zoomedHeight = metrics.frameHeight * zoom;
@@ -454,8 +373,8 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       .map(point => `${point.x},${point.y}`)
       .join(' ');
     const imageStyle = this.getFrameImageStyle(previewFrame);
-    const previewTextureUrl = this.getTexturePreviewUrl(previewFrame);
-    const selectedFrame = this.getSelectedFrame(activeClip);
+    const previewTextureUrl = controller.getTexturePreviewUrl(previewFrame);
+    const selectedFrame = controller.selectedFrame;
 
     return html`
       <div class="stage-shell">
@@ -477,7 +396,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
                     <img
                       class="stage-image"
                       src=${previewTextureUrl}
-                      alt="Preview frame ${this.previewFrameIndex + 1}"
+                      alt="Preview frame ${controller.previewFrameIndex + 1}"
                       style=${imageStyle}
                     />
                   `
@@ -545,7 +464,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return null;
     }
 
-    const names = collectClipPointNames(this.getActiveClip());
+    const names = collectClipPointNames(this.controller.activeClip);
     return html`
       <div class="anchor-tools" aria-label="Frame point tools">
         <div class="anchor-tools-header">
@@ -583,7 +502,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
                           type="button"
                           class="point-list-action"
                           title="Copy this frame's position to every frame of the clip"
-                          @click=${() => void this.onCopyPointToClip(name)}
+                          @click=${() => void this.controller.copyFramePointToClip(name)}
                         >
                           ${this.iconService.getIcon('copy', 12)}
                         </button>
@@ -633,8 +552,9 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       y: point.y * metrics.frameHeight,
     });
 
+    const controller = this.controller;
     const previousFrame = editable
-      ? (this.getActiveClip()?.frames[this.previewFrameIndex - 1] ?? null)
+      ? (controller.activeClip?.frames[controller.previewFrameIndex - 1] ?? null)
       : null;
 
     return html`
@@ -701,7 +621,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
                   type="button"
                   title=${preset.title}
                   aria-label=${preset.title}
-                  @click=${() => void this.onApplyAnchorPreset(preset.anchor)}
+                  @click=${() => void this.controller.applyAnchorPreset(preset.anchor)}
                 >
                   ${preset.label}
                 </button>
@@ -712,7 +632,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
             type="button"
             class="anchor-action-button"
             title="Apply anchor to all frames in current clip"
-            @click=${() => void this.onApplySelectedAnchorToActiveClip()}
+            @click=${() => void this.controller.applySelectedAnchorToActiveClip()}
           >
             Clip
           </button>
@@ -720,7 +640,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
             type="button"
             class="anchor-action-button"
             title="Apply anchor to all frames in all clips"
-            @click=${() => void this.onApplySelectedAnchorToAllClips()}
+            @click=${() => void this.controller.applySelectedAnchorToAllClips()}
           >
             All
           </button>
@@ -747,10 +667,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private renderFrameCard(frame: AnimationFrame, index: number) {
+    const controller = this.controller;
     const imageStyle = this.getFrameImageStyle(frame);
-    const previewTextureUrl = this.getTexturePreviewUrl(frame);
-    const isSelected = this.selectedFrameIndices.includes(index);
-    const isPreviewFrame = index === this.previewFrameIndex;
+    const previewTextureUrl = controller.getTexturePreviewUrl(frame);
+    const isSelected = controller.selectedFrameIndices.includes(index);
+    const isPreviewFrame = index === controller.previewFrameIndex;
     const isDropTarget = index === this.dragOverFrameIndex && this.draggedFrameIndex !== index;
 
     return html`
@@ -792,38 +713,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     `;
   }
 
-  private getSelectedFrame(
-    activeClip: AnimationClip | null = this.getActiveClip()
-  ): AnimationFrame | null {
-    if (!activeClip || activeClip.frames.length === 0) {
-      return null;
-    }
-
-    const frame = activeClip.frames[this.selectedFrameIndex] ?? null;
-    if (!frame) {
-      return null;
-    }
-
-    return this.frameDraft ?? frame;
-  }
-
-  private getPreviewFrame(
-    activeClip: AnimationClip | null = this.getActiveClip()
-  ): AnimationFrame | null {
-    if (!activeClip || activeClip.frames.length === 0) {
-      return null;
-    }
-
-    const frame = activeClip.frames[this.previewFrameIndex] ?? activeClip.frames[0] ?? null;
-    if (!frame) {
-      return null;
-    }
-
-    return this.frameDraft && this.previewFrameIndex === this.selectedFrameIndex
-      ? this.frameDraft
-      : frame;
-  }
-
   private getFrameImageStyle(frame: AnimationFrame): string {
     if (isSequenceAnimationFrame(frame)) {
       return 'width:100%; height:100%; left:0; top:0;';
@@ -836,63 +725,25 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     return `width:${scaleX}%; height:${scaleY}%; left:${left}%; top:${top}%;`;
   }
 
-  private getFrameMetrics(frame: AnimationFrame): { frameWidth: number; frameHeight: number } {
-    const resolvedTexturePath = this.getResolvedFrameTexturePath(frame);
-    const cachedDimensions = resolvedTexturePath
-      ? (this.textureDimensionsCache.get(resolvedTexturePath) ?? null)
-      : null;
-    const textureWidth = cachedDimensions?.width || this.textureDimensions.width || 256;
-    const textureHeight = cachedDimensions?.height || this.textureDimensions.height || 256;
-
-    if (isSequenceAnimationFrame(frame)) {
-      return {
-        frameWidth: Math.max(24, Math.round(textureWidth)),
-        frameHeight: Math.max(24, Math.round(textureHeight)),
-      };
-    }
-
-    return {
-      frameWidth: Math.max(24, Math.round(textureWidth * Math.max(frame.repeat.x, 0.05))),
-      frameHeight: Math.max(24, Math.round(textureHeight * Math.max(frame.repeat.y, 0.05))),
-    };
-  }
-
-  private getResolvedFrameTexturePath(frame: AnimationFrame | null): string {
-    return getAnimationFrameTexturePath(this.resource, frame);
-  }
-
-  private getTexturePreviewUrl(frame: AnimationFrame | null): string {
-    const texturePath = this.getResolvedFrameTexturePath(frame);
-    if (!texturePath) {
-      return '';
-    }
-
-    if (texturePath === this.previewTexturePath && this.texturePreviewUrl) {
-      return this.texturePreviewUrl;
-    }
-
-    const cachedTextureUrl = this.texturePreviewCache.get(texturePath);
-    if (cachedTextureUrl) {
-      return cachedTextureUrl;
-    }
-
-    void this.ensureTexturePreviewLoaded(texturePath);
-    return '';
-  }
-
   private getFrameDurationLabel(frame: AnimationFrame): string {
-    const activeClip = this.getActiveClip();
+    const activeClip = this.controller.activeClip;
     if (!activeClip) {
       return 'No timing';
     }
 
-    return `${this.getFrameDurationSeconds(activeClip, frame).toFixed(3)}s`;
+    return `${this.controller.getFrameDurationSeconds(activeClip, frame).toFixed(3)}s`;
   }
 
-  private getFrameDurationSeconds(clip: AnimationClip, frame: AnimationFrame): number {
-    const fps = Math.max(1, clip.fps);
-    const multiplier = Math.max(0.001, frame.durationMultiplier);
-    return (1 / fps) * multiplier;
+  private onControllerChanged(): void {
+    // A document reload drops the transient draft under an in-flight stage drag;
+    // the drag has nothing left to edit, so end it rather than leave a pointer
+    // gesture bound to a frame that no longer exists.
+    if (this.stageDragState && !this.controller.frameDraft) {
+      this.stageDragState = null;
+    }
+
+    this.syncPlaybackTicker();
+    this.requestUpdate();
   }
 
   private onSetEditMode(mode: AnimationEditMode): void {
@@ -924,13 +775,13 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
   private getStageViewport(): StageViewport | null {
     const frameElement = this.querySelector('.stage-frame');
-    const frame = this.getSelectedFrame();
+    const frame = this.controller.selectedFrame;
     if (!frameElement || !frame) {
       return null;
     }
 
     const rect = frameElement.getBoundingClientRect();
-    const metrics = this.getFrameMetrics(frame);
+    const metrics = this.controller.getFrameMetrics(frame);
     return {
       rect: new DOMRect(
         rect.left - this.stageView.panX,
@@ -944,84 +795,47 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private onSelectFrame(event: MouseEvent, index: number): void {
-    const currentSelection = this.getSelectedFrameIndices();
-    let nextSelectedFrameIndices: number[];
-    let nextPrimaryIndex = index;
-
-    if (event.shiftKey && this.selectionAnchorFrameIndex >= 0) {
-      const [rangeStart, rangeEnd] =
-        this.selectionAnchorFrameIndex <= index
-          ? [this.selectionAnchorFrameIndex, index]
-          : [index, this.selectionAnchorFrameIndex];
-      nextSelectedFrameIndices = [];
-      for (let frameIndex = rangeStart; frameIndex <= rangeEnd; frameIndex += 1) {
-        nextSelectedFrameIndices.push(frameIndex);
-      }
-    } else if (event.ctrlKey || event.metaKey) {
-      const nextSelection = new Set(currentSelection);
-      if (nextSelection.has(index) && nextSelection.size > 1) {
-        nextSelection.delete(index);
-      } else {
-        nextSelection.add(index);
-      }
-      nextSelectedFrameIndices = [...nextSelection].sort((left, right) => left - right);
-      if (!nextSelectedFrameIndices.includes(index)) {
-        nextPrimaryIndex = nextSelectedFrameIndices.at(-1) ?? -1;
-      }
-    } else {
-      nextSelectedFrameIndices = [index];
-    }
-
-    this.frameDraft = null;
-    this.selectedFrameIndices = nextSelectedFrameIndices;
-    this.selectedFrameIndex = nextPrimaryIndex;
-    this.previewFrameIndex = nextPrimaryIndex;
-    this.previewElapsedSeconds = 0;
-    this.selectionAnchorFrameIndex = index;
-    this.persistSelectedFrameIndex(nextPrimaryIndex);
+    this.controller.selectFrame(index, {
+      shift: event.shiftKey,
+      ctrl: event.ctrlKey || event.metaKey,
+    });
   }
 
   private onTogglePlayback(): void {
-    if (this.isPreviewPlaying) {
-      this.stopPreviewPlayback();
-      return;
-    }
-
-    this.startPreviewPlayback();
+    this.controller.togglePlayback();
   }
 
   private onStopPlayback(): void {
-    this.stopPreviewPlayback();
-    const activeClip = this.getActiveClip();
-    if (!activeClip || activeClip.frames.length === 0) {
-      this.previewFrameIndex = -1;
-      return;
-    }
-
-    const fallbackIndex = this.selectedFrameIndex >= 0 ? this.selectedFrameIndex : 0;
-    this.previewFrameIndex = Math.min(fallbackIndex, activeClip.frames.length - 1);
-    this.previewElapsedSeconds = 0;
+    this.controller.stopPlaybackAndRewind();
   }
 
-  private startPreviewPlayback(): void {
-    const activeClip = this.getActiveClip();
-    if (!activeClip || activeClip.frames.length === 0 || this.playbackFrameHandle !== null) {
+  /**
+   * The rAF ticker is the host's half of preview playback: the controller owns
+   * *when* a frame flips (it is shared with the stage), this owns the clock.
+   */
+  private syncPlaybackTicker(): void {
+    if (this.controller.isPreviewPlaying) {
+      this.startPlaybackTicker();
       return;
     }
 
-    this.isPreviewPlaying = true;
-    this.previewDirection = 1;
+    this.stopPlaybackTicker();
+  }
+
+  private startPlaybackTicker(): void {
+    if (this.playbackFrameHandle !== null) {
+      return;
+    }
+
     this.playbackLastTimestamp = null;
 
     const tick = (timestamp: number) => {
-      if (!this.isPreviewPlaying) {
+      if (!this.controller.isPreviewPlaying) {
         return;
       }
 
       this.playbackFrameHandle = requestAnimationFrame(tick);
-      const clip = this.getActiveClip();
-      const frame = this.getPreviewFrame(clip);
-      if (!clip || !frame) {
+      if (!this.controller.activeClip || !this.controller.previewFrame) {
         return;
       }
 
@@ -1030,395 +844,51 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
         return;
       }
 
-      let deltaSeconds = (timestamp - this.playbackLastTimestamp) / 1000;
+      const deltaSeconds = (timestamp - this.playbackLastTimestamp) / 1000;
       this.playbackLastTimestamp = timestamp;
-
-      while (deltaSeconds > 0) {
-        const currentClip = this.getActiveClip();
-        const currentFrame = this.getPreviewFrame(currentClip);
-        if (!currentClip || !currentFrame) {
-          break;
-        }
-
-        const frameDuration = this.getFrameDurationSeconds(currentClip, currentFrame);
-        const remaining = frameDuration - this.previewElapsedSeconds;
-        if (deltaSeconds < remaining) {
-          this.previewElapsedSeconds += deltaSeconds;
-          deltaSeconds = 0;
-          break;
-        }
-
-        deltaSeconds -= remaining;
-        this.previewElapsedSeconds = 0;
-        if (!this.stepPreviewFrame(currentClip)) {
-          this.stopPreviewPlayback();
-          break;
-        }
-      }
+      this.controller.advancePlayback(deltaSeconds);
     };
 
     this.playbackFrameHandle = requestAnimationFrame(tick);
   }
 
-  private stopPreviewPlayback(): void {
+  private stopPlaybackTicker(): void {
     if (this.playbackFrameHandle !== null) {
       cancelAnimationFrame(this.playbackFrameHandle);
       this.playbackFrameHandle = null;
     }
 
-    this.isPreviewPlaying = false;
     this.playbackLastTimestamp = null;
-    this.previewElapsedSeconds = 0;
-  }
-
-  private stepPreviewFrame(activeClip: AnimationClip): boolean {
-    if (activeClip.frames.length === 0) {
-      return false;
-    }
-
-    if (activeClip.playbackMode === 'ping-pong') {
-      const nextIndex = this.previewFrameIndex + this.previewDirection;
-      if (nextIndex >= 0 && nextIndex < activeClip.frames.length) {
-        this.previewFrameIndex = nextIndex;
-        return true;
-      }
-
-      if (activeClip.frames.length === 1) {
-        return activeClip.loop;
-      }
-
-      this.previewDirection *= -1;
-      const bouncedIndex = this.previewFrameIndex + this.previewDirection;
-      if (bouncedIndex >= 0 && bouncedIndex < activeClip.frames.length) {
-        this.previewFrameIndex = bouncedIndex;
-        if (!activeClip.loop && bouncedIndex === 0) {
-          return false;
-        }
-        return true;
-      }
-
-      return false;
-    }
-
-    const nextIndex = this.previewFrameIndex + 1;
-    if (nextIndex < activeClip.frames.length) {
-      this.previewFrameIndex = nextIndex;
-      return true;
-    }
-
-    if (!activeClip.loop) {
-      this.previewFrameIndex = activeClip.frames.length - 1;
-      return false;
-    }
-
-    this.previewFrameIndex = 0;
-    return true;
-  }
-
-  private async applyClipUpdate(
-    updater: (clip: AnimationClip) => AnimationClip,
-    label: string
-  ): Promise<void> {
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(clip =>
-          clip.name === this.activeClipName ? updater(clip) : clip
-        ),
-      }),
-      label
-    );
-  }
-
-  private async applySelectedFrameUpdate(
-    updater: (frame: AnimationFrame) => AnimationFrame,
-    label: string
-  ): Promise<void> {
-    const frameIndex = this.selectedFrameIndex;
-    if (frameIndex < 0) {
-      return;
-    }
-
-    this.frameDraft = null;
-    await this.applyClipUpdate(
-      clip => ({
-        ...clip,
-        frames: clip.frames.map((frame, index) => (index === frameIndex ? updater(frame) : frame)),
-      }),
-      label
-    );
-  }
-
-  private async onUpdateClipPlaybackMode(mode: AnimationPlaybackMode): Promise<void> {
-    await this.applyClipUpdate(
-      clip => ({ ...clip, playbackMode: mode }),
-      `Update clip playback mode: ${this.activeClipName}`
-    );
-  }
-
-  private async onUpdateSelectedFrameDurationMultiplier(value: number): Promise<void> {
-    if (!Number.isFinite(value) || value <= 0) {
-      return;
-    }
-
-    await this.applySelectedFrameUpdate(
-      frame => ({ ...frame, durationMultiplier: Math.max(0.05, value) }),
-      `Update frame duration multiplier: ${this.activeClipName}`
-    );
-  }
-
-  private async onUpdateSelectedFrameTexturePath(value: string): Promise<void> {
-    await this.applySelectedFrameUpdate(
-      frame => ({ ...frame, texturePath: value }),
-      `Update frame texture override: ${this.activeClipName}`
-    );
-  }
-
-  private async onUpdateSelectedFrameAnchor(axis: 'x' | 'y', value: number): Promise<void> {
-    if (!Number.isFinite(value)) {
-      return;
-    }
-
-    const clampedValue = Math.min(1, Math.max(0, value));
-    await this.applySelectedFrameUpdate(
-      frame => ({
-        ...frame,
-        anchor: { ...frame.anchor, [axis]: clampedValue },
-      }),
-      `Update frame anchor: ${this.activeClipName}`
-    );
   }
 
   private isAnchorPresetActive(currentAnchor: StagePoint, presetAnchor: StagePoint): boolean {
     return currentAnchor.x === presetAnchor.x && currentAnchor.y === presetAnchor.y;
   }
 
-  private getSelectedAnchor(): StagePoint | null {
-    const selectedFrame = this.getSelectedFrame();
-    if (!selectedFrame) {
-      return null;
-    }
-
-    return {
-      x: selectedFrame.anchor.x,
-      y: selectedFrame.anchor.y,
-    };
-  }
-
-  private async onApplyAnchorPreset(anchor: StagePoint): Promise<void> {
-    await this.applySelectedFrameUpdate(
-      frame => ({
-        ...frame,
-        anchor: { x: anchor.x, y: anchor.y },
-      }),
-      `Set frame anchor preset: ${this.activeClipName}`
-    );
-  }
-
-  /**
-   * Add a named point to **every** frame of the clip at the same normalized spot.
-   * A point that exists on only some frames is almost always an accident; scripts
-   * read it by name every tick and a hole reads as "the socket vanished".
-   */
   private async onAddPoint(): Promise<void> {
-    const clip = this.getActiveClip();
-    if (!clip) {
-      return;
+    const name = await this.controller.addFramePoint();
+    if (name) {
+      this.selectedPointName = name;
     }
-
-    const existing = new Set(collectClipPointNames(clip));
-    let suggestion = 'point';
-    for (let index = 1; existing.has(suggestion); index += 1) {
-      suggestion = `point${index}`;
-    }
-
-    // Auto-named like clips are; the list row is an input, so renaming is inline.
-    const name = suggestion;
-    this.frameDraft = null;
-    this.selectedPointName = name;
-    await this.applyClipUpdate(
-      candidate => ({
-        ...candidate,
-        frames: candidate.frames.map(frame => ({
-          ...frame,
-          points: [...(frame.points ?? []), { name, x: 0.5, y: 0.5, angle: 0 }],
-        })),
-      }),
-      `Add frame point "${name}": ${this.activeClipName}`
-    );
   }
 
   private async onRenamePoint(name: string, rawNextName: string): Promise<void> {
-    const nextName = rawNextName.trim();
-    const clip = this.getActiveClip();
-    if (!clip || !nextName || nextName === name) {
-      // Restore the input to the stored name on an empty/no-op edit.
-      this.requestUpdate();
-      return;
-    }
-    if (collectClipPointNames(clip).includes(nextName)) {
+    const appliedName = await this.controller.renameFramePoint(name, rawNextName);
+    if (!appliedName) {
+      // Restore the input to the stored name on an empty/no-op/duplicate edit.
       this.requestUpdate();
       return;
     }
 
-    this.frameDraft = null;
-    this.selectedPointName = nextName;
-    await this.applyClipUpdate(
-      candidate => ({
-        ...candidate,
-        frames: candidate.frames.map(frame => ({
-          ...frame,
-          points: (frame.points ?? []).map(point =>
-            point.name === name ? { ...point, name: nextName } : point
-          ),
-        })),
-      }),
-      `Rename frame point: ${name} -> ${nextName}`
-    );
+    this.selectedPointName = appliedName;
   }
 
   private async onRemovePoint(name: string): Promise<void> {
-    this.frameDraft = null;
     if (this.selectedPointName === name) {
       this.selectedPointName = null;
     }
-    await this.applyClipUpdate(
-      clip => ({
-        ...clip,
-        frames: clip.frames.map(frame => ({
-          ...frame,
-          points: (frame.points ?? []).filter(point => point.name !== name),
-        })),
-      }),
-      `Remove frame point "${name}": ${this.activeClipName}`
-    );
-  }
 
-  /** Stamp the selected frame's version of a point onto every frame of the clip. */
-  private async onCopyPointToClip(name: string): Promise<void> {
-    const source = findAnimationFramePoint(this.getSelectedFrame(), name);
-    if (!source) {
-      return;
-    }
-
-    this.frameDraft = null;
-    await this.applyClipUpdate(
-      clip => ({
-        ...clip,
-        frames: clip.frames.map(frame => {
-          const points = frame.points ?? [];
-          const replacement = { ...source };
-          return {
-            ...frame,
-            points: points.some(point => point.name === name)
-              ? points.map(point => (point.name === name ? replacement : point))
-              : [...points, replacement],
-          };
-        }),
-      }),
-      `Copy frame point "${name}" to clip: ${this.activeClipName}`
-    );
-  }
-
-  private async onApplySelectedAnchorToActiveClip(): Promise<void> {
-    const anchor = this.getSelectedAnchor();
-    if (!anchor) {
-      return;
-    }
-
-    this.frameDraft = null;
-    await this.applyClipUpdate(
-      clip => ({
-        ...clip,
-        frames: clip.frames.map(frame => ({
-          ...frame,
-          anchor: { x: anchor.x, y: anchor.y },
-        })),
-      }),
-      `Apply frame anchor to clip: ${this.activeClipName}`
-    );
-  }
-
-  private async onApplySelectedAnchorToAllClips(): Promise<void> {
-    const anchor = this.getSelectedAnchor();
-    if (!anchor) {
-      return;
-    }
-
-    this.frameDraft = null;
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(clip => ({
-          ...clip,
-          frames: clip.frames.map(frame => ({
-            ...frame,
-            anchor: { x: anchor.x, y: anchor.y },
-          })),
-        })),
-      }),
-      `Apply frame anchor to all clips: ${this.activeClipName}`,
-      this.activeClipName
-    );
-  }
-
-  private async onUpdateSelectedFrameBoundingBox(
-    field: 'x' | 'y' | 'width' | 'height',
-    value: number
-  ): Promise<void> {
-    if (!Number.isFinite(value)) {
-      return;
-    }
-
-    await this.applySelectedFrameUpdate(
-      frame => ({
-        ...frame,
-        boundingBox: {
-          ...frame.boundingBox,
-          [field]:
-            field === 'width' || field === 'height'
-              ? Math.max(0, Math.round(value))
-              : Math.round(value),
-        },
-      }),
-      `Update frame bounding box: ${this.activeClipName}`
-    );
-  }
-
-  private async onAddPolygonVertex(): Promise<void> {
-    const selectedFrame = this.getSelectedFrame();
-    if (!selectedFrame) {
-      return;
-    }
-
-    const metrics = this.getFrameMetrics(selectedFrame);
-    await this.applySelectedFrameUpdate(
-      frame => ({
-        ...frame,
-        collisionPolygon: [
-          ...frame.collisionPolygon,
-          { x: Math.round(metrics.frameWidth / 2), y: Math.round(metrics.frameHeight / 2) },
-        ],
-      }),
-      `Add frame polygon vertex: ${this.activeClipName}`
-    );
-  }
-
-  private async onClearPolygon(): Promise<void> {
-    await this.applySelectedFrameUpdate(
-      frame => ({ ...frame, collisionPolygon: [] }),
-      `Clear frame polygon: ${this.activeClipName}`
-    );
-  }
-
-  private async onResetBoundingBox(): Promise<void> {
-    await this.applySelectedFrameUpdate(
-      frame => ({
-        ...frame,
-        boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-      }),
-      `Reset frame bounding box: ${this.activeClipName}`
-    );
+    await this.controller.removeFramePoint(name);
   }
 
   private onStagePointerDown(event: PointerEvent): void {
@@ -1429,7 +899,8 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
-    const frame = this.getSelectedFrame();
+    const controller = this.controller;
+    const frame = controller.selectedFrame;
     if (!frame) {
       return;
     }
@@ -1440,15 +911,16 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     const target = event.target as HTMLElement | SVGElement;
-    const draft = this.cloneFrame(frame);
-    this.frameDraft = draft;
+    if (!controller.beginFrameDraft()) {
+      return;
+    }
 
     if (this.editMode === 'points') {
       const angleHandleName = target.getAttribute('data-point-angle');
       const pointName = target.getAttribute('data-point-name') ?? angleHandleName;
       if (!pointName) {
         // Empty stage click in points mode: nothing to grab.
-        this.frameDraft = null;
+        controller.clearFrameDraft();
         return;
       }
       this.selectedPointName = pointName;
@@ -1460,14 +932,20 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
         pointAngleHandle: Boolean(angleHandleName),
       };
     } else if (this.editMode === 'anchor') {
-      draft.anchor = this.toNormalizedAnchor(point, frame);
+      controller.updateFrameDraft(draft => ({
+        ...draft,
+        anchor: this.toNormalizedAnchor(point, frame),
+      }));
       this.stageDragState = {
         pointerId: event.pointerId,
         mode: 'anchor',
         origin: point,
       };
     } else if (this.editMode === 'bbox') {
-      draft.boundingBox = { x: point.x, y: point.y, width: 0, height: 0 };
+      controller.updateFrameDraft(draft => ({
+        ...draft,
+        boundingBox: { x: point.x, y: point.y, width: 0, height: 0 },
+      }));
       this.stageDragState = {
         pointerId: event.pointerId,
         mode: 'bbox',
@@ -1483,12 +961,16 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
           vertexIndex,
         };
       } else {
-        draft.collisionPolygon = [...draft.collisionPolygon, point];
+        let appendedVertexIndex = 0;
+        controller.updateFrameDraft(draft => {
+          appendedVertexIndex = draft.collisionPolygon.length;
+          return { ...draft, collisionPolygon: [...draft.collisionPolygon, point] };
+        });
         this.stageDragState = {
           pointerId: event.pointerId,
           mode: 'polygon',
           origin: point,
-          vertexIndex: draft.collisionPolygon.length - 1,
+          vertexIndex: appendedVertexIndex,
         };
       }
     }
@@ -1501,9 +983,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
+    const controller = this.controller;
     const dragState = this.stageDragState;
-    const frame = this.getSelectedFrame();
-    if (!dragState || !frame || dragState.pointerId !== event.pointerId || !this.frameDraft) {
+    const frame = controller.selectedFrame;
+    if (!dragState || !frame || dragState.pointerId !== event.pointerId || !controller.frameDraft) {
       return;
     }
 
@@ -1517,10 +1000,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       if (!pointName) {
         return;
       }
-      const metrics = this.getFrameMetrics(frame);
-      this.frameDraft = {
-        ...this.frameDraft,
-        points: (this.frameDraft.points ?? []).map(candidate => {
+      const metrics = controller.getFrameMetrics(frame);
+      controller.updateFrameDraft(draft => ({
+        ...draft,
+        points: (draft.points ?? []).map(candidate => {
           if (candidate.name !== pointName) {
             return candidate;
           }
@@ -1537,15 +1020,15 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
           const angle = (Math.atan2(point.y - originY, point.x - originX) * 180) / Math.PI;
           return { ...candidate, angle: Math.round(angle) };
         }),
-      };
+      }));
       return;
     }
 
     if (dragState.mode === 'anchor') {
-      this.frameDraft = {
-        ...this.frameDraft,
+      controller.updateFrameDraft(draft => ({
+        ...draft,
         anchor: this.toNormalizedAnchor(point, frame),
-      };
+      }));
       return;
     }
 
@@ -1554,10 +1037,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       const y = Math.min(dragState.origin.y, point.y);
       const width = Math.abs(point.x - dragState.origin.x);
       const height = Math.abs(point.y - dragState.origin.y);
-      this.frameDraft = {
-        ...this.frameDraft,
+      controller.updateFrameDraft(draft => ({
+        ...draft,
         boundingBox: { x, y, width, height },
-      };
+      }));
       return;
     }
 
@@ -1566,12 +1049,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
-    const nextPolygon = [...this.frameDraft.collisionPolygon];
-    nextPolygon[vertexIndex] = point;
-    this.frameDraft = {
-      ...this.frameDraft,
-      collisionPolygon: nextPolygon,
-    };
+    controller.updateFrameDraft(draft => {
+      const nextPolygon = [...draft.collisionPolygon];
+      nextPolygon[vertexIndex] = point;
+      return { ...draft, collisionPolygon: nextPolygon };
+    });
   }
 
   private async onStagePointerUp(event: PointerEvent): Promise<void> {
@@ -1585,17 +1067,10 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    const draft = this.frameDraft;
     this.stageDragState = null;
-    this.frameDraft = null;
 
-    if (!draft) {
-      return;
-    }
-
-    await this.applySelectedFrameUpdate(
-      () => draft,
-      `Update frame ${this.editMode}: ${this.activeClipName}`
+    await this.controller.commitFrameDraft(
+      `Update frame ${this.editMode}: ${this.controller.activeClipName}`
     );
   }
 
@@ -1610,7 +1085,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return null;
     }
 
-    const metrics = this.getFrameMetrics(frame);
+    const metrics = this.controller.getFrameMetrics(frame);
     const x = Math.min(
       metrics.frameWidth,
       Math.max(0, ((event.clientX - rect.left) / rect.width) * metrics.frameWidth)
@@ -1626,97 +1101,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   }
 
   private toNormalizedAnchor(point: StagePoint, frame: AnimationFrame): StagePoint {
-    const metrics = this.getFrameMetrics(frame);
+    const metrics = this.controller.getFrameMetrics(frame);
     return {
       x: Number((point.x / metrics.frameWidth).toFixed(3)),
       y: Number((point.y / metrics.frameHeight).toFixed(3)),
     };
-  }
-
-  private cloneFrame(frame: AnimationFrame): AnimationFrame {
-    return {
-      ...frame,
-      offset: { ...frame.offset },
-      repeat: { ...frame.repeat },
-      anchor: { ...frame.anchor },
-      boundingBox: { ...frame.boundingBox },
-      collisionPolygon: frame.collisionPolygon.map(point => ({ ...point })),
-      points: (frame.points ?? []).map(point => ({ ...point })),
-    };
-  }
-
-  private getSelectedAnimatedSprite(): AnimatedSprite2D | null {
-    const primaryNodeId = appState.selection.primaryNodeId;
-    if (!primaryNodeId) {
-      return null;
-    }
-
-    const graph = this.sceneManager.getActiveSceneGraph();
-    const node = graph?.nodeMap.get(primaryNodeId);
-    return node instanceof AnimatedSprite2D ? node : null;
-  }
-
-  private getActiveClip() {
-    return this.resource?.clips.find(clip => clip.name === this.activeClipName) ?? null;
-  }
-
-  private syncFrameStateToActiveClip(preferFirstFrame = false): void {
-    const activeClip = this.getActiveClip();
-    const frameCount = activeClip?.frames.length ?? 0;
-    const storedFrameIndex = this.getStoredSelectedFrameIndex();
-    this.frameDraft = null;
-    this.stageDragState = null;
-
-    if (frameCount === 0) {
-      this.selectedFrameIndex = -1;
-      this.selectedFrameIndices = [];
-      this.previewFrameIndex = -1;
-      this.previewElapsedSeconds = 0;
-      this.selectionAnchorFrameIndex = -1;
-      this.persistSelectedFrameIndex(-1);
-      return;
-    }
-
-    const fallbackIndex = preferFirstFrame
-      ? 0
-      : this.selectedFrameIndex >= 0
-        ? Math.min(this.selectedFrameIndex, frameCount - 1)
-        : storedFrameIndex >= 0
-          ? Math.min(storedFrameIndex, frameCount - 1)
-          : 0;
-
-    this.selectedFrameIndex = fallbackIndex;
-    this.selectedFrameIndices = [fallbackIndex];
-    this.previewFrameIndex = this.isPreviewPlaying
-      ? Math.min(
-          this.previewFrameIndex >= 0 ? this.previewFrameIndex : fallbackIndex,
-          frameCount - 1
-        )
-      : fallbackIndex;
-    this.previewElapsedSeconds = 0;
-    this.selectionAnchorFrameIndex = fallbackIndex;
-    this.persistSelectedFrameIndex(fallbackIndex);
-  }
-
-  private hasSupportedImageExtension(path: string): boolean {
-    const cleaned = path.split('?')[0].split('#')[0];
-    const extension = cleaned.includes('.') ? (cleaned.split('.').pop()?.toLowerCase() ?? '') : '';
-    return IMAGE_EXTENSIONS.has(extension);
-  }
-
-  private resolveAssetPath(): string | null {
-    const directResourcePath = this.resourcePath.trim();
-    if (directResourcePath) {
-      return directResourcePath;
-    }
-
-    const tab = this.tabId
-      ? appState.tabs.tabs.find(
-          candidate => candidate.id === this.tabId && candidate.type === 'animation'
-        )
-      : null;
-
-    return tab?.resourceId ?? null;
   }
 
   private normalizeDroppedTextureResource(rawValue: string): string | null {
@@ -1726,7 +1115,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     }
 
     if (value.startsWith('res://') || value.startsWith('http://') || value.startsWith('https://')) {
-      return this.hasSupportedImageExtension(value) ? value : null;
+      return hasSupportedImageExtension(value) ? value : null;
     }
 
     if (value.includes('://')) {
@@ -1735,7 +1124,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     const normalized = value.replace(/^\.\//, '').replace(/^\/+/, '').replace(/\\+/g, '/');
     const resourcePath = `res://${normalized}`;
-    return this.hasSupportedImageExtension(resourcePath) ? resourcePath : null;
+    return hasSupportedImageExtension(resourcePath) ? resourcePath : null;
   }
 
   private getDroppedTextureResource(event: DragEvent): string | null {
@@ -1774,585 +1163,11 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     );
   }
 
-  /**
-   * Intrinsic pixel size of a frame's raster, stamped into the document so
-   * `sizeMode: 'native'` layout never has to wait on a texture load. Undefined
-   * when the file can't be read or decoded — the frame then falls back to
-   * stretch layout, exactly as legacy content does.
-   */
-  private async readFrameSourceSize(texturePath: string): Promise<AnimationSize | undefined> {
-    try {
-      const blob = await this.projectStorage.readBlob(texturePath);
-      const size = await readBlobSize(blob);
-      return size ? { width: size.width, height: size.height } : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   /** Image files dragged in from the OS (as opposed to project assets, which arrive as paths). */
   private getDroppedImageFiles(event: DragEvent): File[] {
     const files = Array.from(event.dataTransfer?.files ?? []);
     return files.filter(
-      file => file.type.startsWith('image/') || this.hasSupportedImageExtension(file.name)
-    );
-  }
-
-  /**
-   * Highest `<clip>_<nnnn>` number already referenced by the document, so imports keep counting up
-   * instead of overwriting files that earlier slices produced.
-   */
-  private nextFrameFileNumber(clipName: string): number {
-    const prefix = sanitizeFrameFilePrefix(clipName);
-    const pattern = new RegExp(`/${prefix}_(\\d+)\\.[^./]+$`, 'i');
-    let highest = 0;
-
-    for (const clip of this.resource?.clips ?? []) {
-      for (const frame of clip.frames) {
-        const match = pattern.exec(getAnimationFrameTexturePath(this.resource, frame));
-        if (match) {
-          highest = Math.max(highest, Number(match[1]) || 0);
-        }
-      }
-    }
-
-    return highest + 1;
-  }
-
-  /**
-   * Copy OS-dropped images into the animation's own folder as `<clip>_<nnnn>.<ext>` (the managed
-   * sprite-folder convention), so a drag from the desktop lands as project files the resource can
-   * reference. Returns the written resource paths in drop order.
-   */
-  private async importDroppedImageFiles(files: File[]): Promise<string[]> {
-    const assetPath = this.assetPath ? normalizeAnimationAssetPath(this.assetPath) : '';
-    if (!assetPath || files.length === 0) {
-      return [];
-    }
-
-    const clipName = this.activeClipName || this.resource?.clips[0]?.name || 'idle';
-    let frameNumber = this.nextFrameFileNumber(clipName);
-    const written: string[] = [];
-
-    for (const file of files) {
-      const extension = file.name.split('.').pop()?.toLowerCase();
-      const framePath = buildAnimationFrameResourcePath(assetPath, frameNumber, {
-        clipName,
-        extension: extension && IMAGE_EXTENSIONS.has(extension) ? extension : 'png',
-      });
-      await this.projectStorage.writeBinaryFile(framePath, await file.arrayBuffer());
-      written.push(framePath);
-      frameNumber += 1;
-    }
-
-    return written;
-  }
-
-  private async syncFromResourceContext(preserveClip: boolean): Promise<void> {
-    const nextAssetPath = this.resolveAssetPath();
-    const assetChanged = nextAssetPath !== this.assetPath;
-    const nextAnimationId = nextAssetPath ? deriveAnimationDocumentId(nextAssetPath) : null;
-    const animationChanged = nextAnimationId !== this.animationId;
-
-    this.assetPath = nextAssetPath;
-    this.animationId = nextAnimationId;
-    this.syncActiveInspectorController();
-    await this.syncFromDocumentState(preserveClip && !assetChanged && !animationChanged);
-  }
-
-  private async syncFromDocumentState(preserveClip: boolean): Promise<void> {
-    const assetPath = this.assetPath;
-    const animationId = this.animationId;
-
-    if (!assetPath || !animationId) {
-      this.stopPreviewPlayback();
-      this.resource = null;
-      this.activeClipName = '';
-      this.errorMessage = null;
-      this.resetCurrentTexturePreview();
-      this.syncFrameStateToActiveClip();
-      this.syncActiveInspectorController();
-      return;
-    }
-
-    const resource = appState.animations.resources[animationId] ?? null;
-    const isActiveLoadError =
-      appState.animations.activeAnimationId === animationId &&
-      appState.animations.loadState === 'error';
-
-    this.errorMessage = isActiveLoadError ? appState.animations.loadError : null;
-
-    if (!resource) {
-      this.stopPreviewPlayback();
-      this.resource = null;
-      this.activeClipName = '';
-      this.resetCurrentTexturePreview();
-      this.syncFrameStateToActiveClip();
-      this.syncActiveInspectorController();
-      return;
-    }
-
-    this.resource = resource;
-
-    const clipNames = new Set(resource.clips.map(clip => clip.name));
-    const selectedSprite = this.getSelectedAnimatedSprite();
-    const selectedClipName =
-      selectedSprite?.animationResourcePath === assetPath ? selectedSprite.currentClip : '';
-    const storedClipName = this.getStoredActiveClipName();
-    const preferredClipName =
-      preserveClip && clipNames.has(this.activeClipName)
-        ? this.activeClipName
-        : storedClipName && clipNames.has(storedClipName)
-          ? storedClipName
-          : selectedClipName && clipNames.has(selectedClipName)
-            ? selectedClipName
-            : (resource.clips[0]?.name ?? '');
-
-    this.activeClipName = preferredClipName;
-    this.persistActiveClipName(preferredClipName);
-    this.syncFrameStateToActiveClip(!preserveClip);
-
-    await this.syncPreviewTexture();
-
-    this.syncActiveInspectorController();
-  }
-
-  private async syncPreviewTexture(): Promise<void> {
-    const previewFrame = this.getPreviewFrame();
-    const texturePath = this.getResolvedFrameTexturePath(previewFrame);
-    this.previewTexturePath = texturePath;
-    if (!texturePath) {
-      this.resetCurrentTexturePreview();
-      return;
-    }
-
-    const token = ++this.loadToken;
-    const cachedTextureUrl = this.texturePreviewCache.get(texturePath) ?? '';
-    const cachedDimensions = this.textureDimensionsCache.get(texturePath) ?? {
-      width: 0,
-      height: 0,
-    };
-
-    if (cachedTextureUrl) {
-      this.texturePreviewUrl = cachedTextureUrl;
-      this.textureDimensions = cachedDimensions;
-      return;
-    }
-
-    this.resetCurrentTexturePreview();
-    await this.ensureTexturePreviewLoaded(texturePath, token);
-  }
-
-  private async ensureTexturePreviewLoaded(
-    texturePath: string,
-    token = this.loadToken
-  ): Promise<void> {
-    if (!texturePath) {
-      return;
-    }
-
-    const inFlight = this.texturePreviewLoads.get(texturePath);
-    if (inFlight) {
-      await inFlight;
-      if (texturePath === this.previewTexturePath && token === this.loadToken) {
-        this.texturePreviewUrl = this.texturePreviewCache.get(texturePath) ?? '';
-        this.textureDimensions = this.textureDimensionsCache.get(texturePath) ?? {
-          width: 0,
-          height: 0,
-        };
-      }
-      return;
-    }
-
-    const loadPromise = (async () => {
-      try {
-        const blob = await this.projectStorage.readBlob(texturePath);
-        const textureUrl = URL.createObjectURL(blob);
-        const dimensions = await this.readTextureDimensions(textureUrl);
-        this.texturePreviewCache.set(texturePath, textureUrl);
-        this.textureDimensionsCache.set(texturePath, dimensions);
-
-        if (texturePath === this.previewTexturePath && token === this.loadToken) {
-          this.texturePreviewUrl = textureUrl;
-          this.textureDimensions = dimensions;
-        }
-
-        this.requestUpdate();
-      } catch {
-        if (texturePath === this.previewTexturePath && token === this.loadToken) {
-          this.resetCurrentTexturePreview();
-        }
-      } finally {
-        this.texturePreviewLoads.delete(texturePath);
-      }
-    })();
-
-    this.texturePreviewLoads.set(texturePath, loadPromise);
-    await loadPromise;
-  }
-
-  private resetCurrentTexturePreview(): void {
-    this.texturePreviewUrl = '';
-    this.textureDimensions = { width: 0, height: 0 };
-  }
-
-  private clearTexturePreviewCache(): void {
-    for (const textureUrl of this.texturePreviewCache.values()) {
-      if (textureUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(textureUrl);
-      }
-    }
-
-    this.texturePreviewCache.clear();
-    this.textureDimensionsCache.clear();
-    this.texturePreviewLoads.clear();
-    this.previewTexturePath = '';
-    this.resetCurrentTexturePreview();
-  }
-
-  private readTextureDimensions(textureUrl: string): Promise<TextureDimensions> {
-    return new Promise(resolve => {
-      const image = new Image();
-      image.onload = () => {
-        resolve({
-          width: image.naturalWidth || image.width || 0,
-          height: image.naturalHeight || image.height || 0,
-        });
-      };
-      image.onerror = () => resolve({ width: 0, height: 0 });
-      image.src = textureUrl;
-    });
-  }
-
-  private async applyResourceUpdate(
-    updater: (resource: AnimationResource) => AnimationResource,
-    label: string,
-    nextActiveClipName?: string
-  ): Promise<boolean> {
-    if (!this.assetPath || !this.resource || !this.animationId) {
-      return false;
-    }
-
-    const nextResource = updater(this.resource);
-    const pushed = await this.operations.invokeAndPush(
-      new UpdateAnimationDocumentOperation({
-        animationId: this.animationId,
-        nextResource,
-        label,
-      })
-    );
-    if (!pushed) {
-      return false;
-    }
-
-    this.resource = normalizeAnimationResource(nextResource);
-    const preservedActiveClipName =
-      nextActiveClipName ??
-      (this.activeClipName && nextResource.clips.some(clip => clip.name === this.activeClipName)
-        ? this.activeClipName
-        : (nextResource.clips[0]?.name ?? ''));
-    this.activeClipName = preservedActiveClipName;
-    this.persistActiveClipName(this.activeClipName);
-    this.syncFrameStateToActiveClip(Boolean(nextActiveClipName));
-
-    await this.syncPreviewTexture();
-
-    const selectedSprite = this.getSelectedAnimatedSprite();
-    if (
-      selectedSprite &&
-      selectedSprite.animationResourcePath === this.assetPath &&
-      this.activeClipName &&
-      selectedSprite.currentClip !== this.activeClipName
-    ) {
-      await this.commandDispatcher.execute(
-        new UpdateObjectPropertyCommand({
-          nodeId: selectedSprite.nodeId,
-          propertyPath: 'currentClip',
-          value: this.activeClipName,
-        })
-      );
-    }
-
-    return true;
-  }
-
-  private async onSelectClip(clipName: string): Promise<void> {
-    this.activeClipName = clipName;
-    this.persistActiveClipName(clipName);
-    this.syncFrameStateToActiveClip(true);
-    const selectedSprite = this.getSelectedAnimatedSprite();
-    if (
-      selectedSprite &&
-      selectedSprite.animationResourcePath === this.assetPath &&
-      selectedSprite.currentClip !== clipName
-    ) {
-      await this.commandDispatcher.execute(
-        new UpdateObjectPropertyCommand({
-          nodeId: selectedSprite.nodeId,
-          propertyPath: 'currentClip',
-          value: clipName,
-        })
-      );
-    }
-  }
-
-  private async onAddClip(): Promise<void> {
-    if (!this.resource) {
-      return;
-    }
-
-    const existingNames = new Set(this.resource.clips.map(clip => clip.name));
-    let index = this.resource.clips.length + 1;
-    let nextName = `clip-${index}`;
-    while (existingNames.has(nextName)) {
-      index += 1;
-      nextName = `clip-${index}`;
-    }
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: [
-          ...resource.clips,
-          {
-            name: nextName,
-            fps: 12,
-            loop: true,
-            playbackMode: 'normal',
-            frames: [],
-          },
-        ],
-      }),
-      `Add clip: ${nextName}`,
-      nextName
-    );
-  }
-
-  private async onRemoveClip(): Promise<void> {
-    if (!this.resource || !this.activeClipName || this.resource.clips.length === 0) {
-      return;
-    }
-
-    const confirmed = await this.dialogService.showConfirmation({
-      title: 'Delete clip?',
-      message: `Remove clip "${this.activeClipName}" from this animation?`,
-      confirmLabel: 'Delete clip',
-      cancelLabel: 'Cancel',
-      isDangerous: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    const remainingClips = this.resource.clips.filter(clip => clip.name !== this.activeClipName);
-    const nextActiveClipName = remainingClips[0]?.name ?? '';
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.filter(clip => clip.name !== this.activeClipName),
-      }),
-      `Remove clip: ${this.activeClipName}`,
-      nextActiveClipName
-    );
-  }
-
-  private async onRenameClip(nextName: string): Promise<void> {
-    if (!this.resource || !this.activeClipName || !nextName) {
-      return;
-    }
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(clip =>
-          clip.name === this.activeClipName ? { ...clip, name: nextName } : clip
-        ),
-      }),
-      `Rename clip: ${this.activeClipName} -> ${nextName}`,
-      nextName
-    );
-  }
-
-  private async onUpdateClipFps(nextFps: number): Promise<void> {
-    if (!Number.isFinite(nextFps) || nextFps <= 0) {
-      return;
-    }
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(clip =>
-          clip.name === this.activeClipName ? { ...clip, fps: Math.round(nextFps) } : clip
-        ),
-      }),
-      `Update clip fps: ${this.activeClipName}`
-    );
-  }
-
-  private async onUpdateClipLoop(nextLoop: boolean): Promise<void> {
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(clip =>
-          clip.name === this.activeClipName ? { ...clip, loop: nextLoop } : clip
-        ),
-      }),
-      `Update clip loop: ${this.activeClipName}`
-    );
-  }
-
-  private hasAnyFrames(resource: AnimationResource): boolean {
-    return resource.clips.some(clip => clip.frames.length > 0);
-  }
-
-  private async onRemoveSelectedFrame(): Promise<void> {
-    await this.removeFramesAtIndices(this.getSelectedFrameIndices());
-  }
-
-  private async removeFrameAtIndex(frameIndex: number): Promise<void> {
-    await this.removeFramesAtIndices([frameIndex]);
-  }
-
-  private async removeFramesAtIndices(frameIndices: number[]): Promise<void> {
-    const clip = this.getActiveClip();
-    const normalizedFrameIndices = [...new Set(frameIndices)]
-      .filter(frameIndex => frameIndex >= 0 && frameIndex < (clip?.frames.length ?? 0))
-      .sort((left, right) => left - right);
-
-    if (!clip || normalizedFrameIndices.length === 0) {
-      return;
-    }
-
-    const indexSet = new Set(normalizedFrameIndices);
-    const firstRemovedIndex = normalizedFrameIndices[0] ?? -1;
-    const isBatchDelete = normalizedFrameIndices.length > 1;
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(existingClip =>
-          existingClip.name === this.activeClipName
-            ? {
-                ...existingClip,
-                frames: existingClip.frames.filter((_, index) => !indexSet.has(index)),
-              }
-            : existingClip
-        ),
-      }),
-      isBatchDelete
-        ? `Delete ${normalizedFrameIndices.length} frames: ${this.activeClipName}`
-        : `Delete frame ${firstRemovedIndex + 1}: ${this.activeClipName}`,
-      this.activeClipName
-    );
-
-    const nextClip = this.getActiveClip();
-    const nextFrameCount = nextClip?.frames.length ?? 0;
-    const nextSelectedIndex =
-      nextFrameCount === 0 ? -1 : Math.min(firstRemovedIndex, nextFrameCount - 1);
-    this.selectedFrameIndex = nextSelectedIndex;
-    this.selectedFrameIndices = nextSelectedIndex >= 0 ? [nextSelectedIndex] : [];
-    this.previewFrameIndex = nextSelectedIndex;
-    this.selectionAnchorFrameIndex = nextSelectedIndex;
-    this.persistSelectedFrameIndex(nextSelectedIndex);
-  }
-
-  private async reorderFrame(fromIndex: number, toIndex: number): Promise<void> {
-    const clip = this.getActiveClip();
-    if (
-      !clip ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= clip.frames.length ||
-      toIndex >= clip.frames.length ||
-      fromIndex === toIndex
-    ) {
-      return;
-    }
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(existingClip => {
-          if (existingClip.name !== this.activeClipName) {
-            return existingClip;
-          }
-
-          const nextFrames = [...existingClip.frames];
-          const [movedFrame] = nextFrames.splice(fromIndex, 1);
-          if (!movedFrame) {
-            return existingClip;
-          }
-          nextFrames.splice(toIndex, 0, movedFrame);
-          return { ...existingClip, frames: nextFrames };
-        }),
-      }),
-      `Reorder frame ${fromIndex + 1} -> ${toIndex + 1}: ${this.activeClipName}`,
-      this.activeClipName
-    );
-
-    this.selectedFrameIndex = toIndex;
-    this.selectedFrameIndices = [toIndex];
-    this.previewFrameIndex = toIndex;
-    this.selectionAnchorFrameIndex = toIndex;
-    this.persistSelectedFrameIndex(toIndex);
-  }
-
-  private getSelectedFrameIndices(): number[] {
-    if (this.selectedFrameIndices.length > 0) {
-      return this.selectedFrameIndices;
-    }
-
-    return this.selectedFrameIndex >= 0 ? [this.selectedFrameIndex] : [];
-  }
-
-  /**
-   * Append (or, with `insertAtIndex`, splice in) frames referencing the given textures. Dropping
-   * onto a frame card inserts before it; dropping anywhere else in the editor appends.
-   */
-  private async onAddFrameTextures(texturePaths: string[], insertAtIndex?: number): Promise<void> {
-    if (!this.resource || !this.activeClipName) {
-      return;
-    }
-
-    const normalizedTexturePaths = texturePaths.map(path => path.trim()).filter(Boolean);
-    if (normalizedTexturePaths.length === 0) {
-      return;
-    }
-
-    const sourceSizes = await Promise.all(
-      normalizedTexturePaths.map(texturePath => this.readFrameSourceSize(texturePath))
-    );
-    const generatedFrames: AnimationFrame[] = normalizedTexturePaths.map((texturePath, index) => ({
-      textureIndex: 0,
-      offset: { x: 0, y: 0 },
-      repeat: { x: 1, y: 1 },
-      durationMultiplier: 1,
-      anchor: { ...DEFAULT_FRAME_ANCHOR },
-      texturePath,
-      boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-      collisionPolygon: [],
-      sourceSize: sourceSizes[index],
-    }));
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        clips: resource.clips.map(existingClip => {
-          if (existingClip.name !== this.activeClipName) {
-            return existingClip;
-          }
-          const frames = [...existingClip.frames];
-          const at =
-            insertAtIndex === undefined
-              ? frames.length
-              : Math.min(Math.max(0, insertAtIndex), frames.length);
-          frames.splice(at, 0, ...generatedFrames);
-          return { ...existingClip, frames };
-        }),
-      }),
-      `Add ${generatedFrames.length} frame texture${generatedFrames.length === 1 ? '' : 's'}: ${this.activeClipName}`,
-      this.activeClipName
+      file => file.type.startsWith('image/') || hasSupportedImageExtension(file.name)
     );
   }
 
@@ -2394,302 +1209,6 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     const singleResource = this.getDroppedTextureResource(event);
     return singleResource ? [singleResource] : [];
-  }
-
-  private async onAddFramesFromGrid(
-    columns: number = this.slicerColumns,
-    rows: number = this.slicerRows
-  ): Promise<void> {
-    const clip = this.getActiveClip();
-    const texturePath = this.resource?.texturePath?.trim() ?? '';
-    if (!clip || columns <= 0 || rows <= 0 || !texturePath) {
-      return;
-    }
-
-    const sliced = await this.sliceSpritesheetIntoFrameFiles(
-      texturePath,
-      columns,
-      rows,
-      clip.frames.length + 1,
-      clip.name
-    );
-    const generatedFrames: AnimationFrame[] = sliced.map(cell => ({
-      textureIndex: 0,
-      offset: { x: 0, y: 0 },
-      repeat: { x: 1, y: 1 },
-      durationMultiplier: 1,
-      anchor: { ...DEFAULT_FRAME_ANCHOR },
-      texturePath: cell.texturePath,
-      boundingBox: { x: 0, y: 0, width: 0, height: 0 },
-      collisionPolygon: [],
-      sourceSize: cell.sourceSize,
-    }));
-
-    await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        texturePath: '',
-        clips: resource.clips.map(existingClip =>
-          existingClip.name === this.activeClipName
-            ? { ...existingClip, frames: [...existingClip.frames, ...generatedFrames] }
-            : existingClip
-        ),
-      }),
-      `Slice spritesheet into ${generatedFrames.length} frames`
-    );
-  }
-
-  /**
-   * Cut the bound spritesheet into per-frame PNG files inside the animation's folder. Cell
-   * extraction is the shared pure {@link sliceImageBlob}; this method owns only the
-   * `.pix3anim`-specific naming (clip-scoped so two clips can't overwrite each other) and writing.
-   */
-  private async sliceSpritesheetIntoFrameFiles(
-    texturePath: string,
-    columns: number,
-    rows: number,
-    startFrameNumber: number,
-    clipName: string
-  ): Promise<Array<{ texturePath: string; sourceSize?: AnimationSize }>> {
-    const assetPath = this.assetPath ? normalizeAnimationAssetPath(this.assetPath) : '';
-    if (!assetPath) {
-      return [];
-    }
-
-    const sourceBlob = await this.projectStorage.readBlob(texturePath);
-    const cells = await sliceImageBlob(sourceBlob, { columns, rows });
-    // Every cell of a grid slice is the same size — decode one, stamp all.
-    const cellSize = cells.length > 0 ? await readBlobSize(cells[0]) : null;
-    const generated: Array<{ texturePath: string; sourceSize?: AnimationSize }> = [];
-
-    for (const cell of cells) {
-      const framePath = buildAnimationFrameResourcePath(
-        assetPath,
-        startFrameNumber + generated.length,
-        { clipName }
-      );
-      await this.projectStorage.writeBinaryFile(framePath, await cell.arrayBuffer());
-      generated.push({
-        texturePath: framePath,
-        sourceSize: cellSize ? { width: cellSize.width, height: cellSize.height } : undefined,
-      });
-    }
-
-    return generated;
-  }
-
-  private async onUpdateTexturePath(nextTexturePath: string): Promise<void> {
-    const trimmedTexturePath = nextTexturePath.trim();
-    const currentResource = this.resource;
-    const shouldPromptForAutoSlice =
-      Boolean(trimmedTexturePath) &&
-      currentResource !== null &&
-      !this.hasAnyFrames(currentResource);
-
-    const didMutate = await this.applyResourceUpdate(
-      resource => ({
-        ...resource,
-        texturePath: trimmedTexturePath,
-      }),
-      trimmedTexturePath ? `Update spritesheet: ${trimmedTexturePath}` : 'Clear spritesheet texture'
-    );
-
-    if (!didMutate || !trimmedTexturePath || !shouldPromptForAutoSlice) {
-      return;
-    }
-
-    await this.openSlicerDialog(trimmedTexturePath);
-  }
-
-  private async openSlicerDialog(texturePath: string): Promise<void> {
-    const clipName = this.activeClipName || this.resource?.clips[0]?.name || 'idle';
-    const result = await this.animationAutoSliceDialogService.showDialog({
-      texturePath,
-      contextLabel: clipName,
-      defaultColumns: this.slicerColumns,
-      defaultRows: this.slicerRows,
-    });
-
-    if (!result) {
-      return;
-    }
-
-    this.slicerColumns = result.columns;
-    this.slicerRows = result.rows;
-    await this.onAddFramesFromGrid(result.columns, result.rows);
-  }
-
-  private getStoredActiveClipName(): string {
-    if (!this.tabId) {
-      return '';
-    }
-
-    const tab = appState.tabs.tabs.find(candidate => candidate.id === this.tabId);
-    const storedClipName = tab?.contextState?.activeClipName;
-    return typeof storedClipName === 'string' ? storedClipName : '';
-  }
-
-  private getStoredSelectedFrameIndex(): number {
-    if (!this.tabId) {
-      return -1;
-    }
-
-    const tab = appState.tabs.tabs.find(candidate => candidate.id === this.tabId);
-    const storedFrameIndex = tab?.contextState?.selectedFrameIndex;
-    return typeof storedFrameIndex === 'number' && Number.isInteger(storedFrameIndex)
-      ? storedFrameIndex
-      : -1;
-  }
-
-  private persistActiveClipName(clipName: string): void {
-    if (!this.tabId) {
-      return;
-    }
-
-    const tab = appState.tabs.tabs.find(candidate => candidate.id === this.tabId);
-    if (!tab) {
-      return;
-    }
-
-    const currentClipName = tab.contextState?.activeClipName;
-    if (currentClipName === clipName) {
-      return;
-    }
-
-    tab.contextState = {
-      ...(tab.contextState ?? {}),
-      activeClipName: clipName,
-    };
-  }
-
-  private persistSelectedFrameIndex(selectedFrameIndex: number): void {
-    if (!this.tabId) {
-      return;
-    }
-
-    const tab = appState.tabs.tabs.find(candidate => candidate.id === this.tabId);
-    if (!tab) {
-      return;
-    }
-
-    if (tab.contextState?.selectedFrameIndex === selectedFrameIndex) {
-      return;
-    }
-
-    tab.contextState = {
-      ...(tab.contextState ?? {}),
-      selectedFrameIndex,
-    };
-  }
-
-  private syncActiveInspectorController(): void {
-    const isActiveAnimationTab =
-      Boolean(this.assetPath) && Boolean(this.tabId) && appState.tabs.activeTabId === this.tabId;
-
-    if (isActiveAnimationTab) {
-      this.animationEditorService.setActiveController(this);
-      return;
-    }
-
-    if (this.animationEditorService.getActiveController() === this) {
-      this.animationEditorService.setActiveController(null);
-    }
-  }
-
-  private notifyInspectorListeners(): void {
-    for (const listener of this.inspectorListeners) {
-      listener();
-    }
-  }
-
-  getInspectorSnapshot(): AnimationInspectorSnapshot {
-    const activeClip = this.getActiveClip();
-    return {
-      assetPath: this.assetPath,
-      resource: this.resource,
-      clips: this.resource?.clips ?? [],
-      activeClip,
-      activeClipName: this.activeClipName,
-      selectedFrame: this.getSelectedFrame(activeClip),
-      selectedFrameIndex: this.selectedFrameIndex,
-    };
-  }
-
-  subscribeInspector(listener: () => void): () => void {
-    this.inspectorListeners.add(listener);
-    return () => this.inspectorListeners.delete(listener);
-  }
-
-  async updateTexturePath(value: string): Promise<void> {
-    await this.onUpdateTexturePath(value);
-  }
-
-  async openTextureSlicer(): Promise<void> {
-    const texturePath = this.resource?.texturePath?.trim() ?? '';
-    if (!texturePath) {
-      return;
-    }
-
-    await this.openSlicerDialog(texturePath);
-  }
-
-  async selectClip(clipName: string): Promise<void> {
-    await this.onSelectClip(clipName);
-  }
-
-  async addClip(): Promise<void> {
-    await this.onAddClip();
-  }
-
-  async removeClip(): Promise<void> {
-    await this.onRemoveClip();
-  }
-
-  async renameClip(nextName: string): Promise<void> {
-    await this.onRenameClip(nextName);
-  }
-
-  async updateClipFps(nextFps: number): Promise<void> {
-    await this.onUpdateClipFps(nextFps);
-  }
-
-  async updateClipPlaybackMode(mode: AnimationPlaybackMode): Promise<void> {
-    await this.onUpdateClipPlaybackMode(mode);
-  }
-
-  async updateClipLoop(nextLoop: boolean): Promise<void> {
-    await this.onUpdateClipLoop(nextLoop);
-  }
-
-  async updateSelectedFrameDurationMultiplier(value: number): Promise<void> {
-    await this.onUpdateSelectedFrameDurationMultiplier(value);
-  }
-
-  async updateSelectedFrameTexturePath(value: string): Promise<void> {
-    await this.onUpdateSelectedFrameTexturePath(value);
-  }
-
-  async updateSelectedFrameAnchor(axis: 'x' | 'y', value: number): Promise<void> {
-    await this.onUpdateSelectedFrameAnchor(axis, value);
-  }
-
-  async updateSelectedFrameBoundingBox(
-    field: 'x' | 'y' | 'width' | 'height',
-    value: number
-  ): Promise<void> {
-    await this.onUpdateSelectedFrameBoundingBox(field, value);
-  }
-
-  async addPolygonVertex(): Promise<void> {
-    await this.onAddPolygonVertex();
-  }
-
-  async clearPolygon(): Promise<void> {
-    await this.onClearPolygon();
-  }
-
-  async resetBoundingBox(): Promise<void> {
-    await this.onResetBoundingBox();
   }
 
   private onEditorDragEnter(event: DragEvent): void {
@@ -2736,13 +1255,13 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     const droppedFiles = this.getDroppedImageFiles(event);
     const texturePaths =
       droppedFiles.length > 0
-        ? await this.importDroppedImageFiles(droppedFiles)
+        ? await this.controller.importOsFiles(droppedFiles)
         : this.getDroppedTextureResources(event);
     if (texturePaths.length === 0) {
       return;
     }
 
-    await this.onAddFrameTextures(texturePaths);
+    await this.controller.addFrameTextures(texturePaths);
   }
 
   private onFrameDragStart(event: DragEvent, frameIndex: number): void {
@@ -2750,13 +1269,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       return;
     }
 
-    if (!this.selectedFrameIndices.includes(frameIndex) || this.selectedFrameIndices.length > 1) {
-      this.selectedFrameIndices = [frameIndex];
-      this.selectedFrameIndex = frameIndex;
-      this.previewFrameIndex = frameIndex;
-      this.selectionAnchorFrameIndex = frameIndex;
-      this.persistSelectedFrameIndex(frameIndex);
-    }
+    this.controller.selectFrameForDrag(frameIndex);
 
     this.draggedFrameIndex = frameIndex;
     this.dragOverFrameIndex = frameIndex;
@@ -2790,7 +1303,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
       const fromIndex = this.draggedFrameIndex;
       this.draggedFrameIndex = -1;
       this.dragOverFrameIndex = -1;
-      await this.reorderFrame(fromIndex, frameIndex);
+      await this.controller.reorderFrame(fromIndex, frameIndex);
       return;
     }
 
@@ -2808,13 +1321,13 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
     const droppedFiles = this.getDroppedImageFiles(event);
     const texturePaths =
       droppedFiles.length > 0
-        ? await this.importDroppedImageFiles(droppedFiles)
+        ? await this.controller.importOsFiles(droppedFiles)
         : this.getDroppedTextureResources(event);
     if (texturePaths.length === 0) {
       return;
     }
 
-    await this.onAddFrameTextures(texturePaths, frameIndex);
+    await this.controller.addFrameTextures(texturePaths, frameIndex);
   }
 
   private onFrameDragEnd(): void {
@@ -2825,7 +1338,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
   private async onDeleteFrameClick(event: Event, frameIndex: number): Promise<void> {
     event.preventDefault();
     event.stopPropagation();
-    await this.removeFrameAtIndex(frameIndex);
+    await this.controller.removeFrames([frameIndex]);
   }
 
   private async onDeleteFrameKeyDown(event: KeyboardEvent, frameIndex: number): Promise<void> {
@@ -2835,7 +1348,7 @@ export class AnimationPanel extends ComponentBase implements AnimationInspectorC
 
     event.preventDefault();
     event.stopPropagation();
-    await this.removeFrameAtIndex(frameIndex);
+    await this.controller.removeFrames([frameIndex]);
   }
 }
 

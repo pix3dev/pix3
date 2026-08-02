@@ -764,3 +764,268 @@ spawn on a barrel, a hand socket that an item follows during a walk cycle.
 8. **Point coordinate space** — stored normalized to the frame rect (consistent with `anchor`),
    displayed in px in the UI (Construct-3 habit). Crop/resize tools recompute both anchor and
    points, so either storage works; normalized keeps the schema uniform.
+
+---
+
+## 9. Revision 2026-08-02b — Phase 3b/3c implementation contract
+
+Design pass done against the real code after R1/R2/3a/3d/Phase-4 shipped. **This section is
+authoritative for 3b and 3c; where it contradicts §8.3/§8.10, it wins.**
+
+### 9.0 What §8 got wrong (corrected against the code)
+
+1. **3a is only half done.** `StageZoomPanController` is adopted by the animation stage
+   (`animation-panel.ts:186`) but *not* by the sprite editor — `sprite-editor-panel.ts` has zero
+   references and its crop editor still uses the letterboxed object-fit model (`CropRect` /
+   `CropContentRect` :57–71, `renderCropEditor` :874). §8.3's "unify on the controller FIRST"
+   is therefore still an open prerequisite → commit **C5**.
+2. **There is no clips-rail markup to extract.** The animation panel renders toolbar/stage/
+   timeline/status only (`render()` :271–325); clip CRUD UI lives exclusively in the Inspector
+   (`src/ui/object-inspector/inspector-section-renderers.ts:127–216`). `<pix3-sprite-clips-rail>`
+   is **new UI** delegating to existing controller methods, not a port.
+3. **"Per-frame events" is a schema-only parity item.** `AnimationFrame.events` exists
+   (`AnimationResource.ts:76`, `normalizeFrameEvents` :166) but no editor UI edits it. Parity =
+   round-trip preservation, already guaranteed by `normalizeAnimationResource` inside
+   `UpdateAnimationDocumentOperation.computeNextResource` (:72–82). The real gates are the
+   auto-slice prompt and UV-window frames.
+4. The panel is **2 846** lines now, not "~2 400" — points mode (R2) grew it.
+
+### 9.1 `AnimationDocumentController` — plain class, not a ReactiveController
+
+Path `src/ui/sprite-editor/animation-document-controller.ts` (final home from day one;
+`src/ui/animation-editor/` is deleted at C8). Plain class because (a) it is shared across several
+Lit roots at once — shell canvas, timeline, clips rail, **and the Inspector in a different Golden
+Layout panel** — while a ReactiveController binds to one host; (b) the repo precedent is exactly
+this: `AnimationInspectorController` is consumed through a listener set (`subscribeInspector`,
+`animation-panel.ts:2618`) registered in `AnimationEditorService`, and the viewport decomposition
+used plain classes wired with deps objects. DI stays in the host component (`@inject`); the
+controller takes a deps object.
+
+```ts
+export interface AnimationDocumentControllerDeps {
+  operations: OperationService;                    // invokeAndPush(UpdateAnimationDocumentOperation)
+  commandDispatcher: CommandDispatcher;            // UpdateObjectPropertyCommand (currentClip sync, :2067)
+  projectStorage: ProjectStorageService;           // frame-file writes, readBlob
+  animationEditorService: AnimationEditorService;  // inspector-controller registration
+  autoSliceDialog: AnimationAutoSliceDialogService;
+  dialogService: DialogService;                    // remove-clip confirm (:2136)
+  sceneManager: SceneManager;                      // getSelectedAnimatedSprite (:1648)
+}
+
+export class AnimationDocumentController implements AnimationInspectorController {
+  constructor(deps: AnimationDocumentControllerDeps, tabId: string) {}
+
+  attach(): void;    // subscribes appState.tabs/project/animations (today :218-229)
+  dispose(): void;   // unsubscribes, revokes texturePreviewCache blob URLs (:1999)
+
+  readonly assetPath: string | null;
+  readonly resource: AnimationResource | null;
+  readonly activeClip: AnimationClip | null;
+  readonly activeClipName: string;
+  readonly selectedFrameIndex: number;
+  readonly selectedFrameIndices: readonly number[];
+  readonly previewFrameIndex: number;
+  readonly isPreviewPlaying: boolean;
+  readonly frameDraft: AnimationFrame | null;      // transient drag draft (:196)
+  readonly errorMessage: string | null;
+  subscribe(listener: () => void): () => void;     // supersedes subscribeInspector
+
+  selectFrame(index: number, modifiers?: { shift?: boolean; ctrl?: boolean }): void;
+  togglePlayback(): void;  stopPlayback(): void;
+
+  addFrameTextures(paths: string[], insertAtIndex?: number): Promise<void>;   // :2313
+  removeFrames(indices: number[]): Promise<void>;                             // :2217
+  reorderFrame(from: number, to: number): Promise<void>;                      // :2260
+  importOsFiles(files: File[]): Promise<string[]>;                            // :1827 (§8.2 naming)
+  applySelectedFrameUpdate(updater: (f: AnimationFrame) => AnimationFrame, label: string): Promise<void>;
+  beginFrameDraft(): AnimationFrame | null;
+  updateFrameDraft(mutate: (draft: AnimationFrame) => AnimationFrame): void;
+  commitFrameDraft(label: string): Promise<void>;
+
+  getTexturePreviewUrl(frame: AnimationFrame | null): string;
+  getFrameMetrics(frame: AnimationFrame): { frameWidth: number; frameHeight: number };
+  invalidateTexture(path: string): void;           // NEW — §9.5 write-back hook
+
+  replaceFrameTexture(frameIndex: number, blob: Blob, opts: { restamp: FrameRestamp }): Promise<void>;
+
+  // + the AnimationInspectorController methods verbatim (AnimationEditorService.ts:19-41)
+}
+```
+
+**Load** unchanged (`EditorTabService.activateAnimationTab` → `LoadAnimationCommand` →
+`appState.animations`, `EditorTabService.ts:743–771`); the controller mirrors it as
+`syncFromDocumentState` does today (:1863). **Mutate** always via
+`OperationService.invokeAndPush(new UpdateAnimationDocumentOperation(...))` (today
+`applyResourceUpdate` :2027–2077), which sets `descriptor.isDirty`
+(`UpdateAnimationDocumentOperation.ts:52`). **Save** stays with `SaveAnimationCommand` through
+`EditorTabService.saveTabResource` (:817–820) — the controller never writes the `.pix3anim`.
+Selection persistence keeps writing `tab.contextState.activeClipName` / `selectedFrameIndex`
+(:2544–2583); **session key names must not change**.
+
+Deliberate deviation from §8.3's letter: playback *state and stepping math* (`stepPreviewFrame`
+ping-pong, :1074–1116) live on the controller, not in the timeline component — the canvas renders
+`previewFrameIndex` too, so it is shared state. The timeline owns only the rAF ticker and transport
+buttons.
+
+### 9.2 Component contracts — controller-reference-in, no data events out
+
+Precedent: the Inspector already calls this logic directly through a service-provided controller
+(`inspector-section-renderers.ts:127–216`); DOM `CustomEvent`s in this repo are reserved for
+one-shot cross-panel *intents* (`locate-resource`, `node-open-prefab`). Frame selection is
+controller state the shell observes via `subscribe()`, so an event channel would create a second,
+driftable source of truth.
+
+```ts
+// src/ui/sprite-editor/sprite-timeline.ts
+@customElement('pix3-sprite-timeline')       // NB: 'pix3-animation-timeline-panel' is TAKEN
+class SpriteTimeline extends ComponentBase { //     (keyframe timeline, LayoutManager.ts:43)
+  @property({ attribute: false }) controller: AnimationDocumentController | null = null;
+}
+// src/ui/sprite-editor/sprite-clips-rail.ts
+@customElement('pix3-sprite-clips-rail')
+class SpriteClipsRail extends ComponentBase {
+  @property({ attribute: false }) controller: AnimationDocumentController | null = null;
+}
+```
+
+Both subscribe in `connectedCallback`, dispose in `disconnectedCallback`. The timeline ports frame
+cards (:749–793), reorder DnD (:2748–2823), insert-on-drop (:2787), delete affordances. DnD MIME
+constants (:43–47) move to `src/ui/shared/asset-drag-drop.ts` (already the home of
+`setGenerationDragData`, imported by `sprite-editor-panel.ts:34–39`) so timeline and shell share
+one set.
+
+**Stage overlays** → `src/ui/sprite-editor/frame-stage-overlays.ts`: pure template functions
+(`renderAnchorOverlay` / `renderBboxOverlay` / `renderPolygonOverlay` / `renderPointsOverlay`,
+ported from :460–730) plus a `FrameOverlayController` plain class owning `AnimationEditMode`,
+`StageDragState` (:73–84) and the pointer state machine (:1424–1600). Coordinate contract:
+everything in **frame-pixel space**; the host supplies `toFramePoint(event): StagePoint` — the
+unified canvas via `StageZoomPanController.toStageCoords`, the interim old panel via its existing
+`getStageLocalPoint` (:1602).
+
+### 9.3 `AnimationInspectorController` after decomposition
+
+The interface stays **verbatim** in `AnimationEditorService.ts:19–41`; `AnimationDocumentController`
+implements it (today the panel does, :107). Registration moves with the logic — the controller runs
+the equivalent of `syncActiveInspectorController` (:2585–2597): register when
+`appState.tabs.activeTabId === tabId` and an asset is bound, deregister otherwise/on dispose. The
+shell swap is invisible to the Inspector because it never sees a component — it subscribes to
+`AnimationEditorService` (`inspector-panel.ts:247`) and re-snapshots on `setActiveController`. A
+shell tab bound to a static image simply never registers a controller, which the Inspector already
+handles (`controller ?? null`).
+
+### 9.4 Two documents, two undo/dirty regimes
+
+The shell holds **at most one animation document** (the controller, only for `.pix3anim` tabs) and
+**one raster working image** (`current: CurrentImage`, `sprite-editor-panel.ts:163` — component-local
+blob + object URL).
+
+- **Animation document**: dirty = `appState.animations.descriptors[id].isDirty`, set by
+  `UpdateAnimationDocumentOperation` (:52), cleared by `SaveAnimationOperation` (:63), surfaced on
+  the tab by `syncResourceTabsFromDescriptors` (`EditorTabService.ts:926–956`). Undo/redo via
+  history snapshots.
+- **Raster image**: has no dirty regime today and **gets none**. Raster mutations are either
+  transient (discarded on close, current behavior) or committed instantly on Apply/Overwrite
+  (`writeBinaryFile` :1826, explicitly non-undoable per the in-code note :1890–1893).
+
+So "both dirty" reduces to the existing `promptDirtyClose` for the animation descriptor; an
+un-applied crop is discarded silently, same as today. **Keep two tab types** (`animation` persists
+sessions, `sprite-editor` does not — `isPersistableTab` :570–578); both map to the shell tag in
+`LayoutManager`. Do **not** merge the types: tab ids are `${type}:${resourceId}` (:958) and stored
+sessions would silently die.
+
+### 9.5 Frame→canvas binding and the write-back loop (crop frame 3 → Apply)
+
+Binding: timeline click → `controller.selectFrame(3)` → the shell (subscribed) resolves the frame's
+texture path (as :860) and runs the existing `loadBoundImage(path)` (`sprite-editor-panel.ts:356`).
+
+Apply sequence:
+
+1. Canvas composites the cropped blob (existing crop pipeline).
+2. `controller.replaceFrameTexture(3, blob, { restamp })` writes a **NEW** file
+   `<clip>_<nnnn>.png` (`buildAnimationFrameResourcePath` + `nextFrameFileNumber` :1805–1849) via
+   `ProjectStorageService.writeBinaryFile`, which already fires `applyAssetMutationSignal` →
+   `fileRefreshSignal` (`ProjectStorageService.ts:399–402`), refreshing the Asset Browser.
+   **Deliberate deviation from §8.2's overwrite-in-place rule**: undo of step 3 then restores
+   `texturePath` to the untouched original, keeping undo pixel-correct; in-place overwrite would
+   leave undo pointing stale metadata at destroyed pixels. In-place stays reserved for the explicit
+   "Overwrite original" button (:1814) and the future bulk "Trim frames". Orphans are handled by
+   export pruning.
+3. **One** `UpdateAnimationDocumentOperation` updates frame 3: `texturePath` → new file,
+   `sourceSize` → crop w×h (R1 — stamped by the editor so layout never waits on loads),
+   anchor/points recomputed to keep the render identical (`a' = (a·W − cropX)/w`, §8.8/§8.11.3),
+   `boundingBox`/`collisionPolygon` vertices shifted by −crop origin (they are stored in absolute
+   frame px, see :1469–1493). One operation = one undo step.
+4. Invalidation fan-out from `replaceFrameTexture`:
+   - `controller.invalidateTexture(oldPath & newPath)` — evict `texturePreviewCache` /
+     `textureDimensionsCache` / `texturePreviewLoads` (:213–215), revoke the blob URL, notify so
+     timeline thumbs re-request;
+   - `assetLoader.evictTexture(path)` (`AssetLoader.ts:112`; precedent caller
+     `TextureAtlasService.ts:533`) so the next play-mode start reloads;
+   - viewport: the proxy re-syncs the *document* automatically (it compares the open resource
+     object, `Viewport2DProxyRegistry.ts:1110`) and the new `texturePath` differs, so frame textures
+     reload; add a public `Viewport2DProxyRegistry.invalidateTexture(path)` for the in-place
+     overwrite paths (proxies cache by path, :993–998 / :1098), then call
+     `viewportRenderService.requestRender()` — file writes sit outside the dirty-marking paths
+     (CLAUDE.md render-on-demand rule).
+
+### 9.6 Commit staging (each independently shippable)
+
+- **C1** (3b) — extract `AnimationDocumentController`; `pix3-animation-panel` becomes a render host
+  holding one instance. Migrate doc-logic tests from `animation-panel.spec.ts` into
+  `animation-document-controller.spec.ts` (of its 9 tests, ~8 are pure doc logic: clip preservation
+  :94, texture drops :167/:196, anchor-to-all-clips :351, multi-delete :514, autoslice prompt :686).
+- **C2** (3b) — `<pix3-sprite-timeline>`; old panel renders it in place of `renderTimeline`; DnD
+  MIMEs hoisted to `asset-drag-drop.ts`.
+- **C3** (3b) — `<pix3-sprite-clips-rail>` (new UI); old panel shows it; Inspector untouched.
+- **C4** (3b) — overlay extraction (`frame-stage-overlays.ts` + `FrameOverlayController`); old panel
+  stage consumes them.
+- **C5** (3c prereq, finishes 3a) — sprite-editor canvas adopts `StageZoomPanController`; crop rect
+  re-based from letterbox px to frame-pixel space. Ships as "sprite editor gains zoom/pan".
+  Independent of C1–C4 (disjoint files).
+- **C6** (3c) — shell binds `.pix3anim` tabs: construct controller, mount rail + timeline +
+  overlays, frame→canvas binding; `LayoutManager.ts:42` maps `animation` → `pix3-sprite-editor-panel`
+  (also :376–380 tab dispatch, :809 special case, lazy import near :1075/:1084).
+- **C7** (3c) — `replaceFrameTexture` write-back + invalidation fan-out (incl.
+  `Viewport2DProxyRegistry.invalidateTexture`).
+- **C8** (3c, gated) — delete `src/ui/animation-editor/`, drop the old tag from `LayoutManager`,
+  update docs.
+  **Gate checklist**: (a) auto-slice prompt when a texture is assigned to a frameless resource
+  (`onUpdateTexturePath` → `openSlicerDialog` :2481–2520); (b) UV-window (non-sequence) frames
+  render with `offset`/`repeat` windowing on stage *and* thumbs (`getFrameImageStyle` :827–837,
+  `getFrameMetrics` :839–858); (c) per-frame `events` survive round-trip (schema-only — assert in
+  the controller spec); plus points mode, OS-file import naming, multi-select, and tab
+  `contextState` persistence.
+
+### 9.7 Risks
+
+1. **Coordinate-model mismatch (top risk)** — the animation stage sizes the frame element *by zoom*
+   with pan on a parent transform (`getStageViewport` un-translates, :916–944) while the sprite
+   canvas letterboxes. The unified canvas adopts the **animation stage's model** (percentage-
+   positioned overlays keep working); C5 must land before any overlay port, or every drag handler
+   needs two math paths.
+2. **`getFrameMetrics` 256-px fallback** (:844–845) — polygon/bbox are absolute frame px, so edits
+   made before the texture decodes land in a fake 256×256 space. Suppress bbox/polygon/points
+   editing until dimensions are known.
+3. **DnD interference** — frame-reorder drags must keep suppressing the editor-level drop overlay
+   via `FRAME_REORDER_MIME` (`isPotentialTextureDrag` :1755–1775); in the shell this check crosses
+   component boundaries, another reason the MIMEs must be shared constants.
+4. **Session persistence** — keep both tab types, the `${type}:${resourceId}` id scheme, and the
+   `contextState` key names.
+5. **Spec breakage** — `animation-panel.spec.ts` reaches into panel privates via
+   `Object.defineProperty` on injected fields; migrate at C1, it dies at C8. Memory gotcha: specs
+   touching `res://` textures must seed `AssetLoader.textureCache` or Vitest exits non-zero on the
+   detached `.finally` rejection.
+6. **Controller lifetime vs Golden Layout re-dock** — the sprite editor survives disconnect/
+   reconnect by re-minting object URLs (`rehydrateObjectUrls` :274). The controller must be owned by
+   the shell *instance* and re-`attach()` on reconnect, or a re-dock kills the Inspector
+   registration.
+7. **Undo cannot restore pixels** — mitigated by new-file-per-bake (§9.5 step 2), but "Overwrite
+   original" stays pixel-destructive; keep pushing bakes into the generation history
+   (`addCropToHistory` :1703) as a cheap escape hatch.
+
+### 9.8 Open layout question (decide during C6)
+
+The Sprite Editor carries chrome §8.3's sketch does not place: a references sidebar, the prompt bar,
+and the generation history rail. In the unified shell these must collapse (sidebar + bottom rail
+toggles) or the canvas loses exactly the space this work is meant to win back — the live flipbook
+stage today is a 151 px artboard for a 128 px frame.
