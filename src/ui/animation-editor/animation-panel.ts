@@ -17,7 +17,15 @@ import {
   getDroppedTextureResources,
   isPotentialTextureDrag,
 } from '@/ui/sprite-editor/frame-texture-drop';
+import {
+  FrameOverlayController,
+  renderAnchorOverlay,
+  renderBboxOverlay,
+  renderPointsOverlay,
+  renderPolygonOverlay,
+} from '@/ui/sprite-editor/frame-stage-overlays';
 import { getFrameImageStyle } from '@/ui/sprite-editor/sprite-timeline';
+import '@/ui/sprite-editor/sprite-clips-rail';
 import {
   SceneManager,
   collectClipPointNames,
@@ -27,21 +35,6 @@ import {
 } from '@pix3/runtime';
 
 import './animation-panel.ts.css';
-
-type AnimationEditMode = 'anchor' | 'polygon' | 'bbox' | 'points';
-
-interface StageDragState {
-  pointerId: number;
-  mode: AnimationEditMode;
-  origin: StagePoint;
-  vertexIndex?: number;
-  /** Points mode: name of the point being dragged, and whether it's the angle handle. */
-  pointName?: string;
-  pointAngleHandle?: boolean;
-}
-
-/** Length (frame px) of the direction handle drawn from a point in points mode. */
-const POINT_ANGLE_HANDLE_LENGTH = 28;
 
 interface AnchorPreset {
   label: string;
@@ -100,15 +93,8 @@ export class AnimationPanel extends ComponentBase {
   @inject(IconService)
   private readonly iconService!: IconService;
 
-  /** Points mode: the point highlighted on the stage and in the list. */
-  @state()
-  private selectedPointName: string | null = null;
-
   @state()
   private isTextureDragOver = false;
-
-  @state()
-  private editMode: AnimationEditMode = 'anchor';
 
   @state()
   /**
@@ -121,9 +107,19 @@ export class AnimationPanel extends ComponentBase {
     onChange: () => this.requestUpdate(),
   });
 
+  /**
+   * Stage overlays (anchor / bbox / polygon / points) and their pointer state
+   * machine. Coordinates cross this boundary in frame-pixel space only — the
+   * stage's own DOM model stays in {@link toFramePoint} below.
+   */
+  private readonly overlays = new FrameOverlayController({
+    getDocument: () => this.controller,
+    toFramePoint: event => this.toFramePoint(event),
+  });
+
   private documentController: AnimationDocumentController | null = null;
   private disposeControllerSubscription?: () => void;
-  private stageDragState: StageDragState | null = null;
+  private disposeOverlaySubscription?: () => void;
   private textureDragDepth = 0;
 
   /**
@@ -169,6 +165,7 @@ export class AnimationPanel extends ComponentBase {
     const controller = this.controller;
     controller.setContext(this.tabId, this.resourcePath);
     this.disposeControllerSubscription = controller.subscribe(() => this.onControllerChanged());
+    this.disposeOverlaySubscription = this.overlays.subscribe(() => this.requestUpdate());
     controller.attach();
     this.addEventListener('drop', this.onDropCapture, { capture: true });
   }
@@ -183,6 +180,8 @@ export class AnimationPanel extends ComponentBase {
     this.removeEventListener('drop', this.onDropCapture, { capture: true });
     this.disposeControllerSubscription?.();
     this.disposeControllerSubscription = undefined;
+    this.disposeOverlaySubscription?.();
+    this.disposeOverlaySubscription = undefined;
     this.documentController?.dispose();
     super.disconnectedCallback();
   }
@@ -229,16 +228,21 @@ export class AnimationPanel extends ComponentBase {
               <div class="editor-workspace">
                 ${this.renderEditorToolbar(clipFrames.length)}
 
-                <section class="editor-surface editor-surface--stage">
+                <div class="editor-main">
+                  <section class="editor-surface editor-surface--clips">
+                    <pix3-sprite-clips-rail .controller=${controller}></pix3-sprite-clips-rail>
+                  </section>
+
+                  <section class="editor-surface editor-surface--stage">
                     ${this.renderFrameStage(activeClip, previewFrame)}
-                </section>
+                  </section>
+                </div>
 
                 <section class="editor-surface editor-surface--timeline">
-                    <pix3-sprite-timeline .controller=${controller}></pix3-sprite-timeline>
+                  <pix3-sprite-timeline .controller=${controller}></pix3-sprite-timeline>
                 </section>
 
                 ${this.renderStatusBar(activeClip, clipFrames, previewFrame)}
-                </div>
               </div>
             `
           : null}
@@ -248,35 +252,36 @@ export class AnimationPanel extends ComponentBase {
 
   private renderEditorToolbar(frameCount: number) {
     const controller = this.controller;
+    const editMode = this.overlays.editMode;
     return html`
       <div class="editor-toolbar" aria-label="Animation editor toolbar">
         ${this.renderToolbarButton(
           'crosshair',
           'Anchor mode',
-          () => this.onSetEditMode('anchor'),
+          () => this.overlays.setEditMode('anchor'),
           false,
-          this.editMode === 'anchor'
+          editMode === 'anchor'
         )}
         ${this.renderToolbarButton(
           'pen-tool',
           'Polygon mode',
-          () => this.onSetEditMode('polygon'),
+          () => this.overlays.setEditMode('polygon'),
           false,
-          this.editMode === 'polygon'
+          editMode === 'polygon'
         )}
         ${this.renderToolbarButton(
           'crop',
           'Bounding box mode',
-          () => this.onSetEditMode('bbox'),
+          () => this.overlays.setEditMode('bbox'),
           false,
-          this.editMode === 'bbox'
+          editMode === 'bbox'
         )}
         ${this.renderToolbarButton(
           'map-pin',
           'Frame points mode (named sockets)',
-          () => this.onSetEditMode('points'),
+          () => this.overlays.setEditMode('points'),
           false,
-          this.editMode === 'points'
+          editMode === 'points'
         )}
 
         <span class="editor-toolbar-separator" aria-hidden="true"></span>
@@ -360,12 +365,10 @@ export class AnimationPanel extends ComponentBase {
     const zoom = this.stageView.zoom;
     const zoomedWidth = metrics.frameWidth * zoom;
     const zoomedHeight = metrics.frameHeight * zoom;
-    const polygonPoints = previewFrame.collisionPolygon
-      .map(point => `${point.x},${point.y}`)
-      .join(' ');
     const imageStyle = getFrameImageStyle(previewFrame);
     const previewTextureUrl = controller.getTexturePreviewUrl(previewFrame);
     const selectedFrame = controller.selectedFrame;
+    const previousFrame = controller.activeClip?.frames[controller.previewFrameIndex - 1] ?? null;
 
     return html`
       <div class="stage-shell">
@@ -398,46 +401,19 @@ export class AnimationPanel extends ComponentBase {
                 preserveAspectRatio="none"
                 aria-hidden="true"
               >
-                ${previewFrame.boundingBox.width > 0 && previewFrame.boundingBox.height > 0
-                  ? html`
-                      <rect
-                        class="stage-bbox"
-                        x=${previewFrame.boundingBox.x}
-                        y=${previewFrame.boundingBox.y}
-                        width=${previewFrame.boundingBox.width}
-                        height=${previewFrame.boundingBox.height}
-                      ></rect>
-                    `
-                  : null}
-                ${previewFrame.collisionPolygon.length >= 2
-                  ? html`
-                      <polyline
-                        class="stage-polygon"
-                        points=${polygonPoints}
-                        ?data-closed=${previewFrame.collisionPolygon.length >= 3}
-                      ></polyline>
-                    `
-                  : null}
-                ${previewFrame.collisionPolygon.map(
-                  (point, index) => html`
-                    <circle
-                      class="stage-polygon-vertex ${this.editMode === 'polygon'
-                        ? 'is-editable'
-                        : ''}"
-                      cx=${point.x}
-                      cy=${point.y}
-                      r="4"
-                      data-vertex-index=${index}
-                    ></circle>
-                  `
-                )}
-                ${this.renderFramePointOverlay(previewFrame, metrics)}
+                ${renderBboxOverlay(previewFrame)}
+                ${renderPolygonOverlay(previewFrame, {
+                  editable: this.overlays.canEdit('polygon'),
+                })}
+                ${renderPointsOverlay({
+                  frame: previewFrame,
+                  previousFrame,
+                  metrics,
+                  editable: this.overlays.canEdit('points'),
+                  selectedPointName: this.overlays.selectedPointName,
+                })}
               </svg>
-              <div
-                class="stage-anchor ${this.editMode === 'anchor' ? 'is-editable' : ''}"
-                style=${`left:${previewFrame.anchor.x * 100}%; top:${previewFrame.anchor.y * 100}%;`}
-                aria-hidden="true"
-              ></div>
+              ${renderAnchorOverlay(previewFrame, { editable: this.overlays.canEdit('anchor') })}
             </div>
           </div>
         </div>
@@ -451,7 +427,7 @@ export class AnimationPanel extends ComponentBase {
    * one seeds it into every frame and the list doesn't flicker as you scrub.
    */
   private renderPointTools(selectedFrame: AnimationFrame | null) {
-    if (this.editMode !== 'points' || !selectedFrame) {
+    if (this.overlays.editMode !== 'points' || !selectedFrame) {
       return null;
     }
 
@@ -482,10 +458,8 @@ export class AnimationPanel extends ComponentBase {
                           title=${point
                             ? `${(point.x * 100).toFixed(0)}%, ${(point.y * 100).toFixed(0)}%, ${Math.round(point.angle ?? 0)}°`
                             : 'Not defined on this frame'}
-                          ?data-selected=${this.selectedPointName === name}
-                          @focus=${() => {
-                            this.selectedPointName = name;
-                          }}
+                          ?data-selected=${this.overlays.selectedPointName === name}
+                          @focus=${() => this.overlays.setSelectedPointName(name)}
                           @change=${(event: Event) =>
                             void this.onRenamePoint(name, (event.target as HTMLInputElement).value)}
                         />
@@ -523,70 +497,8 @@ export class AnimationPanel extends ComponentBase {
     `;
   }
 
-  /**
-   * Named frame points drawn on the stage: a dot per point plus a direction
-   * handle for its angle. The previous frame's points ghost behind them (a
-   * mini onion-skin) so a socket can be kept continuous while animating.
-   */
-  private renderFramePointOverlay(
-    frame: AnimationFrame,
-    metrics: { frameWidth: number; frameHeight: number }
-  ) {
-    const points = frame.points ?? [];
-    const editable = this.editMode === 'points';
-    if (points.length === 0 && !editable) {
-      return null;
-    }
-
-    const toStage = (point: { x: number; y: number }) => ({
-      x: point.x * metrics.frameWidth,
-      y: point.y * metrics.frameHeight,
-    });
-
-    const controller = this.controller;
-    const previousFrame = editable
-      ? (controller.activeClip?.frames[controller.previewFrameIndex - 1] ?? null)
-      : null;
-
-    return html`
-      ${(previousFrame?.points ?? []).map(point => {
-        const at = toStage(point);
-        return html`<circle
-          class="stage-point stage-point--ghost"
-          cx=${at.x}
-          cy=${at.y}
-          r="3"
-        ></circle>`;
-      })}
-      ${points.map(point => {
-        const at = toStage(point);
-        const angleRadians = ((point.angle ?? 0) * Math.PI) / 180;
-        return html`
-          <line
-            class="stage-point-angle ${editable ? 'is-editable' : ''}"
-            x1=${at.x}
-            y1=${at.y}
-            x2=${at.x + Math.cos(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
-            y2=${at.y + Math.sin(angleRadians) * POINT_ANGLE_HANDLE_LENGTH}
-            data-point-angle=${point.name}
-          ></line>
-          <circle
-            class="stage-point ${editable ? 'is-editable' : ''} ${this.selectedPointName ===
-            point.name
-              ? 'is-selected'
-              : ''}"
-            cx=${at.x}
-            cy=${at.y}
-            r="5"
-            data-point-name=${point.name}
-          ></circle>
-        `;
-      })}
-    `;
-  }
-
   private renderAnchorTools(selectedFrame: AnimationFrame | null) {
-    if (this.editMode !== 'anchor' || !selectedFrame) {
+    if (this.overlays.editMode !== 'anchor' || !selectedFrame) {
       return null;
     }
 
@@ -644,15 +556,8 @@ export class AnimationPanel extends ComponentBase {
     // A document reload drops the transient draft under an in-flight stage drag;
     // the drag has nothing left to edit, so end it rather than leave a pointer
     // gesture bound to a frame that no longer exists.
-    if (this.stageDragState && !this.controller.frameDraft) {
-      this.stageDragState = null;
-    }
-
+    this.overlays.handleDocumentChanged();
     this.requestUpdate();
-  }
-
-  private onSetEditMode(mode: AnimationEditMode): void {
-    this.editMode = mode;
   }
 
   private onAdjustZoom(direction: -1 | 1): void {
@@ -706,7 +611,7 @@ export class AnimationPanel extends ComponentBase {
   private async onAddPoint(): Promise<void> {
     const name = await this.controller.addFramePoint();
     if (name) {
-      this.selectedPointName = name;
+      this.overlays.setSelectedPointName(name);
     }
   }
 
@@ -718,12 +623,12 @@ export class AnimationPanel extends ComponentBase {
       return;
     }
 
-    this.selectedPointName = appliedName;
+    this.overlays.setSelectedPointName(appliedName);
   }
 
   private async onRemovePoint(name: string): Promise<void> {
-    if (this.selectedPointName === name) {
-      this.selectedPointName = null;
+    if (this.overlays.selectedPointName === name) {
+      this.overlays.setSelectedPointName(null);
     }
 
     await this.controller.removeFramePoint(name);
@@ -737,83 +642,7 @@ export class AnimationPanel extends ComponentBase {
       return;
     }
 
-    const controller = this.controller;
-    const frame = controller.selectedFrame;
-    if (!frame) {
-      return;
-    }
-
-    const point = this.getStageLocalPoint(event, frame);
-    if (!point) {
-      return;
-    }
-
-    const target = event.target as HTMLElement | SVGElement;
-    if (!controller.beginFrameDraft()) {
-      return;
-    }
-
-    if (this.editMode === 'points') {
-      const angleHandleName = target.getAttribute('data-point-angle');
-      const pointName = target.getAttribute('data-point-name') ?? angleHandleName;
-      if (!pointName) {
-        // Empty stage click in points mode: nothing to grab.
-        controller.clearFrameDraft();
-        return;
-      }
-      this.selectedPointName = pointName;
-      this.stageDragState = {
-        pointerId: event.pointerId,
-        mode: 'points',
-        origin: point,
-        pointName,
-        pointAngleHandle: Boolean(angleHandleName),
-      };
-    } else if (this.editMode === 'anchor') {
-      controller.updateFrameDraft(draft => ({
-        ...draft,
-        anchor: this.toNormalizedAnchor(point, frame),
-      }));
-      this.stageDragState = {
-        pointerId: event.pointerId,
-        mode: 'anchor',
-        origin: point,
-      };
-    } else if (this.editMode === 'bbox') {
-      controller.updateFrameDraft(draft => ({
-        ...draft,
-        boundingBox: { x: point.x, y: point.y, width: 0, height: 0 },
-      }));
-      this.stageDragState = {
-        pointerId: event.pointerId,
-        mode: 'bbox',
-        origin: point,
-      };
-    } else {
-      const vertexIndex = Number(target.getAttribute('data-vertex-index'));
-      if (Number.isInteger(vertexIndex) && vertexIndex >= 0) {
-        this.stageDragState = {
-          pointerId: event.pointerId,
-          mode: 'polygon',
-          origin: point,
-          vertexIndex,
-        };
-      } else {
-        let appendedVertexIndex = 0;
-        controller.updateFrameDraft(draft => {
-          appendedVertexIndex = draft.collisionPolygon.length;
-          return { ...draft, collisionPolygon: [...draft.collisionPolygon, point] };
-        });
-        this.stageDragState = {
-          pointerId: event.pointerId,
-          mode: 'polygon',
-          origin: point,
-          vertexIndex: appendedVertexIndex,
-        };
-      }
-    }
-
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    this.overlays.handlePointerDown(event);
   }
 
   private onStagePointerMove(event: PointerEvent): void {
@@ -821,77 +650,7 @@ export class AnimationPanel extends ComponentBase {
       return;
     }
 
-    const controller = this.controller;
-    const dragState = this.stageDragState;
-    const frame = controller.selectedFrame;
-    if (!dragState || !frame || dragState.pointerId !== event.pointerId || !controller.frameDraft) {
-      return;
-    }
-
-    const point = this.getStageLocalPoint(event, frame);
-    if (!point) {
-      return;
-    }
-
-    if (dragState.mode === 'points') {
-      const pointName = dragState.pointName;
-      if (!pointName) {
-        return;
-      }
-      const metrics = controller.getFrameMetrics(frame);
-      controller.updateFrameDraft(draft => ({
-        ...draft,
-        points: (draft.points ?? []).map(candidate => {
-          if (candidate.name !== pointName) {
-            return candidate;
-          }
-          if (!dragState.pointAngleHandle) {
-            return {
-              ...candidate,
-              x: Number((point.x / metrics.frameWidth).toFixed(4)),
-              y: Number((point.y / metrics.frameHeight).toFixed(4)),
-            };
-          }
-          // Dragging the handle rotates the point around itself.
-          const originX = candidate.x * metrics.frameWidth;
-          const originY = candidate.y * metrics.frameHeight;
-          const angle = (Math.atan2(point.y - originY, point.x - originX) * 180) / Math.PI;
-          return { ...candidate, angle: Math.round(angle) };
-        }),
-      }));
-      return;
-    }
-
-    if (dragState.mode === 'anchor') {
-      controller.updateFrameDraft(draft => ({
-        ...draft,
-        anchor: this.toNormalizedAnchor(point, frame),
-      }));
-      return;
-    }
-
-    if (dragState.mode === 'bbox') {
-      const x = Math.min(dragState.origin.x, point.x);
-      const y = Math.min(dragState.origin.y, point.y);
-      const width = Math.abs(point.x - dragState.origin.x);
-      const height = Math.abs(point.y - dragState.origin.y);
-      controller.updateFrameDraft(draft => ({
-        ...draft,
-        boundingBox: { x, y, width, height },
-      }));
-      return;
-    }
-
-    const vertexIndex = dragState.vertexIndex ?? -1;
-    if (vertexIndex < 0) {
-      return;
-    }
-
-    controller.updateFrameDraft(draft => {
-      const nextPolygon = [...draft.collisionPolygon];
-      nextPolygon[vertexIndex] = point;
-      return { ...draft, collisionPolygon: nextPolygon };
-    });
+    this.overlays.handlePointerMove(event);
   }
 
   private async onStagePointerUp(event: PointerEvent): Promise<void> {
@@ -899,22 +658,25 @@ export class AnimationPanel extends ComponentBase {
       return;
     }
 
-    const dragState = this.stageDragState;
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    this.stageDragState = null;
-
-    await this.controller.commitFrameDraft(
-      `Update frame ${this.editMode}: ${this.controller.activeClipName}`
-    );
+    await this.overlays.handlePointerUp(event);
   }
 
-  private getStageLocalPoint(event: PointerEvent, frame: AnimationFrame): StagePoint | null {
+  /**
+   * The stage's half of the overlay coordinate contract: a pointer event in
+   * frame-pixel space, unclamped (the overlay controller clamps and rounds).
+   * This stage *sizes* its frame element by zoom, so the proportion of the
+   * element rect is already the proportion of the frame — the unified canvas will
+   * instead go through `StageZoomPanController.toStageCoords`, which is exactly
+   * why this lives in the host and not in the overlay module.
+   *
+   * Metrics come from the *selected* frame while the element is sized by the
+   * *preview* frame; the two only differ mid-playback, and this preserves the
+   * pre-extraction behaviour.
+   */
+  private toFramePoint(event: PointerEvent): StagePoint | null {
     const target = event.currentTarget as HTMLElement | null;
-    if (!target) {
+    const frame = this.controller.selectedFrame;
+    if (!target || !frame) {
       return null;
     }
 
@@ -924,25 +686,9 @@ export class AnimationPanel extends ComponentBase {
     }
 
     const metrics = this.controller.getFrameMetrics(frame);
-    const x = Math.min(
-      metrics.frameWidth,
-      Math.max(0, ((event.clientX - rect.left) / rect.width) * metrics.frameWidth)
-    );
-    const y = Math.min(
-      metrics.frameHeight,
-      Math.max(0, ((event.clientY - rect.top) / rect.height) * metrics.frameHeight)
-    );
     return {
-      x: Math.round(x),
-      y: Math.round(y),
-    };
-  }
-
-  private toNormalizedAnchor(point: StagePoint, frame: AnimationFrame): StagePoint {
-    const metrics = this.controller.getFrameMetrics(frame);
-    return {
-      x: Number((point.x / metrics.frameWidth).toFixed(3)),
-      y: Number((point.y / metrics.frameHeight).toFixed(3)),
+      x: ((event.clientX - rect.left) / rect.width) * metrics.frameWidth,
+      y: ((event.clientY - rect.top) / rect.height) * metrics.frameHeight,
     };
   }
 

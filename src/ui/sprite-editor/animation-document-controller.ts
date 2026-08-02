@@ -450,6 +450,26 @@ export class AnimationDocumentController implements AnimationInspectorController
     };
   }
 
+  /**
+   * Whether {@link getFrameMetrics} is backed by a decoded texture rather than its
+   * 256px placeholder. Frame geometry that is stored in *absolute* frame pixels
+   * (`boundingBox`, `collisionPolygon`) — and anything derived from the frame's
+   * aspect ratio, such as a frame point's angle — would be authored into a fake
+   * 256x256 space while this is false, so editing those is suppressed until the
+   * texture decodes (§9.7 risk 2). Mirrors `getFrameMetrics`'s own fallback chain
+   * exactly, including its use of the *current preview* texture's dimensions for
+   * a frame whose own texture has not been read yet.
+   */
+  hasResolvedFrameMetrics(frame: AnimationFrame): boolean {
+    const resolvedTexturePath = this.getResolvedFrameTexturePath(frame);
+    const cachedDimensions = resolvedTexturePath
+      ? (this.textureDimensionsCache.get(resolvedTexturePath) ?? null)
+      : null;
+    const textureWidth = cachedDimensions?.width || this.textureDimensions.width;
+    const textureHeight = cachedDimensions?.height || this.textureDimensions.height;
+    return textureWidth > 0 && textureHeight > 0;
+  }
+
   getTexturePreviewUrl(frame: AnimationFrame | null): string {
     const texturePath = this.getResolvedFrameTexturePath(frame);
     if (!texturePath) {

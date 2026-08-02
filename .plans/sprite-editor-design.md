@@ -1033,9 +1033,49 @@ Apply sequence:
    original" stays pixel-destructive; keep pushing bakes into the generation history
    (`addCropToHistory` :1703) as a cheap escape hatch.
 
-### 9.8 Open layout question (decide during C6)
+### 9.8 Shell layout — decided 2026-08-02 (user-confirmed)
 
 The Sprite Editor carries chrome §8.3's sketch does not place: a references sidebar, the prompt bar,
-and the generation history rail. In the unified shell these must collapse (sidebar + bottom rail
-toggles) or the canvas loses exactly the space this work is meant to win back — the live flipbook
-stage today is a 151 px artboard for a 128 px frame.
+and the generation history rail. Measured live in the default layout, the cost is severe — the
+flipbook artboard is **651 × 151 px** for a 128 px frame, and the sprite canvas is **646 × 123 px**.
+Merging naively would make the shared canvas *worse*, not better.
+
+**Decision — collapsible right "AI" rail.** References + prompt + history stack into one right-hand
+rail with a collapse toggle:
+
+```
+┌ toolbar: select | crop | rotate/flip | anchor | points | polygon | generate | bg-remove | save ┐
+├──────┬────────────────────────────────────────────────────────────────────────────┬──────────┤
+│clips │                                                                            │  AI    ▸ │
+│ rail │                     canvas / stage (zoom / pan / overlays)                 │ refs     │
+│      │                                                                            │ prompt   │
+│ +−✎  │                                                                            │ history  │
+├──────┴────────────────────────────────────────────────────────────────────────────┴──────────┤
+│ timeline (anim only): frame thumbs · fps · loop · ping-pong · transport                        │
+└───────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Collapsed by default when a `.pix3anim` is bound (the user is editing frames, not generating);
+expanded when a bare image is bound. Generation stays one click away — a modal was rejected because
+it taxes the generate → inspect → regenerate loop, and a bottom drawer was rejected because it
+stacks a second horizontal band under an already-short canvas.
+
+**Decision — reuse the open Sprite Editor tab.** Double-clicking an image asset currently spawns a
+*second* editor tab beside the existing one (observed live: an empty "Sprite Editor" tab plus an
+"ex0059.png" tab). The shell rebinds the open editor instead, matching how the animation tab already
+behaves per resource. Note this interacts with `isPersistableTab` (:570–578) and the
+`${type}:${resourceId}` id scheme — rebinding must not orphan the old tab id in a stored session.
+
+### 9.9 Follow-up — Animation Inspector needs the standard Pix3 property components
+
+Requested 2026-08-02. The Animation Inspector section is hand-rolled markup, not the shared property
+rows the rest of the Inspector uses, and it shows: "Duration Multiplier" and "Texture Override"
+collide on one line, "Anchor X / Anchor Y" are bare inputs, and the Bounding Box X/Y/Width/Height
+fields wrap into a ragged two-column mess. Rebuild
+`src/ui/object-inspector/inspector-section-renderers.ts:127–216` on the standard property-row
+components and theming tokens (see `docs/property-schema-reference.md` and the
+`pix3-ui-conventions` skill), so it reads like every other inspector section.
+
+Independent of C6/C7 — schedule it alongside or after C8. Related cleanup while in there: the
+`ANCHOR_PRESETS` buttons still use Unicode arrow glyphs (`↖ ↑ ↗ …`) as labels, which violates the
+"icons are vector, never Unicode glyphs" rule — replace with `IconService` custom SVGs.

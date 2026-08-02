@@ -68,6 +68,15 @@ pix3-animation-panel .editor-toolbar-button-icon {
   justify-content: center;
 }
 
+/* Clips rail left, stage centre (the timeline sits below both). */
+pix3-animation-panel .editor-main {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.55rem;
+  min-height: 0;
+  min-width: 0;
+}
+
 pix3-animation-panel .editor-surface {
   min-height: 0;
   border: 1px solid var(--line-1);
@@ -75,8 +84,22 @@ pix3-animation-panel .editor-surface {
   background: var(--bg-2);
 }
 
+/*
+ * Deliberately narrow: the stage is the scarce resource here (a 151px artboard
+ * for a 128px frame), so the rail gets just enough for a clip name plus its
+ * frame count.
+ */
+pix3-animation-panel .editor-surface--clips {
+  flex: 0 0 8.5rem;
+  width: 8.5rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.45rem;
+}
+
 pix3-animation-panel .editor-surface--stage {
   flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -489,6 +512,11 @@ pix3-animation-panel .error-state {
 @media (max-width: 900px) {
   pix3-animation-panel .animation-editor {
     padding: 0.45rem;
+  }
+
+  pix3-animation-panel .editor-surface--clips {
+    flex-basis: 7rem;
+    width: 7rem;
   }
 
   pix3-animation-panel .editor-surface--timeline {
