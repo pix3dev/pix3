@@ -112,7 +112,15 @@ pix3-sprite-editor-panel .ag-save-button.is-open {
   color: var(--accent);
 }
 
-pix3-sprite-editor-panel .ag-save-popover {
+/*
+ * Lives in a body-level portal while open (see `savePortal` in the panel): a
+ * 260px popover right-aligned to a toolbar button near the panel's left edge was
+ * being sliced off by Golden Layout's `overflow: hidden` on `.lm_content`.
+ * The portal sets `position`/`left`/`top` itself and keeps the box in the
+ * viewport, so the placement rules here only cover the pre-portal frame.
+ */
+pix3-sprite-editor-panel .ag-save-popover,
+.pix3-dropdown-portal .ag-save-popover {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
@@ -129,13 +137,19 @@ pix3-sprite-editor-panel .ag-save-popover {
   z-index: 20;
 }
 
-pix3-sprite-editor-panel .ag-save-actions {
+.pix3-dropdown-portal .ag-save-popover {
+  position: fixed;
+  top: auto;
+  right: auto;
+}
+
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-save-actions {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-pix3-sprite-editor-panel .ag-save-actions .ag-action-button {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-save-actions .ag-action-button {
   width: 100%;
 }
 
@@ -151,7 +165,7 @@ pix3-sprite-editor-panel textarea {
 }
 
 pix3-sprite-editor-panel .ag-toolbar-button,
-pix3-sprite-editor-panel .ag-action-button {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-action-button {
   padding: 0.4rem 0.8rem;
   border-radius: var(--radius-1);
   border: 1px solid var(--line-1);
@@ -165,7 +179,7 @@ pix3-sprite-editor-panel .ag-action-button {
 }
 
 pix3-sprite-editor-panel .ag-toolbar-button:hover:not(:disabled),
-pix3-sprite-editor-panel .ag-action-button:hover:not(:disabled) {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-action-button:hover:not(:disabled) {
   background: var(--bg-2);
   color: var(--fg-0);
 }
@@ -212,13 +226,13 @@ pix3-sprite-editor-panel .ag-timeline {
   background: var(--bg-1);
 }
 
-pix3-sprite-editor-panel .ag-field {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-pix3-sprite-editor-panel .ag-field-label {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-field-label {
   font-size: 0.78rem;
   color: var(--fg-2);
   text-transform: uppercase;
@@ -230,13 +244,13 @@ pix3-sprite-editor-panel .ag-prompt-spacer {
   flex: 1 1 auto;
 }
 
-pix3-sprite-editor-panel .ag-popover-title {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-popover-title {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--fg-0);
 }
 
-pix3-sprite-editor-panel .ag-hint {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-hint {
   font-size: 0.75rem;
   color: var(--fg-3);
 }
@@ -276,13 +290,13 @@ pix3-sprite-editor-panel .ag-cancel-button {
   cursor: pointer;
 }
 
-pix3-sprite-editor-panel .ag-error {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-error {
   font-size: 0.8rem;
   color: var(--danger);
   white-space: pre-wrap;
 }
 
-pix3-sprite-editor-panel .ag-success {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-success {
   font-size: 0.8rem;
   color: var(--accent);
 }
@@ -696,13 +710,13 @@ pix3-sprite-editor-panel .ag-stage-error {
 }
 
 /* Save popover inputs --------------------------------------------------- */
-pix3-sprite-editor-panel .ag-save-name {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-save-name {
   width: 100%;
   box-sizing: border-box;
 }
 
-pix3-sprite-editor-panel .ag-save-resize select,
-pix3-sprite-editor-panel .ag-save-custom-size {
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-save-resize select,
+:is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-save-custom-size {
   width: 100%;
   box-sizing: border-box;
   background: var(--bg-2);

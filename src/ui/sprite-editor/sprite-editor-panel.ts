@@ -1,5 +1,6 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { createRef, ref } from 'lit/directives/ref.js';
+import { DropdownPortal } from '@/ui/shared/dropdown-portal';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
@@ -323,7 +324,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   private readonly onDocPointerDown = (event: PointerEvent): void => {
     if (this.savePopoverOpen) {
       const wrap = this.querySelector('.ag-save-wrap');
-      if (wrap && !wrap.contains(event.target as Node)) {
+      // The popover itself lives in a body-level portal while open (it would be
+      // clipped by Golden Layout's overflow:hidden otherwise), so it is NOT inside
+      // `wrap` — test it separately or every click on the popover closes it.
+      const target = event.target as Node;
+      const insideTrigger = wrap?.contains(target) ?? false;
+      if (!insideTrigger && !this.savePortal.contains(target)) {
         this.savePopoverOpen = false;
       }
     }
@@ -335,6 +341,14 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   };
   private readonly ownedUrls = new Set<string>();
   private syncedResourceId: string | null = null;
+
+  /**
+   * The save popover is 260px wide and right-aligned to a toolbar button that can sit
+   * close to the panel's left edge, so as a plain absolutely-positioned child it was
+   * sliced off by Golden Layout's `overflow: hidden` on `.lm_content`. The portal
+   * re-parents it to a fixed-position container on `document.body` while open.
+   */
+  private readonly savePortal = new DropdownPortal({ minWidth: '260px' });
 
   /** Listeners on this shell's {@link ImageEditTargetSnapshot} (the Generate panel). */
   private readonly imageEditListeners = new Set<() => void>();
@@ -360,6 +374,8 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   }
 
   disconnectedCallback(): void {
+    // Before Lit tears the tree down, or the portal keeps a detached popover on body.
+    this.savePortal.close();
     this.disposeTabsSubscription?.();
     this.disposeTabsSubscription = undefined;
     this.disposeAiSettingsSubscription?.();
@@ -502,6 +518,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       // The stage image may still be decoding on a fresh mount; give it a frame.
       requestAnimationFrame(() => this.initCropRect());
     }
+    this.syncSavePortal();
     this.refitOnContentSizeChange();
   }
 
@@ -1478,6 +1495,34 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   }
 
   // -- input handlers --------------------------------------------------------
+
+  /**
+   * Keep the body-level portal in step with `savePopoverOpen`. Lit re-renders the
+   * popover's contents in place while it is portaled — the element itself is only
+   * moved, so its bindings keep working — but the portal has to be (re)opened after
+   * the element exists and closed before Lit removes it.
+   */
+  private syncSavePortal(): void {
+    const shouldBeOpen = this.savePopoverOpen && Boolean(this.current);
+    if (!shouldBeOpen) {
+      if (this.savePortal.isOpen()) {
+        this.savePortal.close();
+      }
+      return;
+    }
+    if (this.savePortal.isOpen()) {
+      const trigger = this.querySelector<HTMLElement>('.ag-save-button');
+      if (trigger) {
+        this.savePortal.reposition(trigger);
+      }
+      return;
+    }
+    const trigger = this.querySelector<HTMLElement>('.ag-save-button');
+    const popover = this.querySelector<HTMLElement>('.ag-save-popover');
+    if (trigger && popover) {
+      this.savePortal.open(trigger, popover);
+    }
+  }
 
   private toggleSavePopover(): void {
     this.savePopoverOpen = !this.savePopoverOpen;
