@@ -11,26 +11,22 @@ import {
   type StagePoint,
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
+import { AnimationDocumentController } from '@/ui/sprite-editor/animation-document-controller';
 import {
-  AnimationDocumentController,
-  hasSupportedImageExtension,
-} from '@/ui/sprite-editor/animation-document-controller';
+  getDroppedImageFiles,
+  getDroppedTextureResources,
+  isPotentialTextureDrag,
+} from '@/ui/sprite-editor/frame-texture-drop';
+import { getFrameImageStyle } from '@/ui/sprite-editor/sprite-timeline';
 import {
   SceneManager,
   collectClipPointNames,
   findAnimationFramePoint,
-  isSequenceAnimationFrame,
   type AnimationClip,
   type AnimationFrame,
 } from '@pix3/runtime';
 
 import './animation-panel.ts.css';
-
-const ASSET_RESOURCE_MIME = 'application/x-pix3-asset-resource';
-const ASSET_PATH_MIME = 'application/x-pix3-asset-path';
-const ASSET_RESOURCE_LIST_MIME = 'application/x-pix3-asset-resource-list';
-const ASSET_PATH_LIST_MIME = 'application/x-pix3-asset-path-list';
-const FRAME_REORDER_MIME = 'application/x-pix3-animation-frame-reorder';
 
 type AnimationEditMode = 'anchor' | 'polygon' | 'bbox' | 'points';
 
@@ -68,8 +64,9 @@ const ANCHOR_PRESETS: readonly AnchorPreset[] = [
 /**
  * Render host for the animation editor. The document itself — clips, frames,
  * selection, the preview transport and every mutation — lives in
- * {@link AnimationDocumentController}; this component owns markup, the stage
- * pointer/drag machinery and the rAF ticker that drives preview playback.
+ * {@link AnimationDocumentController}, and the frame strip (cards, reorder,
+ * transport, playback clock) in `<pix3-sprite-timeline>`; what is left here is
+ * the stage markup and its pointer/drag machinery.
  */
 @customElement('pix3-animation-panel')
 export class AnimationPanel extends ComponentBase {
@@ -126,12 +123,8 @@ export class AnimationPanel extends ComponentBase {
 
   private documentController: AnimationDocumentController | null = null;
   private disposeControllerSubscription?: () => void;
-  private playbackFrameHandle: number | null = null;
-  private playbackLastTimestamp: number | null = null;
   private stageDragState: StageDragState | null = null;
   private textureDragDepth = 0;
-  private draggedFrameIndex = -1;
-  private dragOverFrameIndex = -1;
 
   /**
    * Created on first use rather than in the constructor: `@inject` is a prototype
@@ -159,12 +152,25 @@ export class AnimationPanel extends ComponentBase {
     return this.documentController;
   }
 
+  /**
+   * A texture dropped on a frame card is inserted by `<pix3-sprite-timeline>`,
+   * which stops the event so the editor-level handler below can't *also* append
+   * it — and that handler is what normally takes the drop overlay back down.
+   * Capture runs before both, so this is the one place that reliably sees the end
+   * of a texture drag wherever it landed.
+   */
+  private readonly onDropCapture = (): void => {
+    this.textureDragDepth = 0;
+    this.isTextureDragOver = false;
+  };
+
   connectedCallback(): void {
     super.connectedCallback();
     const controller = this.controller;
     controller.setContext(this.tabId, this.resourcePath);
     this.disposeControllerSubscription = controller.subscribe(() => this.onControllerChanged());
     controller.attach();
+    this.addEventListener('drop', this.onDropCapture, { capture: true });
   }
 
   protected updated(changedProperties: Map<PropertyKey, unknown>): void {
@@ -174,7 +180,7 @@ export class AnimationPanel extends ComponentBase {
   }
 
   disconnectedCallback(): void {
-    this.stopPlaybackTicker();
+    this.removeEventListener('drop', this.onDropCapture, { capture: true });
     this.disposeControllerSubscription?.();
     this.disposeControllerSubscription = undefined;
     this.documentController?.dispose();
@@ -228,7 +234,7 @@ export class AnimationPanel extends ComponentBase {
                 </section>
 
                 <section class="editor-surface editor-surface--timeline">
-                    ${this.renderTimeline(activeClip, clipFrames)}
+                    <pix3-sprite-timeline .controller=${controller}></pix3-sprite-timeline>
                 </section>
 
                 ${this.renderStatusBar(activeClip, clipFrames, previewFrame)}
@@ -244,21 +250,6 @@ export class AnimationPanel extends ComponentBase {
     const controller = this.controller;
     return html`
       <div class="editor-toolbar" aria-label="Animation editor toolbar">
-        ${this.renderToolbarButton(
-          controller.isPreviewPlaying ? 'pause' : 'play',
-          controller.isPreviewPlaying ? 'Pause playback' : 'Play preview',
-          () => this.onTogglePlayback(),
-          frameCount === 0
-        )}
-        ${this.renderToolbarButton(
-          'square',
-          'Stop playback',
-          () => this.onStopPlayback(),
-          frameCount === 0
-        )}
-
-        <span class="editor-toolbar-separator" aria-hidden="true"></span>
-
         ${this.renderToolbarButton(
           'crosshair',
           'Anchor mode',
@@ -372,7 +363,7 @@ export class AnimationPanel extends ComponentBase {
     const polygonPoints = previewFrame.collisionPolygon
       .map(point => `${point.x},${point.y}`)
       .join(' ');
-    const imageStyle = this.getFrameImageStyle(previewFrame);
+    const imageStyle = getFrameImageStyle(previewFrame);
     const previewTextureUrl = controller.getTexturePreviewUrl(previewFrame);
     const selectedFrame = controller.selectedFrame;
 
@@ -649,91 +640,6 @@ export class AnimationPanel extends ComponentBase {
     `;
   }
 
-  private renderTimeline(activeClip: AnimationClip | null, clipFrames: AnimationFrame[]) {
-    if (!activeClip || clipFrames.length === 0) {
-      return html`
-        <div class="empty-state empty-state--inline">
-          This clip has no frames yet. Drop images to append sequence frames or import a spritesheet
-          once via <strong>Slice Frames...</strong>.
-        </div>
-      `;
-    }
-
-    return html`
-      <div class="timeline">
-        ${clipFrames.map((frame, index) => this.renderFrameCard(frame, index))}
-      </div>
-    `;
-  }
-
-  private renderFrameCard(frame: AnimationFrame, index: number) {
-    const controller = this.controller;
-    const imageStyle = this.getFrameImageStyle(frame);
-    const previewTextureUrl = controller.getTexturePreviewUrl(frame);
-    const isSelected = controller.selectedFrameIndices.includes(index);
-    const isPreviewFrame = index === controller.previewFrameIndex;
-    const isDropTarget = index === this.dragOverFrameIndex && this.draggedFrameIndex !== index;
-
-    return html`
-      <button
-        class="frame-card ${isSelected ? 'is-selected' : ''} ${isPreviewFrame
-          ? 'is-preview'
-          : ''} ${isDropTarget ? 'is-drop-target' : ''}"
-        type="button"
-        title=${`Frame ${index + 1} · ${this.getFrameDurationLabel(frame)}`}
-        draggable="true"
-        @click=${(event: MouseEvent) => this.onSelectFrame(event, index)}
-        @dragstart=${(event: DragEvent) => this.onFrameDragStart(event, index)}
-        @dragover=${(event: DragEvent) => this.onFrameDragOver(event, index)}
-        @dragleave=${() => this.onFrameDragLeave(index)}
-        @drop=${(event: DragEvent) => void this.onFrameDrop(event, index)}
-        @dragend=${() => this.onFrameDragEnd()}
-      >
-        <div class="frame-thumb">
-          <span
-            class="frame-delete-button"
-            role="button"
-            tabindex="0"
-            title="Delete frame ${index + 1}"
-            aria-label=${`Delete frame ${index + 1}`}
-            @click=${(event: Event) => void this.onDeleteFrameClick(event, index)}
-            @keydown=${(event: KeyboardEvent) => void this.onDeleteFrameKeyDown(event, index)}
-          >
-            ${this.iconService.getIcon('trash-2', 12)}
-          </span>
-          ${previewTextureUrl
-            ? html` <img src=${previewTextureUrl} alt="Frame ${index + 1}" style=${imageStyle} /> `
-            : null}
-          <div
-            class="frame-thumb-anchor"
-            style=${`left:${frame.anchor.x * 100}%; top:${frame.anchor.y * 100}%;`}
-          ></div>
-        </div>
-      </button>
-    `;
-  }
-
-  private getFrameImageStyle(frame: AnimationFrame): string {
-    if (isSequenceAnimationFrame(frame)) {
-      return 'width:100%; height:100%; left:0; top:0;';
-    }
-
-    const scaleX = frame.repeat.x > 0 ? 100 / frame.repeat.x : 100;
-    const scaleY = frame.repeat.y > 0 ? 100 / frame.repeat.y : 100;
-    const left = frame.repeat.x > 0 ? -(frame.offset.x / frame.repeat.x) * 100 : 0;
-    const top = frame.repeat.y > 0 ? -(frame.offset.y / frame.repeat.y) * 100 : 0;
-    return `width:${scaleX}%; height:${scaleY}%; left:${left}%; top:${top}%;`;
-  }
-
-  private getFrameDurationLabel(frame: AnimationFrame): string {
-    const activeClip = this.controller.activeClip;
-    if (!activeClip) {
-      return 'No timing';
-    }
-
-    return `${this.controller.getFrameDurationSeconds(activeClip, frame).toFixed(3)}s`;
-  }
-
   private onControllerChanged(): void {
     // A document reload drops the transient draft under an in-flight stage drag;
     // the drag has nothing left to edit, so end it rather than leave a pointer
@@ -742,7 +648,6 @@ export class AnimationPanel extends ComponentBase {
       this.stageDragState = null;
     }
 
-    this.syncPlaybackTicker();
     this.requestUpdate();
   }
 
@@ -792,73 +697,6 @@ export class AnimationPanel extends ComponentBase {
       contentWidth: metrics.frameWidth,
       contentHeight: metrics.frameHeight,
     };
-  }
-
-  private onSelectFrame(event: MouseEvent, index: number): void {
-    this.controller.selectFrame(index, {
-      shift: event.shiftKey,
-      ctrl: event.ctrlKey || event.metaKey,
-    });
-  }
-
-  private onTogglePlayback(): void {
-    this.controller.togglePlayback();
-  }
-
-  private onStopPlayback(): void {
-    this.controller.stopPlaybackAndRewind();
-  }
-
-  /**
-   * The rAF ticker is the host's half of preview playback: the controller owns
-   * *when* a frame flips (it is shared with the stage), this owns the clock.
-   */
-  private syncPlaybackTicker(): void {
-    if (this.controller.isPreviewPlaying) {
-      this.startPlaybackTicker();
-      return;
-    }
-
-    this.stopPlaybackTicker();
-  }
-
-  private startPlaybackTicker(): void {
-    if (this.playbackFrameHandle !== null) {
-      return;
-    }
-
-    this.playbackLastTimestamp = null;
-
-    const tick = (timestamp: number) => {
-      if (!this.controller.isPreviewPlaying) {
-        return;
-      }
-
-      this.playbackFrameHandle = requestAnimationFrame(tick);
-      if (!this.controller.activeClip || !this.controller.previewFrame) {
-        return;
-      }
-
-      if (this.playbackLastTimestamp === null) {
-        this.playbackLastTimestamp = timestamp;
-        return;
-      }
-
-      const deltaSeconds = (timestamp - this.playbackLastTimestamp) / 1000;
-      this.playbackLastTimestamp = timestamp;
-      this.controller.advancePlayback(deltaSeconds);
-    };
-
-    this.playbackFrameHandle = requestAnimationFrame(tick);
-  }
-
-  private stopPlaybackTicker(): void {
-    if (this.playbackFrameHandle !== null) {
-      cancelAnimationFrame(this.playbackFrameHandle);
-      this.playbackFrameHandle = null;
-    }
-
-    this.playbackLastTimestamp = null;
   }
 
   private isAnchorPresetActive(currentAnchor: StagePoint, presetAnchor: StagePoint): boolean {
@@ -1108,111 +946,15 @@ export class AnimationPanel extends ComponentBase {
     };
   }
 
-  private normalizeDroppedTextureResource(rawValue: string): string | null {
-    const value = rawValue.trim();
-    if (!value) {
-      return null;
-    }
-
-    if (value.startsWith('res://') || value.startsWith('http://') || value.startsWith('https://')) {
-      return hasSupportedImageExtension(value) ? value : null;
-    }
-
-    if (value.includes('://')) {
-      return null;
-    }
-
-    const normalized = value.replace(/^\.\//, '').replace(/^\/+/, '').replace(/\\+/g, '/');
-    const resourcePath = `res://${normalized}`;
-    return hasSupportedImageExtension(resourcePath) ? resourcePath : null;
-  }
-
-  private getDroppedTextureResource(event: DragEvent): string | null {
-    const transfer = event.dataTransfer;
-    if (!transfer) {
-      return null;
-    }
-
-    return (
-      this.normalizeDroppedTextureResource(transfer.getData(ASSET_RESOURCE_MIME)) ??
-      this.normalizeDroppedTextureResource(transfer.getData(ASSET_PATH_MIME)) ??
-      this.normalizeDroppedTextureResource(transfer.getData('text/uri-list')) ??
-      this.normalizeDroppedTextureResource(transfer.getData('text/plain'))
-    );
-  }
-
-  private isPotentialTextureDrag(event: DragEvent): boolean {
-    const transfer = event.dataTransfer;
-    if (!transfer) {
-      return false;
-    }
-
-    const types = new Set(Array.from(transfer.types));
-    if (types.has(FRAME_REORDER_MIME)) {
-      return false;
-    }
-
-    return (
-      types.has('Files') ||
-      types.has(ASSET_RESOURCE_LIST_MIME) ||
-      types.has(ASSET_PATH_LIST_MIME) ||
-      types.has(ASSET_RESOURCE_MIME) ||
-      types.has(ASSET_PATH_MIME) ||
-      types.has('text/uri-list') ||
-      types.has('text/plain')
-    );
-  }
-
-  /** Image files dragged in from the OS (as opposed to project assets, which arrive as paths). */
-  private getDroppedImageFiles(event: DragEvent): File[] {
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    return files.filter(
-      file => file.type.startsWith('image/') || hasSupportedImageExtension(file.name)
-    );
-  }
-
-  private parseDroppedTextureResources(rawValue: string): string[] | null {
-    if (!rawValue.trim()) {
-      return null;
-    }
-
-    try {
-      const parsed = JSON.parse(rawValue) as unknown;
-      if (!Array.isArray(parsed)) {
-        return null;
-      }
-
-      const texturePaths = parsed
-        .map(value =>
-          typeof value === 'string' ? this.normalizeDroppedTextureResource(value) : null
-        )
-        .filter((value): value is string => Boolean(value));
-
-      return texturePaths.length > 0 ? texturePaths : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private getDroppedTextureResources(event: DragEvent): string[] {
-    const transfer = event.dataTransfer;
-    if (!transfer) {
-      return [];
-    }
-
-    const parsedResources =
-      this.parseDroppedTextureResources(transfer.getData(ASSET_RESOURCE_LIST_MIME)) ??
-      this.parseDroppedTextureResources(transfer.getData(ASSET_PATH_LIST_MIME));
-    if (parsedResources && parsedResources.length > 0) {
-      return parsedResources;
-    }
-
-    const singleResource = this.getDroppedTextureResource(event);
-    return singleResource ? [singleResource] : [];
-  }
-
+  /**
+   * Editor-level texture drop: appends frames. A drop that lands on a frame card
+   * inserts instead and stops propagation, so it never reaches this handler —
+   * and a frame *reorder* is filtered out by {@link isPotentialTextureDrag}
+   * through the shared `FRAME_REORDER_MIME`, which is why that constant is not
+   * private to the frame strip.
+   */
   private onEditorDragEnter(event: DragEvent): void {
-    if (!this.isPotentialTextureDrag(event)) {
+    if (!isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
 
@@ -1221,7 +963,7 @@ export class AnimationPanel extends ComponentBase {
   }
 
   private onEditorDragOver(event: DragEvent): void {
-    if (!this.isPotentialTextureDrag(event)) {
+    if (!isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
 
@@ -1233,7 +975,7 @@ export class AnimationPanel extends ComponentBase {
   }
 
   private onEditorDragLeave(event: DragEvent): void {
-    if (!this.isPotentialTextureDrag(event)) {
+    if (!isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
 
@@ -1244,7 +986,7 @@ export class AnimationPanel extends ComponentBase {
   }
 
   private async onEditorDrop(event: DragEvent): Promise<void> {
-    if (!this.isPotentialTextureDrag(event)) {
+    if (!isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
 
@@ -1252,103 +994,16 @@ export class AnimationPanel extends ComponentBase {
     this.textureDragDepth = 0;
     this.isTextureDragOver = false;
 
-    const droppedFiles = this.getDroppedImageFiles(event);
+    const droppedFiles = getDroppedImageFiles(event.dataTransfer);
     const texturePaths =
       droppedFiles.length > 0
         ? await this.controller.importOsFiles(droppedFiles)
-        : this.getDroppedTextureResources(event);
+        : getDroppedTextureResources(event.dataTransfer);
     if (texturePaths.length === 0) {
       return;
     }
 
     await this.controller.addFrameTextures(texturePaths);
-  }
-
-  private onFrameDragStart(event: DragEvent, frameIndex: number): void {
-    if (!event.dataTransfer) {
-      return;
-    }
-
-    this.controller.selectFrameForDrag(frameIndex);
-
-    this.draggedFrameIndex = frameIndex;
-    this.dragOverFrameIndex = frameIndex;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData(FRAME_REORDER_MIME, String(frameIndex));
-    event.dataTransfer.setData('text/plain', String(frameIndex));
-  }
-
-  private onFrameDragOver(event: DragEvent, frameIndex: number): void {
-    const isReorder = this.draggedFrameIndex >= 0;
-    if (!isReorder && !this.isPotentialTextureDrag(event)) {
-      return;
-    }
-
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = isReorder ? 'move' : 'copy';
-    }
-    this.dragOverFrameIndex = frameIndex;
-  }
-
-  private onFrameDragLeave(frameIndex: number): void {
-    if (this.dragOverFrameIndex === frameIndex) {
-      this.dragOverFrameIndex = -1;
-    }
-  }
-
-  private async onFrameDrop(event: DragEvent, frameIndex: number): Promise<void> {
-    if (this.draggedFrameIndex >= 0) {
-      event.preventDefault();
-      const fromIndex = this.draggedFrameIndex;
-      this.draggedFrameIndex = -1;
-      this.dragOverFrameIndex = -1;
-      await this.controller.reorderFrame(fromIndex, frameIndex);
-      return;
-    }
-
-    // Not a reorder: an asset or OS file dropped onto a card inserts new frames before it.
-    if (!this.isPotentialTextureDrag(event)) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    this.dragOverFrameIndex = -1;
-    this.textureDragDepth = 0;
-    this.isTextureDragOver = false;
-
-    const droppedFiles = this.getDroppedImageFiles(event);
-    const texturePaths =
-      droppedFiles.length > 0
-        ? await this.controller.importOsFiles(droppedFiles)
-        : this.getDroppedTextureResources(event);
-    if (texturePaths.length === 0) {
-      return;
-    }
-
-    await this.controller.addFrameTextures(texturePaths, frameIndex);
-  }
-
-  private onFrameDragEnd(): void {
-    this.draggedFrameIndex = -1;
-    this.dragOverFrameIndex = -1;
-  }
-
-  private async onDeleteFrameClick(event: Event, frameIndex: number): Promise<void> {
-    event.preventDefault();
-    event.stopPropagation();
-    await this.controller.removeFrames([frameIndex]);
-  }
-
-  private async onDeleteFrameKeyDown(event: KeyboardEvent, frameIndex: number): Promise<void> {
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    await this.controller.removeFrames([frameIndex]);
   }
 }
 

@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState, resetAppState } from '@/state';
+import { FRAME_REORDER_MIME } from '@/ui/shared/asset-drag-drop';
 import type { AnimationDocumentController } from '@/ui/sprite-editor/animation-document-controller';
 
 import { AnimationPanel } from './animation-panel';
 
 /**
- * Document logic lives in `AnimationDocumentController` and is covered by
- * `src/ui/sprite-editor/animation-document-controller.spec.ts`. What is left here
- * is what the panel still owns: DataTransfer parsing and the drag state machine.
+ * Document logic lives in `AnimationDocumentController` and the frame strip in
+ * `<pix3-sprite-timeline>`, both covered by their own specs under
+ * `src/ui/sprite-editor/`. What is left here is what the panel still owns: the
+ * editor-level texture drop and the overlay it raises.
  */
 function createPanel(): AnimationPanel {
   const panel = new AnimationPanel();
@@ -92,9 +94,12 @@ describe('AnimationPanel', () => {
     await panel.updateComplete;
     expect(panel.querySelector('.editor-toolbar')).not.toBeNull();
     expect(panel.querySelector('.editor-status-row')?.textContent).toContain('idle');
-    expect(panel.querySelector('.editor-surface--timeline')?.textContent).toContain(
-      'This clip has no frames yet'
-    );
+
+    // The strip itself is the timeline component's business; the panel only has to
+    // host it and hand it the one controller instance it owns.
+    const timeline = panel.querySelector('pix3-sprite-timeline');
+    expect(timeline).not.toBeNull();
+    expect(timeline?.controller).toBe(getController(panel));
   });
 
   it('accepts texture drops from the asset browser', async () => {
@@ -155,28 +160,42 @@ describe('AnimationPanel', () => {
     ]);
   });
 
+  it('takes its drop overlay down even when the frame strip swallows the drop', async () => {
+    const panel = createPanel();
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const panelState = panel as unknown as {
+      isTextureDragOver: boolean;
+      textureDragDepth: number;
+    };
+    panelState.isTextureDragOver = true;
+    panelState.textureDragDepth = 1;
+
+    // A frame card inserts the texture itself and stops the event, so the
+    // editor-level drop handler never runs.
+    const card = document.createElement('div');
+    card.addEventListener('drop', event => event.stopPropagation());
+    panel.appendChild(card);
+    card.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }));
+
+    expect(panelState.isTextureDragOver).toBe(false);
+    expect(panelState.textureDragDepth).toBe(0);
+  });
+
+  /**
+   * The other half of this contract — the frame strip *writing* `FRAME_REORDER_MIME`
+   * on dragstart — now lives in `src/ui/sprite-editor/sprite-timeline.spec.ts`. The
+   * shell's job is to stay out of the way while such a drag is in flight, which is
+   * why the MIME is a shared constant rather than a component-private string.
+   */
   it('does not enable the texture overlay during internal frame reordering drags', () => {
     const panel = createPanel();
-    const setData = vi.fn();
     const dataTransfer = {
-      effectAllowed: 'all',
-      setData,
-      types: ['application/x-pix3-animation-frame-reorder', 'text/plain'],
+      effectAllowed: 'move',
+      types: [FRAME_REORDER_MIME, 'text/plain'],
+      getData: vi.fn(() => '1'),
     } as unknown as DataTransfer;
-
-    (
-      panel as unknown as {
-        onFrameDragStart: (event: DragEvent, index: number) => void;
-      }
-    ).onFrameDragStart(
-      {
-        dataTransfer,
-      } as DragEvent,
-      1
-    );
-
-    expect(setData).toHaveBeenCalledWith('application/x-pix3-animation-frame-reorder', '1');
-    expect(getController(panel).selectedFrameIndices).toEqual([1]);
 
     (
       panel as unknown as {
@@ -187,5 +206,18 @@ describe('AnimationPanel', () => {
     } as DragEvent);
 
     expect((panel as unknown as { isTextureDragOver: boolean }).isTextureDragOver).toBe(false);
+
+    (
+      panel as unknown as {
+        onEditorDragEnter: (event: DragEvent) => void;
+      }
+    ).onEditorDragEnter({
+      dataTransfer: {
+        types: ['application/x-pix3-asset-resource'],
+        getData: vi.fn(() => 'res://textures/player.png'),
+      },
+    } as unknown as DragEvent);
+
+    expect((panel as unknown as { isTextureDragOver: boolean }).isTextureDragOver).toBe(true);
   });
 });

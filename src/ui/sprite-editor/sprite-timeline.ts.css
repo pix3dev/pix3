@@ -1,0 +1,162 @@
+/*
+ * Scoped under the component tag on purpose: `.frame-card`, `.timeline` and
+ * `.empty-state` are generic enough that an unscoped rule would leak into every
+ * Light-DOM panel that happens to reuse the name.
+ */
+pix3-sprite-timeline {
+  /* Lay out exactly as the frame strip did when it was inline in the panel. */
+  display: contents;
+}
+
+pix3-sprite-timeline .timeline-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+pix3-sprite-timeline .editor-toolbar-button {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+  padding: 0;
+}
+
+pix3-sprite-timeline .editor-toolbar-button:hover:not(:disabled) {
+  color: var(--fg-0);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-timeline .editor-toolbar-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+pix3-sprite-timeline .editor-toolbar-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+pix3-sprite-timeline .timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 0.45rem;
+  overflow: auto;
+  min-height: 0;
+}
+
+pix3-sprite-timeline .frame-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: transparent;
+  color: var(--fg-0);
+  cursor: pointer;
+  text-align: left;
+}
+
+pix3-sprite-timeline .frame-card:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-timeline .frame-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-timeline .frame-card.is-preview {
+  background: var(--accent-soft);
+}
+
+pix3-sprite-timeline .frame-card.is-drop-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-timeline .frame-thumb {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--radius-1);
+  /* transparency checkerboard (matches global .checker) */
+  background-image:
+    linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(-45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, oklch(0.22 0.008 250) 75%),
+    linear-gradient(-45deg, transparent 75%, oklch(0.22 0.008 250) 75%);
+  background-size: 12px 12px;
+  background-position:
+    0 0,
+    0 6px,
+    6px -6px,
+    -6px 0;
+  background-color: oklch(0.27 0.008 250);
+}
+
+pix3-sprite-timeline .frame-thumb img {
+  position: absolute;
+  transform-origin: top left;
+  image-rendering: pixelated;
+}
+
+pix3-sprite-timeline .frame-thumb-anchor {
+  position: absolute;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-left: -0.3rem;
+  margin-top: -0.3rem;
+  border-radius: 999px;
+  border: 2px solid var(--bg-0);
+  background: var(--accent);
+  pointer-events: none;
+}
+
+pix3-sprite-timeline .frame-delete-button {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  color: var(--fg-1);
+  background: oklch(0 0 0 / 0.55);
+}
+
+pix3-sprite-timeline .frame-delete-button:hover,
+pix3-sprite-timeline .frame-delete-button:focus-visible {
+  color: var(--danger);
+  background: var(--danger-soft);
+  outline: none;
+}
+
+pix3-sprite-timeline .empty-state {
+  padding: 1rem;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--radius-2);
+  color: var(--fg-2);
+}
+
+pix3-sprite-timeline .empty-state--inline {
+  min-height: 10rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
