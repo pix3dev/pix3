@@ -52,8 +52,29 @@ pix3-sprite-editor-panel .ag-icon-button:hover {
   color: var(--fg-0);
 }
 
+pix3-sprite-editor-panel .ag-icon-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 pix3-sprite-editor-panel .ag-toolbar-spacer {
   flex: 1 1 auto;
+}
+
+pix3-sprite-editor-panel .ag-toolbar-separator {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 -0.15rem;
+  background: var(--line-1);
+}
+
+pix3-sprite-editor-panel .ag-zoom-readout {
+  min-width: 3.4em;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--fg-2);
+  text-align: right;
 }
 
 /* Save menu (toolbar) --------------------------------------------------- */
@@ -517,8 +538,10 @@ pix3-sprite-editor-panel .ag-stage {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: auto;
-  padding: 1rem;
+  /* The stage pans and zooms — it never scrolls, and the crop mask's giant
+     box-shadow has to be clipped to it. */
+  overflow: hidden;
+  touch-action: none;
   /* transparency checkerboard (matches global .checker) */
   background-image:
     linear-gradient(45deg, oklch(0.22 0.008 250) 25%, transparent 25%),
@@ -534,16 +557,45 @@ pix3-sprite-editor-panel .ag-stage {
   background-color: oklch(0.27 0.008 250);
 }
 
+pix3-sprite-editor-panel .ag-stage.is-cropping {
+  cursor: crosshair;
+}
+
+pix3-sprite-editor-panel .ag-stage.is-panning,
+pix3-sprite-editor-panel .ag-stage.is-panning .ag-crop-rect,
+pix3-sprite-editor-panel .ag-stage.is-panning .ag-crop-handle {
+  cursor: grabbing;
+}
+
+/* Anchored at the stage's top-left and moved by the pan transform — the model
+   `StageZoomPanController.toStageCoords` / `fitToViewport` assume. It shrink-wraps
+   the image, so overlays position against the image's own box. */
+pix3-sprite-editor-panel .ag-stage-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+  line-height: 0;
+}
+
 pix3-sprite-editor-panel .ag-stage-image {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  display: block;
+  /* Sized by zoom in the template, never CSS-scaled: overlay chrome stays screen-sized. */
+  user-select: none;
+  -webkit-user-drag: none;
+  /* Drags on the image belong to the stage (pan) or the crop tool. */
+  pointer-events: none;
+}
+
+pix3-sprite-editor-panel .ag-stage-image.is-pixelated {
+  image-rendering: pixelated;
 }
 
 pix3-sprite-editor-panel .ag-empty {
   text-align: center;
   color: var(--fg-3);
   max-width: 320px;
+  padding: 1rem;
 }
 
 pix3-sprite-editor-panel .ag-empty-title {
@@ -713,31 +765,7 @@ pix3-sprite-editor-panel .ag-drop-overlay {
 }
 
 /* Crop editor ----------------------------------------------------------- */
-pix3-sprite-editor-panel .ag-stage--crop {
-  display: block;
-  padding: 0;
-  overflow: hidden;
-}
-
-pix3-sprite-editor-panel .ag-crop-image {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-  pointer-events: none;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-pix3-sprite-editor-panel .ag-crop-overlay {
-  position: absolute;
-  inset: 0;
-  touch-action: none;
-  cursor: crosshair;
-}
-
+/* Positioned in image pixels x zoom inside .ag-stage-content. */
 pix3-sprite-editor-panel .ag-crop-rect {
   position: absolute;
   border: 1px solid var(--accent);
@@ -747,6 +775,8 @@ pix3-sprite-editor-panel .ag-crop-rect {
   box-sizing: border-box;
 }
 
+/* Screen-sized, not image-sized: the handles keep the same 12px body (and the
+   same padded hit area below) whether the stage is at 10% or 1600%. */
 pix3-sprite-editor-panel .ag-crop-handle {
   position: absolute;
   width: 12px;
@@ -755,6 +785,13 @@ pix3-sprite-editor-panel .ag-crop-handle {
   border: 1px solid var(--bg-0);
   border-radius: var(--radius-1);
   box-sizing: border-box;
+  touch-action: none;
+}
+
+pix3-sprite-editor-panel .ag-crop-handle::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
 }
 
 pix3-sprite-editor-panel .ag-crop-handle--nw {
