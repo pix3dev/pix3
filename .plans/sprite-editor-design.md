@@ -985,6 +985,16 @@ Apply sequence:
 - **C6** (3c) — shell binds `.pix3anim` tabs: construct controller, mount rail + timeline +
   overlays, frame→canvas binding; `LayoutManager.ts:42` maps `animation` → `pix3-sprite-editor-panel`
   (also :376–380 tab dispatch, :809 special case, lazy import near :1075/:1084).
+- **C6b** (3c) — lift the generation chrome out of the shell into `<pix3-generate-panel>`, a
+  dockable Golden Layout panel titled "Generate" (not in the default layout; opened from View or
+  the shell's `Generate…` toolbar action). Mediated by `ImageEditTargetService`
+  (`src/services/image-gen/`), shaped after `AnimationEditorService`: the shell registers itself as
+  the active `ImageEditTarget` while its tab is active, and the panel renders against the snapshot —
+  no component references either way. General-purpose: with no target the panel keeps the result and
+  offers save-to-project / library / download / open-in-editor, which is the standalone Asset
+  Generator behaviour. The snapshot already carries `boundFrameTexturePath` +
+  `acceptsFrameWriteBack: false` so C7 turns it on without reshaping the interface. Deletes
+  `renderAiRail()`, the `.ag-ai-rail-*` CSS and the `aiRailExpanded` preference.
 - **C7** (3c) — `replaceFrameTexture` write-back + invalidation fan-out (incl.
   `Viewport2DProxyRegistry.invalidateTexture`).
 - **C8** (3c, gated) — delete `src/ui/animation-editor/`, drop the old tag from `LayoutManager`,

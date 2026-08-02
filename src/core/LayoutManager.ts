@@ -29,6 +29,7 @@ const PANEL_COMPONENT_TYPES = {
   agentChat: 'agent-chat',
   library: 'library',
   localization: 'localization',
+  generate: 'generate',
 } as const;
 
 export type PanelComponentType = (typeof PANEL_COMPONENT_TYPES)[keyof typeof PANEL_COMPONENT_TYPES];
@@ -55,6 +56,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.agentChat]: 'pix3-agent-chat-panel',
   [PANEL_COMPONENT_TYPES.library]: 'pix3-library-panel',
   [PANEL_COMPONENT_TYPES.localization]: 'pix3-localization-panel',
+  [PANEL_COMPONENT_TYPES.generate]: 'pix3-generate-panel',
 } as const;
 
 const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
@@ -75,6 +77,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
   [PANEL_COMPONENT_TYPES.localization]: 'Localization',
+  [PANEL_COMPONENT_TYPES.generate]: 'Generate',
 };
 
 /**
@@ -661,56 +664,7 @@ export class LayoutManagerService {
    * default placement if the tree can't be navigated).
    */
   revealAgentPanel(): void {
-    if (!this.layout) {
-      return;
-    }
-
-    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
-    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.agentChat);
-    if (existing) {
-      this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
-      return;
-    }
-
-    const componentConfig: ComponentItemConfig = {
-      type: 'component',
-      componentType: PANEL_COMPONENT_TYPES.agentChat,
-      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat],
-      isClosable: true,
-    };
-
-    // Re-add as its own column just before the Inspector (the last top-level child).
-    try {
-      const root = rootItem as
-        | (ContentItem & {
-            addItem?: (config: unknown, index?: number) => number;
-            contentItems?: ContentItem[];
-          })
-        | undefined;
-      if (root && root.type === 'row' && typeof root.addItem === 'function') {
-        const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
-        root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
-        this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
-        return;
-      }
-    } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Agent panel as a column', error);
-    }
-
-    // Fallback: let Golden Layout choose a placement.
-    try {
-      const layoutApi = this.layout as unknown as {
-        addComponent?: (componentType: string, state?: unknown, title?: string) => void;
-      };
-      layoutApi.addComponent?.(
-        PANEL_COMPONENT_TYPES.agentChat,
-        undefined,
-        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.agentChat]
-      );
-      this.focusPanel(PANEL_COMPONENT_TYPES.agentChat);
-    } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Agent panel', error);
-    }
+    this.revealDockedPanel(PANEL_COMPONENT_TYPES.agentChat, 'Agent');
   }
 
   /**
@@ -720,54 +674,7 @@ export class LayoutManagerService {
    * present, this just brings it to the front of its stack.
    */
   revealLocalizationPanel(): void {
-    if (!this.layout) {
-      return;
-    }
-
-    const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
-    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.localization);
-    if (existing) {
-      this.focusPanel(PANEL_COMPONENT_TYPES.localization);
-      return;
-    }
-
-    const componentConfig: ComponentItemConfig = {
-      type: 'component',
-      componentType: PANEL_COMPONENT_TYPES.localization,
-      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.localization],
-      isClosable: true,
-    };
-
-    try {
-      const root = rootItem as
-        | (ContentItem & {
-            addItem?: (config: unknown, index?: number) => number;
-            contentItems?: ContentItem[];
-          })
-        | undefined;
-      if (root && root.type === 'row' && typeof root.addItem === 'function') {
-        const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
-        root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
-        this.focusPanel(PANEL_COMPONENT_TYPES.localization);
-        return;
-      }
-    } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Localization panel as a column', error);
-    }
-
-    try {
-      const layoutApi = this.layout as unknown as {
-        addComponent?: (componentType: string, state?: unknown, title?: string) => void;
-      };
-      layoutApi.addComponent?.(
-        PANEL_COMPONENT_TYPES.localization,
-        undefined,
-        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.localization]
-      );
-      this.focusPanel(PANEL_COMPONENT_TYPES.localization);
-    } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Localization panel', error);
-    }
+    this.revealDockedPanel(PANEL_COMPONENT_TYPES.localization, 'Localization');
   }
 
   /**
@@ -778,21 +685,40 @@ export class LayoutManagerService {
    * viewport so the editor and library sit side by side.
    */
   revealLibraryPanel(): void {
+    this.revealDockedPanel(PANEL_COMPONENT_TYPES.library, 'Library');
+  }
+
+  /**
+   * Reveal the Generate panel (§9.8). Not part of the default layout: the first
+   * open docks it as a new column just before the Inspector, and the Sprite
+   * Editor's `Generate…` toolbar action routes here so the prompt is always one
+   * click from the canvas even though the two now live in separate docks.
+   */
+  revealGeneratePanel(): void {
+    this.revealDockedPanel(PANEL_COMPONENT_TYPES.generate, 'Generate');
+  }
+
+  /**
+   * Shared body of the `reveal*Panel` family: focus the panel if it is already in
+   * the tree, otherwise dock it as its own column just before the Inspector (the
+   * last top-level child), falling back to Golden Layout's default placement when
+   * the tree can't be navigated.
+   */
+  private revealDockedPanel(componentType: PanelComponentType, logLabel: string): void {
     if (!this.layout) {
       return;
     }
 
     const rootItem = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
-    const existing = this.findPanelByComponentType(rootItem, PANEL_COMPONENT_TYPES.library);
-    if (existing) {
-      this.focusPanel(PANEL_COMPONENT_TYPES.library);
+    if (this.findPanelByComponentType(rootItem, componentType)) {
+      this.focusPanel(componentType);
       return;
     }
 
     const componentConfig: ComponentItemConfig = {
       type: 'component',
-      componentType: PANEL_COMPONENT_TYPES.library,
-      title: PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library],
+      componentType,
+      title: PANEL_DISPLAY_TITLES[componentType],
       isClosable: true,
     };
 
@@ -806,25 +732,21 @@ export class LayoutManagerService {
       if (root && root.type === 'row' && typeof root.addItem === 'function') {
         const insertIndex = Math.max(0, (root.contentItems?.length ?? 1) - 1);
         root.addItem({ type: 'stack', content: [componentConfig] }, insertIndex);
-        this.focusPanel(PANEL_COMPONENT_TYPES.library);
+        this.focusPanel(componentType);
         return;
       }
     } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Library panel as a column', error);
+      console.error(`[LayoutManager] Failed to re-add ${logLabel} panel as a column`, error);
     }
 
     try {
       const layoutApi = this.layout as unknown as {
         addComponent?: (componentType: string, state?: unknown, title?: string) => void;
       };
-      layoutApi.addComponent?.(
-        PANEL_COMPONENT_TYPES.library,
-        undefined,
-        PANEL_DISPLAY_TITLES[PANEL_COMPONENT_TYPES.library]
-      );
-      this.focusPanel(PANEL_COMPONENT_TYPES.library);
+      layoutApi.addComponent?.(componentType, undefined, PANEL_DISPLAY_TITLES[componentType]);
+      this.focusPanel(componentType);
     } catch (error) {
-      console.error('[LayoutManager] Failed to re-add Library panel', error);
+      console.error(`[LayoutManager] Failed to re-add ${logLabel} panel`, error);
     }
   }
 
@@ -1143,6 +1065,9 @@ export class LayoutManagerService {
         }
         if (componentType === PANEL_COMPONENT_TYPES.localization) {
           void import('@/ui/localization-view/localization-panel');
+        }
+        if (componentType === PANEL_COMPONENT_TYPES.generate) {
+          void import('@/ui/generate/generate-panel');
         }
         if (componentType === PANEL_COMPONENT_TYPES.assets) {
           void import('@/ui/assets/assets-panel');

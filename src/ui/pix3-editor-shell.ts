@@ -98,6 +98,7 @@ import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclus
 import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
 import { OpenLocalizationPanelCommand } from '@/features/localization/OpenLocalizationPanelCommand';
+import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCommand';
 import { OpenLibraryDocumentCommand } from '@/features/library/OpenLibraryDocumentCommand';
 import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
@@ -405,6 +406,7 @@ export class Pix3EditorShell extends ComponentBase {
     const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
     const openLocalizationPanelCommand = new OpenLocalizationPanelCommand();
+    const openGeneratePanelCommand = new OpenGeneratePanelCommand();
     const openLibraryDocumentCommand = new OpenLibraryDocumentCommand();
     const checkScriptsCommand = new CheckScriptsCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
@@ -461,6 +463,7 @@ export class Pix3EditorShell extends ComponentBase {
       clearAOCommand,
       focusAnimationTimelineCommand,
       openLocalizationPanelCommand,
+      openGeneratePanelCommand,
       openLibraryDocumentCommand,
       checkScriptsCommand,
       addAnimationPlayerCommand,

@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState, resetAppState } from '@/state';
 import type { AnimationResource } from '@pix3/runtime';
 
+import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCommand';
+import type { ImageEditTarget } from '@/services/image-gen/ImageEditTargetService';
+
 import type { AnimationDocumentController } from './animation-document-controller';
 import { SpriteEditorPanel } from './sprite-editor-panel';
 
@@ -25,9 +28,10 @@ const IMAGE_TAB_ID = `sprite-editor:${IMAGE_PATH}`;
 interface PanelInternals {
   documentController: AnimationDocumentController | null;
   boundFrameTexturePath: string | null;
-  aiRailExpanded: boolean;
   isTextureDragOver: boolean;
   textureDragDepth: number;
+  current: { blob: Blob; mimeType: string; source: string } | null;
+  saveName: string;
 }
 
 function createPreferences() {
@@ -42,7 +46,6 @@ function createPreferences() {
     bgRemovalEngine: 'imgly' as const,
     bgRemovalQuality: 'balanced' as const,
     bgFillHoles: true,
-    aiRailExpanded: null as boolean | null,
   };
 }
 
@@ -50,6 +53,9 @@ interface PanelStubs {
   readBlob: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
   setActiveController: ReturnType<typeof vi.fn>;
+  setActiveTarget: ReturnType<typeof vi.fn>;
+  clearActiveTarget: ReturnType<typeof vi.fn>;
+  execute: ReturnType<typeof vi.fn>;
   preferences: ReturnType<typeof createPreferences>;
 }
 
@@ -66,9 +72,20 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   const setActiveController = vi.fn((controller: AnimationDocumentController | null) => {
     activeController = controller;
   });
+  // §9.8's mediation: the shell registers itself as the active image-edit target,
+  // and the Generate panel (a different dock) renders against that registration.
+  let activeTarget: ImageEditTarget | null = null;
+  const setActiveTarget = vi.fn((target: ImageEditTarget | null) => {
+    activeTarget = target;
+  });
+  const clearActiveTarget = vi.fn((target: ImageEditTarget) => {
+    if (activeTarget === target) {
+      activeTarget = null;
+    }
+  });
+  const execute = vi.fn().mockResolvedValue(true);
 
   const stubs: Record<string, unknown> = {
-    providers: { get: () => undefined, list: () => [], getDefault: () => undefined },
     aiSettings: {
       getPreferences: () => ({ ...preferences }),
       getSelectedProvider: () => undefined,
@@ -77,14 +94,11 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       subscribe: vi.fn().mockReturnValue(() => undefined),
       updatePreferences,
     },
-    history: {
-      subscribe: vi.fn().mockReturnValue(() => undefined),
-      list: vi.fn().mockResolvedValue([]),
-    },
+    history: { add: vi.fn().mockResolvedValue(undefined) },
     bgRemoval: { removeBackground: vi.fn() },
     storage: { readBlob, writeBinaryFile: vi.fn(), createDirectory: vi.fn() },
     editorSettings: { showSettings: vi.fn() },
-    commandDispatcher: { execute: vi.fn().mockResolvedValue(true) },
+    commandDispatcher: { execute },
     assetLibrary: { isUserScopeSupported: () => false },
     sliceDialog: { showDialog: vi.fn().mockResolvedValue(null) },
     editorTabs: { focusOrOpenAnimation: vi.fn() },
@@ -92,6 +106,11 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     animationEditorService: {
       getActiveController: () => activeController,
       setActiveController,
+    },
+    imageEditTargets: {
+      getActiveTarget: () => activeTarget,
+      setActiveTarget,
+      clearActiveTarget,
     },
     dialogService: { showConfirmation: vi.fn().mockResolvedValue(true) },
     sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
@@ -101,7 +120,18 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     Object.defineProperty(panel, key, { value, configurable: true });
   }
 
-  return { panel, stubs: { readBlob, updatePreferences, setActiveController, preferences } };
+  return {
+    panel,
+    stubs: {
+      readBlob,
+      updatePreferences,
+      setActiveController,
+      setActiveTarget,
+      clearActiveTarget,
+      execute,
+      preferences,
+    },
+  };
 }
 
 function createResource(texturePaths: string[]): AnimationResource {
@@ -207,7 +237,7 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(stubs.setActiveController).toHaveBeenCalledWith(internals.documentController);
   });
 
-  it('creates no controller for a bare image tab and expands the AI rail', async () => {
+  it('creates no controller for a bare image tab and hosts no generation chrome', async () => {
     seedImageTab();
     const { panel } = createPanel();
     await mount(panel, IMAGE_TAB_ID);
@@ -217,20 +247,12 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(panel.querySelector('pix3-sprite-clips-rail')).toBeNull();
     expect(panel.querySelector('pix3-sprite-timeline')).toBeNull();
 
-    expect(internals.aiRailExpanded).toBe(true);
-    expect(panel.querySelector('.ag-ai-rail.is-collapsed')).toBeNull();
-    expect(panel.querySelector('.ag-prompt')).not.toBeNull();
-  });
-
-  it('collapses the AI rail by default when a .pix3anim is bound', async () => {
-    seedAnimationTab();
-    const { panel } = createPanel();
-    await mount(panel, ANIMATION_TAB_ID);
-
-    expect((panel as unknown as PanelInternals).aiRailExpanded).toBe(false);
-    expect(panel.querySelector('.ag-ai-rail.is-collapsed')).not.toBeNull();
-    // Collapsed means collapsed: the prompt box is gone, not just hidden.
+    // C6b lifted the AI rail out into <pix3-generate-panel>; the canvas gets the
+    // whole shell instead of "shell minus rail".
+    expect(panel.querySelector('.ag-ai-rail')).toBeNull();
     expect(panel.querySelector('.ag-prompt')).toBeNull();
+    expect(panel.querySelector('.ag-history')).toBeNull();
+    expect(panel.querySelector('.ag-references')).toBeNull();
   });
 
   it('rebinds the canvas to the texture of the frame selected in the timeline', async () => {
@@ -253,20 +275,81 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(stubs.readBlob).toHaveBeenCalledWith('res://sprites/walk/idle_0002.png');
   });
 
-  it('persists the AI rail toggle', async () => {
+  it('registers as the active image-edit target and reports its frame binding', async () => {
     seedAnimationTab();
     const { panel, stubs } = createPanel();
     await mount(panel, ANIMATION_TAB_ID);
 
-    const internals = panel as unknown as PanelInternals;
-    expect(internals.aiRailExpanded).toBe(false);
+    expect(stubs.setActiveTarget).toHaveBeenCalledWith(panel);
 
-    panel.querySelector<HTMLButtonElement>('.ag-ai-rail-toggle')?.click();
+    await vi.waitFor(() => {
+      expect((panel as unknown as PanelInternals).boundFrameTexturePath).toBe(
+        'res://sprites/walk/idle_0001.png'
+      );
+    });
+
+    const snapshot = panel.getImageEditSnapshot();
+    expect(snapshot.targetId).toBe(ANIMATION_TAB_ID);
+    expect(snapshot.label).toBe('walk.pix3anim');
+    expect(snapshot.resourcePath).toBe(ANIMATION_PATH);
+    expect(snapshot.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    // C7 owns the write-back; until then the panel must not push pixels at a frame.
+    expect(snapshot.acceptsFrameWriteBack).toBe(false);
+  });
+
+  it('deregisters as the image-edit target when another tab becomes active', async () => {
+    seedImageTab();
+    const { panel, stubs } = createPanel();
+    await mount(panel, IMAGE_TAB_ID);
+
+    expect(stubs.setActiveTarget).toHaveBeenCalledWith(panel);
+    stubs.clearActiveTarget.mockClear();
+
+    appState.tabs.activeTabId = 'viewport:res://scenes/main.pix3scene';
+    await vi.waitFor(() => {
+      expect(stubs.clearActiveTarget).toHaveBeenCalledWith(panel);
+    });
+
+    // ...and on teardown, conditionally — a second shell that already took over
+    // must not be unbound by this one's disconnect.
+    stubs.clearActiveTarget.mockClear();
+    panel.remove();
+    expect(stubs.clearActiveTarget).toHaveBeenCalledWith(panel);
+  });
+
+  it('takes a generated image from the Generate panel as its working image', async () => {
+    seedImageTab();
+    const { panel } = createPanel();
+    await mount(panel, IMAGE_TAB_ID);
+
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    panel.applyGeneratedImage({
+      blob,
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 64,
+      height: 64,
+    });
     await panel.updateComplete;
 
-    expect(internals.aiRailExpanded).toBe(true);
-    expect(stubs.updatePreferences).toHaveBeenCalledWith({ aiRailExpanded: true });
-    expect(stubs.preferences.aiRailExpanded).toBe(true);
+    const internals = panel as unknown as PanelInternals;
+    expect(internals.current?.blob).toBe(blob);
+    expect(internals.current?.source).toBe('generated');
+    // The prompt travels with the image so the save name still reads from it.
+    expect(internals.saveName).toBe('sprites/a-brass-gear.png');
+  });
+
+  it('opens the Generate panel from the toolbar action', async () => {
+    seedImageTab();
+    const { panel, stubs } = createPanel();
+    await mount(panel, IMAGE_TAB_ID);
+
+    const action = panel.querySelector<HTMLButtonElement>('.ag-generate-action');
+    expect(action).not.toBeNull();
+    action?.click();
+
+    expect(stubs.execute).toHaveBeenCalledTimes(1);
+    expect(stubs.execute.mock.calls[0][0]).toBeInstanceOf(OpenGeneratePanelCommand);
   });
 
   it('keeps the controller and its inspector registration across a re-dock', async () => {

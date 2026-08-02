@@ -24,13 +24,6 @@ export interface AiImagePreferences {
   bgRemovalQuality: BgRemovalQuality;
   /** Fill enclosed transparent holes in the cutout (recovers wrongly-removed object interiors). */
   bgFillHoles: boolean;
-  /**
-   * Sprite Editor right-hand "AI" rail (references + prompt + history): the user's
-   * manual open/closed choice. `null` means they have not chosen, and the rail
-   * follows what is bound — collapsed for a `.pix3anim` (frames are the work),
-   * expanded for a bare image (generation is the work).
-   */
-  aiRailExpanded: boolean | null;
 }
 
 const STORAGE_KEY = 'pix3.aiImageSettings:v1';
@@ -160,7 +153,6 @@ export class AiImageSettingsService {
       bgRemovalEngine: 'imgly',
       bgRemovalQuality: 'balanced',
       bgFillHoles: true,
-      aiRailExpanded: null,
     };
   }
 
@@ -216,10 +208,6 @@ export class AiImageSettingsService {
             : defaults.bgRemovalQuality,
         bgFillHoles:
           typeof parsed.bgFillHoles === 'boolean' ? parsed.bgFillHoles : defaults.bgFillHoles,
-        aiRailExpanded:
-          typeof parsed.aiRailExpanded === 'boolean'
-            ? parsed.aiRailExpanded
-            : defaults.aiRailExpanded,
       };
     } catch {
       return defaults;

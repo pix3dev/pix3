@@ -202,72 +202,6 @@ pix3-sprite-editor-panel .ag-clips-rail {
   border-right: 1px solid var(--line-1);
 }
 
-/*
- * References + prompt + history in one collapsible rail. Collapsed it is a 2rem
- * spine holding just the reopen affordance, which is the whole point: on a
- * `.pix3anim` the user is editing frames, not generating.
- */
-pix3-sprite-editor-panel .ag-ai-rail {
-  flex: 0 0 20rem;
-  width: 20rem;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--line-1);
-  background: var(--bg-1);
-}
-
-pix3-sprite-editor-panel .ag-ai-rail.is-collapsed {
-  flex: 0 0 2.1rem;
-  width: 2.1rem;
-  align-items: center;
-  padding-top: 0.5rem;
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--line-1);
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.6rem;
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-toggle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-  padding: 0.4rem 0;
-  border: none;
-  background: transparent;
-  color: var(--fg-2);
-  cursor: pointer;
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-toggle:hover {
-  color: var(--accent);
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-tag {
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  writing-mode: vertical-rl;
-}
-
 /* Frame strip band, full width under both rails. */
 pix3-sprite-editor-panel .ag-timeline {
   flex: 0 0 auto;
@@ -291,117 +225,9 @@ pix3-sprite-editor-panel .ag-field-label {
   letter-spacing: 0.03em;
 }
 
-/* Prompt bar. Lives inside the AI rail, so it brings no chrome of its own. */
-pix3-sprite-editor-panel .ag-prompt-bar {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  background: var(--bg-1);
-}
-
-/* Rail-local trims: the references / prompt / history blocks were three separate
-   panel regions with their own borders and gutters before they stacked. */
-pix3-sprite-editor-panel .ag-ai-rail-body .ag-history {
-  border-top: 1px solid var(--line-1);
-  padding: 0.5rem 0 0;
-}
-
-pix3-sprite-editor-panel .ag-ai-rail-body .ag-reference-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-/* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
-pix3-sprite-editor-panel .ag-prompt-box {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  overflow: visible;
-}
-
-pix3-sprite-editor-panel .ag-prompt-box:focus-within {
-  border-color: var(--accent);
-}
-
-pix3-sprite-editor-panel .ag-prompt {
-  resize: vertical;
-  min-height: 4.5rem;
-  max-height: 14rem;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-2) var(--radius-2) 0 0;
-}
-
-pix3-sprite-editor-panel .ag-prompt:focus {
-  outline: none;
-}
-
-pix3-sprite-editor-panel .ag-prompt-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem;
-  border-top: 1px solid var(--line-1);
-}
-
+/* Flexible gap in the crop toolbar (shared with the departed prompt toolbar). */
 pix3-sprite-editor-panel .ag-prompt-spacer {
   flex: 1 1 auto;
-}
-
-pix3-sprite-editor-panel .ag-key-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-pix3-sprite-editor-panel .ag-key-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: var(--radius-2);
-  border: 1px solid var(--line-1);
-  background: var(--bg-2);
-  color: var(--fg-1);
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-}
-
-pix3-sprite-editor-panel .ag-key-button.is-connected {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-pix3-sprite-editor-panel .ag-model-select {
-  max-width: 12rem;
-  font-size: 0.82rem;
-  padding: 0.35rem 0.4rem;
-}
-
-pix3-sprite-editor-panel .ag-prompt-toolbar .ag-generate-button {
-  flex: 0 0 auto;
-  padding: 0.4rem 0.9rem;
-}
-
-/* Quick-settings popover anchored above the key button. */
-pix3-sprite-editor-panel .ag-key-popover {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  width: 300px;
-  max-width: 80vw;
-  padding: 0.85rem;
-  border-radius: var(--radius-3);
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  box-shadow: var(--shadow-pop);
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  z-index: 20;
 }
 
 pix3-sprite-editor-panel .ag-popover-title {
@@ -410,148 +236,6 @@ pix3-sprite-editor-panel .ag-popover-title {
   color: var(--fg-0);
 }
 
-pix3-sprite-editor-panel .ag-key-status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-pix3-sprite-editor-panel .ag-key-status {
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 0.08rem 0.45rem;
-  border-radius: 999px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-pix3-sprite-editor-panel .ag-key-status.is-set {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-pix3-sprite-editor-panel .ag-key-status.is-unset {
-  background: var(--bg-3);
-  color: var(--fg-3);
-}
-
-pix3-sprite-editor-panel .ag-key-row {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-}
-
-pix3-sprite-editor-panel .ag-key-row input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-pix3-sprite-editor-panel .ag-key-row button {
-  padding: 0.4rem 0.7rem;
-  border-radius: var(--radius-1);
-  border: 1px solid var(--line-1);
-  background: transparent;
-  color: var(--fg-1);
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-
-pix3-sprite-editor-panel .ag-key-row .ag-key-save {
-  border-color: var(--accent-line);
-  color: var(--accent);
-}
-
-pix3-sprite-editor-panel .ag-key-row button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-pix3-sprite-editor-panel .ag-popover-hint {
-  font-size: 0.75rem;
-  color: var(--fg-3);
-  line-height: 1.4;
-}
-
-pix3-sprite-editor-panel .ag-popover-hint a {
-  color: var(--accent);
-}
-
-pix3-sprite-editor-panel .ag-field-row {
-  display: flex;
-  gap: 0.6rem;
-}
-
-pix3-sprite-editor-panel .ag-field-row .ag-field {
-  flex: 1 1 0;
-}
-
-pix3-sprite-editor-panel .ag-toggle-field {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.8rem;
-  color: var(--fg-2);
-  cursor: pointer;
-}
-
-pix3-sprite-editor-panel .ag-toggle-field input {
-  flex: 0 0 auto;
-}
-
-/* References ------------------------------------------------------------ */
-pix3-sprite-editor-panel .ag-references {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-pix3-sprite-editor-panel .ag-references-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-}
-
-/* Single-column reference list in the narrow sidebar. */
-pix3-sprite-editor-panel .ag-reference-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-pix3-sprite-editor-panel .ag-reference {
-  position: relative;
-  aspect-ratio: 1;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-1);
-  overflow: hidden;
-  background: transparent;
-}
-
-pix3-sprite-editor-panel .ag-reference img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-pix3-sprite-editor-panel .ag-reference-remove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 50%;
-  background: oklch(0 0 0 / 0.55);
-  color: var(--fg-0);
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-pix3-sprite-editor-panel .ag-references-hint,
 pix3-sprite-editor-panel .ag-hint {
   font-size: 0.75rem;
   color: var(--fg-3);
@@ -566,20 +250,7 @@ pix3-sprite-editor-panel .ag-link-button {
   padding: 0;
 }
 
-/* Generate -------------------------------------------------------------- */
-pix3-sprite-editor-panel .ag-warning {
-  padding: 0.5rem 0.6rem;
-  border-radius: var(--radius-1);
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: 0.8rem;
-}
-
-pix3-sprite-editor-panel .ag-generate-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
+/* Crop apply / cancel ---------------------------------------------------- */
 pix3-sprite-editor-panel .ag-generate-button {
   flex: 1 1 auto;
   padding: 0.55rem 1rem;
@@ -1042,90 +713,7 @@ pix3-sprite-editor-panel .ag-save-custom-size {
   font: inherit;
 }
 
-/* History --------------------------------------------------------------- */
-pix3-sprite-editor-panel .ag-history {
-  flex: 0 0 auto;
-  border-top: 1px solid var(--line-1);
-  padding: 0.5rem 0.75rem;
-  background: var(--bg-1);
-}
-
-pix3-sprite-editor-panel .ag-history-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
-}
-
-pix3-sprite-editor-panel .ag-history-hint {
-  flex: 1 1 auto;
-  font-size: 0.72rem;
-  color: var(--fg-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-pix3-sprite-editor-panel .ag-history-thumb[draggable='true'] {
-  cursor: grab;
-}
-
-pix3-sprite-editor-panel .ag-history-thumb[draggable='true']:active {
-  cursor: grabbing;
-}
-
-pix3-sprite-editor-panel .ag-history-strip {
-  display: flex;
-  gap: 0.4rem;
-  overflow-x: auto;
-  padding-bottom: 0.25rem;
-}
-
-pix3-sprite-editor-panel .ag-history-card {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-pix3-sprite-editor-panel .ag-history-thumb {
-  width: 64px;
-  height: 64px;
-  padding: 0;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-1);
-  overflow: hidden;
-  cursor: pointer;
-  background: var(--bg-2);
-}
-
-pix3-sprite-editor-panel .ag-history-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-pix3-sprite-editor-panel .ag-history-delete {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 50%;
-  background: oklch(0 0 0 / 0.55);
-  color: var(--fg-0);
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
 /* Drag overlay ---------------------------------------------------------- */
-pix3-sprite-editor-panel .sprite-editor.is-drag-active {
-  outline: 2px dashed var(--accent);
-  outline-offset: -4px;
-}
-
 pix3-sprite-editor-panel .ag-drop-overlay {
   position: absolute;
   inset: 0;
@@ -1237,11 +825,6 @@ pix3-sprite-editor-panel .ag-crop-apply {
   pix3-sprite-editor-panel .ag-clips-rail {
     flex-basis: 7rem;
     width: 7rem;
-  }
-
-  pix3-sprite-editor-panel .ag-ai-rail {
-    flex-basis: 15rem;
-    width: 15rem;
   }
 
   pix3-sprite-editor-panel .ag-timeline {

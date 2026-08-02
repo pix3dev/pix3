@@ -3,12 +3,14 @@ import { createRef, ref } from 'lit/directives/ref.js';
 import { appState } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
-import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
-import { ImageGenError, type AspectRatio } from '@/services/image-gen/ImageGenTypes';
+import { ImageGenError } from '@/services/image-gen/ImageGenTypes';
+import { GenerationHistoryService } from '@/services/image-gen/GenerationHistoryService';
 import {
-  GenerationHistoryService,
-  type GenerationRecord,
-} from '@/services/image-gen/GenerationHistoryService';
+  ImageEditTargetService,
+  type GeneratedImagePayload,
+  type ImageEditTarget,
+  type ImageEditTargetSnapshot,
+} from '@/services/image-gen/ImageEditTargetService';
 import {
   BackgroundRemovalService,
   type BgRemovalEngine,
@@ -27,6 +29,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { CreateAnimationAssetCommand } from '@/features/scene/CreateAnimationAssetCommand';
+import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCommand';
 import {
   buildAnimationFrameResourcePath,
   buildManagedSpriteAssetPath,
@@ -41,12 +44,7 @@ import {
   normalizeAnimationResource,
   type AnimationFrame,
 } from '@pix3/runtime';
-import {
-  getDroppedAssetResourcePath,
-  hasAssetDragData,
-  setGenerationDragData,
-  toProjectResourcePath,
-} from '@/ui/shared/asset-drag-drop';
+import { toProjectResourcePath } from '@/ui/shared/asset-drag-drop';
 import {
   StageZoomPanController,
   type StagePoint,
@@ -143,14 +141,6 @@ const FRAME_TOOLS: ReadonlyArray<{ tool: AnimationEditMode; icon: string; title:
   { tool: 'bbox', icon: 'square', title: 'Bounding box' },
 ];
 
-interface ReferenceItem {
-  id: string;
-  mimeType: string;
-  blob: Blob;
-  objectUrl: string;
-  label: string;
-}
-
 type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped' | 'rotated' | 'flipped';
 
 interface CurrentImage {
@@ -163,10 +153,7 @@ interface CurrentImage {
 }
 
 @customElement('pix3-sprite-editor-panel')
-export class SpriteEditorPanel extends ComponentBase {
-  @inject(ImageGenProviderRegistry)
-  private readonly providers!: ImageGenProviderRegistry;
-
+export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget {
   @inject(AiImageSettingsService)
   private readonly aiSettings!: AiImageSettingsService;
 
@@ -203,6 +190,9 @@ export class SpriteEditorPanel extends ComponentBase {
   @inject(AnimationEditorService)
   private readonly animationEditorService!: AnimationEditorService;
 
+  @inject(ImageEditTargetService)
+  private readonly imageEditTargets!: ImageEditTargetService;
+
   @inject(DialogService)
   private readonly dialogService!: DialogService;
 
@@ -213,25 +203,13 @@ export class SpriteEditorPanel extends ComponentBase {
   tabId = '';
 
   @state() private boundImagePath: string | null = null;
-  @state() private prompt = '';
-  @state() private providerId = '';
-  @state() private modelId = '';
-  @state() private aspectRatio: AspectRatio = 'Auto';
-  @state() private imageSize = '1K';
-  @state() private quality = '';
-  @state() private transparentBackground = false;
-  @state() private keyConfigured = false;
-  @state() private references: ReferenceItem[] = [];
   @state() private current: CurrentImage | null = null;
-  @state() private generating = false;
-  @state() private generateError: string | null = null;
   @state() private bgBusy = false;
   @state() private bgEngine: BgRemovalEngine = 'imgly';
   @state() private bgQuality: BgRemovalQuality = 'balanced';
   @state() private bgFillHoles = true;
   @state() private bgProgress: BgRemovalProgress | null = null;
   @state() private bgError: string | null = null;
-  @state() private historyRecords: GenerationRecord[] = [];
   @state() private saveName = '';
   @state() private saveMessage: string | null = null;
   @state() private saveError: string | null = null;
@@ -239,12 +217,7 @@ export class SpriteEditorPanel extends ComponentBase {
   @state() private saveMaxSize = 0;
   /** True while the user is entering a custom (non-preset) save size. */
   @state() private saveSizeCustom = false;
-  @state() private isDragActive = false;
   @state() private savePopoverOpen = false;
-  @state() private apiKeyPopoverOpen = false;
-  @state() private apiKeyInput = '';
-  @state() private apiKeyBusy = false;
-  @state() private apiKeyMessage: string | null = null;
   @state() private cropMode = false;
   @state() private cropRect: CropRect | null = null;
   /** True while a rotate/flip transform is re-encoding the current image. */
@@ -263,10 +236,15 @@ export class SpriteEditorPanel extends ComponentBase {
   @state() private boundFrameTexturePath: string | null = null;
   /** Which tool owns a plain left-drag; `crop` stays its own toggle below. */
   @state() private stageTool: StageTool = 'select';
-  /** References + prompt + history, collapsed into one right-hand rail. */
-  @state() private aiRailExpanded = true;
   /** Editor-level texture drag (animation documents only) — appends frames on drop. */
   @state() private isTextureDragOver = false;
+
+  /**
+   * Prompt that produced the working image, handed over by the Generate panel
+   * (§9.8). The shell no longer owns a prompt box, but the save name and the
+   * library description still read better when they carry it.
+   */
+  private lastPrompt = '';
 
   private readonly stageRef = createRef<HTMLDivElement>();
   private readonly stageImageRef = createRef<HTMLImageElement>();
@@ -328,20 +306,11 @@ export class SpriteEditorPanel extends ComponentBase {
   private readonly onDropCapture = (): void => {
     this.textureDragDepth = 0;
     this.isTextureDragOver = false;
-    this.isDragActive = false;
   };
 
   private disposeTabsSubscription?: () => void;
-  private disposeHistorySubscription?: () => void;
   private disposeAiSettingsSubscription?: () => void;
-  private abortController: AbortController | null = null;
   private readonly onDocPointerDown = (event: PointerEvent): void => {
-    if (this.apiKeyPopoverOpen) {
-      const wrap = this.querySelector('.ag-key-wrap');
-      if (wrap && !wrap.contains(event.target as Node)) {
-        this.apiKeyPopoverOpen = false;
-      }
-    }
     if (this.savePopoverOpen) {
       const wrap = this.querySelector('.ag-save-wrap');
       if (wrap && !wrap.contains(event.target as Node)) {
@@ -350,28 +319,25 @@ export class SpriteEditorPanel extends ComponentBase {
     }
   };
   private readonly onDocKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') {
-      return;
-    }
-    if (this.apiKeyPopoverOpen) {
-      this.apiKeyPopoverOpen = false;
-    }
-    if (this.savePopoverOpen) {
+    if (event.key === 'Escape' && this.savePopoverOpen) {
       this.savePopoverOpen = false;
     }
   };
   private readonly ownedUrls = new Set<string>();
-  private readonly historyUrls = new Map<string, string>();
-  private pasteHandler?: (event: ClipboardEvent) => void;
   private syncedResourceId: string | null = null;
+
+  /** Listeners on this shell's {@link ImageEditTargetSnapshot} (the Generate panel). */
+  private readonly imageEditListeners = new Set<() => void>();
+  /** Last broadcast snapshot key — notifications only fire when it actually changed. */
+  private lastImageEditKey = '';
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.disposeTabsSubscription = subscribe(appState.tabs, () => this.syncFromTabState());
-    this.disposeHistorySubscription = this.history.subscribe(() => void this.reloadHistory());
+    this.disposeTabsSubscription = subscribe(appState.tabs, () => {
+      this.syncFromTabState();
+      this.syncActiveImageEditTarget();
+    });
     this.disposeAiSettingsSubscription = this.aiSettings.subscribe(() => this.loadPreferences());
-    this.pasteHandler = (event: ClipboardEvent) => this.onPaste(event);
-    this.addEventListener('paste', this.pasteHandler);
     this.addEventListener('drop', this.onDropCapture, { capture: true });
     this.disposeOverlaySubscription = this.overlays.subscribe(() => this.requestUpdate());
     window.addEventListener('pointerdown', this.onDocPointerDown, true);
@@ -380,20 +346,15 @@ export class SpriteEditorPanel extends ComponentBase {
     // survive but their object URLs were revoked on disconnect, so re-mint them.
     this.rehydrateObjectUrls();
     this.syncFromTabState();
-    void this.reloadHistory();
+    this.syncActiveImageEditTarget();
   }
 
   disconnectedCallback(): void {
     this.disposeTabsSubscription?.();
     this.disposeTabsSubscription = undefined;
-    this.disposeHistorySubscription?.();
-    this.disposeHistorySubscription = undefined;
     this.disposeAiSettingsSubscription?.();
     this.disposeAiSettingsSubscription = undefined;
-    if (this.pasteHandler) {
-      this.removeEventListener('paste', this.pasteHandler);
-      this.pasteHandler = undefined;
-    }
+    this.imageEditTargets.clearActiveTarget(this);
     this.removeEventListener('drop', this.onDropCapture, { capture: true });
     this.disposeOverlaySubscription?.();
     this.disposeOverlaySubscription = undefined;
@@ -406,8 +367,6 @@ export class SpriteEditorPanel extends ComponentBase {
     window.removeEventListener('keydown', this.onDocKeyDown);
     this.stageResizeObserver?.disconnect();
     this.stageResizeObserver = null;
-    this.abortController?.abort();
-    this.abortController = null;
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
@@ -423,11 +382,68 @@ export class SpriteEditorPanel extends ComponentBase {
         objectUrl: this.trackUrl(URL.createObjectURL(this.current.blob)),
       };
     }
-    if (this.references.length > 0) {
-      this.references = this.references.map(reference => ({
-        ...reference,
-        objectUrl: this.trackUrl(URL.createObjectURL(reference.blob)),
-      }));
+  }
+
+  // -- image-edit target (§9.8, the Generate panel's binding) ------------------
+
+  getImageEditSnapshot(): ImageEditTargetSnapshot {
+    const resourcePath = this.animationResourcePath ?? this.boundImagePath;
+    return {
+      targetId: this.tabId,
+      label: resourcePath ? (resourcePath.split('/').pop() ?? resourcePath) : 'Sprite Editor',
+      resourcePath,
+      boundFrameTexturePath: this.boundFrameTexturePath,
+      // C7 adds `replaceFrameTexture`; until then a generated image cannot be
+      // written back into a frame, which is the same reason the raster tools are
+      // disabled while one is bound (`frameRasterHint`).
+      acceptsFrameWriteBack: false,
+    };
+  }
+
+  subscribeImageEditTarget(listener: () => void): () => void {
+    this.imageEditListeners.add(listener);
+    return () => this.imageEditListeners.delete(listener);
+  }
+
+  /** The Generate panel's result, becoming this shell's working image. */
+  applyGeneratedImage(image: GeneratedImagePayload): void {
+    const objectUrl = this.trackUrl(URL.createObjectURL(image.blob));
+    this.setCurrent({
+      blob: image.blob,
+      mimeType: image.mimeType,
+      objectUrl,
+      source: 'generated',
+      width: image.width,
+      height: image.height,
+    });
+    this.lastPrompt = image.prompt;
+    this.saveName = deriveSaveName(image.prompt, this.boundImagePath, image.mimeType);
+  }
+
+  /**
+   * Register/deregister as the active image-edit target. Mirrors
+   * `AnimationDocumentController.syncActiveInspectorController` (§9.3): the
+   * registration follows the *active tab*, and the clear is conditional so a
+   * second shell taking over is not undone by the first one's teardown.
+   */
+  private syncActiveImageEditTarget(): void {
+    if (this.isConnected && this.tabId && appState.tabs.activeTabId === this.tabId) {
+      this.imageEditTargets.setActiveTarget(this);
+      return;
+    }
+    this.imageEditTargets.clearActiveTarget(this);
+  }
+
+  /** Fan out a snapshot change to the Generate panel — only when it really changed. */
+  private notifyImageEditTarget(): void {
+    const snapshot = this.getImageEditSnapshot();
+    const key = `${snapshot.targetId}|${snapshot.resourcePath ?? ''}|${snapshot.boundFrameTexturePath ?? ''}`;
+    if (key === this.lastImageEditKey) {
+      return;
+    }
+    this.lastImageEditKey = key;
+    for (const listener of this.imageEditListeners) {
+      listener();
     }
   }
 
@@ -443,7 +459,9 @@ export class SpriteEditorPanel extends ComponentBase {
         this.syncedResourceId = null;
       }
       this.syncFromTabState();
+      this.syncActiveImageEditTarget();
     }
+    this.notifyImageEditTarget();
     // Re-established on every update rather than in `firstUpdated`: a Golden Layout
     // re-dock disconnects the observer but never fires `firstUpdated` again.
     this.observeStageResize();
@@ -578,51 +596,19 @@ export class SpriteEditorPanel extends ComponentBase {
     return this.documentController?.selectedFrame ?? null;
   }
 
+  /**
+   * Only the raster-side preferences remain here: save-time downscale and the
+   * background-removal engine. Everything generation-related moved to the
+   * Generate panel with the chrome that used it (§9.8).
+   */
   private loadPreferences(): void {
     const prefs = this.aiSettings.getPreferences();
-    const provider = this.aiSettings.getSelectedProvider();
-    this.providerId = provider?.id ?? prefs.selectedProviderId;
-    this.modelId = this.aiSettings.getSelectedModelId(this.providerId) ?? '';
-    const model = provider?.getModel(this.modelId);
-    this.aspectRatio = prefs.defaultAspectRatio;
-    this.imageSize = model?.capabilities.imageSizes.includes(prefs.defaultImageSize)
-      ? prefs.defaultImageSize
-      : (model?.capabilities.imageSizes[0] ?? '1K');
-    const qualities = model?.capabilities.qualities ?? [];
-    this.quality =
-      prefs.defaultQuality && qualities.includes(prefs.defaultQuality)
-        ? prefs.defaultQuality
-        : (qualities.find(q => q === 'medium') ?? qualities[0] ?? '');
-    this.transparentBackground =
-      Boolean(model?.capabilities.supportsTransparency) && prefs.transparentBackground;
     this.saveMaxSize = prefs.defaultSaveMaxSize;
     this.saveSizeCustom =
       prefs.defaultSaveMaxSize > 0 && !SAVE_SIZE_PRESETS.includes(prefs.defaultSaveMaxSize);
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
     this.bgFillHoles = prefs.bgFillHoles;
-    // Collapsed by default for a `.pix3anim` (you came to edit frames), expanded for
-    // a bare image (you came to generate) — until the user says otherwise, and then
-    // their choice sticks across tabs and sessions (§9.8).
-    this.aiRailExpanded = prefs.aiRailExpanded ?? !this.animationResourcePath;
-    void this.refreshKeyStatus();
-  }
-
-  private onToggleAiRail(): void {
-    this.aiRailExpanded = !this.aiRailExpanded;
-    this.aiSettings.updatePreferences({ aiRailExpanded: this.aiRailExpanded });
-  }
-
-  private async refreshKeyStatus(): Promise<void> {
-    if (!this.providerId) {
-      this.keyConfigured = false;
-      return;
-    }
-    try {
-      this.keyConfigured = await this.aiSettings.hasApiKey(this.providerId);
-    } catch {
-      this.keyConfigured = false;
-    }
   }
 
   private async loadBoundImage(resourceId: string): Promise<void> {
@@ -638,7 +624,7 @@ export class SpriteEditorPanel extends ComponentBase {
         width: size?.width,
         height: size?.height,
       });
-      this.saveName = deriveSaveName(this.prompt, resourceId, blob.type || 'image/png');
+      this.saveName = deriveSaveName(this.lastPrompt, resourceId, blob.type || 'image/png');
     } catch (error) {
       console.warn('[SpriteEditor] Failed to load bound image', error);
     }
@@ -647,11 +633,12 @@ export class SpriteEditorPanel extends ComponentBase {
   // -- rendering -------------------------------------------------------------
 
   /**
-   * The unified shell (§9.8): clips rail | canvas | collapsible AI rail, with the
-   * frame timeline as a full-width band underneath. Everything animation-specific
-   * renders only when a document is bound, so an image tab is exactly the editor it
-   * was — minus the width the references sidebar and history strip used to take
-   * from a 646×123 canvas.
+   * The unified shell (§9.8): clips rail | canvas, with the frame timeline as a
+   * full-width band underneath. Everything animation-specific renders only when a
+   * document is bound, so an image tab is exactly the editor it was — minus the
+   * width the references sidebar, prompt bar and history strip used to take from a
+   * 646×123 canvas. That chrome is now `<pix3-generate-panel>`, a dock panel of its
+   * own, so the canvas gets the whole shell rather than "shell minus rail".
    */
   protected render() {
     const controller = this.documentController;
@@ -659,7 +646,7 @@ export class SpriteEditorPanel extends ComponentBase {
 
     return html`
       <section
-        class="sprite-editor ${this.isDragActive ? 'is-drag-active' : ''}"
+        class="sprite-editor"
         @dragenter=${this.onDragEnter}
         @dragover=${this.onDragOver}
         @dragleave=${this.onDragLeave}
@@ -673,7 +660,6 @@ export class SpriteEditorPanel extends ComponentBase {
               </aside>`
             : null}
           <main class="ag-main">${this.renderStage()}</main>
-          ${this.renderAiRail()}
         </div>
         ${hasDocument && controller
           ? html`<section class="ag-timeline" aria-label="Animation frames">
@@ -691,62 +677,9 @@ export class SpriteEditorPanel extends ComponentBase {
   }
 
   private renderDropOverlay() {
-    if (this.isTextureDragOver) {
-      return html`<div class="ag-drop-overlay">Drop image to append frames</div>`;
-    }
-    if (this.isDragActive) {
-      return html`<div class="ag-drop-overlay">Drop image to add as reference</div>`;
-    }
-    return null;
-  }
-
-  /**
-   * References + prompt + generation history, stacked into one collapsible rail.
-   * A modal was rejected (it taxes the generate → inspect → regenerate loop) and so
-   * was a bottom drawer (a second horizontal band under an already-short canvas).
-   */
-  private renderAiRail() {
-    if (!this.aiRailExpanded) {
-      return html`
-        <aside class="ag-ai-rail is-collapsed">
-          <button
-            class="ag-ai-rail-toggle"
-            type="button"
-            title="Show AI generation panel"
-            aria-label="Show AI generation panel"
-            aria-expanded="false"
-            @click=${this.onToggleAiRail}
-          >
-            ${this.icons.getIcon('sparkles', IconSize.SMALL)}
-            <span class="ag-ai-rail-tag">AI</span>
-          </button>
-        </aside>
-      `;
-    }
-
-    const model = this.providers.get(this.providerId)?.getModel(this.modelId);
-    const maxReferences = model?.capabilities.maxReferenceImages ?? 0;
-
-    return html`
-      <aside class="ag-ai-rail">
-        <div class="ag-ai-rail-head">
-          <span class="ag-field-label">AI</span>
-          <button
-            class="ag-icon-button"
-            type="button"
-            title="Hide AI generation panel"
-            aria-label="Hide AI generation panel"
-            aria-expanded="true"
-            @click=${this.onToggleAiRail}
-          >
-            ${this.icons.getIcon('chevron-right', IconSize.SMALL)}
-          </button>
-        </div>
-        <div class="ag-ai-rail-body">
-          ${this.renderReferences(maxReferences)} ${this.renderPromptBar()} ${this.renderHistory()}
-        </div>
-      </aside>
-    `;
+    return this.isTextureDragOver
+      ? html`<div class="ag-drop-overlay">Drop image to append frames</div>`
+      : null;
   }
 
   /**
@@ -757,7 +690,7 @@ export class SpriteEditorPanel extends ComponentBase {
    */
   private renderToolbar() {
     const rasterHint = this.frameRasterHint;
-    const rasterBusy = Boolean(rasterHint) || !this.current || this.bgBusy || this.generating;
+    const rasterBusy = Boolean(rasterHint) || !this.current || this.bgBusy;
     return html`
       <header class="ag-toolbar">
         <div class="ag-title">Sprite Editor</div>
@@ -808,12 +741,12 @@ export class SpriteEditorPanel extends ComponentBase {
         </button>
         <span class="ag-toolbar-separator" aria-hidden="true"></span>
         <button
-          class="ag-icon-button ${this.aiRailExpanded ? 'is-active' : ''}"
-          title="Generate with AI"
-          aria-label="Generate with AI"
-          @click=${this.onToggleAiRail}
+          class="ag-toolbar-button ag-generate-action"
+          type="button"
+          title="Open the Generate panel — results land on this canvas"
+          @click=${this.onOpenGeneratePanel}
         >
-          ${this.icons.getIcon('sparkles', IconSize.SMALL)}
+          ${this.icons.getIcon('sparkles', IconSize.SMALL)} Generate…
         </button>
         <button
           class="ag-toolbar-button"
@@ -827,6 +760,16 @@ export class SpriteEditorPanel extends ComponentBase {
       </header>
     `;
   }
+
+  /**
+   * §9.8's mitigation for the split: the prompt now lives in another dock, so the
+   * shell keeps a one-click route to it. Goes through the command gateway rather
+   * than the LayoutManager directly, so the View-menu item and this button are the
+   * same action.
+   */
+  private onOpenGeneratePanel = (): void => {
+    void this.commandDispatcher.execute(new OpenGeneratePanelCommand());
+  };
 
   /**
    * Why the raster tools are off, or null when they are available. The canvas
@@ -941,7 +884,7 @@ export class SpriteEditorPanel extends ComponentBase {
    * first and the tab rebinds.
    */
   private renderSpritesheetActions() {
-    const busy = this.sliceBusy || this.bgBusy || this.generating || this.cropMode;
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode;
     const canSlice = Boolean(this.boundImagePath) && !busy;
     const hint = this.boundImagePath
       ? undefined
@@ -1104,208 +1047,6 @@ export class SpriteEditorPanel extends ComponentBase {
         ${this.saveMaxSize > 0
           ? html`Source ${sourceLabel} → saved at <strong>${targetLabel}</strong> px`
           : html`Saved at full generated size (${sourceLabel} px)`}
-      </div>
-    `;
-  }
-
-  private renderPromptBar() {
-    const provider = this.providers.get(this.providerId);
-    const model = provider?.getModel(this.modelId);
-    const models = provider?.models ?? [];
-    const canGenerate =
-      this.keyConfigured && this.prompt.trim().length > 0 && !this.generating && Boolean(model);
-
-    return html`
-      <div class="ag-prompt-bar">
-        ${this.generateError ? html`<div class="ag-error">${this.generateError}</div>` : null}
-        <div class="ag-prompt-box">
-          <textarea
-            class="ag-prompt"
-            rows="2"
-            placeholder="Describe the image… Ctrl+Enter to generate."
-            .value=${this.prompt}
-            @input=${this.onPromptInput}
-            @keydown=${this.onPromptKeyDown}
-          ></textarea>
-          <div class="ag-prompt-toolbar">
-            <div class="ag-key-wrap">
-              <button
-                class="ag-key-button ${this.keyConfigured ? 'is-connected' : ''}"
-                title=${this.keyConfigured
-                  ? 'API key connected — quick settings'
-                  : 'Connect API key & quick settings'}
-                @click=${this.toggleApiKeyPopover}
-              >
-                🔑
-              </button>
-              ${this.apiKeyPopoverOpen ? this.renderKeyPopover(provider) : null}
-            </div>
-            <select class="ag-model-select" title="Model" @change=${this.onPanelModelChange}>
-              ${models.map(
-                item =>
-                  html`<option value=${item.id} ?selected=${item.id === this.modelId}>
-                    ${item.label}
-                  </option>`
-              )}
-            </select>
-            <div class="ag-prompt-spacer"></div>
-            ${this.generating
-              ? html`<button class="ag-cancel-button" @click=${this.onCancelGenerate}>
-                  Cancel
-                </button>`
-              : null}
-            <button class="ag-generate-button" ?disabled=${!canGenerate} @click=${this.onGenerate}>
-              ${this.generating ? 'Generating…' : 'Generate'}
-            </button>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  private renderKeyPopover(provider: ReturnType<ImageGenProviderRegistry['get']>) {
-    const providers = this.providers.list();
-    const caps = provider?.getModel(this.modelId)?.capabilities;
-    const helpUrl = provider?.apiKeyHelpUrl;
-    return html`
-      <div class="ag-key-popover" @click=${(e: Event) => e.stopPropagation()}>
-        <div class="ag-popover-title">Quick settings</div>
-
-        <label class="ag-field">
-          <span class="ag-field-label">Provider</span>
-          <select @change=${this.onPanelProviderChange}>
-            ${providers.map(
-              item =>
-                html`<option value=${item.id} ?selected=${item.id === this.providerId}>
-                  ${item.label}
-                </option>`
-            )}
-          </select>
-        </label>
-
-        <div class="ag-key-status-row">
-          <span class="ag-field-label">API key</span>
-          <span class="ag-key-status ${this.keyConfigured ? 'is-set' : 'is-unset'}">
-            ${this.keyConfigured ? 'Connected' : 'Not set'}
-          </span>
-        </div>
-        <div class="ag-key-row">
-          <input
-            type="password"
-            autocomplete="off"
-            placeholder=${this.keyConfigured ? '•••••••• stored' : 'Paste API key'}
-            .value=${this.apiKeyInput}
-            @input=${this.onApiKeyInput}
-            @keydown=${this.onKeyInputKeyDown}
-          />
-          <button
-            class="ag-key-save"
-            ?disabled=${!this.apiKeyInput.trim() || this.apiKeyBusy}
-            @click=${this.onSaveApiKey}
-          >
-            Save
-          </button>
-          ${this.keyConfigured
-            ? html`<button
-                class="ag-key-clear"
-                ?disabled=${this.apiKeyBusy}
-                @click=${this.onClearApiKey}
-              >
-                Clear
-              </button>`
-            : null}
-        </div>
-        <div class="ag-popover-hint">
-          ${this.apiKeyMessage
-            ? this.apiKeyMessage
-            : html`Stored encrypted in this
-              browser.${helpUrl
-                ? html` <a href=${helpUrl} target="_blank" rel="noreferrer">Get a key</a>.`
-                : ''}`}
-        </div>
-
-        <div class="ag-field-row">
-          <label class="ag-field">
-            <span class="ag-field-label">Aspect</span>
-            <select @change=${this.onAspectChange}>
-              ${(caps?.aspectRatios ?? ['Auto']).map(
-                ratio =>
-                  html`<option value=${ratio} ?selected=${ratio === this.aspectRatio}>
-                    ${ratio}
-                  </option>`
-              )}
-            </select>
-          </label>
-          ${caps && caps.imageSizes.length > 0
-            ? html`<label class="ag-field">
-                <span class="ag-field-label">Size</span>
-                <select @change=${this.onSizeChange}>
-                  ${caps.imageSizes.map(
-                    size =>
-                      html`<option value=${size} ?selected=${size === this.imageSize}>
-                        ${size}
-                      </option>`
-                  )}
-                </select>
-              </label>`
-            : null}
-          ${caps && caps.qualities && caps.qualities.length > 0
-            ? html`<label class="ag-field">
-                <span class="ag-field-label">Quality</span>
-                <select @change=${this.onQualityChange}>
-                  ${caps.qualities.map(
-                    q => html`<option value=${q} ?selected=${q === this.quality}>${q}</option>`
-                  )}
-                </select>
-              </label>`
-            : null}
-        </div>
-
-        ${caps?.supportsTransparency
-          ? html`<label class="ag-toggle-field">
-              <input
-                type="checkbox"
-                .checked=${this.transparentBackground}
-                @change=${this.onTransparentChange}
-              />
-              <span>Transparent background (alpha) — no bg-removal needed</span>
-            </label>`
-          : null}
-
-        <button class="ag-link-button" @click=${this.openFullSettings}>Open full settings…</button>
-      </div>
-    `;
-  }
-
-  private renderReferences(maxReferences: number) {
-    if (maxReferences <= 0) {
-      return null;
-    }
-    return html`
-      <div class="ag-references">
-        <div class="ag-references-head">
-          <span class="ag-field-label"
-            >References (${this.references.length}/${maxReferences})</span
-          >
-          <button class="ag-link-button" @click=${this.onAddReferenceFromDisk}>+ Add</button>
-        </div>
-        <div class="ag-reference-grid">
-          ${this.references.map(
-            reference => html`
-              <div class="ag-reference" title=${reference.label}>
-                <img src=${reference.objectUrl} alt=${reference.label} />
-                <button
-                  class="ag-reference-remove"
-                  title="Remove reference"
-                  @click=${() => this.removeReference(reference.id)}
-                >
-                  ✕
-                </button>
-              </div>
-            `
-          )}
-        </div>
-        <div class="ag-references-hint">Drag assets here, paste from clipboard, or click Add.</div>
       </div>
     `;
   }
@@ -1646,65 +1387,7 @@ export class SpriteEditorPanel extends ComponentBase {
     return html`<div class="ag-progress-inner"><span class="ag-spinner"></span>${label}</div>`;
   }
 
-  private renderHistory() {
-    if (this.historyRecords.length === 0) {
-      return null;
-    }
-    return html`
-      <footer class="ag-history">
-        <div class="ag-history-head">
-          <span class="ag-field-label">History (${this.historyRecords.length})</span>
-          <span class="ag-history-hint">Drag a thumbnail to the Asset Browser to save it.</span>
-          <button class="ag-link-button" @click=${this.onClearHistory}>Clear</button>
-        </div>
-        <div class="ag-history-strip">
-          ${this.historyRecords.map(record => {
-            const url = this.historyUrls.get(record.id);
-            return html`
-              <div class="ag-history-card" title=${record.prompt}>
-                <button
-                  class="ag-history-thumb"
-                  draggable="true"
-                  @click=${() => this.useHistoryRecord(record)}
-                  @dragstart=${(event: DragEvent) => this.onHistoryDragStart(event, record)}
-                >
-                  ${url ? html`<img src=${url} alt=${record.prompt} draggable="false" />` : null}
-                </button>
-                <button
-                  class="ag-history-delete"
-                  title="Delete from history"
-                  @click=${() => this.deleteHistoryRecord(record.id)}
-                >
-                  ✕
-                </button>
-              </div>
-            `;
-          })}
-        </div>
-      </footer>
-    `;
-  }
-
   // -- input handlers --------------------------------------------------------
-
-  private onPromptInput(event: Event): void {
-    this.prompt = (event.target as HTMLTextAreaElement).value;
-  }
-
-  private onPromptKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      void this.onGenerate();
-    }
-  }
-
-  private toggleApiKeyPopover(): void {
-    this.apiKeyPopoverOpen = !this.apiKeyPopoverOpen;
-    if (this.apiKeyPopoverOpen) {
-      this.apiKeyInput = '';
-      this.apiKeyMessage = null;
-    }
-  }
 
   private toggleSavePopover(): void {
     this.savePopoverOpen = !this.savePopoverOpen;
@@ -1712,93 +1395,6 @@ export class SpriteEditorPanel extends ComponentBase {
       this.saveMessage = null;
       this.saveError = null;
     }
-  }
-
-  private openFullSettings(): void {
-    this.apiKeyPopoverOpen = false;
-    void this.editorSettings.showSettings('images');
-  }
-
-  private onPanelProviderChange(event: Event): void {
-    const providerId = (event.target as HTMLSelectElement).value;
-    this.providerId = providerId;
-    this.aiSettings.updatePreferences({ selectedProviderId: providerId });
-    this.apiKeyInput = '';
-    this.apiKeyMessage = null;
-    // loadPreferences (via the aiSettings subscription) refreshes model + key status.
-  }
-
-  private onPanelModelChange(event: Event): void {
-    const modelId = (event.target as HTMLSelectElement).value;
-    this.modelId = modelId;
-    this.aiSettings.updatePreferences({ modelByProvider: { [this.providerId]: modelId } });
-  }
-
-  private onApiKeyInput(event: Event): void {
-    this.apiKeyInput = (event.target as HTMLInputElement).value;
-    this.apiKeyMessage = null;
-  }
-
-  private onKeyInputKeyDown(event: KeyboardEvent): void {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      void this.onSaveApiKey();
-    }
-  }
-
-  private async onSaveApiKey(): Promise<void> {
-    const key = this.apiKeyInput.trim();
-    if (!key || !this.providerId) {
-      return;
-    }
-    this.apiKeyBusy = true;
-    try {
-      await this.aiSettings.setApiKey(this.providerId, key);
-      this.keyConfigured = true;
-      this.apiKeyInput = '';
-      this.apiKeyMessage = 'API key saved.';
-    } catch (error) {
-      this.apiKeyMessage = `Failed to save key: ${describeError(error)}`;
-    } finally {
-      this.apiKeyBusy = false;
-    }
-  }
-
-  private async onClearApiKey(): Promise<void> {
-    if (!this.providerId) {
-      return;
-    }
-    this.apiKeyBusy = true;
-    try {
-      await this.aiSettings.clearApiKey(this.providerId);
-      this.keyConfigured = false;
-      this.apiKeyInput = '';
-      this.apiKeyMessage = 'API key removed.';
-    } catch (error) {
-      this.apiKeyMessage = `Failed to remove key: ${describeError(error)}`;
-    } finally {
-      this.apiKeyBusy = false;
-    }
-  }
-
-  private onAspectChange(event: Event): void {
-    this.aspectRatio = (event.target as HTMLSelectElement).value as AspectRatio;
-    this.aiSettings.updatePreferences({ defaultAspectRatio: this.aspectRatio });
-  }
-
-  private onSizeChange(event: Event): void {
-    this.imageSize = (event.target as HTMLSelectElement).value;
-    this.aiSettings.updatePreferences({ defaultImageSize: this.imageSize });
-  }
-
-  private onQualityChange(event: Event): void {
-    this.quality = (event.target as HTMLSelectElement).value;
-    this.aiSettings.updatePreferences({ defaultQuality: this.quality });
-  }
-
-  private onTransparentChange(event: Event): void {
-    this.transparentBackground = (event.target as HTMLInputElement).checked;
-    this.aiSettings.updatePreferences({ transparentBackground: this.transparentBackground });
   }
 
   private onSaveNameInput(event: Event): void {
@@ -1859,42 +1455,13 @@ export class SpriteEditorPanel extends ComponentBase {
     void this.editorSettings.showSettings('images');
   }
 
-  // -- references ------------------------------------------------------------
-
-  private async onAddReferenceFromDisk(): Promise<void> {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = true;
-    input.addEventListener('change', () => {
-      const files = Array.from(input.files ?? []);
-      files.forEach(file => this.addReferenceBlob(file, file.name));
-    });
-    input.click();
-  }
-
-  private onPaste(event: ClipboardEvent): void {
-    const items = Array.from(event.clipboardData?.items ?? []);
-    let handled = false;
-    for (const item of items) {
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          this.addReferenceBlob(file, file.name || 'pasted-image');
-          handled = true;
-        }
-      }
-    }
-    if (handled) {
-      event.preventDefault();
-    }
-  }
+  // -- frame texture drops -----------------------------------------------------
 
   /**
    * With a document bound, an image drop appends frames (the old animation editor's
-   * behaviour); without one, it adds a generation reference. A frame *reorder* drag
-   * is filtered out by `isPotentialTextureDrag` through the shared
-   * `FRAME_REORDER_MIME`, which is why that constant is not private to the strip.
+   * behaviour). A frame *reorder* drag is filtered out by `isPotentialTextureDrag`
+   * through the shared `FRAME_REORDER_MIME`, which is why that constant is not
+   * private to the strip. Reference drops belong to the Generate panel now (§9.8).
    */
   private onDragEnter(event: DragEvent): void {
     if (!this.documentController?.resource || !isPotentialTextureDrag(event.dataTransfer)) {
@@ -1905,75 +1472,29 @@ export class SpriteEditorPanel extends ComponentBase {
   }
 
   private onDragOver(event: DragEvent): void {
-    if (this.documentController?.resource) {
-      if (!isPotentialTextureDrag(event.dataTransfer)) {
-        return;
-      }
-      event.preventDefault();
-      this.isTextureDragOver = true;
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'copy';
-      }
+    if (!this.documentController?.resource || !isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
-
-    if (
-      event.dataTransfer &&
-      (hasAssetDragData(event.dataTransfer) || this.hasFiles(event.dataTransfer))
-    ) {
-      event.preventDefault();
+    event.preventDefault();
+    this.isTextureDragOver = true;
+    if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'copy';
-      this.isDragActive = true;
     }
   }
 
   private onDragLeave(event: DragEvent): void {
-    if (this.documentController?.resource) {
-      if (!isPotentialTextureDrag(event.dataTransfer)) {
-        return;
-      }
-      this.textureDragDepth = Math.max(0, this.textureDragDepth - 1);
-      if (this.textureDragDepth === 0) {
-        this.isTextureDragOver = false;
-      }
+    if (!this.documentController?.resource || !isPotentialTextureDrag(event.dataTransfer)) {
       return;
     }
-
-    // Only clear when leaving the panel entirely.
-    if (event.relatedTarget && this.contains(event.relatedTarget as Node)) {
-      return;
+    this.textureDragDepth = Math.max(0, this.textureDragDepth - 1);
+    if (this.textureDragDepth === 0) {
+      this.isTextureDragOver = false;
     }
-    this.isDragActive = false;
   }
 
   private onDrop(event: DragEvent): void {
-    const dataTransfer = event.dataTransfer;
-    if (!dataTransfer) {
-      return;
-    }
-
-    if (this.documentController?.resource) {
+    if (event.dataTransfer && this.documentController?.resource) {
       void this.onFrameTextureDrop(event);
-      return;
-    }
-
-    if (!hasAssetDragData(dataTransfer) && !this.hasFiles(dataTransfer)) {
-      return;
-    }
-    event.preventDefault();
-    this.isDragActive = false;
-
-    const files = Array.from(dataTransfer.files ?? []).filter(file =>
-      file.type.startsWith('image/')
-    );
-    if (files.length > 0) {
-      files.forEach(file => this.addReferenceBlob(file, file.name));
-      return;
-    }
-
-    const resourcePath = getDroppedAssetResourcePath(dataTransfer);
-    if (resourcePath) {
-      void this.addReferenceFromProject(resourcePath);
     }
   }
 
@@ -1997,130 +1518,6 @@ export class SpriteEditorPanel extends ComponentBase {
     }
 
     await controller.addFrameTextures(texturePaths);
-  }
-
-  private hasFiles(dataTransfer: DataTransfer): boolean {
-    return Array.from(dataTransfer.types ?? []).includes('Files');
-  }
-
-  private async addReferenceFromProject(resourcePath: string): Promise<void> {
-    try {
-      const blob = await this.storage.readBlob(resourcePath);
-      const label = resourcePath.split('/').pop() ?? resourcePath;
-      this.addReferenceBlob(blob, label);
-    } catch (error) {
-      console.warn('[SpriteEditor] Failed to read dropped asset', error);
-    }
-  }
-
-  private addReferenceBlob(blob: Blob, label: string): void {
-    const objectUrl = this.trackUrl(URL.createObjectURL(blob));
-    const reference: ReferenceItem = {
-      id: makeId(),
-      mimeType: blob.type || 'image/png',
-      blob,
-      objectUrl,
-      label,
-    };
-    this.references = [...this.references, reference];
-  }
-
-  private removeReference(id: string): void {
-    const reference = this.references.find(item => item.id === id);
-    if (reference) {
-      this.revokeUrl(reference.objectUrl);
-    }
-    this.references = this.references.filter(item => item.id !== id);
-  }
-
-  // -- generation ------------------------------------------------------------
-
-  private async onGenerate(): Promise<void> {
-    const provider = this.providers.get(this.providerId);
-    const model = provider?.getModel(this.modelId);
-    if (!provider || !model) {
-      this.generateError = 'Select a provider and model in settings first.';
-      return;
-    }
-
-    this.generateError = null;
-    this.saveMessage = null;
-    this.saveError = null;
-    this.generating = true;
-    this.abortController = new AbortController();
-
-    try {
-      const apiKey = await this.aiSettings.getApiKey(this.providerId);
-      if (!apiKey) {
-        this.keyConfigured = false;
-        this.generateError = 'No API key configured for this provider.';
-        return;
-      }
-
-      const caps = model.capabilities;
-      const references = caps.supportsReferenceImages
-        ? await Promise.all(
-            this.references.slice(0, caps.maxReferenceImages).map(async reference => ({
-              mimeType: reference.mimeType,
-              data: await blobToBase64(reference.blob),
-            }))
-          )
-        : [];
-
-      const result = await provider.generate(
-        {
-          prompt: this.prompt.trim(),
-          references,
-          aspectRatio: caps.aspectRatios.includes(this.aspectRatio) ? this.aspectRatio : undefined,
-          imageSize: caps.imageSizes.includes(this.imageSize) ? this.imageSize : undefined,
-          quality: caps.qualities?.includes(this.quality) ? this.quality : undefined,
-          background:
-            caps.supportsTransparency && this.transparentBackground ? 'transparent' : undefined,
-          signal: this.abortController.signal,
-        },
-        { apiKey, modelId: this.modelId }
-      );
-
-      const image = result.images[0];
-      if (!image) {
-        this.generateError = 'The provider returned no image.';
-        return;
-      }
-
-      const blob = base64ToBlob(image.data, image.mimeType);
-      const objectUrl = this.trackUrl(URL.createObjectURL(blob));
-      const size = await readImageSize(objectUrl);
-      this.setCurrent({
-        blob,
-        mimeType: image.mimeType,
-        objectUrl,
-        source: 'generated',
-        width: size?.width,
-        height: size?.height,
-      });
-      this.saveName = deriveSaveName(this.prompt, this.boundImagePath, image.mimeType);
-
-      await this.history.add({
-        providerId: this.providerId,
-        modelId: this.modelId,
-        prompt: this.prompt.trim(),
-        aspectRatio: this.aspectRatio,
-        imageSize: this.imageSize,
-        mimeType: image.mimeType,
-        blob,
-        width: size?.width,
-        height: size?.height,
-      });
-    } catch (error) {
-      this.generateError = describeError(error);
-    } finally {
-      this.generating = false;
-      this.abortController = null;
-    }
-  }
-
-  private onCancelGenerate(): void {
-    this.abortController?.abort();
   }
 
   // -- background removal ----------------------------------------------------
@@ -2551,13 +1948,19 @@ export class SpriteEditorPanel extends ComponentBase {
       'png'
     );
 
+    // Crop bakes keep landing in the generation history: it is the cheap escape
+    // hatch for a pixel-destructive edit undo cannot restore (§9.7 risk 7), and it
+    // is now the Generate panel that shows the strip. The generation metadata comes
+    // straight from the stored preferences — the shell no longer owns a model picker.
+    const prefs = this.aiSettings.getPreferences();
+    const providerId = prefs.selectedProviderId;
     try {
       await this.history.add({
-        providerId: this.providerId,
-        modelId: this.modelId,
-        prompt: this.prompt.trim() ? `${this.prompt.trim()} (crop)` : 'Cropped image',
-        aspectRatio: this.aspectRatio,
-        imageSize: this.imageSize,
+        providerId,
+        modelId: this.aiSettings.getSelectedModelId(providerId) ?? '',
+        prompt: this.lastPrompt.trim() ? `${this.lastPrompt.trim()} (crop)` : 'Cropped image',
+        aspectRatio: prefs.defaultAspectRatio,
+        imageSize: prefs.defaultImageSize,
         mimeType: 'image/png',
         blob,
         width: sw,
@@ -2629,7 +2032,7 @@ export class SpriteEditorPanel extends ComponentBase {
           name,
           type: 'image',
           tags: ['generated'],
-          description: this.prompt || undefined,
+          description: this.lastPrompt || undefined,
           preview: fileName,
           entry: fileName,
           files: [fileName],
@@ -2891,67 +2294,6 @@ export class SpriteEditorPanel extends ComponentBase {
     }
   }
 
-  // -- history ---------------------------------------------------------------
-
-  private async reloadHistory(): Promise<void> {
-    let records: GenerationRecord[] = [];
-    try {
-      records = await this.history.list();
-    } catch (error) {
-      console.warn('[SpriteEditor] Failed to load history', error);
-    }
-    const nextIds = new Set(records.map(record => record.id));
-    for (const [id, url] of this.historyUrls) {
-      if (!nextIds.has(id)) {
-        URL.revokeObjectURL(url);
-        this.historyUrls.delete(id);
-      }
-    }
-    for (const record of records) {
-      if (!this.historyUrls.has(record.id)) {
-        this.historyUrls.set(record.id, URL.createObjectURL(record.blob));
-      }
-    }
-    this.historyRecords = records;
-  }
-
-  private useHistoryRecord(record: GenerationRecord): void {
-    const objectUrl = this.trackUrl(URL.createObjectURL(record.blob));
-    this.setCurrent({
-      blob: record.blob,
-      mimeType: record.mimeType,
-      objectUrl,
-      source: 'generated',
-      width: record.width,
-      height: record.height,
-    });
-    this.prompt = record.prompt;
-    if (record.aspectRatio) {
-      this.aspectRatio = record.aspectRatio as AspectRatio;
-    }
-    if (record.imageSize) {
-      this.imageSize = record.imageSize;
-    }
-    this.saveName = deriveSaveName(record.prompt, this.boundImagePath, record.mimeType);
-  }
-
-  private onHistoryDragStart(event: DragEvent, record: GenerationRecord): void {
-    if (!event.dataTransfer) {
-      return;
-    }
-    const suggestedName = ensureImageExt(slugify(record.prompt) || 'generated', record.mimeType);
-    setGenerationDragData(event.dataTransfer, { id: record.id, suggestedName });
-  }
-
-  private async deleteHistoryRecord(id: string): Promise<void> {
-    await this.history.delete(id);
-    // reloadHistory runs via the history subscription.
-  }
-
-  private async onClearHistory(): Promise<void> {
-    await this.history.clear();
-  }
-
   // -- helpers ---------------------------------------------------------------
 
   private clearCurrent(): void {
@@ -3011,42 +2353,10 @@ export class SpriteEditorPanel extends ComponentBase {
       URL.revokeObjectURL(url);
     }
     this.ownedUrls.clear();
-    for (const url of this.historyUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
-    this.historyUrls.clear();
   }
 }
 
 // -- module-level utilities --------------------------------------------------
-
-const makeId = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `ref-${Date.now()}-${Math.floor(Math.random() * 1e9).toString(36)}`;
-};
-
-const blobToBase64 = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      const commaIndex = result.indexOf(',');
-      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read blob'));
-    reader.readAsDataURL(blob);
-  });
-
-const base64ToBlob = (base64: string, mimeType: string): Blob => {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType });
-};
 
 const readImageSize = (objectUrl: string): Promise<{ width: number; height: number } | null> =>
   new Promise(resolve => {
