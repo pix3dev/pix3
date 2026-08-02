@@ -19,8 +19,11 @@ import { ProjectStorageService } from '@/services/project/ProjectStorageService'
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { OperationService } from '@/services/core/OperationService';
 import { AssetLibraryService } from '@/services/library/AssetLibraryService';
 import { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
+import { AnimationEditorService } from '@/services/animation/AnimationEditorService';
+import { DialogService } from '@/services/editor/DialogService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { CreateAnimationAssetCommand } from '@/features/scene/CreateAnimationAssetCommand';
@@ -30,7 +33,14 @@ import {
   getAnimationAssetDirectory,
   deriveAnimationAssetStem,
 } from '@/features/scene/animation-asset-utils';
-import { normalizeAnimationResource } from '@pix3/runtime';
+import {
+  SceneManager,
+  collectClipPointNames,
+  findAnimationFramePoint,
+  getAnimationFrameTexturePath,
+  normalizeAnimationResource,
+  type AnimationFrame,
+} from '@pix3/runtime';
 import {
   getDroppedAssetResourcePath,
   hasAssetDragData,
@@ -42,6 +52,22 @@ import {
   type StagePoint,
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
+import { AnimationDocumentController } from './animation-document-controller';
+import {
+  FrameOverlayController,
+  renderAnchorOverlay,
+  renderBboxOverlay,
+  renderPointsOverlay,
+  renderPolygonOverlay,
+  type AnimationEditMode,
+} from './frame-stage-overlays';
+import {
+  getDroppedImageFiles,
+  getDroppedTextureResources,
+  isPotentialTextureDrag,
+} from './frame-texture-drop';
+import { getFrameImageStyle } from './sprite-timeline';
+import './sprite-clips-rail';
 import {
   applyCropDrag,
   clampToImage,
@@ -84,6 +110,37 @@ const CROP_HANDLES: ReadonlyArray<{ pos: string; edges: string }> = [
   { pos: 's', edges: 's' },
   { pos: 'sw', edges: 'sw' },
   { pos: 'w', edges: 'w' },
+];
+
+/**
+ * Nine-up anchor grid. Icons, never arrow glyphs — `↖ ↑ ↗` ignore the theme and
+ * render differently on every platform (the outgoing animation panel's version is
+ * the exact violation §9.9 calls out).
+ */
+const ANCHOR_PRESETS: ReadonlyArray<{ icon: string; title: string; anchor: StagePoint }> = [
+  { icon: 'arrow-up-left', title: 'Top left', anchor: { x: 0, y: 0 } },
+  { icon: 'arrow-up', title: 'Top center', anchor: { x: 0.5, y: 0 } },
+  { icon: 'arrow-up-right', title: 'Top right', anchor: { x: 1, y: 0 } },
+  { icon: 'arrow-left', title: 'Center left', anchor: { x: 0, y: 0.5 } },
+  { icon: 'disc', title: 'Center', anchor: { x: 0.5, y: 0.5 } },
+  { icon: 'arrow-right', title: 'Center right', anchor: { x: 1, y: 0.5 } },
+  { icon: 'arrow-down-left', title: 'Bottom left', anchor: { x: 0, y: 1 } },
+  { icon: 'arrow-down', title: 'Bottom center', anchor: { x: 0.5, y: 1 } },
+  { icon: 'arrow-down-right', title: 'Bottom right', anchor: { x: 1, y: 1 } },
+];
+
+/**
+ * Which tool owns a plain left-drag on the canvas. `select` is the neutral state:
+ * the frame overlays still *draw*, they just aren't editable, so scrubbing frames
+ * can't nudge an anchor by accident.
+ */
+type StageTool = 'select' | AnimationEditMode;
+
+const FRAME_TOOLS: ReadonlyArray<{ tool: AnimationEditMode; icon: string; title: string }> = [
+  { tool: 'anchor', icon: 'crosshair', title: 'Anchor point' },
+  { tool: 'points', icon: 'map-pin', title: 'Frame points (named sockets)' },
+  { tool: 'polygon', icon: 'pen-tool', title: 'Collision polygon' },
+  { tool: 'bbox', icon: 'square', title: 'Bounding box' },
 ];
 
 interface ReferenceItem {
@@ -140,6 +197,18 @@ export class SpriteEditorPanel extends ComponentBase {
   @inject(EditorTabService)
   private readonly editorTabs!: EditorTabService;
 
+  @inject(OperationService)
+  private readonly operations!: OperationService;
+
+  @inject(AnimationEditorService)
+  private readonly animationEditorService!: AnimationEditorService;
+
+  @inject(DialogService)
+  private readonly dialogService!: DialogService;
+
+  @inject(SceneManager)
+  private readonly sceneManager!: SceneManager;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -188,6 +257,17 @@ export class SpriteEditorPanel extends ComponentBase {
   private sliceColumns = 4;
   private sliceRows = 1;
 
+  /** `.pix3anim` bound to this tab, or null when the tab holds a bare image. */
+  @state() private animationResourcePath: string | null = null;
+  /** Texture file the canvas is currently showing on behalf of a frame (§9.5). */
+  @state() private boundFrameTexturePath: string | null = null;
+  /** Which tool owns a plain left-drag; `crop` stays its own toggle below. */
+  @state() private stageTool: StageTool = 'select';
+  /** References + prompt + history, collapsed into one right-hand rail. */
+  @state() private aiRailExpanded = true;
+  /** Editor-level texture drag (animation documents only) — appends frames on drop. */
+  @state() private isTextureDragOver = false;
+
   private readonly stageRef = createRef<HTMLDivElement>();
   private readonly stageImageRef = createRef<HTMLImageElement>();
   private cropDrag: CropDragState | null = null;
@@ -213,6 +293,43 @@ export class SpriteEditorPanel extends ComponentBase {
   /** Set when a new working image arrives; consumed by the next `load` event. */
   private pendingStageFit = false;
   private stageResizeObserver: ResizeObserver | null = null;
+  /** `w×h` of the last rendered stage content; a change re-fits an unadjusted view. */
+  private lastStageContentKey = '';
+
+  /**
+   * The animation document, for a `.pix3anim` tab only. Owned by this *instance* and
+   * kept across a Golden Layout re-dock (disconnect → reconnect): `dispose()` only
+   * unsubscribes, and `attach()` is idempotent, so re-connecting restores the
+   * Inspector registration instead of orphaning it (§9.7 risk 6).
+   */
+  private documentController: AnimationDocumentController | null = null;
+  private disposeDocumentSubscription?: () => void;
+  private disposeOverlaySubscription?: () => void;
+  private textureDragDepth = 0;
+
+  /**
+   * Stage overlays (anchor / bbox / polygon / points) and their pointer state
+   * machine. Coordinates cross this boundary in frame-pixel space only — supplied
+   * by {@link toFramePoint} below, which is `StageZoomPanController.toStageCoords`
+   * against the same viewport the crop tool uses. One coordinate model, two tools.
+   */
+  private readonly overlays = new FrameOverlayController({
+    getDocument: () => this.documentController,
+    toFramePoint: event => this.toFramePoint(event),
+  });
+
+  /**
+   * A texture dropped on a timeline frame card is inserted by
+   * `<pix3-sprite-timeline>`, which stops the event so the shell-level handler
+   * never runs — and that handler is what normally takes the drag overlay back
+   * down. Capture runs before both, so this is the one place that reliably sees the
+   * end of a texture drag wherever it landed.
+   */
+  private readonly onDropCapture = (): void => {
+    this.textureDragDepth = 0;
+    this.isTextureDragOver = false;
+    this.isDragActive = false;
+  };
 
   private disposeTabsSubscription?: () => void;
   private disposeHistorySubscription?: () => void;
@@ -255,6 +372,8 @@ export class SpriteEditorPanel extends ComponentBase {
     this.disposeAiSettingsSubscription = this.aiSettings.subscribe(() => this.loadPreferences());
     this.pasteHandler = (event: ClipboardEvent) => this.onPaste(event);
     this.addEventListener('paste', this.pasteHandler);
+    this.addEventListener('drop', this.onDropCapture, { capture: true });
+    this.disposeOverlaySubscription = this.overlays.subscribe(() => this.requestUpdate());
     window.addEventListener('pointerdown', this.onDocPointerDown, true);
     window.addEventListener('keydown', this.onDocKeyDown);
     // On a Golden Layout re-dock the same instance is disconnected then reconnected; its blobs
@@ -275,6 +394,14 @@ export class SpriteEditorPanel extends ComponentBase {
       this.removeEventListener('paste', this.pasteHandler);
       this.pasteHandler = undefined;
     }
+    this.removeEventListener('drop', this.onDropCapture, { capture: true });
+    this.disposeOverlaySubscription?.();
+    this.disposeOverlaySubscription = undefined;
+    // The controller itself is kept: a re-dock reconnects the same instance and
+    // re-`attach()`es it, which is what restores its Inspector registration.
+    this.disposeDocumentSubscription?.();
+    this.disposeDocumentSubscription = undefined;
+    this.documentController?.dispose();
     window.removeEventListener('pointerdown', this.onDocPointerDown, true);
     window.removeEventListener('keydown', this.onDocKeyDown);
     this.stageResizeObserver?.disconnect();
@@ -284,6 +411,7 @@ export class SpriteEditorPanel extends ComponentBase {
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
+    this.boundFrameTexturePath = null;
     super.disconnectedCallback();
   }
 
@@ -305,6 +433,15 @@ export class SpriteEditorPanel extends ComponentBase {
 
   protected updated(changed: Map<PropertyKey, unknown>): void {
     if (changed.has('tabId')) {
+      // A rebind (§9.8) re-keys the tab in place, so the `tab-id` attribute changing
+      // is the only signal the panel gets that it now edits something else — force a
+      // full re-sync past the resource-id early-out. Not on the first update, where
+      // the "previous" value is just the empty initializer and `connectedCallback`
+      // has already synced.
+      const previousTabId = changed.get('tabId');
+      if (typeof previousTabId === 'string' && previousTabId !== '') {
+        this.syncedResourceId = null;
+      }
       this.syncFromTabState();
     }
     // Re-established on every update rather than in `firstUpdated`: a Golden Layout
@@ -314,6 +451,7 @@ export class SpriteEditorPanel extends ComponentBase {
       // The stage image may still be decoding on a fresh mount; give it a frame.
       requestAnimationFrame(() => this.initCropRect());
     }
+    this.refitOnContentSizeChange();
   }
 
   // -- tab / preferences sync ------------------------------------------------
@@ -326,13 +464,118 @@ export class SpriteEditorPanel extends ComponentBase {
     }
     this.syncedResourceId = resourceId;
 
+    // A `.pix3anim` binds a *document*; a bare image binds the raster canvas
+    // directly. The two never coexist — §9.4's "at most one animation document and
+    // one raster working image". Resolved before preferences load, because the
+    // AI rail's default state depends on which of the two this is.
+    const isAnimation =
+      Boolean(resourceId) &&
+      (tab?.type === 'animation' || isAnimationResourcePath(resourceId ?? ''));
+    this.animationResourcePath = isAnimation ? resourceId : null;
+
     this.loadPreferences();
 
+    if (isAnimation && resourceId) {
+      this.boundImagePath = null;
+      this.bindDocumentController(resourceId);
+      return;
+    }
+
+    this.releaseDocumentController();
+    this.boundFrameTexturePath = null;
     const isBound = Boolean(resourceId) && resourceId !== EMPTY_RESOURCE_ID;
     this.boundImagePath = isBound ? resourceId : null;
     if (isBound && resourceId) {
       void this.loadBoundImage(resourceId);
     }
+  }
+
+  // -- animation document ----------------------------------------------------
+
+  /**
+   * Create (once) and attach the document controller for this tab. Built lazily
+   * rather than in the constructor: `@inject` is a prototype accessor that resolves
+   * through the container on *read*, so the deps object must not be assembled
+   * before the container is ready (or before a spec has swapped a service out).
+   */
+  private bindDocumentController(resourcePath: string): AnimationDocumentController {
+    if (!this.documentController) {
+      this.documentController = new AnimationDocumentController(
+        {
+          operations: this.operations,
+          commandDispatcher: this.commandDispatcher,
+          projectStorage: this.storage,
+          animationEditorService: this.animationEditorService,
+          autoSliceDialog: this.sliceDialog,
+          dialogService: this.dialogService,
+          sceneManager: this.sceneManager,
+        },
+        this.tabId,
+        resourcePath
+      );
+    }
+
+    const controller = this.documentController;
+    controller.setContext(this.tabId, resourcePath);
+    if (!this.disposeDocumentSubscription) {
+      this.disposeDocumentSubscription = controller.subscribe(() => this.onDocumentChanged());
+    }
+    controller.attach();
+    this.onDocumentChanged();
+    return controller;
+  }
+
+  /** Tear the document down for good — the tab no longer holds a `.pix3anim`. */
+  private releaseDocumentController(): void {
+    if (!this.documentController) {
+      return;
+    }
+    this.disposeDocumentSubscription?.();
+    this.disposeDocumentSubscription = undefined;
+    this.documentController.dispose();
+    this.documentController = null;
+    this.stageTool = 'select';
+  }
+
+  private onDocumentChanged(): void {
+    // A document reload drops the transient draft under an in-flight stage drag;
+    // the drag has nothing left to edit, so end it.
+    this.overlays.handleDocumentChanged();
+    void this.syncCanvasToSelectedFrame();
+    this.requestUpdate();
+  }
+
+  /**
+   * Frame → canvas binding (§9.5, the binding half). Selecting a frame points the
+   * one canvas at that frame's texture through the very same `loadBoundImage` an
+   * image tab uses, so crop/zoom/pan/overlays all operate on one working image.
+   * Write-back (`replaceFrameTexture` and its invalidation fan-out) is C7.
+   */
+  private async syncCanvasToSelectedFrame(): Promise<void> {
+    const controller = this.documentController;
+    if (!controller) {
+      return;
+    }
+
+    const texturePath = getAnimationFrameTexturePath(controller.resource, controller.selectedFrame);
+    if (!texturePath) {
+      // Every frame deleted (or a clip that never had one): drop the working image
+      // too, or the canvas keeps showing a frame the document no longer has.
+      this.boundFrameTexturePath = null;
+      this.clearCurrent();
+      return;
+    }
+    if (texturePath === this.boundFrameTexturePath) {
+      return;
+    }
+
+    this.boundFrameTexturePath = texturePath;
+    await this.loadBoundImage(texturePath);
+  }
+
+  /** The frame the canvas stands in for, or null when no document is bound. */
+  private get boundFrame(): AnimationFrame | null {
+    return this.documentController?.selectedFrame ?? null;
   }
 
   private loadPreferences(): void {
@@ -358,7 +601,16 @@ export class SpriteEditorPanel extends ComponentBase {
     this.bgEngine = prefs.bgRemovalEngine;
     this.bgQuality = prefs.bgRemovalQuality;
     this.bgFillHoles = prefs.bgFillHoles;
+    // Collapsed by default for a `.pix3anim` (you came to edit frames), expanded for
+    // a bare image (you came to generate) — until the user says otherwise, and then
+    // their choice sticks across tabs and sessions (§9.8).
+    this.aiRailExpanded = prefs.aiRailExpanded ?? !this.animationResourcePath;
     void this.refreshKeyStatus();
+  }
+
+  private onToggleAiRail(): void {
+    this.aiRailExpanded = !this.aiRailExpanded;
+    this.aiSettings.updatePreferences({ aiRailExpanded: this.aiRailExpanded });
   }
 
   private async refreshKeyStatus(): Promise<void> {
@@ -394,28 +646,118 @@ export class SpriteEditorPanel extends ComponentBase {
 
   // -- rendering -------------------------------------------------------------
 
+  /**
+   * The unified shell (§9.8): clips rail | canvas | collapsible AI rail, with the
+   * frame timeline as a full-width band underneath. Everything animation-specific
+   * renders only when a document is bound, so an image tab is exactly the editor it
+   * was — minus the width the references sidebar and history strip used to take
+   * from a 646×123 canvas.
+   */
   protected render() {
+    const controller = this.documentController;
+    const hasDocument = Boolean(controller?.assetPath && controller.resource);
+
     return html`
       <section
         class="sprite-editor ${this.isDragActive ? 'is-drag-active' : ''}"
+        @dragenter=${this.onDragEnter}
         @dragover=${this.onDragOver}
         @dragleave=${this.onDragLeave}
         @drop=${this.onDrop}
       >
-        ${this.renderToolbar()} ${this.renderSliceStatus()}
+        ${this.renderToolbar()} ${this.renderSliceStatus()} ${this.renderDocumentError()}
         <div class="ag-workspace">
-          ${this.renderSidebar()}
+          ${hasDocument && controller
+            ? html`<aside class="ag-clips-rail">
+                <pix3-sprite-clips-rail .controller=${controller}></pix3-sprite-clips-rail>
+              </aside>`
+            : null}
           <main class="ag-main">${this.renderStage()}</main>
+          ${this.renderAiRail()}
         </div>
-        ${this.renderPromptBar()} ${this.renderHistory()}
-        ${this.isDragActive
-          ? html`<div class="ag-drop-overlay">Drop image to add as reference</div>`
+        ${hasDocument && controller
+          ? html`<section class="ag-timeline" aria-label="Animation frames">
+              <pix3-sprite-timeline .controller=${controller}></pix3-sprite-timeline>
+            </section>`
           : null}
+        ${this.renderDropOverlay()}
       </section>
     `;
   }
 
+  private renderDocumentError() {
+    const message = this.documentController?.errorMessage;
+    return message ? html`<div class="ag-slice-status is-error">${message}</div>` : null;
+  }
+
+  private renderDropOverlay() {
+    if (this.isTextureDragOver) {
+      return html`<div class="ag-drop-overlay">Drop image to append frames</div>`;
+    }
+    if (this.isDragActive) {
+      return html`<div class="ag-drop-overlay">Drop image to add as reference</div>`;
+    }
+    return null;
+  }
+
+  /**
+   * References + prompt + generation history, stacked into one collapsible rail.
+   * A modal was rejected (it taxes the generate → inspect → regenerate loop) and so
+   * was a bottom drawer (a second horizontal band under an already-short canvas).
+   */
+  private renderAiRail() {
+    if (!this.aiRailExpanded) {
+      return html`
+        <aside class="ag-ai-rail is-collapsed">
+          <button
+            class="ag-ai-rail-toggle"
+            type="button"
+            title="Show AI generation panel"
+            aria-label="Show AI generation panel"
+            aria-expanded="false"
+            @click=${this.onToggleAiRail}
+          >
+            ${this.icons.getIcon('sparkles', IconSize.SMALL)}
+            <span class="ag-ai-rail-tag">AI</span>
+          </button>
+        </aside>
+      `;
+    }
+
+    const model = this.providers.get(this.providerId)?.getModel(this.modelId);
+    const maxReferences = model?.capabilities.maxReferenceImages ?? 0;
+
+    return html`
+      <aside class="ag-ai-rail">
+        <div class="ag-ai-rail-head">
+          <span class="ag-field-label">AI</span>
+          <button
+            class="ag-icon-button"
+            type="button"
+            title="Hide AI generation panel"
+            aria-label="Hide AI generation panel"
+            aria-expanded="true"
+            @click=${this.onToggleAiRail}
+          >
+            ${this.icons.getIcon('chevron-right', IconSize.SMALL)}
+          </button>
+        </div>
+        <div class="ag-ai-rail-body">
+          ${this.renderReferences(maxReferences)} ${this.renderPromptBar()} ${this.renderHistory()}
+        </div>
+      </aside>
+    `;
+  }
+
+  /**
+   * One toolbar for both documents: `select | crop | rotate/flip | anchor | points |
+   * polygon | generate | bg-remove | save` (§9.8). The frame tools appear only for a
+   * `.pix3anim`; the raster tools disable while the canvas stands in for a frame,
+   * because writing those pixels back into the document is C7.
+   */
   private renderToolbar() {
+    const rasterHint = this.frameRasterHint;
+    const rasterBusy = Boolean(rasterHint) || !this.current || this.bgBusy || this.generating;
     return html`
       <header class="ag-toolbar">
         <div class="ag-title">Sprite Editor</div>
@@ -428,63 +770,122 @@ export class SpriteEditorPanel extends ComponentBase {
           ${this.icons.getIcon('settings', IconSize.SMALL)}
         </button>
         <div class="ag-toolbar-spacer"></div>
+        ${this.renderFrameTools()}
         <button
           class="ag-toolbar-button ${this.cropMode ? 'is-active' : ''}"
-          title="Select a region and crop the image"
+          title=${rasterHint ?? 'Select a region and crop the image'}
           @click=${this.onToggleCrop}
-          ?disabled=${!this.current || this.bgBusy || this.generating}
+          ?disabled=${rasterBusy}
         >
           ${this.icons.getIcon('crop', IconSize.SMALL)} Crop
         </button>
         <button
-          class="ag-toolbar-button"
-          @click=${this.onRemoveBackground}
-          ?disabled=${!this.current || this.bgBusy || this.cropMode}
-        >
-          ${this.bgBusy ? 'Removing…' : 'Remove background'}
-        </button>
-        <button
           class="ag-icon-button"
-          title="Rotate 90° clockwise"
+          title=${rasterHint ?? 'Rotate 90° clockwise'}
           aria-label="Rotate 90° clockwise"
           @click=${this.onRotate}
-          ?disabled=${!this.current ||
-          this.bgBusy ||
-          this.cropMode ||
-          this.generating ||
-          this.transformBusy}
+          ?disabled=${rasterBusy || this.cropMode || this.transformBusy}
         >
           ${this.icons.getIcon('rotate-cw', IconSize.SMALL)}
         </button>
         <button
           class="ag-icon-button"
-          title="Flip horizontally"
+          title=${rasterHint ?? 'Flip horizontally'}
           aria-label="Flip horizontally"
           @click=${this.onFlipHorizontal}
-          ?disabled=${!this.current ||
-          this.bgBusy ||
-          this.cropMode ||
-          this.generating ||
-          this.transformBusy}
+          ?disabled=${rasterBusy || this.cropMode || this.transformBusy}
         >
           ${this.icons.getIcon('flip-horizontal', IconSize.SMALL)}
         </button>
         <button
           class="ag-icon-button"
-          title="Flip vertically"
+          title=${rasterHint ?? 'Flip vertically'}
           aria-label="Flip vertically"
           @click=${this.onFlipVertical}
-          ?disabled=${!this.current ||
-          this.bgBusy ||
-          this.cropMode ||
-          this.generating ||
-          this.transformBusy}
+          ?disabled=${rasterBusy || this.cropMode || this.transformBusy}
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
+        </button>
+        <span class="ag-toolbar-separator" aria-hidden="true"></span>
+        <button
+          class="ag-icon-button ${this.aiRailExpanded ? 'is-active' : ''}"
+          title="Generate with AI"
+          aria-label="Generate with AI"
+          @click=${this.onToggleAiRail}
+        >
+          ${this.icons.getIcon('sparkles', IconSize.SMALL)}
+        </button>
+        <button
+          class="ag-toolbar-button"
+          title=${rasterHint ?? 'Remove the image background'}
+          @click=${this.onRemoveBackground}
+          ?disabled=${rasterBusy || this.cropMode}
+        >
+          ${this.bgBusy ? 'Removing…' : 'Remove background'}
         </button>
         ${this.renderSpritesheetActions()} ${this.renderZoomActions()} ${this.renderSaveMenu()}
       </header>
     `;
+  }
+
+  /**
+   * Why the raster tools are off, or null when they are available. The canvas
+   * standing in for a frame has nowhere to put its output until C7 adds
+   * `replaceFrameTexture` — an unwritten crop would silently vanish on the next
+   * frame click, which is worse than a disabled button that says why.
+   */
+  private get frameRasterHint(): string | null {
+    return this.boundFrameTexturePath
+      ? 'Editing frame pixels from the sprite editor lands in a later change; ' +
+          'crop, rotate, flip and background removal are disabled while a frame is bound.'
+      : null;
+  }
+
+  /** Anchor / points / polygon / bounding-box tools — animation documents only. */
+  private renderFrameTools() {
+    if (!this.documentController?.resource) {
+      return null;
+    }
+
+    return html`
+      <button
+        class="ag-icon-button ${this.stageTool === 'select' && !this.cropMode ? 'is-active' : ''}"
+        type="button"
+        title="Select (no frame overlay editing)"
+        aria-label="Select"
+        @click=${() => this.setStageTool('select')}
+      >
+        ${this.icons.getIcon('mouse-pointer', IconSize.SMALL)}
+      </button>
+      ${FRAME_TOOLS.map(
+        entry => html`
+          <button
+            class="ag-icon-button ${this.stageTool === entry.tool && !this.cropMode
+              ? 'is-active'
+              : ''}"
+            type="button"
+            title=${entry.title}
+            aria-label=${entry.title}
+            ?disabled=${!this.boundFrame}
+            @click=${() => this.setStageTool(entry.tool)}
+          >
+            ${this.icons.getIcon(entry.icon, IconSize.SMALL)}
+          </button>
+        `
+      )}
+      <span class="ag-toolbar-separator" aria-hidden="true"></span>
+    `;
+  }
+
+  private setStageTool(tool: StageTool): void {
+    this.stageTool = tool;
+    if (tool !== 'select') {
+      this.overlays.setEditMode(tool);
+      // Crop and an overlay tool both want a plain left-drag; the last click wins.
+      this.cropMode = false;
+      this.cropRect = null;
+      this.cropDrag = null;
+    }
   }
 
   /** Stage zoom affordances — the same trio (and icons) the animation stage carries. */
@@ -707,15 +1108,6 @@ export class SpriteEditorPanel extends ComponentBase {
     `;
   }
 
-  private renderSidebar() {
-    const model = this.providers.get(this.providerId)?.getModel(this.modelId);
-    const maxReferences = model?.capabilities.maxReferenceImages ?? 0;
-    if (maxReferences <= 0) {
-      return null;
-    }
-    return html`<aside class="ag-sidebar">${this.renderReferences(maxReferences)}</aside>`;
-  }
-
   private renderPromptBar() {
     const provider = this.providers.get(this.providerId);
     const model = provider?.getModel(this.modelId);
@@ -926,10 +1318,16 @@ export class SpriteEditorPanel extends ComponentBase {
    */
   private renderStage() {
     const current = this.current;
-    const size = this.getImageSize();
+    const size = this.getStageContentSize();
     const zoom = this.stageView.zoom;
-    const imageStyle =
-      size && current ? `width:${size.width * zoom}px; height:${size.height * zoom}px;` : '';
+    const frame = this.boundFrame;
+    const contentStyle = size
+      ? `width:${size.width * zoom}px; height:${size.height * zoom}px;`
+      : '';
+    // A frame windows its texture (`offset`/`repeat`) into a fixed box; a bare image
+    // *is* the box. Either way the content element is sized in stage pixels × zoom,
+    // which is the model `toStageCoords` and `fitToViewport` assume.
+    const imageStyle = frame ? getFrameImageStyle(frame) : contentStyle;
 
     return html`
       <div
@@ -945,31 +1343,255 @@ export class SpriteEditorPanel extends ComponentBase {
       >
         ${current
           ? html`<div
-              class="ag-stage-content"
-              style="transform: translate(${this.stageView.panX}px, ${this.stageView.panY}px);"
+              class="ag-stage-content ${frame ? 'is-frame-box' : ''}"
+              style="transform: translate(${this.stageView.panX}px, ${this.stageView
+                .panY}px); ${frame ? contentStyle : ''}"
             >
               <img
-                class="ag-stage-image ${zoom >= PIXELATED_ZOOM_THRESHOLD ? 'is-pixelated' : ''}"
-                src=${current.objectUrl}
+                class="ag-stage-image ${frame ? 'is-frame-image' : ''} ${zoom >=
+                PIXELATED_ZOOM_THRESHOLD
+                  ? 'is-pixelated'
+                  : ''}"
+                src=${this.getStageImageSrc(current.objectUrl)}
                 alt="Working image"
                 draggable="false"
                 style=${imageStyle}
                 ${ref(this.stageImageRef)}
                 @load=${this.onStageImageLoad}
               />
+              ${frame && size ? this.renderFrameOverlays(frame, size) : null}
               ${this.cropMode && this.cropRect ? this.renderCropRect(this.cropRect, zoom) : null}
             </div>`
           : html`<div class="ag-empty">
-              <div class="ag-empty-title">Nothing here yet</div>
-              <div class="ag-empty-body">
-                Enter a prompt and press Generate, or open an image asset to edit it.
-              </div>
+              <div class="ag-empty-title">${this.renderEmptyTitle()}</div>
+              <div class="ag-empty-body">${this.renderEmptyBody()}</div>
             </div>`}
+        ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
       ${this.cropMode ? this.renderCropToolbar() : null}
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
+  }
+
+  private renderEmptyTitle(): string {
+    return this.animationResourcePath ? 'No frame selected' : 'Nothing here yet';
+  }
+
+  private renderEmptyBody(): string {
+    return this.animationResourcePath
+      ? 'Pick a clip with frames, or drop images onto the editor to append sequence frames.'
+      : 'Enter a prompt and press Generate, or open an image asset to edit it.';
+  }
+
+  /**
+   * While the preview is running the canvas follows `previewFrameIndex` off the
+   * controller's own texture cache; the *working* image stays the selected frame, so
+   * a crop or a save still acts on what the user picked.
+   */
+  private getStageImageSrc(fallbackUrl: string): string {
+    const controller = this.documentController;
+    if (!controller?.isPreviewPlaying) {
+      return fallbackUrl;
+    }
+    return controller.getTexturePreviewUrl(controller.previewFrame) || fallbackUrl;
+  }
+
+  /** Anchor / bbox / polygon / points, in frame-pixel space over the canvas. */
+  private renderFrameOverlays(frame: AnimationFrame, size: ImageSize) {
+    const controller = this.documentController;
+    if (!controller) {
+      return null;
+    }
+
+    const metrics = { frameWidth: size.width, frameHeight: size.height };
+    const previousFrame = controller.activeClip?.frames[controller.selectedFrameIndex - 1] ?? null;
+    return html`
+      <svg
+        class="ag-stage-overlay"
+        viewBox=${`0 0 ${size.width} ${size.height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        ${renderBboxOverlay(frame)}
+        ${renderPolygonOverlay(frame, { editable: this.canEditOverlay('polygon') })}
+        ${renderPointsOverlay({
+          frame,
+          previousFrame,
+          metrics,
+          editable: this.canEditOverlay('points'),
+          selectedPointName: this.overlays.selectedPointName,
+        })}
+      </svg>
+      ${renderAnchorOverlay(frame, { editable: this.canEditOverlay('anchor') })}
+    `;
+  }
+
+  /** A tool edits only when it is the active tool *and* the overlay controller agrees. */
+  private canEditOverlay(mode: AnimationEditMode): boolean {
+    return this.stageTool === mode && !this.cropMode && this.overlays.canEdit(mode);
+  }
+
+  /** Anchor presets, floating over the canvas so they cost it no width. */
+  private renderAnchorTools(frame: AnimationFrame | null) {
+    if (this.stageTool !== 'anchor' || this.cropMode || !frame || !this.documentController) {
+      return null;
+    }
+
+    const controller = this.documentController;
+    return html`
+      <div class="ag-frame-tools" aria-label="Anchor point tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Anchor</span>
+          <span class="ag-frame-tools-value">
+            ${frame.anchor.x.toFixed(2)}, ${frame.anchor.y.toFixed(2)}
+          </span>
+        </div>
+        <div class="ag-anchor-grid">
+          ${ANCHOR_PRESETS.map(
+            preset => html`
+              <button
+                class="ag-frame-tools-button ${frame.anchor.x === preset.anchor.x &&
+                frame.anchor.y === preset.anchor.y
+                  ? 'is-active'
+                  : ''}"
+                type="button"
+                title=${preset.title}
+                aria-label=${preset.title}
+                @click=${() => void controller.applyAnchorPreset(preset.anchor)}
+              >
+                ${this.icons.getIcon(preset.icon, IconSize.SMALL)}
+              </button>
+            `
+          )}
+        </div>
+        <div class="ag-frame-tools-row">
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Apply this anchor to every frame of the active clip"
+            @click=${() => void controller.applySelectedAnchorToActiveClip()}
+          >
+            Clip
+          </button>
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Apply this anchor to every frame of every clip"
+            @click=${() => void controller.applySelectedAnchorToAllClips()}
+          >
+            All
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Points-mode side panel: the union of point names across the clip, so adding one
+   * seeds it into every frame and the list doesn't flicker as you scrub.
+   */
+  private renderPointTools(frame: AnimationFrame | null) {
+    if (this.stageTool !== 'points' || this.cropMode || !frame || !this.documentController) {
+      return null;
+    }
+
+    const controller = this.documentController;
+    const names = collectClipPointNames(controller.activeClip);
+    return html`
+      <div class="ag-frame-tools" aria-label="Frame point tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Points</span>
+          <span class="ag-frame-tools-value">${names.length}</span>
+        </div>
+        ${names.length === 0
+          ? html`<p class="ag-frame-tools-hint">
+              Add a named socket (muzzle, hand) and drag it per frame. Scripts read it with
+              <code>getFramePoint()</code>.
+            </p>`
+          : html`
+              <ul class="ag-point-list">
+                ${names.map(name => this.renderPointEntry(frame, name))}
+              </ul>
+            `}
+        <button
+          class="ag-frame-tools-wide"
+          type="button"
+          title="Add a named point to every frame of this clip"
+          @click=${() => void this.onAddPoint()}
+        >
+          Add point
+        </button>
+      </div>
+    `;
+  }
+
+  private renderPointEntry(frame: AnimationFrame, name: string) {
+    const controller = this.documentController;
+    if (!controller) {
+      return null;
+    }
+
+    const point = findAnimationFramePoint(frame, name);
+    return html`
+      <li class="ag-point-list-item ${point ? '' : 'is-missing'}">
+        <input
+          class="ag-point-list-name"
+          type="text"
+          .value=${name}
+          aria-label=${`Point name: ${name}`}
+          title=${point
+            ? `${(point.x * 100).toFixed(0)}%, ${(point.y * 100).toFixed(0)}%, ${Math.round(point.angle ?? 0)}°`
+            : 'Not defined on this frame'}
+          ?data-selected=${this.overlays.selectedPointName === name}
+          @focus=${() => this.overlays.setSelectedPointName(name)}
+          @change=${(event: Event) =>
+            void this.onRenamePoint(name, (event.target as HTMLInputElement).value)}
+        />
+        <button
+          type="button"
+          class="ag-point-list-action"
+          title="Copy this frame's position to every frame of the clip"
+          aria-label=${`Copy ${name} to every frame`}
+          @click=${() => void controller.copyFramePointToClip(name)}
+        >
+          ${this.icons.getIcon('copy', 12)}
+        </button>
+        <button
+          type="button"
+          class="ag-point-list-action is-danger"
+          title="Remove from every frame of the clip"
+          aria-label=${`Remove ${name}`}
+          @click=${() => void this.onRemovePoint(name)}
+        >
+          ${this.icons.getIcon('trash-2', 12)}
+        </button>
+      </li>
+    `;
+  }
+
+  private async onAddPoint(): Promise<void> {
+    const name = await this.documentController?.addFramePoint();
+    if (name) {
+      this.overlays.setSelectedPointName(name);
+    }
+  }
+
+  private async onRenamePoint(name: string, rawNextName: string): Promise<void> {
+    const appliedName = await this.documentController?.renameFramePoint(name, rawNextName);
+    if (!appliedName) {
+      // Restore the input to the stored name on an empty / no-op / duplicate edit.
+      this.requestUpdate();
+      return;
+    }
+    this.overlays.setSelectedPointName(appliedName);
+  }
+
+  private async onRemovePoint(name: string): Promise<void> {
+    if (this.overlays.selectedPointName === name) {
+      this.overlays.setSelectedPointName(null);
+    }
+    await this.documentController?.removeFramePoint(name);
   }
 
   private renderCropRect(rect: CropRect, zoom: number) {
@@ -1268,7 +1890,33 @@ export class SpriteEditorPanel extends ComponentBase {
     }
   }
 
+  /**
+   * With a document bound, an image drop appends frames (the old animation editor's
+   * behaviour); without one, it adds a generation reference. A frame *reorder* drag
+   * is filtered out by `isPotentialTextureDrag` through the shared
+   * `FRAME_REORDER_MIME`, which is why that constant is not private to the strip.
+   */
+  private onDragEnter(event: DragEvent): void {
+    if (!this.documentController?.resource || !isPotentialTextureDrag(event.dataTransfer)) {
+      return;
+    }
+    this.textureDragDepth += 1;
+    this.isTextureDragOver = true;
+  }
+
   private onDragOver(event: DragEvent): void {
+    if (this.documentController?.resource) {
+      if (!isPotentialTextureDrag(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+      this.isTextureDragOver = true;
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy';
+      }
+      return;
+    }
+
     if (
       event.dataTransfer &&
       (hasAssetDragData(event.dataTransfer) || this.hasFiles(event.dataTransfer))
@@ -1280,6 +1928,17 @@ export class SpriteEditorPanel extends ComponentBase {
   }
 
   private onDragLeave(event: DragEvent): void {
+    if (this.documentController?.resource) {
+      if (!isPotentialTextureDrag(event.dataTransfer)) {
+        return;
+      }
+      this.textureDragDepth = Math.max(0, this.textureDragDepth - 1);
+      if (this.textureDragDepth === 0) {
+        this.isTextureDragOver = false;
+      }
+      return;
+    }
+
     // Only clear when leaving the panel entirely.
     if (event.relatedTarget && this.contains(event.relatedTarget as Node)) {
       return;
@@ -1292,6 +1951,12 @@ export class SpriteEditorPanel extends ComponentBase {
     if (!dataTransfer) {
       return;
     }
+
+    if (this.documentController?.resource) {
+      void this.onFrameTextureDrop(event);
+      return;
+    }
+
     if (!hasAssetDragData(dataTransfer) && !this.hasFiles(dataTransfer)) {
       return;
     }
@@ -1310,6 +1975,28 @@ export class SpriteEditorPanel extends ComponentBase {
     if (resourcePath) {
       void this.addReferenceFromProject(resourcePath);
     }
+  }
+
+  private async onFrameTextureDrop(event: DragEvent): Promise<void> {
+    const controller = this.documentController;
+    if (!controller || !isPotentialTextureDrag(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    this.textureDragDepth = 0;
+    this.isTextureDragOver = false;
+
+    const droppedFiles = getDroppedImageFiles(event.dataTransfer);
+    const texturePaths =
+      droppedFiles.length > 0
+        ? await controller.importOsFiles(droppedFiles)
+        : getDroppedTextureResources(event.dataTransfer);
+    if (texturePaths.length === 0) {
+      return;
+    }
+
+    await controller.addFrameTextures(texturePaths);
   }
 
   private hasFiles(dataTransfer: DataTransfer): boolean {
@@ -1545,14 +2232,34 @@ export class SpriteEditorPanel extends ComponentBase {
   }
 
   /**
+   * Size of the box the stage lays out and every overlay is measured against.
+   *
+   * For a bare image that is the image's intrinsic size. For a frame it is the
+   * document controller's own `getFrameMetrics` — deliberately *its* number rather
+   * than the decoded raster's, because that is the space the overlay pointer state
+   * machine clamps and rounds in (`FrameOverlayController.resolveFramePoint`). Two
+   * sources here would put a dragged vertex a few pixels off the one the user aimed
+   * at on a UV-window frame.
+   */
+  private getStageContentSize(): ImageSize | null {
+    const frame = this.boundFrame;
+    const controller = this.documentController;
+    if (frame && controller) {
+      const metrics = controller.getFrameMetrics(frame);
+      return { width: metrics.frameWidth, height: metrics.frameHeight };
+    }
+    return this.getImageSize();
+  }
+
+  /**
    * The content box the zoom/pan controller reasons about: the stage's own rect,
-   * with the image's intrinsic size as the content size. The content element sits
+   * with the content's intrinsic size as the content size. The content element sits
    * at the stage's top-left and is moved by the pan, which is exactly the model
    * `toStageCoords` and `fitToViewport` assume.
    */
   private getStageViewport(): StageViewport | null {
     const stage = this.stageRef.value;
-    const size = this.getImageSize();
+    const size = this.getStageContentSize();
     if (!stage || !size) {
       return null;
     }
@@ -1573,6 +2280,17 @@ export class SpriteEditorPanel extends ComponentBase {
       point: this.stageView.toStageCoords(event, viewport),
       size: { width: viewport.contentWidth, height: viewport.contentHeight },
     };
+  }
+
+  /**
+   * The shell's half of the overlay coordinate contract (§9.2): a pointer event in
+   * frame-pixel space, unclamped (the overlay controller clamps and rounds). One
+   * line, because the canvas already uses the canonical model the overlays want —
+   * content anchored top-left, pan the sole offset, content sized `size × zoom`.
+   */
+  private toFramePoint(event: PointerEvent): StagePoint | null {
+    const viewport = this.getStageViewport();
+    return viewport ? this.stageView.toStageCoords(event, viewport) : null;
   }
 
   private onStageWheel(event: WheelEvent): void {
@@ -1625,6 +2343,24 @@ export class SpriteEditorPanel extends ComponentBase {
     this.stageResizeObserver.observe(stage);
   }
 
+  /**
+   * A frame's metrics can land *after* its raster decoded (the document reads the
+   * texture on its own schedule and reports 256×256 until it does), so the fit
+   * queued by `setCurrent` can be against the wrong box. Re-fit whenever the content
+   * box changes and the user hasn't taken the view over.
+   */
+  private refitOnContentSizeChange(): void {
+    const size = this.getStageContentSize();
+    const key = size ? `${size.width}x${size.height}` : '';
+    if (key === this.lastStageContentKey) {
+      return;
+    }
+    this.lastStageContentKey = key;
+    if (key && !this.hasUserAdjustedView) {
+      this.fitStageToViewport();
+    }
+  }
+
   private onStageImageLoad(): void {
     if (this.pendingStageFit) {
       this.pendingStageFit = false;
@@ -1643,6 +2379,12 @@ export class SpriteEditorPanel extends ComponentBase {
       // that swaps the grab cursor in and out.
       this.requestUpdate();
       event.preventDefault();
+      return;
+    }
+    // A frame overlay tool owns the plain left-drag when one is picked; crop keeps
+    // it otherwise. They are mutually exclusive by construction (`setStageTool`).
+    if (!this.cropMode && this.stageTool !== 'select' && this.boundFrame) {
+      this.overlays.handlePointerDown(event);
       return;
     }
     if (!this.cropMode || event.button !== 0) {
@@ -1672,6 +2414,10 @@ export class SpriteEditorPanel extends ComponentBase {
     if (this.stageView.updatePan(event)) {
       return;
     }
+    if (this.overlays.isDragging) {
+      this.overlays.handlePointerMove(event);
+      return;
+    }
     const drag = this.cropDrag;
     if (!drag) {
       return;
@@ -1686,6 +2432,10 @@ export class SpriteEditorPanel extends ComponentBase {
   private onStagePointerUp(event: PointerEvent): void {
     if (this.stageView.endPan(event)) {
       this.requestUpdate();
+      return;
+    }
+    if (this.overlays.isDragging) {
+      void this.overlays.handlePointerUp(event);
       return;
     }
     if (!this.cropDrag) {
@@ -1707,6 +2457,9 @@ export class SpriteEditorPanel extends ComponentBase {
     this.cropMode = !this.cropMode;
     this.cropRect = null;
     this.cropDrag = null;
+    if (this.cropMode) {
+      this.stageTool = 'select';
+    }
   }
 
   private onCancelCrop(): void {
@@ -2201,6 +2954,18 @@ export class SpriteEditorPanel extends ComponentBase {
 
   // -- helpers ---------------------------------------------------------------
 
+  private clearCurrent(): void {
+    const previous = this.current;
+    if (!previous) {
+      return;
+    }
+    this.current = null;
+    this.revokeUrl(previous.objectUrl);
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+  }
+
   private setCurrent(next: CurrentImage): void {
     const previous = this.current;
     this.current = next;
@@ -2307,6 +3072,14 @@ const slugify = (text: string): string =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
+
+/**
+ * Whether a tab's resource is an animation *document*. The tab type is the real
+ * signal; this is the fallback for the synthetic/detached cases (and it keeps the
+ * shell honest if a `.pix3anim` ever arrives on a differently-typed tab).
+ */
+const isAnimationResourcePath = (resourceId: string): boolean =>
+  /\.pix3anim$/i.test(resourceId.split('?')[0]);
 
 const normalizeRelativePath = (path: string): string =>
   path

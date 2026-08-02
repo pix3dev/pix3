@@ -1060,6 +1060,32 @@ expanded when a bare image is bound. Generation stays one click away — a modal
 it taxes the generate → inspect → regenerate loop, and a bottom drawer was rejected because it
 stacks a second horizontal band under an already-short canvas.
 
+**Superseded 2026-08-02 (later the same day) — the AI rail becomes a dockable panel.** The rail
+still ships in C6, but as a transitional step: the generation chrome is currently interleaved with
+the canvas markup, and collecting it into one self-contained block is the hard part of lifting it
+out. **C6b then moves that block into a Golden Layout panel** (`<pix3-generate-panel>`, tab title
+"Generate", dockable beside Inspector / Profiler / Agent) and deletes the rail. Rationale:
+
+- the canvas gets the *whole* shell rather than "shell minus rail" — the 646×123 problem is fully
+  solved, not merely reduced;
+- dock/undock, resize, tab-stacking, floating and hide come free from Golden Layout instead of
+  being hand-built for an in-panel aside;
+- the data's lifetime matches a panel, not a tab — generation history (34 entries observed live),
+  API key, selected model and references are not per-editor-tab state, which is precisely why they
+  sit awkwardly inside `sprite-editor-panel.ts` today;
+- **the repo already has this exact shape**: the Inspector is a separate dock panel that renders UI
+  for whatever animation document is active, mediated by `AnimationEditorService.setActiveController`
+  + a listener set (§9.3). The generate panel binds to the active shell the same way — a mediating
+  service, never a direct component reference.
+
+Scope note: the panel is **general-purpose** ("Generate"), not strictly a Sprite Editor accessory.
+It binds to the active shell to light up "apply to current frame" / "apply to canvas" (and later
+place-mode, §8.6), but generating a standalone asset into a project folder must keep working — that
+was the original Asset Generator's purpose.
+
+Cost to accept: the prompt → result loop now spans two panels the user can separate or close.
+Mitigate with a `Generate…` toolbar action in the shell that focuses/opens the panel.
+
 **Decision — reuse the open Sprite Editor tab.** Double-clicking an image asset currently spawns a
 *second* editor tab beside the existing one (observed live: an empty "Sprite Editor" tab plus an
 "ex0059.png" tab). The shell rebinds the open editor instead, matching how the animation tab already

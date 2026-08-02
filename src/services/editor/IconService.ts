@@ -346,6 +346,18 @@ export class IconService {
 </svg>`
     );
 
+    // Ping-pong playback — two arrows bouncing between end stops. Feather has no
+    // back-and-forth glyph ('repeat' already means loop here, and 'shuffle' reads
+    // as random order), so the sprite timeline registers its own.
+    this.customIcons.set(
+      'ping-pong',
+      `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M4 4V20M20 4V20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M8 9H17M14 6L17 9L14 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M16 15H7M10 12L7 15L10 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`
+    );
+
     // Keyframe diamond (outline) — timeline keys, generic keyframe affordance.
     this.customIcons.set(
       'diamond',

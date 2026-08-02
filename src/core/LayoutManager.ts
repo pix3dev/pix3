@@ -39,7 +39,11 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.inspector]: 'pix3-inspector-panel',
   [PANEL_COMPONENT_TYPES.profiler]: 'pix3-profiler-panel',
   [PANEL_COMPONENT_TYPES.assets]: 'pix3-assets-panel',
-  [PANEL_COMPONENT_TYPES.animation]: 'pix3-animation-panel',
+  // Both `animation` and `sprite-editor` tabs render the unified Sprite Editor shell.
+  // The *tab types* stay distinct on purpose (`animation` persists in stored sessions,
+  // `sprite-editor` does not, and tab ids are `${type}:${resourceId}`) — only the
+  // component they mount is shared.
+  [PANEL_COMPONENT_TYPES.animation]: 'pix3-sprite-editor-panel',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'pix3-animation-timeline-panel',
   [PANEL_COMPONENT_TYPES.logs]: 'pix3-logs-panel',
   [PANEL_COMPONENT_TYPES.background]: 'pix3-project-home',
@@ -443,6 +447,54 @@ export class LayoutManagerService {
     } catch (error) {
       console.error('[LayoutManager] Failed to add editor tab', error);
     }
+  }
+
+  /**
+   * Re-key an open editor tab in place: same Golden Layout component, same DOM
+   * element, new tab id / title. Used when the Sprite Editor is pointed at another
+   * image instead of spawning a second editor — a remove + re-add would tear the
+   * panel down and lose its working image, references and prompt.
+   *
+   * The tab id lives in three places GL and we both read: the container's
+   * `componentState`, our two bookkeeping maps, and the element's `tab-id`
+   * attribute (which is how the Lit component learns it moved).
+   */
+  rebindEditorTab(previousTabId: string, nextTabId: string, title: string): void {
+    if (previousTabId === nextTabId) {
+      this.updateEditorTabTitle(nextTabId, title);
+      return;
+    }
+
+    const container = this.editorTabContainers.get(previousTabId);
+    const item = this.editorTabItems.get(previousTabId);
+    if (container) {
+      this.editorTabContainers.delete(previousTabId);
+      this.editorTabContainers.set(nextTabId, container);
+    }
+    if (item) {
+      this.editorTabItems.delete(previousTabId);
+      this.editorTabItems.set(nextTabId, item);
+    }
+
+    const stateHolder = container as unknown as {
+      state?: { tabId?: string };
+      setState?: (state: unknown) => void;
+      element?: HTMLElement;
+    };
+    try {
+      if (typeof stateHolder?.setState === 'function') {
+        stateHolder.setState({ ...(stateHolder.state ?? {}), tabId: nextTabId });
+      } else if (stateHolder?.state) {
+        stateHolder.state.tabId = nextTabId;
+      }
+    } catch {
+      // ignore — the element attribute below is what the component actually reads
+    }
+
+    const host = stateHolder?.element?.firstElementChild as HTMLElement | undefined;
+    host?.setAttribute('tab-id', nextTabId);
+
+    this.updateEditorTabTitle(nextTabId, title);
   }
 
   removeEditorTab(tabId: string): void {
@@ -1071,7 +1123,10 @@ export class LayoutManagerService {
         if (componentType === PANEL_COMPONENT_TYPES.runtime) {
           void import('@/ui/runtime/runtime-panel');
         }
-        if (componentType === PANEL_COMPONENT_TYPES.spriteEditor) {
+        if (
+          componentType === PANEL_COMPONENT_TYPES.spriteEditor ||
+          componentType === PANEL_COMPONENT_TYPES.animation
+        ) {
           void import('@/ui/sprite-editor/sprite-editor-panel');
         }
         if (componentType === PANEL_COMPONENT_TYPES.modelLab) {

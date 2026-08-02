@@ -81,12 +81,76 @@ export class SpriteTimeline extends ComponentBase {
           frameCount === 0
         )}
         ${this.renderTransportButton(
-          'square',
+          'stop',
           'Stop playback',
           () => controller.stopPlaybackAndRewind(),
           frameCount === 0
         )}
+        ${this.renderClipTiming(controller)}
       </div>
+    `;
+  }
+
+  /**
+   * Clip timing beside the transport: frame rate, looping and ping-pong. The very
+   * same controller methods the Inspector's animation section calls, so the two
+   * surfaces cannot drift — this one is here because the frame strip is where you
+   * are looking while you tune playback.
+   */
+  private renderClipTiming(controller: AnimationDocumentController) {
+    const activeClip = controller.activeClip;
+    if (!activeClip) {
+      return null;
+    }
+
+    const isPingPong = activeClip.playbackMode === 'ping-pong';
+    return html`
+      <label class="timeline-fps" title="Frames per second">
+        <span class="timeline-fps-label">FPS</span>
+        <input
+          class="timeline-fps-input"
+          type="number"
+          min="1"
+          max="240"
+          step="1"
+          .value=${String(activeClip.fps)}
+          aria-label="Clip frames per second"
+          @change=${(event: Event) =>
+            void controller.updateClipFps(Number((event.target as HTMLInputElement).value))}
+        />
+      </label>
+      ${this.renderTransportToggle(
+        'repeat',
+        'Loop the clip',
+        activeClip.loop,
+        () => void controller.updateClipLoop(!activeClip.loop)
+      )}
+      ${this.renderTransportToggle(
+        'ping-pong',
+        'Ping-pong playback',
+        isPingPong,
+        () => void controller.updateClipPlaybackMode(isPingPong ? 'normal' : 'ping-pong')
+      )}
+    `;
+  }
+
+  private renderTransportToggle(
+    iconName: string,
+    title: string,
+    active: boolean,
+    onClick: () => void
+  ) {
+    return html`
+      <button
+        class="editor-toolbar-button ${active ? 'is-active' : ''}"
+        type="button"
+        title=${title}
+        aria-label=${title}
+        aria-pressed=${active ? 'true' : 'false'}
+        @click=${onClick}
+      >
+        <span class="editor-toolbar-button-icon">${this.iconService.getIcon(iconName, 16)}</span>
+      </button>
     `;
   }
 

@@ -281,6 +281,22 @@ export class EditorTabService {
    * empty editor uses a synthetic resource id so repeated opens re-focus the single instance.
    */
   async focusOrOpenSpriteEditor(imageResourcePath?: string): Promise<void> {
+    this.initialize();
+
+    // One Sprite Editor, rebound — double-clicking a second image used to spawn a
+    // *second* editor beside the first (an empty "Sprite Editor" tab plus an
+    // "ex0059.png" tab). Reuse keeps the single canvas the whole feature is built
+    // around; §9.8.
+    const existing = appState.tabs.tabs.find(tab => tab.type === 'sprite-editor');
+    if (existing) {
+      const nextResourceId = imageResourcePath ?? existing.resourceId;
+      if (nextResourceId !== existing.resourceId) {
+        this.rebindSpriteEditorTab(existing.id, nextResourceId);
+      }
+      await this.focusTab(this.deriveTabId('sprite-editor', nextResourceId));
+      return;
+    }
+
     if (imageResourcePath) {
       await this.openResourceTab(
         'sprite-editor',
@@ -292,6 +308,42 @@ export class EditorTabService {
       return;
     }
     await this.openResourceTab('sprite-editor', 'sprite-editor://new', {}, true, 'Sprite Editor');
+  }
+
+  /**
+   * Point the open Sprite Editor at another image. The tab id is derived
+   * (`${type}:${resourceId}`), so rebinding re-keys the tab everywhere at once —
+   * `appState.tabs`, the active-tab id and Golden Layout's own bookkeeping — rather
+   * than leaving an id that no longer describes its resource. Sprite-editor tabs are
+   * excluded from session persistence (`isPersistableTab`), so no stored session can
+   * be left pointing at the id we retire.
+   */
+  private rebindSpriteEditorTab(previousTabId: string, nextResourceId: string): void {
+    const index = appState.tabs.tabs.findIndex(tab => tab.id === previousTabId);
+    if (index < 0) {
+      return;
+    }
+
+    const previous = appState.tabs.tabs[index];
+    const nextTabId = this.deriveTabId('sprite-editor', nextResourceId);
+    const title =
+      nextResourceId === 'sprite-editor://new' ? 'Sprite Editor' : this.deriveTitle(nextResourceId);
+    const next: EditorTab = {
+      ...previous,
+      id: nextTabId,
+      resourceId: nextResourceId,
+      title,
+      contextState: {},
+    };
+
+    const nextTabs = [...appState.tabs.tabs];
+    nextTabs[index] = next;
+    appState.tabs.tabs = nextTabs;
+    if (appState.tabs.activeTabId === previousTabId) {
+      appState.tabs.activeTabId = nextTabId;
+    }
+
+    this.layoutManager.rebindEditorTab(previousTabId, nextTabId, title);
   }
 
   /**

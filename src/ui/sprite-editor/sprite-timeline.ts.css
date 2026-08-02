@@ -35,6 +35,39 @@ pix3-sprite-timeline .editor-toolbar-button:hover:not(:disabled) {
   background: var(--accent-soft);
 }
 
+pix3-sprite-timeline .editor-toolbar-button.is-active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* Clip timing (fps / loop / ping-pong) shares the transport row. */
+pix3-sprite-timeline .timeline-fps {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.25rem;
+}
+
+pix3-sprite-timeline .timeline-fps-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+
+pix3-sprite-timeline .timeline-fps-input {
+  width: 3.5rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 pix3-sprite-timeline .editor-toolbar-button:disabled {
   opacity: 0.45;
   cursor: default;

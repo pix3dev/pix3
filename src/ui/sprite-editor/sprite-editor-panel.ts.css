@@ -20,7 +20,10 @@ pix3-sprite-editor-panel .ag-toolbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  /* The unified toolbar carries the frame tools too — wrap rather than overflow a
+     narrow panel. */
+  flex-wrap: wrap;
+  gap: 0.35rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--line-1);
   background: var(--bg-1);
@@ -185,15 +188,94 @@ pix3-sprite-editor-panel .ag-workspace {
   min-height: 0;
 }
 
-pix3-sprite-editor-panel .ag-sidebar {
-  flex: 0 0 148px;
-  width: 148px;
-  overflow-y: auto;
-  padding: 0.6rem;
+/*
+ * Clips rail: deliberately narrow. The canvas is the scarce resource in this panel
+ * (measured live before the merge: a 646x123 stage), so the rail gets just enough
+ * for a clip name plus its frame count.
+ */
+pix3-sprite-editor-panel .ag-clips-rail {
+  flex: 0 0 8.5rem;
+  width: 8.5rem;
+  min-width: 0;
+  overflow: hidden auto;
+  padding: 0.45rem;
   border-right: 1px solid var(--line-1);
+}
+
+/*
+ * References + prompt + history in one collapsible rail. Collapsed it is a 2rem
+ * spine holding just the reopen affordance, which is the whole point: on a
+ * `.pix3anim` the user is editing frames, not generating.
+ */
+pix3-sprite-editor-panel .ag-ai-rail {
+  flex: 0 0 20rem;
+  width: 20rem;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  border-left: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-sprite-editor-panel .ag-ai-rail.is-collapsed {
+  flex: 0 0 2.1rem;
+  width: 2.1rem;
+  align-items: center;
+  padding-top: 0.5rem;
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line-1);
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.4rem 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-toggle:hover {
+  color: var(--accent);
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  writing-mode: vertical-rl;
+}
+
+/* Frame strip band, full width under both rails. */
+pix3-sprite-editor-panel .ag-timeline {
+  flex: 0 0 auto;
+  max-height: 13rem;
+  overflow: hidden auto;
+  padding: 0.45rem 0.6rem;
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
 }
 
 pix3-sprite-editor-panel .ag-field {
@@ -209,15 +291,26 @@ pix3-sprite-editor-panel .ag-field-label {
   letter-spacing: 0.03em;
 }
 
-/* Full-width prompt bar pinned to the bottom of the panel. */
+/* Prompt bar. Lives inside the AI rail, so it brings no chrome of its own. */
 pix3-sprite-editor-panel .ag-prompt-bar {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  padding: 0.6rem 0.75rem;
-  border-top: 1px solid var(--line-1);
   background: var(--bg-1);
+}
+
+/* Rail-local trims: the references / prompt / history blocks were three separate
+   panel regions with their own borders and gutters before they stacked. */
+pix3-sprite-editor-panel .ag-ai-rail-body .ag-history {
+  border-top: 1px solid var(--line-1);
+  padding: 0.5rem 0 0;
+}
+
+pix3-sprite-editor-panel .ag-ai-rail-body .ag-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
 }
 
 /* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
@@ -591,6 +684,288 @@ pix3-sprite-editor-panel .ag-stage-image.is-pixelated {
   image-rendering: pixelated;
 }
 
+/* Frame binding (§9.5): the content box is the *frame*, sized by the document's
+   metrics x zoom, and the raster is windowed into it (a UV-window frame shows one
+   cell of a sheet; a sequence frame fills the box). */
+pix3-sprite-editor-panel .ag-stage-content.is-frame-box {
+  overflow: hidden;
+}
+
+pix3-sprite-editor-panel .ag-stage-image.is-frame-image {
+  position: absolute;
+  transform-origin: top left;
+}
+
+/* Frame overlays ---------------------------------------------------------- */
+/* Copies of the outgoing animation stage's rules, scoped under this tag: the
+   overlay templates are shared (`frame-stage-overlays.ts`) but Light-DOM styles are
+   global, so each host brings its own set rather than leaking one. */
+pix3-sprite-editor-panel .ag-stage-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+pix3-sprite-editor-panel .ag-stage-overlay .stage-polygon-vertex.is-editable,
+pix3-sprite-editor-panel .ag-stage-overlay .stage-point.is-editable,
+pix3-sprite-editor-panel .ag-stage-overlay .stage-point-angle.is-editable {
+  pointer-events: auto;
+}
+
+pix3-sprite-editor-panel .stage-bbox {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-sprite-editor-panel .stage-polygon {
+  fill: var(--presence-5);
+  fill-opacity: 0.14;
+  stroke: var(--presence-5);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-sprite-editor-panel .stage-polygon-vertex {
+  fill: var(--presence-5);
+  stroke: var(--bg-0);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-sprite-editor-panel .stage-polygon-vertex.is-editable {
+  cursor: grab;
+}
+
+pix3-sprite-editor-panel .stage-anchor {
+  position: absolute;
+  width: 0.95rem;
+  height: 0.95rem;
+  margin-left: -0.475rem;
+  margin-top: -0.475rem;
+  border-radius: 999px;
+  border: 2px solid var(--bg-0);
+  background: var(--accent);
+}
+
+pix3-sprite-editor-panel .stage-anchor::before,
+pix3-sprite-editor-panel .stage-anchor::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: var(--bg-0);
+  transform: translate(-50%, -50%);
+}
+
+pix3-sprite-editor-panel .stage-anchor::before {
+  width: 1px;
+  height: 1.2rem;
+}
+
+pix3-sprite-editor-panel .stage-anchor::after {
+  width: 1.2rem;
+  height: 1px;
+}
+
+pix3-sprite-editor-panel .stage-anchor.is-editable {
+  cursor: grab;
+}
+
+pix3-sprite-editor-panel .stage-point {
+  fill: var(--accent);
+  stroke: var(--bg-0);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-sprite-editor-panel .stage-point.is-editable {
+  cursor: grab;
+}
+
+pix3-sprite-editor-panel .stage-point.is-selected {
+  stroke: var(--fg-0);
+  stroke-width: 2.5;
+}
+
+/* Previous frame's points — a mini onion-skin for keeping a socket continuous. */
+pix3-sprite-editor-panel .stage-point--ghost {
+  fill: var(--accent);
+  opacity: 0.28;
+  stroke: none;
+}
+
+pix3-sprite-editor-panel .stage-point-angle {
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+pix3-sprite-editor-panel .stage-point-angle.is-editable {
+  cursor: crosshair;
+}
+
+/* Anchor / points side card — floats over the canvas so it costs it no width. */
+pix3-sprite-editor-panel .ag-frame-tools {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 4;
+  width: 10.5rem;
+  max-height: calc(100% - 1rem);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-value {
+  font-size: 0.67rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+
+pix3-sprite-editor-panel .ag-anchor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-row {
+  display: flex;
+  gap: 0.25rem;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-button,
+pix3-sprite-editor-panel .ag-frame-tools-wide {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-button {
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-wide {
+  flex: 1 1 0;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-button:hover,
+pix3-sprite-editor-panel .ag-frame-tools-button:focus-visible,
+pix3-sprite-editor-panel .ag-frame-tools-wide:hover,
+pix3-sprite-editor-panel .ag-frame-tools-wide:focus-visible {
+  color: var(--fg-0);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  outline: none;
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-button.is-active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-editor-panel .ag-frame-tools-hint {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+
+pix3-sprite-editor-panel .ag-point-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-sprite-editor-panel .ag-point-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* A point the current frame doesn't define — still listed (the clip has it). */
+pix3-sprite-editor-panel .ag-point-list-item.is-missing {
+  opacity: 0.5;
+}
+
+pix3-sprite-editor-panel .ag-point-list-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid transparent;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 0.72rem;
+}
+
+pix3-sprite-editor-panel .ag-point-list-name[data-selected] {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-sprite-editor-panel .ag-point-list-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+pix3-sprite-editor-panel .ag-point-list-action:hover,
+pix3-sprite-editor-panel .ag-point-list-action:focus-visible {
+  color: var(--fg-0);
+  background: var(--bg-2);
+  outline: none;
+}
+
+pix3-sprite-editor-panel .ag-point-list-action.is-danger:hover,
+pix3-sprite-editor-panel .ag-point-list-action.is-danger:focus-visible {
+  color: var(--danger);
+}
+
 pix3-sprite-editor-panel .ag-empty {
   text-align: center;
   color: var(--fg-3);
@@ -855,4 +1230,21 @@ pix3-sprite-editor-panel .ag-crop-dims {
 pix3-sprite-editor-panel .ag-crop-apply {
   flex: 0 0 auto;
   padding: 0.4rem 1rem;
+}
+
+/* Narrow panel ----------------------------------------------------------- */
+@media (max-width: 900px) {
+  pix3-sprite-editor-panel .ag-clips-rail {
+    flex-basis: 7rem;
+    width: 7rem;
+  }
+
+  pix3-sprite-editor-panel .ag-ai-rail {
+    flex-basis: 15rem;
+    width: 15rem;
+  }
+
+  pix3-sprite-editor-panel .ag-timeline {
+    max-height: 11rem;
+  }
 }

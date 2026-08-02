@@ -204,4 +204,59 @@ describe('EditorTabService (code tabs)', () => {
     expect(appState.tabs.tabs).toHaveLength(0);
     expect(localStorage.getItem('pix3.projectTabs:project-a')).toBeNull();
   });
+
+  /**
+   * §9.8 — double-clicking a second image used to spawn a *second* editor beside
+   * the first. There is one Sprite Editor; it gets pointed at the new image.
+   */
+  it('rebinds the open Sprite Editor instead of opening a second one', async () => {
+    const { service } = createService();
+    const layoutManager = (
+      service as unknown as {
+        layoutManager: { rebindEditorTab: ReturnType<typeof vi.fn> };
+      }
+    ).layoutManager;
+    layoutManager.rebindEditorTab = vi.fn();
+
+    await service.focusOrOpenSpriteEditor();
+    expect(appState.tabs.tabs.map(tab => tab.id)).toEqual(['sprite-editor:sprite-editor://new']);
+
+    await service.focusOrOpenSpriteEditor('res://sprites/ex0059.png');
+
+    expect(appState.tabs.tabs).toHaveLength(1);
+    const [tab] = appState.tabs.tabs;
+    expect(tab.id).toBe('sprite-editor:res://sprites/ex0059.png');
+    expect(tab.resourceId).toBe('res://sprites/ex0059.png');
+    expect(tab.title).toBe('ex0059.png');
+    expect(appState.tabs.activeTabId).toBe('sprite-editor:res://sprites/ex0059.png');
+    expect(layoutManager.rebindEditorTab).toHaveBeenCalledWith(
+      'sprite-editor:sprite-editor://new',
+      'sprite-editor:res://sprites/ex0059.png',
+      'ex0059.png'
+    );
+
+    // Rebinding again from the menu (no path) keeps the current binding.
+    await service.focusOrOpenSpriteEditor();
+    expect(appState.tabs.tabs).toHaveLength(1);
+    expect(appState.tabs.tabs[0]?.resourceId).toBe('res://sprites/ex0059.png');
+  });
+
+  it('leaves other editor tabs alone when the Sprite Editor rebinds', async () => {
+    const { service } = createService();
+    const layoutManager = (
+      service as unknown as {
+        layoutManager: { rebindEditorTab: ReturnType<typeof vi.fn> };
+      }
+    ).layoutManager;
+    layoutManager.rebindEditorTab = vi.fn();
+
+    await service.openResourceTab('code', 'res://scripts/player.ts');
+    await service.focusOrOpenSpriteEditor('res://sprites/a.png');
+    await service.focusOrOpenSpriteEditor('res://sprites/b.png');
+
+    expect(appState.tabs.tabs.map(tab => tab.id)).toEqual([
+      'code:res://scripts/player.ts',
+      'sprite-editor:res://sprites/b.png',
+    ]);
+  });
 });
