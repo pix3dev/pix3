@@ -38,6 +38,22 @@ import {
   toProjectResourcePath,
 } from '@/ui/shared/asset-drag-drop';
 import {
+  StageZoomPanController,
+  type StagePoint,
+  type StageViewport,
+} from '@/ui/shared/stage-zoom-pan';
+import {
+  applyCropDrag,
+  clampToImage,
+  cropRectToPixels,
+  describeCropRect,
+  initialCropRect,
+  isApplicableCropRect,
+  type CropDragState,
+  type CropRect,
+  type ImageSize,
+} from './crop-geometry';
+import {
   flipImageBlob,
   readBlobSize,
   resizeImageBlob,
@@ -53,34 +69,11 @@ const SAVE_SIZE_PRESETS: readonly number[] = [1024, 512, 256, 128, 64];
 
 const EMPTY_RESOURCE_ID = 'sprite-editor://new';
 
-/** Crop selection rectangle, in overlay (display) pixels relative to the crop overlay's box. */
-interface CropRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+/** Screen-pixel margin left around the image when the stage fits it to the viewport. */
+const STAGE_FIT_PADDING = 16;
 
-/** The painted image region inside the crop overlay (accounts for object-fit letterboxing). */
-interface CropContentRect {
-  ox: number;
-  oy: number;
-  pw: number;
-  ph: number;
-  scale: number;
-}
-
-interface CropDragState {
-  mode: 'draw' | 'move' | 'resize';
-  /** Combination of `n`/`s`/`e`/`w` for resize handles; empty otherwise. */
-  edges: string;
-  originX: number;
-  originY: number;
-  startRectX: number;
-  startRectY: number;
-  startRectW: number;
-  startRectH: number;
-}
+/** Above this zoom the working image is drawn with hard pixel edges, like the animation stage. */
+const PIXELATED_ZOOM_THRESHOLD = 2;
 
 const CROP_HANDLES: ReadonlyArray<{ pos: string; edges: string }> = [
   { pos: 'nw', edges: 'nw' },
@@ -195,9 +188,31 @@ export class SpriteEditorPanel extends ComponentBase {
   private sliceColumns = 4;
   private sliceRows = 1;
 
-  private readonly cropOverlayRef = createRef<HTMLDivElement>();
-  private readonly cropImageRef = createRef<HTMLImageElement>();
+  private readonly stageRef = createRef<HTMLDivElement>();
+  private readonly stageImageRef = createRef<HTMLImageElement>();
   private cropDrag: CropDragState | null = null;
+
+  /**
+   * Zoom/pan of the canvas. Shared with the animation editor's frame stage so
+   * both surfaces agree on wheel-zoom-to-cursor and pan feel (`src/ui/shared/`),
+   * and — more importantly — on one coordinate model: the content element is
+   * *sized* by zoom with the pan applied as a transform, so overlay geometry is
+   * plain image pixels scaled by `zoom`.
+   */
+  private readonly stageView = new StageZoomPanController({
+    minZoom: 0.1,
+    maxZoom: 16,
+    onChange: () => this.requestUpdate(),
+  });
+
+  /**
+   * True once the user has zoomed or panned by hand. Until then the stage keeps
+   * refitting the image on resize, which is how the old object-fit stage behaved.
+   */
+  private hasUserAdjustedView = false;
+  /** Set when a new working image arrives; consumed by the next `load` event. */
+  private pendingStageFit = false;
+  private stageResizeObserver: ResizeObserver | null = null;
 
   private disposeTabsSubscription?: () => void;
   private disposeHistorySubscription?: () => void;
@@ -262,6 +277,8 @@ export class SpriteEditorPanel extends ComponentBase {
     }
     window.removeEventListener('pointerdown', this.onDocPointerDown, true);
     window.removeEventListener('keydown', this.onDocKeyDown);
+    this.stageResizeObserver?.disconnect();
+    this.stageResizeObserver = null;
     this.abortController?.abort();
     this.abortController = null;
     this.revokeAllUrls();
@@ -290,8 +307,11 @@ export class SpriteEditorPanel extends ComponentBase {
     if (changed.has('tabId')) {
       this.syncFromTabState();
     }
+    // Re-established on every update rather than in `firstUpdated`: a Golden Layout
+    // re-dock disconnects the observer but never fires `firstUpdated` again.
+    this.observeStageResize();
     if (changed.has('cropMode') && this.cropMode && !this.cropRect) {
-      // The crop overlay/image need a layout pass before we can size the initial selection.
+      // The stage image may still be decoding on a fresh mount; give it a frame.
       requestAnimationFrame(() => this.initCropRect());
     }
   }
@@ -462,8 +482,55 @@ export class SpriteEditorPanel extends ComponentBase {
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>
-        ${this.renderSpritesheetActions()} ${this.renderSaveMenu()}
+        ${this.renderSpritesheetActions()} ${this.renderZoomActions()} ${this.renderSaveMenu()}
       </header>
+    `;
+  }
+
+  /** Stage zoom affordances — the same trio (and icons) the animation stage carries. */
+  private renderZoomActions() {
+    const disabled = !this.current;
+    return html`
+      <span class="ag-toolbar-separator" aria-hidden="true"></span>
+      <button
+        class="ag-icon-button"
+        title="Zoom out"
+        aria-label="Zoom out"
+        @click=${() => this.onAdjustZoom(-1)}
+        ?disabled=${disabled}
+      >
+        ${this.icons.getIcon('zoom-out', IconSize.SMALL)}
+      </button>
+      <button
+        class="ag-icon-button"
+        title="Reset zoom to 100%"
+        aria-label="Reset zoom to 100%"
+        @click=${this.onResetZoom}
+        ?disabled=${disabled}
+      >
+        ${this.icons.getIcon('zoom-default', IconSize.SMALL)}
+      </button>
+      <button
+        class="ag-icon-button"
+        title="Zoom in"
+        aria-label="Zoom in"
+        @click=${() => this.onAdjustZoom(1)}
+        ?disabled=${disabled}
+      >
+        ${this.icons.getIcon('zoom-in', IconSize.SMALL)}
+      </button>
+      <button
+        class="ag-icon-button"
+        title="Fit the image to the view"
+        aria-label="Fit the image to the view"
+        @click=${this.onFitStageToView}
+        ?disabled=${disabled}
+      >
+        ${this.icons.getIcon('zoom-fit', IconSize.SMALL)}
+      </button>
+      <span class="ag-zoom-readout" title="Stage zoom"
+        >${Math.round(this.stageView.zoom * 100)}%</span
+      >
     `;
   }
 
@@ -851,14 +918,47 @@ export class SpriteEditorPanel extends ComponentBase {
     `;
   }
 
+  /**
+   * One stage for every mode. The image is *sized* by zoom (never CSS-scaled) and
+   * the pan rides on a transform, so overlays laid out in image pixels × zoom
+   * land exactly on the pixels they describe while their chrome — the crop
+   * border, the handles — stays screen-sized and grabbable at any zoom.
+   */
   private renderStage() {
-    if (this.cropMode && this.current) {
-      return this.renderCropEditor(this.current);
-    }
+    const current = this.current;
+    const size = this.getImageSize();
+    const zoom = this.stageView.zoom;
+    const imageStyle =
+      size && current ? `width:${size.width * zoom}px; height:${size.height * zoom}px;` : '';
+
     return html`
-      <div class="ag-stage">
-        ${this.current
-          ? html`<img class="ag-stage-image" src=${this.current.objectUrl} alt="Generated image" />`
+      <div
+        class="ag-stage ${this.cropMode ? 'is-cropping' : ''} ${this.stageView.isPanning
+          ? 'is-panning'
+          : ''}"
+        ${ref(this.stageRef)}
+        @wheel=${this.onStageWheel}
+        @pointerdown=${this.onStagePointerDown}
+        @pointermove=${this.onStagePointerMove}
+        @pointerup=${this.onStagePointerUp}
+        @pointercancel=${this.onStagePointerUp}
+      >
+        ${current
+          ? html`<div
+              class="ag-stage-content"
+              style="transform: translate(${this.stageView.panX}px, ${this.stageView.panY}px);"
+            >
+              <img
+                class="ag-stage-image ${zoom >= PIXELATED_ZOOM_THRESHOLD ? 'is-pixelated' : ''}"
+                src=${current.objectUrl}
+                alt="Working image"
+                draggable="false"
+                style=${imageStyle}
+                ${ref(this.stageImageRef)}
+                @load=${this.onStageImageLoad}
+              />
+              ${this.cropMode && this.cropRect ? this.renderCropRect(this.cropRect, zoom) : null}
+            </div>`
           : html`<div class="ag-empty">
               <div class="ag-empty-title">Nothing here yet</div>
               <div class="ag-empty-body">
@@ -867,49 +967,34 @@ export class SpriteEditorPanel extends ComponentBase {
             </div>`}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
+      ${this.cropMode ? this.renderCropToolbar() : null}
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
   }
 
-  private renderCropEditor(current: CurrentImage) {
+  private renderCropRect(rect: CropRect, zoom: number) {
+    return html`<div
+      class="ag-crop-rect"
+      style="left:${rect.x * zoom}px; top:${rect.y * zoom}px; width:${rect.w *
+      zoom}px; height:${rect.h * zoom}px"
+      @pointerdown=${(event: PointerEvent) => this.beginCropDrag(event, 'move', '')}
+    >
+      ${CROP_HANDLES.map(handle => this.renderCropHandle(handle))}
+    </div>`;
+  }
+
+  private renderCropToolbar() {
     const rect = this.cropRect;
-    const dims = rect ? this.describeCropDimensions(rect) : null;
     return html`
-      <div class="ag-stage ag-stage--crop">
-        <img
-          class="ag-crop-image"
-          src=${current.objectUrl}
-          alt="Crop source"
-          draggable="false"
-          ${ref(this.cropImageRef)}
-          @load=${this.onCropImageLoad}
-        />
-        <div
-          class="ag-crop-overlay"
-          ${ref(this.cropOverlayRef)}
-          @pointerdown=${this.onCropOverlayPointerDown}
-          @pointermove=${this.onCropPointerMove}
-          @pointerup=${this.onCropPointerUp}
-          @pointercancel=${this.onCropPointerUp}
-        >
-          ${rect
-            ? html`<div
-                class="ag-crop-rect"
-                style="left:${rect.x}px; top:${rect.y}px; width:${rect.w}px; height:${rect.h}px"
-                @pointerdown=${(event: PointerEvent) => this.beginCropDrag(event, 'move', '')}
-              >
-                ${CROP_HANDLES.map(handle => this.renderCropHandle(handle))}
-              </div>`
-            : null}
-        </div>
-      </div>
       <div class="ag-crop-toolbar">
-        <span class="ag-crop-dims">${dims ?? 'Drag on the image to select a region'}</span>
+        <span class="ag-crop-dims"
+          >${rect ? describeCropRect(rect) : 'Drag on the image to select a region'}</span
+        >
         <div class="ag-prompt-spacer"></div>
         <button class="ag-cancel-button" @click=${this.onCancelCrop}>Cancel</button>
         <button
           class="ag-generate-button ag-crop-apply"
-          ?disabled=${!this.canApplyCrop()}
+          ?disabled=${!isApplicableCropRect(this.cropRect)}
           @click=${this.onApplyCrop}
         >
           Apply crop
@@ -1443,6 +1528,176 @@ export class SpriteEditorPanel extends ComponentBase {
     }
   }
 
+  // -- stage view (zoom / pan) -----------------------------------------------
+
+  /** Intrinsic size of the working image; the decoded element wins over cached metadata. */
+  private getImageSize(): ImageSize | null {
+    const image = this.stageImageRef.value;
+    if (image && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      return { width: image.naturalWidth, height: image.naturalHeight };
+    }
+    const width = this.current?.width;
+    const height = this.current?.height;
+    if (width && height) {
+      return { width, height };
+    }
+    return null;
+  }
+
+  /**
+   * The content box the zoom/pan controller reasons about: the stage's own rect,
+   * with the image's intrinsic size as the content size. The content element sits
+   * at the stage's top-left and is moved by the pan, which is exactly the model
+   * `toStageCoords` and `fitToViewport` assume.
+   */
+  private getStageViewport(): StageViewport | null {
+    const stage = this.stageRef.value;
+    const size = this.getImageSize();
+    if (!stage || !size) {
+      return null;
+    }
+    const rect = stage.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    return { rect, contentWidth: size.width, contentHeight: size.height };
+  }
+
+  /** Pointer event → image pixels. Returns null before the image size is known. */
+  private toImagePoint(event: PointerEvent): { point: StagePoint; size: ImageSize } | null {
+    const viewport = this.getStageViewport();
+    if (!viewport) {
+      return null;
+    }
+    return {
+      point: this.stageView.toStageCoords(event, viewport),
+      size: { width: viewport.contentWidth, height: viewport.contentHeight },
+    };
+  }
+
+  private onStageWheel(event: WheelEvent): void {
+    const viewport = this.getStageViewport();
+    if (!viewport) {
+      return;
+    }
+    event.preventDefault();
+    this.stageView.zoomAtPointer(event, viewport);
+    this.hasUserAdjustedView = true;
+  }
+
+  private onAdjustZoom(direction: -1 | 1): void {
+    this.stageView.adjustZoom(direction * 2);
+    this.hasUserAdjustedView = true;
+  }
+
+  private onResetZoom(): void {
+    this.stageView.reset();
+    this.hasUserAdjustedView = true;
+  }
+
+  private onFitStageToView(): void {
+    this.fitStageToViewport();
+  }
+
+  private fitStageToViewport(): void {
+    const viewport = this.getStageViewport();
+    if (!viewport) {
+      return;
+    }
+    this.stageView.fitToViewport(viewport, STAGE_FIT_PADDING);
+    // An explicit fit hands the view back to the stage, so resizes refit again.
+    this.hasUserAdjustedView = false;
+  }
+
+  private observeStageResize(): void {
+    if (this.stageResizeObserver || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const stage = this.stageRef.value;
+    if (!stage) {
+      return;
+    }
+    this.stageResizeObserver = new ResizeObserver(() => {
+      if (!this.hasUserAdjustedView) {
+        this.fitStageToViewport();
+      }
+    });
+    this.stageResizeObserver.observe(stage);
+  }
+
+  private onStageImageLoad(): void {
+    if (this.pendingStageFit) {
+      this.pendingStageFit = false;
+      this.fitStageToViewport();
+      return;
+    }
+    // The size may only now be known (element mounted before `current.width` was set).
+    this.requestUpdate();
+  }
+
+  private onStagePointerDown(event: PointerEvent): void {
+    // Middle-drag (or Alt+left) pans; plain left-drag belongs to the crop tool.
+    if (this.stageView.beginPan(event)) {
+      this.hasUserAdjustedView = true;
+      // begin/endPan don't notify (only `setPan` does), so ask for the repaint
+      // that swaps the grab cursor in and out.
+      this.requestUpdate();
+      event.preventDefault();
+      return;
+    }
+    if (!this.cropMode || event.button !== 0) {
+      return;
+    }
+    const resolved = this.toImagePoint(event);
+    if (!resolved) {
+      return;
+    }
+    const point = clampToImage(resolved.point, resolved.size);
+    this.cropDrag = {
+      mode: 'draw',
+      edges: '',
+      originX: point.x,
+      originY: point.y,
+      startRectX: point.x,
+      startRectY: point.y,
+      startRectW: 0,
+      startRectH: 0,
+    };
+    this.cropRect = { x: point.x, y: point.y, w: 0, h: 0 };
+    this.stageRef.value?.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  private onStagePointerMove(event: PointerEvent): void {
+    if (this.stageView.updatePan(event)) {
+      return;
+    }
+    const drag = this.cropDrag;
+    if (!drag) {
+      return;
+    }
+    const resolved = this.toImagePoint(event);
+    if (!resolved) {
+      return;
+    }
+    this.cropRect = applyCropDrag(drag, resolved.point, resolved.size);
+  }
+
+  private onStagePointerUp(event: PointerEvent): void {
+    if (this.stageView.endPan(event)) {
+      this.requestUpdate();
+      return;
+    }
+    if (!this.cropDrag) {
+      return;
+    }
+    const stage = this.stageRef.value;
+    if (stage?.hasPointerCapture(event.pointerId)) {
+      stage.releasePointerCapture(event.pointerId);
+    }
+    this.cropDrag = null;
+  }
+
   // -- crop ------------------------------------------------------------------
 
   private onToggleCrop(): void {
@@ -1460,199 +1715,55 @@ export class SpriteEditorPanel extends ComponentBase {
     this.cropDrag = null;
   }
 
-  private onCropImageLoad(): void {
-    // The image may already be decoded (it is the current stage image); still wait a frame so
-    // the overlay has laid out before we measure it.
-    requestAnimationFrame(() => this.initCropRect());
-  }
-
   private initCropRect(): void {
     if (this.cropRect || !this.cropMode) {
       return;
     }
-    const content = this.getCropContentRect();
-    if (!content) {
+    const size = this.getImageSize();
+    if (!size) {
       return;
     }
-    const insetX = content.pw * 0.15;
-    const insetY = content.ph * 0.15;
-    this.cropRect = {
-      x: content.ox + insetX,
-      y: content.oy + insetY,
-      w: content.pw - insetX * 2,
-      h: content.ph - insetY * 2,
-    };
-  }
-
-  /** Painted-image rectangle inside the crop overlay, accounting for object-fit letterboxing. */
-  private getCropContentRect(): CropContentRect | null {
-    const overlay = this.cropOverlayRef.value;
-    const image = this.cropImageRef.value;
-    if (!overlay || !image || !image.naturalWidth || !image.naturalHeight) {
-      return null;
-    }
-    const bounds = overlay.getBoundingClientRect();
-    if (bounds.width <= 0 || bounds.height <= 0) {
-      return null;
-    }
-    const scale = Math.min(bounds.width / image.naturalWidth, bounds.height / image.naturalHeight);
-    const pw = image.naturalWidth * scale;
-    const ph = image.naturalHeight * scale;
-    return {
-      ox: (bounds.width - pw) / 2,
-      oy: (bounds.height - ph) / 2,
-      pw,
-      ph,
-      scale,
-    };
-  }
-
-  private onCropOverlayPointerDown(event: PointerEvent): void {
-    if (event.button !== 0) {
-      return;
-    }
-    const overlay = this.cropOverlayRef.value;
-    const content = this.getCropContentRect();
-    if (!overlay || !content) {
-      return;
-    }
-    const bounds = overlay.getBoundingClientRect();
-    const x = clamp(event.clientX - bounds.left, content.ox, content.ox + content.pw);
-    const y = clamp(event.clientY - bounds.top, content.oy, content.oy + content.ph);
-    this.cropDrag = {
-      mode: 'draw',
-      edges: '',
-      originX: x,
-      originY: y,
-      startRectX: x,
-      startRectY: y,
-      startRectW: 0,
-      startRectH: 0,
-    };
-    this.cropRect = { x, y, w: 0, h: 0 };
-    overlay.setPointerCapture(event.pointerId);
-    event.preventDefault();
+    this.cropRect = initialCropRect(size);
   }
 
   private beginCropDrag(event: PointerEvent, mode: 'move' | 'resize', edges: string): void {
-    if (event.button !== 0 || !this.cropRect) {
+    // Pan gestures (middle button, Alt+left) belong to the stage even when they
+    // start on the selection — let them bubble instead of grabbing them here.
+    if (event.button !== 0 || event.altKey || !this.cropRect) {
       return;
     }
     event.stopPropagation();
     event.preventDefault();
-    const overlay = this.cropOverlayRef.value;
-    if (!overlay) {
+    const resolved = this.toImagePoint(event);
+    if (!resolved) {
       return;
     }
-    const bounds = overlay.getBoundingClientRect();
     this.cropDrag = {
       mode,
       edges,
-      originX: event.clientX - bounds.left,
-      originY: event.clientY - bounds.top,
+      originX: resolved.point.x,
+      originY: resolved.point.y,
       startRectX: this.cropRect.x,
       startRectY: this.cropRect.y,
       startRectW: this.cropRect.w,
       startRectH: this.cropRect.h,
     };
-    overlay.setPointerCapture(event.pointerId);
-  }
-
-  private onCropPointerMove(event: PointerEvent): void {
-    const drag = this.cropDrag;
-    const overlay = this.cropOverlayRef.value;
-    const content = this.getCropContentRect();
-    if (!drag || !overlay || !content) {
-      return;
-    }
-    const bounds = overlay.getBoundingClientRect();
-    const minX = content.ox;
-    const minY = content.oy;
-    const maxX = content.ox + content.pw;
-    const maxY = content.oy + content.ph;
-    const px = clamp(event.clientX - bounds.left, minX, maxX);
-    const py = clamp(event.clientY - bounds.top, minY, maxY);
-
-    if (drag.mode === 'draw') {
-      this.cropRect = {
-        x: Math.min(px, drag.originX),
-        y: Math.min(py, drag.originY),
-        w: Math.abs(px - drag.originX),
-        h: Math.abs(py - drag.originY),
-      };
-      return;
-    }
-
-    if (drag.mode === 'move') {
-      const w = drag.startRectW;
-      const h = drag.startRectH;
-      const dx = event.clientX - bounds.left - drag.originX;
-      const dy = event.clientY - bounds.top - drag.originY;
-      this.cropRect = {
-        x: clamp(drag.startRectX + dx, minX, maxX - w),
-        y: clamp(drag.startRectY + dy, minY, maxY - h),
-        w,
-        h,
-      };
-      return;
-    }
-
-    let left = drag.startRectX;
-    let top = drag.startRectY;
-    let right = drag.startRectX + drag.startRectW;
-    let bottom = drag.startRectY + drag.startRectH;
-    if (drag.edges.includes('w')) {
-      left = clamp(px, minX, right - 1);
-    }
-    if (drag.edges.includes('e')) {
-      right = clamp(px, left + 1, maxX);
-    }
-    if (drag.edges.includes('n')) {
-      top = clamp(py, minY, bottom - 1);
-    }
-    if (drag.edges.includes('s')) {
-      bottom = clamp(py, top + 1, maxY);
-    }
-    this.cropRect = { x: left, y: top, w: right - left, h: bottom - top };
-  }
-
-  private onCropPointerUp(event: PointerEvent): void {
-    if (!this.cropDrag) {
-      return;
-    }
-    const overlay = this.cropOverlayRef.value;
-    if (overlay && overlay.hasPointerCapture(event.pointerId)) {
-      overlay.releasePointerCapture(event.pointerId);
-    }
-    this.cropDrag = null;
-  }
-
-  private canApplyCrop(): boolean {
-    return Boolean(this.cropRect && this.cropRect.w >= 2 && this.cropRect.h >= 2);
-  }
-
-  private describeCropDimensions(rect: CropRect): string | null {
-    const content = this.getCropContentRect();
-    if (!content) {
-      return null;
-    }
-    const w = Math.max(1, Math.round(rect.w / content.scale));
-    const h = Math.max(1, Math.round(rect.h / content.scale));
-    return `${w} × ${h} px`;
+    this.stageRef.value?.setPointerCapture(event.pointerId);
   }
 
   private async onApplyCrop(): Promise<void> {
-    const image = this.cropImageRef.value;
+    const image = this.stageImageRef.value;
     const rect = this.cropRect;
-    const content = this.getCropContentRect();
-    if (!image || !rect || !content || !this.current) {
+    const size = this.getImageSize();
+    if (!image || !rect || !size || !this.current) {
       return;
     }
 
-    const sx = clamp(Math.round((rect.x - content.ox) / content.scale), 0, image.naturalWidth - 1);
-    const sy = clamp(Math.round((rect.y - content.oy) / content.scale), 0, image.naturalHeight - 1);
-    const sw = clamp(Math.round(rect.w / content.scale), 1, image.naturalWidth - sx);
-    const sh = clamp(Math.round(rect.h / content.scale), 1, image.naturalHeight - sy);
+    const pixels = cropRectToPixels(rect, size);
+    if (!pixels) {
+      return;
+    }
+    const { sx, sy, sw, sh } = pixels;
 
     const canvas = document.createElement('canvas');
     canvas.width = sw;
@@ -2096,6 +2207,9 @@ export class SpriteEditorPanel extends ComponentBase {
     if (previous && previous.objectUrl !== next.objectUrl) {
       this.revokeUrl(previous.objectUrl);
     }
+    // A new working image gets a fresh view: the fit runs once the <img> has
+    // decoded and can report its intrinsic size.
+    this.pendingStageFit = true;
   }
 
   private async ensureParentDirectory(relativePath: string): Promise<void> {
@@ -2176,9 +2290,6 @@ const readImageSize = (objectUrl: string): Promise<{ width: number; height: numb
     image.onerror = () => resolve(null);
     image.src = objectUrl;
   });
-
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(Math.max(value, min), Math.max(min, max));
 
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
