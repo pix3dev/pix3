@@ -254,6 +254,50 @@ describe('AnimationDocumentController', () => {
     expect(controller.selectedFrameIndex).toBe(0);
   });
 
+  it('keeps a ctrl-multiselection across a spurious document re-sync', async () => {
+    // Regression: selecting a frame persists the primary index into
+    // `tab.contextState`, which mutates `appState.tabs` and re-enters
+    // `syncFromDocumentState` on the next valtio flush. That re-entry used to
+    // collapse the selection to a single frame, so multi-select lit up and then
+    // silently reverted — and "delete selected frames" only deleted one.
+    const { deps } = createDeps();
+    const controller = new AnimationDocumentController(deps, '');
+
+    const resource: AnimationResource = {
+      version: '1.0.0',
+      texturePath: '',
+      clips: [
+        {
+          name: 'idle',
+          fps: 12,
+          loop: true,
+          playbackMode: 'normal',
+          frames: [
+            createFrame('res://a.png'),
+            createFrame('res://b.png'),
+            createFrame('res://c.png'),
+            createFrame('res://d.png'),
+          ],
+        },
+      ],
+    };
+    const internals = seedDocument(controller, resource, { activeClipName: 'idle' });
+    appState.animations.resources[internals.animationId as string] = resource;
+
+    controller.selectFrame(1);
+    controller.selectFrame(3, { ctrl: true });
+    expect(controller.selectedFrameIndices).toEqual([1, 3]);
+
+    await internals.syncFromDocumentState(true);
+
+    expect(controller.selectedFrameIndices).toEqual([1, 3]);
+    expect(controller.selectedFrameIndex).toBe(3);
+
+    // A deliberate reset (clip switch / fresh load) must still collapse it.
+    await internals.syncFromDocumentState(false);
+    expect(controller.selectedFrameIndices).toEqual([0]);
+  });
+
   it('prompts for autoslice when a texture is assigned to an animation without frames', async () => {
     const { deps, showDialog } = createDeps();
     showDialog.mockResolvedValue({ columns: 4, rows: 2 });

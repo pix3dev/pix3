@@ -1597,8 +1597,21 @@ export class AnimationDocumentController implements AnimationInspectorController
           ? Math.min(storedFrameIndex, frameCount - 1)
           : 0;
 
+    // This runs on EVERY appState.tabs/project/animations notification, and
+    // `persistSelectedFrameIndex` below writes `tab.contextState` — so selecting a
+    // frame re-enters here on the next valtio flush. Collapsing to `[fallbackIndex]`
+    // unconditionally is what made ctrl/shift multi-select useless: the strip lit up
+    // and then went back to one card a tick later, so "delete selected frames" only
+    // ever deleted one. Keep an established multi-selection when this re-entry is
+    // spurious — same primary frame, all indices still in range.
+    const isSpuriousResync =
+      !preferFirstFrame &&
+      this._selectedFrameIndices.length > 1 &&
+      fallbackIndex === this._selectedFrameIndex &&
+      this._selectedFrameIndices.every(frameIndex => frameIndex < frameCount);
+
     this._selectedFrameIndex = fallbackIndex;
-    this._selectedFrameIndices = [fallbackIndex];
+    this._selectedFrameIndices = isSpuriousResync ? this._selectedFrameIndices : [fallbackIndex];
     this._previewFrameIndex = this._isPreviewPlaying
       ? Math.min(
           this._previewFrameIndex >= 0 ? this._previewFrameIndex : fallbackIndex,

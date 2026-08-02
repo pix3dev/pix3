@@ -1000,9 +1000,19 @@ Apply sequence:
 
 1. **Coordinate-model mismatch (top risk)** — the animation stage sizes the frame element *by zoom*
    with pan on a parent transform (`getStageViewport` un-translates, :916–944) while the sprite
-   canvas letterboxes. The unified canvas adopts the **animation stage's model** (percentage-
-   positioned overlays keep working); C5 must land before any overlay port, or every drag handler
-   needs two math paths.
+   canvas letterboxes. C5 must land before any overlay port, or every drag handler needs two math
+   paths.
+
+   **Corrected during C5 (2026-08-02):** do NOT adopt the animation stage's model verbatim. That
+   stage flex-centres its artboard inside a scroll container and then un-translates in
+   `getStageViewport`, which makes zoom-at-cursor slightly imprecise whenever the content is
+   smaller than the viewport (the un-panned origin moves as flex re-centres) — and is why it never
+   calls `fitToViewport`, whose `panX = (rect.width − contentWidth·zoom) / 2` only makes sense for
+   a top-left-anchored content box. C5 adopted `StageZoomPanController`'s **canonical** model
+   instead: content absolutely positioned at the stage's top-left, pan as the sole offset, image
+   sized `naturalSize × zoom`. Same coordinate contract for overlays, but exact.
+   **Therefore at C6 the animation side drops its flex-centring + scroll container**, not the
+   other way round.
 2. **`getFrameMetrics` 256-px fallback** (:844–845) — polygon/bbox are absolute frame px, so edits
    made before the texture decodes land in a fake 256×256 space. Suppress bbox/polygon/points
    editing until dimensions are known.
