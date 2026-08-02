@@ -1746,7 +1746,13 @@ export class AnimationDocumentController implements AnimationInspectorController
 
     this._activeClipName = preferredClipName;
     this.persistActiveClipName(preferredClipName);
-    this.syncFrameStateToActiveClip(!preserveClip);
+    // Nothing is selected yet on the first sync of a document, and there the frame
+    // index the tab stored is the right answer — that is what `contextState`
+    // records a session for. Forcing frame 0 unconditionally made a restored
+    // `animation:` tab always reopen on the first frame even though the index had
+    // been persisted all along. Swapping the tab to *another* asset still resets:
+    // the stored index describes the document that just went away.
+    this.syncFrameStateToActiveClip(!preserveClip && this._selectedFrameIndex >= 0);
     this.notify();
 
     await this.syncPreviewTexture();

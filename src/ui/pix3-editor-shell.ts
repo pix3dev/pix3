@@ -157,7 +157,6 @@ import './welcome/pix3-welcome';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
 import './profiler/profiler-panel';
-import './animation-editor/animation-panel';
 import './viewport/game-tab';
 import './pix3-editor-shell.ts.css';
 

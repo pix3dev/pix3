@@ -312,6 +312,68 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(stubs.readBlob).toHaveBeenCalledWith('res://sprites/walk/idle_0002.png');
   });
 
+  /**
+   * C8 gate — session restore. `animation` tabs are the only editor tabs of the two
+   * that persist, so a stored `animation:res://…` entry must still reopen on the
+   * shell *and* land on the clip/frame its `contextState` recorded.
+   */
+  it('opens a restored animation session tab on the clip and frame it stored', async () => {
+    seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+    const runClip = createResource([
+      'res://sprites/walk/run_0001.png',
+      'res://sprites/walk/run_0002.png',
+    ]).clips[0];
+    appState.animations.resources[ANIMATION_ID].clips.push({ ...runClip, name: 'run' });
+    appState.tabs.tabs[0].contextState = { activeClipName: 'run', selectedFrameIndex: 1 };
+
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.documentController?.activeClipName).toBe('run');
+    });
+    expect(internals.documentController?.selectedFrameIndex).toBe(1);
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/run_0002.png');
+    });
+  });
+
+  /**
+   * C8 gate — multi-select. The timeline authors it (ctrl/shift-click) but the
+   * action needs a host that sees the whole selection; a card's own trash icon only
+   * ever removes that one frame.
+   */
+  it('deletes every selected frame from the toolbar action', async () => {
+    seedAnimationTab([
+      'res://sprites/walk/idle_0001.png',
+      'res://sprites/walk/idle_0002.png',
+      'res://sprites/walk/idle_0003.png',
+    ]);
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const controller = (panel as unknown as PanelInternals).documentController;
+    expect(controller).not.toBeNull();
+    controller?.selectFrame(0);
+    controller?.selectFrame(2, { ctrl: true });
+    expect(controller?.getSelectedFrameIndices()).toEqual([0, 2]);
+
+    const removeSelectedFrames = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(controller, 'removeSelectedFrames', {
+      value: removeSelectedFrames,
+      configurable: true,
+    });
+    await panel.updateComplete;
+
+    const action = panel.querySelector<HTMLButtonElement>('.ag-delete-frames');
+    expect(action?.disabled).toBe(false);
+    expect(action?.title).toBe('Delete 2 selected frames');
+    action?.click();
+
+    expect(removeSelectedFrames).toHaveBeenCalledTimes(1);
+  });
+
   it('registers as the active image-edit target and reports its frame binding', async () => {
     seedAnimationTab();
     const { panel, stubs } = createPanel();

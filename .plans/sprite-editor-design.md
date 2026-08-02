@@ -970,22 +970,22 @@ Apply sequence:
 
 ### 9.6 Commit staging (each independently shippable)
 
-- **C1** (3b) — extract `AnimationDocumentController`; `pix3-animation-panel` becomes a render host
+- ~~DONE~~ **C1** (3b) — extract `AnimationDocumentController`; `pix3-animation-panel` becomes a render host
   holding one instance. Migrate doc-logic tests from `animation-panel.spec.ts` into
   `animation-document-controller.spec.ts` (of its 9 tests, ~8 are pure doc logic: clip preservation
   :94, texture drops :167/:196, anchor-to-all-clips :351, multi-delete :514, autoslice prompt :686).
-- **C2** (3b) — `<pix3-sprite-timeline>`; old panel renders it in place of `renderTimeline`; DnD
+- ~~DONE~~ **C2** (3b) — `<pix3-sprite-timeline>`; old panel renders it in place of `renderTimeline`; DnD
   MIMEs hoisted to `asset-drag-drop.ts`.
-- **C3** (3b) — `<pix3-sprite-clips-rail>` (new UI); old panel shows it; Inspector untouched.
-- **C4** (3b) — overlay extraction (`frame-stage-overlays.ts` + `FrameOverlayController`); old panel
+- ~~DONE~~ **C3** (3b) — `<pix3-sprite-clips-rail>` (new UI); old panel shows it; Inspector untouched.
+- ~~DONE~~ **C4** (3b) — overlay extraction (`frame-stage-overlays.ts` + `FrameOverlayController`); old panel
   stage consumes them.
-- **C5** (3c prereq, finishes 3a) — sprite-editor canvas adopts `StageZoomPanController`; crop rect
+- ~~DONE~~ **C5** (3c prereq, finishes 3a) — sprite-editor canvas adopts `StageZoomPanController`; crop rect
   re-based from letterbox px to frame-pixel space. Ships as "sprite editor gains zoom/pan".
   Independent of C1–C4 (disjoint files).
-- **C6** (3c) — shell binds `.pix3anim` tabs: construct controller, mount rail + timeline +
+- ~~DONE~~ **C6** (3c) — shell binds `.pix3anim` tabs: construct controller, mount rail + timeline +
   overlays, frame→canvas binding; `LayoutManager.ts:42` maps `animation` → `pix3-sprite-editor-panel`
   (also :376–380 tab dispatch, :809 special case, lazy import near :1075/:1084).
-- **C6b** (3c) — lift the generation chrome out of the shell into `<pix3-generate-panel>`, a
+- ~~DONE~~ **C6b** (3c) — lift the generation chrome out of the shell into `<pix3-generate-panel>`, a
   dockable Golden Layout panel titled "Generate" (not in the default layout; opened from View or
   the shell's `Generate…` toolbar action). Mediated by `ImageEditTargetService`
   (`src/services/image-gen/`), shaped after `AnimationEditorService`: the shell registers itself as
@@ -995,16 +995,27 @@ Apply sequence:
   Generator behaviour. The snapshot already carries `boundFrameTexturePath` +
   `acceptsFrameWriteBack: false` so C7 turns it on without reshaping the interface. Deletes
   `renderAiRail()`, the `.ag-ai-rail-*` CSS and the `aiRailExpanded` preference.
-- **C7** (3c) — `replaceFrameTexture` write-back + invalidation fan-out (incl.
+- ~~DONE~~ **C7** (3c) — `replaceFrameTexture` write-back + invalidation fan-out (incl.
   `Viewport2DProxyRegistry.invalidateTexture`).
-- **C8** (3c, gated) — delete `src/ui/animation-editor/`, drop the old tag from `LayoutManager`,
-  update docs.
+- ~~DONE~~ **C8** (3c, gated) — delete `src/ui/animation-editor/`, drop the old tag from
+  `LayoutManager`, update docs.
   **Gate checklist**: (a) auto-slice prompt when a texture is assigned to a frameless resource
   (`onUpdateTexturePath` → `openSlicerDialog` :2481–2520); (b) UV-window (non-sequence) frames
   render with `offset`/`repeat` windowing on stage *and* thumbs (`getFrameImageStyle` :827–837,
   `getFrameMetrics` :839–858); (c) per-frame `events` survive round-trip (schema-only — assert in
   the controller spec); plus points mode, OS-file import naming, multi-select, and tab
   `contextState` persistence.
+  **Gap the gate caught and closed:** `selectedFrameIndex` was persisted to `contextState` all
+  along but ignored on load — the first sync forced frame 0, so a restored `animation:` tab always
+  reopened on the first frame. Fixed in `syncFromDocumentState`; swapping the tab to a *different*
+  asset still resets, since the stored index describes the document that just went away.
+  Verified live after the deletion: `pix3-animation-panel` is not in the DOM and no longer even
+  registered as a custom element, while an `animation:res://…/boom1.pix3anim` tab from the stored
+  session restores into the shell on clip `burst` **and frame 9** (where it was parked before the
+  reload), with clips rail, timeline and the Inspector binding all intact.
+
+**Phase 3 is complete.** The remaining sprite-editor work is §9.9 plus the backlog in §8.6 (place
+mode) and §8.7 (power tools).
 
 ### 9.7 Risks
 

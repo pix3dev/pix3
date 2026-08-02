@@ -30,7 +30,9 @@ capability inventory is the catalog — start there every time.
      clips (property + event tracks).
    - Frame/flipbook sprite animation (numbered frame files, a spritesheet, or "a
      sprite that swaps textures over time") → `AnimatedSprite2D` / `AnimatedSprite3D`
-     + a hand-written `.pix3anim` JSON next to the frames (recipe in the catalog).
+     + a `.pix3anim` next to the frames — hand-written JSON (recipe in the catalog)
+     or authored in the editor's **Sprite Editor** (clips rail + frame timeline
+     around the same canvas that crops/edits each frame).
      One-shot VFX (impact flash, poof, muzzle burst): `loop: false` +
      `freeOnFinish: true` (the node self-destructs when the clip ends — no
      component). **Never** a Script that `setTexture()`s frames on a timer.

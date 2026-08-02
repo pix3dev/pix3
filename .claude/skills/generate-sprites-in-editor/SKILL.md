@@ -5,11 +5,16 @@ description: Generate image/sprite assets with the Pix3 editor's AI Sprite Edito
 
 # Generating sprites in the running Pix3 editor and wiring them into a scene
 
-You cannot generate images yourself — the Sprite Editor runs **in the browser**
-and calls Gemini/OpenAI with the **user's API key** (stored encrypted per-browser
-via `SecretStorageService`, never in any file). You drive it through the
+You cannot generate images yourself — the editor's image generation runs **in the
+browser** and calls Gemini/OpenAI with the **user's API key** (stored encrypted
+per-browser via `SecretStorageService`, never in any file). You drive it through the
 **chrome-devtools MCP** against the live editor, and only if a key is already
 configured there.
+
+Two panels are involved when you drive the UI: the **Generate** panel
+(`pix3-generate-panel`) makes the image, the **Sprite Editor**
+(`pix3-sprite-editor-panel`) edits and saves it — including, for a `.pix3anim`, its
+clips rail and frame timeline, where a generated image lands in the selected frame.
 
 There are two ways to drive it, and **you should prefer the first**:
 
@@ -34,9 +39,10 @@ For attaching, play-mode control, and inspection, see the sibling
 - Editor open in the MCP's Chrome with a **project loaded** (the MCP profile persists
   the File System Access handle, so `navigate_page http://localhost:8123` usually
   auto-restores the project + last scene — the `#editor?local=…` URL).
-- **API key configured.** `assets.status().keyConfigured === true` (or, in the panel,
-  `.ag-key-button.is-connected`). If not, generation is disabled — the human must
-  enter a key once (Editor Settings → AI, or the panel's 🔑 popover); you can't.
+- **API key configured.** `assets.status().keyConfigured === true` (or, in the UI,
+  `.gp-key-button.is-connected` on the Generate panel). If not, generation is
+  disabled — the human must enter a key once (Editor Settings → AI, or the key
+  popover in the Generate panel's prompt bar); you can't.
 - The bridge is **dev-only** and the `assets` surface needs **v2+**: check
   `window.__PIX3_DEBUG__.version >= 2`. If `window.__PIX3_DEBUG__` is `undefined`
   you're on a prod build / wrong page.
@@ -145,37 +151,56 @@ below (that part is identical regardless of how the image was produced).
 
 ## §B. Driving the panel DOM (fallback / interactive QC)
 
-The Sprite Editor panel is **light DOM**, so `.ag-*` selectors query straight off
-`document`. `addReferenceFromProject` / `onSaveToProject` / `aspectRatio` /
-`saveName` / `references` / `generating` / `current` are all real (TS-`private` ≠
-runtime-private) and reachable on the panel element in dev builds.
+**Generation and image editing live in two different panels now.** The **Generate**
+panel (`pix3-generate-panel`, `.gp-*` classes) owns the prompt, references, model /
+API-key chrome and the generation history; the **Sprite Editor**
+(`pix3-sprite-editor-panel`, `.ag-*` classes) owns the canvas — crop, rotate/flip,
+background removal, slice, save, and (for a `.pix3anim`) the clips rail + frame
+timeline. Both are light DOM, so those selectors query straight off `document`.
 
-## B1. Open the Sprite Editor panel
+They are wired through `ImageEditTargetService`, never to each other: the Sprite
+Editor registers itself as the active image-edit target while its tab is focused, and
+the Generate panel **delivers a finished image straight onto that canvas** (into the
+selected *frame*, when a `.pix3anim` is open). With no editor open the result stays in
+the Generate panel with its own Save to project / Save to Library / Open in Sprite
+Editor / Download actions — the old standalone Asset Generator behaviour. The panel
+header (`.gp-head`) states which of the two is in effect.
+
+TS-`private` is not runtime-private, so `addReferenceFromProject` / `prompt` /
+`aspectRatio` / `references` / `generating` / `result` / `saveName` /
+`onSaveToProject` on the Generate panel — and `boundImagePath` / `current` /
+`saveName` / `saveMaxSize` / `onSaveToProject` / `onSliceIntoFrames` /
+`onCreateAnimation` on the Sprite Editor — are all reachable in dev builds.
+
+## B1. Open the panels
 
 ```js
+() => window.__PIX3_DEBUG__.command('editor.open-generate-panel')  // the Generate dock
+// and, when you want the canvas too (crop / slice / frame editing):
 () => window.__PIX3_DEBUG__.command('editor.open-sprite-editor')
-// then read state (returns false if already open — fine):
+// then read state (both return false if already open — fine):
 () => {
-  const p = document.querySelector('pix3-sprite-editor-panel');
-  const key = document.querySelector('.ag-key-button');
-  return { open: !!p, keyConnected: key?.classList.contains('is-connected'),
-           model: document.querySelector('.ag-model-select')?.value };
+  const g = document.querySelector('pix3-generate-panel');
+  const key = document.querySelector('.gp-key-button');
+  return { open: !!g, keyConnected: key?.classList.contains('is-connected'),
+           model: document.querySelector('.gp-model-select')?.value,
+           destination: document.querySelector('.gp-head')?.textContent?.trim() };
 }
 ```
 
 ## B2. Add project assets as style references (the key trick)
 
-The panel component exposes `addReferenceFromProject(resourcePath)` — a normal
-prototype method callable at runtime — that reads a `res://` asset via project
-storage and adds it as a reference image. This is how you make new art match the
-game's existing look **without** the native file picker:
+The Generate panel exposes `addReferenceFromProject(resourcePath)` — a normal
+prototype method — that reads a `res://` asset via project storage and adds it as a
+reference image. This is how you make new art match the game's existing look
+**without** the native file picker:
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-sprite-editor-panel');
-  await p.addReferenceFromProject('res://sprites/ui/shop-ui.png');
-  await p.addReferenceFromProject('res://.../an_already_generated_sibling.png'); // for state consistency
-  return { refCount: p.references.length }; // model cap is usually 6
+  const g = document.querySelector('pix3-generate-panel');
+  await g.addReferenceFromProject('res://sprites/ui/shop-ui.png');
+  await g.addReferenceFromProject('res://.../an_already_generated_sibling.png'); // for state consistency
+  return { refCount: g.references.length }; // model cap is usually 6
 }
 ```
 
@@ -193,16 +218,16 @@ node's width×height, so pick the closest aspect and accept minor stretch. Set
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-sprite-editor-panel');
-  p.aspectRatio = '1:1'; // '16:9' for wide buttons
-  const ta = document.querySelector('.ag-prompt');
+  const g = document.querySelector('pix3-generate-panel');
+  g.aspectRatio = '1:1'; // '16:9' for wide buttons
+  const ta = document.querySelector('.gp-prompt');
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
   setter.call(ta, 'YOUR PROMPT');            // native setter so Lit sees it
   ta.dispatchEvent(new Event('input', { bubbles: true }));
   await new Promise(r => setTimeout(r, 150));
-  document.querySelector('.ag-generate-button').click();
+  document.querySelector('.gp-generate-button').click();
   await new Promise(r => setTimeout(r, 500));
-  return { generating: p.generating, error: document.querySelector('.ag-error')?.textContent || null };
+  return { generating: g.generating, error: document.querySelector('.gp-error')?.textContent || null };
 }
 ```
 
@@ -217,41 +242,57 @@ Poll for completion (generation ~5–20 s; often done by the time you re-check):
 
 ```js
 async () => {
-  const p = document.querySelector('pix3-sprite-editor-panel');
+  const g = document.querySelector('pix3-generate-panel');
+  const sprite = document.querySelector('pix3-sprite-editor-panel');
   const t0 = Date.now();
-  while (Date.now() - t0 < 30000) { if (!p.generating) break; await new Promise(r => setTimeout(r, 1500)); }
-  return { done: !p.generating, hasCurrent: !!p.current, error: document.querySelector('.ag-error')?.textContent || null };
+  while (Date.now() - t0 < 30000) { if (!g.generating) break; await new Promise(r => setTimeout(r, 1500)); }
+  // The image lands EITHER on the Sprite Editor canvas (a target was registered)
+  // OR in the Generate panel's own result block.
+  return { done: !g.generating, hasResult: !!g.result, onCanvas: !!sprite?.current,
+           error: document.querySelector('.gp-error')?.textContent || null };
 }
 ```
 
 Screenshot to QC before saving — the art quality is worth one look.
 
 **Transparency:** Gemini can't output alpha (`supportsTransparency:false`); OpenAI
-GPT-Image can (transparent toggle), or click "Remove background" (a Web Worker;
-tuned for subjects-on-background, unreliable for UI chrome). Simplest: generate
-**opaque** button plates (no cutout needed).
+GPT-Image can (transparent toggle), or click "Remove background" in the Sprite Editor
+(a Web Worker; tuned for subjects-on-background, unreliable for UI chrome).
+Simplest: generate **opaque** button plates (no cutout needed).
 
 ## B4. Save into the project
 
-`onSaveToProject()` reads `panel.saveName`, creates parent dirs, writes via the File
-System Access API, and returns the saved path (null on failure). The parent folder
-must already be reachable, but it creates missing dirs:
+Whichever panel holds the image, `onSaveToProject()` reads that panel's `saveName`,
+creates parent dirs, writes via the File System Access API, and returns the saved path
+(null on failure):
 
 ```js
+// (a) the image is on the Sprite Editor canvas (a target was registered):
 async () => {
   const p = document.querySelector('pix3-sprite-editor-panel');
   p.saveName = 'sprites/ui/btn_close_normal.png'; // project-relative; res:// prefix also accepted
   p.saveMaxSize = 256;  // OPTIONAL: longest-edge downscale on save (0 = keep full 1K/2K size)
   return await p.onSaveToProject();
 }
+// (b) the image stayed in the Generate panel (no image editor open):
+async () => {
+  const g = document.querySelector('pix3-generate-panel');
+  g.saveName = 'sprites/ui/btn_close_normal.png';
+  return await g.onSaveToProject();
+}
 ```
 
+**Frame write-back:** with a `.pix3anim` open in the Sprite Editor, a generated image
+— and any crop / rotate / flip / background removal — is written **into the selected
+frame** as a new `<clip>_<nnnn>.png` and the document is updated, so there is nothing
+to save by hand and undo puts the frame back on its untouched original.
+
 **Downscale on save:** generations come out at 1K/2K, but game UI rarely needs
-that. The save popover has a "Resize on save (longest edge)" dropdown; set
-`panel.saveMaxSize` (px, `0` = original) to downscale aspect-preserving at write
-time. It also drives `Insert as Sprite2D`, `Overwrite original`, and `Download`.
-The default comes from Editor Settings → AI ("Default save size") and persists.
-(Headless equivalent: `assets.save(id, name, { maxSize: 256 })`.)
+that. The Sprite Editor's save popover has a "Resize on save (longest edge)"
+dropdown; set `panel.saveMaxSize` (px, `0` = original) to downscale
+aspect-preserving at write time. It also drives `Insert as Sprite2D`, `Overwrite
+original`, and `Download`. The default comes from Editor Settings → AI ("Default save
+size") and persists. (Headless equivalent: `assets.save(id, name, { maxSize: 256 })`.)
 
 Verify the bytes landed with a shell `ls` on the real path — don't trust the return
 value alone. Then loop steps B2–B4 for each state/sprite (reuse references for
@@ -307,16 +348,24 @@ the edited scene from disk:
 - The render **canvas is inside a shadow root** — `document.querySelector('canvas')`
   returns nothing. Driving precise in-game clicks needs the 2D ortho camera's logical
   size; usually not worth it — verify via inspector + `errors()` instead.
-- `addReferenceFromProject` / `onSaveToProject` / `aspectRatio` / `saveName` /
-  `references` / `generating` / `current` are all real (TS-`private` ≠ runtime-private)
-  and reachable on the panel element in dev builds.
-- Generated a spritesheet? `onSliceIntoFrames()` writes its cells into
-  `<name>_frames/`, and `onCreateAnimation()` builds a managed sprite folder
-  (`<dir>/<stem>/<stem>.pix3anim` + `idle_<nnnn>.png`) and opens the animation
-  editor on it. Both need the image **saved into the project first** — they act on
-  `panel.boundImagePath`, so a purely in-memory generation has nothing to slice.
-  Both open the shared slice dialog, so confirm it via
+- **Two panels.** Prompt / references / model / history are `pix3-generate-panel`
+  (`.gp-*`); the canvas, crop, background removal, slice and save are
+  `pix3-sprite-editor-panel` (`.ag-*`). Reaching for `.ag-prompt` or
+  `panel.addReferenceFromProject` on the Sprite Editor is the single most likely
+  mistake — that chrome moved. Their `private` fields and methods are all reachable
+  at runtime (TS-`private` ≠ runtime-private) in dev builds.
+- A generated image goes to the Sprite Editor **only if one is open and focused** (it
+  registers as the active `ImageEditTarget`); otherwise it stays in the Generate
+  panel's result block. Read `.gp-head` if you are unsure which happened.
+- Generated a spritesheet? On the **Sprite Editor**, `onSliceIntoFrames()` writes its
+  cells into `<name>_frames/`, and `onCreateAnimation()` builds a managed sprite
+  folder (`<dir>/<stem>/<stem>.pix3anim` + `idle_<nnnn>.png`) and opens it in the
+  same editor (clips rail + frame timeline appear around the canvas). Both need the
+  image **saved into the project first** — they act on `panel.boundImagePath`, so a
+  purely in-memory generation has nothing to slice. Both open the shared slice
+  dialog, so confirm it via
   `document.querySelector('pix3-animation-auto-slice-dialog')` before awaiting.
-- After a page reload the panel's references/history reset — re-add references.
+- After a page reload the Generate panel's references/history reset — re-add
+  references.
 - Design canvas size is in `pix3project.yaml` (`viewportBaseSize`); DeepCore is
   1080×1080.

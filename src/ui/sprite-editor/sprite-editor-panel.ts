@@ -923,7 +923,32 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           </button>
         `
       )}
+      ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
+    `;
+  }
+
+  /**
+   * Delete every selected frame. Multi-select is authored in the timeline
+   * (ctrl/shift-click), but the *action* has to live somewhere that sees the whole
+   * selection — a frame card's own trash icon only ever removes that one frame.
+   */
+  private renderDeleteFramesAction() {
+    const controller = this.documentController;
+    const selectedCount = controller?.getSelectedFrameIndices().length ?? 0;
+    const title =
+      selectedCount > 1 ? `Delete ${selectedCount} selected frames` : 'Delete selected frame';
+    return html`
+      <button
+        class="ag-icon-button ag-delete-frames"
+        type="button"
+        title=${title}
+        aria-label=${title}
+        ?disabled=${selectedCount === 0}
+        @click=${() => void controller?.removeSelectedFrames()}
+      >
+        ${this.icons.getIcon('trash-2', IconSize.SMALL)}
+      </button>
     `;
   }
 

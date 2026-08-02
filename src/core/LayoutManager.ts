@@ -65,7 +65,9 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.inspector]: 'Inspector',
   [PANEL_COMPONENT_TYPES.profiler]: 'Profiler',
   [PANEL_COMPONENT_TYPES.assets]: 'Assets',
-  [PANEL_COMPONENT_TYPES.animation]: 'Sprite Animation',
+  // Both tab types mount the same shell, so they read the same. Editor tabs take
+  // their title from the tab itself; this is only the fallback.
+  [PANEL_COMPONENT_TYPES.animation]: 'Sprite Editor',
   [PANEL_COMPONENT_TYPES.animationTimeline]: 'Animation',
   [PANEL_COMPONENT_TYPES.logs]: 'Logs',
   [PANEL_COMPONENT_TYPES.background]: 'Home',
@@ -101,7 +103,6 @@ const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
   inspector: true,
   profiler: true,
   assets: true,
-  animation: false,
   animationTimeline: true,
   logs: true,
 };
@@ -999,7 +1000,6 @@ export class LayoutManagerService {
         previousPanelVisibility.inspector === nextPanelVisibility.inspector &&
         previousPanelVisibility.profiler === nextPanelVisibility.profiler &&
         previousPanelVisibility.assets === nextPanelVisibility.assets &&
-        previousPanelVisibility.animation === nextPanelVisibility.animation &&
         previousPanelVisibility.animationTimeline === nextPanelVisibility.animationTimeline &&
         previousPanelVisibility.logs === nextPanelVisibility.logs
       ) ||

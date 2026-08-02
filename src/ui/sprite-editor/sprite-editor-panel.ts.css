@@ -60,6 +60,11 @@ pix3-sprite-editor-panel .ag-icon-button:disabled {
   cursor: default;
 }
 
+pix3-sprite-editor-panel .ag-delete-frames:not(:disabled):hover,
+pix3-sprite-editor-panel .ag-delete-frames:not(:disabled):focus-visible {
+  color: var(--danger);
+}
+
 pix3-sprite-editor-panel .ag-toolbar-spacer {
   flex: 1 1 auto;
 }
