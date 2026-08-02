@@ -258,6 +258,55 @@ export class Viewport2DProxyRegistry {
     }
   }
 
+  /**
+   * Forget the decoded copy of a texture file whose pixels changed on disk, so
+   * the next visual sync re-reads it (§9.5 step 4).
+   *
+   * Proxies cache the path they last loaded (`userData.texturePath` for
+   * Sprite2D / TiledSprite2D / UIControl2D, `userData.animationTexturePath` for
+   * AnimatedSprite2D) and only reload when it *differs* — which an in-place
+   * overwrite never makes it do. Clearing the cached path (and, for animated
+   * sprites, the cached resource that gates their reload) turns the next sync
+   * into a reload. Returns the affected node ids so the caller can drive that
+   * sync; it is the facade that owns the per-node-type update dispatch.
+   */
+  invalidateTexture(texturePath: string): string[] {
+    const normalizedTexturePath = texturePath.trim();
+    if (!normalizedTexturePath) {
+      return [];
+    }
+
+    const affectedNodeIds: string[] = [];
+    const pathCachingVisuals = [
+      this.sprite2DVisuals,
+      this.tiledSprite2DVisuals,
+      this.uiControl2DVisuals,
+    ];
+
+    for (const visuals of pathCachingVisuals) {
+      for (const [nodeId, visualRoot] of visuals) {
+        if ((visualRoot.userData.texturePath as string | null) === normalizedTexturePath) {
+          // Guaranteed mismatch on the next compare: the live path is this
+          // non-empty string, the cached one is now null.
+          visualRoot.userData.texturePath = null;
+          affectedNodeIds.push(nodeId);
+        }
+      }
+    }
+
+    for (const [nodeId, visualRoot] of this.animatedSprite2DVisuals) {
+      if ((visualRoot.userData.animationTexturePath as string | null) !== normalizedTexturePath) {
+        continue;
+      }
+      this.disposeAnimatedSprite2DTexture(visualRoot);
+      // The reload is gated on a missing resource, not on the texture path.
+      visualRoot.userData.animationResource = null;
+      affectedNodeIds.push(nodeId);
+    }
+
+    return affectedNodeIds;
+  }
+
   private getCrisp2DPosition(position: THREE.Vector3): { x: number; y: number; z: number } {
     return {
       x: Math.round(position.x),

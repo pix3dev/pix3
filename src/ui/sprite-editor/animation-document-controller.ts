@@ -20,7 +20,9 @@ import type { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import type { DialogService } from '@/services/editor/DialogService';
 import type { OperationService } from '@/services/core/OperationService';
 import type { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import type { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import type { StagePoint } from '@/ui/shared/stage-zoom-pan';
+import { restampFrameGeometry, type FrameRasterTransform } from './frame-restamp';
 import {
   AnimatedSprite2D,
   collectClipPointNames,
@@ -33,6 +35,7 @@ import {
   type AnimationPlaybackMode,
   type AnimationResource,
   type AnimationSize,
+  type AssetLoader,
   type SceneManager,
 } from '@pix3/runtime';
 
@@ -56,6 +59,38 @@ export interface AnimationDocumentControllerDeps {
   /** Remove-clip confirmation. */
   dialogService: DialogService;
   sceneManager: SceneManager;
+  /**
+   * Play-mode texture cache to evict when frame pixels change on disk (§9.5
+   * step 4). Optional: only a host that offers the raster tools has to wire it,
+   * so headless specs and the legacy animation panel stay dependency-free.
+   */
+  assetLoader?: AssetLoader;
+  /**
+   * Editor viewport, for the proxy-cache eviction plus the mandatory repaint —
+   * file writes sit outside the dirty-marking paths, so without it the change
+   * only shows up on the ≤500 ms heartbeat (CLAUDE.md render-on-demand rule).
+   * Optional for the same reason as {@link assetLoader}.
+   */
+  viewportRenderer?: ViewportRendererService;
+}
+
+/**
+ * Everything {@link AnimationDocumentController.replaceFrameTexture} needs beyond
+ * the pixels themselves.
+ */
+export interface ReplaceFrameTextureOptions {
+  /** How the new raster relates to the old one; drives the geometry restamp. */
+  restamp: FrameRasterTransform;
+  /**
+   * Pixel size the transform was authored against. Defaults to the frame's own
+   * `sourceSize`/decoded metrics; pass it when the caller *knows* better — the
+   * crop tool does, because it measured the decoded raster it cut.
+   */
+  sourceSize?: AnimationSize;
+  /** Undo-history label; defaults to "Replace frame N pixels: <clip>". */
+  label?: string;
+  /** File extension for the new frame file (no dot). Defaults to `png`. */
+  extension?: string;
 }
 
 export const IMAGE_EXTENSIONS = new Set([
@@ -126,6 +161,9 @@ export class AnimationDocumentController implements AnimationInspectorController
   private readonly texturePreviewCache = new Map<string, string>();
   private readonly textureDimensionsCache = new Map<string, TextureDimensions>();
   private readonly texturePreviewLoads = new Map<string, Promise<void>>();
+
+  /** Highest `<clip>_<nnnn>` this session already wrote, by sanitized clip prefix. */
+  private readonly reservedFrameFileNumbers = new Map<string, number>();
 
   /**
    * Host listeners fire on every change; Inspector listeners only when the
@@ -866,6 +904,118 @@ export class AnimationDocumentController implements AnimationInspectorController
     return written;
   }
 
+  // --- frame pixel write-back (§9.5) ----------------------------------------
+
+  /**
+   * Point a frame at freshly baked pixels: write them as a **new** frame file,
+   * restamp the frame's metadata against the new raster, and invalidate every
+   * cache that still holds the old bytes.
+   *
+   * The new file is deliberate (§9.5 step 2). An in-place overwrite would leave
+   * undo restoring metadata that describes destroyed pixels; writing
+   * `<clip>_<nnnn>.png` instead means undo of the single operation below puts
+   * `texturePath` back on an untouched original. In-place stays reserved for the
+   * explicit "Overwrite original" button and the future bulk "Trim frames";
+   * orphaned bakes are handled by export pruning.
+   *
+   * Returns the new resource path, or null when nothing was written.
+   */
+  async replaceFrameTexture(
+    frameIndex: number,
+    blob: Blob,
+    options: ReplaceFrameTextureOptions
+  ): Promise<string | null> {
+    const clip = this.activeClip;
+    const frame = clip?.frames[frameIndex] ?? null;
+    const assetPath = this._assetPath ? normalizeAnimationAssetPath(this._assetPath) : '';
+    if (!clip || !frame || !assetPath) {
+      return null;
+    }
+
+    // The measured size is authoritative for `sourceSize` (R1: the editor stamps
+    // it so layout never waits on a texture load) and is what the restamp maps
+    // the frame's geometry into.
+    const measured = await readBlobSize(blob);
+    const toSize: AnimationSize = measured
+      ? { width: measured.width, height: measured.height }
+      : { width: 0, height: 0 };
+    const fromSize = options.sourceSize ?? this.resolveFrameSourceSize(frame);
+
+    const clipName = clip.name;
+    const frameNumber = this.reserveFrameFileNumber(clipName);
+    const framePath = buildAnimationFrameResourcePath(assetPath, frameNumber, {
+      clipName,
+      extension: options.extension ?? 'png',
+    });
+    await this.deps.projectStorage.writeBinaryFile(framePath, await blob.arrayBuffer());
+
+    const previousTexturePath = this.getResolvedFrameTexturePath(frame);
+    const restamped = fromSize
+      ? restampFrameGeometry(frame, options.restamp, fromSize, toSize)
+      : { ...frame, sourceSize: toSize };
+
+    this._frameDraft = null;
+    const didMutate = await this.applyClipUpdate(
+      candidate => ({
+        ...candidate,
+        frames: candidate.frames.map((existingFrame, index) =>
+          index === frameIndex
+            ? {
+                ...restamped,
+                texturePath: framePath,
+                // The frame now owns a file of its own: any UV window it used to
+                // read out of the resource spritesheet is baked into those pixels.
+                offset: { x: 0, y: 0 },
+                repeat: { x: 1, y: 1 },
+              }
+            : existingFrame
+        ),
+      }),
+      options.label ?? `Replace frame ${frameIndex + 1} pixels: ${clipName}`
+    );
+    if (!didMutate) {
+      return null;
+    }
+
+    this.invalidateTextureEverywhere(previousTexturePath, framePath);
+    return framePath;
+  }
+
+  /**
+   * §9.5 step 4 — the invalidation fan-out. Three caches hold decoded copies of a
+   * texture file: this controller's preview cache (timeline thumbs + stage), the
+   * shared {@link AssetLoader} (the next play-mode start), and the viewport's 2D
+   * proxy visuals. The trailing repaint is not optional: a file write marks
+   * nothing dirty, so the viewport would otherwise show the old pixels until the
+   * heartbeat.
+   */
+  private invalidateTextureEverywhere(...texturePaths: string[]): void {
+    const unique = [...new Set(texturePaths.map(path => path.trim()).filter(Boolean))];
+    for (const texturePath of unique) {
+      this.invalidateTexture(texturePath);
+      this.deps.assetLoader?.evictTexture(texturePath);
+      this.deps.viewportRenderer?.invalidateTexture(texturePath);
+    }
+  }
+
+  /**
+   * The frame's raster size when it is actually known — its stamped `sourceSize`
+   * first, then a decoded texture. Null while neither is available, which
+   * suppresses the geometry restamp rather than authoring it into the 256px
+   * placeholder space (§9.7 risk 2).
+   */
+  private resolveFrameSourceSize(frame: AnimationFrame): AnimationSize | null {
+    const stamped = frame.sourceSize;
+    if (stamped && stamped.width > 0 && stamped.height > 0) {
+      return { width: stamped.width, height: stamped.height };
+    }
+    if (!this.hasResolvedFrameMetrics(frame)) {
+      return null;
+    }
+    const metrics = this.getFrameMetrics(frame);
+    return { width: metrics.frameWidth, height: metrics.frameHeight };
+  }
+
   // --- frame property edits -------------------------------------------------
 
   async applySelectedFrameUpdate(
@@ -1289,8 +1439,8 @@ export class AnimationDocumentController implements AnimationInspectorController
   private async applyClipUpdate(
     updater: (clip: AnimationClip) => AnimationClip,
     label: string
-  ): Promise<void> {
-    await this.applyResourceUpdate(
+  ): Promise<boolean> {
+    return this.applyResourceUpdate(
       resource => ({
         ...resource,
         clips: resource.clips.map(clip =>
@@ -1481,7 +1631,7 @@ export class AnimationDocumentController implements AnimationInspectorController
   private nextFrameFileNumber(clipName: string): number {
     const prefix = sanitizeFrameFilePrefix(clipName);
     const pattern = new RegExp(`/${prefix}_(\\d+)\\.[^./]+$`, 'i');
-    let highest = 0;
+    let highest = this.reservedFrameFileNumbers.get(prefix) ?? 0;
 
     for (const clip of this._resource?.clips ?? []) {
       for (const frame of clip.frames) {
@@ -1493,6 +1643,17 @@ export class AnimationDocumentController implements AnimationInspectorController
     }
 
     return highest + 1;
+  }
+
+  /**
+   * {@link nextFrameFileNumber}, but the number is remembered for the rest of the
+   * session. Undoing a bake un-references its file, which would otherwise let the
+   * next bake reuse the number and overwrite pixels a *redo* still points at.
+   */
+  private reserveFrameFileNumber(clipName: string): number {
+    const frameNumber = this.nextFrameFileNumber(clipName);
+    this.reservedFrameFileNumbers.set(sanitizeFrameFilePrefix(clipName), frameNumber);
+    return frameNumber;
   }
 
   private getSelectedAnimatedSprite(): AnimatedSprite2D | null {

@@ -263,7 +263,7 @@ describe('GeneratePanel', () => {
     expect(panel.querySelector('.gp-result')).toBeNull();
   });
 
-  it('keeps the result here while the bound canvas stands in for a frame (C7 gap)', async () => {
+  it('keeps the result here when the bound frame cannot take a write-back', async () => {
     const { panel, stubs } = createPanel();
     await mount(panel);
 
@@ -279,6 +279,27 @@ describe('GeneratePanel', () => {
 
     expect(applied).toHaveLength(0);
     expect(panel.querySelector('.gp-result')).not.toBeNull();
+  });
+
+  it('delivers into the bound frame once the target accepts write-back (C7)', async () => {
+    const { panel, stubs } = createPanel();
+    await mount(panel);
+
+    const { target, applied } = createTarget({
+      label: 'walk.pix3anim',
+      boundFrameTexturePath: 'res://sprites/walk/idle_0001.png',
+      acceptsFrameWriteBack: true,
+    });
+    stubs.targets.setActiveTarget(target);
+    await panel.updateComplete;
+    expect(panel.querySelector('.gp-target')?.textContent).toContain('into the selected frame');
+
+    await generate(panel, 'A brass gear', stubs);
+
+    expect(applied).toHaveLength(1);
+    expect(applied[0].prompt).toBe('A brass gear');
+    // Delivered into the frame — nothing is left here to save by hand.
+    expect(panel.querySelector('.gp-result')).toBeNull();
   });
 
   it('follows the bound editor when its snapshot changes', async () => {

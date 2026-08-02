@@ -2971,6 +2971,32 @@ export class ViewportRendererService {
   }
 
   /**
+   * Repaint every 2D proxy drawn from a texture file whose pixels just changed on
+   * disk (the sprite editor's frame write-back / overwrite paths, §9.5 step 4).
+   * The registry forgets its decoded copy; the standard per-node visual sync then
+   * reloads it, exactly as {@link refreshLocalizedLabels} does for a locale swap.
+   *
+   * The trailing `requestRender()` is required, not defensive: a file write marks
+   * nothing dirty, so without it the new pixels would only appear on the ≤500 ms
+   * heartbeat (CLAUDE.md render-on-demand rule).
+   */
+  invalidateTexture(texturePath: string): void {
+    const affectedNodeIds = this.proxyRegistry.invalidateTexture(texturePath);
+    if (affectedNodeIds.length === 0) {
+      return;
+    }
+
+    const graph = this.sceneManager.getActiveSceneGraph();
+    for (const nodeId of affectedNodeIds) {
+      const node = graph?.nodeMap.get(nodeId);
+      if (node) {
+        this.updateNodeTransform(node);
+      }
+    }
+    this.requestRender();
+  }
+
+  /**
    * Rewind a SpineSkeleton2D proxy to the first frame of its current animation
    * and repaint. Transient pose-only state (no operation, no history) — the
    * Inspector's Spine "Reset" button and the node's own `resetToFirstFrame()`

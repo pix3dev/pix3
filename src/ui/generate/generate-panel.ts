@@ -230,9 +230,9 @@ export class GeneratePanel extends ComponentBase {
 
   /**
    * Whether a generated image can be pushed straight onto the bound editor's
-   * canvas. A frame-bound canvas cannot take one until C7 adds the write-back, so
-   * the result falls through to this panel's own save block rather than being
-   * dropped on the next frame click.
+   * canvas. A frame-bound canvas only takes one when it says it can write it back
+   * into the frame (§9.5); otherwise the result falls through to this panel's own
+   * save block rather than being dropped on the next frame click.
    */
   private get canApplyToTarget(): boolean {
     const snapshot = this.targetSnapshot;
@@ -301,8 +301,10 @@ export class GeneratePanel extends ComponentBase {
     const destination = !snapshot
       ? 'No image editor open — results are saved from here.'
       : this.canApplyToTarget
-        ? `Results go to ${snapshot.label}`
-        : `${snapshot.label} is showing a frame — results stay here until frame write-back lands.`;
+        ? snapshot.boundFrameTexturePath
+          ? `Results go into the selected frame of ${snapshot.label}`
+          : `Results go to ${snapshot.label}`
+        : `${snapshot.label} cannot take a generated frame right now — results stay here.`;
 
     return html`
       <header class="gp-head">

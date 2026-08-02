@@ -36,11 +36,14 @@ import {
   getAnimationAssetDirectory,
   deriveAnimationAssetStem,
 } from '@/features/scene/animation-asset-utils';
+import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import {
+  AssetLoader,
   SceneManager,
   collectClipPointNames,
   findAnimationFramePoint,
   getAnimationFrameTexturePath,
+  isSequenceAnimationFrame,
   normalizeAnimationResource,
   type AnimationFrame,
 } from '@pix3/runtime';
@@ -51,6 +54,7 @@ import {
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
 import { AnimationDocumentController } from './animation-document-controller';
+import type { FrameRasterTransform } from './frame-restamp';
 import {
   FrameOverlayController,
   renderAnchorOverlay,
@@ -198,6 +202,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
+
+  @inject(ViewportRendererService)
+  private readonly viewportRenderer!: ViewportRendererService;
+
+  @inject(AssetLoader)
+  private readonly assetLoader!: AssetLoader;
 
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
@@ -393,11 +403,21 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       label: resourcePath ? (resourcePath.split('/').pop() ?? resourcePath) : 'Sprite Editor',
       resourcePath,
       boundFrameTexturePath: this.boundFrameTexturePath,
-      // C7 adds `replaceFrameTexture`; until then a generated image cannot be
-      // written back into a frame, which is the same reason the raster tools are
-      // disabled while one is bound (`frameRasterHint`).
-      acceptsFrameWriteBack: false,
+      acceptsFrameWriteBack: this.canWriteBackToFrame,
     };
+  }
+
+  /**
+   * Whether baked pixels have a frame to land in (§9.5). True for any frame of an
+   * open document, including a UV-window one — the write-back gives that frame a
+   * raster file of its own, which is exactly what turns it into a sequence frame.
+   */
+  private get canWriteBackToFrame(): boolean {
+    return Boolean(
+      this.documentController &&
+        this.boundFrameTexturePath &&
+        this.documentController.selectedFrameIndex >= 0
+    );
   }
 
   subscribeImageEditTarget(listener: () => void): () => void {
@@ -405,8 +425,22 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     return () => this.imageEditListeners.delete(listener);
   }
 
-  /** The Generate panel's result, becoming this shell's working image. */
+  /**
+   * The Generate panel's result. With a frame bound it goes straight into that
+   * frame as a new frame file (§9.5); the canvas then reloads from it through the
+   * ordinary frame→canvas binding. A size mismatch is accepted as-is for v1 —
+   * `sourceSize` is restamped and the frame renders at the new size. Placing a
+   * differently-sized generation by hand (drag/scale) is Phase 5's place mode.
+   *
+   * Otherwise it becomes the transient working image, exactly as before.
+   */
   applyGeneratedImage(image: GeneratedImagePayload): void {
+    this.lastPrompt = image.prompt;
+    if (this.canWriteBackToFrame) {
+      void this.writeBlobToBoundFrame(image.blob, { kind: 'replace' }, 'Generate into frame');
+      return;
+    }
+
     const objectUrl = this.trackUrl(URL.createObjectURL(image.blob));
     this.setCurrent({
       blob: image.blob,
@@ -416,7 +450,6 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       width: image.width,
       height: image.height,
     });
-    this.lastPrompt = image.prompt;
     this.saveName = deriveSaveName(image.prompt, this.boundImagePath, image.mimeType);
   }
 
@@ -437,7 +470,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   /** Fan out a snapshot change to the Generate panel — only when it really changed. */
   private notifyImageEditTarget(): void {
     const snapshot = this.getImageEditSnapshot();
-    const key = `${snapshot.targetId}|${snapshot.resourcePath ?? ''}|${snapshot.boundFrameTexturePath ?? ''}`;
+    const key = `${snapshot.targetId}|${snapshot.resourcePath ?? ''}|${snapshot.boundFrameTexturePath ?? ''}|${snapshot.acceptsFrameWriteBack}`;
     if (key === this.lastImageEditKey) {
       return;
     }
@@ -527,6 +560,8 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           autoSliceDialog: this.sliceDialog,
           dialogService: this.dialogService,
           sceneManager: this.sceneManager,
+          assetLoader: this.assetLoader,
+          viewportRenderer: this.viewportRenderer,
         },
         this.tabId,
         resourcePath
@@ -772,16 +807,71 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   };
 
   /**
-   * Why the raster tools are off, or null when they are available. The canvas
-   * standing in for a frame has nowhere to put its output until C7 adds
-   * `replaceFrameTexture` — an unwritten crop would silently vanish on the next
-   * frame click, which is worse than a disabled button that says why.
+   * Why the raster tools are off, or null when they are available. Since C7 a
+   * frame-bound canvas writes its bakes back into the frame (§9.5), so the only
+   * remaining blockers are the two cases where the canvas is not showing the
+   * frame's own pixels 1:1 and a crop rect would therefore mean the wrong thing.
    */
   private get frameRasterHint(): string | null {
-    return this.boundFrameTexturePath
-      ? 'Editing frame pixels from the sprite editor lands in a later change; ' +
-          'crop, rotate, flip and background removal are disabled while a frame is bound.'
-      : null;
+    const frame = this.boundFrame;
+    if (!frame || !this.boundFrameTexturePath) {
+      return null;
+    }
+    if (!isSequenceAnimationFrame(frame)) {
+      // A UV-window frame reads a rect out of the shared spritesheet, but the
+      // canvas is showing that whole sheet — cropping it would cut every frame.
+      return 'This frame is a window into the shared spritesheet, which is what the canvas shows. Slice it into frame files first to edit its pixels.';
+    }
+    if (!this.documentController?.hasResolvedFrameMetrics(frame)) {
+      return 'Waiting for the frame texture to decode…';
+    }
+    return null;
+  }
+
+  /**
+   * The write-back half of §9.5: hand baked pixels to the document, which writes
+   * a new `<clip>_<nnnn>.png` and records one undo step pointing the frame at it.
+   * The canvas is not touched here — the frame's `texturePath` changed, so the
+   * shell's own frame→canvas binding reloads it from the file that now exists.
+   *
+   * Returns true when the bake landed in the document.
+   */
+  private async writeBlobToBoundFrame(
+    blob: Blob,
+    restamp: FrameRasterTransform,
+    label?: string
+  ): Promise<boolean> {
+    const controller = this.documentController;
+    const frameIndex = controller?.selectedFrameIndex ?? -1;
+    if (!controller || frameIndex < 0 || !this.boundFrameTexturePath) {
+      return false;
+    }
+
+    const sourceSize = this.getImageSize();
+    try {
+      const written = await controller.replaceFrameTexture(frameIndex, blob, {
+        restamp,
+        sourceSize: sourceSize ?? undefined,
+        label: label ? `${label} ${frameIndex + 1}: ${controller.activeClipName}` : undefined,
+      });
+      if (!written) {
+        this.sliceStatus = { text: 'Could not write the frame file.', isError: true };
+        return false;
+      }
+      // The toolbar status line, not `saveMessage` — that one only exists inside
+      // the save popover, and a frame bake never opens it.
+      this.sliceStatus = {
+        text: `Frame ${frameIndex + 1} now uses ${written.split('/').pop() ?? written}`,
+        isError: false,
+      };
+      return true;
+    } catch (error) {
+      this.sliceStatus = {
+        text: `Frame write-back failed: ${describeError(error)}`,
+        isError: true,
+      };
+      return false;
+    }
   }
 
   /** Anchor / points / polygon / bounding-box tools — animation documents only. */
@@ -1540,6 +1630,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           this.bgProgress = progress;
         },
       });
+      if (this.canWriteBackToFrame) {
+        // Same-size replacement, so the restamp only re-stamps `sourceSize`.
+        await this.writeBlobToBoundFrame(output, { kind: 'replace' }, 'Remove frame background');
+        return;
+      }
       const objectUrl = this.trackUrl(URL.createObjectURL(output));
       const size = await readImageSize(objectUrl);
       this.setCurrent({
@@ -1566,7 +1661,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   // -- rotate / flip ---------------------------------------------------------
 
   private onRotate(): void {
-    void this.applyTransform('rotated', blob => rotateImageBlob(blob, 1));
+    void this.applyTransform('rotated', { kind: 'rotate', quarterTurns: 1 }, blob =>
+      rotateImageBlob(blob, 1)
+    );
   }
 
   private onFlipHorizontal(): void {
@@ -1578,16 +1675,24 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   }
 
   private applyFlip(axis: FlipAxis): Promise<void> {
-    return this.applyTransform('flipped', blob => flipImageBlob(blob, axis));
+    return this.applyTransform('flipped', { kind: 'flip', axis }, blob =>
+      flipImageBlob(blob, axis)
+    );
   }
 
   /**
    * Run a geometric transform over the current working image and swap it in. The transform is a
    * plain canvas re-encode (no network / model), so it's cheap; `transformBusy` just guards against
    * overlapping clicks. The save name is intentionally left untouched.
+   *
+   * Frame-bound, the result is committed instead of held: a transient bake would
+   * vanish on the next frame click, so each transform writes a new frame file and
+   * takes one undo step (§9.5). `restamp` is how the document re-derives the
+   * frame's anchor / points / bbox / polygon against the new raster.
    */
   private async applyTransform(
     source: CurrentSource,
+    restamp: FrameRasterTransform,
     transform: (blob: Blob) => Promise<{ blob: Blob; width: number; height: number }>
   ): Promise<void> {
     if (!this.current || this.transformBusy || this.cropMode) {
@@ -1596,6 +1701,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.transformBusy = true;
     try {
       const result = await transform(this.current.blob);
+      if (this.canWriteBackToFrame) {
+        await this.writeBlobToBoundFrame(result.blob, restamp, 'Transform frame');
+        return;
+      }
       const objectUrl = this.trackUrl(URL.createObjectURL(result.blob));
       this.setCurrent({
         blob: result.blob,
@@ -1931,22 +2040,29 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       return;
     }
 
-    const objectUrl = this.trackUrl(URL.createObjectURL(blob));
     this.cropMode = false;
     this.cropRect = null;
     this.cropDrag = null;
-    this.setCurrent({
-      blob,
-      mimeType: 'image/png',
-      objectUrl,
-      source: 'cropped',
-      width: sw,
-      height: sh,
-    });
-    this.saveName = setImageExt(
-      `${stripImageExt(normalizeRelativePath(this.saveName) || 'cropped')}-crop`,
-      'png'
-    );
+
+    if (this.canWriteBackToFrame) {
+      // §9.5 in one line: the crop origin is all the document needs to keep the
+      // frame's anchor, points, bbox and polygon on the same pixels.
+      await this.writeBlobToBoundFrame(blob, { kind: 'crop', x: sx, y: sy }, 'Crop frame');
+    } else {
+      const objectUrl = this.trackUrl(URL.createObjectURL(blob));
+      this.setCurrent({
+        blob,
+        mimeType: 'image/png',
+        objectUrl,
+        source: 'cropped',
+        width: sw,
+        height: sh,
+      });
+      this.saveName = setImageExt(
+        `${stripImageExt(normalizeRelativePath(this.saveName) || 'cropped')}-crop`,
+        'png'
+      );
+    }
 
     // Crop bakes keep landing in the generation history: it is the cheap escape
     // hatch for a pixel-destructive edit undo cannot restore (§9.7 risk 7), and it

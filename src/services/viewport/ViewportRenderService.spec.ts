@@ -43,6 +43,41 @@ describe('ViewportRendererService', () => {
     expect(mesh.position.y).toBe(-0.5);
   });
 
+  it('forgets a proxy texture whose file changed on disk (§9.5 step 4)', () => {
+    const service = new ViewportRendererService();
+    const svc = service as unknown as {
+      proxyRegistry: {
+        createSprite2DVisual: (s: Sprite2D) => THREE.Group;
+        sprite2DVisuals: Map<string, THREE.Group>;
+        animatedSprite2DVisuals: Map<string, THREE.Group>;
+        invalidateTexture: (path: string) => string[];
+      };
+    };
+
+    const sprite = new Sprite2D({ id: 'sprite-invalidate', width: 10, height: 10 });
+    const spriteVisual = svc.proxyRegistry.createSprite2DVisual(sprite);
+    spriteVisual.userData.texturePath = 'res://sprites/walk/idle_0001.png';
+    svc.proxyRegistry.sprite2DVisuals.set(sprite.nodeId, spriteVisual);
+
+    const animatedVisual = new THREE.Group();
+    animatedVisual.userData.animationTexturePath = 'res://sprites/walk/idle_0001.png';
+    animatedVisual.userData.animationResource = { version: '1.0.0', texturePath: '', clips: [] };
+    svc.proxyRegistry.animatedSprite2DVisuals.set('animated-invalidate', animatedVisual);
+
+    const untouched = new THREE.Group();
+    untouched.userData.texturePath = 'res://sprites/other.png';
+    svc.proxyRegistry.sprite2DVisuals.set('untouched', untouched);
+
+    const affected = svc.proxyRegistry.invalidateTexture('res://sprites/walk/idle_0001.png');
+
+    expect(affected.sort()).toEqual(['animated-invalidate', sprite.nodeId].sort());
+    // Cleared caches = a guaranteed mismatch on the next compare, so the sync reloads.
+    expect(spriteVisual.userData.texturePath).toBeNull();
+    expect(animatedVisual.userData.animationTexturePath).toBeNull();
+    expect(animatedVisual.userData.animationResource).toBeNull();
+    expect(untouched.userData.texturePath).toBe('res://sprites/other.png');
+  });
+
   it('should create an editor anchor marker for Sprite2D visuals', () => {
     const service = new ViewportRendererService();
 

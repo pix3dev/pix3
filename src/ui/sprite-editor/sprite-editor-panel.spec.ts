@@ -30,8 +30,41 @@ interface PanelInternals {
   boundFrameTexturePath: string | null;
   isTextureDragOver: boolean;
   textureDragDepth: number;
-  current: { blob: Blob; mimeType: string; source: string } | null;
+  current: {
+    blob: Blob;
+    mimeType: string;
+    objectUrl: string;
+    source: string;
+    width?: number;
+    height?: number;
+  } | null;
+  cropMode: boolean;
+  cropRect: { x: number; y: number; w: number; h: number } | null;
   saveName: string;
+  onApplyCrop(): Promise<void>;
+}
+
+/**
+ * happy-dom has no 2D canvas, and the crop bake composites through one. Stand in
+ * for it (only for `canvas`; Lit renders through `createElement` too) so the test
+ * can reach the routing decision that follows the bake.
+ */
+function stubCropCanvas(output: Blob): void {
+  const realCreateElement = document.createElement.bind(document);
+  vi.spyOn(document, 'createElement').mockImplementation((tagName: string, options?: unknown) => {
+    if (tagName !== 'canvas') {
+      return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+    }
+    const canvas = realCreateElement('canvas');
+    Object.defineProperties(canvas, {
+      getContext: { value: () => ({ drawImage: vi.fn() }), configurable: true },
+      toBlob: {
+        value: (callback: (blob: Blob | null) => void) => callback(output),
+        configurable: true,
+      },
+    });
+    return canvas;
+  });
 }
 
 function createPreferences() {
@@ -114,6 +147,10 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     },
     dialogService: { showConfirmation: vi.fn().mockResolvedValue(true) },
     sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
+    // §9.5's invalidation fan-out. Both are pure side-effect sinks here; the
+    // controller spec asserts they are actually reached.
+    viewportRenderer: { invalidateTexture: vi.fn(), requestRender: vi.fn() },
+    assetLoader: { evictTexture: vi.fn() },
   };
 
   for (const [key, value] of Object.entries(stubs)) {
@@ -293,8 +330,9 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(snapshot.label).toBe('walk.pix3anim');
     expect(snapshot.resourcePath).toBe(ANIMATION_PATH);
     expect(snapshot.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
-    // C7 owns the write-back; until then the panel must not push pixels at a frame.
-    expect(snapshot.acceptsFrameWriteBack).toBe(false);
+    // C7: baked pixels now have a frame to land in, so the Generate panel is
+    // allowed to push straight at it.
+    expect(snapshot.acceptsFrameWriteBack).toBe(true);
   });
 
   it('deregisters as the image-edit target when another tab becomes active', async () => {
@@ -372,6 +410,88 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(internals.documentController).toBe(controller);
     expect(stubs.setActiveController).toHaveBeenCalledWith(controller);
     expect(panel.querySelector('pix3-sprite-timeline')?.controller).toBe(controller);
+  });
+
+  it('routes a crop Apply on a frame-bound canvas into the frame (§9.5)', async () => {
+    seedAnimationTab();
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    const controller = internals.documentController;
+    const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+    Object.defineProperty(controller, 'replaceFrameTexture', {
+      value: replaceFrameTexture,
+      configurable: true,
+    });
+
+    // The canvas normally holds the frame's decoded raster; `readBlob` rejects in
+    // these tests, so stand it up directly.
+    internals.current = {
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      mimeType: 'image/png',
+      objectUrl: 'blob:working-image',
+      source: 'file',
+      width: 100,
+      height: 80,
+    };
+    internals.cropMode = true;
+    internals.cropRect = { x: 20, y: 10, w: 40, h: 30 };
+    await panel.updateComplete;
+
+    const cropped = new Blob([new Uint8Array([9])], { type: 'image/png' });
+    stubCropCanvas(cropped);
+    await internals.onApplyCrop();
+
+    expect(replaceFrameTexture).toHaveBeenCalledTimes(1);
+    const [frameIndex, appliedBlob, options] = replaceFrameTexture.mock.calls[0];
+    expect(frameIndex).toBe(0);
+    expect(appliedBlob).toBe(cropped);
+    // The crop origin is what lets the document keep anchor/points/bbox on the
+    // same pixels; the source size is the raster the rect was measured against.
+    expect(options.restamp).toEqual({ kind: 'crop', x: 20, y: 10 });
+    expect(options.sourceSize).toEqual({ width: 100, height: 80 });
+    // The bake is committed, not held: crop mode closes and nothing waits on Save.
+    expect(internals.cropMode).toBe(false);
+  });
+
+  it('drops a generated image straight into the bound frame', async () => {
+    seedAnimationTab();
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+    Object.defineProperty(internals.documentController, 'replaceFrameTexture', {
+      value: replaceFrameTexture,
+      configurable: true,
+    });
+
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    panel.applyGeneratedImage({
+      blob,
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 64,
+      height: 64,
+    });
+
+    await vi.waitFor(() => {
+      expect(replaceFrameTexture).toHaveBeenCalledTimes(1);
+    });
+    expect(replaceFrameTexture.mock.calls[0][1]).toBe(blob);
+    // v1 accepts a size mismatch and restamps `sourceSize`; place mode is Phase 5.
+    expect(replaceFrameTexture.mock.calls[0][2].restamp).toEqual({ kind: 'replace' });
+    // ...and it does NOT become a transient working image needing a Save.
+    expect(internals.current?.blob).not.toBe(blob);
   });
 
   it('takes the drag overlay down even when the frame strip swallows the drop', async () => {

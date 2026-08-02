@@ -28,14 +28,17 @@ export interface ImageEditTargetSnapshot {
   readonly resourcePath: string | null;
   /**
    * Texture file the canvas currently stands in for on behalf of an animation frame
-   * (§9.5), or null when it edits a bare image. C7 turns this into "apply to current
-   * frame"; C6b only reports it so the panel can say what would happen.
+   * (§9.5), or null when it edits a bare image. When
+   * {@link acceptsFrameWriteBack} is set, applying an image means "replace that
+   * frame's pixels", not "put it on a scratch canvas".
    */
   readonly boundFrameTexturePath: string | null;
   /**
-   * Whether the target can write a generated image back into the bound frame.
-   * False until C7 lands `replaceFrameTexture` — until then applying to a
-   * frame-bound canvas would silently vanish on the next frame click.
+   * Whether the target can write a generated image back into the bound frame —
+   * i.e. whether {@link ImageEditTarget.applyGeneratedImage} will commit it as a
+   * new frame file plus one undo step. False means an applied image would be
+   * dropped on the next frame click, so the Generate panel keeps the result
+   * instead and offers its own save actions.
    */
   readonly acceptsFrameWriteBack: boolean;
 }
