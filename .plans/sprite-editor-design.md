@@ -1526,3 +1526,39 @@ trim range → frames written by the §8.2 convention through the same
 `importOsFiles`-style append path the timeline already uses. Browser-only, no ffmpeg. Seek with
 `requestVideoFrameCallback` where available and fall back to `currentTime` stepping; the fallback
 must await the `seeked` event before each grab or it silently captures duplicate frames.
+
+### 9.13 Verification log — the loose ends, closed 2026-08-04
+
+Three paths this track had implemented but never *executed*. All three were checked in a live editor
+(chrome-devtools MCP, SkyDefender), judged by state.
+
+**`sizeMode: 'native'` for a frame with no authored `sourceSize`** — the path exists
+(`AnimatedSprite2D.resolveFrameSourceSize`: authored → atlas → decoded image) but nothing had run it.
+Verified by building an `AnimatedSprite2D` in the live runtime over two *real* project textures of
+different sizes whose frames carry no `sourceSize` (`mg0001.png` 37×25, `ex0059.png` 128×128,
+confirmed against the PNG headers on disk), node 100×100. Predicted from the formula before
+measuring — `clipScale = nodeWidth / referenceSize.width = 100/37` — and measured exactly:
+
+| | frame 0 (37×25) | frame 1 (128×128) |
+|---|---|---|
+| `stretch` | 100 × 100 | 100 × 100 |
+| `native` | 100 × 67.568 | 345.946 × 345.946 |
+
+So the size really does come from the resolution chain rather than falling back to stretch, and the
+per-clip scale is applied to both axes. `sourceSize` on both frames read `{0,0}` throughout — the
+authored branch was never taken.
+
+**The `atlasSizeOf` branch in `Viewport2DProxyRegistry.resolveProxyFrameSourceSize`** — only
+reachable with an atlas resolver installed, which happens in `TextureAtlasService.prepareForPlay`.
+Verified in play mode: `mg0001.png` loads as an atlas view onto a 2048×2048 sheet, `atlasSizeOf`
+returns `{37, 25}`, and the proxy resolver handed a frame with no `sourceSize` returns `{37, 25}` —
+the frame's true size, not the sheet's. Had this branch been wrong the proxy would have sized the
+sprite to the whole atlas page.
+
+**Golden Layout re-dock** — previously only emulated with `remove()` + `appendChild`. Exercised
+through a real Golden Layout control (maximise → restore on the shell's stack), which re-parents the
+element and therefore drives the same `disconnectedCallback` → `connectedCallback` cycle a dock move
+does. The proof that it was not a no-op: the working image's object URL *changed*, i.e. teardown
+revoked it and `rehydrateObjectUrls` minted a new one — and the new one still resolves. Everything
+else survived: same component instance, same `AnimationDocumentController`, clip `burst`, frame 0,
+frame binding, the decoded 128×128 stage image and all 22 timeline cards. No new console errors.
