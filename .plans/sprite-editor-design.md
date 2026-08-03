@@ -961,12 +961,16 @@ Apply sequence:
      timeline thumbs re-request;
    - `assetLoader.evictTexture(path)` (`AssetLoader.ts:112`; precedent caller
      `TextureAtlasService.ts:533`) so the next play-mode start reloads;
-   - viewport: the proxy re-syncs the *document* automatically (it compares the open resource
-     object, `Viewport2DProxyRegistry.ts:1110`) and the new `texturePath` differs, so frame textures
-     reload; add a public `Viewport2DProxyRegistry.invalidateTexture(path)` for the in-place
-     overwrite paths (proxies cache by path, :993–998 / :1098), then call
+   - viewport: `Viewport2DProxyRegistry.invalidateTexture(path)` (public, added by C7), then
      `viewportRenderService.requestRender()` — file writes sit outside the dirty-marking paths
      (CLAUDE.md render-on-demand rule).
+     **Corrected 2026-08-03 (§9.10 shipped):** an earlier draft of this step claimed the proxy
+     "re-syncs the *document* automatically … so frame textures reload". It did not: the proxy
+     compared the open resource object but only ever loaded the *resource-level* `texturePath`, so a
+     per-frame file was never loaded at all and the path-keyed invalidation evicted a cache entry
+     that had never been populated. The proxy now resolves the current frame through
+     `getAnimationFrameTexturePath` and holds that file's texture, which is what makes this
+     invalidation actually reach the pixels on screen.
 
 ### 9.6 Commit staging (each independently shippable)
 
@@ -1185,3 +1189,33 @@ Watch out for: eviction (a clip of 60 frames must not pin 60 textures per proxy 
 `AssetLoader`'s cache rather than a private one where possible), the editor's render-on-demand rule
 (finish with `requestRender()`), and the pre-launch atlas, which must keep excluding these the same
 way it already handles frame files.
+
+**~~DONE~~ 2026-08-03.** `Viewport2DProxyRegistry` now resolves the *current* frame through
+`getAnimationFrameTexturePath(resource, frame)` — the same precedence rule as the runtime loader,
+the asset previews and the Sprite Editor — driven by the frame index
+`applyAnimatedSprite2DPresentation` already computes, so changing `currentFrame` (Inspector, or any
+future editor-side flipbook preview — nothing ticks one today) swaps the texture on screen.
+
+- **Caching.** No per-proxy map. The *decode* cache is the shared `AssetLoader`'s (one decode per
+  file editor-wide, evictable from the one place the write-back fan-out already calls,
+  `evictTexture`); the proxy keeps exactly **one clone** — the current frame's. The clone is
+  required, not incidental: `offset`/`repeat` are per-node state, so two nodes on one sheet at
+  different frames would corrupt each other's UVs; a `Texture.clone()` shares the GPU upload with
+  its source, which is exactly how `AnimatedSprite2D.cloneTexture` handles the same problem.
+- **UV semantics** now mirror the runtime instead of blindly writing the frame's `offset`/`repeat`:
+  a sequence frame is the whole file (its window was baked into the pixels), a sheet frame carries a
+  local rect, and both compose against `baseRegionOf(texture)` so an atlas view samples inside its
+  packed frame. Incidentally this fixes legacy sequence frames whose `repeat` normalizes to `0,0` —
+  the old code wrote that straight to the texture and drew nothing.
+- **`invalidateTexture`** now matches on the frame's own path (it clears the cached path rather than
+  disposing, so the stale pixels keep drawing for the microtask the re-read takes instead of
+  flashing the placeholder colour). It stays dependent on the caller having evicted `AssetLoader`
+  first, which `invalidateTextureEverywhere` does, in that order.
+- **Correction to the section above:** the atlas does *not* exclude animation frame files — it
+  packs them (`TextureAtlasService.scanAndClassify` walks each `.pix3anim` and marks its image refs
+  eligible; only Spine pages are excluded). Nothing there changed. What *did* need care is the
+  consequence: the proxy now shares a cache with the atlas resolver, so it composes regions and
+  reads `atlasSizeOf` for native sizing.
+- R1's `sizeMode` / `sourceSize` / per-frame-anchor maths is untouched; it just gets the per-frame
+  texture it was always missing (and a `null` while a swap is in flight, rather than the previous
+  frame's dimensions).

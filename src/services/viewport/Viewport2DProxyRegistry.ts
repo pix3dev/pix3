@@ -4,7 +4,17 @@ import { AnimatedSprite2D, resolveAnimatedSpriteFrameLayout } from '@pix3/runtim
 import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
-import { findAnimationClip } from '@pix3/runtime';
+import {
+  findAnimationClip,
+  getAnimationFrameTexturePath,
+  isSequenceAnimationFrame,
+} from '@pix3/runtime';
+import {
+  applyTextureRegionToTexture,
+  composeTextureRegion,
+  type TextureRegion,
+} from '@pix3/runtime';
+import { atlasSizeOf, baseRegionOf, copyAtlasMetadata } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { ColorRect2D } from '@pix3/runtime';
@@ -298,8 +308,16 @@ export class Viewport2DProxyRegistry {
       if ((visualRoot.userData.animationTexturePath as string | null) !== normalizedTexturePath) {
         continue;
       }
-      this.disposeAnimatedSprite2DTexture(visualRoot);
-      // The reload is gated on a missing resource, not on the texture path.
+      // `animationTexturePath` is the *frame's* file (or the resource-level
+      // spritesheet for sheet-backed clips), so this now matches the per-frame
+      // write-back that C7 introduced. Clearing the path — rather than dropping
+      // the texture — is what forces the reload: the stale pixels keep drawing
+      // for the one microtask the re-read takes instead of flashing the
+      // placeholder colour, and the swap disposes them.
+      visualRoot.userData.animationTexturePath = null;
+      delete visualRoot.userData.animationTextureLoadPath;
+      // The resource may itself have been rewritten alongside the pixels (a crop
+      // restamps `sourceSize`); its reload is gated on a missing resource.
       visualRoot.userData.animationResource = null;
       affectedNodeIds.push(nodeId);
     }
@@ -1096,7 +1114,6 @@ export class Viewport2DProxyRegistry {
       frames.length > 0
         ? (frames[Math.max(0, Math.min(node.currentFrame, frames.length - 1))] ?? null)
         : null;
-    const texture = (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
 
     const layout = resolveAnimatedSpriteFrameLayout({
       nodeWidth: node.width ?? 64,
@@ -1104,8 +1121,14 @@ export class Viewport2DProxyRegistry {
       anchor: node.anchor,
       sizeMode: node.sizeMode,
       frame,
-      frameSourceSize: this.resolveProxyFrameSourceSize(frame, texture),
-      clipFirstFrameSourceSize: this.resolveProxyFrameSourceSize(frames[0] ?? null, texture),
+      frameSourceSize: this.resolveProxyFrameSourceSize(
+        frame,
+        this.getAnimatedSprite2DFrameTexture(visualRoot, resource, frame)
+      ),
+      clipFirstFrameSourceSize: this.resolveProxyFrameSourceSize(
+        frames[0] ?? null,
+        this.getAnimatedSprite2DFrameTexture(visualRoot, resource, frames[0] ?? null)
+      ),
     });
 
     sizeGroup.scale.set(layout.width, layout.height, 1);
@@ -1113,9 +1136,12 @@ export class Viewport2DProxyRegistry {
   }
 
   /**
-   * Frame pixel size for proxy layout: the authored `sourceSize` first, then the
-   * loaded texture's own image dimensions. Mirrors the runtime's resolution order
-   * minus the atlas branch (editor proxies load raw textures, never atlas views).
+   * Frame pixel size for proxy layout: the authored `sourceSize` first, then an
+   * atlas view's recorded source size, then the loaded texture's own image
+   * dimensions — the same order as `AnimatedSprite2D.resolveFrameSourceSize`.
+   * The atlas branch matters because proxies now resolve their textures through
+   * the shared {@link AssetLoader}, whose cache can hold sheet views while play
+   * mode has an atlas resolver installed.
    */
   private resolveProxyFrameSourceSize(
     frame: AnimationFrame | null,
@@ -1126,12 +1152,38 @@ export class Viewport2DProxyRegistry {
       return authored;
     }
 
+    const atlasSize = atlasSizeOf(texture);
+    if (atlasSize && atlasSize.width > 0 && atlasSize.height > 0) {
+      return atlasSize;
+    }
+
     const image = texture?.image as { width?: number; height?: number } | undefined;
     if (image && Number(image.width) > 0 && Number(image.height) > 0) {
       return { width: Number(image.width), height: Number(image.height) };
     }
 
     return null;
+  }
+
+  /**
+   * The proxy's cached texture, but only when it is the one this frame actually
+   * wants. A frame swap resolves its file asynchronously, so during that gap the
+   * cached texture still belongs to the previous frame — sizing off it would
+   * flash the wrong native size.
+   */
+  private getAnimatedSprite2DFrameTexture(
+    visualRoot: THREE.Object3D,
+    resource: AnimationResource | null,
+    frame: AnimationFrame | null
+  ): THREE.Texture | null {
+    const texturePath = getAnimationFrameTexturePath(resource, frame);
+    if (!texturePath) {
+      return null;
+    }
+    if ((visualRoot.userData.animationTexturePath as string | null) !== texturePath) {
+      return null;
+    }
+    return (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
   }
 
   private syncAnimatedSprite2DMaterial(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
@@ -1144,7 +1196,6 @@ export class Viewport2DProxyRegistry {
     const currentResourcePath = node.animationResourcePath?.trim() || null;
     const previousResourcePath =
       (visualRoot.userData.animationResourcePath as string | null) ?? null;
-    const cachedTexturePath = (visualRoot.userData.animationTexturePath as string | null) ?? null;
     const openResource = currentResourcePath
       ? this.getLoadedAnimationResource(currentResourcePath)
       : null;
@@ -1157,12 +1208,13 @@ export class Viewport2DProxyRegistry {
     visualRoot.userData.color = node.color;
 
     if (openResource && openResource !== cachedResource) {
+      // The Sprite Editor holds this .pix3anim open and just mutated it — adopt
+      // the live object. Whether that changed the *pixels* on screen is decided
+      // by the presentation pass, which resolves the current frame's own file
+      // and reloads only when that path differs from the cached one.
       visualRoot.userData.animationResource = openResource;
-      if ((openResource.texturePath.trim() || null) !== cachedTexturePath) {
-        void this.loadAnimatedSprite2DVisualAsset(node, visualRoot);
-        this.applyAnimatedSprite2DPresentation(node, visualRoot, material);
-        return;
-      }
+      this.applyAnimatedSprite2DPresentation(node, visualRoot, material);
+      return;
     }
 
     if (currentResourcePath !== previousResourcePath) {
@@ -1195,24 +1247,51 @@ export class Viewport2DProxyRegistry {
     }
 
     const resource = (visualRoot.userData.animationResource as AnimationResource | null) ?? null;
-    const texture = (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
     const clip = findAnimationClip(resource, node.currentClip);
     const frames = clip?.frames ?? [];
     const frameIndex =
       frames.length > 0 ? Math.max(0, Math.min(node.currentFrame, frames.length - 1)) : 0;
     const frame = frames[frameIndex] ?? null;
 
+    // The current frame's own file when it has one, else the resource-level
+    // spritesheet — `getAnimationFrameTexturePath` is the single precedence rule,
+    // shared with the runtime loader, the asset previews and the Sprite Editor.
+    const frameTexturePath = getAnimationFrameTexturePath(resource, frame);
+    this.ensureAnimatedSprite2DFrameTexture(node, visualRoot, frameTexturePath);
+
+    const texture = (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
+    const isCurrentFrameTexture =
+      texture !== null &&
+      frameTexturePath.length > 0 &&
+      (visualRoot.userData.animationTexturePath as string | null) === frameTexturePath;
+
     if (texture) {
       if (resolvedMaterial.map !== texture) {
         resolvedMaterial.map = texture;
       }
 
-      if (frame) {
-        texture.offset.set(frame.offset.x, frame.offset.y);
-        texture.repeat.set(frame.repeat.x, frame.repeat.y);
-      } else {
-        texture.offset.set(0, 0);
-        texture.repeat.set(1, 1);
+      // While a frame swap's file is in flight the cached texture still shows the
+      // previous frame; leave its UVs alone rather than blanking the sprite for
+      // the microtask it takes to resolve.
+      if (isCurrentFrameTexture) {
+        // A sequence frame *is* the whole file (its UV window was baked into the
+        // pixels when the frame was written out), so only a sheet frame carries a
+        // local rect. Both compose against an atlas view's base region so the
+        // sampled sub-rect lands inside the packed frame — identity for the plain
+        // textures edit mode normally loads.
+        const localRegion: TextureRegion | null =
+          frame && !isSequenceAnimationFrame(frame)
+            ? {
+                x: frame.offset.x,
+                y: frame.offset.y,
+                width: frame.repeat.x,
+                height: frame.repeat.y,
+              }
+            : null;
+        applyTextureRegionToTexture(
+          texture,
+          composeTextureRegion(baseRegionOf(texture), localRegion)
+        );
       }
 
       resolvedMaterial.color.set('#ffffff');
@@ -1253,22 +1332,13 @@ export class Viewport2DProxyRegistry {
         return;
       }
 
-      let texture: THREE.Texture | null = null;
-      const texturePath = resource.texturePath.trim();
-      if (texturePath) {
-        texture = await this.loadAnimatedSpriteTexture(texturePath);
-      }
-
-      if (visualRoot.userData.animationLoadToken !== token) {
-        texture?.dispose();
-        return;
-      }
-
-      this.disposeAnimatedSprite2DTexture(visualRoot);
       visualRoot.userData.animationResource = resource;
-      visualRoot.userData.animationTexture = texture;
-      visualRoot.userData.animationTexturePath = texturePath || null;
+      // The frame's texture is resolved (and loaded) from here — a `.pix3anim`
+      // authored the §8.2 way has no resource-level spritesheet at all.
       this.applyAnimatedSprite2DPresentation(node, visualRoot);
+      this.applyAnimatedSprite2DFrameLayout(node, visualRoot);
+      // Reading the resource file marks nothing dirty (CLAUDE.md render-on-demand).
+      this.deps.requestRender();
     } catch {
       if (visualRoot.userData.animationLoadToken !== token) {
         return;
@@ -1284,47 +1354,85 @@ export class Viewport2DProxyRegistry {
     }
   }
 
-  private async loadAnimatedSpriteTexture(texturePath: string): Promise<THREE.Texture | null> {
-    const textureLoader = new THREE.TextureLoader();
+  /**
+   * Make sure the proxy holds the texture for the frame it is about to draw.
+   *
+   * A §8.2 clip is N files, so this runs on every frame change (including while
+   * an editor preview is playing). The *decode* cache is the shared
+   * {@link AssetLoader}'s — deliberately not a per-proxy map: one decode per file
+   * for the whole editor, evictable from one place (`evictTexture`, which the
+   * Sprite Editor's write-back fan-out already calls), and no proxy pinning 60
+   * frames of its clip forever. What the proxy keeps is exactly one *clone* of
+   * the current frame's texture, because `offset`/`repeat` are per-node state and
+   * two nodes on the same sheet at different frames would otherwise fight over
+   * them; a clone shares the GPU upload with its source, so this costs no VRAM.
+   */
+  private ensureAnimatedSprite2DFrameTexture(
+    node: AnimatedSprite2D,
+    visualRoot: THREE.Group,
+    texturePath: string
+  ): void {
+    const cachedTexturePath = (visualRoot.userData.animationTexturePath as string | null) ?? null;
+    if (cachedTexturePath === (texturePath || null)) {
+      return;
+    }
 
-    try {
-      const blob = await this.deps.readBlob(texturePath);
-      const blobUrl = URL.createObjectURL(blob);
+    if (!texturePath) {
+      this.disposeAnimatedSprite2DTexture(visualRoot);
+      return;
+    }
 
-      return await new Promise(resolve => {
-        textureLoader.load(
-          blobUrl,
-          texture => {
-            try {
-              configureSpriteTexture(texture);
-              resolve(texture);
-            } finally {
-              URL.revokeObjectURL(blobUrl);
-            }
-          },
-          undefined,
-          () => {
-            URL.revokeObjectURL(blobUrl);
-            resolve(null);
-          }
-        );
-      });
-    } catch {
-      const schemeMatch = /^([a-z]+[a-z0-9+.-]*):\/\//i.exec(texturePath);
-      const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
+    if (visualRoot.userData.animationTextureLoadPath === texturePath) {
+      return; // Already in flight for this exact file.
+    }
+    visualRoot.userData.animationTextureLoadPath = texturePath;
 
-      if (scheme === 'http' || scheme === 'https' || scheme === '') {
-        try {
-          const texture = textureLoader.load(texturePath);
-          configureSpriteTexture(texture);
-          return texture;
-        } catch {
-          return null;
-        }
+    void (async () => {
+      let texture: THREE.Texture | null = null;
+      try {
+        texture = await this.loadAnimationFrameTexture(texturePath);
+      } catch {
+        texture = null;
       }
 
-      return null;
-    }
+      // Latest-wins + liveness guard: the frame (or the whole proxy) may have
+      // moved on while the file resolved.
+      if (visualRoot.userData.animationTextureLoadPath !== texturePath) {
+        texture?.dispose();
+        return;
+      }
+      delete visualRoot.userData.animationTextureLoadPath;
+
+      const previousTexture =
+        (visualRoot.userData.animationTexture as THREE.Texture | null) ?? null;
+      previousTexture?.dispose();
+      visualRoot.userData.animationTexture = texture;
+      // Recorded even when the load failed, so a broken frame shows the
+      // placeholder instead of re-requesting its file on every sync.
+      visualRoot.userData.animationTexturePath = texturePath;
+
+      this.applyAnimatedSprite2DPresentation(node, visualRoot);
+      // `sizeMode: 'native'` reads the texture's own dimensions when the frame
+      // carries no authored sourceSize, so re-run the layout too.
+      this.applyAnimatedSprite2DFrameLayout(node, visualRoot);
+      // An async texture load is outside every dirty-marking path — without this
+      // the new frame would only appear on the ≤500 ms heartbeat.
+      this.deps.requestRender();
+    })();
+  }
+
+  /**
+   * A private clone of the shared decoded texture, treated for 2D display
+   * (sRGB + no mipmaps — see {@link configureSpriteTexture}) and re-stamped with
+   * any atlas metadata so the region composition in the presentation pass can
+   * find its packed frame.
+   */
+  private async loadAnimationFrameTexture(texturePath: string): Promise<THREE.Texture | null> {
+    const shared = await this.deps.getAssetLoader().loadTexture(texturePath);
+    const texture = shared.clone();
+    configureSpriteTexture(texture);
+    copyAtlasMetadata(shared, texture);
+    return texture;
   }
 
   private getLoadedAnimationResource(resourcePath: string): AnimationResource | null {
@@ -1345,6 +1453,8 @@ export class Viewport2DProxyRegistry {
 
     visualRoot.userData.animationTexture = null;
     visualRoot.userData.animationTexturePath = null;
+    // Any in-flight frame load now fails its liveness check and disposes itself.
+    delete visualRoot.userData.animationTextureLoadPath;
   }
 
   /**
