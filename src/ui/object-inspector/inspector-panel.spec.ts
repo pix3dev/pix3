@@ -908,7 +908,8 @@ describe('InspectorPanel animation section', () => {
     expect(panel.querySelector('.animation-frame-indicator-title')?.textContent?.trim()).toBe(
       'Frame 2 of 3'
     );
-    expect(panel.querySelector('.animation-frame-badge')?.textContent?.trim()).toBe('2');
+    // The number lives in the title only — the decorative badge used to repeat it.
+    expect(panel.querySelector('.animation-frame-badge')).toBeNull();
 
     controller.setSelectedFrameIndex(2);
     await panel.updateComplete;

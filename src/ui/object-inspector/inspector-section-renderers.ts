@@ -279,7 +279,6 @@ export class InspectorSectionRenderers {
           class="animation-frame-indicator"
           data-frame-index=${animationState.selectedFrameIndex}
         >
-          <span class="animation-frame-badge" aria-hidden="true">${frameNumber}</span>
           <span class="animation-frame-indicator-text">
             <span class="animation-frame-indicator-title"
               >Frame ${frameNumber} of ${frameCount}</span

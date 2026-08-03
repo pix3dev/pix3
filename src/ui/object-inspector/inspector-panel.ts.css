@@ -248,21 +248,6 @@ pix3-panel {
   background: var(--accent-soft);
 }
 
-.animation-frame-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.6rem;
-  height: 1.6rem;
-  padding: 0 0.35rem;
-  border-radius: var(--radius-1);
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.78rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
 .animation-frame-indicator-text {
   display: flex;
   flex-direction: column;
