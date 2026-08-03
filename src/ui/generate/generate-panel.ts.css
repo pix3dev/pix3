@@ -520,6 +520,30 @@ pix3-generate-panel .gp-history-thumb img {
   display: block;
 }
 
+pix3-generate-panel .gp-history-apply {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-0);
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-generate-panel .gp-history-apply:disabled {
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-3);
+  cursor: default;
+}
+
 pix3-generate-panel .gp-history-delete {
   position: absolute;
   top: -6px;

@@ -5,6 +5,7 @@ import type { AnimationResource } from '@pix3/runtime';
 
 import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCommand';
 import type { ImageEditTarget } from '@/services/image-gen/ImageEditTargetService';
+import { setGenerationDragData } from '@/ui/shared/asset-drag-drop';
 
 import type { AnimationDocumentController } from './animation-document-controller';
 import { SpriteEditorPanel } from './sprite-editor-panel';
@@ -145,6 +146,7 @@ function createPreferences() {
 }
 
 interface PanelStubs {
+  historyGet: ReturnType<typeof vi.fn>;
   readBlob: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
   setActiveController: ReturnType<typeof vi.fn>;
@@ -160,6 +162,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   // Reads never resolve to a decodable blob: the texture-preview loader swallows
   // the failure, and no detached promise is left hanging (the `.finally` gotcha).
   const readBlob = vi.fn().mockRejectedValue(new Error('no project storage in tests'));
+  const historyGet = vi.fn().mockResolvedValue(undefined);
   const updatePreferences = vi.fn((patch: Record<string, unknown>) => {
     Object.assign(preferences, patch);
   });
@@ -189,7 +192,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       subscribe: vi.fn().mockReturnValue(() => undefined),
       updatePreferences,
     },
-    history: { add: vi.fn().mockResolvedValue(undefined) },
+    history: { add: vi.fn().mockResolvedValue(undefined), get: historyGet },
     bgRemoval: { removeBackground: vi.fn() },
     storage: { readBlob, writeBinaryFile: vi.fn(), createDirectory: vi.fn() },
     editorSettings: { showSettings: vi.fn() },
@@ -222,6 +225,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   return {
     panel,
     stubs: {
+      historyGet,
       readBlob,
       updatePreferences,
       setActiveController,
@@ -838,5 +842,53 @@ describe('SpriteEditorPanel (unified shell)', () => {
 
     expect(internals.isTextureDragOver).toBe(false);
     expect(internals.textureDragDepth).toBe(0);
+  });
+
+  /**
+   * §8.4 — a generation dropped on the canvas goes into the *current* frame, not
+   * onto the end of the clip (that is the timeline's row of the matrix). Here the
+   * sizes differ, so it opens a placement rather than writing.
+   */
+  it('routes a generation dropped on the canvas into the bound frame', async () => {
+    seedAnimationTab();
+    const { panel, stubs } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+    seedFrameMetrics(internals.documentController, 'res://sprites/walk/idle_0001.png', {
+      width: 256,
+      height: 256,
+    });
+
+    const blob = new Blob([new Uint8Array([7, 7, 7])], { type: 'image/png' });
+    stubs.historyGet.mockResolvedValue({
+      id: 'rec-1',
+      createdAt: 0,
+      providerId: '',
+      modelId: '',
+      prompt: 'A brass gear',
+      mimeType: 'image/png',
+      blob,
+      width: 128,
+      height: 64,
+    });
+
+    const transfer = new DataTransfer();
+    setGenerationDragData(transfer, { id: 'rec-1', suggestedName: 'a-brass-gear.png' });
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, 'dataTransfer', { value: transfer, configurable: true });
+    panel.querySelector('.ag-stage')?.dispatchEvent(drop);
+
+    await vi.waitFor(() => {
+      expect(internals.placeSession).not.toBeNull();
+    });
+    expect(stubs.historyGet).toHaveBeenCalledWith('rec-1');
+    expect(internals.placeSession?.blob).toBe(blob);
+    expect(internals.placeSession?.image).toEqual({ width: 128, height: 64 });
+    // ...and it did NOT fall through to the append path.
+    expect(internals.documentController?.activeClip?.frames).toHaveLength(1);
   });
 });

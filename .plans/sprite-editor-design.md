@@ -1382,7 +1382,13 @@ Two additions, both outside the place-mode code and both landing on the §9.11.0
    from `GenerationHistoryService` and calls `this.imageEditTargets.applyGeneratedImage({...})` — the
    same call `deliver()` makes, so a size mismatch opens place mode with no extra wiring. Icon
    button via `IconService` (a Feather name already registered there), never a glyph.
-2. **Drag a history thumbnail into the timeline.** `sprite-timeline.ts` already parses drops through
+2. **Drag a history thumbnail onto the canvas.** §8.4's matrix says this goes into the *current
+   frame* (place mode on a size mismatch), not onto the end of the clip. `sprite-editor-panel.ts`'s
+   `onFrameTextureDrop` reads the payload, pulls the record and calls its own `applyGeneratedImage`.
+   This row was missing from the first draft of this section and the drop was left inert — the
+   append overlay lit up and nothing happened, because the shared parser (correctly) refuses to read
+   a `res://` path out of a generation's suggested file name.
+3. **Drag a history thumbnail into the timeline.** `sprite-timeline.ts` already parses drops through
    `frame-texture-drop.ts`; teach it `GENERATION_DRAG_MIME`
    (`hasGenerationDragData`/`getGenerationDragData`, `@/ui/shared/asset-drag-drop`, already exported
    and already set by `onHistoryDragStart`). On drop: inject `GenerationHistoryService`, fetch the
@@ -1390,6 +1396,12 @@ Two additions, both outside the place-mode code and both landing on the §9.11.0
    existing `controller.importOsFiles([file])` path so insert-before-card semantics, file naming and
    undo are shared rather than reimplemented. `isPotentialTextureDrag` must return true for it, so
    add the MIME there too.
+
+   §8.4's timeline row ends "(place-mode if size mismatch)"; that parenthetical does **not** apply
+   to an insert and is deliberately not implemented. Place mode exists to fit an image into an
+   *existing* frame's rect; a newly inserted frame has no rect to fit into — it takes the image's own
+   size, exactly like a file dragged in from the desktop. Place mode on the timeline would only make
+   sense for a drop that *replaces* a frame, which this row is not.
 
 #### 9.11.6 Tests and live verification
 

@@ -59,6 +59,7 @@ interface PanelStubs {
   generate: ReturnType<typeof vi.fn>;
   historyAdd: ReturnType<typeof vi.fn>;
   historyList: ReturnType<typeof vi.fn>;
+  historyGet: ReturnType<typeof vi.fn>;
   writeBinaryFile: ReturnType<typeof vi.fn>;
   focusOrOpenSpriteEditor: ReturnType<typeof vi.fn>;
   targets: ImageEditTargetService;
@@ -85,6 +86,11 @@ function createPanel(records: GenerationRecord[] = []): {
   };
   const historyAdd = vi.fn().mockResolvedValue(undefined);
   const historyList = vi.fn().mockResolvedValue(records);
+  // The stored copy the panel re-reads before pasting into a frame, keyed the
+  // same way IndexedDB keys it.
+  const historyGet = vi
+    .fn()
+    .mockImplementation(async (id: string) => records.find(record => record.id === id));
   const writeBinaryFile = vi.fn().mockResolvedValue(undefined);
   const focusOrOpenSpriteEditor = vi.fn().mockResolvedValue(undefined);
   const targets = new ImageEditTargetService();
@@ -109,6 +115,7 @@ function createPanel(records: GenerationRecord[] = []): {
     history: {
       subscribe: vi.fn().mockReturnValue(() => undefined),
       list: historyList,
+      get: historyGet,
       add: historyAdd,
       delete: vi.fn().mockResolvedValue(undefined),
       clear: vi.fn().mockResolvedValue(undefined),
@@ -126,7 +133,33 @@ function createPanel(records: GenerationRecord[] = []): {
 
   return {
     panel,
-    stubs: { generate, historyAdd, historyList, writeBinaryFile, focusOrOpenSpriteEditor, targets },
+    stubs: {
+      generate,
+      historyAdd,
+      historyList,
+      historyGet,
+      writeBinaryFile,
+      focusOrOpenSpriteEditor,
+      targets,
+    },
+  };
+}
+
+/** One stored generation, as `GenerationHistoryService.list()` would hand it back. */
+function createHistoryRecord(overrides: Partial<GenerationRecord> = {}): GenerationRecord {
+  return {
+    id: 'rec-1',
+    providerId: 'fake',
+    modelId: 'fake-model',
+    prompt: 'A brass gear',
+    aspectRatio: 'Auto',
+    imageSize: '1K',
+    mimeType: PNG_MIME,
+    blob: new Blob([new Uint8Array([1])], { type: PNG_MIME }),
+    width: 64,
+    height: 64,
+    createdAt: 0,
+    ...overrides,
   };
 }
 
@@ -359,6 +392,74 @@ describe('GeneratePanel', () => {
     await panel.updateComplete;
     expect(applied).toHaveLength(1);
     expect(applied[0].blob).toBe(record.blob);
+  });
+
+  it('only enables "Apply to current frame" while a writable frame is bound (P5b)', async () => {
+    const { panel, stubs } = createPanel([createHistoryRecord()]);
+    await mount(panel);
+    await vi.waitFor(() => {
+      expect(panel.querySelector('.gp-history-apply')).not.toBeNull();
+    });
+    const applyButton = () => panel.querySelector<HTMLButtonElement>('.gp-history-apply');
+
+    // No editor bound at all.
+    expect(applyButton()?.disabled).toBe(true);
+
+    // A plain image canvas: applicable, but there is no frame behind it, so the
+    // frame paste stays off (the thumbnail itself already covers that case).
+    const plain = createTarget();
+    stubs.targets.setActiveTarget(plain.target);
+    await panel.updateComplete;
+    expect(applyButton()?.disabled).toBe(true);
+    stubs.targets.clearActiveTarget(plain.target);
+
+    // A frame-bound canvas that cannot take a write-back right now (§9.5).
+    const blocked = createTarget({
+      label: 'walk.pix3anim',
+      boundFrameTexturePath: 'res://sprites/walk/idle_0001.png',
+      acceptsFrameWriteBack: false,
+    });
+    stubs.targets.setActiveTarget(blocked.target);
+    await panel.updateComplete;
+    expect(applyButton()?.disabled).toBe(true);
+
+    blocked.update({ acceptsFrameWriteBack: true });
+    await panel.updateComplete;
+    expect(applyButton()?.disabled).toBe(false);
+    expect(applyButton()?.getAttribute('title')).toBe('Apply to current frame');
+  });
+
+  it('pastes the stored generation into the bound frame when applied (P5b)', async () => {
+    const record = createHistoryRecord();
+    const { panel, stubs } = createPanel([record]);
+    await mount(panel);
+    await vi.waitFor(() => {
+      expect(panel.querySelector('.gp-history-apply')).not.toBeNull();
+    });
+
+    const { target, applied } = createTarget({
+      label: 'walk.pix3anim',
+      boundFrameTexturePath: 'res://sprites/walk/idle_0001.png',
+      acceptsFrameWriteBack: true,
+    });
+    stubs.targets.setActiveTarget(target);
+    await panel.updateComplete;
+
+    panel.querySelector<HTMLButtonElement>('.gp-history-apply')?.click();
+
+    await vi.waitFor(() => {
+      expect(applied).toHaveLength(1);
+    });
+    expect(stubs.historyGet).toHaveBeenCalledWith('rec-1');
+    expect(applied[0].blob).toBe(record.blob);
+    expect(applied[0].mimeType).toBe(PNG_MIME);
+    expect(applied[0].prompt).toBe('A brass gear');
+    // The size travels with it: that is what lets the Sprite Editor decide
+    // between an immediate write-back and place mode (§9.11.0).
+    expect(applied[0].width).toBe(64);
+    expect(applied[0].height).toBe(64);
+    // A paste is not a "continue from here": the prompt bar is untouched.
+    expect(panel.querySelector<HTMLTextAreaElement>('.gp-prompt')?.value).toBe('');
   });
 
   it('re-mints history thumbnails after a Golden Layout re-dock', async () => {

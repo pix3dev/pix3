@@ -242,6 +242,16 @@ export class GeneratePanel extends ComponentBase {
     return !snapshot.boundFrameTexturePath || snapshot.acceptsFrameWriteBack;
   }
 
+  /**
+   * Whether a stored generation can be pasted straight into the frame the bound
+   * editor has selected (§9.11.5). Stricter than {@link canApplyToTarget}: a plain
+   * image canvas already takes history entries through the thumbnail itself, so
+   * the extra action only earns its place when there *is* a frame behind it.
+   */
+  private get canApplyToFrame(): boolean {
+    return this.canApplyToTarget && Boolean(this.targetSnapshot?.boundFrameTexturePath);
+  }
+
   /** Hand `image` to the bound editor, or keep it here when there is nowhere to put it. */
   private deliver(image: PendingResult): void {
     if (
@@ -595,6 +605,10 @@ export class GeneratePanel extends ComponentBase {
       return null;
     }
     const applyLabel = this.canApplyToTarget ? 'Apply to canvas' : 'Use this image';
+    const canApplyToFrame = this.canApplyToFrame;
+    const frameApplyLabel = canApplyToFrame
+      ? 'Apply to current frame'
+      : 'No frame is bound — select a frame in the Sprite Editor';
     return html`
       <footer class="gp-history">
         <div class="gp-history-head">
@@ -616,6 +630,15 @@ export class GeneratePanel extends ComponentBase {
                   @dragstart=${(event: DragEvent) => this.onHistoryDragStart(event, record)}
                 >
                   ${url ? html`<img src=${url} alt=${record.prompt} draggable="false" />` : null}
+                </button>
+                <button
+                  class="gp-history-apply"
+                  title=${frameApplyLabel}
+                  aria-label=${`${frameApplyLabel}: ${record.prompt}`}
+                  ?disabled=${!canApplyToFrame}
+                  @click=${() => void this.applyHistoryRecordToFrame(record)}
+                >
+                  ${this.icons.getIcon('check', 12)}
                 </button>
                 <button
                   class="gp-history-delete"
@@ -1100,6 +1123,44 @@ export class GeneratePanel extends ComponentBase {
       prompt: record.prompt,
       width: record.width,
       height: record.height,
+    });
+  }
+
+  /**
+   * Paste a stored generation into the bound editor's selected frame (§9.11.5).
+   * Deliberately the very same `applyGeneratedImage` call the fresh-generation
+   * path makes, so a size mismatch opens the Sprite Editor's place mode here too
+   * without this action knowing anything about it. Unlike the thumbnail click it
+   * does not adopt the record's prompt/aspect ratio: this is a paste, not a
+   * "continue from here".
+   */
+  private async applyHistoryRecordToFrame(record: GenerationRecord): Promise<void> {
+    if (!this.canApplyToFrame) {
+      return;
+    }
+
+    // Re-read through the service so the freshest stored copy is what lands in
+    // the frame; the strip's own record still carries the blob, so a failed or
+    // missing read is not a reason to drop the paste.
+    let stored: GenerationRecord | undefined;
+    try {
+      stored = await this.history.get(record.id);
+    } catch (error) {
+      console.warn('[GeneratePanel] Failed to read the generation to apply', error);
+    }
+    const source = stored ?? record;
+
+    // Awaiting the read gave the user time to click elsewhere.
+    if (!this.canApplyToFrame) {
+      return;
+    }
+
+    this.imageEditTargets.applyGeneratedImage({
+      blob: source.blob,
+      mimeType: source.mimeType,
+      prompt: source.prompt,
+      width: source.width,
+      height: source.height,
     });
   }
 

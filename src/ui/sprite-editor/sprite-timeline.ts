@@ -1,6 +1,14 @@
 import { ComponentBase, customElement, html, inject, property } from '@/fw';
 import { IconService } from '@/services/editor/IconService';
-import { FRAME_REORDER_MIME } from '@/ui/shared/asset-drag-drop';
+import {
+  GenerationHistoryService,
+  type GenerationRecord,
+} from '@/services/image-gen/GenerationHistoryService';
+import {
+  FRAME_REORDER_MIME,
+  getGenerationDragData,
+  type GenerationDragPayload,
+} from '@/ui/shared/asset-drag-drop';
 import { isSequenceAnimationFrame, type AnimationClip, type AnimationFrame } from '@pix3/runtime';
 
 import type { AnimationDocumentController } from './animation-document-controller';
@@ -32,6 +40,9 @@ export class SpriteTimeline extends ComponentBase {
 
   @inject(IconService)
   private readonly iconService!: IconService;
+
+  @inject(GenerationHistoryService)
+  private readonly generationHistory!: GenerationHistoryService;
 
   private boundController: AnimationDocumentController | null = null;
   private disposeControllerSubscription?: () => void;
@@ -411,16 +422,54 @@ export class SpriteTimeline extends ComponentBase {
     event.stopPropagation();
     this.dragOverFrameIndex = -1;
 
-    const droppedFiles = getDroppedImageFiles(event.dataTransfer);
-    const texturePaths =
-      droppedFiles.length > 0
-        ? await controller.importOsFiles(droppedFiles)
-        : getDroppedTextureResources(event.dataTransfer);
+    const texturePaths = await this.resolveDroppedTexturePaths(controller, event.dataTransfer);
     if (texturePaths.length === 0) {
       return;
     }
 
     await controller.addFrameTextures(texturePaths, frameIndex);
+  }
+
+  /**
+   * Every source a card drop can carry, resolved to project texture paths: a
+   * Generate-panel history thumbnail, OS image files, or project assets that are
+   * already on disk. The first two go through `importOsFiles`, so a generated
+   * image is named, placed and undone exactly like a file dragged in from the
+   * desktop instead of getting its own import path (§9.11.5).
+   */
+  private async resolveDroppedTexturePaths(
+    controller: AnimationDocumentController,
+    transfer: DataTransfer | null
+  ): Promise<string[]> {
+    const generation = getGenerationDragData(transfer);
+    if (generation) {
+      const file = await this.readGenerationFile(generation);
+      return file ? controller.importOsFiles([file]) : [];
+    }
+
+    const droppedFiles = getDroppedImageFiles(transfer);
+    return droppedFiles.length > 0
+      ? controller.importOsFiles(droppedFiles)
+      : getDroppedTextureResources(transfer);
+  }
+
+  /** Materialize a dragged generation (an id, not the pixels) as an importable file. */
+  private async readGenerationFile(payload: GenerationDragPayload): Promise<File | null> {
+    let record: GenerationRecord | undefined;
+    try {
+      record = await this.generationHistory.get(payload.id);
+    } catch (error) {
+      console.warn('[SpriteTimeline] Failed to read the dragged generation', error);
+      return null;
+    }
+
+    if (!record) {
+      // Deleted from history between dragstart and drop — nothing to insert.
+      return null;
+    }
+
+    const name = payload.suggestedName?.trim() || defaultGenerationFileName(record.mimeType);
+    return new File([record.blob], name, { type: record.mimeType });
   }
 
   private onFrameDragEnd(): void {
@@ -443,6 +492,17 @@ export class SpriteTimeline extends ComponentBase {
     event.stopPropagation();
     await this.controller?.removeFrames([frameIndex]);
   }
+}
+
+/**
+ * Fallback name for a dragged generation whose payload carried none. Only the
+ * extension really matters — `importOsFiles` renames every imported file to the
+ * clip's own `<clip>_<nnnn>.<ext>` sequence — but it must match the blob.
+ */
+function defaultGenerationFileName(mimeType: string): string {
+  const subtype = mimeType.split('/')[1]?.split(/[+;]/)[0]?.trim();
+  const extension = subtype && /^[a-z0-9]+$/i.test(subtype) ? subtype.toLowerCase() : 'png';
+  return `generated-${Date.now()}.${extension === 'jpeg' ? 'jpg' : extension}`;
 }
 
 /**

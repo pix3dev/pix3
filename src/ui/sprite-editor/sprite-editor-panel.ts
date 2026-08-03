@@ -69,6 +69,7 @@ import {
   getDroppedTextureResources,
   isPotentialTextureDrag,
 } from './frame-texture-drop';
+import { getGenerationDragData } from '@/ui/shared/asset-drag-drop';
 import { getFrameImageStyle } from './sprite-timeline';
 import './sprite-clips-rail';
 import {
@@ -1781,6 +1782,15 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.textureDragDepth = 0;
     this.isTextureDragOver = false;
 
+    // §8.4: a generation dropped on the *canvas* goes into the current frame
+    // (place mode when the sizes differ), not onto the end of the clip — that is
+    // the timeline's row of the matrix. Without this the drop would light the
+    // append overlay and then do nothing, because the shared parser deliberately
+    // refuses to read a `res://` path out of a generation's suggested file name.
+    if (await this.applyDroppedGeneration(event.dataTransfer)) {
+      return;
+    }
+
     const droppedFiles = getDroppedImageFiles(event.dataTransfer);
     const texturePaths =
       droppedFiles.length > 0
@@ -1791,6 +1801,35 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
 
     await controller.addFrameTextures(texturePaths);
+  }
+
+  /**
+   * Route a dragged Generate-panel history entry into the bound frame. Returns
+   * true when the drop was a generation — handled or not — so the caller stops
+   * rather than falling through to the append path. The drag carries only a record
+   * id; the pixels come back out of {@link GenerationHistoryService}.
+   */
+  private async applyDroppedGeneration(transfer: DataTransfer | null): Promise<boolean> {
+    const payload = getGenerationDragData(transfer);
+    if (!payload) {
+      return false;
+    }
+
+    try {
+      const record = await this.history.get(payload.id);
+      if (record) {
+        this.applyGeneratedImage({
+          blob: record.blob,
+          mimeType: record.mimeType,
+          prompt: record.prompt,
+          width: record.width,
+          height: record.height,
+        });
+      }
+    } catch (error) {
+      console.warn('[SpriteEditor] Failed to read the dropped generation', error);
+    }
+    return true;
   }
 
   // -- background removal ----------------------------------------------------

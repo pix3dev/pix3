@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetAppState } from '@/state';
-import { FRAME_REORDER_MIME } from '@/ui/shared/asset-drag-drop';
+import type { GenerationRecord } from '@/services/image-gen/GenerationHistoryService';
+import { FRAME_REORDER_MIME, GENERATION_DRAG_MIME } from '@/ui/shared/asset-drag-drop';
 import type { AnimationFrame, AnimationResource } from '@pix3/runtime';
 
 import {
   AnimationDocumentController,
   type AnimationDocumentControllerDeps,
 } from './animation-document-controller';
-import { isPotentialTextureDrag } from './frame-texture-drop';
+import { getDroppedTextureResources, isPotentialTextureDrag } from './frame-texture-drop';
 import { SpriteTimeline } from './sprite-timeline';
 
 /**
@@ -107,6 +108,41 @@ function createDataTransfer(initial: Record<string, string> = {}) {
       data.set(type, value);
     },
   };
+}
+
+/** One stored generation, shaped as `GenerationHistoryService` hands it back. */
+function createGenerationRecord(): GenerationRecord {
+  return {
+    id: 'rec-1',
+    createdAt: 0,
+    providerId: 'fake',
+    modelId: 'fake-model',
+    prompt: 'A brass gear',
+    mimeType: 'image/png',
+    blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+    width: 64,
+    height: 64,
+  };
+}
+
+/**
+ * Stand in for the injected `GenerationHistoryService`, which is IndexedDB-backed.
+ * Only `get` is reached: the drag payload carries an id, and the timeline resolves
+ * the pixels itself.
+ */
+function stubGenerationHistory(
+  timeline: SpriteTimeline,
+  record: GenerationRecord | undefined
+): ReturnType<typeof vi.fn> {
+  const get = vi.fn().mockResolvedValue(record);
+  Object.defineProperty(timeline, 'generationHistory', { value: { get }, configurable: true });
+  return get;
+}
+
+/** The controller's project-storage writer, so a real import can be observed. */
+function getWriteBinaryFileStub(controller: AnimationDocumentController): ReturnType<typeof vi.fn> {
+  const deps = (controller as unknown as { deps: AnimationDocumentControllerDeps }).deps;
+  return deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>;
 }
 
 function dispatchDragEvent(
@@ -226,6 +262,79 @@ describe('SpriteTimeline', () => {
     await vi.waitFor(() => {
       expect(addFrameTextures).toHaveBeenCalledWith(['res://textures/player.png'], 1);
     });
+  });
+
+  it('imports a generation dragged out of the Generate panel as a frame (P5b)', async () => {
+    const controller = createController();
+    const writeBinaryFile = getWriteBinaryFileStub(controller);
+    const timeline = await mountTimeline(controller);
+    const record = createGenerationRecord();
+    const get = stubGenerationHistory(timeline, record);
+    // Exactly what `setGenerationDragData` writes: the record id, plus the
+    // suggested *file name* on text/plain — which must never be read as a path.
+    const dataTransfer = createDataTransfer({
+      [GENERATION_DRAG_MIME]: JSON.stringify({ id: 'rec-1', suggestedName: 'a-brass-gear.png' }),
+      'text/plain': 'a-brass-gear.png',
+    });
+
+    dispatchDragEvent(getFrameCards(timeline)[1], 'drop', dataTransfer);
+
+    await vi.waitFor(() => {
+      expect(writeBinaryFile).toHaveBeenCalledTimes(1);
+    });
+    expect(get).toHaveBeenCalledWith('rec-1');
+    // Shared with the OS-file import: the blob lands in the clip's own numbered
+    // frame sequence, not under the dragged name.
+    expect(writeBinaryFile.mock.calls[0][0]).toBe('res://animations/walk/idle_0001.png');
+    await vi.waitFor(() => {
+      expect(controller.resource?.clips[0]?.frames.map(frame => frame.texturePath)).toEqual([
+        'res://a.png',
+        'res://animations/walk/idle_0001.png',
+        'res://b.png',
+        'res://c.png',
+      ]);
+    });
+  });
+
+  it('inserts nothing when the dragged generation is gone from history', async () => {
+    const controller = createController();
+    const writeBinaryFile = getWriteBinaryFileStub(controller);
+    const timeline = await mountTimeline(controller);
+    // Deleted between dragstart and drop: the text/plain file name left behind
+    // must not be turned into a `res://` frame that does not exist.
+    const get = stubGenerationHistory(timeline, undefined);
+    const dataTransfer = createDataTransfer({
+      [GENERATION_DRAG_MIME]: JSON.stringify({ id: 'rec-1', suggestedName: 'a-brass-gear.png' }),
+      'text/plain': 'a-brass-gear.png',
+    });
+
+    dispatchDragEvent(getFrameCards(timeline)[1], 'drop', dataTransfer);
+
+    await vi.waitFor(() => {
+      expect(get).toHaveBeenCalledWith('rec-1');
+    });
+    await Promise.resolve();
+
+    expect(writeBinaryFile).not.toHaveBeenCalled();
+    expect(controller.resource?.clips[0]?.frames).toHaveLength(3);
+  });
+
+  it('treats a generation drag as a potential texture drop, not as a path', () => {
+    // `dragover` can only see the MIME list, so the card's preventDefault — and
+    // hence the drop event at all — hangs off this predicate.
+    const idOnly = createDataTransfer({
+      [GENERATION_DRAG_MIME]: JSON.stringify({ id: 'rec-1' }),
+    });
+    expect(isPotentialTextureDrag(idOnly as unknown as DataTransfer)).toBe(true);
+
+    // The suggested file name rides along on text/plain and looks exactly like a
+    // relative image path; reading it as one would invent a `res://` asset. The
+    // shell around the strip shares this parser, so the guard lives there.
+    const withSuggestedName = createDataTransfer({
+      [GENERATION_DRAG_MIME]: JSON.stringify({ id: 'rec-1', suggestedName: 'a-brass-gear.png' }),
+      'text/plain': 'a-brass-gear.png',
+    });
+    expect(getDroppedTextureResources(withSuggestedName as unknown as DataTransfer)).toEqual([]);
   });
 
   it('deletes a single frame from its card affordance', async () => {

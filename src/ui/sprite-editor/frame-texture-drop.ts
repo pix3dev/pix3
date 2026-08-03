@@ -4,6 +4,8 @@ import {
   ASSET_RESOURCE_LIST_MIME,
   ASSET_RESOURCE_MIME,
   FRAME_REORDER_MIME,
+  GENERATION_DRAG_MIME,
+  hasGenerationDragData,
 } from '@/ui/shared/asset-drag-drop';
 
 import { hasSupportedImageExtension } from './animation-document-controller';
@@ -75,6 +77,15 @@ export function getDroppedTextureResources(transfer: DataTransfer | null): strin
     return [];
   }
 
+  // A Generate-panel history thumbnail carries only a record id, plus `text/plain`
+  // holding the *suggested file name* for the save dialog. That name looks exactly
+  // like a relative image path, so parsing it here would invent a `res://` asset
+  // that does not exist. Such a drop is resolved by its handler instead (it reads
+  // the blob out of GenerationHistoryService and imports it as a file).
+  if (hasGenerationDragData(transfer)) {
+    return [];
+  }
+
   const parsedResources =
     parseDroppedTextureResources(transfer.getData(ASSET_RESOURCE_LIST_MIME)) ??
     parseDroppedTextureResources(transfer.getData(ASSET_PATH_LIST_MIME));
@@ -111,6 +122,7 @@ export function isPotentialTextureDrag(transfer: DataTransfer | null): boolean {
 
   return (
     types.has('Files') ||
+    types.has(GENERATION_DRAG_MIME) ||
     types.has(ASSET_RESOURCE_LIST_MIME) ||
     types.has(ASSET_PATH_LIST_MIME) ||
     types.has(ASSET_RESOURCE_MIME) ||
