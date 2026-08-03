@@ -83,6 +83,18 @@ import {
   type ImageSize,
 } from './crop-geometry';
 import {
+  applyPlaceDrag,
+  clampPlaceScale,
+  describePlaceRect,
+  isApplicablePlaceRect,
+  quickFitRect,
+  scalePlaceRect,
+  type PlaceDragMode,
+  type PlaceDragState,
+  type PlaceQuickFit,
+  type PlaceRect,
+} from './place-geometry';
+import {
   flipImageBlob,
   readBlobSize,
   resizeImageBlob,
@@ -114,6 +126,12 @@ const CROP_HANDLES: ReadonlyArray<{ pos: string; edges: string }> = [
   { pos: 'sw', edges: 'sw' },
   { pos: 'w', edges: 'w' },
 ];
+
+/** Place mode has corner handles only — they scale, they never stretch (§9.11.1). */
+const PLACE_HANDLES: readonly string[] = ['nw', 'ne', 'se', 'sw'];
+
+/** Multiplier a plain wheel notch applies to the placed image's size. */
+const PLACE_WHEEL_STEP = 1.1;
 
 /**
  * Nine-up anchor grid. Icons, never arrow glyphs — `↖ ↑ ↗` ignore the theme and
@@ -155,6 +173,31 @@ interface CurrentImage {
   source: CurrentSource;
   width?: number;
   height?: number;
+}
+
+/**
+ * An incoming image being positioned by hand over the bound frame (§9.11). Opened
+ * only when the frame can be written back to *and* the incoming raster is a
+ * different size to the frame; nothing is written until Apply.
+ */
+interface PlaceSession {
+  blob: Blob;
+  mimeType: string;
+  /** Tracked via {@link SpriteEditorPanel.trackUrl}, revoked when the session closes. */
+  objectUrl: string;
+  /** Intrinsic size of the incoming image. */
+  image: ImageSize;
+  /** The frame rect at session start — the canvas the composite is drawn onto. */
+  frame: ImageSize;
+  prompt: string;
+  /** The frame this session belongs to; leaving it cancels. */
+  frameIndex: number;
+  /**
+   * `boundFrameTexturePath` at session start. Recorded rather than compared
+   * through Lit's `changed` map so the cancel is order-independent: the binding and
+   * the session can land in the same update cycle.
+   */
+  texturePath: string;
 }
 
 @customElement('pix3-sprite-editor-panel')
@@ -231,6 +274,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   @state() private savePopoverOpen = false;
   @state() private cropMode = false;
   @state() private cropRect: CropRect | null = null;
+  /** Open place session (§9.11), mutually exclusive with {@link cropMode}. */
+  @state() private placeSession: PlaceSession | null = null;
+  /** Destination of the placed image, in frame pixels. */
+  @state() private placeRect: PlaceRect | null = null;
   /** True while a rotate/flip transform is re-encoding the current image. */
   @state() private transformBusy = false;
   /** True while a slice / create-animation run is writing frame files. */
@@ -259,7 +306,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
 
   private readonly stageRef = createRef<HTMLDivElement>();
   private readonly stageImageRef = createRef<HTMLImageElement>();
+  /** The `<img>` place mode composites from — the incoming raster, not the frame's. */
+  private readonly placeImageRef = createRef<HTMLImageElement>();
   private cropDrag: CropDragState | null = null;
+  private placeDrag: PlaceDragState | null = null;
 
   /**
    * Zoom/pan of the canvas. Shared with the animation editor's frame stage so
@@ -335,8 +385,15 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
   };
   private readonly onDocKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && this.savePopoverOpen) {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    if (this.savePopoverOpen) {
       this.savePopoverOpen = false;
+      return;
+    }
+    if (this.placeSession) {
+      this.closePlaceSession();
     }
   };
   private readonly ownedUrls = new Set<string>();
@@ -393,6 +450,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     window.removeEventListener('keydown', this.onDocKeyDown);
     this.stageResizeObserver?.disconnect();
     this.stageResizeObserver = null;
+    // An un-applied placement does not survive a re-dock: its object URL is about
+    // to be revoked, and the generation itself is still in the Generate panel's
+    // history strip, which is what makes losing it acceptable (§9.11.2).
+    this.closePlaceSession();
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
@@ -419,7 +480,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       label: resourcePath ? (resourcePath.split('/').pop() ?? resourcePath) : 'Sprite Editor',
       resourcePath,
       boundFrameTexturePath: this.boundFrameTexturePath,
-      acceptsFrameWriteBack: this.canWriteBackToFrame,
+      // While a placement is open the frame is spoken for: a second generation
+      // must not land on top of one being positioned, so the Generate panel falls
+      // back to its own save block (§9.11.2).
+      acceptsFrameWriteBack: this.canWriteBackToFrame && !this.placeSession,
     };
   }
 
@@ -442,18 +506,17 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   }
 
   /**
-   * The Generate panel's result. With a frame bound it goes straight into that
-   * frame as a new frame file (§9.5); the canvas then reloads from it through the
-   * ordinary frame→canvas binding. A size mismatch is accepted as-is for v1 —
-   * `sourceSize` is restamped and the frame renders at the new size. Placing a
-   * differently-sized generation by hand (drag/scale) is Phase 5's place mode.
+   * The Generate panel's result. With a frame bound it goes into that frame as a
+   * new frame file (§9.5); the canvas then reloads from it through the ordinary
+   * frame→canvas binding. Same-size results land immediately; a differently-sized
+   * one opens a **place session** instead and writes nothing until Apply (§9.11.0).
    *
    * Otherwise it becomes the transient working image, exactly as before.
    */
   applyGeneratedImage(image: GeneratedImagePayload): void {
     this.lastPrompt = image.prompt;
     if (this.canWriteBackToFrame) {
-      void this.writeBlobToBoundFrame(image.blob, { kind: 'replace' }, 'Generate into frame');
+      void this.routeGeneratedImageToFrame(image);
       return;
     }
 
@@ -467,6 +530,41 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       height: image.height,
     });
     this.saveName = deriveSaveName(image.prompt, this.boundImagePath, image.mimeType);
+  }
+
+  /**
+   * The §9.11.0 scope gate. "Frame size" is the document's own
+   * {@link getStageContentSize} — its `getFrameMetrics`, not the decoded raster,
+   * the same rule every other overlay follows. An indeterminate incoming size
+   * falls back to the equal-size branch rather than opening a session against an
+   * unknown rect.
+   */
+  private async routeGeneratedImageToFrame(image: GeneratedImagePayload): Promise<void> {
+    // §9.7 risk 2: until the frame's texture has decoded, `getStageContentSize()`
+    // reports the 256px placeholder, and a session opened against that would bake a
+    // composite the size of a rect the user never saw. Fall through to the straight
+    // write-back instead — it does not depend on the frame rect at all.
+    const boundFrame = this.boundFrame;
+    const metricsResolved = Boolean(
+      boundFrame && this.documentController?.hasResolvedFrameMetrics(boundFrame)
+    );
+    const frame = metricsResolved ? this.getStageContentSize() : null;
+    const incoming =
+      image.width && image.height
+        ? { width: image.width, height: image.height }
+        : await readBlobSize(image.blob);
+
+    if (
+      frame &&
+      incoming &&
+      incoming.width > 0 &&
+      incoming.height > 0 &&
+      (incoming.width !== frame.width || incoming.height !== frame.height) &&
+      this.openPlaceSession(image, incoming, frame)
+    ) {
+      return;
+    }
+    await this.writeBlobToBoundFrame(image.blob, { kind: 'replace' }, 'Generate into frame');
   }
 
   /**
@@ -514,6 +612,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // Re-established on every update rather than in `firstUpdated`: a Golden Layout
     // re-dock disconnects the observer but never fires `firstUpdated` again.
     this.observeStageResize();
+    // A rebind, or a write-back that gave the frame a new file, moves the pixels
+    // out from under an open placement — the rect no longer describes anything the
+    // user aimed at, so drop it.
+    this.syncPlaceSessionToFrame();
     if (changed.has('cropMode') && this.cropMode && !this.cropRect) {
       // The stage image may still be decoding on a fresh mount; give it a frame.
       requestAnimationFrame(() => this.initCropRect());
@@ -611,6 +713,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // A document reload drops the transient draft under an in-flight stage drag;
     // the drag has nothing left to edit, so end it.
     this.overlays.handleDocumentChanged();
+    this.syncPlaceSessionToFrame();
     void this.syncCanvasToSelectedFrame();
     this.requestUpdate();
   }
@@ -956,10 +1059,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.stageTool = tool;
     if (tool !== 'select') {
       this.overlays.setEditMode(tool);
-      // Crop and an overlay tool both want a plain left-drag; the last click wins.
+      // Crop, place and an overlay tool all want a plain left-drag; the last click wins.
       this.cropMode = false;
       this.cropRect = null;
       this.cropDrag = null;
+      this.closePlaceSession();
     }
   }
 
@@ -1216,7 +1320,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       >
         ${current
           ? html`<div
-              class="ag-stage-content ${frame ? 'is-frame-box' : ''}"
+              class="ag-stage-content ${frame ? 'is-frame-box' : ''} ${this.placeSession
+                ? 'is-placing'
+                : ''}"
               style="transform: translate(${this.stageView.panX}px, ${this.stageView
                 .panY}px); ${frame ? contentStyle : ''}"
             >
@@ -1234,6 +1340,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
               />
               ${frame && size ? this.renderFrameOverlays(frame, size) : null}
               ${this.cropMode && this.cropRect ? this.renderCropRect(this.cropRect, zoom) : null}
+              ${this.placeSession && this.placeRect
+                ? this.renderPlaceOverlay(this.placeSession, this.placeRect, zoom)
+                : null}
             </div>`
           : html`<div class="ag-empty">
               <div class="ag-empty-title">${this.renderEmptyTitle()}</div>
@@ -1242,7 +1351,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
-      ${this.cropMode ? this.renderCropToolbar() : null}
+      ${this.placeSession
+        ? this.renderPlaceToolbar()
+        : this.cropMode
+          ? this.renderCropToolbar()
+          : null}
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
   }
@@ -1875,6 +1988,18 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       return;
     }
     event.preventDefault();
+    // While placing, a plain wheel scales the *image* about the cursor; the stage's
+    // own zoom moves to Ctrl+wheel so both are still reachable (§9.11.3).
+    const session = this.placeSession;
+    if (session && this.placeRect && !event.ctrlKey) {
+      const pivot = this.stageView.toStageCoords(event, viewport);
+      const factor = event.deltaY < 0 ? PLACE_WHEEL_STEP : 1 / PLACE_WHEEL_STEP;
+      this.placeRect = clampPlaceScale(
+        scalePlaceRect(this.placeRect, factor, pivot),
+        session.image
+      );
+      return;
+    }
     this.stageView.zoomAtPointer(event, viewport);
     this.hasUserAdjustedView = true;
   }
@@ -1957,6 +2082,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       event.preventDefault();
       return;
     }
+    // A placement owns the stage while it is open: only its rect and handles start
+    // a drag (they stop propagation before this runs), so a plain left-drag on the
+    // background does nothing — there is no rubber-band in place mode.
+    if (this.placeSession) {
+      return;
+    }
     // A frame overlay tool owns the plain left-drag when one is picked; crop keeps
     // it otherwise. They are mutually exclusive by construction (`setStageTool`).
     if (!this.cropMode && this.stageTool !== 'select' && this.boundFrame) {
@@ -1990,6 +2121,14 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (this.stageView.updatePan(event)) {
       return;
     }
+    const placeDrag = this.placeDrag;
+    if (placeDrag) {
+      const placePoint = this.toImagePoint(event);
+      if (placePoint) {
+        this.placeRect = applyPlaceDrag(placeDrag, placePoint.point);
+      }
+      return;
+    }
     if (this.overlays.isDragging) {
       this.overlays.handlePointerMove(event);
       return;
@@ -2010,6 +2149,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       this.requestUpdate();
       return;
     }
+    if (this.placeDrag) {
+      this.releaseStagePointer(event);
+      this.placeDrag = null;
+      return;
+    }
     if (this.overlays.isDragging) {
       void this.overlays.handlePointerUp(event);
       return;
@@ -2017,11 +2161,15 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (!this.cropDrag) {
       return;
     }
+    this.releaseStagePointer(event);
+    this.cropDrag = null;
+  }
+
+  private releaseStagePointer(event: PointerEvent): void {
     const stage = this.stageRef.value;
     if (stage?.hasPointerCapture(event.pointerId)) {
       stage.releasePointerCapture(event.pointerId);
     }
-    this.cropDrag = null;
   }
 
   // -- crop ------------------------------------------------------------------
@@ -2030,6 +2178,8 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (!this.current) {
       return;
     }
+    // Crop and place own the same left-drag; opening one closes the other.
+    this.closePlaceSession();
     this.cropMode = !this.cropMode;
     this.cropRect = null;
     this.cropDrag = null;
@@ -2154,6 +2304,307 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       });
     } catch (error) {
       console.warn('[SpriteEditor] Failed to add crop to history', error);
+    }
+  }
+
+  // -- place mode (§9.11) ----------------------------------------------------
+
+  /**
+   * Start positioning `image` over the bound frame. Returns false when there is no
+   * frame to place into, in which case the caller falls back to the straight
+   * write-back. Seeds `fit` deliberately: nothing is cut before the user has said
+   * anything.
+   */
+  private openPlaceSession(
+    image: GeneratedImagePayload,
+    incoming: ImageSize,
+    frame: ImageSize
+  ): boolean {
+    const controller = this.documentController;
+    const frameIndex = controller?.selectedFrameIndex ?? -1;
+    const texturePath = this.boundFrameTexturePath;
+    if (!controller || frameIndex < 0 || !texturePath) {
+      return false;
+    }
+
+    this.closePlaceSession();
+    this.placeSession = {
+      blob: image.blob,
+      mimeType: image.mimeType,
+      objectUrl: this.trackUrl(URL.createObjectURL(image.blob)),
+      image: incoming,
+      frame,
+      prompt: image.prompt,
+      frameIndex,
+      texturePath,
+    };
+    this.placeRect = quickFitRect(incoming, frame, 'fit');
+    // Crop and the overlay tools all want the plain left-drag place mode now owns.
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+    this.stageTool = 'select';
+    return true;
+  }
+
+  /** Discard the session and give its object URL back. Safe to call with none open. */
+  private closePlaceSession(): void {
+    const session = this.placeSession;
+    this.placeDrag = null;
+    if (!session) {
+      return;
+    }
+    this.placeSession = null;
+    this.placeRect = null;
+    this.revokeUrl(session.objectUrl);
+  }
+
+  /**
+   * A frame click — or anything else that repoints the canvas — while a placement
+   * is open throws it away. Acceptable *only* because the generation is still in
+   * the Generate panel's history strip, which is the escape hatch for every
+   * pixel-level action here (§9.7 risk 7).
+   */
+  private syncPlaceSessionToFrame(): void {
+    const session = this.placeSession;
+    if (!session) {
+      return;
+    }
+    const controller = this.documentController;
+    if (
+      !controller ||
+      controller.selectedFrameIndex !== session.frameIndex ||
+      this.boundFrameTexturePath !== session.texturePath
+    ) {
+      this.closePlaceSession();
+    }
+  }
+
+  /**
+   * The placed image, its scrim and its rect — laid out in frame pixels × zoom
+   * inside `.ag-stage-content`, exactly like the crop rect. The image itself takes
+   * no pointer events; the outline and its four corner handles do.
+   *
+   * Paint order is load-bearing and none of these carry a `z-index`: the image goes
+   * down **first**, the scrims over it, the outline last. Dimming has to fall on the
+   * overhang — that is the whole message ("this part will be cut"), and with the
+   * scrims underneath the image it read as if the overhang would be kept.
+   */
+  private renderPlaceOverlay(session: PlaceSession, rect: PlaceRect, zoom: number) {
+    const style = `left:${rect.x * zoom}px; top:${rect.y * zoom}px; width:${rect.w * zoom}px; height:${rect.h * zoom}px`;
+    // The raster's *own* magnification, not the stage's: a 32px sprite blown up to
+    // fill a 256px frame wants hard edges even at 100% stage zoom.
+    const rasterZoom = session.image.width > 0 ? (rect.w / session.image.width) * zoom : zoom;
+    return html`
+      <img
+        class="ag-place-image ${rasterZoom >= PIXELATED_ZOOM_THRESHOLD ? 'is-pixelated' : ''}"
+        src=${session.objectUrl}
+        alt="Image being placed"
+        draggable="false"
+        style=${style}
+        ${ref(this.placeImageRef)}
+      />
+      <div class="ag-place-scrim ag-place-scrim--top" aria-hidden="true"></div>
+      <div class="ag-place-scrim ag-place-scrim--right" aria-hidden="true"></div>
+      <div class="ag-place-scrim ag-place-scrim--bottom" aria-hidden="true"></div>
+      <div class="ag-place-scrim ag-place-scrim--left" aria-hidden="true"></div>
+      <div
+        class="ag-place-rect"
+        style=${style}
+        @pointerdown=${(event: PointerEvent) => this.beginPlaceDrag(event, 'move', '')}
+      >
+        ${PLACE_HANDLES.map(
+          corner =>
+            html`<span
+              class="ag-place-handle ag-place-handle--${corner}"
+              @pointerdown=${(event: PointerEvent) => this.beginPlaceDrag(event, 'resize', corner)}
+            ></span>`
+        )}
+      </div>
+    `;
+  }
+
+  /**
+   * Replaces the crop toolbar while a placement is open — the two can never both be
+   * active. The three quick actions are plain text buttons on purpose: this toolbar
+   * is transient and words beat three invented glyphs (§9.11.3).
+   */
+  private renderPlaceToolbar() {
+    const session = this.placeSession;
+    if (!session) {
+      return null;
+    }
+    const rect = this.placeRect;
+    return html`
+      <div class="ag-place-toolbar">
+        <span class="ag-place-dims">${rect ? describePlaceRect(rect, session.image) : ''}</span>
+        <button
+          class="ag-place-quick"
+          type="button"
+          title="Scale the whole image to fit inside the frame"
+          @click=${() => this.onPlaceQuickFit('fit')}
+        >
+          Fit
+        </button>
+        <button
+          class="ag-place-quick"
+          type="button"
+          title="Scale the image to cover the frame, cutting the overflow"
+          @click=${() => this.onPlaceQuickFit('fill')}
+        >
+          Fill
+        </button>
+        <button
+          class="ag-place-quick"
+          type="button"
+          title="Write the image as-is and let the frame take its size"
+          @click=${this.onResizeFrameToImage}
+        >
+          Resize frame to image
+        </button>
+        <div class="ag-prompt-spacer"></div>
+        <button class="ag-cancel-button" @click=${this.onCancelPlace}>Cancel</button>
+        <button
+          class="ag-generate-button ag-crop-apply"
+          ?disabled=${!isApplicablePlaceRect(rect)}
+          @click=${this.onApplyPlace}
+        >
+          Apply
+        </button>
+      </div>
+    `;
+  }
+
+  private onPlaceQuickFit(mode: PlaceQuickFit): void {
+    const session = this.placeSession;
+    if (!session) {
+      return;
+    }
+    this.placeRect = quickFitRect(session.image, session.frame, mode);
+  }
+
+  private onCancelPlace = (): void => {
+    this.closePlaceSession();
+  };
+
+  private beginPlaceDrag(event: PointerEvent, mode: PlaceDragMode, corner: string): void {
+    // Pan gestures (middle button, Alt+left) belong to the stage even when they
+    // start on the placement — let them bubble instead of grabbing them here.
+    if (event.button !== 0 || event.altKey || !this.placeRect) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+    const resolved = this.toImagePoint(event);
+    if (!resolved) {
+      return;
+    }
+    this.placeDrag = {
+      mode,
+      corner,
+      originX: resolved.point.x,
+      originY: resolved.point.y,
+      startRect: { ...this.placeRect },
+    };
+    this.stageRef.value?.setPointerCapture(event.pointerId);
+  }
+
+  /**
+   * Bake the placement (§9.11.4). The canvas is the *frame's* size, not the
+   * incoming image's, so `buildFramePixelMap`'s `replace` case is the identity:
+   * anchor, points, bbox and polygon all survive untouched and `sourceSize` is
+   * re-stamped to the same numbers. The frame rect did not move — only its pixels.
+   */
+  private onApplyPlace = async (): Promise<void> => {
+    const session = this.placeSession;
+    const rect = this.placeRect;
+    const image = this.placeImageRef.value;
+    if (!session || !rect || !image || !isApplicablePlaceRect(rect)) {
+      return;
+    }
+
+    const width = Math.max(1, Math.round(session.frame.width));
+    const height = Math.max(1, Math.round(session.frame.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    // No fill: `fit` letterboxing has to be alpha, not black.
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(
+      image,
+      Math.round(rect.x),
+      Math.round(rect.y),
+      Math.max(1, Math.round(rect.w)),
+      Math.max(1, Math.round(rect.h))
+    );
+
+    const blob = await new Promise<Blob | null>(resolve =>
+      canvas.toBlob(result => resolve(result), 'image/png')
+    );
+    if (!blob) {
+      return;
+    }
+
+    const prompt = session.prompt;
+    // Closed before the write-back, exactly as crop does — the frame is about to
+    // rebind onto the file this bake creates.
+    this.closePlaceSession();
+    await this.writeBlobToBoundFrame(blob, { kind: 'replace' }, 'Place into frame');
+    await this.addBakeToHistory(
+      blob,
+      prompt.trim() ? `${prompt.trim()} (placed)` : 'Placed image',
+      width,
+      height
+    );
+  };
+
+  /**
+   * "Resize frame to image" is not a composite: the incoming bytes go through
+   * untouched and the frame takes their size, which is precisely the pre-place-mode
+   * behaviour. Deliberately not routed through the canvas.
+   */
+  private onResizeFrameToImage = async (): Promise<void> => {
+    const session = this.placeSession;
+    if (!session) {
+      return;
+    }
+    const blob = session.blob;
+    this.closePlaceSession();
+    await this.writeBlobToBoundFrame(blob, { kind: 'replace' }, 'Resize frame to image');
+  };
+
+  /**
+   * Push a bake into the generation strip. Undo cannot restore pixels (§9.7 risk
+   * 7), so every destructive bake leaves a copy there as the escape hatch. The
+   * generation metadata comes from the stored preferences — the shell no longer
+   * owns a model picker.
+   */
+  private async addBakeToHistory(
+    blob: Blob,
+    prompt: string,
+    width: number,
+    height: number
+  ): Promise<void> {
+    const prefs = this.aiSettings.getPreferences();
+    const providerId = prefs.selectedProviderId;
+    try {
+      await this.history.add({
+        providerId,
+        modelId: this.aiSettings.getSelectedModelId(providerId) ?? '',
+        prompt,
+        aspectRatio: prefs.defaultAspectRatio,
+        imageSize: prefs.defaultImageSize,
+        mimeType: 'image/png',
+        blob,
+        width,
+        height,
+      });
+    } catch (error) {
+      console.warn('[SpriteEditor] Failed to add bake to history', error);
     }
   }
 

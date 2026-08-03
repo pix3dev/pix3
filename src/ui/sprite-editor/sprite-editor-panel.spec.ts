@@ -40,24 +40,85 @@ interface PanelInternals {
   } | null;
   cropMode: boolean;
   cropRect: { x: number; y: number; w: number; h: number } | null;
+  placeSession: {
+    blob: Blob;
+    image: { width: number; height: number };
+    frame: { width: number; height: number };
+    frameIndex: number;
+    prompt: string;
+  } | null;
+  placeRect: { x: number; y: number; w: number; h: number } | null;
   saveName: string;
   onApplyCrop(): Promise<void>;
+  onApplyPlace(): Promise<void>;
 }
 
 /**
- * happy-dom has no 2D canvas, and the crop bake composites through one. Stand in
- * for it (only for `canvas`; Lit renders through `createElement` too) so the test
- * can reach the routing decision that follows the bake.
+ * Give the controller the decoded size it would have read off the frame's texture.
+ *
+ * This is *arranging state the real code fills*, not stubbing behaviour: happy-dom
+ * decodes no images, so `getFrameMetrics` would otherwise stay on its 256px
+ * placeholder — and the place-mode gate deliberately refuses to open a session
+ * against a placeholder rect (§9.7 risk 2), exactly as the crop tool already
+ * refuses. Without this the tests below would be measuring a size the user never
+ * saw.
  */
-function stubCropCanvas(output: Blob): void {
+function seedFrameMetrics(
+  controller: AnimationDocumentController | null,
+  texturePath: string,
+  size: { width: number; height: number }
+): void {
+  const cache = (controller as unknown as { textureDimensionsCache: Map<string, typeof size> })
+    .textureDimensionsCache;
+  cache.set(texturePath, size);
+}
+
+/** What a stubbed bake canvas recorded, so a test can assert the composite's shape. */
+interface StubbedCanvas {
+  width: number;
+  height: number;
+  drawArgs: unknown[][];
+}
+
+/**
+ * happy-dom has no 2D canvas, and the crop/place bakes composite through one. Stand
+ * in for it (only for `canvas`; Lit renders through `createElement` too) so the test
+ * can reach the routing decision that follows the bake, and record what was drawn.
+ */
+function stubCropCanvas(output: Blob): StubbedCanvas[] {
+  const recorded: StubbedCanvas[] = [];
   const realCreateElement = document.createElement.bind(document);
   vi.spyOn(document, 'createElement').mockImplementation((tagName: string, options?: unknown) => {
     if (tagName !== 'canvas') {
       return realCreateElement(tagName, options as ElementCreationOptions | undefined);
     }
     const canvas = realCreateElement('canvas');
+    const record: StubbedCanvas = { width: 0, height: 0, drawArgs: [] };
+    recorded.push(record);
     Object.defineProperties(canvas, {
-      getContext: { value: () => ({ drawImage: vi.fn() }), configurable: true },
+      width: {
+        get: () => record.width,
+        set: (value: number) => {
+          record.width = value;
+        },
+        configurable: true,
+      },
+      height: {
+        get: () => record.height,
+        set: (value: number) => {
+          record.height = value;
+        },
+        configurable: true,
+      },
+      getContext: {
+        value: () => ({
+          imageSmoothingEnabled: false,
+          drawImage: (...args: unknown[]) => {
+            record.drawArgs.push(args);
+          },
+        }),
+        configurable: true,
+      },
       toBlob: {
         value: (callback: (blob: Blob | null) => void) => callback(output),
         configurable: true,
@@ -65,6 +126,7 @@ function stubCropCanvas(output: Blob): void {
     });
     return canvas;
   });
+  return recorded;
 }
 
 function createPreferences() {
@@ -521,7 +583,7 @@ describe('SpriteEditorPanel (unified shell)', () => {
     expect(internals.cropMode).toBe(false);
   });
 
-  it('drops a generated image straight into the bound frame', async () => {
+  it('drops an equally-sized generated image straight into the bound frame', async () => {
     seedAnimationTab();
     const { panel } = createPanel();
     await mount(panel, ANIMATION_TAB_ID);
@@ -537,23 +599,225 @@ describe('SpriteEditorPanel (unified shell)', () => {
       configurable: true,
     });
 
+    seedFrameMetrics(internals.documentController, 'res://sprites/walk/idle_0001.png', {
+      width: 256,
+      height: 256,
+    });
+
     const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    // 256x256 is the frame's decoded size, so this is the equal-size fast path
+    // (§9.11.0 measures the frame with `getFrameMetrics`, never the incoming raster).
     panel.applyGeneratedImage({
       blob,
       mimeType: 'image/png',
       prompt: 'A brass gear',
-      width: 64,
-      height: 64,
+      width: 256,
+      height: 256,
     });
 
     await vi.waitFor(() => {
       expect(replaceFrameTexture).toHaveBeenCalledTimes(1);
     });
     expect(replaceFrameTexture.mock.calls[0][1]).toBe(blob);
-    // v1 accepts a size mismatch and restamps `sourceSize`; place mode is Phase 5.
     expect(replaceFrameTexture.mock.calls[0][2].restamp).toEqual({ kind: 'replace' });
     // ...and it does NOT become a transient working image needing a Save.
     expect(internals.current?.blob).not.toBe(blob);
+    // No placement was needed, so none was opened.
+    expect(internals.placeSession).toBeNull();
+  });
+
+  /** §9.11.0 — the scope gate. A size mismatch is a placement, not a write. */
+  it('opens a place session for a differently-sized generation and writes nothing', async () => {
+    seedAnimationTab();
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+    Object.defineProperty(internals.documentController, 'replaceFrameTexture', {
+      value: replaceFrameTexture,
+      configurable: true,
+    });
+
+    seedFrameMetrics(internals.documentController, 'res://sprites/walk/idle_0001.png', {
+      width: 256,
+      height: 256,
+    });
+
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    panel.applyGeneratedImage({
+      blob,
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 128,
+      height: 64,
+    });
+
+    await vi.waitFor(() => {
+      expect(internals.placeSession).not.toBeNull();
+    });
+    expect(internals.placeSession?.blob).toBe(blob);
+    expect(internals.placeSession?.image).toEqual({ width: 128, height: 64 });
+    expect(internals.placeSession?.frame).toEqual({ width: 256, height: 256 });
+    expect(internals.placeSession?.frameIndex).toBe(0);
+    // `fit` is the default seed, so nothing is cut before the user has said
+    // anything: 128x64 contained in 256x256 is 256x128, centred.
+    expect(internals.placeRect).toEqual({ x: 0, y: 64, w: 256, h: 128 });
+
+    // Nothing was written, and the canvas was not hijacked either.
+    expect(replaceFrameTexture).not.toHaveBeenCalled();
+    expect(internals.current?.blob).not.toBe(blob);
+
+    // §9.11.2 — a second generation must not land on top of one being placed.
+    expect(panel.getImageEditSnapshot().acceptsFrameWriteBack).toBe(false);
+  });
+
+  /**
+   * §9.7 risk 2. With the frame's texture still undecoded, `getFrameMetrics` reports
+   * its 256px placeholder — a rect the user has never seen. Opening a placement
+   * against it would bake a composite of an invented size, so the gate falls through
+   * to the straight write-back instead, which does not depend on the frame rect.
+   */
+  it('does not open a placement while the frame metrics are still the placeholder', async () => {
+    seedAnimationTab();
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+    Object.defineProperty(internals.documentController, 'replaceFrameTexture', {
+      value: replaceFrameTexture,
+      configurable: true,
+    });
+
+    // Deliberately NOT seeded — this is the undecoded window.
+    expect(
+      internals.documentController?.hasResolvedFrameMetrics(
+        internals.documentController.activeClip!.frames[0]
+      )
+    ).toBe(false);
+
+    panel.applyGeneratedImage({
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 128,
+      height: 64,
+    });
+
+    await vi.waitFor(() => {
+      expect(replaceFrameTexture).toHaveBeenCalledTimes(1);
+    });
+    expect(internals.placeSession).toBeNull();
+  });
+
+  it('cancels an open placement when another frame is selected', async () => {
+    seedAnimationTab(['res://sprites/walk/idle_0001.png', 'res://sprites/walk/idle_0002.png']);
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    seedFrameMetrics(internals.documentController, 'res://sprites/walk/idle_0001.png', {
+      width: 256,
+      height: 256,
+    });
+
+    panel.applyGeneratedImage({
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 128,
+      height: 64,
+    });
+    await vi.waitFor(() => {
+      expect(internals.placeSession).not.toBeNull();
+    });
+
+    // Losing the generation to a stray frame click is acceptable because the
+    // Generate panel's history strip still holds it (§9.11.2).
+    internals.documentController?.selectFrame(1);
+
+    expect(internals.placeSession).toBeNull();
+    expect(internals.placeRect).toBeNull();
+    // ...and the frame is available for a straight write-back again.
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0002.png');
+    });
+    expect(panel.getImageEditSnapshot().acceptsFrameWriteBack).toBe(true);
+  });
+
+  it('bakes a placement onto a canvas the size of the frame, not the image', async () => {
+    seedAnimationTab();
+    const { panel } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const internals = panel as unknown as PanelInternals;
+    await vi.waitFor(() => {
+      expect(internals.boundFrameTexturePath).toBe('res://sprites/walk/idle_0001.png');
+    });
+
+    const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+    Object.defineProperty(internals.documentController, 'replaceFrameTexture', {
+      value: replaceFrameTexture,
+      configurable: true,
+    });
+
+    // The canvas normally holds the frame's decoded raster; `readBlob` rejects in
+    // these tests, so stand it up directly — the placed <img> only renders inside
+    // `.ag-stage-content`, which needs a working image.
+    internals.current = {
+      blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }),
+      mimeType: 'image/png',
+      objectUrl: 'blob:working-image',
+      source: 'file',
+      width: 256,
+      height: 256,
+    };
+    seedFrameMetrics(internals.documentController, 'res://sprites/walk/idle_0001.png', {
+      width: 256,
+      height: 256,
+    });
+    panel.applyGeneratedImage({
+      blob: new Blob([new Uint8Array([4, 5, 6])], { type: 'image/png' }),
+      mimeType: 'image/png',
+      prompt: 'A brass gear',
+      width: 128,
+      height: 64,
+    });
+    await vi.waitFor(() => {
+      expect(internals.placeSession).not.toBeNull();
+    });
+    await panel.updateComplete;
+    expect(panel.querySelector('.ag-place-image')).not.toBeNull();
+    expect(panel.querySelectorAll('.ag-place-handle')).toHaveLength(4);
+
+    const placed = new Blob([new Uint8Array([9])], { type: 'image/png' });
+    const canvases = stubCropCanvas(placed);
+    await internals.onApplyPlace();
+
+    expect(canvases).toHaveLength(1);
+    // Frame-sized output, so `replace` restamps the geometry as the identity.
+    expect(canvases[0].width).toBe(256);
+    expect(canvases[0].height).toBe(256);
+    expect(canvases[0].drawArgs[0].slice(1)).toEqual([0, 64, 256, 128]);
+
+    expect(replaceFrameTexture).toHaveBeenCalledTimes(1);
+    expect(replaceFrameTexture.mock.calls[0][1]).toBe(placed);
+    expect(replaceFrameTexture.mock.calls[0][2].restamp).toEqual({ kind: 'replace' });
+    // The session is closed before the write-back, exactly as crop does.
+    expect(internals.placeSession).toBeNull();
   });
 
   it('takes the drag overlay down even when the frame strip swallows the drop', async () => {

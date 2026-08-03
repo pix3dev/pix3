@@ -839,6 +839,151 @@ pix3-sprite-editor-panel .ag-crop-apply {
   padding: 0.4rem 1rem;
 }
 
+/* Place mode (§9.11) ----------------------------------------------------- */
+/* The frame box clips its raster (`is-frame-box`), but a placed image is allowed
+   to hang off the frame — that is what "fill" means — so it must stay visible.
+   The stage's own `overflow: hidden` is what keeps the overhang inside the panel. */
+pix3-sprite-editor-panel .ag-stage-content.is-placing {
+  overflow: visible;
+}
+
+/* Four divs rather than a clip-path: deterministic, and measurable from a test.
+   They dim everything *outside* the frame box, which is this element's own rect. */
+pix3-sprite-editor-panel .ag-place-scrim {
+  position: absolute;
+  background: oklch(0 0 0 / 0.55);
+  pointer-events: none;
+}
+
+pix3-sprite-editor-panel .ag-place-scrim--top {
+  left: -100000px;
+  right: -100000px;
+  bottom: 100%;
+  height: 100000px;
+}
+
+pix3-sprite-editor-panel .ag-place-scrim--bottom {
+  left: -100000px;
+  right: -100000px;
+  top: 100%;
+  height: 100000px;
+}
+
+pix3-sprite-editor-panel .ag-place-scrim--left {
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 100000px;
+}
+
+pix3-sprite-editor-panel .ag-place-scrim--right {
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 100000px;
+}
+
+/* Positioned in frame pixels x zoom, like the crop rect. */
+pix3-sprite-editor-panel .ag-place-image {
+  position: absolute;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  /* Drags belong to the outline and its handles, never to the pixels. */
+  pointer-events: none;
+}
+
+pix3-sprite-editor-panel .ag-place-image.is-pixelated {
+  image-rendering: pixelated;
+}
+
+pix3-sprite-editor-panel .ag-place-rect {
+  position: absolute;
+  border: 1px solid var(--accent);
+  cursor: move;
+  box-sizing: border-box;
+}
+
+pix3-sprite-editor-panel .ag-stage.is-panning .ag-place-rect,
+pix3-sprite-editor-panel .ag-stage.is-panning .ag-place-handle {
+  cursor: grabbing;
+}
+
+/* Screen-sized, same visual language as the crop handles — corners only. */
+pix3-sprite-editor-panel .ag-place-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 1px solid var(--bg-0);
+  border-radius: var(--radius-1);
+  box-sizing: border-box;
+  touch-action: none;
+}
+
+pix3-sprite-editor-panel .ag-place-handle::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+
+pix3-sprite-editor-panel .ag-place-handle--nw {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+pix3-sprite-editor-panel .ag-place-handle--ne {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+pix3-sprite-editor-panel .ag-place-handle--se {
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+}
+pix3-sprite-editor-panel .ag-place-handle--sw {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+
+pix3-sprite-editor-panel .ag-place-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-sprite-editor-panel .ag-place-dims {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--fg-1);
+}
+
+/* Words, not glyphs: this toolbar is transient and "Fit"/"Fill" read better than
+   three invented icons would. */
+pix3-sprite-editor-panel .ag-place-quick {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+pix3-sprite-editor-panel .ag-place-quick:hover {
+  border-color: var(--accent);
+  color: var(--fg-0);
+}
+
 /* Narrow panel ----------------------------------------------------------- */
 @media (max-width: 900px) {
   pix3-sprite-editor-panel .ag-clips-rail {

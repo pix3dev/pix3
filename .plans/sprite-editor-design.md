@@ -1219,3 +1219,280 @@ future editor-side flipbook preview — nothing ticks one today) swaps the textu
 - R1's `sizeMode` / `sourceSize` / per-frame-anchor maths is untouched; it just gets the per-frame
   texture it was always missing (and a `null` while a swap is in flight, rather than the previous
   frame's dimensions).
+
+### 9.11 Phase 5 implementation contract — place mode + history paste (§8.6)
+
+Supersedes §8.6 where they differ. Two independently shippable commits: **P5a** place mode, **P5b**
+history paste. Every file path below already exists unless marked NEW.
+
+#### 9.11.0 Scope gate — when place mode engages
+
+Place mode is a **frame-only** affordance. The trigger, evaluated in `applyGeneratedImage`
+(`sprite-editor-panel.ts` :453):
+
+| `canWriteBackToFrame` | incoming size vs frame size | behaviour |
+|---|---|---|
+| false | — | unchanged: the image becomes the working canvas image (today's `setCurrent` path) |
+| true | equal | unchanged: immediate `writeBlobToBoundFrame(blob, {kind:'replace'})` (the C7 fast path) |
+| true | different | **open a place session** — nothing is written until Apply |
+
+"Frame size" is `getStageContentSize()` (the document's own `getFrameMetrics`, not the decoded
+raster — same rule as every other overlay, §9.5). Incoming size comes from `image.width/height` when
+the payload carries them, else `readBlobSize(blob)` (`@/services/image-gen/image-ops`). If the size
+cannot be determined, fall back to the equal-size branch rather than opening a session with an
+unknown rect.
+
+Do **not** re-litigate non-destructive `offset`/`repeat` placement — rejected for v1 in §8.6.
+
+#### 9.11.1 NEW `src/ui/sprite-editor/place-geometry.ts` — pure math, no DOM
+
+Mirrors `crop-geometry.ts` exactly in shape and testing style (that file is the template: image-pixel
+space, host converts pointer events, functions are pure). Coordinates here are **frame-pixel space** —
+the space `toImagePoint()` reports and `getStageContentSize()` sizes.
+
+```ts
+/** Destination rect of the incoming image, in frame pixels. May extend outside the frame. */
+export interface PlaceRect { x: number; y: number; w: number; h: number }
+export type PlaceQuickFit = 'fit' | 'fill' | 'actual';
+export type PlaceDragMode = 'move' | 'resize';
+export interface PlaceDragState {
+  mode: PlaceDragMode;
+  /** nw/ne/se/sw for resize; empty for move. Corners only — see below. */
+  corner: string;
+  originX: number; originY: number;
+  startRect: PlaceRect;
+}
+```
+
+Exports:
+
+- `quickFitRect(image: ImageSize, frame: ImageSize, mode: PlaceQuickFit): PlaceRect` — `fit` =
+  contain (whole image inside the frame, centred, letterboxed), `fill` = cover (frame fully covered,
+  overflow centred and cut), `actual` = 1:1 pixels, centred. All three centre on the frame.
+- `applyPlaceDrag(drag, point: StagePoint): PlaceRect` — `move` translates by the raw delta with **no
+  clamping** (unlike crop: an image is allowed to hang off the frame; that is what cover means).
+  `resize` scales about the **opposite corner** with the aspect ratio **locked** to
+  `drag.startRect.w / drag.startRect.h` — corner handles scale, they never stretch. Edge handles do
+  not exist in v1. Enforce `MIN_PLACE_SIZE = 1` px on the driven axis.
+- `scalePlaceRect(rect, factor: number, pivot: StagePoint): PlaceRect` — wheel zoom about the cursor,
+  aspect preserved: the pivot keeps the same relative position inside the rect.
+- `clampPlaceScale(rect, image: ImageSize)` — keep the on-screen scale within `[1/32, 32]` of native
+  so a wheel spin cannot make the rect degenerate or astronomically large.
+- `describePlaceRect(rect, image: ImageSize): string` — `"128 × 96 px · 150%"` (percentage relative
+  to the image's native width, rounded to a whole percent).
+- `isApplicablePlaceRect(rect): boolean` — both extents >= 1 px after rounding.
+
+`place-geometry.spec.ts` (NEW) covers: contain/cover/actual against both portrait- and
+landscape-relative frames, an exactly-square case, corner resize keeping aspect and pinning the
+opposite corner, move accepting negative coordinates, wheel scale keeping the pivot fixed, and the
+scale clamp. Pure functions — no component mount, no `res://` textures, so no `AssetLoader` seeding
+is needed.
+
+#### 9.11.2 Panel state and lifecycle (`sprite-editor-panel.ts`)
+
+```ts
+interface PlaceSession {
+  blob: Blob;
+  mimeType: string;
+  objectUrl: string;        // tracked via trackUrl(), revoked via revokeUrl()
+  image: ImageSize;         // incoming intrinsic size
+  frame: ImageSize;         // frame rect at session start
+  prompt: string;
+  frameIndex: number;       // the frame the session is bound to
+}
+@state() private placeSession: PlaceSession | null = null;
+@state() private placeRect: PlaceRect | null = null;
+private placeDrag: PlaceDragState | null = null;
+```
+
+- Opening a session sets `cropMode = false`, `stageTool = 'select'` (they are mutually exclusive by
+  construction, as crop already is) and seeds `placeRect = quickFitRect(image, frame, 'fit')` —
+  **`fit` is the default**, so nothing is cut before the user has said anything.
+- Cancel, `disconnectedCallback`, a change of `boundFrameTexturePath`, and any change of
+  `documentController.selectedFrameIndex` away from `placeSession.frameIndex` all **cancel** the
+  session and revoke its URL. Losing a generation to a stray frame click is acceptable *only*
+  because the generation strip in the Generate panel still holds it — say so in the comment.
+- `getImageEditSnapshot()` must report `acceptsFrameWriteBack: false` while a session is open, so a
+  second generation cannot land on top of one being placed; it falls back to the Generate panel's own
+  save block, which is the existing "nowhere to put it" behaviour.
+
+#### 9.11.3 Stage rendering and interaction
+
+In `renderStage()`, inside `.ag-stage-content`, after the frame image and overlays, when
+`placeSession && placeRect`:
+
+- `.ag-place-scrim` — four absolutely-positioned divs (top/right/bottom/left) that extend far past
+  the content box and dim everything **outside** the frame rect. Not `clip-path`: four divs are
+  deterministic and measurable from a test.
+- `<img class="ag-place-image">` at `left/top/width/height = rect × zoom`, `pointer-events: none`,
+  `is-pixelated` under the same `PIXELATED_ZOOM_THRESHOLD` rule as the stage image.
+- `.ag-place-rect` — the outline, carrying `@pointerdown` -> `beginPlaceDrag(event, 'move', '')`,
+  with four corner handles (`.ag-place-handle--nw|ne|se|sw`) -> `beginPlaceDrag(event, 'resize', corner)`.
+  Reuse the crop handles' visual language and the `is-panning` cursor override.
+- `.ag-stage-content` gets `is-placing`, which sets `overflow: visible` — the frame box clips
+  (`is-frame-box`) and the placed image must stay visible where it hangs off.
+
+Pointer/wheel routing (`onStagePointerDown` / `Move` / `Up` / `onStageWheel`), inserted **before**
+the crop branches:
+
+- Pan (middle-drag, Alt+left) keeps priority — unchanged, it is checked first already.
+- With a session open, plain left-drag on the stage background does nothing (no rubber-band); only
+  the rect and its handles start a drag.
+- Plain **wheel scales the placed image** about the cursor (`scalePlaceRect` + `clampPlaceScale`);
+  **Ctrl+wheel** falls through to `stageView.zoomAtPointer` so the stage can still be zoomed. Both
+  `preventDefault()`.
+- Escape cancels the session (extend the existing `onDocKeyDown`, which today only closes the save
+  popover).
+
+Toolbar: `renderPlaceToolbar()` replaces `renderCropToolbar()` while a session is open (they can
+never both be active), same markup shape:
+`describePlaceRect(...)` · **Fit** · **Fill** · **Resize frame to image** · **Cancel** · **Apply**.
+Fit/Fill re-seed `placeRect` from `quickFitRect`. The three quick actions are plain buttons, not
+icons — this toolbar is transient and text is clearer than three invented glyphs.
+
+#### 9.11.4 Apply — the bake
+
+`onApplyPlace()`, modelled on `onApplyCrop` (:2083):
+
+1. Composite: canvas sized to `placeSession.frame` (the frame rect, **not** the incoming image),
+   `ctx.imageSmoothingEnabled = true`, `ctx.drawImage(placedImageElement, rect.x, rect.y, rect.w, rect.h)`
+   with the destination rect rounded to whole pixels. Transparent background — no fill — so `fit`
+   letterboxing is alpha, not black.
+2. `canvas.toBlob(..., 'image/png')`.
+3. Close the session (revoke URL) **before** the write-back, exactly as crop does.
+4. `await this.writeBlobToBoundFrame(blob, { kind: 'replace' }, 'Place into frame')`. Because the
+   output size equals the frame's own size, `buildFramePixelMap`'s `replace` case is the identity —
+   anchor, points, bbox and polygon all survive untouched, and `sourceSize` is re-stamped to the same
+   numbers. That is the correct semantic: the frame rect did not move, only its pixels.
+5. Add the composite to `GenerationHistoryService` with prompt `"<prompt> (placed)"`, mirroring the
+   crop bake's history entry and for the same reason (§9.7 risk 7: undo cannot restore pixels).
+
+**Resize frame to image** is *not* a composite: it writes `placeSession.blob` unchanged through
+`writeBlobToBoundFrame(blob, { kind: 'replace' })`, which is precisely today's behaviour — the frame
+grows to the image and the geometry rescales proportionally. Implement it as a distinct handler that
+closes the session and calls the existing path; do not route it through the canvas.
+
+#### 9.11.5 P5b — history paste (§8.4)
+
+Two additions, both outside the place-mode code and both landing on the §9.11.0 gate for free:
+
+1. **"Apply to current frame"** on each card in the Generate panel's history strip
+   (`generate-panel.ts` :593 `renderHistory`). Enabled only when
+   `this.canApplyToTarget && this.targetSnapshot?.boundFrameTexturePath`; it loads the record's blob
+   from `GenerationHistoryService` and calls `this.imageEditTargets.applyGeneratedImage({...})` — the
+   same call `deliver()` makes, so a size mismatch opens place mode with no extra wiring. Icon
+   button via `IconService` (a Feather name already registered there), never a glyph.
+2. **Drag a history thumbnail into the timeline.** `sprite-timeline.ts` already parses drops through
+   `frame-texture-drop.ts`; teach it `GENERATION_DRAG_MIME`
+   (`hasGenerationDragData`/`getGenerationDragData`, `@/ui/shared/asset-drag-drop`, already exported
+   and already set by `onHistoryDragStart`). On drop: inject `GenerationHistoryService`, fetch the
+   record, wrap it as `new File([blob], suggestedName, { type: mimeType })` and hand it to the
+   existing `controller.importOsFiles([file])` path so insert-before-card semantics, file naming and
+   undo are shared rather than reimplemented. `isPotentialTextureDrag` must return true for it, so
+   add the MIME there too.
+
+#### 9.11.6 Tests and live verification
+
+Vitest: `place-geometry.spec.ts` (above) plus panel-level cases in `sprite-editor-panel.spec.ts` for
+the §9.11.0 gate — equal size writes back immediately, different size opens a session and writes
+nothing, `acceptsFrameWriteBack` goes false while placing, a frame switch cancels.
+
+Tests are not verification. The live pass (chrome-devtools MCP, SkyDefender, judged by state):
+a differently-sized image into a `.pix3anim` frame opens the session; Fit/Fill produce the expected
+rects; wheel keeps the pivot; Apply writes one file of exactly the frame's size and leaves the
+frame's anchor/points/bbox numerically unchanged; "Resize frame to image" changes `sourceSize`;
+Cancel writes nothing. `git status samples/` must be clean after the cleanup pass.
+
+### 9.12 Phase 6 implementation contract — power tools (§8.7/§8.8)
+
+Order is free; **Trim frames is first** because it is the one that makes the atlas win real in a
+single click. Each tool is a toolbar action plus, where it is destructive and bulk, one confirm
+dialog through the injected `DialogService`.
+
+#### 9.12.1 Trim frames — the whole clip, one undo step
+
+The maths already exists twice over and neither half should be rewritten:
+
+- `trimImageBlob(blob, options)` (`@/services/image-gen/image-ops` :366) finds the opaque bounding
+  box and returns `{ blob, width, height, empty, bounds }`.
+- `restampFrameGeometry(frame, { kind: 'crop', x, y }, from, to)` (`frame-restamp.ts`) re-derives
+  anchor, points, bbox and polygon so the sprite does not move on screen —
+  `a' = (a·W − cropX)/w`, §8.8/§8.11.3.
+
+**The trap that will bite an implementer:** `TrimResult.bounds` is the **raw, unpadded** content box,
+but the output canvas centres that content with `padding` (default **2**) around it. The crop origin
+the restamp needs is therefore *not* `bounds.x`. Compute it from the returned output size:
+
+```ts
+const dx = Math.round((result.width  - result.bounds.width)  / 2);
+const dy = Math.round((result.height - result.bounds.height) / 2);
+const restamp = { kind: 'crop', x: result.bounds.x - dx, y: result.bounds.y - dy } as const;
+```
+
+That formula is correct for `padding: 0` and for `square: true` alike, which is why it is preferred
+over hardcoding `padding: 0`.
+
+New method on `AnimationDocumentController`, **not** a loop over `replaceFrameTexture` — that would
+push one undo step per frame and leave a half-trimmed clip if the fifth frame threw:
+
+```ts
+async trimClipFrames(options?: { padding?: number; alphaThreshold?: number }): Promise<TrimClipReport>
+```
+
+1. Skip any frame where `isSequenceAnimationFrame(frame)` is false (a UV window into a shared sheet —
+   trimming it would cut every other frame) and any frame whose `hasResolvedFrameMetrics` is false.
+   Both are *skips*, reported, not errors.
+2. For each remaining frame: read its texture blob, `trimImageBlob`, and when `empty` or when the
+   bounds already equal the full frame, skip it — a no-op frame must not burn a new file number.
+3. Write every new frame file first (`reserveFrameFileNumber` + `projectStorage.writeBinaryFile`),
+   collecting `{ index, framePath, restamped }`.
+4. Then **one** `applyClipUpdate` that swaps all of them at once, labelled
+   `Trim N frames: <clip>`.
+5. Then one `invalidateTextureEverywhere(...allOldPaths, ...allNewPaths)` pass.
+6. Return `{ trimmed, skipped, failed }` counts so the toolbar can state the outcome in
+   `sliceStatus` rather than silently doing nothing on a clip of UV-window frames.
+
+UI: a toolbar action in the frame-tools group of `sprite-editor-panel.ts`, animation documents only,
+disabled while `sliceBusy`. It opens a `DialogService` confirm carrying padding (default 0) and alpha
+threshold (default 0, with the hint from `TrimOptions` about raising it to ~8 for a
+background-removal halo) and states how many frames will be rewritten. Destructive — pixels are
+rewritten and undo restores the *document*, not the files, exactly as for crop (§9.7 risk 7).
+
+Live verification (state, not screenshots): pick a SkyDefender clip whose frames have transparent
+margins; record every frame's `anchor` and `sourceSize` before; run the tool; assert each new
+`sourceSize` shrank, each `anchor` moved so that `anchor·sourceSize` still points at the same content
+pixel, and that the sprite's on-screen position in the viewport did not move. Then
+`git checkout -- samples/` and confirm `git status samples/` is clean.
+
+#### 9.12.2 Auto collision polygon
+
+Alpha channel (or the ISNet mask `BackgroundRemovalService` already produces for opaque images) →
+marching squares contour → Douglas–Peucker simplify → `frame.collisionPolygon` (absolute frame
+pixels, which is the space `restampFrameGeometry` already maps). Pure functions in a NEW
+`src/ui/sprite-editor/contour-trace.ts` with its own spec: marching squares over a boolean mask, then
+RDP with a tolerance in pixels. UI: a frame-tools action with a tolerance slider that previews the
+polygon live through the existing `renderPolygonOverlay` before committing one `applyClipUpdate`.
+The polygon overlay is already editable, so the tool only has to seed it.
+
+#### 9.12.3 Chroma key
+
+Eyedropper on the stage (reuse the place/crop pointer routing pattern — a transient mode, not a
+`stageTool`) plus a tolerance slider → alpha. Pure function `chromaKeyImage(imageData, rgb, tolerance)`
+belongs in `@/services/image-gen/image-ops.ts` next to `trimImageBlob`, so the Asset Generator and the
+agent tool layer get it for free. Write-back for a bound frame is
+`writeBlobToBoundFrame(blob, { kind: 'replace' })` at unchanged size — the identity restamp.
+
+#### 9.12.4 Bulk frame ops
+
+Delete even/odd frames, and map any `image-ops` raster function over every frame of a clip.
+Managed-folder frames only (`isSequenceAnimationFrame`). Both follow §9.12.1's shape: write all files,
+then one `applyClipUpdate`, then one invalidation pass. Deleting frames needs no new file writes and
+is a plain single-step clip update.
+
+#### 9.12.5 Video import
+
+`<video>` element + `canvas.drawImage(video)` frame extraction with an fps picker and an in/out
+trim range → frames written by the §8.2 convention through the same
+`importOsFiles`-style append path the timeline already uses. Browser-only, no ffmpeg. Seek with
+`requestVideoFrameCallback` where available and fall back to `currentTime` stepping; the fallback
+must await the `seeked` event before each grab or it silently captures duplicate frames.
