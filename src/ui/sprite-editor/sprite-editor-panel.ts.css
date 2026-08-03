@@ -590,6 +590,40 @@ pix3-sprite-editor-panel .ag-frame-tools-button.is-active {
   background: var(--accent-soft);
 }
 
+/* Auto-collision-polygon tolerance (§9.12.2). */
+pix3-sprite-editor-panel .ag-polygon-tolerance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+pix3-sprite-editor-panel .ag-polygon-tolerance-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--fg-2);
+}
+
+pix3-sprite-editor-panel .ag-polygon-tolerance-label em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1);
+}
+
+pix3-sprite-editor-panel .ag-polygon-tolerance input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+pix3-sprite-editor-panel .ag-polygon-apply {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
 pix3-sprite-editor-panel .ag-frame-tools-hint {
   margin: 0;
   font-size: 0.68rem;

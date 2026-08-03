@@ -9,7 +9,13 @@ import {
   sanitizeFrameFilePrefix,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import { readBlobSize, sliceImageBlob, trimImageBlob } from '@/services/image-gen/image-ops';
+import {
+  readAlphaMask,
+  readBlobSize,
+  sliceImageBlob,
+  trimImageBlob,
+  type AlphaMask,
+} from '@/services/image-gen/image-ops';
 import type { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
 import type {
   AnimationEditorService,
@@ -22,6 +28,7 @@ import type { OperationService } from '@/services/core/OperationService';
 import type { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import type { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import type { StagePoint } from '@/ui/shared/stage-zoom-pan';
+import { traceCollisionPolygon, DEFAULT_CONTOUR_TOLERANCE } from './contour-trace';
 import { restampFrameGeometry, type FrameRasterTransform } from './frame-restamp';
 import {
   AnimatedSprite2D,
@@ -116,6 +123,36 @@ export interface TrimClipReport {
   failed: number;
 }
 
+/**
+ * Knobs {@link AnimationDocumentController.traceSelectedFramePolygon} hands to the
+ * §9.12.2 tracer.
+ */
+export interface AutoPolygonOptions {
+  /**
+   * Douglas–Peucker tolerance in frame pixels: no polygon edge strays further than
+   * this from the traced alpha outline. Default {@link DEFAULT_CONTOUR_TOLERANCE}.
+   */
+  tolerance?: number;
+  /**
+   * Alpha (0..255) at or below which a pixel counts as empty. Default 0 — the same
+   * meaning it has for a trim.
+   */
+  alphaThreshold?: number;
+}
+
+/** Outcome of one auto-trace. Nothing is committed; the polygon lands in the draft. */
+export interface AutoPolygonReport {
+  /**
+   * `traced` — the frame draft now carries the polygon, awaiting a commit;
+   * `no-frame` — no frame selected, or the frame is a UV window into a shared
+   * sheet whose alpha is not this frame's outline; `unreadable` — the texture
+   * could not be decoded; `empty` — the frame has no opaque pixels, and the
+   * existing polygon was left alone rather than replaced with nothing.
+   */
+  status: 'traced' | 'no-frame' | 'unreadable' | 'empty';
+  vertexCount: number;
+}
+
 export const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',
@@ -184,6 +221,12 @@ export class AnimationDocumentController implements AnimationInspectorController
   private readonly texturePreviewCache = new Map<string, string>();
   private readonly textureDimensionsCache = new Map<string, TextureDimensions>();
   private readonly texturePreviewLoads = new Map<string, Promise<void>>();
+  /**
+   * Decoded alpha masks for the auto-polygon tracer (§9.12.2), keyed
+   * `<texturePath>|<alphaThreshold>`. Dragging the tolerance slider re-traces on
+   * every release; re-decoding the PNG each time would make it feel like treacle.
+   */
+  private readonly alphaMaskCache = new Map<string, AlphaMask>();
 
   /** Highest `<clip>_<nnnn>` this session already wrote, by sanitized clip prefix. */
   private readonly reservedFrameFileNumbers = new Map<string, number>();
@@ -568,6 +611,13 @@ export class AnimationDocumentController implements AnimationInspectorController
     this.texturePreviewCache.delete(normalizedTexturePath);
     this.textureDimensionsCache.delete(normalizedTexturePath);
     this.texturePreviewLoads.delete(normalizedTexturePath);
+    // The mask cache is keyed by path *and* alpha threshold, so drop every entry
+    // this file produced rather than one.
+    for (const key of this.alphaMaskCache.keys()) {
+      if (key.startsWith(`${normalizedTexturePath}|`)) {
+        this.alphaMaskCache.delete(key);
+      }
+    }
     if (this.previewTexturePath === normalizedTexturePath) {
       this.resetCurrentTexturePreview();
       void this.syncPreviewTexture();
@@ -1155,6 +1205,79 @@ export class AnimationDocumentController implements AnimationInspectorController
       return { width: cached.width, height: cached.height };
     }
     return null;
+  }
+
+  // --- auto collision polygon (§9.12.2) -------------------------------------
+
+  /**
+   * §9.12.2 — trace the selected frame's alpha into a collision polygon: marching
+   * squares over the opaque mask, Douglas–Peucker down to `tolerance`, straight
+   * into `collisionPolygon` in absolute frame pixels (the space
+   * {@link restampFrameGeometry} already maps, so a later crop moves it correctly).
+   *
+   * The result lands in the **frame draft**, not in the document. That is the whole
+   * preview mechanism: the stage already renders the draft through
+   * `renderPolygonOverlay`, and that overlay is already editable, so the traced
+   * polygon *is* the live preview and the user can drag its vertices before
+   * committing. Nothing is written until the host calls
+   * {@link commitFrameDraft} — one `applyClipUpdate`, one undo step — and
+   * {@link clearFrameDraft} discards the trace entirely.
+   *
+   * A UV-window frame is refused: its file is the shared spritesheet, so the
+   * outline of that file's alpha is the sheet's, not the frame's. Hosts should
+   * additionally gate on {@link hasResolvedFrameMetrics} — the polygon is authored
+   * in the raster's own pixels, and an overlay laid out against the 256 px
+   * placeholder would draw it in the wrong place (§9.7 risk 2).
+   */
+  async traceSelectedFramePolygon(options: AutoPolygonOptions = {}): Promise<AutoPolygonReport> {
+    const frame = this.getSelectedFrame();
+    if (!frame || this._selectedFrameIndex < 0 || !isSequenceAnimationFrame(frame)) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+
+    const texturePath = this.getResolvedFrameTexturePath(frame);
+    if (!texturePath) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+
+    const alphaThreshold = Math.min(255, Math.max(0, Math.round(options.alphaThreshold ?? 0)));
+    const mask = await this.loadAlphaMask(texturePath, alphaThreshold);
+    if (!mask) {
+      return { status: 'unreadable', vertexCount: 0 };
+    }
+
+    const polygon = traceCollisionPolygon(mask, {
+      tolerance: Math.max(0, options.tolerance ?? DEFAULT_CONTOUR_TOLERANCE),
+    });
+    if (polygon.length < 3) {
+      // Nothing opaque to trace — leave whatever polygon the frame already has.
+      return { status: 'empty', vertexCount: 0 };
+    }
+
+    if (!this._frameDraft && !this.beginFrameDraft()) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+    this.updateFrameDraft(draft => ({ ...draft, collisionPolygon: polygon }));
+    return { status: 'traced', vertexCount: polygon.length };
+  }
+
+  /** Decode (once per path + threshold) the opacity mask the tracer walks. */
+  private async loadAlphaMask(
+    texturePath: string,
+    alphaThreshold: number
+  ): Promise<AlphaMask | null> {
+    const key = `${texturePath}|${alphaThreshold}`;
+    const cached = this.alphaMaskCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const blob = await this.deps.projectStorage.readBlob(texturePath);
+    const mask = await readAlphaMask(blob, { alphaThreshold });
+    if (mask) {
+      this.alphaMaskCache.set(key, mask);
+    }
+    return mask;
   }
 
   /**
@@ -2079,6 +2202,7 @@ export class AnimationDocumentController implements AnimationInspectorController
     this.texturePreviewCache.clear();
     this.textureDimensionsCache.clear();
     this.texturePreviewLoads.clear();
+    this.alphaMaskCache.clear();
     this.previewTexturePath = '';
     this.resetCurrentTexturePreview();
   }

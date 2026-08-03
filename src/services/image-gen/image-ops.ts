@@ -454,6 +454,64 @@ export async function trimImageBlob(blob: Blob, options: TrimOptions = {}): Prom
   }
 }
 
+export interface AlphaMaskOptions {
+  /**
+   * Alpha value (0..255) at or below which a pixel counts as empty. Default 0 (only fully
+   * transparent pixels are empty). Raise slightly (e.g. 8) to also drop the near-transparent halo
+   * background removal leaves behind — the same knob {@link TrimOptions} carries.
+   */
+  alphaThreshold?: number;
+}
+
+export interface AlphaMask extends ImageDimensions {
+  /** Row-major `width * height` flags, origin top-left: 1 = opaque, 0 = empty. */
+  readonly data: Uint8Array;
+}
+
+/**
+ * Decode an image and reduce it to one opacity flag per pixel — the input the Sprite Editor's
+ * auto-collision-polygon tracer (`contour-trace.ts`, §9.12.2) walks, and a cheap-to-keep
+ * representation of a cut-out for anything else that needs the *shape* rather than the pixels.
+ *
+ * Lives next to {@link trimImageBlob} deliberately: both answer "where are the opaque pixels?",
+ * both decode the same way, and the agent tool layer and the Asset Generator reach for this module
+ * rather than growing their own canvas code. Returns null when the image can't be decoded (no
+ * canvas in this context) — callers must treat that as "unknown", never as "empty".
+ */
+export async function readAlphaMask(
+  blob: Blob,
+  options: AlphaMaskOptions = {}
+): Promise<AlphaMask | null> {
+  if (!canUseBitmap()) {
+    return null;
+  }
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return null;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    const threshold = clamp(Math.round(options.alphaThreshold ?? 0), 0, 255);
+    const mask = new Uint8Array(width * height);
+    for (let index = 0; index < mask.length; index += 1) {
+      mask[index] = data[index * 4 + 3] > threshold ? 1 : 0;
+    }
+    return { width, height, data: mask };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export interface AlphaStats {
   /** True when any pixel is meaningfully transparent (alpha ≤ 250 for >0.5% of pixels). */
   readonly hasAlpha: boolean;

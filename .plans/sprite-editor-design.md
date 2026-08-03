@@ -1504,6 +1504,20 @@ RDP with a tolerance in pixels. UI: a frame-tools action with a tolerance slider
 polygon live through the existing `renderPolygonOverlay` before committing one `applyClipUpdate`.
 The polygon overlay is already editable, so the tool only has to seed it.
 
+**Implementation notes.** The preview needs no new channel: the trace is written into the **frame
+draft** (`beginFrameDraft`/`updateFrameDraft`), which `selectedFrame` already returns in preference
+to the stored frame, so `renderPolygonOverlay` draws it and its vertices are draggable straight
+away; Apply is `commitFrameDraft` (one `applyClipUpdate`, one undo step) and Discard is
+`clearFrameDraft`. The alpha read is a new `readAlphaMask(blob, { alphaThreshold })` in
+`image-ops.ts`, next to `trimImageBlob` and available to the agent tool layer for the same reason;
+masks are cached per `<texturePath>|<threshold>` on the controller (and dropped by
+`invalidateTexture`) so dragging the tolerance slider does not re-decode the PNG. The tool shares
+the raster tools' `frameRasterHint` gate — a UV-window frame's file is the whole spritesheet, and an
+undecoded frame would author absolute pixels against the 256 px placeholder (§9.7 risk 2). The
+ISNet-mask alternative this section offers was not wired: the alpha channel is already the mask for
+every frame the editor writes, and reaching for `BackgroundRemovalService` would put a model load
+behind a geometry tool.
+
 #### 9.12.3 Chroma key
 
 Eyedropper on the stage (reuse the place/crop pointer routing pattern — a transient mode, not a

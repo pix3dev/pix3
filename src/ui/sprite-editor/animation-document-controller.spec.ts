@@ -897,6 +897,273 @@ describe('AnimationDocumentController', () => {
     });
   });
 
+  /**
+   * §9.12.2 — the auto collision polygon. As in the trim suite, the REAL alpha
+   * reader (`readAlphaMask`) and the REAL tracer run: only `createImageBitmap` and
+   * the 2D canvas are stood up, over a synthetic alpha buffer happy-dom cannot
+   * produce. What is asserted is the *contract*: the trace lands in the draft (so
+   * the existing overlay previews it), nothing reaches the document until the
+   * draft is committed, and then it is one clip update.
+   */
+  describe('traceSelectedFramePolygon (§9.12.2)', () => {
+    const ASSET_PATH = 'res://sprites/walk/walk.pix3anim';
+    const ANIMATION_ID = 'sprites-walk-walk';
+
+    /** A frame raster described by a predicate over its pixels. */
+    interface AlphaRaster {
+      width: number;
+      height: number;
+      isOpaque: (x: number, y: number) => boolean;
+    }
+
+    /** `#` is opaque; every other character is transparent. */
+    function rasterFromRows(rows: string[]): AlphaRaster {
+      return {
+        width: rows[0]?.length ?? 0,
+        height: rows.length,
+        isOpaque: (x, y) => rows[y]?.[x] === '#',
+      };
+    }
+
+    /** A filled disc — an outline whose vertex count actually moves with tolerance. */
+    function discRaster(size: number, radius: number): AlphaRaster {
+      const center = size / 2;
+      return {
+        width: size,
+        height: size,
+        isOpaque: (x, y) => Math.hypot(x + 0.5 - center, y + 0.5 - center) <= radius,
+      };
+    }
+
+    function stubAlphaRasters(rasters: Record<string, AlphaRaster>): {
+      decodes: ReturnType<typeof vi.fn>;
+    } {
+      // `readBlob` resolves here, so the texture-preview loader reaches `new Image()`,
+      // which happy-dom never settles. Settle it as "undecodable" (the preview is not
+      // what this suite is about).
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = 0;
+          public naturalHeight = 0;
+          public width = 0;
+          public height = 0;
+          set src(_value: string) {
+            queueMicrotask(() => this.onerror?.());
+          }
+        }
+      );
+
+      const decodes = vi.fn();
+      vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+        const key = await blob.text();
+        const raster = rasters[key];
+        if (!raster) {
+          throw new Error(`no raster stubbed for ${key}`);
+        }
+        decodes(key);
+        return { width: raster.width, height: raster.height, raster, close: () => undefined };
+      });
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          let drawn: AlphaRaster | null = null;
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              drawImage: (bitmap: { raster?: AlphaRaster }) => {
+                drawn = bitmap.raster ?? null;
+              },
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                const raster: AlphaRaster | null = drawn;
+                if (raster) {
+                  for (let y = 0; y < height; y += 1) {
+                    for (let x = 0; x < width; x += 1) {
+                      data[(y * width + x) * 4 + 3] = raster.isOpaque(x, y) ? 255 : 0;
+                    }
+                  }
+                }
+                return { data };
+              },
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['baked'], { type: 'image/png' })),
+          };
+          return canvas as unknown as HTMLElement;
+        }
+      );
+      return { decodes };
+    }
+
+    /** Frame blobs are their own path, so the bitmap stub can identify them. */
+    function readBlobByPath(): ReturnType<typeof vi.fn> {
+      return vi.fn(async (texturePath: string) => new Blob([texturePath], { type: 'image/png' }));
+    }
+
+    function seedPolygonDocument(
+      controller: AnimationDocumentController,
+      frames: AnimationResource['clips'][number]['frames']
+    ): ControllerInternals {
+      const resource: AnimationResource = {
+        version: '1.0.0',
+        texturePath: 'res://sprites/walk/sheet.png',
+        clips: [{ name: 'idle', fps: 12, loop: true, playbackMode: 'normal', frames }],
+      };
+      const internals = seedDocument(controller, resource, {
+        animationId: ANIMATION_ID,
+        assetPath: ASSET_PATH,
+        activeClipName: 'idle',
+      });
+      internals._selectedFrameIndex = 0;
+      internals._selectedFrameIndices = [0];
+      return internals;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('traces into the frame DRAFT and writes nothing until the draft is committed', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': rasterFromRows([
+          '........',
+          '..####..',
+          '..####..',
+          '..####..',
+          '........',
+        ]),
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [createFrame('res://sprites/walk/idle_0001.png')]);
+
+      const report = await controller.traceSelectedFramePolygon({ tolerance: 1 });
+
+      expect(report).toEqual({ status: 'traced', vertexCount: 4 });
+      // The preview *is* the editable overlay: the polygon sits in the draft, in
+      // absolute frame pixels, and the document has not been touched.
+      expect(controller.frameDraft?.collisionPolygon).toEqual([
+        { x: 6, y: 1 },
+        { x: 6, y: 4 },
+        { x: 2, y: 4 },
+        { x: 2, y: 1 },
+      ]);
+      expect(invokeAndPush).not.toHaveBeenCalled();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+
+      await controller.commitFrameDraft('Auto collision polygon: idle');
+
+      // ...and the commit is ONE clip update.
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      expect(controller.frameDraft).toBeNull();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([
+        { x: 6, y: 1 },
+        { x: 6, y: 4 },
+        { x: 2, y: 4 },
+        { x: 2, y: 1 },
+      ]);
+    });
+
+    it('decodes the texture once across re-traces, and a coarser tolerance yields fewer vertices', async () => {
+      const { decodes } = stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': discRaster(48, 20),
+      });
+      const readBlob = readBlobByPath();
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [createFrame('res://sprites/walk/idle_0001.png')]);
+
+      const fine = await controller.traceSelectedFramePolygon({ tolerance: 0.5 });
+      const coarse = await controller.traceSelectedFramePolygon({ tolerance: 4 });
+
+      expect(fine.status).toBe('traced');
+      expect(coarse.vertexCount).toBeLessThan(fine.vertexCount);
+      expect(coarse.vertexCount).toBeGreaterThanOrEqual(3);
+      expect(controller.frameDraft?.collisionPolygon).toHaveLength(coarse.vertexCount);
+      // The mask cache: dragging the tolerance slider must not re-decode the PNG
+      // on every release. (`readBlob` is shared with the texture-preview loader, so
+      // the decode count is the honest signal here.)
+      expect(decodes).toHaveBeenCalledTimes(1);
+      expect(decodes).toHaveBeenCalledWith('res://sprites/walk/idle_0001.png');
+
+      // ...and invalidating the file drops the cached mask with everything else.
+      controller.invalidateTexture('res://sprites/walk/idle_0001.png');
+      await controller.traceSelectedFramePolygon({ tolerance: 4 });
+      expect(decodes).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses a UV-window frame, whose file is the whole spritesheet', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/sheet.png': rasterFromRows(['####', '####']),
+      });
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      const windowFrame = { ...createFrame(''), repeat: { x: 0.25, y: 1 } };
+      seedPolygonDocument(controller, [windowFrame]);
+
+      const report = await controller.traceSelectedFramePolygon();
+
+      expect(report).toEqual({ status: 'no-frame', vertexCount: 0 });
+      expect(controller.frameDraft).toBeNull();
+    });
+
+    it('reports an empty frame instead of clearing the polygon it already has', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': rasterFromRows(['....', '....']),
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [
+        {
+          ...createFrame('res://sprites/walk/idle_0001.png'),
+          collisionPolygon: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 2 },
+          ],
+        },
+      ]);
+
+      const report = await controller.traceSelectedFramePolygon();
+
+      expect(report).toEqual({ status: 'empty', vertexCount: 0 });
+      expect(controller.frameDraft).toBeNull();
+      expect(invokeAndPush).not.toHaveBeenCalled();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toHaveLength(3);
+    });
+  });
+
   it('registers itself as the inspector controller only while its tab is active', async () => {
     const setActiveController = vi.fn();
     const activeControllers: unknown[] = [];

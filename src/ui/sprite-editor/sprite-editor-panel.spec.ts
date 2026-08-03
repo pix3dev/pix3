@@ -511,6 +511,203 @@ describe('SpriteEditorPanel (unified shell)', () => {
     });
   });
 
+  /**
+   * §9.12.2 — the auto collision polygon. Nothing is doubled here beyond the two
+   * browser APIs happy-dom lacks (`createImageBitmap` and the 2D canvas): the real
+   * alpha reader, the real tracer and the real document controller all run, so
+   * these assertions are about the shipping path from the toolbar button to the
+   * polygon the stage draws.
+   */
+  describe('auto collision polygon (§9.12.2)', () => {
+    const FRAME_PATH = 'res://sprites/walk/idle_0001.png';
+    /**
+     * A 32×24 frame with a 16×14 opaque block at (8, 4) — corners (8,4) (24,4)
+     * (24,18) (8,18). Big enough to clear `getFrameMetrics`'s 24 px floor, so the
+     * overlay's viewBox is the frame's real pixel space.
+     */
+    const FRAME_ROWS = Array.from({ length: 24 }, (_unusedRow, y) =>
+      Array.from({ length: 32 }, (_unusedColumn, x) =>
+        x >= 8 && x < 24 && y >= 4 && y < 18 ? '#' : '.'
+      ).join('')
+    );
+    const TRACED_POLYGON = [
+      { x: 24, y: 4 },
+      { x: 24, y: 18 },
+      { x: 8, y: 18 },
+      { x: 8, y: 4 },
+    ];
+
+    /**
+     * Stand up the two browser APIs happy-dom lacks, over a synthetic buffer: the
+     * `<img>` decode both the stage's working image and the controller's texture
+     * preview await (which is also what fills `textureDimensionsCache`, so the
+     * frame's metrics resolve exactly as they do in the app), and the
+     * `createImageBitmap` + 2D canvas pair `readAlphaMask` reads the alpha through.
+     */
+    function stubAlphaDecode(rows: string[]): void {
+      const width = rows[0]?.length ?? 0;
+      const height = rows.length;
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = width;
+          public naturalHeight = height;
+          set src(_value: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        }
+      );
+      vi.stubGlobal('createImageBitmap', async () => ({
+        width: rows[0]?.length ?? 0,
+        height: rows.length,
+        close: () => undefined,
+      }));
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              drawImage: () => undefined,
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                for (let y = 0; y < height; y += 1) {
+                  for (let x = 0; x < width; x += 1) {
+                    data[(y * width + x) * 4 + 3] = rows[y]?.[x] === '#' ? 255 : 0;
+                  }
+                }
+                return { data };
+              },
+            }),
+          } as unknown as HTMLElement;
+        }
+      );
+    }
+
+    async function mountTracablePanel(): Promise<{
+      panel: SpriteEditorPanel;
+      controller: AnimationDocumentController;
+    }> {
+      seedAnimationTab([FRAME_PATH]);
+      const { panel, stubs } = createPanel();
+      // The frame's file has to actually read for the stage to bind to it.
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      // The stage has to hold the frame's image, and the frame's metrics have to
+      // have resolved, before the tool is offered at all (§9.7 risk 2) — both come
+      // out of the real texture load above.
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+        expect(controller.getFrameMetrics(controller.selectedFrame!)).toEqual({
+          frameWidth: 32,
+          frameHeight: 24,
+        });
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+      return { panel, controller };
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('traces the frame into the live polygon overlay and commits it on Apply', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      const { panel, controller } = await mountTracablePanel();
+
+      const action = panel.querySelector<HTMLButtonElement>('.ag-auto-polygon');
+      expect(action?.disabled).toBe(false);
+      action?.click();
+
+      // The trace lands in the frame DRAFT, which is what the *existing* overlay
+      // renders — the preview is the editable polygon, not a second overlay.
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon).toEqual(TRACED_POLYGON);
+      });
+      await panel.updateComplete;
+      expect(panel.querySelector('.stage-polygon')?.getAttribute('points')).toBe(
+        '24,4 24,18 8,18 8,4'
+      );
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain('Traced 4 vertices');
+      // Tracing switches to the polygon tool, so the vertices are draggable at once.
+      expect(panel.querySelector('[aria-label="Collision polygon tools"]')).not.toBeNull();
+
+      // Nothing is written until Apply.
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+      panel.querySelector<HTMLButtonElement>('.ag-polygon-apply')?.click();
+
+      await vi.waitFor(() => {
+        expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual(TRACED_POLYGON);
+      });
+    });
+
+    it('re-traces at the tolerance the slider carries, and Discard leaves the frame alone', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      const { panel, controller } = await mountTracablePanel();
+
+      panel.querySelector<HTMLButtonElement>('.ag-auto-polygon')?.click();
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon).toHaveLength(4);
+      });
+      await panel.updateComplete;
+
+      // A tolerance far past the shape still yields a usable collider, never a
+      // one-vertex "polygon" (the contour-trace guard, reached through the UI).
+      const slider = panel.querySelector<HTMLInputElement>('.ag-polygon-tolerance input');
+      expect(slider?.value).toBe('2');
+      if (!slider) {
+        throw new Error('no tolerance slider');
+      }
+      slider.value = '8';
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      slider.dispatchEvent(new Event('change', { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon.length).toBeGreaterThanOrEqual(3);
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-frame-tools .ag-frame-tools-wide + *');
+      const discard = [...panel.querySelectorAll<HTMLButtonElement>('.ag-frame-tools-wide')].find(
+        button => button.textContent?.trim() === 'Discard'
+      );
+      discard?.click();
+      await panel.updateComplete;
+
+      expect(controller.frameDraft).toBeNull();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+      expect(panel.querySelector('.ag-polygon-apply')).toBeNull();
+    });
+
+    it('refuses to trace while the frame texture has not decoded', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      seedAnimationTab([FRAME_PATH]);
+      const { panel } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      await panel.updateComplete;
+
+      // No decoded size: absolute-pixel geometry would be authored against the
+      // 256 px placeholder, so the tool shares the raster tools' gate.
+      const action = panel.querySelector<HTMLButtonElement>('.ag-auto-polygon');
+      expect(action?.disabled).toBe(true);
+      expect(action?.title).toBe('Waiting for the frame texture to decode…');
+    });
+  });
+
   it('registers as the active image-edit target and reports its frame binding', async () => {
     seedAnimationTab();
     const { panel, stubs } = createPanel();

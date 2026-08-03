@@ -54,7 +54,12 @@ import {
   type StagePoint,
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
-import { AnimationDocumentController, type TrimClipReport } from './animation-document-controller';
+import {
+  AnimationDocumentController,
+  type AutoPolygonReport,
+  type TrimClipReport,
+} from './animation-document-controller';
+import { DEFAULT_CONTOUR_TOLERANCE } from './contour-trace';
 import type { FrameRasterTransform } from './frame-restamp';
 import {
   FrameOverlayController,
@@ -288,6 +293,17 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   /** Grid the slice dialog opens with; remembered per panel instance. */
   private sliceColumns = 4;
   private sliceRows = 1;
+
+  /** §9.12.2 — Douglas–Peucker tolerance (frame px) the auto-polygon trace runs at. */
+  @state() private polygonTolerance = DEFAULT_CONTOUR_TOLERANCE;
+  /** True while a trace is decoding / walking the frame's alpha. */
+  @state() private polygonBusy = false;
+  /**
+   * Frame whose *draft* holds an auto-traced polygon awaiting Apply, or -1. The
+   * trace is a draft, so it is already on screen (and already editable) through the
+   * existing overlay; this only tracks whether there is something to commit.
+   */
+  @state() private polygonPreviewFrameIndex = -1;
 
   /** `.pix3anim` bound to this tab, or null when the tab holds a bare image. */
   @state() private animationResourcePath: string | null = null;
@@ -714,9 +730,29 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // A document reload drops the transient draft under an in-flight stage drag;
     // the drag has nothing left to edit, so end it.
     this.overlays.handleDocumentChanged();
+    this.syncPolygonPreviewToDraft();
     this.syncPlaceSessionToFrame();
     void this.syncCanvasToSelectedFrame();
     this.requestUpdate();
+  }
+
+  /**
+   * An auto-traced polygon lives in the frame draft, and the draft is dropped by
+   * anything that changes the selection or reloads the document — so the Apply
+   * affordance has to go with it.
+   */
+  private syncPolygonPreviewToDraft(): void {
+    if (this.polygonPreviewFrameIndex < 0) {
+      return;
+    }
+
+    const controller = this.documentController;
+    if (
+      !controller?.frameDraft ||
+      controller.selectedFrameIndex !== this.polygonPreviewFrameIndex
+    ) {
+      this.polygonPreviewFrameIndex = -1;
+    }
   }
 
   /**
@@ -1027,10 +1063,89 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           </button>
         `
       )}
-      ${this.renderTrimFramesAction()} ${this.renderDeleteFramesAction()}
+      ${this.renderAutoPolygonAction()} ${this.renderTrimFramesAction()}
+      ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
     `;
   }
+
+  /**
+   * §9.12.2 — seed the collision polygon from the frame's alpha. Shares the raster
+   * tools' gate (`frameRasterHint`): a UV-window frame's file is the whole
+   * spritesheet, and a frame whose texture has not decoded yet has no pixel space
+   * to author absolute coordinates in.
+   */
+  private renderAutoPolygonAction() {
+    const hint = this.frameRasterHint;
+    const disabled = !this.boundFrame || Boolean(hint) || this.polygonBusy || this.cropMode;
+    return html`
+      <button
+        class="ag-icon-button ag-auto-polygon"
+        type="button"
+        title=${hint ?? 'Trace a collision polygon from this frame’s alpha'}
+        aria-label="Auto collision polygon"
+        ?disabled=${disabled}
+        @click=${this.onAutoTracePolygon}
+      >
+        ${this.icons.getIcon('zap', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  /**
+   * Switch to the polygon tool (so the outline is visible *and* draggable) and
+   * trace. The traced polygon goes into the frame draft, which the existing
+   * overlay renders — there is no second, read-only preview overlay to keep in
+   * step, and the user can nudge a vertex before Apply.
+   */
+  private onAutoTracePolygon = async (): Promise<void> => {
+    this.setStageTool('polygon');
+    await this.runPolygonTrace();
+  };
+
+  /** Trace at the current tolerance, replacing whatever the draft holds. */
+  private async runPolygonTrace(): Promise<void> {
+    const controller = this.documentController;
+    if (!controller || this.polygonBusy) {
+      return;
+    }
+
+    this.polygonBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.traceSelectedFramePolygon({
+        tolerance: this.polygonTolerance,
+      });
+      this.polygonPreviewFrameIndex =
+        report.status === 'traced' ? controller.selectedFrameIndex : -1;
+      this.sliceStatus = {
+        text: describeAutoPolygonReport(report, this.polygonTolerance),
+        isError: report.status === 'unreadable',
+      };
+    } catch (error) {
+      this.polygonPreviewFrameIndex = -1;
+      this.sliceStatus = { text: `Auto polygon failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.polygonBusy = false;
+    }
+  }
+
+  /** Commit the traced polygon: one `applyClipUpdate`, one undo step. */
+  private onApplyPolygonPreview = async (): Promise<void> => {
+    const controller = this.documentController;
+    if (!controller) {
+      return;
+    }
+
+    this.polygonPreviewFrameIndex = -1;
+    await controller.commitFrameDraft(`Auto collision polygon: ${controller.activeClipName}`);
+  };
+
+  /** Throw the trace away — the document never saw it. */
+  private onCancelPolygonPreview = (): void => {
+    this.polygonPreviewFrameIndex = -1;
+    this.documentController?.clearFrameDraft();
+  };
 
   /**
    * §9.12.1 — trim the whole clip in one undo step. A clip-wide action, so it sits
@@ -1132,6 +1247,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   }
 
   private setStageTool(tool: StageTool): void {
+    if (tool !== 'polygon' && this.polygonPreviewFrameIndex >= 0) {
+      // Leaving polygon mode abandons an uncommitted trace rather than leaving a
+      // draft nobody can see the Apply button for.
+      this.onCancelPolygonPreview();
+    }
     this.stageTool = tool;
     if (tool !== 'select') {
       this.overlays.setEditMode(tool);
@@ -1425,6 +1545,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
               <div class="ag-empty-body">${this.renderEmptyBody()}</div>
             </div>`}
         ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
+        ${this.renderPolygonTools(frame)}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
       ${this.placeSession
@@ -1584,6 +1705,94 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         >
           Add point
         </button>
+      </div>
+    `;
+  }
+
+  /**
+   * Polygon-mode side card (§9.12.2): the tolerance the auto-trace runs at, plus
+   * Apply / Discard for a trace that has not been committed yet. The polygon
+   * itself is drawn by the ordinary overlay — this card never renders geometry.
+   */
+  private renderPolygonTools(frame: AnimationFrame | null) {
+    if (this.stageTool !== 'polygon' || this.cropMode || !frame || !this.documentController) {
+      return null;
+    }
+
+    const controller = this.documentController;
+    const hint = this.frameRasterHint;
+    const pending = this.polygonPreviewFrameIndex >= 0;
+    return html`
+      <div class="ag-frame-tools" aria-label="Collision polygon tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Polygon</span>
+          <span class="ag-frame-tools-value">${frame.collisionPolygon.length} pts</span>
+        </div>
+        <label class="ag-polygon-tolerance">
+          <span class="ag-polygon-tolerance-label">
+            Tolerance <em>${this.polygonTolerance.toFixed(1)} px</em>
+          </span>
+          <input
+            type="range"
+            min="0"
+            max="8"
+            step="0.5"
+            .value=${String(this.polygonTolerance)}
+            aria-label="Auto polygon tolerance in pixels"
+            @input=${(event: Event) => {
+              this.polygonTolerance = Number((event.target as HTMLInputElement).value);
+            }}
+            @change=${() => {
+              // Re-trace on release, not on every tick of the drag: the mask is
+              // cached, but a re-trace still walks the whole outline.
+              if (this.polygonPreviewFrameIndex >= 0) {
+                void this.runPolygonTrace();
+              }
+            }}
+          />
+        </label>
+        ${hint ? html`<p class="ag-frame-tools-hint">${hint}</p>` : null}
+        <div class="ag-frame-tools-row">
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Trace the polygon from this frame’s alpha channel"
+            ?disabled=${Boolean(hint) || this.polygonBusy}
+            @click=${() => void this.runPolygonTrace()}
+          >
+            ${this.polygonBusy ? 'Tracing…' : 'Auto'}
+          </button>
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Remove every vertex of this frame’s polygon"
+            @click=${() => void controller.clearPolygon()}
+          >
+            Clear
+          </button>
+        </div>
+        ${pending
+          ? html`
+              <div class="ag-frame-tools-row">
+                <button
+                  class="ag-frame-tools-wide ag-polygon-apply"
+                  type="button"
+                  title="Write the traced polygon into the frame"
+                  @click=${this.onApplyPolygonPreview}
+                >
+                  Apply
+                </button>
+                <button
+                  class="ag-frame-tools-wide"
+                  type="button"
+                  title="Discard the traced polygon"
+                  @click=${this.onCancelPolygonPreview}
+                >
+                  Discard
+                </button>
+              </div>
+            `
+          : null}
       </div>
     `;
   }
@@ -3215,6 +3424,23 @@ const describeTrimReport = (report: TrimClipReport, clipName: string): string =>
     parts.push(`${report.failed} failed`);
   }
   return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.2 — state the outcome of a trace. Every non-`traced` status has a cause
+ * the user can act on, so none of them may be silent.
+ */
+const describeAutoPolygonReport = (report: AutoPolygonReport, tolerance: number): string => {
+  switch (report.status) {
+    case 'traced':
+      return `Traced ${report.vertexCount} vertices at ${tolerance.toFixed(1)} px — Apply to keep them.`;
+    case 'empty':
+      return 'This frame has no opaque pixels to trace.';
+    case 'unreadable':
+      return 'Could not read this frame’s pixels.';
+    default:
+      return 'Select a frame with its own texture file to trace a polygon.';
+  }
 };
 
 declare global {
