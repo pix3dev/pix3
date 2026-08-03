@@ -78,6 +78,16 @@ import {
   getDroppedTextureResources,
   isPotentialTextureDrag,
 } from './frame-texture-drop';
+import {
+  DEFAULT_VIDEO_IMPORT_FPS,
+  VIDEO_IMPORT_FPS_CHOICES,
+  formatVideoTime,
+  grabVideoFrames,
+  loadVideoFile,
+  planVideoFrameTimes,
+  type LoadedVideo,
+  type VideoFramePlan,
+} from './video-frame-extract';
 import { getGenerationDragData } from '@/ui/shared/asset-drag-drop';
 import { getFrameImageStyle } from './sprite-timeline';
 import './sprite-clips-rail';
@@ -252,6 +262,28 @@ interface PlaceSession {
   texturePath: string;
 }
 
+/**
+ * §9.12.5 — a picked video, decoded and waiting for its fps and in/out range. The
+ * element is held open for the whole session so the import does not decode the
+ * file twice; {@link LoadedVideo.release} revokes its object URL.
+ */
+interface VideoImportSession {
+  fileName: string;
+  loaded: LoadedVideo;
+  /** Start of the trim range, seconds. */
+  inSeconds: number;
+  /** End of the trim range, seconds. */
+  outSeconds: number;
+  fps: number;
+}
+
+/** §9.12.5's outcome, in the three buckets every §9.12 tool reports. */
+interface VideoImportReport {
+  imported: number;
+  skipped: number;
+  failed: number;
+}
+
 @customElement('pix3-sprite-editor-panel')
 export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget {
   @inject(AiImageSettingsService)
@@ -375,6 +407,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
 
   /** §9.12.4 — whether the bulk frame-ops card is open over the stage. */
   @state() private bulkPanelOpen = false;
+
+  /**
+   * §9.12.5 — the picked video, decoded and waiting for its fps/range, or null.
+   * Nothing is written until Import.
+   */
+  @state() private videoSession: VideoImportSession | null = null;
+  /** True while a video file is being opened and decoded (before the card appears). */
+  @state() private videoBusy = false;
+  /** Frames grabbed so far in the running import — the card's progress readout. */
+  @state() private videoProgress = 0;
 
   /** `.pix3anim` bound to this tab, or null when the tab holds a bare image. */
   @state() private animationResourcePath: string | null = null;
@@ -549,6 +591,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // Same reasoning for the eyedropper's decoded RGBA — a re-dock reloads the
     // working image, so holding a full-resolution pixel buffer across it is waste.
     this.closeChromaMode();
+    // And for the decoded video: it holds an object URL and a decoder, and an
+    // un-imported range is cheap to re-pick.
+    this.closeVideoSession();
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
@@ -1151,8 +1196,32 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         `
       )}
       ${this.renderAutoPolygonAction()} ${this.renderTrimFramesAction()}
-      ${this.renderBulkFramesAction()} ${this.renderDeleteFramesAction()}
+      ${this.renderBulkFramesAction()} ${this.renderVideoImportAction()}
+      ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
+    `;
+  }
+
+  /**
+   * §9.12.5 — pull frames out of a video file. Clip-wide and *additive*, so unlike
+   * the trim and the bulk ops it needs no frame selected and no raster gate: it
+   * appends to the clip rather than rewriting what is already there.
+   */
+  private renderVideoImportAction() {
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode || this.videoBusy;
+    return html`
+      <button
+        class="ag-icon-button ag-video-import ${this.videoSession ? 'is-active' : ''}"
+        type="button"
+        title=${this.videoBusy
+          ? 'Decoding the video…'
+          : 'Import frames from a video file (browser decoding, no ffmpeg)'}
+        aria-label="Import frames from a video"
+        ?disabled=${busy}
+        @click=${this.onToggleVideoImport}
+      >
+        ${this.icons.getIcon('video', IconSize.SMALL)}
+      </button>
     `;
   }
 
@@ -1478,6 +1547,290 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       this.sliceBusy = false;
     }
   }
+
+  // -- video import (§9.12.5) -------------------------------------------------
+
+  /** Open the picker, or close an open session. Nothing is written either way. */
+  private onToggleVideoImport = (): void => {
+    if (this.videoSession) {
+      this.closeVideoSession();
+      return;
+    }
+    this.pickVideoFile();
+  };
+
+  /**
+   * A detached `<input type="file">`, the way the Generate panel opens its
+   * reference picker. Deliberately not `showOpenFilePicker`: the editor calls it
+   * nowhere, and a video is read as bytes and thrown away, not kept as a project
+   * file handle.
+   */
+  private pickVideoFile(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) {
+        void this.openVideoSession(file);
+      }
+    });
+    input.click();
+  }
+
+  /**
+   * Decode the picked file far enough to know its size and length. Two of
+   * §9.12.5's guards land here, before any UI exists to be confused by them: a
+   * container the browser cannot open, and a file that reports no usable duration
+   * (a live stream reports `Infinity`, an audio-only file has no video track) —
+   * neither of which can be given an in/out range.
+   */
+  private async openVideoSession(file: File): Promise<void> {
+    this.videoBusy = true;
+    this.sliceStatus = null;
+    try {
+      const loaded = await loadVideoFile(file);
+      if (!Number.isFinite(loaded.duration) || loaded.duration <= 0) {
+        loaded.release();
+        this.sliceStatus = {
+          text: `“${file.name}” reports no usable duration, so there is no range to import from.`,
+          isError: true,
+        };
+        return;
+      }
+      // The two cards share the stage's top-right slot.
+      this.bulkPanelOpen = false;
+      this.videoSession = {
+        fileName: file.name,
+        loaded,
+        inSeconds: 0,
+        outSeconds: loaded.duration,
+        fps: DEFAULT_VIDEO_IMPORT_FPS,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Video import failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.videoBusy = false;
+    }
+  }
+
+  /** Drop the session and let the decoder go. Safe to call when none is open. */
+  private closeVideoSession(): void {
+    const session = this.videoSession;
+    if (!session) {
+      return;
+    }
+    this.videoSession = null;
+    this.videoProgress = 0;
+    session.loaded.release();
+  }
+
+  /** Replace the session wholesale — Lit tracks the object, not its fields. */
+  private updateVideoSession(patch: Partial<VideoImportSession>): void {
+    if (!this.videoSession) {
+      return;
+    }
+    this.videoSession = { ...this.videoSession, ...patch };
+  }
+
+  /** The plan the card is currently showing, and the one Import runs. */
+  private get videoFramePlan(): VideoFramePlan | null {
+    const session = this.videoSession;
+    return session
+      ? planVideoFrameTimes({
+          duration: session.loaded.duration,
+          fps: session.fps,
+          inSeconds: session.inSeconds,
+          outSeconds: session.outSeconds,
+        })
+      : null;
+  }
+
+  /**
+   * §9.12.5's card: the fps picker and the in/out trim range, plus a live count of
+   * what they add up to. Every refusal the plan can return is stated here *before*
+   * the user commits, so Import is only ever enabled on a range that will actually
+   * produce frames.
+   */
+  private renderVideoImportTools() {
+    const session = this.videoSession;
+    const plan = this.videoFramePlan;
+    const clip = this.documentController?.activeClip;
+    if (!session || !plan || !clip) {
+      return null;
+    }
+
+    const busy = this.sliceBusy || this.videoBusy;
+    return html`
+      <div class="ag-frame-tools ag-video-tools" aria-label="Video import tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Video</span>
+          <span class="ag-frame-tools-value">${session.loaded.width}×${session.loaded.height}</span>
+        </div>
+        <p class="ag-frame-tools-hint">
+          ${session.fileName} — ${formatVideoTime(session.loaded.duration)}, appended to
+          <em>${clip.name}</em>.
+        </p>
+        <label class="ag-video-field">
+          <span class="ag-video-field-label">Frame rate</span>
+          <select
+            aria-label="Video import frame rate"
+            ?disabled=${busy}
+            @change=${(event: Event) =>
+              this.updateVideoSession({
+                fps: Number((event.target as HTMLSelectElement).value),
+              })}
+          >
+            ${VIDEO_IMPORT_FPS_CHOICES.map(
+              fps => html`<option value=${fps} ?selected=${fps === session.fps}>${fps} fps</option>`
+            )}
+          </select>
+        </label>
+        ${this.renderVideoRange('In', session.inSeconds, 'Video import range start', value =>
+          this.updateVideoSession({
+            inSeconds: Math.min(value, session.outSeconds),
+          })
+        )}
+        ${this.renderVideoRange('Out', session.outSeconds, 'Video import range end', value =>
+          this.updateVideoSession({
+            outSeconds: Math.max(value, session.inSeconds),
+          })
+        )}
+        <p class="ag-frame-tools-hint ag-video-plan ${plan.status === 'ok' ? '' : 'is-warning'}">
+          ${this.sliceBusy
+            ? `Grabbing frame ${this.videoProgress} of ${plan.times.length}…`
+            : describeVideoPlan(plan)}
+        </p>
+        <div class="ag-frame-tools-row">
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            ?disabled=${busy}
+            @click=${this.onCancelVideoImport}
+          >
+            Cancel
+          </button>
+          <button
+            class="ag-frame-tools-wide ag-video-apply"
+            type="button"
+            title=${plan.status === 'ok'
+              ? `Grab ${plan.times.length} frames and append them to ${clip.name}`
+              : describeVideoPlan(plan)}
+            ?disabled=${busy || plan.status !== 'ok'}
+            @click=${this.onImportVideoFrames}
+          >
+            ${this.sliceBusy ? 'Importing…' : 'Import'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  /** One in/out handle over the video's own timeline. */
+  private renderVideoRange(
+    label: string,
+    value: number,
+    ariaLabel: string,
+    apply: (next: number) => void
+  ) {
+    const duration = this.videoSession?.loaded.duration ?? 0;
+    return html`
+      <label class="ag-video-range">
+        <span class="ag-video-range-label">${label} <em>${formatVideoTime(value)}</em></span>
+        <input
+          type="range"
+          min="0"
+          max=${duration.toFixed(3)}
+          step="0.05"
+          .value=${String(value)}
+          aria-label=${ariaLabel}
+          ?disabled=${this.sliceBusy}
+          @input=${(event: Event) => apply(Number((event.target as HTMLInputElement).value))}
+        />
+      </label>
+    `;
+  }
+
+  private onCancelVideoImport = (): void => {
+    this.closeVideoSession();
+  };
+
+  /**
+   * §9.12.5's import, in §9.12.1's shape: every frame is grabbed and every file is
+   * written **first**, and then **one** document update appends the whole batch —
+   * so the import is a single undo step, never a half-imported clip.
+   *
+   * The write goes through `importOsFiles` + `addFrameTextures`, which is byte for
+   * byte the path an OS image drop takes: §8.2's managed-folder naming, the
+   * `sourceSize` stamp and the undo label are all shared rather than reimplemented
+   * here.
+   */
+  private onImportVideoFrames = async (): Promise<void> => {
+    const session = this.videoSession;
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    const plan = this.videoFramePlan;
+    if (!session || !controller || !clip || !plan || plan.status !== 'ok' || this.sliceBusy) {
+      return;
+    }
+
+    const frameCount = plan.times.length;
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Import frames from this video?',
+      message: `Grab ${frameCount} frame${frameCount === 1 ? '' : 's'} at ${
+        session.fps
+      } fps between ${formatVideoTime(plan.inSeconds)} and ${formatVideoTime(
+        plan.outSeconds
+      )}, and append them to "${clip.name}".`,
+      confirmLabel: `Import ${frameCount} frame${frameCount === 1 ? '' : 's'}`,
+      cancelLabel: 'Cancel',
+      disclaimer: `Each frame is written into the animation's own folder as a new ${session.loaded.width}×${session.loaded.height} PNG. The whole import is one undo step, but undo restores the document, not the files on disk. At most ${plan.maxFrames} frames per import.`,
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    this.videoProgress = 0;
+    const report: VideoImportReport = { imported: 0, skipped: 0, failed: 0 };
+    try {
+      const grab = await grabVideoFrames(session.loaded.video, {
+        times: plan.times,
+        namePrefix: 'video-frame',
+        onProgress: grabbed => {
+          this.videoProgress = grabbed;
+        },
+      });
+      report.skipped = grab.skipped;
+      report.failed = grab.failed;
+
+      if (grab.files.length > 0) {
+        const frameCountBefore = clip.frames.length;
+        const texturePaths = await controller.importOsFiles(grab.files);
+        await controller.addFrameTextures(texturePaths);
+        // Detected the way `deleteFramesByParity` detects its own outcome: the
+        // document can refuse an update, and then nothing was imported however
+        // many files exist on disk.
+        const added = (controller.activeClip?.frames.length ?? frameCountBefore) - frameCountBefore;
+        report.imported = Math.max(0, added);
+        report.failed += grab.files.length - report.imported;
+      }
+
+      this.sliceStatus = {
+        text: describeVideoImportReport(report, clip.name),
+        isError: report.failed > 0,
+      };
+      if (report.imported > 0) {
+        this.closeVideoSession();
+      }
+    } catch (error) {
+      this.sliceStatus = { text: `Video import failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+      this.videoProgress = 0;
+    }
+  };
 
   /**
    * Delete every selected frame. Multi-select is authored in the timeline
@@ -2068,6 +2421,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
             </div>`}
         ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
         ${this.renderPolygonTools(frame)} ${this.renderBulkFramesTools()}
+        ${this.renderVideoImportTools()}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
       ${this.placeSession
@@ -3992,6 +4346,46 @@ const describeBulkReport = (report: BulkFrameReport, subject: string): string =>
     report.processed > 0
       ? `${subject} — ${report.processed} frame${report.processed === 1 ? '' : 's'}`
       : `${subject} — nothing to do`,
+  ];
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.5 — say what the current fps/range add up to, including *why* a range is
+ * refused. Every status the plan can return names something the user can change,
+ * so none of them is allowed to read as "the button is broken".
+ */
+const describeVideoPlan = (plan: VideoFramePlan): string => {
+  switch (plan.status) {
+    case 'ok':
+      return `${plan.times.length} frame${plan.times.length === 1 ? '' : 's'} from ${formatVideoTime(
+        plan.inSeconds
+      )} to ${formatVideoTime(plan.outSeconds)}.`;
+    case 'too-many':
+      return `That range asks for ${plan.requested} frames; the cap is ${plan.maxFrames}. Narrow the range or lower the frame rate.`;
+    case 'no-duration':
+      return 'This video reports no usable duration.';
+    default:
+      return 'This range is shorter than one frame — widen it or raise the frame rate.';
+  }
+};
+
+/**
+ * §9.12.5 — say what the import did, in the same three buckets the trim and the
+ * bulk ops report. A video whose tail decodes to nothing imports fewer frames than
+ * it grabbed, and that has to be visible rather than looking like a short clip.
+ */
+const describeVideoImportReport = (report: VideoImportReport, clipName: string): string => {
+  const parts: string[] = [
+    report.imported > 0
+      ? `Imported ${report.imported} frame${report.imported === 1 ? '' : 's'} into ${clipName}`
+      : `Nothing imported into ${clipName}`,
   ];
   if (report.skipped > 0) {
     parts.push(`${report.skipped} skipped`);

@@ -150,6 +150,8 @@ interface PanelStubs {
   showConfirmation: ReturnType<typeof vi.fn>;
   historyGet: ReturnType<typeof vi.fn>;
   readBlob: ReturnType<typeof vi.fn>;
+  writeBinaryFile: ReturnType<typeof vi.fn>;
+  invokeAndPush: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
   setActiveController: ReturnType<typeof vi.fn>;
   setActiveTarget: ReturnType<typeof vi.fn>;
@@ -164,6 +166,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   // Reads never resolve to a decodable blob: the texture-preview loader swallows
   // the failure, and no detached promise is left hanging (the `.finally` gotcha).
   const readBlob = vi.fn().mockRejectedValue(new Error('no project storage in tests'));
+  const writeBinaryFile = vi.fn().mockResolvedValue(undefined);
+  const invokeAndPush = vi.fn().mockResolvedValue(true);
   const historyGet = vi.fn().mockResolvedValue(undefined);
   const updatePreferences = vi.fn((patch: Record<string, unknown>) => {
     Object.assign(preferences, patch);
@@ -200,13 +204,13 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     },
     history: { add: vi.fn().mockResolvedValue(undefined), get: historyGet },
     bgRemoval: { removeBackground: vi.fn() },
-    storage: { readBlob, writeBinaryFile: vi.fn(), createDirectory: vi.fn() },
+    storage: { readBlob, writeBinaryFile, createDirectory: vi.fn() },
     editorSettings: { showSettings: vi.fn() },
     commandDispatcher: { execute },
     assetLibrary: { isUserScopeSupported: () => false },
     sliceDialog: { showDialog: vi.fn().mockResolvedValue(null) },
     editorTabs: { focusOrOpenAnimation: vi.fn() },
-    operations: { invokeAndPush: vi.fn().mockResolvedValue(true) },
+    operations: { invokeAndPush },
     animationEditorService: {
       getActiveController: () => activeController,
       setActiveController,
@@ -238,6 +242,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       showConfirmation,
       historyGet,
       readBlob,
+      writeBinaryFile,
+      invokeAndPush,
       updatePreferences,
       setActiveController,
       setActiveTarget,
@@ -1159,6 +1165,295 @@ describe('SpriteEditorPanel (unified shell)', () => {
         expect(stubs.showConfirmation).toHaveBeenCalledOnce();
       });
       expect(applyRasterOpToClipFrames).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * §9.12.5 — video import. The seek/grab timing is the extractor's job and is
+   * tested against a browser-shaped fake in `video-frame-extract.spec.ts`; what the
+   * shell owes is the picker, the fps/range card, the confirm, the §8.2 write path
+   * and the `{ imported, skipped, failed }` status line.
+   *
+   * Nothing is doubled here beyond the three browser capabilities happy-dom lacks:
+   * the OS file picker, video decoding and the 2D canvas. The real
+   * `planVideoFrameTimes`, the real `grabVideoFrames`, the real document controller
+   * and the real `importOsFiles` all run, so the batching assertion below (every
+   * file written *before* the single operation push) is about shipping code.
+   */
+  describe('video import (§9.12.5)', () => {
+    /**
+     * A decodable video, modelled only as far as this spec needs: metadata and a
+     * first frame arrive asynchronously, and so does every seek. (The
+     * grab-order/duplicate-frame question lives in the extractor's own spec, which
+     * models frame *presentation* separately from `currentTime`.)
+     */
+    class FakeVideoElement extends EventTarget {
+      public readyState = 0;
+      public preload = '';
+      public muted = false;
+      public playsInline = false;
+      public videoWidth = 0;
+      public videoHeight = 0;
+      private time = 0;
+
+      constructor(
+        public duration: number,
+        private readonly size: { width: number; height: number }
+      ) {
+        super();
+      }
+
+      set src(value: string) {
+        if (!value) {
+          return;
+        }
+        setTimeout(() => {
+          this.readyState = 2;
+          this.videoWidth = this.size.width;
+          this.videoHeight = this.size.height;
+          this.dispatchEvent(new Event('loadeddata'));
+        }, 0);
+      }
+
+      get currentTime(): number {
+        return this.time;
+      }
+
+      set currentTime(value: number) {
+        this.time = value;
+        setTimeout(() => {
+          this.readyState = 2;
+          this.dispatchEvent(new Event('seeked'));
+        }, 0);
+      }
+
+      removeAttribute(): void {}
+      load(): void {}
+    }
+
+    /**
+     * Stand up the picker, the decoder and the canvas. The `<input type="file">` is
+     * a real element with a seeded `files` list and a `click()` that dispatches the
+     * `change` the panel listens for — the one thing a headless DOM can never do on
+     * its own.
+     */
+    function stubVideoPipeline(options: {
+      file: File;
+      duration: number;
+      width?: number;
+      height?: number;
+    }): void {
+      const size = { width: options.width ?? 32, height: options.height ?? 24 };
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, elementOptions?: unknown) => {
+          if (tagName === 'video') {
+            return new FakeVideoElement(options.duration, size) as unknown as HTMLElement;
+          }
+          if (tagName === 'canvas') {
+            return {
+              width: 0,
+              height: 0,
+              getContext: () => ({ imageSmoothingEnabled: false, drawImage: () => undefined }),
+              toBlob: (callback: (blob: Blob | null) => void) =>
+                callback(new Blob(['frame'], { type: 'image/png' })),
+            } as unknown as HTMLElement;
+          }
+
+          const element = realCreateElement(
+            tagName,
+            elementOptions as ElementCreationOptions | undefined
+          );
+          if (tagName === 'input') {
+            Object.defineProperties(element, {
+              files: { value: [options.file], configurable: true },
+              click: {
+                value: () => element.dispatchEvent(new Event('change')),
+                configurable: true,
+              },
+            });
+          }
+          return element;
+        }
+      );
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:video');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    }
+
+    async function openVideoCard(
+      duration: number
+    ): Promise<{ panel: SpriteEditorPanel; stubs: PanelStubs }> {
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      stubVideoPipeline({
+        file: new File(['video bytes'], 'walk-cycle.mp4', { type: 'video/mp4' }),
+        duration,
+      });
+      const { panel, stubs } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-import')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-video-tools')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      return { panel, stubs };
+    }
+
+    it('opens the fps/range card on a picked video and states what it will grab', async () => {
+      const { panel } = await openVideoCard(1);
+
+      const card = panel.querySelector('.ag-video-tools');
+      expect(card?.textContent).toContain('walk-cycle.mp4');
+      expect(card?.textContent).toContain('0:01.0');
+      expect(panel.querySelector('.ag-video-tools .ag-frame-tools-value')?.textContent).toContain(
+        '32×24'
+      );
+      // 1 s at the default 12 fps.
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        '12 frames from 0:00.0 to 0:01.0.'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(false);
+    });
+
+    it('writes every frame file first and appends them in ONE document update', async () => {
+      const { panel, stubs } = await openVideoCard(1);
+
+      // Drop to 4 fps through the picker, so the range plans four frames.
+      const fpsSelect = panel.querySelector<HTMLSelectElement>('.ag-video-field select');
+      if (!fpsSelect) {
+        throw new Error('no fps picker');
+      }
+      fpsSelect.value = '4';
+      fpsSelect.dispatchEvent(new Event('change'));
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain('4 frames');
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const writeBinaryFile = stubs.writeBinaryFile;
+      const invokeAndPush = stubs.invokeAndPush;
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.click();
+      await vi.waitFor(() => {
+        expect(controller?.activeClip?.frames.length).toBe(5);
+      });
+
+      expect(stubs.showConfirmation.mock.calls[0][0]).toMatchObject({
+        title: 'Import frames from this video?',
+        confirmLabel: 'Import 4 frames',
+      });
+      // §8.2's managed-folder naming, shared with an OS image drop rather than
+      // reinvented: the clip already owns idle_0001.png, so the import counts on.
+      expect(writeBinaryFile.mock.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+        'res://sprites/walk/idle_0005.png',
+      ]);
+      // §9.12.1's batching shape: every file lands before the single undo step.
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const pushOrder = invokeAndPush.mock.invocationCallOrder[0];
+      for (const order of writeBinaryFile.mock.invocationCallOrder) {
+        expect(order).toBeLessThan(pushOrder);
+      }
+
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Imported 4 frames into idle.'
+      );
+      // A finished import closes the session and lets the decoder go.
+      expect(panel.querySelector('.ag-video-tools')).toBeNull();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:video');
+    });
+
+    it('writes nothing when the confirm is declined, and keeps the card open', async () => {
+      const { panel, stubs } = await openVideoCard(1);
+      stubs.showConfirmation.mockResolvedValueOnce(false);
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.click();
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+
+      expect(stubs.writeBinaryFile).not.toHaveBeenCalled();
+      expect(stubs.invokeAndPush).not.toHaveBeenCalled();
+      expect(panel.querySelector('.ag-video-tools')).not.toBeNull();
+    });
+
+    it('refuses a range that would produce more frames than the cap allows', async () => {
+      // 10 minutes at the default 12 fps is 7,200 frames.
+      const { panel } = await openVideoCard(600);
+
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        'That range asks for 7200 frames; the cap is 300.'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(true);
+    });
+
+    it('refuses an in/out range that holds less than one frame', async () => {
+      const { panel } = await openVideoCard(1);
+
+      const outRange = panel.querySelector<HTMLInputElement>(
+        'input[aria-label="Video import range end"]'
+      );
+      if (!outRange) {
+        throw new Error('no out-point slider');
+      }
+      outRange.value = '0.05';
+      outRange.dispatchEvent(new Event('input'));
+      await panel.updateComplete;
+
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        'This range is shorter than one frame'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(true);
+    });
+
+    it('states the failure when the browser cannot decode the picked file', async () => {
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const realCreateElement = document.createElement.bind(document);
+      const file = new File(['not a video'], 'broken.mov', { type: 'video/quicktime' });
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, elementOptions?: unknown) => {
+          if (tagName === 'video') {
+            const video = new EventTarget() as EventTarget & { src: string };
+            Object.defineProperty(video, 'src', {
+              set: () => {
+                setTimeout(() => video.dispatchEvent(new Event('error')), 0);
+              },
+              configurable: true,
+            });
+            Object.assign(video, { removeAttribute: () => {}, load: () => {} });
+            return video as unknown as HTMLElement;
+          }
+          const element = realCreateElement(
+            tagName,
+            elementOptions as ElementCreationOptions | undefined
+          );
+          if (tagName === 'input') {
+            Object.defineProperties(element, {
+              files: { value: [file], configurable: true },
+              click: {
+                value: () => element.dispatchEvent(new Event('change')),
+                configurable: true,
+              },
+            });
+          }
+          return element;
+        }
+      );
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:video');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+      const { panel } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      panel.querySelector<HTMLButtonElement>('.ag-video-import')?.click();
+
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+          'could not decode this video file'
+        );
+      });
+      expect(panel.querySelector('.ag-video-tools')).toBeNull();
     });
   });
 

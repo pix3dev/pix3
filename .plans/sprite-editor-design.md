@@ -1624,6 +1624,75 @@ trim range → frames written by the §8.2 convention through the same
 `requestVideoFrameCallback` where available and fall back to `currentTime` stepping; the fallback
 must await the `seeked` event before each grab or it silently captures duplicate frames.
 
+**Implementation notes.**
+
+*Where it lives.* A new `src/ui/sprite-editor/video-frame-extract.ts` with its own spec, the split
+§9.12.2 made for `contour-trace.ts`: `planVideoFrameTimes` is **pure** (no DOM at all) and decides
+*which* timestamps to grab, `loadVideoFile` / `seekVideoTo` / `grabVideoFrames` touch the DOM but
+hold no policy, and the panel owns the picker, the confirm and the status line. It is deliberately
+*not* in `image-ops.ts`: everything there is blob-in/blob-out raster maths with no element lifetime
+to manage, whereas this holds a live `<video>` (and its object URL) open across a whole session.
+
+*The seek.* `seekVideoTo` waits for `requestVideoFrameCallback` where the element has one — a
+strictly better signal than `seeked`, because it fires when the frame has actually been *presented*
+— and for the `seeked` event where it does not (Firefox). Two details the contract does not name but
+the browser demands. First, **a seek to where the element already is does not reliably fire
+`seeked`**, and the first grab of a range starting at 0 is exactly that case, so the helper answers
+from state (`currentTime` within 1 µs *and* `readyState ≥ HAVE_CURRENT_DATA`) instead of waiting for
+an event that will never come. Second, `rVFC` on a *paused* element is a weaker promise than the spec
+reads like, so the 5 s per-seek timeout is not only a hang guard: if it expires and `seeked` was
+observed, the seek is taken; only a seek that never landed at all rejects. A rejected seek **aborts
+the whole run** rather than counting as one failure — an unseekable file fails every later timestamp
+identically, and at the cap that is 300 timeouts in a row.
+
+*Batching.* §9.12.1's shape, one level up: every frame is grabbed into a `File`, then
+`importOsFiles` writes the whole batch, then **one** `addFrameTextures` appends them — one
+`applyResourceUpdate`, one undo step. That is also why the grabbed PNGs are held in memory rather
+than streamed one at a time: `importOsFiles` numbers a run from `nextFrameFileNumber` *once*, so
+calling it per frame before the document update would hand every file the same number. Reusing that
+function (rather than writing files here) is what makes the §8.2 managed-folder naming, the
+`sourceSize` stamp and the undo label shared instead of reimplemented — the panel spec asserts the
+written paths continue the clip's own `idle_000N.png` sequence.
+
+*The cap is 300 frames*, stated in the card ("the cap is 300") and in the confirm's disclaimer. It
+is an order of magnitude past a hand-authored clip (SkyDefender's longest is 22) and is where the
+memory held by the un-written batch stops being invisible. Over it the plan returns `too-many`
+carrying `requested`, so the card can say *by how much* and Import stays disabled; it never silently
+imports a truncated range.
+
+*Guards.* Four, each with a test: a file the browser cannot decode (`loadVideoFile` waits for
+`loadeddata`, not merely `loadedmetadata`, and rejects on `error` or on a 15 s timeout — a truncated
+file fires neither event); a video with no usable duration (0, `NaN`, or the `Infinity` a live stream
+reports) and one with no video track at all; an in/out range holding less than one frame at the
+chosen fps; and the frame cap. All four are stated in the card *before* the user can commit, and
+Import is enabled only on a plan whose status is `ok`.
+
+*Reporting* is `{ imported, skipped, failed }` through the existing `sliceStatus` line, the same
+three buckets `TrimClipReport` and `BulkFrameReport` use. `skipped` is a timestamp the decoder had
+no frame for (a range running past the video's real end) — the same call `applyRasterOpToClipFrames`
+makes when a raster op hands back nothing — while a draw/encode failure is a `failed`. `imported` is
+measured as the clip's frame-count delta, the way `deleteFramesByParity` measures its own outcome, so
+a document that refuses the update cannot report success.
+
+*Deviations.* (1) The card has **no video preview** — the in/out range is picked against a numeric
+`m:ss.s` readout, not a scrubbed frame. A preview needs the element in the tree and a second render
+surface next to the stage's; it is a follow-up, not a blocker. (2) The confirm is the plain
+`showConfirmation`, not §9.12.1's `showChoice`: every parameter this tool takes (fps, in, out) is
+already on the card, so there is nothing left to put on the buttons. (3) The file picker is a
+detached `<input type="file">`, the way `generate-panel.ts` opens its reference picker —
+`showOpenFilePicker` appears nowhere in the editor, and a video is read as bytes and thrown away
+rather than kept as a project file handle.
+
+*Tests.* `video-frame-extract.spec.ts` runs the real planner and the real grab loop against a
+`FakeVideo` that models the one thing happy-dom cannot do: it keeps the *requested* time
+(`currentTime`) apart from the frame that would actually be painted (`presentedTime`), which only
+catches up when the seek completes. The canvas double records the presented one, so the
+duplicate-frame assertion is real — dropping the `await` in front of `seekVideoTo` was tried and
+turns four of those tests red. The panel spec drives the whole shipping path (picker → card → fps
+select → confirm → import) with only the three capabilities happy-dom lacks stood up (the OS picker,
+video decoding, the 2D canvas), and asserts the batching invariant directly: every `writeBinaryFile`
+call order is less than the single `invokeAndPush`.
+
 ### 9.13 Verification log — the loose ends, closed 2026-08-04
 
 Three paths this track had implemented but never *executed*. All three were checked in a live editor
