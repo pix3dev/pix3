@@ -564,6 +564,339 @@ describe('AnimationDocumentController', () => {
     });
   });
 
+  describe('trimClipFrames (§9.12.1)', () => {
+    const ASSET_PATH = 'res://sprites/walk/walk.pix3anim';
+    const ANIMATION_ID = 'sprites-walk-walk';
+
+    /** A frame raster: fully opaque inside `opaque`, fully transparent outside. */
+    interface FakeRaster {
+      width: number;
+      height: number;
+      opaque: { x: number; y: number; width: number; height: number } | null;
+    }
+
+    /**
+     * Let the REAL `trimImageBlob` run. happy-dom has neither `createImageBitmap`
+     * nor a 2D canvas, so both are stood up over a synthetic alpha buffer — the
+     * bounding-box scan, the padding/centering maths and therefore the crop origin
+     * this spec is about are all the shipping implementation, not a double.
+     *
+     * Frame blobs carry their own texture path as text, which is how the bitmap
+     * stub knows which raster it was handed.
+     */
+    function stubRasters(rasters: Record<string, FakeRaster>): void {
+      // Unlike the other suites here, `readBlob` RESOLVES in this one, so the
+      // controller's texture-preview loader gets as far as `new Image()` — which
+      // happy-dom never settles, and `applyResourceUpdate` awaits it. Settle it as
+      // "undecodable" (the preview is not what these tests are about).
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = 0;
+          public naturalHeight = 0;
+          public width = 0;
+          public height = 0;
+          set src(_value: string) {
+            queueMicrotask(() => this.onerror?.());
+          }
+        }
+      );
+
+      vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+        const key = await blob.text();
+        const raster = rasters[key];
+        if (!raster) {
+          throw new Error(`no raster stubbed for ${key}`);
+        }
+        return { width: raster.width, height: raster.height, raster, close: () => undefined };
+      });
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          let drawn: FakeRaster | null = null;
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              drawImage: (bitmap: { raster?: FakeRaster }) => {
+                drawn = bitmap.raster ?? null;
+              },
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                const raster: FakeRaster | null = drawn;
+                const box = raster?.opaque ?? null;
+                if (box) {
+                  for (let y = box.y; y < box.y + box.height; y += 1) {
+                    for (let x = box.x; x < box.x + box.width; x += 1) {
+                      data[(y * width + x) * 4 + 3] = 255;
+                    }
+                  }
+                }
+                return { data };
+              },
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['trimmed'], { type: 'image/png' })),
+          };
+          return canvas as unknown as HTMLElement;
+        }
+      );
+    }
+
+    function createTrimmableFrame(
+      texturePath: string,
+      sourceSize?: { width: number; height: number }
+    ) {
+      return {
+        ...createFrame(texturePath, { x: 0.4, y: 0.25 }),
+        ...(sourceSize ? { sourceSize } : {}),
+      };
+    }
+
+    function seedTrimDocument(
+      controller: AnimationDocumentController,
+      frames: ReturnType<typeof createTrimmableFrame>[]
+    ) {
+      const resource: AnimationResource = {
+        version: '1.0.0',
+        texturePath: '',
+        clips: [{ name: 'idle', fps: 12, loop: true, playbackMode: 'normal', frames }],
+      };
+      return seedDocument(controller, resource, {
+        animationId: ANIMATION_ID,
+        assetPath: ASSET_PATH,
+        activeClipName: 'idle',
+      });
+    }
+
+    /** Frame blobs are their own path, so `stubRasters` can identify them. */
+    function readBlobByPath(): ReturnType<typeof vi.fn> {
+      return vi.fn(async (texturePath: string) => new Blob([texturePath], { type: 'image/png' }));
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('trims the whole clip in ONE undo step and moves each anchor so the content stays put', async () => {
+      stubRasters({
+        'res://sprites/walk/idle_0001.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 20, y: 10, width: 40, height: 30 },
+        },
+        'res://sprites/walk/idle_0002.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 20, y: 10, width: 40, height: 30 },
+        },
+      });
+      const { deps, invokeAndPush, writeBinaryFile, evictTexture } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedTrimDocument(controller, [
+        createTrimmableFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+        createTrimmableFrame('res://sprites/walk/idle_0002.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.trimClipFrames();
+
+      expect(report).toEqual({ trimmed: 2, skipped: 0, failed: 0 });
+      // One clip update for the whole clip — not one per frame (§9.12.1).
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+
+      const storageWrites = (
+        deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>
+      ).mock;
+      expect(storageWrites.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      // Every file lands BEFORE the document swap, so a throw mid-way leaves the
+      // document untouched rather than half-trimmed.
+      for (const order of storageWrites.invocationCallOrder) {
+        expect(order).toBeLessThan(invokeAndPush.mock.invocationCallOrder[0]);
+      }
+      expect(writeBinaryFile).not.toHaveBeenCalled();
+
+      const frames = controller.resource?.clips[0]?.frames ?? [];
+      expect(frames.map(frame => frame.texturePath)).toEqual([
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      for (const frame of frames) {
+        // R1/§8.8 — the editor stamps the new raster size.
+        expect(frame.sourceSize).toEqual({ width: 40, height: 30 });
+        // a' = (a·W − cropX) / w: 0.4·100 = 40 px, minus the 20 px cut, over 40 px.
+        expect(frame.anchor.x).toBeCloseTo(0.5, 6);
+        // 0.25·80 = 20 px, minus the 10 px cut, over 30 px.
+        expect(frame.anchor.y).toBeCloseTo(1 / 3, 6);
+      }
+
+      // One invalidation pass covering both the retired and the new files.
+      expect(evictTexture).toHaveBeenCalledWith('res://sprites/walk/idle_0001.png');
+      expect(evictTexture).toHaveBeenCalledWith('res://sprites/walk/idle_0004.png');
+    });
+
+    it('derives the crop origin from the padded output size, not from the raw bounds', async () => {
+      // THE TRAP: with padding the content is CENTERED in a bigger canvas, so the
+      // crop origin is `bounds − (output − bounds)/2`. Using `bounds.x` directly
+      // would leave the anchor at 0.4545 instead of the 0.5 the content deserves.
+      stubRasters({
+        'res://sprites/walk/idle_0001.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 20, y: 10, width: 40, height: 30 },
+        },
+      });
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedTrimDocument(controller, [
+        createTrimmableFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.trimClipFrames({ padding: 2 });
+
+      expect(report.trimmed).toBe(1);
+      const frame = controller.resource?.clips[0]?.frames[0];
+      expect(frame?.sourceSize).toEqual({ width: 44, height: 34 });
+      // Content sits 2 px in on every side, so its centre is still the canvas centre.
+      expect(frame?.anchor.x).toBeCloseTo(0.5, 6);
+      // Source y=20 maps to 20 − (10 − 2) = 12 of 34.
+      expect(frame?.anchor.y).toBeCloseTo(12 / 34, 6);
+    });
+
+    it('skips UV-window, unmeasured, empty and already-tight frames without burning a file number', async () => {
+      stubRasters({
+        'res://sprites/walk/sheet.png': { width: 100, height: 80, opaque: null },
+        'res://sprites/walk/idle_0002.png': { width: 100, height: 80, opaque: null },
+        'res://sprites/walk/idle_0003.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 0, y: 0, width: 100, height: 80 },
+        },
+        'res://sprites/walk/idle_0004.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 25, y: 25, width: 10, height: 10 },
+        },
+      });
+      const readBlob = readBlobByPath();
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      const internals = seedTrimDocument(controller, [
+        // 1. A UV window into the shared sheet — trimming it would cut every frame.
+        {
+          ...createTrimmableFrame(''),
+          repeat: { x: 0.5, y: 1 },
+          sourceSize: { width: 50, height: 80 },
+        },
+        // 2. Own file, but its raster size is not known yet (no stamp, nothing decoded).
+        createTrimmableFrame('res://sprites/walk/idle_0002.png'),
+        // 3. Fully opaque already — the bounds fill the raster. Its size comes from
+        //    the decoded-texture cache below rather than a stamp, which is the other
+        //    half of "this frame has been measured".
+        createTrimmableFrame('res://sprites/walk/idle_0003.png'),
+        // 4. The only frame with anything to cut.
+        createTrimmableFrame('res://sprites/walk/idle_0004.png', { width: 100, height: 80 }),
+      ]);
+      internals._resource = {
+        ...(internals._resource as AnimationResource),
+        texturePath: 'res://sprites/walk/sheet.png',
+      };
+      // Arranging state the real code fills: in the app the timeline thumbnails
+      // decode every frame into this cache. happy-dom decodes nothing, so frame 3
+      // would otherwise look "not measured yet" and skip for the wrong reason.
+      internals.textureDimensionsCache.set('res://sprites/walk/idle_0003.png', {
+        width: 100,
+        height: 80,
+      });
+
+      const report = await controller.trimClipFrames();
+
+      expect(report).toEqual({ trimmed: 1, skipped: 3, failed: 0 });
+      // Frame 2 is skipped before any read: its raster size is unknown, so there is
+      // nothing to restamp its geometry against. (The sheet is read by the preview
+      // loader, which is why this asserts on the frame files rather than the total.)
+      expect(readBlob).not.toHaveBeenCalledWith('res://sprites/walk/idle_0002.png');
+      expect(readBlob).toHaveBeenCalledWith('res://sprites/walk/idle_0003.png');
+      expect(readBlob).toHaveBeenCalledWith('res://sprites/walk/idle_0004.png');
+      // Highest existing number is 4, so the single trim takes 5 — the three skips
+      // burnt no file numbers.
+      const storageWrites = (
+        deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>
+      ).mock;
+      expect(storageWrites.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0005.png',
+      ]);
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+
+      const frames = controller.resource?.clips[0]?.frames ?? [];
+      expect(frames[0]?.texturePath).toBe('');
+      expect(frames[2]?.texturePath).toBe('res://sprites/walk/idle_0003.png');
+      expect(frames[3]?.sourceSize).toEqual({ width: 10, height: 10 });
+    });
+
+    it('reports a frame whose file cannot be read as failed and still trims the rest', async () => {
+      stubRasters({
+        'res://sprites/walk/idle_0002.png': {
+          width: 100,
+          height: 80,
+          opaque: { x: 10, y: 10, width: 20, height: 20 },
+        },
+      });
+      const readBlob = vi.fn(async (texturePath: string) => {
+        if (texturePath.endsWith('idle_0001.png')) {
+          throw new Error('missing file');
+        }
+        return new Blob([texturePath], { type: 'image/png' });
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const controller = new AnimationDocumentController(deps, '');
+      seedTrimDocument(controller, [
+        createTrimmableFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+        createTrimmableFrame('res://sprites/walk/idle_0002.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.trimClipFrames();
+
+      expect(report).toEqual({ trimmed: 1, skipped: 0, failed: 1 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const frames = controller.resource?.clips[0]?.frames ?? [];
+      expect(frames[0]?.texturePath).toBe('res://sprites/walk/idle_0001.png');
+      expect(frames[1]?.texturePath).toBe('res://sprites/walk/idle_0003.png');
+    });
+  });
+
   it('registers itself as the inspector controller only while its tab is active', async () => {
     const setActiveController = vi.fn();
     const activeControllers: unknown[] = [];

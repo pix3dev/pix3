@@ -9,7 +9,7 @@ import {
   sanitizeFrameFilePrefix,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import { readBlobSize, sliceImageBlob } from '@/services/image-gen/image-ops';
+import { readBlobSize, sliceImageBlob, trimImageBlob } from '@/services/image-gen/image-ops';
 import type { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
 import type {
   AnimationEditorService,
@@ -91,6 +91,29 @@ export interface ReplaceFrameTextureOptions {
   label?: string;
   /** File extension for the new frame file (no dot). Defaults to `png`. */
   extension?: string;
+}
+
+/** Knobs {@link AnimationDocumentController.trimClipFrames} hands to `trimImageBlob`. */
+export interface TrimClipFramesOptions {
+  /** Transparent margin (px) kept around the content on every side. Default 0. */
+  padding?: number;
+  /**
+   * Alpha (0..255) at or below which a pixel counts as empty. Default 0 — only
+   * fully transparent pixels trim away. ~8 also eats the near-transparent halo a
+   * background removal leaves behind (see `TrimOptions`).
+   */
+  alphaThreshold?: number;
+}
+
+/**
+ * Outcome of a clip-wide trim. `skipped` is the *expected* category (UV-window
+ * frames, frames whose raster size isn't known yet, empty frames, frames that are
+ * already tight); `failed` means a read/trim/write threw for that frame.
+ */
+export interface TrimClipReport {
+  trimmed: number;
+  skipped: number;
+  failed: number;
 }
 
 export const IMAGE_EXTENSIONS = new Set([
@@ -979,6 +1002,159 @@ export class AnimationDocumentController implements AnimationInspectorController
 
     this.invalidateTextureEverywhere(previousTexturePath, framePath);
     return framePath;
+  }
+
+  /**
+   * §9.12.1 — crop the transparent margins off **every** frame of the active clip,
+   * moving each frame's anchor/points/bbox/polygon so the animation is pixel-
+   * identical on screen while the PNGs (and the atlas that packs them) shrink.
+   *
+   * Deliberately **not** a loop over {@link replaceFrameTexture}: that would push
+   * one undo step per frame and leave a half-trimmed clip if the fifth frame threw.
+   * Instead every new file is written first, then **one** `applyClipUpdate` swaps
+   * them all in, then **one** invalidation pass runs. A frame that cannot be
+   * trimmed is reported as a skip, never as an error, and never burns a frame file
+   * number.
+   */
+  async trimClipFrames(options: TrimClipFramesOptions = {}): Promise<TrimClipReport> {
+    const report: TrimClipReport = { trimmed: 0, skipped: 0, failed: 0 };
+    const clip = this.activeClip;
+    const assetPath = this._assetPath ? normalizeAnimationAssetPath(this._assetPath) : '';
+    if (!clip || !assetPath || clip.frames.length === 0) {
+      return report;
+    }
+
+    const padding = Math.max(0, Math.round(options.padding ?? 0));
+    const alphaThreshold = Math.max(0, Math.round(options.alphaThreshold ?? 0));
+    const clipName = clip.name;
+    const writes: Array<{ index: number; framePath: string; restamped: AnimationFrame }> = [];
+    const previousTexturePaths: string[] = [];
+
+    for (const [frameIndex, frame] of clip.frames.entries()) {
+      // A UV window into the shared spritesheet: trimming those pixels would cut
+      // every other frame that reads the same sheet.
+      if (!isSequenceAnimationFrame(frame)) {
+        report.skipped += 1;
+        continue;
+      }
+      // Absolute-pixel geometry would be re-authored into the 256px placeholder
+      // space while the raster size is unknown (§9.7 risk 2) — the
+      // `hasResolvedFrameMetrics` gate, applied per frame.
+      const fromSize = this.resolveTrimSourceSize(frame);
+      const texturePath = this.getResolvedFrameTexturePath(frame);
+      if (!fromSize || !texturePath) {
+        report.skipped += 1;
+        continue;
+      }
+
+      try {
+        const source = await this.deps.projectStorage.readBlob(texturePath);
+        const result = await trimImageBlob(source, { padding, alphaThreshold });
+        const bounds = result.bounds;
+        if (result.empty || !bounds) {
+          report.skipped += 1;
+          continue;
+        }
+        if (
+          bounds.x === 0 &&
+          bounds.y === 0 &&
+          bounds.width === fromSize.width &&
+          bounds.height === fromSize.height
+        ) {
+          // Already tight — rewriting it would only burn a file number.
+          report.skipped += 1;
+          continue;
+        }
+
+        // THE TRAP (§9.12.1): `bounds` is the raw content box, but the output
+        // canvas *centres* that content inside `padding` (and inside a square, if
+        // asked). The crop origin is therefore the content box shifted back by the
+        // margin the encoder added, which is derived from the returned size — not
+        // `bounds.x` and not the padding constant.
+        const dx = Math.round((result.width - bounds.width) / 2);
+        const dy = Math.round((result.height - bounds.height) / 2);
+        const restamped = restampFrameGeometry(
+          frame,
+          { kind: 'crop', x: bounds.x - dx, y: bounds.y - dy },
+          fromSize,
+          { width: result.width, height: result.height }
+        );
+
+        const frameNumber = this.reserveFrameFileNumber(clipName);
+        const framePath = buildAnimationFrameResourcePath(assetPath, frameNumber, {
+          clipName,
+          extension: 'png',
+        });
+        await this.deps.projectStorage.writeBinaryFile(framePath, await result.blob.arrayBuffer());
+        writes.push({ index: frameIndex, framePath, restamped });
+        previousTexturePaths.push(texturePath);
+      } catch (error) {
+        console.warn('[SpriteEditor] Failed to trim frame', texturePath, error);
+        report.failed += 1;
+      }
+    }
+
+    if (writes.length === 0) {
+      return report;
+    }
+
+    const writesByIndex = new Map(writes.map(write => [write.index, write]));
+    this._frameDraft = null;
+    const didMutate = await this.applyClipUpdate(
+      candidate => ({
+        ...candidate,
+        frames: candidate.frames.map((existingFrame, frameIndex) => {
+          const write = writesByIndex.get(frameIndex);
+          return write
+            ? {
+                ...write.restamped,
+                texturePath: write.framePath,
+                // Same reset as `replaceFrameTexture`: the trimmed file *is* the
+                // frame now, so any leftover UV window is baked into its pixels.
+                offset: { x: 0, y: 0 },
+                repeat: { x: 1, y: 1 },
+              }
+            : existingFrame;
+        }),
+      }),
+      `Trim ${writes.length} frame${writes.length === 1 ? '' : 's'}: ${clipName}`
+    );
+    if (!didMutate) {
+      // The files exist but the document refused the swap; nothing was trimmed as
+      // far as the user can tell, and the orphans are export-pruned like any bake.
+      report.failed += writes.length;
+      return report;
+    }
+
+    this.invalidateTextureEverywhere(
+      ...previousTexturePaths,
+      ...writes.map(write => write.framePath)
+    );
+    report.trimmed = writes.length;
+    return report;
+  }
+
+  /**
+   * The frame's own raster size for a trim, or null when it is genuinely unknown —
+   * which is {@link hasResolvedFrameMetrics}'s question asked per frame.
+   *
+   * Neither of the existing resolvers can be reused as-is for a clip-wide pass:
+   * both {@link hasResolvedFrameMetrics} and {@link resolveFrameSourceSize} fall
+   * back to the *current preview* texture's dimensions, so in a loop they would
+   * hand one frame's size to another and silently restamp geometry into the wrong
+   * space. A stamped `sourceSize` (§8.8, written by the editor on every add /
+   * replace / crop) counts as measured even while the decode cache is cold.
+   */
+  private resolveTrimSourceSize(frame: AnimationFrame): AnimationSize | null {
+    const stamped = frame.sourceSize;
+    if (stamped && stamped.width > 0 && stamped.height > 0) {
+      return { width: stamped.width, height: stamped.height };
+    }
+    const cached = this.textureDimensionsCache.get(this.getResolvedFrameTexturePath(frame));
+    if (cached && cached.width > 0 && cached.height > 0) {
+      return { width: cached.width, height: cached.height };
+    }
+    return null;
   }
 
   /**

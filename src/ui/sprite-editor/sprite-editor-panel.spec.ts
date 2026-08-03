@@ -146,6 +146,7 @@ function createPreferences() {
 }
 
 interface PanelStubs {
+  showChoice: ReturnType<typeof vi.fn>;
   historyGet: ReturnType<typeof vi.fn>;
   readBlob: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
@@ -182,6 +183,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     }
   });
   const execute = vi.fn().mockResolvedValue(true);
+  // §9.12.1's confirm: two confirm buttons (the alpha threshold) plus cancel.
+  const showChoice = vi.fn().mockResolvedValue('confirm');
 
   const stubs: Record<string, unknown> = {
     aiSettings: {
@@ -210,7 +213,10 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       setActiveTarget,
       clearActiveTarget,
     },
-    dialogService: { showConfirmation: vi.fn().mockResolvedValue(true) },
+    dialogService: {
+      showConfirmation: vi.fn().mockResolvedValue(true),
+      showChoice: showChoice,
+    },
     sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
     // §9.5's invalidation fan-out. Both are pure side-effect sinks here; the
     // controller spec asserts they are actually reached.
@@ -225,6 +231,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   return {
     panel,
     stubs: {
+      showChoice,
       historyGet,
       readBlob,
       updatePreferences,
@@ -438,6 +445,70 @@ describe('SpriteEditorPanel (unified shell)', () => {
     action?.click();
 
     expect(removeSelectedFrames).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * §9.12.1 — the clip-wide trim. The maths lives in the controller (and is tested
+   * there); what the shell owes is the confirm, the parameters it carries and a
+   * status line that states the outcome, so a clip of UV-window frames does not
+   * look like a dead button.
+   */
+  it('trims the whole clip from the toolbar after a confirm and states the outcome', async () => {
+    seedAnimationTab(['res://sprites/walk/idle_0001.png', 'res://sprites/walk/idle_0002.png']);
+    const { panel, stubs } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const controller = (panel as unknown as PanelInternals).documentController;
+    const trimClipFrames = vi.fn().mockResolvedValue({ trimmed: 1, skipped: 1, failed: 0 });
+    Object.defineProperty(controller, 'trimClipFrames', {
+      value: trimClipFrames,
+      configurable: true,
+    });
+    await panel.updateComplete;
+
+    const action = panel.querySelector<HTMLButtonElement>('.ag-trim-frames');
+    expect(action?.disabled).toBe(false);
+    expect(action?.title).toBe('Trim transparent margins from 2 frames');
+    action?.click();
+
+    await vi.waitFor(() => {
+      expect(trimClipFrames).toHaveBeenCalledWith({ padding: 0, alphaThreshold: 0 });
+    });
+    expect(stubs.showChoice).toHaveBeenCalledOnce();
+
+    await panel.updateComplete;
+    expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+      'Trimmed 1 frame of idle, 1 skipped.'
+    );
+  });
+
+  it('raises the alpha threshold when the confirm takes the halo option, and writes nothing on cancel', async () => {
+    seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+    const { panel, stubs } = createPanel();
+    await mount(panel, ANIMATION_TAB_ID);
+
+    const controller = (panel as unknown as PanelInternals).documentController;
+    const trimClipFrames = vi.fn().mockResolvedValue({ trimmed: 1, skipped: 0, failed: 0 });
+    Object.defineProperty(controller, 'trimClipFrames', {
+      value: trimClipFrames,
+      configurable: true,
+    });
+    await panel.updateComplete;
+
+    stubs.showChoice.mockResolvedValueOnce('cancel');
+    panel.querySelector<HTMLButtonElement>('.ag-trim-frames')?.click();
+    await vi.waitFor(() => {
+      expect(stubs.showChoice).toHaveBeenCalledOnce();
+    });
+    expect(trimClipFrames).not.toHaveBeenCalled();
+
+    stubs.showChoice.mockResolvedValueOnce('secondary');
+    panel.querySelector<HTMLButtonElement>('.ag-trim-frames')?.click();
+    await vi.waitFor(() => {
+      // The `TrimOptions` hint made reachable: ~8 also cuts the halo a background
+      // removal leaves behind.
+      expect(trimClipFrames).toHaveBeenCalledWith({ padding: 0, alphaThreshold: 8 });
+    });
   });
 
   it('registers as the active image-edit target and reports its frame binding', async () => {

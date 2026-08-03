@@ -54,7 +54,7 @@ import {
   type StagePoint,
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
-import { AnimationDocumentController } from './animation-document-controller';
+import { AnimationDocumentController, type TrimClipReport } from './animation-document-controller';
 import type { FrameRasterTransform } from './frame-restamp';
 import {
   FrameOverlayController,
@@ -1027,10 +1027,85 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           </button>
         `
       )}
-      ${this.renderDeleteFramesAction()}
+      ${this.renderTrimFramesAction()} ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
     `;
   }
+
+  /**
+   * §9.12.1 — trim the whole clip in one undo step. A clip-wide action, so it sits
+   * next to "delete selected frames" rather than on a frame card: the frame the
+   * canvas happens to show says nothing about which frames have transparent margins.
+   */
+  private renderTrimFramesAction() {
+    const frameCount = this.documentController?.activeClip?.frames.length ?? 0;
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode;
+    const title =
+      frameCount === 0
+        ? 'Trim frames (this clip has no frames)'
+        : `Trim transparent margins from ${frameCount} frame${frameCount === 1 ? '' : 's'}`;
+    return html`
+      <button
+        class="ag-icon-button ag-trim-frames"
+        type="button"
+        title=${title}
+        aria-label="Trim frames"
+        ?disabled=${frameCount === 0 || busy}
+        @click=${this.onTrimFrames}
+      >
+        ${this.icons.getIcon('scissors', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  /**
+   * Destructive and bulk, so it goes through a confirm (§9.12). The two confirm
+   * buttons are the alpha threshold: "Trim" cuts only fully transparent pixels,
+   * "Trim including halo" raises the threshold to 8 so the near-transparent fringe
+   * a background removal leaves behind goes too (the hint `TrimOptions` carries).
+   * Padding stays at the §9.12.1 default of 0 — the point of the tool is tightness.
+   */
+  private onTrimFrames = async (): Promise<void> => {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!controller || !clip || clip.frames.length === 0 || this.sliceBusy) {
+      return;
+    }
+
+    const frameCount = clip.frames.length;
+    const choice = await this.dialogService.showChoice({
+      title: 'Trim frames?',
+      message: `Crop the transparent margins off ${frameCount} frame${
+        frameCount === 1 ? '' : 's'
+      } of "${clip.name}". Each frame's anchor, points and boxes move with the crop, so nothing shifts on screen.`,
+      confirmLabel: 'Trim frames',
+      secondaryLabel: 'Trim including halo',
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      disclaimer:
+        'Every trimmed frame is written as a new file. Undo restores the document, not the pixels on disk. "Trim including halo" also cuts near-transparent pixels (alpha ≤ 8), which is what background removal leaves behind.',
+    });
+    if (choice === 'cancel') {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.trimClipFrames({
+        padding: 0,
+        alphaThreshold: choice === 'secondary' ? 8 : 0,
+      });
+      this.sliceStatus = {
+        text: describeTrimReport(report, clip.name),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Trim failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  };
 
   /**
    * Delete every selected frame. Multi-select is authored in the timeline
@@ -3120,6 +3195,26 @@ const describeError = (error: unknown): string => {
     return error.message;
   }
   return 'Unknown error';
+};
+
+/**
+ * §9.12.1 step 6 — say what happened. A clip of UV-window frames trims *nothing*,
+ * and silence there reads as a broken button, so the skips are always spelled out.
+ */
+const describeTrimReport = (report: TrimClipReport, clipName: string): string => {
+  const parts: string[] = [];
+  if (report.trimmed > 0) {
+    parts.push(`Trimmed ${report.trimmed} frame${report.trimmed === 1 ? '' : 's'} of ${clipName}`);
+  } else {
+    parts.push(`Nothing to trim in ${clipName}`);
+  }
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
 };
 
 declare global {

@@ -1452,8 +1452,19 @@ async trimClipFrames(options?: { padding?: number; alphaThreshold?: number }): P
 ```
 
 1. Skip any frame where `isSequenceAnimationFrame(frame)` is false (a UV window into a shared sheet —
-   trimming it would cut every other frame) and any frame whose `hasResolvedFrameMetrics` is false.
+   trimming it would cut every other frame) and any frame whose raster size is genuinely unknown.
    Both are *skips*, reported, not errors.
+
+   **Correction, made during implementation:** `hasResolvedFrameMetrics` cannot be used here as this
+   section first said. It — and `resolveFrameSourceSize` — fall back to the *current preview*
+   texture's dimensions, which is right for the one selected frame and wrong in a clip-wide loop,
+   where it would hand one frame's size to another and restamp geometry into the wrong space. The
+   implementation asks the same question per frame instead (`resolveTrimSourceSize`: stamped
+   `sourceSize` → that frame's own decode-cache entry → skip). Residual risk, accepted: a stamped
+   `sourceSize` that disagrees with the file on disk (hand-edited YAML, a file replaced outside the
+   editor) would restamp against the wrong space. Measured on real content, no SkyDefender frame
+   carries a stamped `sourceSize` at all and all 22 frames of `boom1`'s clip resolve through the
+   decode cache, so the stamped branch is rarely the one taken.
 2. For each remaining frame: read its texture blob, `trimImageBlob`, and when `empty` or when the
    bounds already equal the full frame, skip it — a no-op frame must not burn a new file number.
 3. Write every new frame file first (`reserveFrameFileNumber` + `projectStorage.writeBinaryFile`),
@@ -1465,10 +1476,17 @@ async trimClipFrames(options?: { padding?: number; alphaThreshold?: number }): P
    `sliceStatus` rather than silently doing nothing on a clip of UV-window frames.
 
 UI: a toolbar action in the frame-tools group of `sprite-editor-panel.ts`, animation documents only,
-disabled while `sliceBusy`. It opens a `DialogService` confirm carrying padding (default 0) and alpha
-threshold (default 0, with the hint from `TrimOptions` about raising it to ~8 for a
-background-removal halo) and states how many frames will be rewritten. Destructive — pixels are
-rewritten and undo restores the *document*, not the files, exactly as for crop (§9.7 risk 7).
+disabled while `sliceBusy`. It confirms through `DialogService` and states how many frames will be
+rewritten. Destructive — pixels are rewritten and undo restores the *document*, not the files,
+exactly as for crop (§9.7 risk 7).
+
+**Correction:** this section asked for a confirm "carrying padding and alpha threshold" fields.
+`DialogService` has no numeric inputs — only a single type-to-confirm text field — and a dedicated
+dialog service + component + shell wiring (the `AnimationAutoSliceDialogService` pattern) is a lot of
+surface for one tool. The implementation uses `showChoice` with the alpha threshold as the *choice*:
+**Trim frames** (alpha 0) / **Trim including halo** (alpha 8, the `TrimOptions` hint made reachable)
+/ Cancel. Padding stays at 0 and remains a `trimClipFrames` option for callers. A free-form form is a
+follow-up, not a blocker.
 
 Live verification (state, not screenshots): pick a SkyDefender clip whose frames have transparent
 margins; record every frame's `anchor` and `sourceSize` before; run the tool; assert each new
