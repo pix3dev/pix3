@@ -27,7 +27,7 @@
 
 ## Рантайм (Runtime)
 
-- [ ] **выпустить `@pix3/runtime` 1.3.0 в npm** (Сложность: S) — _npm отдаёт `latest = 1.2.0`, тегов `runtime-v*` в репозитории нет вообще, поэтому пер-кадровый anchor/`sizeMode`/`sourceSize` (R1) и `getFramePoint`/`core:PointAttachment` (R2) потребителям недоступны: DeepCore стоит на ровно 1.2.0. **Блокер:** R1/R2 лежат в ветке `feat/sprite-editor-unified`, а `main` уже помечен 1.3.0 без них — тег от текущего `main` опубликует версию мимо цели. Порядок: смерджить ветку → тег `runtime-v1.3.0` (или ручной запуск `publish-packages.yml`, OIDC) → в DeepCore обычный `npm update @pix3/runtime` (спека `^1.2.0` подхватит сама, править package.json не нужно)_
+- [x] **выпустить `@pix3/runtime` 1.3.0 в npm** (Сложность: S) — _сделано 2026-08-04: тег `runtime-v1.3.0` (первый `runtime-v*` в репозитории) → `publish-packages.yml` через OIDC → npm `latest = 1.3.0`. Открыло потребителям пер-кадровый anchor/`sizeMode`/`sourceSize` (R1) и `getFramePoint`/`core:PointAttachment` (R2). DeepCore подтянул обычным `npm update` (спека `^1.2.0` разрешилась в 1.3.0, package.json править не пришлось), собирается чисто_
 - [x] add remote preview to check the game on device (Сложность: L) — _relay + player.html + `PreviewHostService`; см. [done/rapid-prototyping-design.md](done/rapid-prototyping-design.md)_
 - [x] implement cinematic camera module, that will allow control camera more flexibly (Сложность: L) — _P0.1 vcams (3D) + Cutscene Director; Camera2D осознанно отложена_
 - [x] update nodes properties and hot reload them in the game mode (Сложность: M) — _P0.5_
