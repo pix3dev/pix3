@@ -1126,3 +1126,62 @@ components and theming tokens (see `docs/property-schema-reference.md` and the
 Independent of C6/C7 — schedule it alongside or after C8. Related cleanup while in there: the
 `ANCHOR_PRESETS` buttons still use Unicode arrow glyphs (`↖ ↑ ↗ …`) as labels, which violates the
 "icons are vector, never Unicode glyphs" rule — replace with `IconService` custom SVGs.
+
+**~~DONE~~ 2026-08-03.** The section is rebuilt on the canonical machinery: clip and frame editors
+are `PropertyDefinition`s (`src/ui/object-inspector/animation-inspector-properties.ts`) rendered by
+a new `InspectorPropertyRenderers.renderDetachedProperty` — the same `.property-group` /
+`.property-label` / `pix3-number-field` / `pix3-vector2-editor` / `.property-select--enum` markup a
+node section uses, for any target that is *not* the selected node (values live in the asset
+document, and `setValue` routes to the controller). Sections come from `renderPropertySection`.
+Bounding Box X/Y/W/H collapsed into two vector rows ("Box Position", "Box Size" with W/H chips);
+the ad-hoc `.mini-button` / `.primary-button` (which were never styled at all) became one
+`.inspector-button` treatment with icons. Only read-only identity rows (Name/Path) stay bespoke.
+Selection now reads as selected: the active clip carries the accent list treatment
+(`.animation-clip-button.is-selected` — accent-soft fill, accent leading bar, check icon,
+`aria-current`), the frame section gets an accent rail plus a "Frame N of M" badge indicator, and
+`InspectorPanel.updated()` scrolls it into view (`block: 'nearest'`) only when the clip name or
+frame index changes, so Inspector-side edits never scroll. `ANCHOR_PRESETS` had already been moved
+to `IconService` icons during the unification (`sprite-editor-panel.ts:123`) — verified, nothing
+left to do there.
+
+### 9.10 Follow-up — the editor viewport cannot draw per-frame-file animations
+
+Found during C7 (2026-08-02), out of that commit's scope, and **now the default case** rather than
+an edge case: the §8.2 convention (`sprites/<name>/<clip>_<nnnn>.png`) produces animations whose
+frames are separate files, auto-slice writes them that way, and every C7 write-back converts a
+frame into its own file.
+
+**The gap.** `Viewport2DProxyRegistry.loadAnimatedSprite2DVisualAsset` only ever reads the
+**resource-level** `resource.texturePath` (the one-spritesheet import source) and stores it as
+`visualRoot.userData.animationTexturePath`. It never calls `getAnimationFrameTexturePath`, so an
+`AnimatedSprite2D` whose frames carry their own `texturePath` has no texture to show in the editor
+viewport — regardless of C7's invalidation fan-out, which correctly evicts caches for a texture the
+proxy never loaded in the first place.
+
+Everything *else* already resolves per-frame paths, which is what makes this asymmetry a bug rather
+than a design choice:
+
+| Consumer | Per-frame aware? |
+| --- | --- |
+| Runtime scene load — `SceneLoader.ts:2132` | yes, via `getAnimationFrameTexturePath` |
+| Asset preview / timeline thumbs — `AssetsPreviewService.ts:539, :1028` | yes |
+| Sprite Editor canvas — `animation-document-controller.ts` | yes |
+| **Editor viewport proxy — `Viewport2DProxyRegistry`** | **no** |
+
+So the same scene renders correctly in play mode and in the export, and wrong in the editor
+viewport. §9.5 claimed the proxy "re-syncs the document automatically… so frame textures reload" —
+that is simply not true, and this section supersedes that sentence.
+
+**Shape of the fix.** The proxy needs the runtime's frame-presentation model, not just a second
+texture path: resolve the *current* frame's path through `getAnimationFrameTexturePath`, load and
+cache per-frame textures (a clip is N files, so a per-proxy `Map<path, Texture>` with the existing
+`configure2DTexture` treatment), and drive it from the same frame index
+`applyAnimatedSprite2DPresentation` already computes. R1's `sizeMode` / `sourceSize` / per-frame
+anchor maths is already mirrored there (:1033–1075), so this is the missing input to code that
+otherwise exists. Keep the resource-level path as the fallback for genuine spritesheet animations —
+both forms are legal and `getAnimationFrameTexturePath` already encodes the precedence.
+
+Watch out for: eviction (a clip of 60 frames must not pin 60 textures per proxy forever — reuse
+`AssetLoader`'s cache rather than a private one where possible), the editor's render-on-demand rule
+(finish with `requestRender()`), and the pre-launch atlas, which must keep excluding these the same
+way it already handles frame files.

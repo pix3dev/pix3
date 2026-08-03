@@ -857,6 +857,280 @@ describe('InspectorPanel asset preview rendering', () => {
   });
 });
 
+describe('InspectorPanel animation section', () => {
+  it('renders clip and frame editors as standard property rows', async () => {
+    const { panel } = await setupInspectorForAnimation();
+
+    const labels = Array.from(panel.querySelectorAll('.property-group .property-label')).map(
+      label => label.textContent?.trim()
+    );
+
+    expect(labels).toContain('Name');
+    expect(labels).toContain('FPS');
+    expect(labels).toContain('Playback');
+    expect(labels).toContain('Duration (x)');
+    expect(labels).toContain('Texture');
+    expect(labels).toContain('Anchor');
+    expect(labels).toContain('Box Position');
+    expect(labels).toContain('Box Size');
+    // Loop is a checkbox row, whose label lives in .property-label-text.
+    expect(
+      Array.from(panel.querySelectorAll('.property-group--checkbox .property-label-text')).map(
+        text => text.textContent?.trim()
+      )
+    ).toContain('Loop');
+
+    // Standard editors, not hand-rolled inputs.
+    expect(panel.querySelector('pix3-vector2-editor')).not.toBeNull();
+    expect(panel.querySelectorAll('pix3-number-field').length).toBeGreaterThan(0);
+    expect(panel.querySelector('select.property-select--enum')).not.toBeNull();
+    expect(panel.querySelector('input[type="number"]')).toBeNull();
+    expect(panel.querySelector('.field-grid')).toBeNull();
+    expect(panel.querySelector('.mini-button')).toBeNull();
+    expect(panel.querySelector('.primary-button')).toBeNull();
+    expect(panel.querySelectorAll('.inspector-button').length).toBeGreaterThan(0);
+  });
+
+  it('marks the active clip as selected and follows the selected frame index', async () => {
+    const { panel, controller } = await setupInspectorForAnimation();
+
+    const clipButtons = Array.from(
+      panel.querySelectorAll('.animation-clip-button')
+    ) as HTMLButtonElement[];
+    const selected = clipButtons.filter(button => button.classList.contains('is-selected'));
+
+    expect(clipButtons).toHaveLength(2);
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.dataset.clipName).toBe('walk');
+    expect(selected[0]?.getAttribute('aria-current')).toBe('true');
+    expect(clipButtons[1]?.getAttribute('aria-current')).toBe('false');
+
+    expect(panel.querySelector('.animation-frame-indicator-title')?.textContent?.trim()).toBe(
+      'Frame 2 of 3'
+    );
+    expect(panel.querySelector('.animation-frame-badge')?.textContent?.trim()).toBe('2');
+
+    controller.setSelectedFrameIndex(2);
+    await panel.updateComplete;
+
+    expect(panel.querySelector('.animation-frame-indicator-title')?.textContent?.trim()).toBe(
+      'Frame 3 of 3'
+    );
+  });
+
+  it('scrolls the frame section into view only when the editor moves the selection', async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const { panel, controller } = await setupInspectorForAnimation();
+      scrollIntoView.mockClear();
+
+      // Re-rendering with the same selection must not scroll.
+      panel.requestUpdate();
+      await panel.updateComplete;
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      controller.setSelectedFrameIndex(0);
+      await panel.updateComplete;
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it('routes clip and frame edits back to the controller', async () => {
+    const { panel, controller } = await setupInspectorForAnimation();
+
+    (panel.querySelector('.animation-clip-actions .btn-icon') as HTMLButtonElement).click();
+    expect(controller.addClip).toHaveBeenCalledTimes(1);
+
+    const otherClip = Array.from(
+      panel.querySelectorAll('.animation-clip-button')
+    )[1] as HTMLButtonElement;
+    otherClip.click();
+    expect(controller.selectClip).toHaveBeenCalledWith('run');
+
+    const buttons = Array.from(panel.querySelectorAll('.inspector-button')) as HTMLButtonElement[];
+    const byLabel = (label: string) =>
+      buttons.find(button => button.textContent?.trim() === label) as HTMLButtonElement;
+
+    byLabel('Clear Texture').click();
+    expect(controller.updateTexturePath).toHaveBeenCalledWith('');
+
+    byLabel('Add Vertex').click();
+    expect(controller.addPolygonVertex).toHaveBeenCalledTimes(1);
+
+    byLabel('Reset Box').click();
+    expect(controller.resetBoundingBox).toHaveBeenCalledTimes(1);
+
+    const playbackSelect = panel.querySelector('select.property-select--enum') as HTMLSelectElement;
+    playbackSelect.value = 'ping-pong';
+    playbackSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(controller.updateClipPlaybackMode).toHaveBeenCalledWith('ping-pong');
+
+    const anchorEditor = panel.querySelector('pix3-vector2-editor') as HTMLElement;
+    anchorEditor.dispatchEvent(
+      new CustomEvent('commit-change', { detail: { x: 0.25, y: 0.5 }, bubbles: false })
+    );
+    expect(controller.updateSelectedFrameAnchor).toHaveBeenCalledWith('x', 0.25);
+  });
+});
+
+function createAnimationFrame(texturePath: string) {
+  return {
+    textureIndex: 0,
+    offset: { x: 0, y: 0 },
+    repeat: { x: 1, y: 1 },
+    durationMultiplier: 1,
+    anchor: { x: 0.5, y: 0.5 },
+    texturePath,
+    boundingBox: { x: 0, y: 0, width: 32, height: 32 },
+    collisionPolygon: [],
+  };
+}
+
+type FakeAnimationController = {
+  getInspectorSnapshot: () => unknown;
+  subscribeInspector: (listener: () => void) => () => void;
+  setSelectedFrameIndex: (index: number) => void;
+  updateTexturePath: ReturnType<typeof vi.fn>;
+  openTextureSlicer: ReturnType<typeof vi.fn>;
+  selectClip: ReturnType<typeof vi.fn>;
+  addClip: ReturnType<typeof vi.fn>;
+  removeClip: ReturnType<typeof vi.fn>;
+  renameClip: ReturnType<typeof vi.fn>;
+  updateClipFps: ReturnType<typeof vi.fn>;
+  updateClipPlaybackMode: ReturnType<typeof vi.fn>;
+  updateClipLoop: ReturnType<typeof vi.fn>;
+  updateSelectedFrameDurationMultiplier: ReturnType<typeof vi.fn>;
+  updateSelectedFrameTexturePath: ReturnType<typeof vi.fn>;
+  updateSelectedFrameAnchor: ReturnType<typeof vi.fn>;
+  updateSelectedFrameBoundingBox: ReturnType<typeof vi.fn>;
+  addPolygonVertex: ReturnType<typeof vi.fn>;
+  clearPolygon: ReturnType<typeof vi.fn>;
+  resetBoundingBox: ReturnType<typeof vi.fn>;
+};
+
+function createFakeAnimationController(): FakeAnimationController {
+  const clips = [
+    {
+      name: 'walk',
+      fps: 12,
+      loop: true,
+      playbackMode: 'normal' as const,
+      frames: [
+        createAnimationFrame('res://anim/walk_0.png'),
+        createAnimationFrame('res://anim/walk_1.png'),
+        createAnimationFrame('res://anim/walk_2.png'),
+      ],
+    },
+    {
+      name: 'run',
+      fps: 18,
+      loop: false,
+      playbackMode: 'ping-pong' as const,
+      frames: [createAnimationFrame('res://anim/run_0.png')],
+    },
+  ];
+  const resource = { version: '1.0', texturePath: 'res://anim/sheet.png', clips };
+  const listeners = new Set<() => void>();
+  let selectedFrameIndex = 1;
+
+  const controller: FakeAnimationController = {
+    getInspectorSnapshot: () => ({
+      assetPath: 'res://anim/hero.pix3anim',
+      resource,
+      clips,
+      activeClip: clips[0],
+      activeClipName: 'walk',
+      selectedFrame: clips[0].frames[selectedFrameIndex] ?? null,
+      selectedFrameIndex,
+    }),
+    subscribeInspector: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    setSelectedFrameIndex: (index: number) => {
+      selectedFrameIndex = index;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    updateTexturePath: vi.fn().mockResolvedValue(undefined),
+    openTextureSlicer: vi.fn().mockResolvedValue(undefined),
+    selectClip: vi.fn().mockResolvedValue(undefined),
+    addClip: vi.fn().mockResolvedValue(undefined),
+    removeClip: vi.fn().mockResolvedValue(undefined),
+    renameClip: vi.fn().mockResolvedValue(undefined),
+    updateClipFps: vi.fn().mockResolvedValue(undefined),
+    updateClipPlaybackMode: vi.fn().mockResolvedValue(undefined),
+    updateClipLoop: vi.fn().mockResolvedValue(undefined),
+    updateSelectedFrameDurationMultiplier: vi.fn().mockResolvedValue(undefined),
+    updateSelectedFrameTexturePath: vi.fn().mockResolvedValue(undefined),
+    updateSelectedFrameAnchor: vi.fn().mockResolvedValue(undefined),
+    updateSelectedFrameBoundingBox: vi.fn().mockResolvedValue(undefined),
+    addPolygonVertex: vi.fn().mockResolvedValue(undefined),
+    clearPolygon: vi.fn().mockResolvedValue(undefined),
+    resetBoundingBox: vi.fn().mockResolvedValue(undefined),
+  };
+
+  return controller;
+}
+
+async function setupInspectorForAnimation(): Promise<{
+  panel: InstanceType<typeof InspectorPanel>;
+  controller: FakeAnimationController;
+}> {
+  const controller = createFakeAnimationController();
+  const panel = document.createElement('pix3-inspector-panel') as InstanceType<
+    typeof InspectorPanel
+  >;
+
+  Object.defineProperty(panel, 'sceneManager', {
+    value: { getSceneGraph: vi.fn(() => null), getActiveSceneGraph: vi.fn(() => null) },
+    configurable: true,
+  });
+  Object.defineProperty(panel, 'commandDispatcher', {
+    value: { execute: vi.fn().mockResolvedValue(undefined) },
+    configurable: true,
+  });
+  Object.defineProperty(panel, 'iconService', {
+    value: { getIcon: vi.fn(() => '') },
+    configurable: true,
+  });
+  Object.defineProperty(panel, 'assetsPreviewService', {
+    value: {
+      subscribe: (listener: (snapshot: { selectedItem: null }) => void) => {
+        listener({ selectedItem: null });
+        return () => undefined;
+      },
+    },
+    configurable: true,
+  });
+  Object.defineProperty(panel, 'animationEditorService', {
+    value: {
+      getActiveController: () => controller,
+      getActiveAssetPath: () => 'res://anim/hero.pix3anim',
+      subscribe: (listener: (snapshot: unknown) => void) => {
+        listener({ assetPath: 'res://anim/hero.pix3anim', controller });
+        return () => undefined;
+      },
+    },
+    configurable: true,
+  });
+  Object.defineProperty(panel, 'viewportService', {
+    value: { setPreviewAnimation: vi.fn() },
+    configurable: true,
+  });
+
+  document.body.appendChild(panel);
+  await panel.updateComplete;
+
+  return { panel, controller };
+}
+
 async function setupInspectorForNode(
   node: NodeBase,
   execute = vi.fn().mockResolvedValue(undefined)

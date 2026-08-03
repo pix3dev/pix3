@@ -191,6 +191,10 @@ export class InspectorPanel extends ComponentBase {
   private scriptCreatorRequestedHandler?: (e: Event) => void;
   activeAnimationController: AnimationInspectorController | null = null;
 
+  /** `${clipName}#${frameIndex}` of the last rendered animation selection (scroll-into-view guard). */
+  private lastAnimationSelectionKey: string | null = null;
+  private lastAnimationClipName: string | undefined = undefined;
+
   readonly resourcePreview = new InspectorResourcePreview(this);
   readonly sectionRenderers = new InspectorSectionRenderers(this);
   readonly propertyRenderers = new InspectorPropertyRenderers(this);
@@ -1244,6 +1248,36 @@ export class InspectorPanel extends ComponentBase {
           isValid: true,
         },
       };
+    }
+  }
+
+  /**
+   * Bring the Animation Inspector's clip/frame section into view when the *editor*
+   * moves the selection (timeline scrub, clips rail, canvas). Keyed on the
+   * clip name + frame index only, so editing a value in the Inspector never
+   * scrolls; `block: 'nearest'` makes it a no-op when the section is already
+   * visible.
+   */
+  protected updated(): void {
+    const state = this.activeAnimationState;
+    const key = state ? `${state.activeClipName}#${state.selectedFrameIndex}` : null;
+    if (key === this.lastAnimationSelectionKey) {
+      return;
+    }
+
+    const clipChanged = state?.activeClipName !== this.lastAnimationClipName;
+    this.lastAnimationSelectionKey = key;
+    this.lastAnimationClipName = state?.activeClipName;
+
+    if (!state) {
+      return;
+    }
+
+    const target =
+      this.querySelector<HTMLElement>('.animation-frame-indicator') ??
+      (clipChanged ? this.querySelector<HTMLElement>('.animation-clip-button.is-selected') : null);
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ block: 'nearest' });
     }
   }
 

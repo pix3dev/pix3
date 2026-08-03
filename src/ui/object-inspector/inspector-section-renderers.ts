@@ -2,7 +2,19 @@ import { html } from '@/fw';
 import type { PropertyDefinition } from '@/fw';
 import { appState } from '@/state';
 import { MeshInstance, getPropertiesByGroup, isShaderEffectHost } from '@pix3/runtime';
-import type { AnimationPlaybackMode, ScriptComponent } from '@pix3/runtime';
+import type { AnimationClip, AnimationFrame, ScriptComponent } from '@pix3/runtime';
+import type {
+  AnimationInspectorController,
+  AnimationInspectorSnapshot,
+} from '@/services/animation/AnimationEditorService';
+import {
+  ANIMATION_CLIP_PROPERTIES,
+  ANIMATION_FRAME_PROPERTIES,
+  ANIMATION_RESOURCE_PROPERTIES,
+  type AnimationClipPropertyTarget,
+  type AnimationFramePropertyTarget,
+  type AnimationResourcePropertyTarget,
+} from './animation-inspector-properties';
 import { getNodeVisuals } from '@/ui/scene-tree/node-visuals.helper';
 import { isPrefabChildNode, isPrefabNode } from '@/features/scene/prefab-utils';
 import { AddNodeToGroupCommand } from '@/features/scene/AddNodeToGroupCommand';
@@ -13,6 +25,17 @@ import { ToggleScriptEnabledCommand } from '@/features/scripts/ToggleScriptEnabl
 import { AddEffectCommand } from '@/features/effects/AddEffectCommand';
 import { RemoveEffectCommand } from '@/features/effects/RemoveEffectCommand';
 import type { InspectorPanel } from './inspector-panel';
+import type { DetachedPropertyOptions } from './inspector-property-renderers';
+
+/**
+ * Per-row overrides for the frame property rows: the bounding-box size takes the
+ * W/H chips the Size group uses (X/Y would read as a position), and the override
+ * field keeps its "optional" placeholder.
+ */
+const ANIMATION_FRAME_PROPERTY_OPTIONS: Readonly<Record<string, DetachedPropertyOptions>> = {
+  animationFrameTexturePath: { placeholder: 'Optional per-frame texture' },
+  animationFrameBoundingBoxSize: { axes: ['w', 'h'] },
+};
 
 /**
  * Renders the inspector's top-level sections (animation/asset inspectors,
@@ -40,6 +63,16 @@ export class InspectorSectionRenderers {
     this.host.activeAnimationState = controller?.getInspectorSnapshot() ?? null;
   }
 
+  /**
+   * Animation Inspector (a `.pix3anim` document bound by the Sprite Editor shell).
+   *
+   * Built on the same property machinery as a node section: clip/frame editors are
+   * {@link PropertyDefinition}s rendered through `renderDetachedProperty`, sections
+   * come from `renderPropertySection`, and the current clip/frame carry the
+   * accent-token selected treatment the rest of the editor's lists use. The only
+   * bespoke rows are read-only identity values (Name/Path) and the action buttons —
+   * neither is an editable property.
+   */
   renderAnimationProperties() {
     const controller = this.host.activeAnimationController;
     const animationState = this.host.activeAnimationState;
@@ -48,356 +81,255 @@ export class InspectorSectionRenderers {
     }
 
     const assetPath = animationState.assetPath;
-    const clips = animationState.clips;
     const activeClip = animationState.activeClip;
     const selectedFrame = animationState.selectedFrame;
-    const texturePath = animationState.resource?.texturePath?.trim() ?? '';
 
     return html`
-      <div class="property-section">
+      <div class="property-section property-section--animation">
         <div class="section-header">
           <h3 class="section-title">Animation Inspector</h3>
           <p class="node-type">PIX3ANIM</p>
         </div>
 
-        ${assetPath
-          ? html`
-              <div class="property-group-section asset-section">
-                <h4 class="group-title">Resource</h4>
-                <div class="property-group">
-                  <span class="property-label">Name</span>
-                  <span class="asset-value">${this.getAnimationAssetTitle(assetPath)}</span>
-                </div>
-                <div class="property-group">
-                  <span class="property-label">Path</span>
-                  <span class="asset-value asset-path">${assetPath}</span>
-                </div>
-              </div>
-            `
-          : null}
-
-        <div class="property-group-section asset-section">
-          <div class="section-header">
-            <h4 class="group-title">Spritesheet Import</h4>
-            ${texturePath ? html`<span class="animation-chip">Source</span>` : null}
-          </div>
-          <label class="field">
-            <span>Import Source</span>
-            <input
-              type="text"
-              .value=${texturePath}
-              placeholder="res://textures/spritesheet.png"
-              @change=${(event: Event) =>
-                void controller.updateTexturePath((event.target as HTMLInputElement).value.trim())}
-            />
-          </label>
-          <div class="toolbar-row">
-            <button
-              class="primary-button"
-              type="button"
-              ?disabled=${texturePath.length === 0 || !animationState.activeClipName}
-              @click=${() => void controller.openTextureSlicer()}
-            >
-              Generate Frames...
-            </button>
-            <button
-              class="mini-button"
-              type="button"
-              ?disabled=${texturePath.length === 0}
-              @click=${() => void controller.updateTexturePath('')}
-            >
-              Clear Texture
-            </button>
-          </div>
-          <div class="panel-note">
-            Use this only as a one-time import source. The editor stores sequence frames as separate
-            files after slicing.
-          </div>
-        </div>
-
-        <div class="property-group-section asset-section">
-          <div class="section-header">
-            <h4 class="group-title">Clips</h4>
-            <div class="animation-clip-actions">
-              <button
-                class="btn-icon"
-                type="button"
-                title="Add Clip"
-                aria-label="Add clip"
-                @click=${() => void controller.addClip()}
-              >
-                ${this.host.iconService.getIcon('plus', 14)}
-              </button>
-              <button
-                class="btn-icon"
-                type="button"
-                title="Remove"
-                aria-label="Remove active clip"
-                ?disabled=${!activeClip}
-                @click=${() => void controller.removeClip()}
-              >
-                ${this.host.iconService.getIcon('trash-2', 14)}
-              </button>
-            </div>
-          </div>
-          <div class="animation-clip-list">
-            ${clips.map(
-              clip => html`
-                <button
-                  class="animation-clip-button ${clip.name === animationState.activeClipName
-                    ? 'is-active'
-                    : ''}"
-                  type="button"
-                  @click=${() => void controller.selectClip(clip.name)}
-                >
-                  <span class="animation-clip-name">${clip.name}</span>
-                  <span class="animation-clip-meta">${clip.frames.length}</span>
-                </button>
-              `
-            )}
-          </div>
-        </div>
-
+        ${assetPath ? this.renderAnimationResourceSection(assetPath) : ''}
+        ${this.renderAnimationImportSection(controller, animationState)}
+        ${this.renderAnimationClipsSection(controller, animationState)}
         ${activeClip
-          ? html`
-              <div class="property-group-section asset-section">
-                <div class="section-header">
-                  <h4 class="group-title">Clip</h4>
-                  <span class="animation-chip"
-                    >${selectedFrame
-                      ? `Frame ${animationState.selectedFrameIndex + 1}`
-                      : 'Clip'}</span
-                  >
-                </div>
-                <div class="field-grid">
-                  <label class="field">
-                    <span>Name</span>
-                    <input
-                      type="text"
-                      .value=${activeClip.name}
-                      @change=${(event: Event) =>
-                        void controller.renameClip((event.target as HTMLInputElement).value.trim())}
-                    />
-                  </label>
-                </div>
-                <div class="row">
-                  <label class="field">
-                    <span>FPS</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      .value=${String(activeClip.fps)}
-                      @change=${(event: Event) =>
-                        void controller.updateClipFps(
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Playback</span>
-                    <select
-                      .value=${activeClip.playbackMode}
-                      @change=${(event: Event) =>
-                        void controller.updateClipPlaybackMode(
-                          (event.target as HTMLSelectElement).value as AnimationPlaybackMode
-                        )}
-                    >
-                      <option value="normal">Normal</option>
-                      <option value="ping-pong">Ping-Pong</option>
-                    </select>
-                  </label>
-                </div>
-                <label class="field-toggle">
-                  <input
-                    type="checkbox"
-                    .checked=${activeClip.loop}
-                    @change=${(event: Event) =>
-                      void controller.updateClipLoop((event.target as HTMLInputElement).checked)}
-                  />
-                  <span>Loop clip</span>
-                </label>
-              </div>
-            `
-          : html`
-              <div class="property-group-section asset-section">
-                <div class="asset-text-preview-state">No active clip selected.</div>
-              </div>
-            `}
+          ? this.renderAnimationClipSection(controller, activeClip)
+          : this.host.propertyRenderers.renderPropertySection(
+              'Clip',
+              html`<div class="asset-text-preview-state">No active clip selected.</div>`,
+              { hideTitle: true }
+            )}
         ${selectedFrame
-          ? html`
-              <div class="property-group-section asset-section">
-                <div class="section-header">
-                  <h4 class="group-title">Frame</h4>
-                  <span class="frame-chip">${animationState.selectedFrameIndex + 1}</span>
-                </div>
-                <div class="field-grid">
-                  <label class="field">
-                    <span>Duration Multiplier</span>
-                    <input
-                      type="number"
-                      min="0.05"
-                      step="0.05"
-                      .value=${String(selectedFrame.durationMultiplier)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameDurationMultiplier(
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Texture Override</span>
-                    <input
-                      type="text"
-                      .value=${selectedFrame.texturePath}
-                      placeholder="Optional per-frame texture"
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameTexturePath(
-                          (event.target as HTMLInputElement).value.trim()
-                        )}
-                    />
-                  </label>
-                </div>
-                <div class="row">
-                  <label class="field">
-                    <span>Anchor X</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      .value=${selectedFrame.anchor.x.toFixed(2)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameAnchor(
-                          'x',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Anchor Y</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      .value=${selectedFrame.anchor.y.toFixed(2)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameAnchor(
-                          'y',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                </div>
-                <div class="field-grid">
-                  <div class="inspector-section-title inspector-section-title--subtle">
-                    Bounding Box
-                  </div>
-                </div>
-                <div class="row">
-                  <label class="field">
-                    <span>X</span>
-                    <input
-                      type="number"
-                      step="1"
-                      .value=${String(selectedFrame.boundingBox.x)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameBoundingBox(
-                          'x',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Y</span>
-                    <input
-                      type="number"
-                      step="1"
-                      .value=${String(selectedFrame.boundingBox.y)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameBoundingBox(
-                          'y',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                </div>
-                <div class="row">
-                  <label class="field">
-                    <span>Width</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      .value=${String(selectedFrame.boundingBox.width)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameBoundingBox(
-                          'width',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                  <label class="field">
-                    <span>Height</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      .value=${String(selectedFrame.boundingBox.height)}
-                      @change=${(event: Event) =>
-                        void controller.updateSelectedFrameBoundingBox(
-                          'height',
-                          Number((event.target as HTMLInputElement).value)
-                        )}
-                    />
-                  </label>
-                </div>
-                <div class="field-grid">
-                  <div class="inspector-section-title inspector-section-title--subtle">
-                    Collision Polygon
-                  </div>
-                  <div class="panel-note">
-                    ${selectedFrame.collisionPolygon.length
-                      ? `${selectedFrame.collisionPolygon.length} vertices authored.`
-                      : 'No collision polygon authored yet.'}
-                  </div>
-                </div>
-                <div class="toolbar-row">
-                  <button
-                    class="mini-button"
-                    type="button"
-                    @click=${() => void controller.addPolygonVertex()}
-                  >
-                    Add Vertex
-                  </button>
-                  <button
-                    class="mini-button"
-                    type="button"
-                    @click=${() => void controller.clearPolygon()}
-                  >
-                    Clear Polygon
-                  </button>
-                  <button
-                    class="mini-button"
-                    type="button"
-                    @click=${() => void controller.resetBoundingBox()}
-                  >
-                    Reset Box
-                  </button>
-                </div>
-              </div>
-            `
-          : html`
-              <div class="property-group-section asset-section">
-                <div class="asset-text-preview-state">
-                  Pick a frame in the timeline to edit delay, anchor, bounding box, and polygon
-                  data.
-                </div>
-              </div>
-            `}
+          ? this.renderAnimationFrameSection(controller, animationState, selectedFrame)
+          : this.host.propertyRenderers.renderPropertySection(
+              'Frame',
+              html`<div class="asset-text-preview-state">
+                Pick a frame in the timeline to edit delay, anchor, bounding box, and polygon data.
+              </div>`,
+              { hideTitle: true }
+            )}
       </div>
     `;
+  }
+
+  private renderAnimationResourceSection(assetPath: string) {
+    return this.host.propertyRenderers.renderPropertySection(
+      'Resource',
+      html`
+        <div class="property-group">
+          <span class="property-label">Name</span>
+          <span class="asset-value">${this.getAnimationAssetTitle(assetPath)}</span>
+        </div>
+        <div class="property-group">
+          <span class="property-label">Path</span>
+          <span class="asset-value asset-path">${assetPath}</span>
+        </div>
+      `
+    );
+  }
+
+  private renderAnimationImportSection(
+    controller: AnimationInspectorController,
+    animationState: AnimationInspectorSnapshot
+  ) {
+    const texturePath = animationState.resource?.texturePath?.trim() ?? '';
+    const target: AnimationResourcePropertyTarget = { controller, texturePath };
+
+    return this.host.propertyRenderers.renderPropertySection(
+      'Spritesheet Import',
+      html`
+        <div class="group-header">
+          <h4 class="group-title">Spritesheet Import</h4>
+          ${texturePath ? html`<span class="animation-chip">Source</span>` : ''}
+        </div>
+        ${ANIMATION_RESOURCE_PROPERTIES.map(prop =>
+          this.host.propertyRenderers.renderDetachedProperty(prop, target, {
+            placeholder: 'res://textures/spritesheet.png',
+          })
+        )}
+        <div class="inspector-button-row">
+          <button
+            class="inspector-button inspector-button--primary"
+            type="button"
+            ?disabled=${texturePath.length === 0 || !animationState.activeClipName}
+            @click=${() => void controller.openTextureSlicer()}
+          >
+            ${this.host.iconService.getIcon('grid', 13)}
+            <span>Generate Frames</span>
+          </button>
+          <button
+            class="inspector-button"
+            type="button"
+            ?disabled=${texturePath.length === 0}
+            @click=${() => void controller.updateTexturePath('')}
+          >
+            ${this.host.iconService.getIcon('x', 13)}
+            <span>Clear Texture</span>
+          </button>
+        </div>
+        <p class="panel-note">
+          Use this only as a one-time import source. The editor stores sequence frames as separate
+          files after slicing.
+        </p>
+      `,
+      { hideTitle: true }
+    );
+  }
+
+  private renderAnimationClipsSection(
+    controller: AnimationInspectorController,
+    animationState: AnimationInspectorSnapshot
+  ) {
+    const clips = animationState.clips;
+
+    return this.host.propertyRenderers.renderPropertySection(
+      'Clips',
+      html`
+        <div class="group-header">
+          <h4 class="group-title">Clips</h4>
+          <div class="animation-clip-actions">
+            <button
+              class="btn-icon"
+              type="button"
+              title="Add Clip"
+              aria-label="Add clip"
+              @click=${() => void controller.addClip()}
+            >
+              ${this.host.iconService.getIcon('plus', 14)}
+            </button>
+            <button
+              class="btn-icon"
+              type="button"
+              title="Remove"
+              aria-label="Remove active clip"
+              ?disabled=${!animationState.activeClip}
+              @click=${() => void controller.removeClip()}
+            >
+              ${this.host.iconService.getIcon('trash-2', 14)}
+            </button>
+          </div>
+        </div>
+        <div class="animation-clip-list">
+          ${clips.map(clip => {
+            const isSelected = clip.name === animationState.activeClipName;
+            return html`
+              <button
+                class="animation-clip-button ${isSelected ? 'is-selected' : ''}"
+                type="button"
+                data-clip-name=${clip.name}
+                aria-current=${isSelected ? 'true' : 'false'}
+                @click=${() => void controller.selectClip(clip.name)}
+              >
+                <span class="animation-clip-marker" aria-hidden="true">
+                  ${isSelected ? this.host.iconService.getIcon('check', 12) : ''}
+                </span>
+                <span class="animation-clip-name">${clip.name}</span>
+                <span class="animation-clip-meta"
+                  >${clip.frames.length} ${clip.frames.length === 1 ? 'frame' : 'frames'}</span
+                >
+              </button>
+            `;
+          })}
+          ${clips.length === 0
+            ? html`<div class="asset-text-preview-state">No clips in this resource yet.</div>`
+            : ''}
+        </div>
+      `,
+      { hideTitle: true }
+    );
+  }
+
+  private renderAnimationClipSection(
+    controller: AnimationInspectorController,
+    activeClip: AnimationClip
+  ) {
+    const target: AnimationClipPropertyTarget = { controller, clip: activeClip };
+
+    return this.host.propertyRenderers.renderPropertySection(
+      'Clip',
+      html`
+        <div class="group-header">
+          <h4 class="group-title">Clip</h4>
+          <span class="animation-chip animation-chip--selected">${activeClip.name}</span>
+        </div>
+        ${ANIMATION_CLIP_PROPERTIES.map(prop =>
+          this.host.propertyRenderers.renderDetachedProperty(prop, target)
+        )}
+      `,
+      { className: 'animation-clip-section', hideTitle: true }
+    );
+  }
+
+  private renderAnimationFrameSection(
+    controller: AnimationInspectorController,
+    animationState: AnimationInspectorSnapshot,
+    selectedFrame: AnimationFrame
+  ) {
+    const target: AnimationFramePropertyTarget = { controller, frame: selectedFrame };
+    const frameNumber = animationState.selectedFrameIndex + 1;
+    const frameCount = animationState.activeClip?.frames.length ?? 0;
+    const vertexCount = selectedFrame.collisionPolygon.length;
+
+    return this.host.propertyRenderers.renderPropertySection(
+      'Frame',
+      html`
+        <div
+          class="animation-frame-indicator"
+          data-frame-index=${animationState.selectedFrameIndex}
+        >
+          <span class="animation-frame-badge" aria-hidden="true">${frameNumber}</span>
+          <span class="animation-frame-indicator-text">
+            <span class="animation-frame-indicator-title"
+              >Frame ${frameNumber} of ${frameCount}</span
+            >
+            <span class="animation-frame-indicator-sub">${animationState.activeClipName}</span>
+          </span>
+        </div>
+        ${ANIMATION_FRAME_PROPERTIES.map(prop =>
+          this.host.propertyRenderers.renderDetachedProperty(
+            prop,
+            target,
+            ANIMATION_FRAME_PROPERTY_OPTIONS[prop.name] ?? {}
+          )
+        )}
+        <div class="group-header group-header--sub">
+          <h5 class="group-subtitle">Collision Polygon</h5>
+          <span class="animation-clip-meta">
+            ${vertexCount ? `${vertexCount} vertices` : 'none authored'}
+          </span>
+        </div>
+        <div class="inspector-button-row">
+          <button
+            class="inspector-button"
+            type="button"
+            @click=${() => void controller.addPolygonVertex()}
+          >
+            ${this.host.iconService.getIcon('plus', 13)}
+            <span>Add Vertex</span>
+          </button>
+          <button
+            class="inspector-button"
+            type="button"
+            ?disabled=${vertexCount === 0}
+            @click=${() => void controller.clearPolygon()}
+          >
+            ${this.host.iconService.getIcon('x', 13)}
+            <span>Clear Polygon</span>
+          </button>
+          <button
+            class="inspector-button"
+            type="button"
+            @click=${() => void controller.resetBoundingBox()}
+          >
+            ${this.host.iconService.getIcon('refresh-cw', 13)}
+            <span>Reset Box</span>
+          </button>
+        </div>
+      `,
+      { className: 'animation-frame-section', hideTitle: true }
+    );
   }
 
   getAnimationAssetTitle(assetPath: string): string {

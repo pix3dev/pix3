@@ -1,4 +1,5 @@
 import { html } from '@/fw';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import type { PropertyDefinition } from '@/fw';
 import { appState } from '@/state';
 import { Group2D, Node2D, Sprite2D, UIControl2D, getPropertiesByGroup } from '@pix3/runtime';
@@ -14,6 +15,7 @@ import {
   type PrefabMetadata,
 } from '@/features/scene/prefab-utils';
 import type { InspectorPanel } from './inspector-panel';
+import type { NumberFieldAxis } from './property-editors';
 
 interface SelectOption {
   value: string;
@@ -24,6 +26,18 @@ type ReadOnlyValue = boolean | ((target: unknown) => boolean) | undefined;
 type PropertySectionOptions = {
   className?: string;
   hideTitle?: boolean;
+};
+
+/** Per-row overrides for {@link InspectorPropertyRenderers.renderDetachedProperty}. */
+export type DetachedPropertyOptions = {
+  /** Overrides `prop.ui.label`. */
+  label?: string;
+  /** Placeholder for text rows. */
+  placeholder?: string;
+  /** Defaults to the collaboration read-only flag. */
+  readOnly?: boolean;
+  /** Axis chips for a vector2 pair, e.g. `['w', 'h']` for a size. */
+  axes?: readonly [NumberFieldAxis, NumberFieldAxis];
 };
 
 const PROPERTY_GROUP_ORDER = [
@@ -1644,6 +1658,171 @@ export class InspectorPropertyRenderers {
     }
   }
 
+  /**
+   * Render one standard property row for a target that is **not** the selected
+   * scene node — the Animation Inspector's clip/frame editors, for instance,
+   * whose values live in an asset document rather than in `propertyValues`.
+   *
+   * Same markup, classes and web components as {@link renderPropertyInput}
+   * (`.property-group` + `.property-label` + `pix3-number-field` /
+   * `pix3-vector2-editor` / `.property-input--text` / `.property-select--enum`),
+   * so a detached section reads exactly like a node section. Edits go straight to
+   * `prop.setValue(target, value)`; the definition decides where they land.
+   */
+  renderDetachedProperty(
+    prop: PropertyDefinition,
+    target: unknown,
+    options: DetachedPropertyOptions = {}
+  ) {
+    const label = options.label ?? prop.ui?.label ?? prop.name;
+    const unitSuffix = prop.ui?.unit ? ` (${prop.ui.unit})` : '';
+    // Asset documents are not node properties, so play mode does not apply; a
+    // read-only collaborator still must not author.
+    const readOnly = options.readOnly ?? appState.collaboration.isReadOnly;
+    const labelTemplate = this.renderPropertyLabel(
+      prop,
+      `${label}${unitSuffix}`,
+      false,
+      prop.ui?.description
+    );
+    const commit = (value: unknown) => prop.setValue(target, value);
+
+    if (prop.type === 'boolean') {
+      return html`
+        <div class="property-group property-group--checkbox">
+          <label
+            class="property-label property-label--checkbox"
+            title=${ifDefined(prop.ui?.description)}
+          >
+            <input
+              type="checkbox"
+              class="property-checkbox"
+              .checked=${prop.getValue(target) === true}
+              ?disabled=${readOnly}
+              @change=${(e: Event) => commit((e.target as HTMLInputElement).checked)}
+            />
+            <span class="property-label-text">${label}</span>
+          </label>
+        </div>
+      `;
+    }
+
+    if (prop.type === 'vector2') {
+      const raw = prop.getValue(target) as { x?: number; y?: number } | null;
+      const x = Number.isFinite(raw?.x) ? Number(raw?.x) : 0;
+      const y = Number.isFinite(raw?.y) ? Number(raw?.y) : 0;
+      const min = typeof prop.ui?.min === 'number' ? prop.ui.min : Number.NEGATIVE_INFINITY;
+      const max = typeof prop.ui?.max === 'number' ? prop.ui.max : Number.POSITIVE_INFINITY;
+
+      if (options.axes) {
+        // Width/height-style pairs get the W/H chips the Size group uses instead
+        // of the vector editor's fixed X/Y.
+        const [firstAxis, secondAxis] = options.axes;
+        return html`
+          <div class="property-group">
+            ${labelTemplate}
+            <div class="size-inline-editor">
+              <pix3-number-field
+                axis=${firstAxis}
+                class="size-inline-input"
+                .value=${x}
+                .step=${prop.ui?.step ?? 1}
+                .precision=${prop.ui?.precision ?? 0}
+                .min=${min}
+                .max=${max}
+                ?disabled=${readOnly}
+                @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                  commit({ x: e.detail.value, y })}
+              ></pix3-number-field>
+              <pix3-number-field
+                axis=${secondAxis}
+                class="size-inline-input"
+                .value=${y}
+                .step=${prop.ui?.step ?? 1}
+                .precision=${prop.ui?.precision ?? 0}
+                .min=${min}
+                .max=${max}
+                ?disabled=${readOnly}
+                @commit-change=${(e: CustomEvent<{ value: number }>) =>
+                  commit({ x, y: e.detail.value })}
+              ></pix3-number-field>
+            </div>
+          </div>
+        `;
+      }
+
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <pix3-vector2-editor
+            .x=${x}
+            .y=${y}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ x: number; y: number }>) => commit(e.detail)}
+          ></pix3-vector2-editor>
+        </div>
+      `;
+    }
+
+    if (prop.type === 'enum' || prop.type === 'select') {
+      const current = String(prop.getValue(target) ?? '');
+      const selectOptions = this.getSelectOptions(prop);
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <select
+            class="property-select property-select--enum"
+            aria-label=${label}
+            ?disabled=${readOnly}
+            @change=${(e: Event) => commit((e.target as HTMLSelectElement).value)}
+          >
+            ${selectOptions.map(
+              option =>
+                html`<option value=${option.value} ?selected=${option.value === current}>
+                  ${option.label}
+                </option>`
+            )}
+          </select>
+        </div>
+      `;
+    }
+
+    if (prop.type === 'number') {
+      const numericValue = Number(prop.getValue(target));
+      return html`
+        <div class="property-group">
+          ${labelTemplate}
+          <pix3-number-field
+            .value=${Number.isFinite(numericValue) ? numericValue : 0}
+            .step=${prop.ui?.step ?? 0.01}
+            .precision=${prop.ui?.precision ?? 2}
+            .min=${typeof prop.ui?.min === 'number' ? prop.ui.min : Number.NEGATIVE_INFINITY}
+            .max=${typeof prop.ui?.max === 'number' ? prop.ui.max : Number.POSITIVE_INFINITY}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ value: number }>) => commit(e.detail.value)}
+          ></pix3-number-field>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="property-group">
+        ${labelTemplate}
+        <input
+          type="text"
+          class="property-input property-input--text"
+          aria-label=${label}
+          .value=${String(prop.getValue(target) ?? '')}
+          placeholder=${ifDefined(options.placeholder)}
+          ?disabled=${readOnly}
+          @change=${(e: Event) => commit((e.target as HTMLInputElement).value)}
+        />
+      </div>
+    `;
+  }
+
   renderPropertySection(label: string, content: unknown, options: PropertySectionOptions = {}) {
     const classes = [
       'property-group-section',
@@ -1660,9 +1839,17 @@ export class InspectorPropertyRenderers {
     `;
   }
 
-  renderPropertyLabel(prop: PropertyDefinition, label: string, isOverridden: boolean) {
+  renderPropertyLabel(
+    prop: PropertyDefinition,
+    label: string,
+    isOverridden: boolean,
+    description?: string
+  ) {
     return html`
-      <span class="property-label ${isOverridden ? 'property-label--overridden' : ''}">
+      <span
+        class="property-label ${isOverridden ? 'property-label--overridden' : ''}"
+        title=${ifDefined(description)}
+      >
         ${label}
         ${isOverridden
           ? html`
