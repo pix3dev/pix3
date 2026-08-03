@@ -1526,12 +1526,95 @@ belongs in `@/services/image-gen/image-ops.ts` next to `trimImageBlob`, so the A
 agent tool layer get it for free. Write-back for a bound frame is
 `writeBlobToBoundFrame(blob, { kind: 'replace' })` at unchanged size — the identity restamp.
 
+**Implementation notes.**
+
+*Signature.* `chromaKeyImage(blob, color, options)` takes and returns a **`Blob`**, not the
+`imageData` this section names. Every other op in the module is blob-in/blob-out (`trimImageBlob`,
+`readAlphaMask`, `rotateImageBlob`), the frame write-back wants a blob, and an `ImageData` signature
+would have forced both the panel and the agent layer to grow their own decode/encode. Returns
+`{ blob, width, height, keyedPixels, softenedPixels }` — the counts are what the status line reports,
+so "nothing happened" is never silent.
+
+*Colour distance is plain RGB euclidean*, normalised by `√3·255` so `tolerance` is a 0..1 fraction a
+slider can carry. Justified in the function's own comment: the backgrounds this targets are flat —
+one near-uniform RGB across thousands of pixels — so a perceptual metric (CIEDE2000) buys nothing
+measurable, while a chroma-only metric (YCbCr) would additionally key *shaded* copies of the
+background colour, i.e. eat the shadowed side of the subject.
+
+*Edges: a hard cut by default, with the ramp available.* `softness` (same 0..1 units) is implemented
+and exposed as a second slider, but defaults to **0**. A hard cut is the predictable answer for the
+flat, hard-edged generated art this ships against, and a softened fringe is exactly the
+"near-transparent halo" §9.12.1's `alphaThreshold: 8` trim would then cut anyway. **No despill**:
+removing the key colour's contribution from surviving semi-transparent pixels needs an estimate of
+what is *behind* the subject, which a single flat-background still image does not carry — it is a
+video-keying concern. Existing alpha is *scaled*, never overwritten, so re-keying an already
+cut-out image cannot resurrect transparent pixels.
+
+*The eyedropper.* A transient mode (`chromaMode`), routed through
+`onStagePointerDown/Move/Up` in the same slot crop and place occupy, and mutually exclusive with both
+(`setStageTool`, `onToggleCrop`, `openPlaceSession` and Escape all close it; a new working image
+closes it too, because a colour picked off the previous frame means nothing against this one). Two
+new pure helpers back it — `readImagePixels(blob)` and `samplePixelColor(pixels, x, y)` — so the
+RGBA is decoded **once** when the mode opens and a drag re-samples synchronously per pointer move
+instead of re-decoding the PNG. Coordinates come from the same `toImagePoint` the crop tool uses, so
+the picker agrees with every other stage tool under zoom and pan.
+
+*Write-back* is the `onRemoveBackground` split verbatim: `canWriteBackToFrame` →
+`writeBlobToBoundFrame(blob, { kind: 'replace' }, 'Chroma key frame')`; otherwise the keyed blob
+becomes the working image (`source: 'chroma-keyed'`) and the save name is forced to `.png`.
+
 #### 9.12.4 Bulk frame ops
 
 Delete even/odd frames, and map any `image-ops` raster function over every frame of a clip.
 Managed-folder frames only (`isSequenceAnimationFrame`). Both follow §9.12.1's shape: write all files,
 then one `applyClipUpdate`, then one invalidation pass. Deleting frames needs no new file writes and
 is a plain single-step clip update.
+
+**Implementation notes.** Two controller methods, both returning
+`BulkFrameReport { processed, skipped, failed }` — deliberately the same three buckets
+`TrimClipReport` uses, so `sliceStatus` states every bulk outcome the same way and a clip of
+UV-window frames never looks like a dead button.
+
+- `deleteFramesByParity('even' | 'odd')` — parity is counted the way the **timeline labels** frames,
+  so `Frame 1` is odd. It writes and deletes nothing (the PNGs stay on disk, undo really restores the
+  clip), so it is delegated to the existing `removeFrames`, which already collapses the removal into
+  one operation and repairs the selection. Success is detected by comparing the frame count before
+  and after rather than by changing `removeFrames`' signature. A UV-window frame of the selected
+  parity is a *skip*: halving frames that all read one shared sheet is a slicing decision, not a
+  frame-list edit.
+- `applyRasterOpToClipFrames(op)` — `op` is a small union, not a callback, because each case has to
+  carry the `FrameRasterTransform` that re-derives the frame's geometry (`flip` → `{kind:'flip'}`,
+  `rotate` → `{kind:'rotate'}`, `chroma-key` → the identity `{kind:'replace'}`). Byte-for-byte
+  §9.12.1's shape, including `resolveTrimSourceSize` per frame (never the preview-texture fallback)
+  and the "already-tight"-style skips. Output is forced to PNG whatever the source encoding was: a
+  managed folder's frames are `<clip>_<nnnn>.png` by convention, so preserving a JPEG's encoding
+  would write a JPEG under a `.png` name — and for the chroma key would throw away the alpha it just
+  authored.
+
+**Where chroma key lives in the UI, and why not in the bulk card.** §9.12.4 asks for chroma key to be
+one of the bulk ops so the two features compose — it is, at the controller level
+(`{ kind: 'chroma-key', color, tolerance, softness }`). But it is *offered* from the chroma
+toolbar's **Apply to clip** button rather than from the bulk card, because it is the one op that
+needs a parameter the user has to pick off the canvas first; a blind "Chroma key" button in the card
+would have had nothing to key. So the flow is: eyedropper on one frame → tune tolerance → Apply (this
+frame) or Apply to clip (all of them). The card carries what needs no parameter: Drop every 2nd,
+Flip H, Flip V, Rotate 90°.
+
+**Confirms.** As §9.12.1 found, `DialogService` has no numeric input — only `showChoice` and a
+type-to-confirm field — so the parity confirm follows the trim's precedent and puts the parameter on
+the *buttons*: "Drop N even" / "Drop N odd" / Cancel. The raster ops take the plain
+`showConfirmation` with `isDangerous` and the same disclaimer the trim carries (new files are
+written; undo restores the document, not the pixels on disk — §9.7 risk 7).
+
+**Tests.** `image-ops.spec.ts` runs the real key over a real RGBA strip (only `createImageBitmap` and
+the 2D canvas are stood up), with greys chosen so the arithmetic is exact against a black key — a
+grey of value *v* sits at exactly *v*/255 of the maximum distance, which makes the ramp assertion
+(`153`, i.e. 60 % of 255) a checkable number rather than a recorded one. The controller spec runs the
+real `flipImageBlob` / `rotateImageBlob` / `chromaKeyImage` over a synthetic raster and asserts the
+batching invariant directly (every `writeBinaryFile` call order is less than the single
+`invokeAndPush`). The panel spec drives the eyedropper through a real `pointerdown` — happy-dom
+measures every element as 0×0, so the stage is given a real `getBoundingClientRect`, which is
+arranging state the browser fills, the same move `seedFrameMetrics` makes.
 
 #### 9.12.5 Video import
 

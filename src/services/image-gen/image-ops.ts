@@ -512,6 +512,188 @@ export async function readAlphaMask(
   }
 }
 
+/** A plain 8-bit-per-channel colour. Alpha is deliberately absent — this is a *key*. */
+export interface RgbColor {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+export interface ImagePixels extends ImageDimensions {
+  /** Row-major RGBA bytes, origin top-left — the `ImageData.data` layout verbatim. */
+  readonly data: Uint8ClampedArray;
+}
+
+/**
+ * Decode an image into its raw RGBA bytes. The eyedropper half of the chroma-key
+ * tool reads its target colour out of this rather than growing its own canvas
+ * code, and it is decoded **once** per working image so dragging the picker over
+ * the canvas costs nothing per sample.
+ *
+ * Returns null when the image can't be decoded (no canvas in this context) —
+ * callers must treat that as "unknown", never as "black".
+ */
+export async function readImagePixels(blob: Blob): Promise<ImagePixels | null> {
+  if (!canUseBitmap()) {
+    return null;
+  }
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return null;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    return { width, height, data: ctx.getImageData(0, 0, width, height).data };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * Colour at a pixel, or null when the coordinate is outside the image. Floats are
+ * floored, which is what a pointer position in image space needs: 12.9 is still
+ * inside pixel 12.
+ */
+export function samplePixelColor(pixels: ImagePixels, x: number, y: number): RgbColor | null {
+  const px = Math.floor(x);
+  const py = Math.floor(y);
+  if (px < 0 || py < 0 || px >= pixels.width || py >= pixels.height) {
+    return null;
+  }
+  const offset = (py * pixels.width + px) * 4;
+  return { r: pixels.data[offset], g: pixels.data[offset + 1], b: pixels.data[offset + 2] };
+}
+
+export interface ChromaKeyOptions extends EncodeOptions {
+  /**
+   * Colour distance, as a fraction (0..1) of the largest possible RGB distance,
+   * at or below which a pixel is knocked fully transparent. Default 0.1.
+   */
+  tolerance?: number;
+  /**
+   * Width of the ramp *beyond* `tolerance`, in the same 0..1 units, over which
+   * alpha falls off linearly instead of cutting. Default 0 — a hard cut (see the
+   * note on {@link chromaKeyImage}).
+   */
+  softness?: number;
+}
+
+export interface ChromaKeyResult extends RasterResult {
+  /** Pixels driven to alpha 0. */
+  readonly keyedPixels: number;
+  /** Pixels inside the soft band — alpha reduced but not to zero. Always 0 for a hard cut. */
+  readonly softenedPixels: number;
+}
+
+/** Largest possible RGB euclidean distance: the black↔white diagonal, √3·255. */
+const MAX_RGB_DISTANCE = Math.sqrt(3) * 255;
+
+/**
+ * Knock a colour out of an image: every pixel within `tolerance` of `color` loses
+ * its alpha. This is the "delete the flat background an image model gave me"
+ * tool (§9.12.3), and it lives here rather than in the panel so the Asset
+ * Generator and the agent tool layer get it for free — the same reason
+ * {@link trimImageBlob} and {@link readAlphaMask} do.
+ *
+ * **Colour distance is plain RGB euclidean**, normalised by {@link MAX_RGB_DISTANCE}
+ * so `tolerance` is a 0..1 fraction the UI can put on a slider. Deliberately not a
+ * perceptual metric (CIEDE2000) and not chroma-only (YCbCr): the backgrounds this
+ * targets are *flat* — one nearly-uniform RGB value across thousands of pixels —
+ * so the extra machinery buys nothing measurable, while euclidean distance keeps
+ * the slider's feel linear and the loop a few instructions per pixel. A
+ * chroma-only metric would additionally key out *shaded* copies of the background
+ * colour, which for a sprite means eating the shadowed side of the subject.
+ *
+ * **Edges: `softness` is 0 by default, i.e. v1 cuts hard.** A hard cut on an
+ * anti-aliased edge leaves a one-pixel fringe of the key colour, so the ramp is
+ * implemented and exposed — the *default* is hard because that is the predictable
+ * answer for the flat, hard-edged generated art this ships against, and because a
+ * ramp interacts with the trim tool's `alphaThreshold` (a softened fringe is
+ * exactly the "near-transparent halo" a later trim would then cut anyway).
+ *
+ * **No despill.** Removing the key colour's contribution from surviving
+ * semi-transparent pixels needs an estimate of what is *behind* the subject,
+ * which a single flat-background still image does not carry; it is a video-keying
+ * concern. Pixels the ramp only partially keys keep their original RGB.
+ *
+ * Existing alpha is **scaled**, never overwritten, so re-keying an already
+ * cut-out image cannot resurrect transparent pixels. Output is PNG unless the
+ * caller says otherwise — writing this into a JPEG would discard the whole point.
+ */
+export async function chromaKeyImage(
+  blob: Blob,
+  color: RgbColor,
+  options: ChromaKeyOptions = {}
+): Promise<ChromaKeyResult> {
+  if (!canUseBitmap()) {
+    const size = await readBlobSize(blob);
+    return {
+      blob,
+      width: size?.width ?? 0,
+      height: size?.height ?? 0,
+      keyedPixels: 0,
+      softenedPixels: 0,
+    };
+  }
+
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    const cut = clamp(options.tolerance ?? 0.1, 0, 1) * MAX_RGB_DISTANCE;
+    const ramp = clamp(options.softness ?? 0, 0, 1) * MAX_RGB_DISTANCE;
+    let keyedPixels = 0;
+    let softenedPixels = 0;
+
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3];
+      if (alpha === 0) {
+        continue;
+      }
+      const dr = data[index] - color.r;
+      const dg = data[index + 1] - color.g;
+      const db = data[index + 2] - color.b;
+      const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+      if (distance <= cut) {
+        data[index + 3] = 0;
+        keyedPixels += 1;
+      } else if (ramp > 0 && distance < cut + ramp) {
+        data[index + 3] = Math.round(alpha * ((distance - cut) / ramp));
+        softenedPixels += 1;
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    const outBlob = await canvasToBlob(canvas, {
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+    return { blob: outBlob, width, height, keyedPixels, softenedPixels };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export interface AlphaStats {
   /** True when any pixel is meaningfully transparent (alpha ≤ 250 for >0.5% of pixels). */
   readonly hasAlpha: boolean;

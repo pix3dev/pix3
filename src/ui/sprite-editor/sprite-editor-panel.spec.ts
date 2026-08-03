@@ -147,6 +147,7 @@ function createPreferences() {
 
 interface PanelStubs {
   showChoice: ReturnType<typeof vi.fn>;
+  showConfirmation: ReturnType<typeof vi.fn>;
   historyGet: ReturnType<typeof vi.fn>;
   readBlob: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
@@ -185,6 +186,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   const execute = vi.fn().mockResolvedValue(true);
   // §9.12.1's confirm: two confirm buttons (the alpha threshold) plus cancel.
   const showChoice = vi.fn().mockResolvedValue('confirm');
+  // §9.12.4's raster ops take the plain two-way confirm.
+  const showConfirmation = vi.fn().mockResolvedValue(true);
 
   const stubs: Record<string, unknown> = {
     aiSettings: {
@@ -214,7 +217,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       clearActiveTarget,
     },
     dialogService: {
-      showConfirmation: vi.fn().mockResolvedValue(true),
+      showConfirmation,
       showChoice: showChoice,
     },
     sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
@@ -232,6 +235,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     panel,
     stubs: {
       showChoice,
+      showConfirmation,
       historyGet,
       readBlob,
       updatePreferences,
@@ -705,6 +709,456 @@ describe('SpriteEditorPanel (unified shell)', () => {
       const action = panel.querySelector<HTMLButtonElement>('.ag-auto-polygon');
       expect(action?.disabled).toBe(true);
       expect(action?.title).toBe('Waiting for the frame texture to decode…');
+    });
+  });
+
+  /**
+   * §9.12.3 — the chroma key. Only the two browser APIs happy-dom lacks are stood
+   * up (`createImageBitmap` and the 2D canvas, over a real RGBA strip) plus the
+   * stage's rect, which happy-dom reports as 0×0 so no pointer could ever land on
+   * a pixel. Everything else — the transient mode, the pointer routing, the
+   * sample, and `chromaKeyImage` itself — is the shipping code.
+   */
+  describe('chroma key (§9.12.3)', () => {
+    /**
+     * A uniform-grey raster of `width × height`, or an explicit 1-row strip of
+     * greys. Grey is convenient: against a grey key the RGB distance is exactly
+     * |a − b|·√3, so what gets keyed is arithmetic anyone can check.
+     */
+    function stubGreyDecode(greys: readonly number[], width: number, height: number): void {
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = width;
+          public naturalHeight = height;
+          set src(_value: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        }
+      );
+      vi.stubGlobal('createImageBitmap', async () => ({ width, height, close: () => undefined }));
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              drawImage: () => undefined,
+              getImageData: (_x: number, _y: number, w: number, h: number) => {
+                const data = new Uint8ClampedArray(w * h * 4);
+                for (let index = 0; index < w * h; index += 1) {
+                  const grey = greys[index % greys.length];
+                  data[index * 4] = grey;
+                  data[index * 4 + 1] = grey;
+                  data[index * 4 + 2] = grey;
+                  data[index * 4 + 3] = 255;
+                }
+                return { data, width: w, height: h };
+              },
+              putImageData: () => undefined,
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['keyed'], { type: 'image/png' })),
+          } as unknown as HTMLElement;
+        }
+      );
+    }
+
+    /**
+     * happy-dom measures every element as 0×0, which makes `getStageViewport()`
+     * return null and no pointer can reach a pixel. Give the stage a real rect —
+     * arranging state the browser fills, not stubbing behaviour — and make sure
+     * pointer capture exists on it.
+     */
+    function giveStageARect(panel: SpriteEditorPanel): HTMLElement {
+      const stage = panel.querySelector<HTMLElement>('.ag-stage');
+      if (!stage) {
+        throw new Error('no stage');
+      }
+      stage.getBoundingClientRect = () =>
+        ({
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 400,
+          width: 400,
+          height: 400,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      stage.setPointerCapture = () => undefined;
+      stage.hasPointerCapture = () => true;
+      stage.releasePointerCapture = () => undefined;
+      return stage;
+    }
+
+    /** The stage sits at (0,0) with zoom 1 and no pan, so client == image pixels. */
+    function pickAt(stage: HTMLElement, x: number, y: number): void {
+      stage.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerId: 1,
+          clientX: x,
+          clientY: y,
+        })
+      );
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('picks a colour off the canvas and keys it out of the working image', async () => {
+      // 0, 51, 102, 204 — 0 %, 20 %, 40 % and 80 % of the way from black.
+      stubGreyDecode([0, 51, 102, 204], 4, 1);
+      seedImageTab();
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, IMAGE_TAB_ID);
+      const internals = panel as unknown as PanelInternals;
+      await vi.waitFor(() => {
+        expect(internals.current).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      // Nothing picked yet: the swatch says so rather than pretending to be black.
+      expect(panel.querySelector('.ag-chroma-swatch')?.className).toContain('is-empty');
+      expect(panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.disabled).toBe(true);
+
+      pickAt(giveStageARect(panel), 2.5, 0.5);
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar .ag-crop-dims')?.textContent).toBe(
+        'rgb(102, 102, 102)'
+      );
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.click();
+      await vi.waitFor(() => {
+        expect(internals.current?.source).toBe('chroma-keyed');
+      });
+      await panel.updateComplete;
+
+      // At the 10 % default tolerance only the picked grey itself is within range
+      // (51 and 204 sit 20 % and 40 % away), so exactly one pixel loses its alpha.
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain('Keyed out 1 pixel.');
+      // Keyed output carries alpha, so the save name is forced to .png.
+      expect(internals.saveName.endsWith('-keyed.png')).toBe(true);
+      // Applying closes the transient mode, exactly as crop does.
+      expect(panel.querySelector('.ag-chroma-toolbar')).toBeNull();
+    });
+
+    it('writes the picked colour back into the bound frame, not the working image', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+      Object.defineProperty(controller, 'replaceFrameTexture', {
+        value: replaceFrameTexture,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      pickAt(giveStageARect(panel), 10.5, 10.5);
+      await panel.updateComplete;
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.click();
+
+      await vi.waitFor(() => {
+        expect(replaceFrameTexture).toHaveBeenCalled();
+      });
+      // The keyed image is the same size as the frame, so the restamp is the
+      // identity — §9.12.3's "unchanged size" write-back.
+      expect(replaceFrameTexture.mock.calls[0][2]).toMatchObject({
+        restamp: { kind: 'replace' },
+        label: 'Chroma key frame 1: idle',
+      });
+      // The working image stays the frame's own file; a frame bake is committed,
+      // never held on the canvas.
+      expect((panel as unknown as PanelInternals).current?.source).toBe('file');
+    });
+
+    it('hands the picked colour to the clip-wide op after a confirm', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png', 'res://sprites/walk/idle_0002.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const applyRasterOpToClipFrames = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-clip')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      pickAt(giveStageARect(panel), 5.5, 5.5);
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-clip')?.click();
+      await vi.waitFor(() => {
+        expect(applyRasterOpToClipFrames).toHaveBeenCalledWith({
+          kind: 'chroma-key',
+          color: { r: 70, g: 70, b: 70 },
+          tolerance: 0.1,
+          softness: 0,
+        });
+      });
+      expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Chroma key: idle — 2 frames.'
+      );
+    });
+
+    it('writes nothing when the clip-wide confirm is declined', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      stubs.showConfirmation.mockResolvedValue(false);
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const applyRasterOpToClipFrames = vi.fn();
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-clip')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      pickAt(giveStageARect(panel), 5.5, 5.5);
+      await panel.updateComplete;
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-clip')?.click();
+
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+      expect(applyRasterOpToClipFrames).not.toHaveBeenCalled();
+    });
+
+    it('is mutually exclusive with the crop tool', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedImageTab();
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, IMAGE_TAB_ID);
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+
+      // Both own the plain left-press on the canvas; the last click wins.
+      const crop = [...panel.querySelectorAll<HTMLButtonElement>('.ag-toolbar-button')].find(
+        button => button.textContent?.trim() === 'Crop'
+      );
+      crop?.click();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar')).toBeNull();
+      expect((panel as unknown as PanelInternals).cropMode).toBe(true);
+    });
+  });
+
+  /**
+   * §9.12.4 — bulk frame ops. The batching is the controller's job (and is tested
+   * there); what the shell owes is the confirm, the parameter it carries and a
+   * status line that spells out the skips.
+   */
+  describe('bulk frame ops (§9.12.4)', () => {
+    async function mountBulkPanel(): Promise<{
+      panel: SpriteEditorPanel;
+      stubs: PanelStubs;
+      controller: AnimationDocumentController;
+    }> {
+      seedAnimationTab([
+        'res://sprites/walk/idle_0001.png',
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      const { panel, stubs } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      panel.querySelector<HTMLButtonElement>('.ag-bulk-frames')?.click();
+      await panel.updateComplete;
+      return { panel, stubs, controller };
+    }
+
+    function findBulkButton(panel: SpriteEditorPanel, label: string): HTMLButtonElement {
+      const button = [
+        ...panel.querySelectorAll<HTMLButtonElement>('.ag-bulk-tools .ag-frame-tools-wide'),
+      ].find(candidate => candidate.textContent?.trim() === label);
+      if (!button) {
+        throw new Error(`no bulk button labelled "${label}"`);
+      }
+      return button;
+    }
+
+    it('drops every second frame through the confirm that carries the parity', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const deleteFramesByParity = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'deleteFramesByParity', {
+        value: deleteFramesByParity,
+        configurable: true,
+      });
+
+      expect(panel.querySelector('[aria-label="Bulk frame tools"]')).not.toBeNull();
+      findBulkButton(panel, 'Drop every 2nd').click();
+
+      await vi.waitFor(() => {
+        expect(deleteFramesByParity).toHaveBeenCalledWith('even');
+      });
+      // The confirm's two buttons ARE the parameter — `DialogService` has no radio
+      // group, so the choice carries it exactly as §9.12.1's trim confirm does.
+      expect(stubs.showChoice.mock.calls[0][0]).toMatchObject({
+        confirmLabel: 'Drop 2 even',
+        secondaryLabel: 'Drop 2 odd',
+      });
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Dropped even frames of idle — 2 frames.'
+      );
+    });
+
+    it('takes the odd half from the secondary button and nothing on cancel', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const deleteFramesByParity = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'deleteFramesByParity', {
+        value: deleteFramesByParity,
+        configurable: true,
+      });
+
+      stubs.showChoice.mockResolvedValueOnce('cancel');
+      findBulkButton(panel, 'Drop every 2nd').click();
+      await vi.waitFor(() => {
+        expect(stubs.showChoice).toHaveBeenCalledOnce();
+      });
+      expect(deleteFramesByParity).not.toHaveBeenCalled();
+
+      stubs.showChoice.mockResolvedValueOnce('secondary');
+      findBulkButton(panel, 'Drop every 2nd').click();
+      await vi.waitFor(() => {
+        expect(deleteFramesByParity).toHaveBeenCalledWith('odd');
+      });
+    });
+
+    it('maps a raster op over the clip after a confirm and states the skips', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const applyRasterOpToClipFrames = vi
+        .fn()
+        .mockResolvedValue({ processed: 3, skipped: 1, failed: 0 });
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+
+      findBulkButton(panel, 'Flip H').click();
+
+      await vi.waitFor(() => {
+        expect(applyRasterOpToClipFrames).toHaveBeenCalledWith({
+          kind: 'flip',
+          axis: 'horizontal',
+        });
+      });
+      expect(stubs.showConfirmation.mock.calls[0][0]).toMatchObject({
+        title: 'Flip horizontally every frame?',
+        isDangerous: true,
+      });
+      await panel.updateComplete;
+      // A clip of UV-window frames processes nothing; silence there would read as
+      // a dead button, so the skips are always spelled out.
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Flip horizontally: idle — 3 frames, 1 skipped.'
+      );
+    });
+
+    it('writes nothing when the raster-op confirm is declined', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const applyRasterOpToClipFrames = vi.fn();
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      stubs.showConfirmation.mockResolvedValueOnce(false);
+
+      findBulkButton(panel, 'Rotate 90°').click();
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+      expect(applyRasterOpToClipFrames).not.toHaveBeenCalled();
     });
   });
 

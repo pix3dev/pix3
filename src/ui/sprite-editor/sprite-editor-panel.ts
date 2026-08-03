@@ -56,7 +56,11 @@ import {
 } from '@/ui/shared/stage-zoom-pan';
 import {
   AnimationDocumentController,
+  describeBulkRasterOp,
   type AutoPolygonReport,
+  type BulkFrameReport,
+  type BulkRasterOp,
+  type FrameParity,
   type TrimClipReport,
 } from './animation-document-controller';
 import { DEFAULT_CONTOUR_TOLERANCE } from './contour-trace';
@@ -101,13 +105,18 @@ import {
   type PlaceRect,
 } from './place-geometry';
 import {
+  chromaKeyImage,
   flipImageBlob,
   readBlobSize,
+  readImagePixels,
   resizeImageBlob,
   rotateImageBlob,
+  samplePixelColor,
   scaledDimensions,
   sliceImageBlob,
   type FlipAxis,
+  type ImagePixels,
+  type RgbColor,
 } from '@/services/image-gen/image-ops';
 import './sprite-editor-panel.ts.css';
 
@@ -140,6 +149,13 @@ const PLACE_HANDLES: readonly string[] = ['nw', 'ne', 'se', 'sw'];
 const PLACE_WHEEL_STEP = 1.1;
 
 /**
+ * §9.12.3 — starting tolerance for the chroma key, as a fraction of the maximum
+ * RGB distance. 10% keys a flat generated background and its JPEG-ish noise
+ * without reaching into a saturated subject.
+ */
+const DEFAULT_CHROMA_TOLERANCE = 0.1;
+
+/**
  * Nine-up anchor grid. Icons, never arrow glyphs — `↖ ↑ ↗` ignore the theme and
  * render differently on every platform (the outgoing animation panel's version is
  * the exact violation §9.9 calls out).
@@ -170,7 +186,37 @@ const FRAME_TOOLS: ReadonlyArray<{ tool: AnimationEditMode; icon: string; title:
   { tool: 'bbox', icon: 'square', title: 'Bounding box' },
 ];
 
-type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped' | 'rotated' | 'flipped';
+type CurrentSource =
+  | 'file'
+  | 'generated'
+  | 'bg-removed'
+  | 'cropped'
+  | 'rotated'
+  | 'flipped'
+  | 'chroma-keyed';
+
+/**
+ * §9.12.4's bulk raster ops, as the card offers them. Chroma key is deliberately
+ * absent: it needs a picked colour, so it is offered from the chroma toolbar
+ * (where the colour and its tolerance already are) rather than as a blind action.
+ */
+const BULK_RASTER_OPS: ReadonlyArray<{ op: BulkRasterOp; label: string; title: string }> = [
+  {
+    op: { kind: 'flip', axis: 'horizontal' },
+    label: 'Flip H',
+    title: 'Mirror every frame horizontally (anchors and points mirror with them)',
+  },
+  {
+    op: { kind: 'flip', axis: 'vertical' },
+    label: 'Flip V',
+    title: 'Mirror every frame vertically (anchors and points mirror with them)',
+  },
+  {
+    op: { kind: 'rotate', quarterTurns: 1 },
+    label: 'Rotate 90°',
+    title: 'Turn every frame a quarter-turn clockwise',
+  },
+];
 
 interface CurrentImage {
   blob: Blob;
@@ -305,6 +351,31 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
    */
   @state() private polygonPreviewFrameIndex = -1;
 
+  /**
+   * §9.12.3 — the chroma-key eyedropper. A **transient mode**, deliberately not a
+   * `stageTool`: it owns the plain left-click on the canvas exactly the way crop
+   * and place mode own the plain left-drag, and it is mutually exclusive with
+   * both. Nothing is written until Apply.
+   */
+  @state() private chromaMode = false;
+  /** Colour picked off the canvas, or null while the user hasn't clicked yet. */
+  @state() private chromaColor: RgbColor | null = null;
+  /** 0..1 fraction of the maximum RGB distance that counts as "this colour". */
+  @state() private chromaTolerance = DEFAULT_CHROMA_TOLERANCE;
+  /** 0..1 ramp beyond the tolerance; 0 is a hard cut (the shipped default). */
+  @state() private chromaSoftness = 0;
+  /** True while a key is re-encoding the image (or writing frame files). */
+  @state() private chromaBusy = false;
+  /**
+   * Decoded RGBA of the working image, so the eyedropper samples without
+   * re-decoding the PNG on every pointer move. Dropped whenever the working image
+   * changes.
+   */
+  private chromaPixels: ImagePixels | null = null;
+
+  /** §9.12.4 — whether the bulk frame-ops card is open over the stage. */
+  @state() private bulkPanelOpen = false;
+
   /** `.pix3anim` bound to this tab, or null when the tab holds a bare image. */
   @state() private animationResourcePath: string | null = null;
   /** Texture file the canvas is currently showing on behalf of a frame (§9.5). */
@@ -411,6 +482,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
     if (this.placeSession) {
       this.closePlaceSession();
+      return;
+    }
+    if (this.chromaMode) {
+      this.closeChromaMode();
     }
   };
   private readonly ownedUrls = new Set<string>();
@@ -471,6 +546,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // to be revoked, and the generation itself is still in the Generate panel's
     // history strip, which is what makes losing it acceptable (§9.11.2).
     this.closePlaceSession();
+    // Same reasoning for the eyedropper's decoded RGBA — a re-dock reloads the
+    // working image, so holding a full-resolution pixel buffer across it is waste.
+    this.closeChromaMode();
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
@@ -724,6 +802,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.documentController.dispose();
     this.documentController = null;
     this.stageTool = 'select';
+    this.bulkPanelOpen = false;
   }
 
   private onDocumentChanged(): void {
@@ -931,6 +1010,14 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>
+        <button
+          class="ag-toolbar-button ag-chroma-toggle ${this.chromaMode ? 'is-active' : ''}"
+          title=${rasterHint ?? 'Chroma key — pick a colour on the canvas to knock it out'}
+          @click=${this.onToggleChroma}
+          ?disabled=${rasterBusy || this.cropMode}
+        >
+          ${this.icons.getIcon('droplet', IconSize.SMALL)} Chroma key
+        </button>
         <span class="ag-toolbar-separator" aria-hidden="true"></span>
         <button
           class="ag-toolbar-button ag-generate-action"
@@ -1064,8 +1151,31 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         `
       )}
       ${this.renderAutoPolygonAction()} ${this.renderTrimFramesAction()}
-      ${this.renderDeleteFramesAction()}
+      ${this.renderBulkFramesAction()} ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
+    `;
+  }
+
+  /**
+   * §9.12.4 — the bulk frame-ops card's toggle. Clip-wide like the trim, so it
+   * sits beside it rather than on a frame card.
+   */
+  private renderBulkFramesAction() {
+    const frameCount = this.documentController?.activeClip?.frames.length ?? 0;
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode;
+    return html`
+      <button
+        class="ag-icon-button ag-bulk-frames ${this.bulkPanelOpen ? 'is-active' : ''}"
+        type="button"
+        title=${frameCount === 0
+          ? 'Bulk frame ops (this clip has no frames)'
+          : `Bulk frame ops for ${frameCount} frame${frameCount === 1 ? '' : 's'}`}
+        aria-label="Bulk frame ops"
+        ?disabled=${frameCount === 0 || busy}
+        @click=${this.onToggleBulkPanel}
+      >
+        ${this.icons.getIcon('layers', IconSize.SMALL)}
+      </button>
     `;
   }
 
@@ -1222,6 +1332,153 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
   };
 
+  private onToggleBulkPanel = (): void => {
+    this.bulkPanelOpen = !this.bulkPanelOpen;
+  };
+
+  /**
+   * §9.12.4's card. Two families, both clip-wide and both confirmed: dropping
+   * every other frame (no files touched — a plain clip update), and mapping a
+   * raster op over every frame (files written first, then one clip update, then
+   * one invalidation pass — §9.12.1's shape).
+   *
+   * Chroma key is not listed here on purpose; it needs a colour, so the chroma
+   * toolbar carries its own "Apply to clip" once one has been picked.
+   */
+  private renderBulkFramesTools() {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!this.bulkPanelOpen || !controller || !clip) {
+      return null;
+    }
+
+    const busy = this.sliceBusy || this.chromaBusy;
+    return html`
+      <div class="ag-frame-tools ag-bulk-tools" aria-label="Bulk frame tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Bulk</span>
+          <span class="ag-frame-tools-value">${clip.frames.length} frames</span>
+        </div>
+        <p class="ag-frame-tools-hint">
+          Applies to every frame of <em>${clip.name}</em> that owns its own file.
+        </p>
+        <button
+          class="ag-frame-tools-wide"
+          type="button"
+          title="Halve the clip — drop every second frame"
+          ?disabled=${busy || clip.frames.length < 2}
+          @click=${this.onDeleteAlternateFrames}
+        >
+          Drop every 2nd
+        </button>
+        <div class="ag-frame-tools-row ag-bulk-ops">
+          ${BULK_RASTER_OPS.map(
+            entry => html`
+              <button
+                class="ag-frame-tools-wide"
+                type="button"
+                title=${entry.title}
+                ?disabled=${busy}
+                @click=${() => void this.onBulkRasterOp(entry.op)}
+              >
+                ${entry.label}
+              </button>
+            `
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Destructive but *recoverable* — no file is written or deleted, so undo really
+   * restores the clip. The confirm's two buttons carry the parameter, exactly as
+   * §9.12.1's trim confirm does, because `DialogService` has no numeric or radio
+   * input: Even drops frames 2, 4, 6…; Odd drops 1, 3, 5….
+   */
+  private onDeleteAlternateFrames = async (): Promise<void> => {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!controller || !clip || clip.frames.length < 2 || this.sliceBusy) {
+      return;
+    }
+
+    const evenCount = Math.floor(clip.frames.length / 2);
+    const oddCount = clip.frames.length - evenCount;
+    const choice = await this.dialogService.showChoice({
+      title: 'Drop every second frame?',
+      message: `"${clip.name}" has ${clip.frames.length} frames. Dropping the even ones removes ${evenCount}; dropping the odd ones removes ${oddCount}. Halve the fps afterwards to keep the same timing.`,
+      confirmLabel: `Drop ${evenCount} even`,
+      secondaryLabel: `Drop ${oddCount} odd`,
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      secondaryIsDangerous: true,
+      disclaimer:
+        'No files are written or deleted — the frame PNGs stay on disk and undo restores the clip.',
+    });
+    if (choice === 'cancel') {
+      return;
+    }
+
+    const parity: FrameParity = choice === 'secondary' ? 'odd' : 'even';
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.deleteFramesByParity(parity);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `Dropped ${parity} frames of ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Drop frames failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  };
+
+  /**
+   * Map a raster op over the clip. Pixel-destructive and bulk, so it confirms and
+   * carries the same warning the trim does: new files are written and undo
+   * restores the *document*, not the pixels on disk (§9.7 risk 7).
+   */
+  private async onBulkRasterOp(op: BulkRasterOp): Promise<void> {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!controller || !clip || clip.frames.length === 0 || this.sliceBusy) {
+      return;
+    }
+
+    const verb = describeBulkRasterOp(op);
+    const confirmed = await this.dialogService.showConfirmation({
+      title: `${verb} every frame?`,
+      message: `${verb} all ${clip.frames.length} frame${
+        clip.frames.length === 1 ? '' : 's'
+      } of "${clip.name}". Each frame's anchor, points, boxes and collision polygon move with the pixels, so nothing shifts on screen.`,
+      confirmLabel: verb,
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      disclaimer:
+        'Every transformed frame is written as a new file. Undo restores the document, not the pixels on disk.',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.applyRasterOpToClipFrames(op);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `${verb}: ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `${verb} failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  }
+
   /**
    * Delete every selected frame. Multi-select is authored in the timeline
    * (ctrl/shift-click), but the *action* has to live somewhere that sees the whole
@@ -1246,6 +1503,269 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     `;
   }
 
+  // -- chroma key (§9.12.3) ---------------------------------------------------
+
+  /**
+   * Enter/leave the eyedropper. A transient mode, not a `stageTool`: it owns the
+   * plain left-click on the canvas, which crop, place and the overlay tools also
+   * want, so opening it closes them (and vice versa — `setStageTool`,
+   * `onToggleCrop` and `openPlaceSession` all close this one).
+   */
+  private onToggleChroma = (): void => {
+    if (this.chromaMode) {
+      this.closeChromaMode();
+      return;
+    }
+    if (!this.current) {
+      return;
+    }
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+    this.closePlaceSession();
+    this.stageTool = 'select';
+    this.chromaMode = true;
+    // Decode once for the whole session: the picker then samples synchronously
+    // on every pointer move instead of re-decoding the PNG per event.
+    void this.loadChromaPixels();
+  };
+
+  /** Leave chroma mode and forget the picked colour. Safe to call when it is off. */
+  private closeChromaMode(): void {
+    if (!this.chromaMode && !this.chromaColor && !this.chromaPixels) {
+      return;
+    }
+    this.chromaMode = false;
+    this.chromaColor = null;
+    this.chromaPixels = null;
+  }
+
+  private async loadChromaPixels(): Promise<void> {
+    const blob = this.current?.blob;
+    if (!blob) {
+      return;
+    }
+    try {
+      const pixels = await readImagePixels(blob);
+      // A frame switch (or a Cancel) can land while this is in flight.
+      if (this.chromaMode) {
+        this.chromaPixels = pixels;
+      }
+    } catch (error) {
+      console.warn('[SpriteEditor] Failed to decode the image for the eyedropper', error);
+    }
+  }
+
+  /**
+   * Sample the pixel under the pointer. Coordinates come through the same
+   * `toImagePoint` crop uses, so the picker agrees with every other stage tool on
+   * where a pointer is — including under zoom and pan.
+   */
+  private pickChromaColor(event: PointerEvent): void {
+    const pixels = this.chromaPixels;
+    const resolved = this.toImagePoint(event);
+    if (!pixels || !resolved) {
+      return;
+    }
+    // A frame's stage box is the document's metrics, which for a UV-window frame
+    // is not the raster's size — but the raster tools (and therefore this one)
+    // are gated on `frameRasterHint`, so here the two spaces are the same.
+    const color = samplePixelColor(pixels, resolved.point.x, resolved.point.y);
+    if (color) {
+      this.chromaColor = color;
+    }
+  }
+
+  /**
+   * The transient bottom bar, in the same slot crop and place use — the three are
+   * mutually exclusive by construction, so only one is ever rendered.
+   */
+  private renderChromaToolbar() {
+    const color = this.chromaColor;
+    const clip = this.documentController?.activeClip;
+    return html`
+      <div class="ag-chroma-toolbar">
+        <span
+          class="ag-chroma-swatch ${color ? '' : 'is-empty'}"
+          style=${color ? `background: rgb(${color.r}, ${color.g}, ${color.b})` : ''}
+          aria-hidden="true"
+        ></span>
+        <span class="ag-crop-dims"
+          >${color
+            ? `rgb(${color.r}, ${color.g}, ${color.b})`
+            : 'Click the canvas to pick a colour'}</span
+        >
+        ${this.renderChromaSlider(
+          'Tolerance',
+          this.chromaTolerance,
+          'Chroma key tolerance',
+          value => {
+            this.chromaTolerance = value;
+          }
+        )}
+        ${this.renderChromaSlider(
+          'Softness',
+          this.chromaSoftness,
+          'Chroma key edge softness',
+          value => {
+            this.chromaSoftness = value;
+          }
+        )}
+        <div class="ag-prompt-spacer"></div>
+        <button class="ag-cancel-button" @click=${this.onCancelChroma}>Cancel</button>
+        ${clip
+          ? html`<button
+              class="ag-place-quick ag-chroma-clip"
+              type="button"
+              title="Key this colour out of every frame of the active clip"
+              ?disabled=${!color || this.chromaBusy || this.sliceBusy}
+              @click=${this.onApplyChromaToClip}
+            >
+              Apply to clip
+            </button>`
+          : null}
+        <button
+          class="ag-generate-button ag-crop-apply ag-chroma-apply"
+          ?disabled=${!color || this.chromaBusy}
+          @click=${this.onApplyChroma}
+        >
+          ${this.chromaBusy ? 'Keying…' : 'Apply'}
+        </button>
+      </div>
+    `;
+  }
+
+  /** One 0..100 % slider over a 0..1 chroma parameter. */
+  private renderChromaSlider(
+    label: string,
+    value: number,
+    ariaLabel: string,
+    apply: (next: number) => void
+  ) {
+    return html`
+      <label class="ag-chroma-slider">
+        <span class="ag-chroma-slider-label">${label} <em>${Math.round(value * 100)}%</em></span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          .value=${String(Math.round(value * 100))}
+          aria-label=${ariaLabel}
+          @input=${(event: Event) => apply(Number((event.target as HTMLInputElement).value) / 100)}
+        />
+      </label>
+    `;
+  }
+
+  private onCancelChroma = (): void => {
+    this.closeChromaMode();
+  };
+
+  /**
+   * Key the working image. Frame-bound, the result is a same-size replacement —
+   * the identity restamp (§9.12.3) — so it goes straight into the frame as a new
+   * frame file; otherwise it becomes the working image, exactly the split
+   * `onRemoveBackground` already makes.
+   */
+  private onApplyChroma = async (): Promise<void> => {
+    const current = this.current;
+    const color = this.chromaColor;
+    if (!current || !color || this.chromaBusy) {
+      return;
+    }
+
+    this.chromaBusy = true;
+    this.bgError = null;
+    try {
+      const result = await chromaKeyImage(current.blob, color, {
+        tolerance: this.chromaTolerance,
+        softness: this.chromaSoftness,
+      });
+      const writeBack = this.canWriteBackToFrame;
+      // Closed before the write-back, exactly as crop does — the frame is about
+      // to rebind onto the file this bake creates.
+      this.closeChromaMode();
+      if (writeBack) {
+        await this.writeBlobToBoundFrame(result.blob, { kind: 'replace' }, 'Chroma key frame');
+        return;
+      }
+      const objectUrl = this.trackUrl(URL.createObjectURL(result.blob));
+      this.setCurrent({
+        blob: result.blob,
+        mimeType: 'image/png',
+        objectUrl,
+        source: 'chroma-keyed',
+        width: result.width,
+        height: result.height,
+      });
+      // Keyed output carries alpha — force .png so a save cannot flatten it.
+      this.saveName = setImageExt(
+        `${stripImageExt(normalizeRelativePath(this.saveName) || 'cutout')}-keyed`,
+        'png'
+      );
+      this.sliceStatus = {
+        text: `Keyed out ${result.keyedPixels} pixel${result.keyedPixels === 1 ? '' : 's'}.`,
+        isError: false,
+      };
+    } catch (error) {
+      this.bgError = `Chroma key failed: ${describeError(error)}`;
+    } finally {
+      this.chromaBusy = false;
+    }
+  };
+
+  /**
+   * §9.12.3 × §9.12.4 — the same key over every frame of the clip, through the one
+   * batched path (write all files, one clip update, one invalidation pass).
+   */
+  private onApplyChromaToClip = async (): Promise<void> => {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    const color = this.chromaColor;
+    if (!controller || !clip || !color || this.chromaBusy || this.sliceBusy) {
+      return;
+    }
+
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Chroma key every frame?',
+      message: `Knock rgb(${color.r}, ${color.g}, ${color.b}) out of all ${
+        clip.frames.length
+      } frame${clip.frames.length === 1 ? '' : 's'} of "${clip.name}", at ${Math.round(
+        this.chromaTolerance * 100
+      )}% tolerance.`,
+      confirmLabel: 'Chroma key clip',
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      disclaimer:
+        'Every keyed frame is written as a new file. Undo restores the document, not the pixels on disk.',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const op: BulkRasterOp = {
+      kind: 'chroma-key',
+      color,
+      tolerance: this.chromaTolerance,
+      softness: this.chromaSoftness,
+    };
+    this.closeChromaMode();
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.applyRasterOpToClipFrames(op);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `Chroma key: ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Chroma key failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  };
+
   private setStageTool(tool: StageTool): void {
     if (tool !== 'polygon' && this.polygonPreviewFrameIndex >= 0) {
       // Leaving polygon mode abandons an uncommitted trace rather than leaving a
@@ -1255,11 +1775,13 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.stageTool = tool;
     if (tool !== 'select') {
       this.overlays.setEditMode(tool);
-      // Crop, place and an overlay tool all want a plain left-drag; the last click wins.
+      // Crop, place, the eyedropper and an overlay tool all want a plain
+      // left-press; the last click wins.
       this.cropMode = false;
       this.cropRect = null;
       this.cropDrag = null;
       this.closePlaceSession();
+      this.closeChromaMode();
     }
   }
 
@@ -1504,9 +2026,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
 
     return html`
       <div
-        class="ag-stage ${this.cropMode ? 'is-cropping' : ''} ${this.stageView.isPanning
-          ? 'is-panning'
-          : ''}"
+        class="ag-stage ${this.cropMode ? 'is-cropping' : ''} ${this.chromaMode
+          ? 'is-picking'
+          : ''} ${this.stageView.isPanning ? 'is-panning' : ''}"
         ${ref(this.stageRef)}
         @wheel=${this.onStageWheel}
         @pointerdown=${this.onStagePointerDown}
@@ -1545,14 +2067,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
               <div class="ag-empty-body">${this.renderEmptyBody()}</div>
             </div>`}
         ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
-        ${this.renderPolygonTools(frame)}
+        ${this.renderPolygonTools(frame)} ${this.renderBulkFramesTools()}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
       ${this.placeSession
         ? this.renderPlaceToolbar()
         : this.cropMode
           ? this.renderCropToolbar()
-          : null}
+          : this.chromaMode
+            ? this.renderChromaToolbar()
+            : null}
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
   }
@@ -2405,6 +2929,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       event.preventDefault();
       return;
     }
+    // The eyedropper owns the plain left-press while it is open (§9.12.3). It is a
+    // transient mode, so it is routed here rather than through `stageTool` — the
+    // same slot crop occupies below, and mutually exclusive with it by
+    // construction.
+    if (this.chromaMode && event.button === 0) {
+      this.pickChromaColor(event);
+      this.stageRef.value?.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
     // A placement owns the stage while it is open: only its rect and handles start
     // a drag (they stop propagation before this runs), so a plain left-drag on the
     // background does nothing — there is no rubber-band in place mode.
@@ -2444,6 +2978,15 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (this.stageView.updatePan(event)) {
       return;
     }
+    // Dragging with the eyedropper down keeps re-sampling, which is what makes
+    // "slide onto the exact background pixel" possible at any zoom. Cheap because
+    // the RGBA was decoded once when the mode opened.
+    if (this.chromaMode) {
+      if (this.stageRef.value?.hasPointerCapture(event.pointerId)) {
+        this.pickChromaColor(event);
+      }
+      return;
+    }
     const placeDrag = this.placeDrag;
     if (placeDrag) {
       const placePoint = this.toImagePoint(event);
@@ -2470,6 +3013,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   private onStagePointerUp(event: PointerEvent): void {
     if (this.stageView.endPan(event)) {
       this.requestUpdate();
+      return;
+    }
+    if (this.chromaMode) {
+      this.releaseStagePointer(event);
       return;
     }
     if (this.placeDrag) {
@@ -2501,8 +3048,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (!this.current) {
       return;
     }
-    // Crop and place own the same left-drag; opening one closes the other.
+    // Crop, place and the eyedropper own the same left-press; opening one closes
+    // the others.
     this.closePlaceSession();
+    this.closeChromaMode();
     this.cropMode = !this.cropMode;
     this.cropRect = null;
     this.cropDrag = null;
@@ -2662,10 +3211,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       texturePath,
     };
     this.placeRect = quickFitRect(incoming, frame, 'fit');
-    // Crop and the overlay tools all want the plain left-drag place mode now owns.
+    // Crop, the eyedropper and the overlay tools all want the plain left-press
+    // place mode now owns.
     this.cropMode = false;
     this.cropRect = null;
     this.cropDrag = null;
+    this.closeChromaMode();
     this.stageTool = 'select';
     return true;
   }
@@ -3266,11 +3817,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.cropMode = false;
     this.cropRect = null;
     this.cropDrag = null;
+    this.closeChromaMode();
   }
 
   private setCurrent(next: CurrentImage): void {
     const previous = this.current;
     this.current = next;
+    // The eyedropper's decoded RGBA describes the *previous* image, and the colour
+    // picked out of it means nothing against a different frame — a new working
+    // image always ends the session.
+    this.closeChromaMode();
     if (previous && previous.objectUrl !== next.objectUrl) {
       this.revokeUrl(previous.objectUrl);
     }
@@ -3417,6 +3973,26 @@ const describeTrimReport = (report: TrimClipReport, clipName: string): string =>
   } else {
     parts.push(`Nothing to trim in ${clipName}`);
   }
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.4 — say what a bulk op did. Same rule as the trim's report: a clip of
+ * UV-window frames processes *nothing*, and silence there reads as a dead button,
+ * so the skips are always spelled out.
+ */
+const describeBulkReport = (report: BulkFrameReport, subject: string): string => {
+  const parts: string[] = [
+    report.processed > 0
+      ? `${subject} — ${report.processed} frame${report.processed === 1 ? '' : 's'}`
+      : `${subject} — nothing to do`,
+  ];
   if (report.skipped > 0) {
     parts.push(`${report.skipped} skipped`);
   }

@@ -340,7 +340,10 @@ pix3-sprite-editor-panel .ag-stage {
   background-color: oklch(0.27 0.008 250);
 }
 
-pix3-sprite-editor-panel .ag-stage.is-cropping {
+pix3-sprite-editor-panel .ag-stage.is-cropping,
+/* §9.12.3 — the eyedropper is a transient mode, so it only changes the cursor;
+   crosshair rather than a custom pipette so it matches the crop tool's feel. */
+pix3-sprite-editor-panel .ag-stage.is-picking {
   cursor: crosshair;
 }
 
@@ -997,6 +1000,97 @@ pix3-sprite-editor-panel .ag-place-dims {
   font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
   color: var(--fg-1);
+}
+
+/* Chroma key (§9.12.3) ---------------------------------------------------- */
+/* Same slot and same shape as the crop / place toolbars — the three modes are
+   mutually exclusive, so only one of them is ever on screen. */
+pix3-sprite-editor-panel .ag-chroma-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-sprite-editor-panel .ag-chroma-swatch {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-2);
+}
+
+/* No colour picked yet: the checkerboard says "nothing here" without a glyph. */
+pix3-sprite-editor-panel .ag-chroma-swatch.is-empty {
+  background-image:
+    linear-gradient(45deg, var(--line-2) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--line-2) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--line-2) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--line-2) 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
+}
+
+pix3-sprite-editor-panel .ag-chroma-slider {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 8rem;
+}
+
+pix3-sprite-editor-panel .ag-chroma-slider-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--fg-2);
+}
+
+pix3-sprite-editor-panel .ag-chroma-slider-label em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1);
+}
+
+pix3-sprite-editor-panel .ag-chroma-slider input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+pix3-sprite-editor-panel .ag-chroma-apply {
+  flex: 0 0 auto;
+}
+
+/* Bulk frame ops (§9.12.4) ------------------------------------------------ */
+/* Rides the shared `.ag-frame-tools` card; only the width differs, because
+   "Rotate 90°" does not fit the anchor grid's 10.5rem. */
+pix3-sprite-editor-panel .ag-bulk-tools {
+  width: 12rem;
+}
+
+/* Scoped to this one toggle on purpose: `.ag-icon-button.is-active` is unstyled
+   today and giving it a rule would restyle every frame-tool button too. */
+pix3-sprite-editor-panel .ag-bulk-frames.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-editor-panel .ag-bulk-ops {
+  flex-wrap: wrap;
+}
+
+pix3-sprite-editor-panel .ag-bulk-ops .ag-frame-tools-wide {
+  flex: 1 1 3.5rem;
 }
 
 /* Words, not glyphs: this toolbar is transient and "Fit"/"Fill" read better than
