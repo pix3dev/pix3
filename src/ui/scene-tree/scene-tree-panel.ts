@@ -17,6 +17,7 @@ import { CreatePrefabInstanceCommand } from '@/features/scene/CreatePrefabInstan
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
 import { SaveAsPrefabCommand } from '@/features/scene/SaveAsPrefabCommand';
 import { OpenPrefabCommand } from '@/features/scene/OpenPrefabCommand';
+import { OpenSpriteEditorForNodeCommand } from '@/features/editor/OpenSpriteEditorForNodeCommand';
 import { UnlinkPrefabInstanceCommand } from '@/features/scene/UnlinkPrefabInstanceCommand';
 import { FrameSelectedCommand } from '@/features/viewport/FrameSelectedCommand';
 import { SceneManager } from '@pix3/runtime';
@@ -203,6 +204,7 @@ export class SceneTreePanel extends ComponentBase {
           @node-context-menu=${this.onNodeContextMenu.bind(this)}
           @node-asset-drop=${this.onNodeAssetDrop.bind(this)}
           @node-open-prefab=${this.onNodeOpenPrefab.bind(this)}
+          @node-open-sprite-editor=${this.onNodeOpenSpriteEditor.bind(this)}
         >
           ${hasHierarchy
             ? html`<ul
@@ -916,6 +918,12 @@ export class SceneTreePanel extends ComponentBase {
     );
     const node = sceneManager.getSceneGraph(sceneId)?.nodeMap.get(event.detail.nodeId) ?? null;
     await this.openPrefabForNode(node);
+  }
+
+  private async onNodeOpenSpriteEditor(event: CustomEvent<{ nodeId: string }>): Promise<void> {
+    await this.commandDispatcher.execute(
+      new OpenSpriteEditorForNodeCommand({ nodeId: event.detail.nodeId })
+    );
   }
 
   private async openPrefabForNode(node: NodeBase | null): Promise<void> {

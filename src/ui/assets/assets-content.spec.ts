@@ -738,7 +738,12 @@ function stubServices(
   const listeners: Array<(value: AssetsPreviewSnapshot) => void> = [];
   const assetsPreviewService: Pick<
     AssetsPreviewService,
-    'subscribe' | 'selectItem' | 'requestThumbnail' | 'requestAnimationFrames'
+    | 'subscribe'
+    | 'selectItem'
+    | 'requestThumbnail'
+    | 'requestAnimationFrames'
+    | 'setCollapseSpriteFolders'
+    | 'syncFromAssetSelection'
   > = {
     subscribe(listener: (value: AssetsPreviewSnapshot) => void) {
       listeners.push(listener);
@@ -758,6 +763,8 @@ function stubServices(
     }),
     requestThumbnail: vi.fn(),
     requestAnimationFrames: vi.fn(async () => undefined),
+    setCollapseSpriteFolders: vi.fn(async () => undefined),
+    syncFromAssetSelection: vi.fn(async () => undefined),
   };
   // Exposed so a test can push an externally-driven snapshot (see `notifyListeners`).
   Object.defineProperty(assetsPreviewService, '__listeners', { value: listeners });

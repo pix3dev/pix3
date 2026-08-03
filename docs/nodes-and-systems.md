@@ -76,7 +76,11 @@ tables: [node-types-reference.md](node-types-reference.md).
     /* … one entry per frame … */
   ]}]}
 ```
-**Spritesheet mode** instead: set top-level `texturePath` and give each frame a UV rect `offset:{x,y}` + `repeat:{x,y}` (these default to 0 → sample nothing, so they're required here). Frames may carry `durationMultiplier` and `events:[{signal,args}]` (fired on play-driven frame entry). Node wiring: `type: AnimatedSprite2D`, properties `animationResourcePath`, `currentClip`, `isPlaying`, `freeOnFinish` (one-shot self-destruct), `width`/`height`. First spawn of a runtime-instantiated clip warms its texture cache; if the first play must be pixel-perfect, spawn one invisible warm-up at level start. Authoring GUI: the editor's animation panel produces the same file.
+**Spritesheet mode** instead: set top-level `texturePath` and give each frame a UV rect `offset:{x,y}` + `repeat:{x,y}` (these default to 0 → sample nothing, so they're required here). Frames may carry `durationMultiplier` and `events:[{signal,args}]` (fired on play-driven frame entry). Node wiring: `type: AnimatedSprite2D`, properties `animationResourcePath`, `currentClip`, `isPlaying`, `freeOnFinish` (one-shot self-destruct), `width`/`height`, `anchor`, `sizeMode`. First spawn of a runtime-instantiated clip warms its texture cache; if the first play must be pixel-perfect, spawn one invisible warm-up at level start. Authoring GUI: the editor's **Sprite Editor** produces the same file — one shell (canvas + clips rail + frame timeline) that edits both a bare image and a `.pix3anim`; selecting a frame binds the canvas to that frame's texture, and crop / rotate / flip / background-removal / generation write straight back into the frame.
+
+**Frame presentation — `sizeMode`, per-frame `anchor`, `sourceSize`.** Two anchors are in play and they mean different things. The **node** `anchor` is a global pivot in the node's `width × height` box (y up, same as `Sprite2D.anchor`). Each **frame's** `anchor` is that frame's own origin inside its — possibly tightly cropped — raster, normalized with **y measured from the top** (image convention, like `boundingBox`). They compose: the quad is placed so the frame anchor lands on the node's position, then shifted by the node pivot. That is what makes cropping pay off — crop a frame tighter, move its anchor to the old visual centre, and the animation is pixel-identical while the PNG (and the atlas) shrinks. `sizeMode` decides how a frame fills the box: `'stretch'` (default, and what every pre-existing scene assumes) scales every frame to exactly `width × height`; `'native'` renders each frame at its own `sourceSize` scaled by one per-clip factor derived from the clip's FIRST frame, so mixed-size frames keep their relative proportions and resizing the node scales the whole animation uniformly (the editor sets `'native'` on newly created nodes). `sourceSize` is an optional per-frame `{width,height}` the editor stamps whenever a frame is added, imported or sliced, so native layout never waits on a texture load; a frame with no known size falls back to stretch, so legacy files keep working. The math lives in one shared module (`core/animated-sprite-layout.ts`) because the editor viewport draws SEPARATE proxy meshes — both apply the same resolver.
+
+**Named frame points (sockets).** `AnimationFrame.points?: [{name, x, y, angle?}]` — points that live in frame space (normalized, y from the top; `angle` in degrees, 0 = right) and move *and rotate* across frames: a muzzle on a barrel, a hand socket an item follows through a walk cycle. Read them from scripts — `sprite.getFramePoint('muzzle')` returns node-local `{x, y, angle}` usable directly as a child position, `getFramePointWorld('muzzle')` adds the node's world transform and accumulated Z rotation, `getClipPointNames()` lists the active clip's points; all return `null`/`[]` when the current frame doesn't define the point. Frame `events` compose naturally: an emitting frame fires `muzzle-flash`, the handler reads `getFramePoint('muzzle')`. For the "item in hand" case attach **`core:PointAttachment`** to the child (`point`, `applyRotation`, `offsetX`/`offsetY`, optional `spriteNodeId`); it parks the node on the named point every tick and leaves it alone on frames that don't define it. Authoring: the Sprite Editor's **points** canvas tool (drag the dot, drag the direction handle for the angle; the previous frame's points ghost behind as a mini onion-skin).
 
 **Spine skeletal animation (`SpineSkeleton2D`)** — for rigs authored in the Spine
 editor, when a flipbook (`.pix3anim`) is not enough: bone hierarchies, mesh
@@ -142,6 +146,7 @@ effect. Registered in
 | `core:Fade` | Fade a 2D node's opacity in/out (optional auto-destroy) |
 | `core:RadialProgress` | Circular progress mask on a Sprite2D |
 | `core:AnimationPlayer` | Play keyframe clips on this node + descendants (§4) |
+| `core:PointAttachment` | Keep this node on a named frame point of a parent `AnimatedSprite2D` (hand socket, muzzle) every tick, optionally copying the point's angle |
 | `core:PlaySound` | Play a sound when a node signal fires |
 | `core:FreeOnSignal` | `queueFree` this node when a signal fires on it (e.g. `animation-finished`), after an optional delay — one-shot VFX lifecycle |
 | `core:Shake` | Additive positional shake (juice) |
@@ -172,7 +177,8 @@ Each entry: **what it is → how to use it → where it lives**.
 ### Keyframe animation
 Timeline-authored clips (position/rotation/scale/color tracks + audio + event
 tracks) on `core:AnimationPlayer`. **Use:** attach `core:AnimationPlayer`, author
-in the Animation panel, `player.play('clip')` or `autoplay`. Event tracks emit
+in the **Animation** timeline panel (keyframes — not the Sprite Editor, which owns
+flipbook frames), `player.play('clip')` or `autoplay`. Event tracks emit
 signals (the "cutscene glue"); `finish()` fast-forwards. Signals:
 `animation_started` / `animation_finished`.
 See node-types-reference "AnimationPlayer" + [../samples/HelloWorld/demo-03-animation-timeline.pix3scene](../samples/HelloWorld/demo-03-animation-timeline.pix3scene).

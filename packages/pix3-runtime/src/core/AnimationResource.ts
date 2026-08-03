@@ -27,11 +27,43 @@ export interface AnimationFrameEvent {
   args: string;
 }
 
+/** Intrinsic pixel size of a frame's raster. `0×0` means "unknown". */
+export interface AnimationSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * A named point that lives in frame space and moves (and rotates) across frames —
+ * a muzzle on a gun barrel, a hand socket an item follows through a walk cycle.
+ * Construct 3 calls these "image points"; the `angle` makes ours a full 2D socket
+ * (a direction, not just a position).
+ *
+ * Coordinates are normalized to the frame rect with y measured from the top, the
+ * same convention as {@link AnimationFrame.anchor} (the UI shows pixels). `angle`
+ * is in degrees, clockwise, 0 = pointing right.
+ */
+export interface AnimationFramePoint {
+  name: string;
+  x: number;
+  y: number;
+  angle?: number;
+}
+
 export interface AnimationFrame {
   textureIndex: number;
   offset: AnimationVector2;
   repeat: AnimationVector2;
   durationMultiplier: number;
+  /**
+   * The frame's own origin, normalized to the frame rect with **y measured from
+   * the top** (same convention as `boundingBox` and `collisionPolygon`; the
+   * editor's overlay places its marker at `top: anchor.y * 100%`). This is the
+   * point in the — possibly tightly cropped — raster that lands on the node's
+   * position, so cropping a frame and moving its anchor keeps the animation
+   * visually identical while the PNG shrinks. Composes with the node-level
+   * `AnimatedSprite2D.anchor`, which is a separate global offset.
+   */
   anchor: AnimationVector2;
   texturePath: string;
   boundingBox: AnimationBoundingBox;
@@ -42,6 +74,20 @@ export interface AnimationFrame {
    * materializes it to `[]`, so runtime (loaded) frames always carry the field.
    */
   events?: AnimationFrameEvent[];
+  /**
+   * Intrinsic pixel size of this frame's raster, stamped by the editor whenever a
+   * frame is added / replaced / cropped so `sizeMode: 'native'` layout never has
+   * to wait on a texture load. Optional in authored files; `normalizeFrame`
+   * materializes it (falling back to the bounding box, then `0×0`). A `0×0` size
+   * makes the frame fall back to stretch layout, so legacy files keep working.
+   */
+  sourceSize?: AnimationSize;
+  /**
+   * Named sockets in this frame's space. Optional in authored files;
+   * `normalizeFrame` materializes `[]` and de-duplicates names within a frame
+   * (first occurrence wins), so runtime frames always carry the field.
+   */
+  points?: AnimationFramePoint[];
 }
 
 export interface AnimationClip {
@@ -136,6 +182,51 @@ function normalizeFrameEvents(value: unknown): AnimationFrameEvent[] {
   return events;
 }
 
+function normalizeFramePoints(value: unknown): AnimationFramePoint[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const points: AnimationFramePoint[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const candidate = typeof entry === 'object' && entry !== null ? entry : {};
+    const name =
+      typeof (candidate as { name?: unknown }).name === 'string'
+        ? (candidate as { name: string }).name.trim()
+        : '';
+    // A point is addressed by name, so an unnamed or duplicate one is unusable.
+    if (name.length === 0 || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+
+    const angle = normalizeFiniteNumber((candidate as { angle?: unknown }).angle);
+    points.push({
+      name,
+      x: normalizeFiniteNumber((candidate as { x?: unknown }).x, 0.5),
+      y: normalizeFiniteNumber((candidate as { y?: unknown }).y, 0.5),
+      ...(angle !== 0 ? { angle } : {}),
+    });
+  }
+
+  return points;
+}
+
+function normalizeSourceSize(value: unknown, boundingBox: AnimationBoundingBox): AnimationSize {
+  const candidate = typeof value === 'object' && value !== null ? value : null;
+  const width = Math.max(0, normalizeFiniteNumber((candidate as { width?: unknown })?.width));
+  const height = Math.max(0, normalizeFiniteNumber((candidate as { height?: unknown })?.height));
+  if (width > 0 && height > 0) {
+    return { width, height };
+  }
+
+  // No explicit size: the bounding box is the best available description of the
+  // frame's extent (the editor authors it in source pixels). Zero when neither
+  // is known — callers treat that as "unknown" and fall back to stretch layout.
+  return { width: boundingBox.width, height: boundingBox.height };
+}
+
 function normalizePlaybackMode(value: unknown): AnimationPlaybackMode {
   return value === 'ping-pong' ? 'ping-pong' : 'normal';
 }
@@ -146,6 +237,7 @@ function normalizeFrame(frame: unknown): AnimationFrame {
     typeof (candidate as { textureIndex?: unknown }).textureIndex === 'number'
       ? Math.max(0, Math.floor((candidate as { textureIndex: number }).textureIndex))
       : 0;
+  const boundingBox = normalizeBoundingBox((candidate as { boundingBox?: unknown }).boundingBox);
 
   return {
     textureIndex,
@@ -160,14 +252,45 @@ function normalizeFrame(frame: unknown): AnimationFrame {
       typeof (candidate as { texturePath?: unknown }).texturePath === 'string'
         ? (candidate as { texturePath: string }).texturePath.trim()
         : '',
-    boundingBox: normalizeBoundingBox((candidate as { boundingBox?: unknown }).boundingBox),
+    boundingBox,
     collisionPolygon: Array.isArray((candidate as { collisionPolygon?: unknown }).collisionPolygon)
       ? ((candidate as { collisionPolygon: unknown[] }).collisionPolygon ?? []).map(
           normalizePolygonPoint
         )
       : [],
     events: normalizeFrameEvents((candidate as { events?: unknown }).events),
+    sourceSize: normalizeSourceSize(
+      (candidate as { sourceSize?: unknown }).sourceSize,
+      boundingBox
+    ),
+    points: normalizeFramePoints((candidate as { points?: unknown }).points),
   };
+}
+
+/** Look up a named point on a frame, or `null` when the frame doesn't define it. */
+export function findAnimationFramePoint(
+  frame: AnimationFrame | null | undefined,
+  name: string
+): AnimationFramePoint | null {
+  if (!frame?.points || name.length === 0) {
+    return null;
+  }
+  return frame.points.find(point => point.name === name) ?? null;
+}
+
+/** Every point name defined anywhere in a clip, in first-seen order. */
+export function collectClipPointNames(clip: AnimationClip | null | undefined): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const frame of clip?.frames ?? []) {
+    for (const point of frame.points ?? []) {
+      if (!seen.has(point.name)) {
+        seen.add(point.name);
+        names.push(point.name);
+      }
+    }
+  }
+  return names;
 }
 
 function normalizeClip(clip: unknown, index: number): AnimationClip {

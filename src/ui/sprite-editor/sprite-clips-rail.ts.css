@@ -1,0 +1,148 @@
+/*
+ * Scoped under the component tag on purpose: `.clip-list`, `.clip-entry` and
+ * friends are generic enough that an unscoped rule would leak into every
+ * Light-DOM panel that happens to reuse the name.
+ */
+pix3-sprite-clips-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  height: 100%;
+}
+
+pix3-sprite-clips-rail .clips-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+pix3-sprite-clips-rail .clips-rail-title {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+pix3-sprite-clips-rail .clips-rail-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+pix3-sprite-clips-rail .clips-rail-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+pix3-sprite-clips-rail .clips-rail-action:hover:not(:disabled),
+pix3-sprite-clips-rail .clips-rail-action:focus-visible {
+  color: var(--fg-0);
+  background: var(--bg-2);
+  outline: none;
+}
+
+pix3-sprite-clips-rail .clips-rail-action.is-danger:hover:not(:disabled),
+pix3-sprite-clips-rail .clips-rail-action.is-danger:focus-visible {
+  color: var(--danger);
+}
+
+pix3-sprite-clips-rail .clips-rail-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+pix3-sprite-clips-rail .clip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+pix3-sprite-clips-rail .clip-list-item {
+  display: flex;
+  min-width: 0;
+}
+
+pix3-sprite-clips-rail .clip-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+  text-align: left;
+}
+
+pix3-sprite-clips-rail .clip-entry:hover,
+pix3-sprite-clips-rail .clip-entry:focus-visible {
+  color: var(--fg-0);
+  border-color: var(--accent-line);
+  outline: none;
+}
+
+pix3-sprite-clips-rail .clip-entry.is-active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-sprite-clips-rail .clip-entry-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.72rem;
+}
+
+pix3-sprite-clips-rail .clip-entry-count {
+  flex: none;
+  font-size: 0.64rem;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-sprite-clips-rail .clip-rename-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem 0.3rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-sprite-clips-rail .clip-rename-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+pix3-sprite-clips-rail .clips-rail-empty {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}

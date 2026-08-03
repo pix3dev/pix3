@@ -554,6 +554,19 @@ export class SceneTreeNodeComponent extends ComponentBase {
       return;
     }
 
+    // Sprite nodes open in the Sprite Editor, mirroring the prefab rule and the
+    // "double-click the object" model the viewport and asset browser use.
+    if (this.node.type === 'Sprite2D' || this.node.type === 'AnimatedSprite2D') {
+      this.dispatchEvent(
+        new CustomEvent('node-open-sprite-editor', {
+          detail: { nodeId: this.node.id },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      return;
+    }
+
     // Any other node: frame it in the viewport (the preceding click already
     // selected it). Frames the specific node regardless of the selection.
     void this.commandDispatcher.execute(new FrameSelectedCommand({ nodeId: this.node.id }));

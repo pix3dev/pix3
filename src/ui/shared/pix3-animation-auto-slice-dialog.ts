@@ -14,7 +14,19 @@ export class AnimationAutoSliceDialog extends ComponentBase {
   public texturePath = '';
 
   @property({ type: String })
-  public clipName = 'idle';
+  public contextLabel = 'idle';
+
+  @property({ type: String })
+  public contextCaption = 'Active clip';
+
+  @property({ type: String })
+  public confirmNote = 'Confirm to append the generated frame sequence to the active clip.';
+
+  @property({ type: String })
+  public confirmLabel = 'Slice Frames';
+
+  @property({ type: String })
+  public cancelLabel = 'Keep Without Slicing';
 
   @property({ type: Number })
   public defaultColumns = 1;
@@ -78,8 +90,8 @@ export class AnimationAutoSliceDialog extends ComponentBase {
             <div class="preview-panel">
               <div class="preview-header">
                 <div>
-                  <div class="dialog-copy dialog-copy--compact">Active clip</div>
-                  <div class="dialog-highlight">${this.clipName}</div>
+                  <div class="dialog-copy dialog-copy--compact">${this.contextCaption}</div>
+                  <div class="dialog-highlight">${this.contextLabel}</div>
                 </div>
                 <div class="preview-stat">${frameCount} frames</div>
               </div>
@@ -148,15 +160,13 @@ export class AnimationAutoSliceDialog extends ComponentBase {
                   <strong>${(1 / this.columns).toFixed(3)} x ${(1 / this.rows).toFixed(3)}</strong>
                 </div>
               </div>
-              <p class="dialog-note">
-                Confirm to append the generated frame sequence to the active clip.
-              </p>
+              <p class="dialog-note">${this.confirmNote}</p>
             </div>
           </div>
           <div class="dialog-actions">
-            <button class="btn-secondary" @click=${this.handleCancel}>Keep Without Slicing</button>
+            <button class="btn-secondary" @click=${this.handleCancel}>${this.cancelLabel}</button>
             <button class="btn-primary" ?disabled=${!isValid} @click=${this.handleConfirm}>
-              Slice Frames
+              ${this.confirmLabel}
             </button>
           </div>
         </div>

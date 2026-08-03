@@ -269,7 +269,6 @@ export interface PanelVisibilityState {
   inspector: boolean;
   profiler: boolean;
   assets: boolean;
-  animation: boolean;
   animationTimeline: boolean;
   logs: boolean;
 }
@@ -577,7 +576,6 @@ export const createInitialAppState = (): AppState => ({
       inspector: true,
       profiler: true,
       assets: true,
-      animation: true,
       animationTimeline: true,
       logs: true,
     },

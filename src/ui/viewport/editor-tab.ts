@@ -25,6 +25,10 @@ import {
   resolveViewportPopOut,
   type ScopeNodeLookup,
 } from '@/features/selection/SelectionScopeResolver';
+import {
+  OpenSpriteEditorForNodeCommand,
+  isSpriteEditableNode,
+} from '@/features/editor/OpenSpriteEditorForNodeCommand';
 import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { CreateSprite2DCommand } from '@/features/scene/CreateSprite2DCommand';
@@ -1321,6 +1325,23 @@ export class EditorTabComponent extends ComponentBase {
       const resolution = modifiers.doubleClick
         ? resolveViewportDoubleClick(getNode, focusId, leaf.nodeId)
         : resolveViewportClick(getNode, focusId, leaf.nodeId, { deep: modifiers.deep });
+
+      // Drill-until-leaf-then-open (Figma's "double-click again to enter
+      // vector-edit mode"): once the double-click has nothing deeper to drill
+      // into and the node it lands on is already the direct selection, the
+      // second double-click opens that sprite's editor instead of no-opping.
+      if (
+        modifiers.doubleClick &&
+        resolution.candidateId === leaf.nodeId &&
+        appState.selection.nodeIds.length === 1 &&
+        appState.selection.nodeIds[0] === leaf.nodeId &&
+        isSpriteEditableNode(leaf)
+      ) {
+        await this.commandDispatcher.execute(
+          new OpenSpriteEditorForNodeCommand({ nodeId: leaf.nodeId })
+        );
+        return;
+      }
 
       await this.commandDispatcher.execute(
         selectObjectInScope(resolution.candidateId, resolution.nextFocusId, modifiers.additive)

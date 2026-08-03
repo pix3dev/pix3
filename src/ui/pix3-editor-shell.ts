@@ -98,6 +98,7 @@ import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclus
 import { ClearAmbientOcclusionCommand } from '@/features/render/ClearAmbientOcclusionCommand';
 import { FocusAnimationTimelineCommand } from '@/features/animation-timeline/FocusAnimationTimelineCommand';
 import { OpenLocalizationPanelCommand } from '@/features/localization/OpenLocalizationPanelCommand';
+import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCommand';
 import { OpenLibraryDocumentCommand } from '@/features/library/OpenLibraryDocumentCommand';
 import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
@@ -156,7 +157,6 @@ import './welcome/pix3-welcome';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
 import './profiler/profiler-panel';
-import './animation-editor/animation-panel';
 import './viewport/game-tab';
 import './pix3-editor-shell.ts.css';
 
@@ -405,6 +405,7 @@ export class Pix3EditorShell extends ComponentBase {
     const clearAOCommand = new ClearAmbientOcclusionCommand();
     const focusAnimationTimelineCommand = new FocusAnimationTimelineCommand();
     const openLocalizationPanelCommand = new OpenLocalizationPanelCommand();
+    const openGeneratePanelCommand = new OpenGeneratePanelCommand();
     const openLibraryDocumentCommand = new OpenLibraryDocumentCommand();
     const checkScriptsCommand = new CheckScriptsCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
@@ -461,6 +462,7 @@ export class Pix3EditorShell extends ComponentBase {
       clearAOCommand,
       focusAnimationTimelineCommand,
       openLocalizationPanelCommand,
+      openGeneratePanelCommand,
       openLibraryDocumentCommand,
       checkScriptsCommand,
       addAnimationPlayerCommand,
@@ -1499,7 +1501,14 @@ export class Pix3EditorShell extends ComponentBase {
         <pix3-animation-auto-slice-dialog
           .dialogId=${this.activeAnimationAutoSliceDialog.id}
           .texturePath=${this.activeAnimationAutoSliceDialog.params.texturePath}
-          .clipName=${this.activeAnimationAutoSliceDialog.params.clipName}
+          .contextLabel=${this.activeAnimationAutoSliceDialog.params.contextLabel}
+          .contextCaption=${this.activeAnimationAutoSliceDialog.params.contextCaption ??
+          'Active clip'}
+          .confirmNote=${this.activeAnimationAutoSliceDialog.params.confirmNote ??
+          'Confirm to append the generated frame sequence to the active clip.'}
+          .confirmLabel=${this.activeAnimationAutoSliceDialog.params.confirmLabel ?? 'Slice Frames'}
+          .cancelLabel=${this.activeAnimationAutoSliceDialog.params.cancelLabel ??
+          'Keep Without Slicing'}
           .defaultColumns=${this.activeAnimationAutoSliceDialog.params.defaultColumns || 1}
           .defaultRows=${this.activeAnimationAutoSliceDialog.params.defaultRows || 1}
         ></pix3-animation-auto-slice-dialog>

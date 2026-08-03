@@ -1,0 +1,582 @@
+pix3-generate-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+pix3-generate-panel .generate-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font-size: 0.9rem;
+}
+
+/* Head ------------------------------------------------------------------ */
+pix3-generate-panel .gp-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--line-1);
+}
+
+pix3-generate-panel .gp-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/*
+ * Which editor the results land on. The prompt -> result loop now spans two
+ * panels (§9.8), so the destination has to be readable without looking away.
+ */
+pix3-generate-panel .gp-target {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-generate-panel .gp-target.is-bound {
+  color: var(--accent);
+}
+
+pix3-generate-panel .gp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+}
+
+/* Shared controls -------------------------------------------------------- */
+pix3-generate-panel select,
+pix3-generate-panel input[type='text'],
+pix3-generate-panel input[type='password'],
+pix3-generate-panel textarea {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
+pix3-generate-panel button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+pix3-generate-panel .gp-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+  line-height: 1;
+}
+
+pix3-generate-panel .gp-icon-button:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+pix3-generate-panel .gp-action-button {
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+pix3-generate-panel .gp-action-button:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+pix3-generate-panel .gp-field-label {
+  font-size: 0.78rem;
+  color: var(--fg-2);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+pix3-generate-panel .gp-field-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+pix3-generate-panel .gp-field-row .gp-field {
+  flex: 1 1 0;
+}
+
+pix3-generate-panel .gp-toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-generate-panel .gp-toggle-field input {
+  flex: 0 0 auto;
+}
+
+pix3-generate-panel .gp-hint {
+  font-size: 0.75rem;
+  color: var(--fg-3);
+}
+
+pix3-generate-panel .gp-error {
+  font-size: 0.8rem;
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+
+pix3-generate-panel .gp-success {
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+pix3-generate-panel .gp-spacer {
+  flex: 1 1 auto;
+}
+
+/* References ------------------------------------------------------------- */
+pix3-generate-panel .gp-references {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+pix3-generate-panel .gp-references-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+pix3-generate-panel .gp-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+pix3-generate-panel .gp-reference {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+  background: transparent;
+}
+
+pix3-generate-panel .gp-reference img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+pix3-generate-panel .gp-reference-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-0);
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Prompt ----------------------------------------------------------------- */
+pix3-generate-panel .gp-prompt-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* ChatGPT-style unified prompt frame: textarea + toolbar row underneath. */
+pix3-generate-panel .gp-prompt-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  overflow: visible;
+}
+
+pix3-generate-panel .gp-prompt-box:focus-within {
+  border-color: var(--accent);
+}
+
+pix3-generate-panel .gp-prompt {
+  resize: vertical;
+  min-height: 4.5rem;
+  max-height: 14rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+}
+
+pix3-generate-panel .gp-prompt:focus {
+  outline: none;
+}
+
+pix3-generate-panel .gp-prompt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-generate-panel .gp-key-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+pix3-generate-panel .gp-key-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+  line-height: 1;
+}
+
+pix3-generate-panel .gp-key-button.is-connected {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-generate-panel .gp-model-select {
+  max-width: 12rem;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.4rem;
+}
+
+pix3-generate-panel .gp-generate-button {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius-1);
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+pix3-generate-panel .gp-cancel-button {
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+/* Quick-settings popover anchored above the key button. */
+pix3-generate-panel .gp-key-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 300px;
+  max-width: 80vw;
+  padding: 0.85rem;
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  z-index: 20;
+}
+
+pix3-generate-panel .gp-popover-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-key-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+pix3-generate-panel .gp-key-status {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+pix3-generate-panel .gp-key-status.is-set {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-generate-panel .gp-key-status.is-unset {
+  background: var(--bg-3);
+  color: var(--fg-3);
+}
+
+pix3-generate-panel .gp-key-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+pix3-generate-panel .gp-key-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-generate-panel .gp-key-row button {
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: transparent;
+  color: var(--fg-1);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+pix3-generate-panel .gp-key-row .gp-key-save {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+pix3-generate-panel .gp-popover-hint {
+  font-size: 0.75rem;
+  color: var(--fg-3);
+  line-height: 1.4;
+}
+
+pix3-generate-panel .gp-popover-hint a {
+  color: var(--accent);
+}
+
+/* Standalone result ------------------------------------------------------ */
+pix3-generate-panel .gp-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+}
+
+pix3-generate-panel .gp-result-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+pix3-generate-panel .gp-result-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+}
+
+pix3-generate-panel .gp-result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+pix3-generate-panel .gp-result-name {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+pix3-generate-panel .gp-result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* History ---------------------------------------------------------------- */
+pix3-generate-panel .gp-history {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line-1);
+  padding: 0.5rem 0 0;
+}
+
+pix3-generate-panel .gp-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+pix3-generate-panel .gp-history-hint {
+  flex: 1 1 auto;
+  font-size: 0.72rem;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-generate-panel .gp-history-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-bottom: 0.25rem;
+}
+
+pix3-generate-panel .gp-history-card {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+pix3-generate-panel .gp-history-thumb {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bg-2);
+}
+
+pix3-generate-panel .gp-history-thumb[draggable='true']:active {
+  cursor: grabbing;
+}
+
+pix3-generate-panel .gp-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+pix3-generate-panel .gp-history-apply {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-0);
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-generate-panel .gp-history-apply:disabled {
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-3);
+  cursor: default;
+}
+
+pix3-generate-panel .gp-history-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: oklch(0 0 0 / 0.55);
+  color: var(--fg-0);
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Drag overlay ----------------------------------------------------------- */
+pix3-generate-panel .generate-panel.is-drag-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+
+pix3-generate-panel .gp-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 5;
+}

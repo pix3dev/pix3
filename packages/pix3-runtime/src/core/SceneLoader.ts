@@ -1059,6 +1059,8 @@ export class SceneLoader {
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
           color: typeof props.color === 'string' ? props.color : undefined,
+          anchor: this.readVector2(props.anchor, new Vector2(0.5, 0.5)),
+          sizeMode: props.sizeMode === 'native' ? 'native' : undefined,
         });
 
         if (animationResourcePath) {

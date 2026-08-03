@@ -87,6 +87,10 @@ export class AssetsContent extends ComponentBase {
   @state()
   private contentView: ContentView = 'grid';
 
+  /** Managed sprite folders render as one sprite card (design §8.5). */
+  @state()
+  private collapseSpriteFolders = true;
+
   @state()
   private thumbnailSize = DEFAULT_THUMBNAIL_SIZE;
 
@@ -258,6 +262,8 @@ export class AssetsContent extends ComponentBase {
     );
     const contentView: ContentView =
       (persisted?.contentView ?? appState.project.assetsContentView) === 'list' ? 'list' : 'grid';
+    this.collapseSpriteFolders = persisted?.collapseSpriteFolders ?? true;
+    void this.assetsPreviewService.setCollapseSpriteFolders(this.collapseSpriteFolders);
     this.thumbnailSize = thumbnailSize;
     this.contentView = contentView;
     appState.project.assetsThumbnailSize = thumbnailSize;
@@ -273,6 +279,14 @@ export class AssetsContent extends ComponentBase {
     appState.project.assetsContentView = view;
     this.projectService.saveAssetBrowserState({ contentView: view });
   }
+
+  private onToggleCollapseSpriteFolders = (): void => {
+    this.collapseSpriteFolders = !this.collapseSpriteFolders;
+    void this.assetsPreviewService.setCollapseSpriteFolders(this.collapseSpriteFolders);
+    this.projectService.saveAssetBrowserState({
+      collapseSpriteFolders: this.collapseSpriteFolders,
+    });
+  };
 
   private onThumbnailSizeInput(event: Event): void {
     const value = clampThumbnailSize(Number((event.target as HTMLInputElement).value));
@@ -405,6 +419,18 @@ export class AssetsContent extends ComponentBase {
           : null}
         <button
           type="button"
+          class="assets-view-btn ${this.collapseSpriteFolders ? 'is-active' : ''}"
+          aria-label="Collapse sprite folders"
+          title=${this.collapseSpriteFolders
+            ? 'Sprite folders shown as single sprites — click to show their files'
+            : 'Sprite folders shown as folders — click to collapse them into sprites'}
+          aria-pressed=${this.collapseSpriteFolders}
+          @click=${this.onToggleCollapseSpriteFolders}
+        >
+          ${this.iconService.getIcon('film', IconSize.SMALL)}
+        </button>
+        <button
+          type="button"
           class="assets-view-btn ${this.contentView === 'grid' ? 'is-active' : ''}"
           aria-label="Grid view"
           aria-pressed=${this.contentView === 'grid'}
@@ -462,6 +488,18 @@ export class AssetsContent extends ComponentBase {
                       @click=${() => this.addToSceneAsSprite(item)}
                     >
                       Add to Scene as Sprite2D
+                    </button>
+                    <div class="menu-separator" role="separator"></div>
+                  `
+                : null}
+              ${item.spriteFolderPath
+                ? html`
+                    <button
+                      type="button"
+                      role="menuitem"
+                      @click=${() => this.showSpriteFolderFiles(item)}
+                    >
+                      Show Files
                     </button>
                     <div class="menu-separator" role="separator"></div>
                   `
@@ -524,6 +562,15 @@ export class AssetsContent extends ComponentBase {
     if (this.contextMenu) {
       this.contextMenu = null;
     }
+  }
+
+  /** Escape hatch out of the collapsed sprite card: browse the folder's real files. */
+  private showSpriteFolderFiles(item: AssetPreviewItem): void {
+    this.closeContextMenu();
+    if (!item.spriteFolderPath) {
+      return;
+    }
+    void this.assetsPreviewService.syncFromAssetSelection(item.spriteFolderPath, 'directory');
   }
 
   private openInSpriteEditor(item: AssetPreviewItem): void {
@@ -597,6 +644,11 @@ export class AssetsContent extends ComponentBase {
                 : null}`
             : null}
           ${this.isAnimationPreviewable(item) ? this.renderAnimationToggle(item, '') : null}
+          ${item.spriteFolderPath
+            ? html`<span class="sprite-badge" title="Managed sprite folder"
+                >${item.spriteFrameCount ?? 0}f</span
+              >`
+            : null}
         </span>
         <span class="name">${item.name}</span>
         ${this.renderItemMeta(item)}

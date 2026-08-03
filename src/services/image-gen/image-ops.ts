@@ -283,6 +283,60 @@ export async function flipImageBlob(
   }
 }
 
+export interface SliceGrid {
+  /** Number of cells across. Values below 1 are clamped to 1. */
+  readonly columns: number;
+  /** Number of cells down. Values below 1 are clamped to 1. */
+  readonly rows: number;
+}
+
+/**
+ * Cut a spritesheet into `columns × rows` equal cells, row-major (left-to-right, top-to-bottom).
+ * Cell size is the fractional source size rounded up to whole output pixels, so a sheet whose
+ * dimensions don't divide evenly still yields complete cells instead of a clipped last column/row.
+ *
+ * This is the pure half of spritesheet slicing — naming and writing the resulting files is the
+ * caller's policy (`.pix3anim` frame paths for the animation editor, a user-chosen folder for the
+ * Sprite Editor's "Slice…" action).
+ */
+export async function sliceImageBlob(
+  blob: Blob,
+  grid: SliceGrid,
+  encode: EncodeOptions = {}
+): Promise<Blob[]> {
+  const columns = Math.max(1, Math.floor(grid.columns));
+  const rows = Math.max(1, Math.floor(grid.rows));
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const cellWidth = bitmap.width / columns;
+    const cellHeight = bitmap.height / rows;
+    const outWidth = Math.max(1, Math.round(cellWidth));
+    const outHeight = Math.max(1, Math.round(cellHeight));
+    const cells: Blob[] = [];
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const cell = await drawToBlob(
+          bitmap,
+          { width: outWidth, height: outHeight },
+          {
+            x: column * cellWidth,
+            y: row * cellHeight,
+            width: cellWidth,
+            height: cellHeight,
+          },
+          { mimeType: encode.mimeType ?? 'image/png', quality: encode.quality }
+        );
+        cells.push(cell.blob);
+      }
+    }
+
+    return cells;
+  } finally {
+    bitmap.close();
+  }
+}
+
 export interface TrimOptions extends EncodeOptions {
   /** Transparent padding (px) kept around the opaque content on every side. Default 2. */
   padding?: number;

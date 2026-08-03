@@ -124,12 +124,6 @@ pix3-panel {
   color: var(--fg-0);
 }
 
-.toolbar-row {
-  display: flex;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-}
-
 .panel-note {
   margin: 0;
   font-size: 0.74rem;
@@ -137,16 +131,7 @@ pix3-panel {
   color: var(--fg-2);
 }
 
-.field-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.8rem;
-  color: var(--fg-2);
-}
-
-.animation-chip,
-.frame-chip {
+.animation-chip {
   display: inline-flex;
   align-items: center;
   min-height: 1.4rem;
@@ -155,6 +140,17 @@ pix3-panel {
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.68rem;
+}
+
+.animation-chip--selected {
+  border: 1px solid var(--accent-line);
+  font-weight: 600;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  line-height: 1.4rem;
 }
 
 .animation-clip-actions {
@@ -172,16 +168,20 @@ pix3-panel {
 .animation-clip-button {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.45rem 0.55rem;
+  padding: 0.4rem 0.55rem;
   border: 1px solid var(--line-1);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-2);
   background: var(--bg-2);
   color: var(--fg-0);
   text-align: left;
   cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .animation-clip-button:hover {
@@ -189,12 +189,26 @@ pix3-panel {
   background: var(--accent-soft);
 }
 
-.animation-clip-button.is-active {
-  border-color: var(--accent);
+/* Same selected treatment as every other Pix3 list (scene tree, timeline):
+   accent-soft fill, accent text, and an accent bar on the leading edge. */
+.animation-clip-button.is-selected {
+  border-color: var(--accent-line);
+  border-left-color: var(--accent);
   background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.animation-clip-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  min-width: 12px;
+  color: var(--accent);
 }
 
 .animation-clip-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -203,9 +217,117 @@ pix3-panel {
   font-weight: 500;
 }
 
+.animation-clip-button.is-selected .animation-clip-name {
+  font-weight: 600;
+}
+
 .animation-clip-meta {
   color: var(--fg-2);
   font-size: 0.72rem;
+}
+
+.animation-clip-button.is-selected .animation-clip-meta {
+  color: var(--accent);
+}
+
+/* The clip/frame the editor is pointed at: an accent rail down the section so the
+   Inspector reads as "this frame", not "some frame". */
+.animation-clip-section,
+.animation-frame-section {
+  border-left: 2px solid var(--accent-line);
+  padding-left: 0.55rem;
+}
+
+.animation-frame-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-2);
+  background: var(--accent-soft);
+}
+
+.animation-frame-indicator-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.animation-frame-indicator-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.animation-frame-indicator-sub {
+  font-size: 0.7rem;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One button treatment for inspector actions, shared with the summary toolbar. */
+.inspector-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.inspector-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.inspector-button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--fg-0);
+}
+
+.inspector-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.inspector-button--primary {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.inspector-button--primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.group-header--sub {
+  margin-top: 0.15rem;
+}
+
+.group-subtitle {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg-1);
 }
 
 .property-group-section--titleless {

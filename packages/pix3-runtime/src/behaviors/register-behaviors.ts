@@ -20,6 +20,7 @@ import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
 import { CameraBrainBehavior } from './CameraBrainBehavior';
 import { Hitbox2DBehavior } from './Hitbox2DBehavior';
+import { PointAttachmentBehavior } from './PointAttachmentBehavior';
 import { NetworkedNodeBehavior } from './NetworkedNodeBehavior';
 import { ReplicatedTransformBehavior } from './ReplicatedTransformBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
@@ -174,6 +175,17 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Physics',
     componentClass: Hitbox2DBehavior,
     keywords: ['hitbox', 'collision', 'collider', 'area', '2d', 'overlap', 'raycast', 'hit'],
+  });
+
+  registry.registerComponent({
+    id: 'core:PointAttachment',
+    displayName: 'Point Attachment',
+    description:
+      'Keeps this node on a named frame point of a parent AnimatedSprite2D (hand socket, muzzle) ' +
+      'every tick',
+    category: 'Animation',
+    componentClass: PointAttachmentBehavior,
+    keywords: ['point', 'socket', 'attach', 'muzzle', 'hand', 'bone', 'sprite', 'animation'],
   });
 
   registry.registerComponent({
