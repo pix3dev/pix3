@@ -147,8 +147,11 @@ function createPreferences() {
 
 interface PanelStubs {
   showChoice: ReturnType<typeof vi.fn>;
+  showConfirmation: ReturnType<typeof vi.fn>;
   historyGet: ReturnType<typeof vi.fn>;
   readBlob: ReturnType<typeof vi.fn>;
+  writeBinaryFile: ReturnType<typeof vi.fn>;
+  invokeAndPush: ReturnType<typeof vi.fn>;
   updatePreferences: ReturnType<typeof vi.fn>;
   setActiveController: ReturnType<typeof vi.fn>;
   setActiveTarget: ReturnType<typeof vi.fn>;
@@ -163,6 +166,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   // Reads never resolve to a decodable blob: the texture-preview loader swallows
   // the failure, and no detached promise is left hanging (the `.finally` gotcha).
   const readBlob = vi.fn().mockRejectedValue(new Error('no project storage in tests'));
+  const writeBinaryFile = vi.fn().mockResolvedValue(undefined);
+  const invokeAndPush = vi.fn().mockResolvedValue(true);
   const historyGet = vi.fn().mockResolvedValue(undefined);
   const updatePreferences = vi.fn((patch: Record<string, unknown>) => {
     Object.assign(preferences, patch);
@@ -185,6 +190,8 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
   const execute = vi.fn().mockResolvedValue(true);
   // §9.12.1's confirm: two confirm buttons (the alpha threshold) plus cancel.
   const showChoice = vi.fn().mockResolvedValue('confirm');
+  // §9.12.4's raster ops take the plain two-way confirm.
+  const showConfirmation = vi.fn().mockResolvedValue(true);
 
   const stubs: Record<string, unknown> = {
     aiSettings: {
@@ -197,13 +204,13 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     },
     history: { add: vi.fn().mockResolvedValue(undefined), get: historyGet },
     bgRemoval: { removeBackground: vi.fn() },
-    storage: { readBlob, writeBinaryFile: vi.fn(), createDirectory: vi.fn() },
+    storage: { readBlob, writeBinaryFile, createDirectory: vi.fn() },
     editorSettings: { showSettings: vi.fn() },
     commandDispatcher: { execute },
     assetLibrary: { isUserScopeSupported: () => false },
     sliceDialog: { showDialog: vi.fn().mockResolvedValue(null) },
     editorTabs: { focusOrOpenAnimation: vi.fn() },
-    operations: { invokeAndPush: vi.fn().mockResolvedValue(true) },
+    operations: { invokeAndPush },
     animationEditorService: {
       getActiveController: () => activeController,
       setActiveController,
@@ -214,7 +221,7 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
       clearActiveTarget,
     },
     dialogService: {
-      showConfirmation: vi.fn().mockResolvedValue(true),
+      showConfirmation,
       showChoice: showChoice,
     },
     sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map() }) },
@@ -232,8 +239,11 @@ function createPanel(): { panel: SpriteEditorPanel; stubs: PanelStubs } {
     panel,
     stubs: {
       showChoice,
+      showConfirmation,
       historyGet,
       readBlob,
+      writeBinaryFile,
+      invokeAndPush,
       updatePreferences,
       setActiveController,
       setActiveTarget,
@@ -508,6 +518,942 @@ describe('SpriteEditorPanel (unified shell)', () => {
       // The `TrimOptions` hint made reachable: ~8 also cuts the halo a background
       // removal leaves behind.
       expect(trimClipFrames).toHaveBeenCalledWith({ padding: 0, alphaThreshold: 8 });
+    });
+  });
+
+  /**
+   * §9.12.2 — the auto collision polygon. Nothing is doubled here beyond the two
+   * browser APIs happy-dom lacks (`createImageBitmap` and the 2D canvas): the real
+   * alpha reader, the real tracer and the real document controller all run, so
+   * these assertions are about the shipping path from the toolbar button to the
+   * polygon the stage draws.
+   */
+  describe('auto collision polygon (§9.12.2)', () => {
+    const FRAME_PATH = 'res://sprites/walk/idle_0001.png';
+    /**
+     * A 32×24 frame with a 16×14 opaque block at (8, 4) — corners (8,4) (24,4)
+     * (24,18) (8,18). Big enough to clear `getFrameMetrics`'s 24 px floor, so the
+     * overlay's viewBox is the frame's real pixel space.
+     */
+    const FRAME_ROWS = Array.from({ length: 24 }, (_unusedRow, y) =>
+      Array.from({ length: 32 }, (_unusedColumn, x) =>
+        x >= 8 && x < 24 && y >= 4 && y < 18 ? '#' : '.'
+      ).join('')
+    );
+    const TRACED_POLYGON = [
+      { x: 24, y: 4 },
+      { x: 24, y: 18 },
+      { x: 8, y: 18 },
+      { x: 8, y: 4 },
+    ];
+
+    /**
+     * Stand up the two browser APIs happy-dom lacks, over a synthetic buffer: the
+     * `<img>` decode both the stage's working image and the controller's texture
+     * preview await (which is also what fills `textureDimensionsCache`, so the
+     * frame's metrics resolve exactly as they do in the app), and the
+     * `createImageBitmap` + 2D canvas pair `readAlphaMask` reads the alpha through.
+     */
+    function stubAlphaDecode(rows: string[]): void {
+      const width = rows[0]?.length ?? 0;
+      const height = rows.length;
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = width;
+          public naturalHeight = height;
+          set src(_value: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        }
+      );
+      vi.stubGlobal('createImageBitmap', async () => ({
+        width: rows[0]?.length ?? 0,
+        height: rows.length,
+        close: () => undefined,
+      }));
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              drawImage: () => undefined,
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                for (let y = 0; y < height; y += 1) {
+                  for (let x = 0; x < width; x += 1) {
+                    data[(y * width + x) * 4 + 3] = rows[y]?.[x] === '#' ? 255 : 0;
+                  }
+                }
+                return { data };
+              },
+            }),
+          } as unknown as HTMLElement;
+        }
+      );
+    }
+
+    async function mountTracablePanel(): Promise<{
+      panel: SpriteEditorPanel;
+      controller: AnimationDocumentController;
+    }> {
+      seedAnimationTab([FRAME_PATH]);
+      const { panel, stubs } = createPanel();
+      // The frame's file has to actually read for the stage to bind to it.
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      // The stage has to hold the frame's image, and the frame's metrics have to
+      // have resolved, before the tool is offered at all (§9.7 risk 2) — both come
+      // out of the real texture load above.
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+        expect(controller.getFrameMetrics(controller.selectedFrame!)).toEqual({
+          frameWidth: 32,
+          frameHeight: 24,
+        });
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+      return { panel, controller };
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('traces the frame into the live polygon overlay and commits it on Apply', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      const { panel, controller } = await mountTracablePanel();
+
+      const action = panel.querySelector<HTMLButtonElement>('.ag-auto-polygon');
+      expect(action?.disabled).toBe(false);
+      action?.click();
+
+      // The trace lands in the frame DRAFT, which is what the *existing* overlay
+      // renders — the preview is the editable polygon, not a second overlay.
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon).toEqual(TRACED_POLYGON);
+      });
+      await panel.updateComplete;
+      expect(panel.querySelector('.stage-polygon')?.getAttribute('points')).toBe(
+        '24,4 24,18 8,18 8,4'
+      );
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain('Traced 4 vertices');
+      // Tracing switches to the polygon tool, so the vertices are draggable at once.
+      expect(panel.querySelector('[aria-label="Collision polygon tools"]')).not.toBeNull();
+
+      // Nothing is written until Apply.
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+      panel.querySelector<HTMLButtonElement>('.ag-polygon-apply')?.click();
+
+      await vi.waitFor(() => {
+        expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual(TRACED_POLYGON);
+      });
+    });
+
+    it('re-traces at the tolerance the slider carries, and Discard leaves the frame alone', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      const { panel, controller } = await mountTracablePanel();
+
+      panel.querySelector<HTMLButtonElement>('.ag-auto-polygon')?.click();
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon).toHaveLength(4);
+      });
+      await panel.updateComplete;
+
+      // A tolerance far past the shape still yields a usable collider, never a
+      // one-vertex "polygon" (the contour-trace guard, reached through the UI).
+      const slider = panel.querySelector<HTMLInputElement>('.ag-polygon-tolerance input');
+      expect(slider?.value).toBe('2');
+      if (!slider) {
+        throw new Error('no tolerance slider');
+      }
+      slider.value = '8';
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      slider.dispatchEvent(new Event('change', { bubbles: true }));
+      await vi.waitFor(() => {
+        expect(controller.frameDraft?.collisionPolygon.length).toBeGreaterThanOrEqual(3);
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-frame-tools .ag-frame-tools-wide + *');
+      const discard = [...panel.querySelectorAll<HTMLButtonElement>('.ag-frame-tools-wide')].find(
+        button => button.textContent?.trim() === 'Discard'
+      );
+      discard?.click();
+      await panel.updateComplete;
+
+      expect(controller.frameDraft).toBeNull();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+      expect(panel.querySelector('.ag-polygon-apply')).toBeNull();
+    });
+
+    it('refuses to trace while the frame texture has not decoded', async () => {
+      stubAlphaDecode(FRAME_ROWS);
+      seedAnimationTab([FRAME_PATH]);
+      const { panel } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      await panel.updateComplete;
+
+      // No decoded size: absolute-pixel geometry would be authored against the
+      // 256 px placeholder, so the tool shares the raster tools' gate.
+      const action = panel.querySelector<HTMLButtonElement>('.ag-auto-polygon');
+      expect(action?.disabled).toBe(true);
+      expect(action?.title).toBe('Waiting for the frame texture to decode…');
+    });
+  });
+
+  /**
+   * §9.12.3 — the chroma key. Only the two browser APIs happy-dom lacks are stood
+   * up (`createImageBitmap` and the 2D canvas, over a real RGBA strip) plus the
+   * stage's rect, which happy-dom reports as 0×0 so no pointer could ever land on
+   * a pixel. Everything else — the transient mode, the pointer routing, the
+   * sample, and `chromaKeyImage` itself — is the shipping code.
+   */
+  describe('chroma key (§9.12.3)', () => {
+    /**
+     * A uniform-grey raster of `width × height`, or an explicit 1-row strip of
+     * greys. Grey is convenient: against a grey key the RGB distance is exactly
+     * |a − b|·√3, so what gets keyed is arithmetic anyone can check.
+     */
+    function stubGreyDecode(greys: readonly number[], width: number, height: number): void {
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = width;
+          public naturalHeight = height;
+          set src(_value: string) {
+            queueMicrotask(() => this.onload?.());
+          }
+        }
+      );
+      vi.stubGlobal('createImageBitmap', async () => ({ width, height, close: () => undefined }));
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              drawImage: () => undefined,
+              getImageData: (_x: number, _y: number, w: number, h: number) => {
+                const data = new Uint8ClampedArray(w * h * 4);
+                for (let index = 0; index < w * h; index += 1) {
+                  const grey = greys[index % greys.length];
+                  data[index * 4] = grey;
+                  data[index * 4 + 1] = grey;
+                  data[index * 4 + 2] = grey;
+                  data[index * 4 + 3] = 255;
+                }
+                return { data, width: w, height: h };
+              },
+              putImageData: () => undefined,
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['keyed'], { type: 'image/png' })),
+          } as unknown as HTMLElement;
+        }
+      );
+    }
+
+    /**
+     * happy-dom measures every element as 0×0, which makes `getStageViewport()`
+     * return null and no pointer can reach a pixel. Give the stage a real rect —
+     * arranging state the browser fills, not stubbing behaviour — and make sure
+     * pointer capture exists on it.
+     */
+    function giveStageARect(panel: SpriteEditorPanel): HTMLElement {
+      const stage = panel.querySelector<HTMLElement>('.ag-stage');
+      if (!stage) {
+        throw new Error('no stage');
+      }
+      stage.getBoundingClientRect = () =>
+        ({
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 400,
+          width: 400,
+          height: 400,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      stage.setPointerCapture = () => undefined;
+      stage.hasPointerCapture = () => true;
+      stage.releasePointerCapture = () => undefined;
+      return stage;
+    }
+
+    /** The stage sits at (0,0) with zoom 1 and no pan, so client == image pixels. */
+    function pickAt(stage: HTMLElement, x: number, y: number): void {
+      stage.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          pointerId: 1,
+          clientX: x,
+          clientY: y,
+        })
+      );
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('picks a colour off the canvas and keys it out of the working image', async () => {
+      // 0, 51, 102, 204 — 0 %, 20 %, 40 % and 80 % of the way from black.
+      stubGreyDecode([0, 51, 102, 204], 4, 1);
+      seedImageTab();
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, IMAGE_TAB_ID);
+      const internals = panel as unknown as PanelInternals;
+      await vi.waitFor(() => {
+        expect(internals.current).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      // Nothing picked yet: the swatch says so rather than pretending to be black.
+      expect(panel.querySelector('.ag-chroma-swatch')?.className).toContain('is-empty');
+      expect(panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.disabled).toBe(true);
+
+      pickAt(giveStageARect(panel), 2.5, 0.5);
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar .ag-crop-dims')?.textContent).toBe(
+        'rgb(102, 102, 102)'
+      );
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.click();
+      await vi.waitFor(() => {
+        expect(internals.current?.source).toBe('chroma-keyed');
+      });
+      await panel.updateComplete;
+
+      // At the 10 % default tolerance only the picked grey itself is within range
+      // (51 and 204 sit 20 % and 40 % away), so exactly one pixel loses its alpha.
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain('Keyed out 1 pixel.');
+      // Keyed output carries alpha, so the save name is forced to .png.
+      expect(internals.saveName.endsWith('-keyed.png')).toBe(true);
+      // Applying closes the transient mode, exactly as crop does.
+      expect(panel.querySelector('.ag-chroma-toolbar')).toBeNull();
+    });
+
+    it('writes the picked colour back into the bound frame, not the working image', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      const replaceFrameTexture = vi.fn().mockResolvedValue('res://sprites/walk/idle_0002.png');
+      Object.defineProperty(controller, 'replaceFrameTexture', {
+        value: replaceFrameTexture,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      pickAt(giveStageARect(panel), 10.5, 10.5);
+      await panel.updateComplete;
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-apply')?.click();
+
+      await vi.waitFor(() => {
+        expect(replaceFrameTexture).toHaveBeenCalled();
+      });
+      // The keyed image is the same size as the frame, so the restamp is the
+      // identity — §9.12.3's "unchanged size" write-back.
+      expect(replaceFrameTexture.mock.calls[0][2]).toMatchObject({
+        restamp: { kind: 'replace' },
+        label: 'Chroma key frame 1: idle',
+      });
+      // The working image stays the frame's own file; a frame bake is committed,
+      // never held on the canvas.
+      expect((panel as unknown as PanelInternals).current?.source).toBe('file');
+    });
+
+    it('hands the picked colour to the clip-wide op after a confirm', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png', 'res://sprites/walk/idle_0002.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const applyRasterOpToClipFrames = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-clip')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      pickAt(giveStageARect(panel), 5.5, 5.5);
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-clip')?.click();
+      await vi.waitFor(() => {
+        expect(applyRasterOpToClipFrames).toHaveBeenCalledWith({
+          kind: 'chroma-key',
+          color: { r: 70, g: 70, b: 70 },
+          tolerance: 0.1,
+          softness: 0,
+        });
+      });
+      expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Chroma key: idle — 2 frames.'
+      );
+    });
+
+    it('writes nothing when the clip-wide confirm is declined', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      stubs.showConfirmation.mockResolvedValue(false);
+      await mount(panel, ANIMATION_TAB_ID);
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const applyRasterOpToClipFrames = vi.fn();
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      panel.requestUpdate();
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-chroma-clip')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      pickAt(giveStageARect(panel), 5.5, 5.5);
+      await panel.updateComplete;
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-clip')?.click();
+
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+      expect(applyRasterOpToClipFrames).not.toHaveBeenCalled();
+    });
+
+    it('is mutually exclusive with the crop tool', async () => {
+      stubGreyDecode([70], 32, 24);
+      seedImageTab();
+      const { panel, stubs } = createPanel();
+      stubs.readBlob.mockImplementation(
+        async (path: string) => new Blob([path], { type: 'image/png' })
+      );
+      await mount(panel, IMAGE_TAB_ID);
+      await vi.waitFor(() => {
+        expect((panel as unknown as PanelInternals).current).not.toBeNull();
+      });
+      await panel.updateComplete;
+
+      panel.querySelector<HTMLButtonElement>('.ag-chroma-toggle')?.click();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar')).not.toBeNull();
+
+      // Both own the plain left-press on the canvas; the last click wins.
+      const crop = [...panel.querySelectorAll<HTMLButtonElement>('.ag-toolbar-button')].find(
+        button => button.textContent?.trim() === 'Crop'
+      );
+      crop?.click();
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-chroma-toolbar')).toBeNull();
+      expect((panel as unknown as PanelInternals).cropMode).toBe(true);
+    });
+  });
+
+  /**
+   * §9.12.4 — bulk frame ops. The batching is the controller's job (and is tested
+   * there); what the shell owes is the confirm, the parameter it carries and a
+   * status line that spells out the skips.
+   */
+  describe('bulk frame ops (§9.12.4)', () => {
+    async function mountBulkPanel(): Promise<{
+      panel: SpriteEditorPanel;
+      stubs: PanelStubs;
+      controller: AnimationDocumentController;
+    }> {
+      seedAnimationTab([
+        'res://sprites/walk/idle_0001.png',
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      const { panel, stubs } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      const controller = (panel as unknown as PanelInternals).documentController;
+      if (!controller) {
+        throw new Error('no document controller');
+      }
+      panel.querySelector<HTMLButtonElement>('.ag-bulk-frames')?.click();
+      await panel.updateComplete;
+      return { panel, stubs, controller };
+    }
+
+    function findBulkButton(panel: SpriteEditorPanel, label: string): HTMLButtonElement {
+      const button = [
+        ...panel.querySelectorAll<HTMLButtonElement>('.ag-bulk-tools .ag-frame-tools-wide'),
+      ].find(candidate => candidate.textContent?.trim() === label);
+      if (!button) {
+        throw new Error(`no bulk button labelled "${label}"`);
+      }
+      return button;
+    }
+
+    it('drops every second frame through the confirm that carries the parity', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const deleteFramesByParity = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'deleteFramesByParity', {
+        value: deleteFramesByParity,
+        configurable: true,
+      });
+
+      expect(panel.querySelector('[aria-label="Bulk frame tools"]')).not.toBeNull();
+      findBulkButton(panel, 'Drop every 2nd').click();
+
+      await vi.waitFor(() => {
+        expect(deleteFramesByParity).toHaveBeenCalledWith('even');
+      });
+      // The confirm's two buttons ARE the parameter — `DialogService` has no radio
+      // group, so the choice carries it exactly as §9.12.1's trim confirm does.
+      expect(stubs.showChoice.mock.calls[0][0]).toMatchObject({
+        confirmLabel: 'Drop 2 even',
+        secondaryLabel: 'Drop 2 odd',
+      });
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Dropped even frames of idle — 2 frames.'
+      );
+    });
+
+    it('takes the odd half from the secondary button and nothing on cancel', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const deleteFramesByParity = vi
+        .fn()
+        .mockResolvedValue({ processed: 2, skipped: 0, failed: 0 });
+      Object.defineProperty(controller, 'deleteFramesByParity', {
+        value: deleteFramesByParity,
+        configurable: true,
+      });
+
+      stubs.showChoice.mockResolvedValueOnce('cancel');
+      findBulkButton(panel, 'Drop every 2nd').click();
+      await vi.waitFor(() => {
+        expect(stubs.showChoice).toHaveBeenCalledOnce();
+      });
+      expect(deleteFramesByParity).not.toHaveBeenCalled();
+
+      stubs.showChoice.mockResolvedValueOnce('secondary');
+      findBulkButton(panel, 'Drop every 2nd').click();
+      await vi.waitFor(() => {
+        expect(deleteFramesByParity).toHaveBeenCalledWith('odd');
+      });
+    });
+
+    it('maps a raster op over the clip after a confirm and states the skips', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const applyRasterOpToClipFrames = vi
+        .fn()
+        .mockResolvedValue({ processed: 3, skipped: 1, failed: 0 });
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+
+      findBulkButton(panel, 'Flip H').click();
+
+      await vi.waitFor(() => {
+        expect(applyRasterOpToClipFrames).toHaveBeenCalledWith({
+          kind: 'flip',
+          axis: 'horizontal',
+        });
+      });
+      expect(stubs.showConfirmation.mock.calls[0][0]).toMatchObject({
+        title: 'Flip horizontally every frame?',
+        isDangerous: true,
+      });
+      await panel.updateComplete;
+      // A clip of UV-window frames processes nothing; silence there would read as
+      // a dead button, so the skips are always spelled out.
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Flip horizontally: idle — 3 frames, 1 skipped.'
+      );
+    });
+
+    it('writes nothing when the raster-op confirm is declined', async () => {
+      const { panel, stubs, controller } = await mountBulkPanel();
+      const applyRasterOpToClipFrames = vi.fn();
+      Object.defineProperty(controller, 'applyRasterOpToClipFrames', {
+        value: applyRasterOpToClipFrames,
+        configurable: true,
+      });
+      stubs.showConfirmation.mockResolvedValueOnce(false);
+
+      findBulkButton(panel, 'Rotate 90°').click();
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+      expect(applyRasterOpToClipFrames).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * §9.12.5 — video import. The seek/grab timing is the extractor's job and is
+   * tested against a browser-shaped fake in `video-frame-extract.spec.ts`; what the
+   * shell owes is the picker, the fps/range card, the confirm, the §8.2 write path
+   * and the `{ imported, skipped, failed }` status line.
+   *
+   * Nothing is doubled here beyond the three browser capabilities happy-dom lacks:
+   * the OS file picker, video decoding and the 2D canvas. The real
+   * `planVideoFrameTimes`, the real `grabVideoFrames`, the real document controller
+   * and the real `importOsFiles` all run, so the batching assertion below (every
+   * file written *before* the single operation push) is about shipping code.
+   */
+  describe('video import (§9.12.5)', () => {
+    /**
+     * A decodable video, modelled only as far as this spec needs: metadata and a
+     * first frame arrive asynchronously, and so does every seek. (The
+     * grab-order/duplicate-frame question lives in the extractor's own spec, which
+     * models frame *presentation* separately from `currentTime`.)
+     */
+    class FakeVideoElement extends EventTarget {
+      public readyState = 0;
+      public preload = '';
+      public muted = false;
+      public playsInline = false;
+      public videoWidth = 0;
+      public videoHeight = 0;
+      private time = 0;
+
+      constructor(
+        public duration: number,
+        private readonly size: { width: number; height: number }
+      ) {
+        super();
+      }
+
+      set src(value: string) {
+        if (!value) {
+          return;
+        }
+        setTimeout(() => {
+          this.readyState = 2;
+          this.videoWidth = this.size.width;
+          this.videoHeight = this.size.height;
+          this.dispatchEvent(new Event('loadeddata'));
+        }, 0);
+      }
+
+      get currentTime(): number {
+        return this.time;
+      }
+
+      set currentTime(value: number) {
+        this.time = value;
+        setTimeout(() => {
+          this.readyState = 2;
+          this.dispatchEvent(new Event('seeked'));
+        }, 0);
+      }
+
+      removeAttribute(): void {}
+      load(): void {}
+    }
+
+    /**
+     * Stand up the picker, the decoder and the canvas. The `<input type="file">` is
+     * a real element with a seeded `files` list and a `click()` that dispatches the
+     * `change` the panel listens for — the one thing a headless DOM can never do on
+     * its own.
+     */
+    function stubVideoPipeline(options: {
+      file: File;
+      duration: number;
+      width?: number;
+      height?: number;
+    }): void {
+      const size = { width: options.width ?? 32, height: options.height ?? 24 };
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, elementOptions?: unknown) => {
+          if (tagName === 'video') {
+            return new FakeVideoElement(options.duration, size) as unknown as HTMLElement;
+          }
+          if (tagName === 'canvas') {
+            return {
+              width: 0,
+              height: 0,
+              getContext: () => ({ imageSmoothingEnabled: false, drawImage: () => undefined }),
+              toBlob: (callback: (blob: Blob | null) => void) =>
+                callback(new Blob(['frame'], { type: 'image/png' })),
+            } as unknown as HTMLElement;
+          }
+
+          const element = realCreateElement(
+            tagName,
+            elementOptions as ElementCreationOptions | undefined
+          );
+          if (tagName === 'input') {
+            Object.defineProperties(element, {
+              files: { value: [options.file], configurable: true },
+              click: {
+                value: () => element.dispatchEvent(new Event('change')),
+                configurable: true,
+              },
+            });
+          }
+          return element;
+        }
+      );
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:video');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    }
+
+    async function openVideoCard(
+      duration: number
+    ): Promise<{ panel: SpriteEditorPanel; stubs: PanelStubs }> {
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      stubVideoPipeline({
+        file: new File(['video bytes'], 'walk-cycle.mp4', { type: 'video/mp4' }),
+        duration,
+      });
+      const { panel, stubs } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-import')?.click();
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-video-tools')).not.toBeNull();
+      });
+      await panel.updateComplete;
+      return { panel, stubs };
+    }
+
+    it('opens the fps/range card on a picked video and states what it will grab', async () => {
+      const { panel } = await openVideoCard(1);
+
+      const card = panel.querySelector('.ag-video-tools');
+      expect(card?.textContent).toContain('walk-cycle.mp4');
+      expect(card?.textContent).toContain('0:01.0');
+      expect(panel.querySelector('.ag-video-tools .ag-frame-tools-value')?.textContent).toContain(
+        '32×24'
+      );
+      // 1 s at the default 12 fps.
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        '12 frames from 0:00.0 to 0:01.0.'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(false);
+    });
+
+    it('writes every frame file first and appends them in ONE document update', async () => {
+      const { panel, stubs } = await openVideoCard(1);
+
+      // Drop to 4 fps through the picker, so the range plans four frames.
+      const fpsSelect = panel.querySelector<HTMLSelectElement>('.ag-video-field select');
+      if (!fpsSelect) {
+        throw new Error('no fps picker');
+      }
+      fpsSelect.value = '4';
+      fpsSelect.dispatchEvent(new Event('change'));
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain('4 frames');
+
+      const controller = (panel as unknown as PanelInternals).documentController;
+      const writeBinaryFile = stubs.writeBinaryFile;
+      const invokeAndPush = stubs.invokeAndPush;
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.click();
+      await vi.waitFor(() => {
+        expect(controller?.activeClip?.frames.length).toBe(5);
+      });
+
+      expect(stubs.showConfirmation.mock.calls[0][0]).toMatchObject({
+        title: 'Import frames from this video?',
+        confirmLabel: 'Import 4 frames',
+      });
+      // §8.2's managed-folder naming, shared with an OS image drop rather than
+      // reinvented: the clip already owns idle_0001.png, so the import counts on.
+      expect(writeBinaryFile.mock.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+        'res://sprites/walk/idle_0005.png',
+      ]);
+      // §9.12.1's batching shape: every file lands before the single undo step.
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const pushOrder = invokeAndPush.mock.invocationCallOrder[0];
+      for (const order of writeBinaryFile.mock.invocationCallOrder) {
+        expect(order).toBeLessThan(pushOrder);
+      }
+
+      await panel.updateComplete;
+      expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+        'Imported 4 frames into idle.'
+      );
+      // A finished import closes the session and lets the decoder go.
+      expect(panel.querySelector('.ag-video-tools')).toBeNull();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:video');
+    });
+
+    it('writes nothing when the confirm is declined, and keeps the card open', async () => {
+      const { panel, stubs } = await openVideoCard(1);
+      stubs.showConfirmation.mockResolvedValueOnce(false);
+
+      panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.click();
+      await vi.waitFor(() => {
+        expect(stubs.showConfirmation).toHaveBeenCalledOnce();
+      });
+
+      expect(stubs.writeBinaryFile).not.toHaveBeenCalled();
+      expect(stubs.invokeAndPush).not.toHaveBeenCalled();
+      expect(panel.querySelector('.ag-video-tools')).not.toBeNull();
+    });
+
+    it('refuses a range that would produce more frames than the cap allows', async () => {
+      // 10 minutes at the default 12 fps is 7,200 frames.
+      const { panel } = await openVideoCard(600);
+
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        'That range asks for 7200 frames; the cap is 300.'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(true);
+    });
+
+    it('refuses an in/out range that holds less than one frame', async () => {
+      const { panel } = await openVideoCard(1);
+
+      const outRange = panel.querySelector<HTMLInputElement>(
+        'input[aria-label="Video import range end"]'
+      );
+      if (!outRange) {
+        throw new Error('no out-point slider');
+      }
+      outRange.value = '0.05';
+      outRange.dispatchEvent(new Event('input'));
+      await panel.updateComplete;
+
+      expect(panel.querySelector('.ag-video-plan')?.textContent).toContain(
+        'This range is shorter than one frame'
+      );
+      expect(panel.querySelector<HTMLButtonElement>('.ag-video-apply')?.disabled).toBe(true);
+    });
+
+    it('states the failure when the browser cannot decode the picked file', async () => {
+      seedAnimationTab(['res://sprites/walk/idle_0001.png']);
+      const realCreateElement = document.createElement.bind(document);
+      const file = new File(['not a video'], 'broken.mov', { type: 'video/quicktime' });
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, elementOptions?: unknown) => {
+          if (tagName === 'video') {
+            const video = new EventTarget() as EventTarget & { src: string };
+            Object.defineProperty(video, 'src', {
+              set: () => {
+                setTimeout(() => video.dispatchEvent(new Event('error')), 0);
+              },
+              configurable: true,
+            });
+            Object.assign(video, { removeAttribute: () => {}, load: () => {} });
+            return video as unknown as HTMLElement;
+          }
+          const element = realCreateElement(
+            tagName,
+            elementOptions as ElementCreationOptions | undefined
+          );
+          if (tagName === 'input') {
+            Object.defineProperties(element, {
+              files: { value: [file], configurable: true },
+              click: {
+                value: () => element.dispatchEvent(new Event('change')),
+                configurable: true,
+              },
+            });
+          }
+          return element;
+        }
+      );
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:video');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+      const { panel } = createPanel();
+      await mount(panel, ANIMATION_TAB_ID);
+      panel.querySelector<HTMLButtonElement>('.ag-video-import')?.click();
+
+      await vi.waitFor(() => {
+        expect(panel.querySelector('.ag-slice-status')?.textContent).toContain(
+          'could not decode this video file'
+        );
+      });
+      expect(panel.querySelector('.ag-video-tools')).toBeNull();
     });
   });
 

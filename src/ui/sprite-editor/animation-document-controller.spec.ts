@@ -897,6 +897,725 @@ describe('AnimationDocumentController', () => {
     });
   });
 
+  /**
+   * §9.12.2 — the auto collision polygon. As in the trim suite, the REAL alpha
+   * reader (`readAlphaMask`) and the REAL tracer run: only `createImageBitmap` and
+   * the 2D canvas are stood up, over a synthetic alpha buffer happy-dom cannot
+   * produce. What is asserted is the *contract*: the trace lands in the draft (so
+   * the existing overlay previews it), nothing reaches the document until the
+   * draft is committed, and then it is one clip update.
+   */
+  describe('traceSelectedFramePolygon (§9.12.2)', () => {
+    const ASSET_PATH = 'res://sprites/walk/walk.pix3anim';
+    const ANIMATION_ID = 'sprites-walk-walk';
+
+    /** A frame raster described by a predicate over its pixels. */
+    interface AlphaRaster {
+      width: number;
+      height: number;
+      isOpaque: (x: number, y: number) => boolean;
+    }
+
+    /** `#` is opaque; every other character is transparent. */
+    function rasterFromRows(rows: string[]): AlphaRaster {
+      return {
+        width: rows[0]?.length ?? 0,
+        height: rows.length,
+        isOpaque: (x, y) => rows[y]?.[x] === '#',
+      };
+    }
+
+    /** A filled disc — an outline whose vertex count actually moves with tolerance. */
+    function discRaster(size: number, radius: number): AlphaRaster {
+      const center = size / 2;
+      return {
+        width: size,
+        height: size,
+        isOpaque: (x, y) => Math.hypot(x + 0.5 - center, y + 0.5 - center) <= radius,
+      };
+    }
+
+    function stubAlphaRasters(rasters: Record<string, AlphaRaster>): {
+      decodes: ReturnType<typeof vi.fn>;
+    } {
+      // `readBlob` resolves here, so the texture-preview loader reaches `new Image()`,
+      // which happy-dom never settles. Settle it as "undecodable" (the preview is not
+      // what this suite is about).
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = 0;
+          public naturalHeight = 0;
+          public width = 0;
+          public height = 0;
+          set src(_value: string) {
+            queueMicrotask(() => this.onerror?.());
+          }
+        }
+      );
+
+      const decodes = vi.fn();
+      vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+        const key = await blob.text();
+        const raster = rasters[key];
+        if (!raster) {
+          throw new Error(`no raster stubbed for ${key}`);
+        }
+        decodes(key);
+        return { width: raster.width, height: raster.height, raster, close: () => undefined };
+      });
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          let drawn: AlphaRaster | null = null;
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              drawImage: (bitmap: { raster?: AlphaRaster }) => {
+                drawn = bitmap.raster ?? null;
+              },
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                const raster: AlphaRaster | null = drawn;
+                if (raster) {
+                  for (let y = 0; y < height; y += 1) {
+                    for (let x = 0; x < width; x += 1) {
+                      data[(y * width + x) * 4 + 3] = raster.isOpaque(x, y) ? 255 : 0;
+                    }
+                  }
+                }
+                return { data };
+              },
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['baked'], { type: 'image/png' })),
+          };
+          return canvas as unknown as HTMLElement;
+        }
+      );
+      return { decodes };
+    }
+
+    /** Frame blobs are their own path, so the bitmap stub can identify them. */
+    function readBlobByPath(): ReturnType<typeof vi.fn> {
+      return vi.fn(async (texturePath: string) => new Blob([texturePath], { type: 'image/png' }));
+    }
+
+    function seedPolygonDocument(
+      controller: AnimationDocumentController,
+      frames: AnimationResource['clips'][number]['frames']
+    ): ControllerInternals {
+      const resource: AnimationResource = {
+        version: '1.0.0',
+        texturePath: 'res://sprites/walk/sheet.png',
+        clips: [{ name: 'idle', fps: 12, loop: true, playbackMode: 'normal', frames }],
+      };
+      const internals = seedDocument(controller, resource, {
+        animationId: ANIMATION_ID,
+        assetPath: ASSET_PATH,
+        activeClipName: 'idle',
+      });
+      internals._selectedFrameIndex = 0;
+      internals._selectedFrameIndices = [0];
+      return internals;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('drops a trace whose frame stopped being the selected one mid-decode', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': rasterFromRows([
+          '........',
+          '..####..',
+          '..####..',
+          '........',
+        ]),
+      });
+      let releaseFirstRead: () => void = () => undefined;
+      const firstRead = new Promise<void>(resolve => {
+        releaseFirstRead = resolve;
+      });
+      const readBlob = vi.fn(async (texturePath: string) => {
+        if (texturePath.endsWith('idle_0001.png')) {
+          await firstRead;
+        }
+        return new Blob([texturePath], { type: 'image/png' });
+      });
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      const internals = seedPolygonDocument(controller, [
+        createFrame('res://sprites/walk/idle_0001.png'),
+        createFrame('res://sprites/walk/idle_0002.png'),
+      ]);
+
+      const pending = controller.traceSelectedFramePolygon({ tolerance: 1 });
+      // The timeline stays clickable while the first decode of a frame runs.
+      internals._selectedFrameIndex = 1;
+      internals._selectedFrameIndices = [1];
+      releaseFirstRead();
+
+      // Without the guard this outline would land in a draft cloned from frame 2.
+      await expect(pending).resolves.toEqual({ status: 'stale', vertexCount: 0 });
+      expect(controller.frameDraft).toBeNull();
+    });
+
+    it('traces into the frame DRAFT and writes nothing until the draft is committed', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': rasterFromRows([
+          '........',
+          '..####..',
+          '..####..',
+          '..####..',
+          '........',
+        ]),
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [createFrame('res://sprites/walk/idle_0001.png')]);
+
+      const report = await controller.traceSelectedFramePolygon({ tolerance: 1 });
+
+      expect(report).toEqual({ status: 'traced', vertexCount: 4 });
+      // The preview *is* the editable overlay: the polygon sits in the draft, in
+      // absolute frame pixels, and the document has not been touched.
+      expect(controller.frameDraft?.collisionPolygon).toEqual([
+        { x: 6, y: 1 },
+        { x: 6, y: 4 },
+        { x: 2, y: 4 },
+        { x: 2, y: 1 },
+      ]);
+      expect(invokeAndPush).not.toHaveBeenCalled();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([]);
+
+      await controller.commitFrameDraft('Auto collision polygon: idle');
+
+      // ...and the commit is ONE clip update.
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      expect(controller.frameDraft).toBeNull();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toEqual([
+        { x: 6, y: 1 },
+        { x: 6, y: 4 },
+        { x: 2, y: 4 },
+        { x: 2, y: 1 },
+      ]);
+    });
+
+    it('decodes the texture once across re-traces, and a coarser tolerance yields fewer vertices', async () => {
+      const { decodes } = stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': discRaster(48, 20),
+      });
+      const readBlob = readBlobByPath();
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [createFrame('res://sprites/walk/idle_0001.png')]);
+
+      const fine = await controller.traceSelectedFramePolygon({ tolerance: 0.5 });
+      const coarse = await controller.traceSelectedFramePolygon({ tolerance: 4 });
+
+      expect(fine.status).toBe('traced');
+      expect(coarse.vertexCount).toBeLessThan(fine.vertexCount);
+      expect(coarse.vertexCount).toBeGreaterThanOrEqual(3);
+      expect(controller.frameDraft?.collisionPolygon).toHaveLength(coarse.vertexCount);
+      // The mask cache: dragging the tolerance slider must not re-decode the PNG
+      // on every release. (`readBlob` is shared with the texture-preview loader, so
+      // the decode count is the honest signal here.)
+      expect(decodes).toHaveBeenCalledTimes(1);
+      expect(decodes).toHaveBeenCalledWith('res://sprites/walk/idle_0001.png');
+
+      // ...and invalidating the file drops the cached mask with everything else.
+      controller.invalidateTexture('res://sprites/walk/idle_0001.png');
+      await controller.traceSelectedFramePolygon({ tolerance: 4 });
+      expect(decodes).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses a UV-window frame, whose file is the whole spritesheet', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/sheet.png': rasterFromRows(['####', '####']),
+      });
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      const windowFrame = { ...createFrame(''), repeat: { x: 0.25, y: 1 } };
+      seedPolygonDocument(controller, [windowFrame]);
+
+      const report = await controller.traceSelectedFramePolygon();
+
+      expect(report).toEqual({ status: 'no-frame', vertexCount: 0 });
+      expect(controller.frameDraft).toBeNull();
+    });
+
+    it('reports an empty frame instead of clearing the polygon it already has', async () => {
+      stubAlphaRasters({
+        'res://sprites/walk/idle_0001.png': rasterFromRows(['....', '....']),
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedPolygonDocument(controller, [
+        {
+          ...createFrame('res://sprites/walk/idle_0001.png'),
+          collisionPolygon: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 2 },
+          ],
+        },
+      ]);
+
+      const report = await controller.traceSelectedFramePolygon();
+
+      expect(report).toEqual({ status: 'empty', vertexCount: 0 });
+      expect(controller.frameDraft).toBeNull();
+      expect(invokeAndPush).not.toHaveBeenCalled();
+      expect(controller.resource?.clips[0]?.frames[0]?.collisionPolygon).toHaveLength(3);
+    });
+  });
+
+  /**
+   * §9.12.4. Two shapes to hold apart: the parity delete touches no file at all
+   * and is one plain clip update, while the raster map follows §9.12.1's batching
+   * exactly — every file written first, then ONE clip update, then ONE
+   * invalidation pass. The real `flipImageBlob` / `chromaKeyImage` run over a
+   * synthetic raster; only `createImageBitmap` and the 2D canvas are stood up.
+   */
+  describe('bulk frame ops (§9.12.4)', () => {
+    const ASSET_PATH = 'res://sprites/walk/walk.pix3anim';
+    const ANIMATION_ID = 'sprites-walk-walk';
+
+    interface BulkRaster {
+      width: number;
+      height: number;
+      /** Uniform grey the whole raster is filled with (chroma-key input). */
+      grey: number;
+    }
+
+    function stubBulkRasters(rasters: Record<string, BulkRaster>): void {
+      // `readBlob` resolves here, so the texture-preview loader reaches
+      // `new Image()`, which happy-dom never settles. Settle it as undecodable.
+      vi.stubGlobal(
+        'Image',
+        class {
+          public onload: (() => void) | null = null;
+          public onerror: (() => void) | null = null;
+          public naturalWidth = 0;
+          public naturalHeight = 0;
+          public width = 0;
+          public height = 0;
+          set src(_value: string) {
+            queueMicrotask(() => this.onerror?.());
+          }
+        }
+      );
+
+      vi.stubGlobal('createImageBitmap', async (blob: Blob) => {
+        const key = await blob.text();
+        const raster = rasters[key];
+        if (!raster) {
+          throw new Error(`no raster stubbed for ${key}`);
+        }
+        return { width: raster.width, height: raster.height, raster, close: () => undefined };
+      });
+
+      const realCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(
+        (tagName: string, options?: unknown) => {
+          if (tagName !== 'canvas') {
+            return realCreateElement(tagName, options as ElementCreationOptions | undefined);
+          }
+          let drawn: BulkRaster | null = null;
+          const canvas = {
+            width: 0,
+            height: 0,
+            getContext: () => ({
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: 'low',
+              translate: () => undefined,
+              scale: () => undefined,
+              rotate: () => undefined,
+              drawImage: (bitmap: { raster?: BulkRaster }) => {
+                drawn = bitmap.raster ?? null;
+              },
+              getImageData: (_x: number, _y: number, width: number, height: number) => {
+                const data = new Uint8ClampedArray(width * height * 4);
+                const raster: BulkRaster | null = drawn;
+                for (let index = 0; index < width * height; index += 1) {
+                  data[index * 4] = raster?.grey ?? 0;
+                  data[index * 4 + 1] = raster?.grey ?? 0;
+                  data[index * 4 + 2] = raster?.grey ?? 0;
+                  data[index * 4 + 3] = 255;
+                }
+                return { data, width, height };
+              },
+              putImageData: () => undefined,
+            }),
+            toBlob: (callback: (blob: Blob | null) => void) =>
+              callback(new Blob(['baked'], { type: 'image/png' })),
+          };
+          return canvas as unknown as HTMLElement;
+        }
+      );
+    }
+
+    /** Frame blobs are their own path, so the bitmap stub can identify them. */
+    function readBlobByPath(): ReturnType<typeof vi.fn> {
+      return vi.fn(async (texturePath: string) => new Blob([texturePath], { type: 'image/png' }));
+    }
+
+    function bulkFrame(texturePath: string, sourceSize?: { width: number; height: number }) {
+      return {
+        ...createFrame(texturePath, { x: 0.4, y: 0.25 }),
+        ...(sourceSize ? { sourceSize } : {}),
+      };
+    }
+
+    function seedBulkDocument(
+      controller: AnimationDocumentController,
+      frames: ReturnType<typeof bulkFrame>[]
+    ): ControllerInternals {
+      const resource: AnimationResource = {
+        version: '1.0.0',
+        texturePath: '',
+        clips: [{ name: 'idle', fps: 12, loop: true, playbackMode: 'normal', frames }],
+      };
+      return seedDocument(controller, resource, {
+        animationId: ANIMATION_ID,
+        assetPath: ASSET_PATH,
+        activeClipName: 'idle',
+      });
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('drops every even frame in one clip update and writes no files', async () => {
+      const { deps, invokeAndPush, writeBinaryFile } = createDeps();
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(
+        controller,
+        [1, 2, 3, 4, 5].map(number =>
+          bulkFrame(`res://sprites/walk/idle_000${number}.png`, { width: 100, height: 80 })
+        )
+      );
+
+      const report = await controller.deleteFramesByParity('even');
+
+      // "Even" is the number the timeline shows, so frames 2 and 4 go.
+      expect(report).toEqual({ processed: 2, skipped: 0, failed: 0 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      expect(writeBinaryFile).not.toHaveBeenCalled();
+      expect(controller.resource?.clips[0]?.frames.map(frame => frame.texturePath)).toEqual([
+        'res://sprites/walk/idle_0001.png',
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0005.png',
+      ]);
+    });
+
+    it('drops the odd frames instead when asked, and refuses UV-window frames', async () => {
+      const { deps } = createDeps();
+      const controller = new AnimationDocumentController(deps, '');
+      const internals = seedBulkDocument(controller, [
+        // Frame 1 (odd) is a window into the shared sheet — halving *those* is a
+        // slicing decision, so it is reported as a skip, not removed.
+        { ...bulkFrame(''), repeat: { x: 0.5, y: 1 } },
+        bulkFrame('res://sprites/walk/idle_0002.png'),
+        bulkFrame('res://sprites/walk/idle_0003.png'),
+      ]);
+      internals._resource = {
+        ...(internals._resource as AnimationResource),
+        texturePath: 'res://sprites/walk/sheet.png',
+      };
+
+      const report = await controller.deleteFramesByParity('odd');
+
+      expect(report).toEqual({ processed: 1, skipped: 1, failed: 0 });
+      expect(controller.resource?.clips[0]?.frames.map(frame => frame.texturePath)).toEqual([
+        '',
+        'res://sprites/walk/idle_0002.png',
+      ]);
+    });
+
+    it('maps a flip over the whole clip: all files first, ONE update, ONE invalidation', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0001.png': { width: 100, height: 80, grey: 0 },
+        'res://sprites/walk/idle_0002.png': { width: 100, height: 80, grey: 0 },
+      });
+      const { deps, invokeAndPush, evictTexture, invalidateTexture } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(controller, [
+        bulkFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+        bulkFrame('res://sprites/walk/idle_0002.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'flip',
+        axis: 'horizontal',
+      });
+
+      expect(report).toEqual({ processed: 2, skipped: 0, failed: 0 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+
+      const storageWrites = (
+        deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>
+      ).mock;
+      expect(storageWrites.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      // Every file lands BEFORE the document swap (§9.12.1's shape), so a throw
+      // mid-way leaves the document untouched rather than half-flipped.
+      for (const order of storageWrites.invocationCallOrder) {
+        expect(order).toBeLessThan(invokeAndPush.mock.invocationCallOrder[0]);
+      }
+
+      const frames = controller.resource?.clips[0]?.frames ?? [];
+      expect(frames.map(frame => frame.texturePath)).toEqual([
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0004.png',
+      ]);
+      for (const frame of frames) {
+        // A mirror is not a resize: same box, mirrored anchor (0.4 → 0.6).
+        expect(frame.sourceSize).toEqual({ width: 100, height: 80 });
+        expect(frame.anchor.x).toBeCloseTo(0.6, 6);
+        expect(frame.anchor.y).toBeCloseTo(0.25, 6);
+      }
+
+      // One invalidation pass covering both the retired and the new files.
+      expect(evictTexture).toHaveBeenCalledWith('res://sprites/walk/idle_0001.png');
+      expect(evictTexture).toHaveBeenCalledWith('res://sprites/walk/idle_0004.png');
+      expect(invalidateTexture).toHaveBeenCalledWith('res://sprites/walk/idle_0004.png');
+    });
+
+    it('skips UV-window and unmeasured frames without burning a file number', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0003.png': { width: 100, height: 80, grey: 0 },
+      });
+      const readBlob = readBlobByPath();
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      const internals = seedBulkDocument(controller, [
+        { ...bulkFrame(''), repeat: { x: 0.5, y: 1 }, sourceSize: { width: 50, height: 80 } },
+        // Own file, but its raster size is not known — nothing to restamp against.
+        bulkFrame('res://sprites/walk/idle_0002.png'),
+        bulkFrame('res://sprites/walk/idle_0003.png', { width: 100, height: 80 }),
+      ]);
+      internals._resource = {
+        ...(internals._resource as AnimationResource),
+        texturePath: 'res://sprites/walk/sheet.png',
+      };
+
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'flip',
+        axis: 'vertical',
+      });
+
+      expect(report).toEqual({ processed: 1, skipped: 2, failed: 0 });
+      expect(readBlob).not.toHaveBeenCalledWith('res://sprites/walk/idle_0002.png');
+      // Highest existing number is 3, so the single write takes 4.
+      const storageWrites = (
+        deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>
+      ).mock;
+      expect(storageWrites.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0004.png',
+      ]);
+    });
+
+    it('composes with the chroma key: same size, identity restamp', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0001.png': { width: 100, height: 80, grey: 12 },
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(controller, [
+        bulkFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'chroma-key',
+        color: { r: 12, g: 12, b: 12 },
+        tolerance: 0.05,
+      });
+
+      expect(report).toEqual({ processed: 1, skipped: 0, failed: 0 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const frame = controller.resource?.clips[0]?.frames[0];
+      expect(frame?.texturePath).toBe('res://sprites/walk/idle_0002.png');
+      // Only alpha changed, so nothing about the frame's geometry may move.
+      expect(frame?.sourceSize).toEqual({ width: 100, height: 80 });
+      expect(frame?.anchor).toEqual({ x: 0.4, y: 0.25 });
+    });
+
+    it('reports a frame whose file cannot be read as failed and still maps the rest', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0002.png': { width: 100, height: 80, grey: 0 },
+      });
+      const readBlob = vi.fn(async (texturePath: string) => {
+        if (texturePath.endsWith('idle_0001.png')) {
+          throw new Error('missing file');
+        }
+        return new Blob([texturePath], { type: 'image/png' });
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob,
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(controller, [
+        bulkFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+        bulkFrame('res://sprites/walk/idle_0002.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'rotate',
+        quarterTurns: 1,
+      });
+
+      expect(report).toEqual({ processed: 1, skipped: 0, failed: 1 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const frames = controller.resource?.clips[0]?.frames ?? [];
+      expect(frames[0]?.texturePath).toBe('res://sprites/walk/idle_0001.png');
+      expect(frames[1]?.texturePath).toBe('res://sprites/walk/idle_0003.png');
+      // A quarter-turn swaps the box: 100×80 becomes 80×100.
+      expect(frames[1]?.sourceSize).toEqual({ width: 80, height: 100 });
+    });
+
+    it('leaves a frame the key colour never touches alone, and says it skipped it', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0001.png': { width: 100, height: 80, grey: 12 },
+        // Nowhere near the key: this frame comes back byte-identical.
+        'res://sprites/walk/idle_0002.png': { width: 100, height: 80, grey: 200 },
+      });
+      const { deps, invokeAndPush } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile: vi.fn().mockResolvedValue(undefined),
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(controller, [
+        bulkFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+        bulkFrame('res://sprites/walk/idle_0002.png', { width: 100, height: 80 }),
+      ]);
+
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'chroma-key',
+        color: { r: 12, g: 12, b: 12 },
+        tolerance: 0.05,
+      });
+
+      // §9.12.1's "already tight" skip, one op over: rewriting the second frame
+      // would burn a file number and claim work that never happened.
+      expect(report).toEqual({ processed: 1, skipped: 1, failed: 0 });
+      expect(invokeAndPush).toHaveBeenCalledOnce();
+      const storageWrites = (
+        deps.projectStorage.writeBinaryFile as unknown as ReturnType<typeof vi.fn>
+      ).mock;
+      expect(storageWrites.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0003.png',
+      ]);
+      expect(controller.resource?.clips[0]?.frames.map(frame => frame.texturePath)).toEqual([
+        'res://sprites/walk/idle_0003.png',
+        'res://sprites/walk/idle_0002.png',
+      ]);
+    });
+
+    it('never hands a bake a file number an import already spent, even after an undo', async () => {
+      stubBulkRasters({
+        'res://sprites/walk/idle_0001.png': { width: 100, height: 80, grey: 0 },
+      });
+      const writeBinaryFile = vi.fn().mockResolvedValue(undefined);
+      const { deps } = createDeps({
+        projectStorage: {
+          readBlob: readBlobByPath(),
+          writeBinaryFile,
+        } as unknown as AnimationDocumentControllerDeps['projectStorage'],
+      });
+      const controller = new AnimationDocumentController(deps, '');
+      seedBulkDocument(controller, [
+        bulkFrame('res://sprites/walk/idle_0001.png', { width: 100, height: 80 }),
+      ]);
+
+      // A video import (§9.12.5) lands as a run of files through this path.
+      const imported = await controller.importOsFiles([
+        new File(['a'], 'grab-1.png', { type: 'image/png' }),
+        new File(['b'], 'grab-2.png', { type: 'image/png' }),
+      ]);
+      expect(imported).toEqual([
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+      ]);
+
+      // Undo: the document never gained those frames, so nothing references
+      // 0002/0003 any more — but a *redo* still points at those exact files.
+      const report = await controller.applyRasterOpToClipFrames({
+        kind: 'flip',
+        axis: 'horizontal',
+      });
+
+      expect(report).toEqual({ processed: 1, skipped: 0, failed: 0 });
+      expect(writeBinaryFile.mock.calls.map(call => call[0])).toEqual([
+        'res://sprites/walk/idle_0002.png',
+        'res://sprites/walk/idle_0003.png',
+        // Not 0002 again: the bake counts past the imported run.
+        'res://sprites/walk/idle_0004.png',
+      ]);
+    });
+  });
+
   it('registers itself as the inspector controller only while its tab is active', async () => {
     const setActiveController = vi.fn();
     const activeControllers: unknown[] = [];

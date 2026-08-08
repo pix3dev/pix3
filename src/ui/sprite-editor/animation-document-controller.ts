@@ -9,7 +9,20 @@ import {
   sanitizeFrameFilePrefix,
 } from '@/features/scene/animation-asset-utils';
 import { appState } from '@/state';
-import { readBlobSize, sliceImageBlob, trimImageBlob } from '@/services/image-gen/image-ops';
+import {
+  chromaKeyImage,
+  flipImageBlob,
+  readAlphaMask,
+  readBlobSize,
+  rotateImageBlob,
+  sliceImageBlob,
+  trimImageBlob,
+  type AlphaMask,
+  type FlipAxis,
+  type QuarterTurns,
+  type RasterResult,
+  type RgbColor,
+} from '@/services/image-gen/image-ops';
 import type { AnimationAutoSliceDialogService } from '@/services/animation/AnimationAutoSliceDialogService';
 import type {
   AnimationEditorService,
@@ -22,6 +35,7 @@ import type { OperationService } from '@/services/core/OperationService';
 import type { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import type { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import type { StagePoint } from '@/ui/shared/stage-zoom-pan';
+import { traceCollisionPolygon, DEFAULT_CONTOUR_TOLERANCE } from './contour-trace';
 import { restampFrameGeometry, type FrameRasterTransform } from './frame-restamp';
 import {
   AnimatedSprite2D,
@@ -116,6 +130,86 @@ export interface TrimClipReport {
   failed: number;
 }
 
+/**
+ * §9.12.4 — outcome of a bulk frame op. `processed` is what actually changed,
+ * `skipped` the frames the op does not apply to (a UV window into a shared sheet,
+ * or a frame whose raster size isn't known yet), `failed` a read/transform/write
+ * that threw. Deliberately the same three buckets {@link TrimClipReport} uses, so
+ * the toolbar states every bulk outcome the same way.
+ */
+export interface BulkFrameReport {
+  processed: number;
+  skipped: number;
+  failed: number;
+}
+
+/**
+ * Which half of the clip {@link AnimationDocumentController.deleteFramesByParity}
+ * removes, counted the way the UI numbers frames: `Frame 1` is odd.
+ */
+export type FrameParity = 'even' | 'odd';
+
+/**
+ * A raster op mapped over every frame of a clip (§9.12.4). Each case is an
+ * existing `image-ops` function *plus* the {@link FrameRasterTransform} that
+ * re-derives the frame's anchor / points / bbox / polygon against the result —
+ * the pairing is the whole reason this is an enum rather than a callback.
+ */
+export type BulkRasterOp =
+  /** §9.12.3's chroma key, applied clip-wide — the two power tools composing. */
+  | {
+      readonly kind: 'chroma-key';
+      readonly color: RgbColor;
+      readonly tolerance?: number;
+      readonly softness?: number;
+    }
+  | { readonly kind: 'flip'; readonly axis: FlipAxis }
+  | { readonly kind: 'rotate'; readonly quarterTurns: QuarterTurns };
+
+/** Undo-label / status verb for a bulk raster op. */
+export const describeBulkRasterOp = (op: BulkRasterOp): string => {
+  switch (op.kind) {
+    case 'chroma-key':
+      return 'Chroma key';
+    case 'flip':
+      return op.axis === 'horizontal' ? 'Flip horizontally' : 'Flip vertically';
+    case 'rotate':
+      return `Rotate ${op.quarterTurns * 90}°`;
+  }
+};
+
+/**
+ * Knobs {@link AnimationDocumentController.traceSelectedFramePolygon} hands to the
+ * §9.12.2 tracer.
+ */
+export interface AutoPolygonOptions {
+  /**
+   * Douglas–Peucker tolerance in frame pixels: no polygon edge strays further than
+   * this from the traced alpha outline. Default {@link DEFAULT_CONTOUR_TOLERANCE}.
+   */
+  tolerance?: number;
+  /**
+   * Alpha (0..255) at or below which a pixel counts as empty. Default 0 — the same
+   * meaning it has for a trim.
+   */
+  alphaThreshold?: number;
+}
+
+/** Outcome of one auto-trace. Nothing is committed; the polygon lands in the draft. */
+export interface AutoPolygonReport {
+  /**
+   * `traced` — the frame draft now carries the polygon, awaiting a commit;
+   * `no-frame` — no frame selected, or the frame is a UV window into a shared
+   * sheet whose alpha is not this frame's outline; `unreadable` — the texture
+   * could not be decoded; `empty` — the frame has no opaque pixels, and the
+   * existing polygon was left alone rather than replaced with nothing; `stale` —
+   * the selection moved while the mask was decoding, so the trace was dropped
+   * instead of landing on a frame it does not describe.
+   */
+  status: 'traced' | 'no-frame' | 'unreadable' | 'empty' | 'stale';
+  vertexCount: number;
+}
+
 export const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',
@@ -184,6 +278,12 @@ export class AnimationDocumentController implements AnimationInspectorController
   private readonly texturePreviewCache = new Map<string, string>();
   private readonly textureDimensionsCache = new Map<string, TextureDimensions>();
   private readonly texturePreviewLoads = new Map<string, Promise<void>>();
+  /**
+   * Decoded alpha masks for the auto-polygon tracer (§9.12.2), keyed
+   * `<texturePath>|<alphaThreshold>`. Dragging the tolerance slider re-traces on
+   * every release; re-decoding the PNG each time would make it feel like treacle.
+   */
+  private readonly alphaMaskCache = new Map<string, AlphaMask>();
 
   /** Highest `<clip>_<nnnn>` this session already wrote, by sanitized clip prefix. */
   private readonly reservedFrameFileNumbers = new Map<string, number>();
@@ -568,6 +668,13 @@ export class AnimationDocumentController implements AnimationInspectorController
     this.texturePreviewCache.delete(normalizedTexturePath);
     this.textureDimensionsCache.delete(normalizedTexturePath);
     this.texturePreviewLoads.delete(normalizedTexturePath);
+    // The mask cache is keyed by path *and* alpha threshold, so drop every entry
+    // this file produced rather than one.
+    for (const key of this.alphaMaskCache.keys()) {
+      if (key.startsWith(`${normalizedTexturePath}|`)) {
+        this.alphaMaskCache.delete(key);
+      }
+    }
     if (this.previewTexturePath === normalizedTexturePath) {
       this.resetCurrentTexturePreview();
       void this.syncPreviewTexture();
@@ -902,6 +1009,13 @@ export class AnimationDocumentController implements AnimationInspectorController
    * Copy OS-dropped images into the animation's own folder as `<clip>_<nnnn>.<ext>` (the managed
    * sprite-folder convention), so a drag from the desktop lands as project files the resource can
    * reference. Returns the written resource paths in drop order.
+   *
+   * Every number written here is reserved as it is used, not merely counted past: undoing the
+   * import un-references these files, and without the reservation the next bake (trim, chroma,
+   * flip) would take the freed number back and overwrite pixels a *redo* still points at. The run
+   * can be long — a video import (§9.12.5) lands here as N frames at once — so the reservation
+   * happens per file rather than once at the end, and a write that throws mid-run still leaves the
+   * files it already produced protected.
    */
   async importOsFiles(files: File[]): Promise<string[]> {
     const assetPath = this._assetPath ? normalizeAnimationAssetPath(this._assetPath) : '';
@@ -920,6 +1034,7 @@ export class AnimationDocumentController implements AnimationInspectorController
         extension: extension && IMAGE_EXTENSIONS.has(extension) ? extension : 'png',
       });
       await this.deps.projectStorage.writeBinaryFile(framePath, await file.arrayBuffer());
+      this.rememberFrameFileNumber(clipName, frameNumber);
       written.push(framePath);
       frameNumber += 1;
     }
@@ -1155,6 +1270,256 @@ export class AnimationDocumentController implements AnimationInspectorController
       return { width: cached.width, height: cached.height };
     }
     return null;
+  }
+
+  // --- bulk frame ops (§9.12.4) ---------------------------------------------
+
+  /**
+   * §9.12.4 — drop every even (or every odd) frame of the active clip, counting
+   * the way the timeline labels them: `Frame 1` is odd. The classic "this was
+   * captured at 24 fps and only needs 12" halving.
+   *
+   * No file is written and none is deleted: the frames' PNGs stay on disk, so
+   * undo genuinely restores the clip. It is therefore a **plain single-step clip
+   * update**, delegated to {@link removeFrames} — which already collapses the
+   * whole removal into one operation and repairs the selection afterwards.
+   *
+   * A UV-window frame is refused rather than removed. Its siblings all read out
+   * of one shared sheet, and halving *those* is a slicing decision, not a
+   * frame-list edit; refusing keeps the tool's promise ("only frames that own
+   * their file") identical to every other §9.12 tool.
+   */
+  async deleteFramesByParity(parity: FrameParity): Promise<BulkFrameReport> {
+    const report: BulkFrameReport = { processed: 0, skipped: 0, failed: 0 };
+    const clip = this.activeClip;
+    if (!clip || clip.frames.length === 0) {
+      return report;
+    }
+
+    const wantEven = parity === 'even';
+    const targets: number[] = [];
+    for (const [frameIndex, frame] of clip.frames.entries()) {
+      // (frameIndex + 1) is the number the timeline shows.
+      if (((frameIndex + 1) % 2 === 0) !== wantEven) {
+        continue;
+      }
+      if (!isSequenceAnimationFrame(frame)) {
+        report.skipped += 1;
+        continue;
+      }
+      targets.push(frameIndex);
+    }
+    if (targets.length === 0) {
+      return report;
+    }
+
+    const frameCountBefore = clip.frames.length;
+    await this.removeFrames(targets);
+    if ((this.activeClip?.frames.length ?? frameCountBefore) === frameCountBefore) {
+      // The document refused the update (no operation pushed); nothing changed.
+      report.failed = targets.length;
+      return report;
+    }
+
+    report.processed = targets.length;
+    return report;
+  }
+
+  /**
+   * §9.12.4 — map one raster op over every frame of the active clip.
+   *
+   * Shares {@link trimClipFrames}'s shape exactly, and for the same reasons:
+   * every new file is written **first**, then **one** `applyClipUpdate` swaps them
+   * all in at once (one undo step, never a half-transformed clip), then **one**
+   * invalidation pass runs. A loop over {@link replaceFrameTexture} would give up
+   * all three.
+   *
+   * The geometry restamp is not optional — a clip-wide flip has to mirror every
+   * anchor, point, box and polygon or the sprite jumps — which is why each op
+   * carries its {@link FrameRasterTransform} and why a frame whose raster size is
+   * unknown is skipped rather than guessed at (§9.7 risk 2).
+   */
+  async applyRasterOpToClipFrames(op: BulkRasterOp): Promise<BulkFrameReport> {
+    const report: BulkFrameReport = { processed: 0, skipped: 0, failed: 0 };
+    const clip = this.activeClip;
+    const assetPath = this._assetPath ? normalizeAnimationAssetPath(this._assetPath) : '';
+    if (!clip || !assetPath || clip.frames.length === 0) {
+      return report;
+    }
+
+    const clipName = clip.name;
+    const transform = rasterOpTransform(op);
+    const writes: Array<{ index: number; framePath: string; restamped: AnimationFrame }> = [];
+    const previousTexturePaths: string[] = [];
+
+    for (const [frameIndex, frame] of clip.frames.entries()) {
+      if (!isSequenceAnimationFrame(frame)) {
+        report.skipped += 1;
+        continue;
+      }
+      const fromSize = this.resolveTrimSourceSize(frame);
+      const texturePath = this.getResolvedFrameTexturePath(frame);
+      if (!fromSize || !texturePath) {
+        report.skipped += 1;
+        continue;
+      }
+
+      try {
+        const source = await this.deps.projectStorage.readBlob(texturePath);
+        const result = await runFrameRasterOp(op, source);
+        if (result.width <= 0 || result.height <= 0) {
+          // Nothing decodable came back — treat it as "this frame is not for me".
+          report.skipped += 1;
+          continue;
+        }
+        if (result.changedPixels === 0) {
+          // §9.12.1's "already tight" skip, one op over: this frame has none of
+          // the key colour, so writing it would burn a file number, invalidate its
+          // texture and let the report claim work that never happened.
+          report.skipped += 1;
+          continue;
+        }
+        const restamped = restampFrameGeometry(frame, transform, fromSize, {
+          width: result.width,
+          height: result.height,
+        });
+
+        const frameNumber = this.reserveFrameFileNumber(clipName);
+        const framePath = buildAnimationFrameResourcePath(assetPath, frameNumber, {
+          clipName,
+          extension: 'png',
+        });
+        await this.deps.projectStorage.writeBinaryFile(framePath, await result.blob.arrayBuffer());
+        writes.push({ index: frameIndex, framePath, restamped });
+        previousTexturePaths.push(texturePath);
+      } catch (error) {
+        console.warn(
+          '[SpriteEditor] Failed to apply a bulk raster op to a frame',
+          texturePath,
+          error
+        );
+        report.failed += 1;
+      }
+    }
+
+    if (writes.length === 0) {
+      return report;
+    }
+
+    const writesByIndex = new Map(writes.map(write => [write.index, write]));
+    this._frameDraft = null;
+    const didMutate = await this.applyClipUpdate(
+      candidate => ({
+        ...candidate,
+        frames: candidate.frames.map((existingFrame, frameIndex) => {
+          const write = writesByIndex.get(frameIndex);
+          return write
+            ? {
+                ...write.restamped,
+                texturePath: write.framePath,
+                // Same reset as `replaceFrameTexture` / `trimClipFrames`: the new
+                // file *is* the frame, so any leftover UV window is baked in.
+                offset: { x: 0, y: 0 },
+                repeat: { x: 1, y: 1 },
+              }
+            : existingFrame;
+        }),
+      }),
+      `${describeBulkRasterOp(op)} ${writes.length} frame${writes.length === 1 ? '' : 's'}: ${clipName}`
+    );
+    if (!didMutate) {
+      // The files exist but the document refused the swap; nothing changed as far
+      // as the user can tell, and the orphans are export-pruned like any bake.
+      report.failed += writes.length;
+      return report;
+    }
+
+    this.invalidateTextureEverywhere(
+      ...previousTexturePaths,
+      ...writes.map(write => write.framePath)
+    );
+    report.processed = writes.length;
+    return report;
+  }
+
+  // --- auto collision polygon (§9.12.2) -------------------------------------
+
+  /**
+   * §9.12.2 — trace the selected frame's alpha into a collision polygon: marching
+   * squares over the opaque mask, Douglas–Peucker down to `tolerance`, straight
+   * into `collisionPolygon` in absolute frame pixels (the space
+   * {@link restampFrameGeometry} already maps, so a later crop moves it correctly).
+   *
+   * The result lands in the **frame draft**, not in the document. That is the whole
+   * preview mechanism: the stage already renders the draft through
+   * `renderPolygonOverlay`, and that overlay is already editable, so the traced
+   * polygon *is* the live preview and the user can drag its vertices before
+   * committing. Nothing is written until the host calls
+   * {@link commitFrameDraft} — one `applyClipUpdate`, one undo step — and
+   * {@link clearFrameDraft} discards the trace entirely.
+   *
+   * A UV-window frame is refused: its file is the shared spritesheet, so the
+   * outline of that file's alpha is the sheet's, not the frame's. Hosts should
+   * additionally gate on {@link hasResolvedFrameMetrics} — the polygon is authored
+   * in the raster's own pixels, and an overlay laid out against the 256 px
+   * placeholder would draw it in the wrong place (§9.7 risk 2).
+   */
+  async traceSelectedFramePolygon(options: AutoPolygonOptions = {}): Promise<AutoPolygonReport> {
+    const frame = this.getSelectedFrame();
+    if (!frame || this._selectedFrameIndex < 0 || !isSequenceAnimationFrame(frame)) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+
+    const texturePath = this.getResolvedFrameTexturePath(frame);
+    if (!texturePath) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+
+    const alphaThreshold = Math.min(255, Math.max(0, Math.round(options.alphaThreshold ?? 0)));
+    const mask = await this.loadAlphaMask(texturePath, alphaThreshold);
+    if (!mask) {
+      return { status: 'unreadable', vertexCount: 0 };
+    }
+    if (this.getSelectedFrame() !== frame) {
+      // The first decode of a frame is real work, and the timeline stays clickable
+      // throughout it. `beginFrameDraft` below clones whatever is selected *now*,
+      // so a trace that outlived its frame would stamp one frame's outline onto
+      // another — drop it instead.
+      return { status: 'stale', vertexCount: 0 };
+    }
+
+    const polygon = traceCollisionPolygon(mask, {
+      tolerance: Math.max(0, options.tolerance ?? DEFAULT_CONTOUR_TOLERANCE),
+    });
+    if (polygon.length < 3) {
+      // Nothing opaque to trace — leave whatever polygon the frame already has.
+      return { status: 'empty', vertexCount: 0 };
+    }
+
+    if (!this._frameDraft && !this.beginFrameDraft()) {
+      return { status: 'no-frame', vertexCount: 0 };
+    }
+    this.updateFrameDraft(draft => ({ ...draft, collisionPolygon: polygon }));
+    return { status: 'traced', vertexCount: polygon.length };
+  }
+
+  /** Decode (once per path + threshold) the opacity mask the tracer walks. */
+  private async loadAlphaMask(
+    texturePath: string,
+    alphaThreshold: number
+  ): Promise<AlphaMask | null> {
+    const key = `${texturePath}|${alphaThreshold}`;
+    const cached = this.alphaMaskCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const blob = await this.deps.projectStorage.readBlob(texturePath);
+    const mask = await readAlphaMask(blob, { alphaThreshold });
+    if (mask) {
+      this.alphaMaskCache.set(key, mask);
+    }
+    return mask;
   }
 
   /**
@@ -1828,8 +2193,20 @@ export class AnimationDocumentController implements AnimationInspectorController
    */
   private reserveFrameFileNumber(clipName: string): number {
     const frameNumber = this.nextFrameFileNumber(clipName);
-    this.reservedFrameFileNumbers.set(sanitizeFrameFilePrefix(clipName), frameNumber);
+    this.rememberFrameFileNumber(clipName, frameNumber);
     return frameNumber;
+  }
+
+  /**
+   * Mark `<clip>_<nnnn>` as spent, for paths that number their files themselves
+   * (an import writes a whole run of them). Same stake as
+   * {@link reserveFrameFileNumber}: a number stays spent even after the frames
+   * that used it are undone away, because redo still points at those files.
+   */
+  private rememberFrameFileNumber(clipName: string, frameNumber: number): void {
+    const prefix = sanitizeFrameFilePrefix(clipName);
+    const highest = Math.max(this.reservedFrameFileNumbers.get(prefix) ?? 0, frameNumber);
+    this.reservedFrameFileNumbers.set(prefix, highest);
   }
 
   private getSelectedAnimatedSprite(): AnimatedSprite2D | null {
@@ -2079,6 +2456,7 @@ export class AnimationDocumentController implements AnimationInspectorController
     this.texturePreviewCache.clear();
     this.textureDimensionsCache.clear();
     this.texturePreviewLoads.clear();
+    this.alphaMaskCache.clear();
     this.previewTexturePath = '';
     this.resetCurrentTexturePreview();
   }
@@ -2191,6 +2569,52 @@ export class AnimationDocumentController implements AnimationInspectorController
     for (const listener of [...this.listeners]) {
       listener();
     }
+  }
+}
+
+/**
+ * §9.12.4 — run one bulk op's pixels. Output is forced to PNG whatever the source
+ * was: a managed sprite folder's frame files are `<clip>_<nnnn>.png` by
+ * convention, so keeping a JPEG's encoding here would write a JPEG under a `.png`
+ * name (and, for the chroma key, throw the alpha away it just authored).
+ */
+async function runFrameRasterOp(op: BulkRasterOp, blob: Blob): Promise<FrameRasterOpResult> {
+  switch (op.kind) {
+    case 'chroma-key': {
+      const result = await chromaKeyImage(blob, op.color, {
+        tolerance: op.tolerance,
+        softness: op.softness,
+        mimeType: 'image/png',
+      });
+      return { ...result, changedPixels: result.keyedPixels + result.softenedPixels };
+    }
+    case 'flip':
+      return flipImageBlob(blob, op.axis, { mimeType: 'image/png' });
+    case 'rotate':
+      return rotateImageBlob(blob, op.quarterTurns, { mimeType: 'image/png' });
+  }
+}
+
+/**
+ * What {@link runFrameRasterOp} hands back: a {@link RasterResult}, plus — for the
+ * ops that can legitimately leave a frame alone — how many pixels they actually
+ * touched. A flip or a rotate always rewrites the raster, so they report nothing.
+ */
+interface FrameRasterOpResult extends RasterResult {
+  /** Chroma key only: keyed + softened pixels. `undefined` means "unknowable / always changed". */
+  readonly changedPixels?: number;
+}
+
+/** How each bulk op moves a frame's geometry (`frame-restamp.ts`'s vocabulary). */
+function rasterOpTransform(op: BulkRasterOp): FrameRasterTransform {
+  switch (op.kind) {
+    case 'chroma-key':
+      // Same pixels, same size — only alpha changed, so the restamp is identity.
+      return { kind: 'replace' };
+    case 'flip':
+      return { kind: 'flip', axis: op.axis };
+    case 'rotate':
+      return { kind: 'rotate', quarterTurns: op.quarterTurns };
   }
 }
 
