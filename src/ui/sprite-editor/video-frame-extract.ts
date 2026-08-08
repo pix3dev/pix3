@@ -392,7 +392,10 @@ export function formatVideoTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return '0:00.0';
   }
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds - minutes * 60;
+  // Round to the displayed precision *before* splitting: 59.96 s rounds to 60.0,
+  // which as a remainder would read "0:60.0" rather than "1:00.0".
+  const tenths = Math.round(seconds * 10);
+  const minutes = Math.floor(tenths / 600);
+  const rest = (tenths - minutes * 600) / 10;
   return `${minutes}:${rest.toFixed(1).padStart(4, '0')}`;
 }

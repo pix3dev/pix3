@@ -202,9 +202,11 @@ export interface AutoPolygonReport {
    * `no-frame` — no frame selected, or the frame is a UV window into a shared
    * sheet whose alpha is not this frame's outline; `unreadable` — the texture
    * could not be decoded; `empty` — the frame has no opaque pixels, and the
-   * existing polygon was left alone rather than replaced with nothing.
+   * existing polygon was left alone rather than replaced with nothing; `stale` —
+   * the selection moved while the mask was decoding, so the trace was dropped
+   * instead of landing on a frame it does not describe.
    */
-  status: 'traced' | 'no-frame' | 'unreadable' | 'empty';
+  status: 'traced' | 'no-frame' | 'unreadable' | 'empty' | 'stale';
   vertexCount: number;
 }
 
@@ -1007,6 +1009,13 @@ export class AnimationDocumentController implements AnimationInspectorController
    * Copy OS-dropped images into the animation's own folder as `<clip>_<nnnn>.<ext>` (the managed
    * sprite-folder convention), so a drag from the desktop lands as project files the resource can
    * reference. Returns the written resource paths in drop order.
+   *
+   * Every number written here is reserved as it is used, not merely counted past: undoing the
+   * import un-references these files, and without the reservation the next bake (trim, chroma,
+   * flip) would take the freed number back and overwrite pixels a *redo* still points at. The run
+   * can be long — a video import (§9.12.5) lands here as N frames at once — so the reservation
+   * happens per file rather than once at the end, and a write that throws mid-run still leaves the
+   * files it already produced protected.
    */
   async importOsFiles(files: File[]): Promise<string[]> {
     const assetPath = this._assetPath ? normalizeAnimationAssetPath(this._assetPath) : '';
@@ -1025,6 +1034,7 @@ export class AnimationDocumentController implements AnimationInspectorController
         extension: extension && IMAGE_EXTENSIONS.has(extension) ? extension : 'png',
       });
       await this.deps.projectStorage.writeBinaryFile(framePath, await file.arrayBuffer());
+      this.rememberFrameFileNumber(clipName, frameNumber);
       written.push(framePath);
       frameNumber += 1;
     }
@@ -1362,6 +1372,13 @@ export class AnimationDocumentController implements AnimationInspectorController
           report.skipped += 1;
           continue;
         }
+        if (result.changedPixels === 0) {
+          // §9.12.1's "already tight" skip, one op over: this frame has none of
+          // the key colour, so writing it would burn a file number, invalidate its
+          // texture and let the report claim work that never happened.
+          report.skipped += 1;
+          continue;
+        }
         const restamped = restampFrameGeometry(frame, transform, fromSize, {
           width: result.width,
           height: result.height,
@@ -1462,6 +1479,13 @@ export class AnimationDocumentController implements AnimationInspectorController
     const mask = await this.loadAlphaMask(texturePath, alphaThreshold);
     if (!mask) {
       return { status: 'unreadable', vertexCount: 0 };
+    }
+    if (this.getSelectedFrame() !== frame) {
+      // The first decode of a frame is real work, and the timeline stays clickable
+      // throughout it. `beginFrameDraft` below clones whatever is selected *now*,
+      // so a trace that outlived its frame would stamp one frame's outline onto
+      // another — drop it instead.
+      return { status: 'stale', vertexCount: 0 };
     }
 
     const polygon = traceCollisionPolygon(mask, {
@@ -2169,8 +2193,20 @@ export class AnimationDocumentController implements AnimationInspectorController
    */
   private reserveFrameFileNumber(clipName: string): number {
     const frameNumber = this.nextFrameFileNumber(clipName);
-    this.reservedFrameFileNumbers.set(sanitizeFrameFilePrefix(clipName), frameNumber);
+    this.rememberFrameFileNumber(clipName, frameNumber);
     return frameNumber;
+  }
+
+  /**
+   * Mark `<clip>_<nnnn>` as spent, for paths that number their files themselves
+   * (an import writes a whole run of them). Same stake as
+   * {@link reserveFrameFileNumber}: a number stays spent even after the frames
+   * that used it are undone away, because redo still points at those files.
+   */
+  private rememberFrameFileNumber(clipName: string, frameNumber: number): void {
+    const prefix = sanitizeFrameFilePrefix(clipName);
+    const highest = Math.max(this.reservedFrameFileNumbers.get(prefix) ?? 0, frameNumber);
+    this.reservedFrameFileNumbers.set(prefix, highest);
   }
 
   private getSelectedAnimatedSprite(): AnimatedSprite2D | null {
@@ -2542,19 +2578,31 @@ export class AnimationDocumentController implements AnimationInspectorController
  * convention, so keeping a JPEG's encoding here would write a JPEG under a `.png`
  * name (and, for the chroma key, throw the alpha away it just authored).
  */
-function runFrameRasterOp(op: BulkRasterOp, blob: Blob): Promise<RasterResult> {
+async function runFrameRasterOp(op: BulkRasterOp, blob: Blob): Promise<FrameRasterOpResult> {
   switch (op.kind) {
-    case 'chroma-key':
-      return chromaKeyImage(blob, op.color, {
+    case 'chroma-key': {
+      const result = await chromaKeyImage(blob, op.color, {
         tolerance: op.tolerance,
         softness: op.softness,
         mimeType: 'image/png',
       });
+      return { ...result, changedPixels: result.keyedPixels + result.softenedPixels };
+    }
     case 'flip':
       return flipImageBlob(blob, op.axis, { mimeType: 'image/png' });
     case 'rotate':
       return rotateImageBlob(blob, op.quarterTurns, { mimeType: 'image/png' });
   }
+}
+
+/**
+ * What {@link runFrameRasterOp} hands back: a {@link RasterResult}, plus — for the
+ * ops that can legitimately leave a frame alone — how many pixels they actually
+ * touched. A flip or a rotate always rewrites the raster, so they report nothing.
+ */
+interface FrameRasterOpResult extends RasterResult {
+  /** Chroma key only: keyed + softened pixels. `undefined` means "unknowable / always changed". */
+  readonly changedPixels?: number;
 }
 
 /** How each bulk op moves a frame's geometry (`frame-restamp.ts`'s vocabulary). */

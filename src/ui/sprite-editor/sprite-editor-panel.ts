@@ -1402,8 +1402,35 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   };
 
   private onToggleBulkPanel = (): void => {
-    this.bulkPanelOpen = !this.bulkPanelOpen;
+    if (this.bulkPanelOpen) {
+      this.bulkPanelOpen = false;
+      return;
+    }
+    this.closeStageCards();
+    // An overlay tool's card sits in the same slot, so hand the stage back to
+    // plain select rather than render two cards on top of each other.
+    this.setStageTool('select');
+    this.bulkPanelOpen = true;
   };
+
+  /**
+   * The stage's top-right slot holds exactly **one** card — the anchor / points /
+   * polygon cards (which `stageTool` already keeps mutually exclusive), §9.12.4's
+   * bulk card and §9.12.5's video card all render into it absolutely positioned.
+   * Opening any of them drops the others, the same "the last click wins" rule
+   * {@link setStageTool} applies to crop, place and the eyedropper.
+   *
+   * The one exception is an import in flight: its decoder is mid-grab and
+   * {@link closeVideoSession} would revoke the element out from under it, so the
+   * video card outlives this until the run finishes (its own button is disabled
+   * throughout, but the overlay tools' are not).
+   */
+  private closeStageCards(): void {
+    this.bulkPanelOpen = false;
+    if (!this.sliceBusy) {
+      this.closeVideoSession();
+    }
+  }
 
   /**
    * §9.12.4's card. Two families, both clip-wide and both confirmed: dropping
@@ -1598,8 +1625,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         };
         return;
       }
-      // The two cards share the stage's top-right slot.
+      // Every card shares the stage's top-right slot; this one takes it.
       this.bulkPanelOpen = false;
+      this.setStageTool('select');
       this.videoSession = {
         fileName: file.name,
         loaded,
@@ -1900,8 +1928,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
     try {
       const pixels = await readImagePixels(blob);
-      // A frame switch (or a Cancel) can land while this is in flight.
-      if (this.chromaMode) {
+      // A frame switch (or a Cancel) can land while this is in flight — and the
+      // mode flag alone does not cover a *re-entry* on another frame, whose own
+      // decode can finish first, so the blob has to still be the decoded one.
+      if (this.chromaMode && this.current?.blob === blob) {
         this.chromaPixels = pixels;
       }
     } catch (error) {
@@ -2135,6 +2165,8 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       this.cropDrag = null;
       this.closePlaceSession();
       this.closeChromaMode();
+      // …and this tool's own card takes the stage slot (see `closeStageCards`).
+      this.closeStageCards();
     }
   }
 
@@ -4408,6 +4440,8 @@ const describeAutoPolygonReport = (report: AutoPolygonReport, tolerance: number)
       return 'This frame has no opaque pixels to trace.';
     case 'unreadable':
       return 'Could not read this frame’s pixels.';
+    case 'stale':
+      return 'The selection moved while tracing — nothing was applied. Try again.';
     default:
       return 'Select a frame with its own texture file to trace a polygon.';
   }

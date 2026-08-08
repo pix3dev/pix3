@@ -1728,3 +1728,43 @@ does. The proof that it was not a no-op: the working image's object URL *changed
 revoked it and `rehydrateObjectUrls` minted a new one — and the new one still resolves. Everything
 else survived: same component instance, same `AnimationDocumentController`, clip `burst`, frame 0,
 frame binding, the decoded 128×128 stage image and all 22 timeline cards. No new console errors.
+
+### 9.14 Review pass — what the PR #36 read found, and what it cost to fix
+
+An independent read of the phase-6 diff against this contract turned up one real defect and
+four smaller ones. All are fixed on the branch; the tests below fail without their fix.
+
+**The file-number reservation was missing on the import path.** `importOsFiles` numbered its files
+with `nextFrameFileNumber` and never reserved them, unlike every other write path (§9.5's
+`replaceFrameTexture`, §9.12.1's trim, §9.12.4's bulk op), which all go through
+`reserveFrameFileNumber` precisely because *un-referenced is not the same as free*: undo drops the
+document's reference to a file that redo still points at. Video import (§9.12.5) writes N files
+through this path at once, so the window was wide: import 12 frames → undo → any bake → redo, and
+the clip shows another frame's pixels. Measured rather than argued — with the reservation removed,
+the bake writes `idle_0002.png`, the same name the first imported frame holds. Reserved per file
+inside the loop, not once at the end, so a write that throws mid-run still protects what it wrote.
+
+**The chroma key rewrote frames it had not changed.** §9.12.4 above promised §9.12.1's
+"already-tight"-style skips; only the `width <= 0` guard was implemented. `chromaKeyImage` reports
+`keyedPixels` / `softenedPixels` and they were dropped on the floor, so a clip whose key colour
+appears in three of 22 frames burned 22 file numbers and reported "processed 22". `runFrameRasterOp`
+now surfaces a `changedPixels` count for the one op that can legitimately no-op, and a zero skips.
+
+**`traceSelectedFramePolygon` could stamp one frame's outline onto another.** The frame is read
+before `loadAlphaMask`'s decode (real work on first touch) and `beginFrameDraft` clones whatever is
+selected *after* it; the timeline stays clickable throughout. Guarded by re-checking frame identity
+after the await, with a new `stale` report status so the panel says what happened instead of
+claiming there is no frame.
+
+**The stage's top-right slot had no single owner.** The anchor / points / polygon cards are mutually
+exclusive through `stageTool`, and opening the video card closed the bulk card — but nothing closed
+them the other way, so two cards could render on top of each other with both toggles lit.
+`closeStageCards()` now enforces one occupant, on the same "the last click wins" rule `setStageTool`
+already applied to crop, place and the eyedropper. Its one exception is an import in flight: its
+decoder is mid-grab and releasing it would abort the run.
+
+**Two smaller ones.** `formatVideoTime` split before rounding, so 59.96 s read `0:60.0`; the
+eyedropper's decode guard tested `chromaMode` but not *which* image had been decoded, so a re-entry
+on another frame could sample stale pixels. And `seekVideoTo`'s "seek landed but `rVFC` never fired"
+branch — named in §9.12.5 as deliberate, not a hang guard — had no test, because the fake video
+always fired both signals together; it has one now.

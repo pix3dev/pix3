@@ -30,6 +30,13 @@ interface FakeVideoOptions {
   height?: number;
   /** Emit `requestVideoFrameCallback`, i.e. be a Chrome/Safari-shaped element. */
   frameCallback?: boolean;
+  /**
+   * Have `requestVideoFrameCallback` but never actually run it, while the seek
+   * itself completes — `rVFC` on a *paused* element is a weaker promise than the
+   * spec suggests, and this is the shape that makes `seekVideoTo`'s timeout do
+   * something other than fail.
+   */
+  silentFrameCallback?: boolean;
   /** Never complete a seek — an unseekable / truncated file. */
   unseekable?: boolean;
   /** Report a 0×0 frame from this timestamp on (past the real end of the video). */
@@ -59,7 +66,7 @@ class FakeVideo extends EventTarget {
   constructor(private readonly options: FakeVideoOptions = {}) {
     super();
     this.duration = options.duration ?? 1;
-    if (options.frameCallback) {
+    if (options.frameCallback || options.silentFrameCallback) {
       // Declared conditionally on purpose: the extractor picks its seek signal by
       // `typeof video.requestVideoFrameCallback === 'function'`, so a Firefox-shaped
       // element must genuinely not have it.
@@ -128,9 +135,11 @@ class FakeVideo extends EventTarget {
     setTimeout(() => {
       this.presentedTime = value;
       this.readyState = 2;
-      const callback = this.pendingFrameCallback;
-      this.pendingFrameCallback = null;
-      callback?.();
+      if (!this.options.silentFrameCallback) {
+        const callback = this.pendingFrameCallback;
+        this.pendingFrameCallback = null;
+        callback?.();
+      }
       this.dispatchEvent(new Event('seeked'));
     }, 1);
   }
@@ -306,6 +315,17 @@ describe('seekVideoTo (§9.12.5)', () => {
     const video = new FakeVideo({ unseekable: true });
 
     await expect(seekVideoTo(asVideo(video), 0.3, 20)).rejects.toThrow(/could not be seeked/);
+  });
+
+  it('takes a completed seek whose frame callback never fires, rather than failing it', async () => {
+    // The timeout is not only a hang guard: `rVFC` on a paused element can simply
+    // not fire, and a `seeked` that did arrive is evidence enough that the frame
+    // is there. Failing here would abort a whole import on such a browser.
+    const video = new FakeVideo({ silentFrameCallback: true });
+
+    await expect(seekVideoTo(asVideo(video), 0.3, 20)).resolves.toBeUndefined();
+    expect(video.frameCallbackCount).toBe(1);
+    expect(video.presentedTime).toBe(0.3);
   });
 });
 
@@ -486,5 +506,9 @@ describe('formatVideoTime', () => {
     expect(formatVideoTime(9.25)).toBe('0:09.3');
     expect(formatVideoTime(72.5)).toBe('1:12.5');
     expect(formatVideoTime(Number.NaN)).toBe('0:00.0');
+    // Rounding happens before the split, so a second that rounds up carries into
+    // the minutes instead of reading as "0:60.0".
+    expect(formatVideoTime(59.96)).toBe('1:00.0');
+    expect(formatVideoTime(119.99)).toBe('2:00.0');
   });
 });
