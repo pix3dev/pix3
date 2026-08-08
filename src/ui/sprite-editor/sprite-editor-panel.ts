@@ -54,7 +54,16 @@ import {
   type StagePoint,
   type StageViewport,
 } from '@/ui/shared/stage-zoom-pan';
-import { AnimationDocumentController, type TrimClipReport } from './animation-document-controller';
+import {
+  AnimationDocumentController,
+  describeBulkRasterOp,
+  type AutoPolygonReport,
+  type BulkFrameReport,
+  type BulkRasterOp,
+  type FrameParity,
+  type TrimClipReport,
+} from './animation-document-controller';
+import { DEFAULT_CONTOUR_TOLERANCE } from './contour-trace';
 import type { FrameRasterTransform } from './frame-restamp';
 import {
   FrameOverlayController,
@@ -69,6 +78,16 @@ import {
   getDroppedTextureResources,
   isPotentialTextureDrag,
 } from './frame-texture-drop';
+import {
+  DEFAULT_VIDEO_IMPORT_FPS,
+  VIDEO_IMPORT_FPS_CHOICES,
+  formatVideoTime,
+  grabVideoFrames,
+  loadVideoFile,
+  planVideoFrameTimes,
+  type LoadedVideo,
+  type VideoFramePlan,
+} from './video-frame-extract';
 import { getGenerationDragData } from '@/ui/shared/asset-drag-drop';
 import { getFrameImageStyle } from './sprite-timeline';
 import './sprite-clips-rail';
@@ -96,13 +115,18 @@ import {
   type PlaceRect,
 } from './place-geometry';
 import {
+  chromaKeyImage,
   flipImageBlob,
   readBlobSize,
+  readImagePixels,
   resizeImageBlob,
   rotateImageBlob,
+  samplePixelColor,
   scaledDimensions,
   sliceImageBlob,
   type FlipAxis,
+  type ImagePixels,
+  type RgbColor,
 } from '@/services/image-gen/image-ops';
 import './sprite-editor-panel.ts.css';
 
@@ -135,6 +159,13 @@ const PLACE_HANDLES: readonly string[] = ['nw', 'ne', 'se', 'sw'];
 const PLACE_WHEEL_STEP = 1.1;
 
 /**
+ * §9.12.3 — starting tolerance for the chroma key, as a fraction of the maximum
+ * RGB distance. 10% keys a flat generated background and its JPEG-ish noise
+ * without reaching into a saturated subject.
+ */
+const DEFAULT_CHROMA_TOLERANCE = 0.1;
+
+/**
  * Nine-up anchor grid. Icons, never arrow glyphs — `↖ ↑ ↗` ignore the theme and
  * render differently on every platform (the outgoing animation panel's version is
  * the exact violation §9.9 calls out).
@@ -165,7 +196,37 @@ const FRAME_TOOLS: ReadonlyArray<{ tool: AnimationEditMode; icon: string; title:
   { tool: 'bbox', icon: 'square', title: 'Bounding box' },
 ];
 
-type CurrentSource = 'file' | 'generated' | 'bg-removed' | 'cropped' | 'rotated' | 'flipped';
+type CurrentSource =
+  | 'file'
+  | 'generated'
+  | 'bg-removed'
+  | 'cropped'
+  | 'rotated'
+  | 'flipped'
+  | 'chroma-keyed';
+
+/**
+ * §9.12.4's bulk raster ops, as the card offers them. Chroma key is deliberately
+ * absent: it needs a picked colour, so it is offered from the chroma toolbar
+ * (where the colour and its tolerance already are) rather than as a blind action.
+ */
+const BULK_RASTER_OPS: ReadonlyArray<{ op: BulkRasterOp; label: string; title: string }> = [
+  {
+    op: { kind: 'flip', axis: 'horizontal' },
+    label: 'Flip H',
+    title: 'Mirror every frame horizontally (anchors and points mirror with them)',
+  },
+  {
+    op: { kind: 'flip', axis: 'vertical' },
+    label: 'Flip V',
+    title: 'Mirror every frame vertically (anchors and points mirror with them)',
+  },
+  {
+    op: { kind: 'rotate', quarterTurns: 1 },
+    label: 'Rotate 90°',
+    title: 'Turn every frame a quarter-turn clockwise',
+  },
+];
 
 interface CurrentImage {
   blob: Blob;
@@ -199,6 +260,28 @@ interface PlaceSession {
    * the session can land in the same update cycle.
    */
   texturePath: string;
+}
+
+/**
+ * §9.12.5 — a picked video, decoded and waiting for its fps and in/out range. The
+ * element is held open for the whole session so the import does not decode the
+ * file twice; {@link LoadedVideo.release} revokes its object URL.
+ */
+interface VideoImportSession {
+  fileName: string;
+  loaded: LoadedVideo;
+  /** Start of the trim range, seconds. */
+  inSeconds: number;
+  /** End of the trim range, seconds. */
+  outSeconds: number;
+  fps: number;
+}
+
+/** §9.12.5's outcome, in the three buckets every §9.12 tool reports. */
+interface VideoImportReport {
+  imported: number;
+  skipped: number;
+  failed: number;
 }
 
 @customElement('pix3-sprite-editor-panel')
@@ -288,6 +371,52 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   /** Grid the slice dialog opens with; remembered per panel instance. */
   private sliceColumns = 4;
   private sliceRows = 1;
+
+  /** §9.12.2 — Douglas–Peucker tolerance (frame px) the auto-polygon trace runs at. */
+  @state() private polygonTolerance = DEFAULT_CONTOUR_TOLERANCE;
+  /** True while a trace is decoding / walking the frame's alpha. */
+  @state() private polygonBusy = false;
+  /**
+   * Frame whose *draft* holds an auto-traced polygon awaiting Apply, or -1. The
+   * trace is a draft, so it is already on screen (and already editable) through the
+   * existing overlay; this only tracks whether there is something to commit.
+   */
+  @state() private polygonPreviewFrameIndex = -1;
+
+  /**
+   * §9.12.3 — the chroma-key eyedropper. A **transient mode**, deliberately not a
+   * `stageTool`: it owns the plain left-click on the canvas exactly the way crop
+   * and place mode own the plain left-drag, and it is mutually exclusive with
+   * both. Nothing is written until Apply.
+   */
+  @state() private chromaMode = false;
+  /** Colour picked off the canvas, or null while the user hasn't clicked yet. */
+  @state() private chromaColor: RgbColor | null = null;
+  /** 0..1 fraction of the maximum RGB distance that counts as "this colour". */
+  @state() private chromaTolerance = DEFAULT_CHROMA_TOLERANCE;
+  /** 0..1 ramp beyond the tolerance; 0 is a hard cut (the shipped default). */
+  @state() private chromaSoftness = 0;
+  /** True while a key is re-encoding the image (or writing frame files). */
+  @state() private chromaBusy = false;
+  /**
+   * Decoded RGBA of the working image, so the eyedropper samples without
+   * re-decoding the PNG on every pointer move. Dropped whenever the working image
+   * changes.
+   */
+  private chromaPixels: ImagePixels | null = null;
+
+  /** §9.12.4 — whether the bulk frame-ops card is open over the stage. */
+  @state() private bulkPanelOpen = false;
+
+  /**
+   * §9.12.5 — the picked video, decoded and waiting for its fps/range, or null.
+   * Nothing is written until Import.
+   */
+  @state() private videoSession: VideoImportSession | null = null;
+  /** True while a video file is being opened and decoded (before the card appears). */
+  @state() private videoBusy = false;
+  /** Frames grabbed so far in the running import — the card's progress readout. */
+  @state() private videoProgress = 0;
 
   /** `.pix3anim` bound to this tab, or null when the tab holds a bare image. */
   @state() private animationResourcePath: string | null = null;
@@ -395,6 +524,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
     if (this.placeSession) {
       this.closePlaceSession();
+      return;
+    }
+    if (this.chromaMode) {
+      this.closeChromaMode();
     }
   };
   private readonly ownedUrls = new Set<string>();
@@ -455,6 +588,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     // to be revoked, and the generation itself is still in the Generate panel's
     // history strip, which is what makes losing it acceptable (§9.11.2).
     this.closePlaceSession();
+    // Same reasoning for the eyedropper's decoded RGBA — a re-dock reloads the
+    // working image, so holding a full-resolution pixel buffer across it is waste.
+    this.closeChromaMode();
+    // And for the decoded video: it holds an object URL and a decoder, and an
+    // un-imported range is cheap to re-pick.
+    this.closeVideoSession();
     this.revokeAllUrls();
     // Force a full re-sync (and bound-image reload) if this instance is reconnected.
     this.syncedResourceId = null;
@@ -708,15 +847,36 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.documentController.dispose();
     this.documentController = null;
     this.stageTool = 'select';
+    this.bulkPanelOpen = false;
   }
 
   private onDocumentChanged(): void {
     // A document reload drops the transient draft under an in-flight stage drag;
     // the drag has nothing left to edit, so end it.
     this.overlays.handleDocumentChanged();
+    this.syncPolygonPreviewToDraft();
     this.syncPlaceSessionToFrame();
     void this.syncCanvasToSelectedFrame();
     this.requestUpdate();
+  }
+
+  /**
+   * An auto-traced polygon lives in the frame draft, and the draft is dropped by
+   * anything that changes the selection or reloads the document — so the Apply
+   * affordance has to go with it.
+   */
+  private syncPolygonPreviewToDraft(): void {
+    if (this.polygonPreviewFrameIndex < 0) {
+      return;
+    }
+
+    const controller = this.documentController;
+    if (
+      !controller?.frameDraft ||
+      controller.selectedFrameIndex !== this.polygonPreviewFrameIndex
+    ) {
+      this.polygonPreviewFrameIndex = -1;
+    }
   }
 
   /**
@@ -895,6 +1055,14 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         >
           ${this.icons.getIcon('flip-vertical', IconSize.SMALL)}
         </button>
+        <button
+          class="ag-toolbar-button ag-chroma-toggle ${this.chromaMode ? 'is-active' : ''}"
+          title=${rasterHint ?? 'Chroma key — pick a colour on the canvas to knock it out'}
+          @click=${this.onToggleChroma}
+          ?disabled=${rasterBusy || this.cropMode}
+        >
+          ${this.icons.getIcon('droplet', IconSize.SMALL)} Chroma key
+        </button>
         <span class="ag-toolbar-separator" aria-hidden="true"></span>
         <button
           class="ag-toolbar-button ag-generate-action"
@@ -1027,10 +1195,136 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
           </button>
         `
       )}
-      ${this.renderTrimFramesAction()} ${this.renderDeleteFramesAction()}
+      ${this.renderAutoPolygonAction()} ${this.renderTrimFramesAction()}
+      ${this.renderBulkFramesAction()} ${this.renderVideoImportAction()}
+      ${this.renderDeleteFramesAction()}
       <span class="ag-toolbar-separator" aria-hidden="true"></span>
     `;
   }
+
+  /**
+   * §9.12.5 — pull frames out of a video file. Clip-wide and *additive*, so unlike
+   * the trim and the bulk ops it needs no frame selected and no raster gate: it
+   * appends to the clip rather than rewriting what is already there.
+   */
+  private renderVideoImportAction() {
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode || this.videoBusy;
+    return html`
+      <button
+        class="ag-icon-button ag-video-import ${this.videoSession ? 'is-active' : ''}"
+        type="button"
+        title=${this.videoBusy
+          ? 'Decoding the video…'
+          : 'Import frames from a video file (browser decoding, no ffmpeg)'}
+        aria-label="Import frames from a video"
+        ?disabled=${busy}
+        @click=${this.onToggleVideoImport}
+      >
+        ${this.icons.getIcon('video', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  /**
+   * §9.12.4 — the bulk frame-ops card's toggle. Clip-wide like the trim, so it
+   * sits beside it rather than on a frame card.
+   */
+  private renderBulkFramesAction() {
+    const frameCount = this.documentController?.activeClip?.frames.length ?? 0;
+    const busy = this.sliceBusy || this.bgBusy || this.cropMode;
+    return html`
+      <button
+        class="ag-icon-button ag-bulk-frames ${this.bulkPanelOpen ? 'is-active' : ''}"
+        type="button"
+        title=${frameCount === 0
+          ? 'Bulk frame ops (this clip has no frames)'
+          : `Bulk frame ops for ${frameCount} frame${frameCount === 1 ? '' : 's'}`}
+        aria-label="Bulk frame ops"
+        ?disabled=${frameCount === 0 || busy}
+        @click=${this.onToggleBulkPanel}
+      >
+        ${this.icons.getIcon('layers', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  /**
+   * §9.12.2 — seed the collision polygon from the frame's alpha. Shares the raster
+   * tools' gate (`frameRasterHint`): a UV-window frame's file is the whole
+   * spritesheet, and a frame whose texture has not decoded yet has no pixel space
+   * to author absolute coordinates in.
+   */
+  private renderAutoPolygonAction() {
+    const hint = this.frameRasterHint;
+    const disabled = !this.boundFrame || Boolean(hint) || this.polygonBusy || this.cropMode;
+    return html`
+      <button
+        class="ag-icon-button ag-auto-polygon"
+        type="button"
+        title=${hint ?? 'Trace a collision polygon from this frame’s alpha'}
+        aria-label="Auto collision polygon"
+        ?disabled=${disabled}
+        @click=${this.onAutoTracePolygon}
+      >
+        ${this.icons.getIcon('zap', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
+  /**
+   * Switch to the polygon tool (so the outline is visible *and* draggable) and
+   * trace. The traced polygon goes into the frame draft, which the existing
+   * overlay renders — there is no second, read-only preview overlay to keep in
+   * step, and the user can nudge a vertex before Apply.
+   */
+  private onAutoTracePolygon = async (): Promise<void> => {
+    this.setStageTool('polygon');
+    await this.runPolygonTrace();
+  };
+
+  /** Trace at the current tolerance, replacing whatever the draft holds. */
+  private async runPolygonTrace(): Promise<void> {
+    const controller = this.documentController;
+    if (!controller || this.polygonBusy) {
+      return;
+    }
+
+    this.polygonBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.traceSelectedFramePolygon({
+        tolerance: this.polygonTolerance,
+      });
+      this.polygonPreviewFrameIndex =
+        report.status === 'traced' ? controller.selectedFrameIndex : -1;
+      this.sliceStatus = {
+        text: describeAutoPolygonReport(report, this.polygonTolerance),
+        isError: report.status === 'unreadable',
+      };
+    } catch (error) {
+      this.polygonPreviewFrameIndex = -1;
+      this.sliceStatus = { text: `Auto polygon failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.polygonBusy = false;
+    }
+  }
+
+  /** Commit the traced polygon: one `applyClipUpdate`, one undo step. */
+  private onApplyPolygonPreview = async (): Promise<void> => {
+    const controller = this.documentController;
+    if (!controller) {
+      return;
+    }
+
+    this.polygonPreviewFrameIndex = -1;
+    await controller.commitFrameDraft(`Auto collision polygon: ${controller.activeClipName}`);
+  };
+
+  /** Throw the trace away — the document never saw it. */
+  private onCancelPolygonPreview = (): void => {
+    this.polygonPreviewFrameIndex = -1;
+    this.documentController?.clearFrameDraft();
+  };
 
   /**
    * §9.12.1 — trim the whole clip in one undo step. A clip-wide action, so it sits
@@ -1107,6 +1401,465 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     }
   };
 
+  private onToggleBulkPanel = (): void => {
+    if (this.bulkPanelOpen) {
+      this.bulkPanelOpen = false;
+      return;
+    }
+    this.closeStageCards();
+    // An overlay tool's card sits in the same slot, so hand the stage back to
+    // plain select rather than render two cards on top of each other.
+    this.setStageTool('select');
+    this.bulkPanelOpen = true;
+  };
+
+  /**
+   * The stage's top-right slot holds exactly **one** card — the anchor / points /
+   * polygon cards (which `stageTool` already keeps mutually exclusive), §9.12.4's
+   * bulk card and §9.12.5's video card all render into it absolutely positioned.
+   * Opening any of them drops the others, the same "the last click wins" rule
+   * {@link setStageTool} applies to crop, place and the eyedropper.
+   *
+   * The one exception is an import in flight: its decoder is mid-grab and
+   * {@link closeVideoSession} would revoke the element out from under it, so the
+   * video card outlives this until the run finishes (its own button is disabled
+   * throughout, but the overlay tools' are not).
+   */
+  private closeStageCards(): void {
+    this.bulkPanelOpen = false;
+    if (!this.sliceBusy) {
+      this.closeVideoSession();
+    }
+  }
+
+  /**
+   * §9.12.4's card. Two families, both clip-wide and both confirmed: dropping
+   * every other frame (no files touched — a plain clip update), and mapping a
+   * raster op over every frame (files written first, then one clip update, then
+   * one invalidation pass — §9.12.1's shape).
+   *
+   * Chroma key is not listed here on purpose; it needs a colour, so the chroma
+   * toolbar carries its own "Apply to clip" once one has been picked.
+   */
+  private renderBulkFramesTools() {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!this.bulkPanelOpen || !controller || !clip) {
+      return null;
+    }
+
+    const busy = this.sliceBusy || this.chromaBusy;
+    return html`
+      <div class="ag-frame-tools ag-bulk-tools" aria-label="Bulk frame tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Bulk</span>
+          <span class="ag-frame-tools-value">${clip.frames.length} frames</span>
+        </div>
+        <p class="ag-frame-tools-hint">
+          Applies to every frame of <em>${clip.name}</em> that owns its own file.
+        </p>
+        <button
+          class="ag-frame-tools-wide"
+          type="button"
+          title="Halve the clip — drop every second frame"
+          ?disabled=${busy || clip.frames.length < 2}
+          @click=${this.onDeleteAlternateFrames}
+        >
+          Drop every 2nd
+        </button>
+        <div class="ag-frame-tools-row ag-bulk-ops">
+          ${BULK_RASTER_OPS.map(
+            entry => html`
+              <button
+                class="ag-frame-tools-wide"
+                type="button"
+                title=${entry.title}
+                ?disabled=${busy}
+                @click=${() => void this.onBulkRasterOp(entry.op)}
+              >
+                ${entry.label}
+              </button>
+            `
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Destructive but *recoverable* — no file is written or deleted, so undo really
+   * restores the clip. The confirm's two buttons carry the parameter, exactly as
+   * §9.12.1's trim confirm does, because `DialogService` has no numeric or radio
+   * input: Even drops frames 2, 4, 6…; Odd drops 1, 3, 5….
+   */
+  private onDeleteAlternateFrames = async (): Promise<void> => {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!controller || !clip || clip.frames.length < 2 || this.sliceBusy) {
+      return;
+    }
+
+    const evenCount = Math.floor(clip.frames.length / 2);
+    const oddCount = clip.frames.length - evenCount;
+    const choice = await this.dialogService.showChoice({
+      title: 'Drop every second frame?',
+      message: `"${clip.name}" has ${clip.frames.length} frames. Dropping the even ones removes ${evenCount}; dropping the odd ones removes ${oddCount}. Halve the fps afterwards to keep the same timing.`,
+      confirmLabel: `Drop ${evenCount} even`,
+      secondaryLabel: `Drop ${oddCount} odd`,
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      secondaryIsDangerous: true,
+      disclaimer:
+        'No files are written or deleted — the frame PNGs stay on disk and undo restores the clip.',
+    });
+    if (choice === 'cancel') {
+      return;
+    }
+
+    const parity: FrameParity = choice === 'secondary' ? 'odd' : 'even';
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.deleteFramesByParity(parity);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `Dropped ${parity} frames of ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Drop frames failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  };
+
+  /**
+   * Map a raster op over the clip. Pixel-destructive and bulk, so it confirms and
+   * carries the same warning the trim does: new files are written and undo
+   * restores the *document*, not the pixels on disk (§9.7 risk 7).
+   */
+  private async onBulkRasterOp(op: BulkRasterOp): Promise<void> {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    if (!controller || !clip || clip.frames.length === 0 || this.sliceBusy) {
+      return;
+    }
+
+    const verb = describeBulkRasterOp(op);
+    const confirmed = await this.dialogService.showConfirmation({
+      title: `${verb} every frame?`,
+      message: `${verb} all ${clip.frames.length} frame${
+        clip.frames.length === 1 ? '' : 's'
+      } of "${clip.name}". Each frame's anchor, points, boxes and collision polygon move with the pixels, so nothing shifts on screen.`,
+      confirmLabel: verb,
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      disclaimer:
+        'Every transformed frame is written as a new file. Undo restores the document, not the pixels on disk.',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.applyRasterOpToClipFrames(op);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `${verb}: ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `${verb} failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  }
+
+  // -- video import (§9.12.5) -------------------------------------------------
+
+  /** Open the picker, or close an open session. Nothing is written either way. */
+  private onToggleVideoImport = (): void => {
+    if (this.videoSession) {
+      this.closeVideoSession();
+      return;
+    }
+    this.pickVideoFile();
+  };
+
+  /**
+   * A detached `<input type="file">`, the way the Generate panel opens its
+   * reference picker. Deliberately not `showOpenFilePicker`: the editor calls it
+   * nowhere, and a video is read as bytes and thrown away, not kept as a project
+   * file handle.
+   */
+  private pickVideoFile(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (file) {
+        void this.openVideoSession(file);
+      }
+    });
+    input.click();
+  }
+
+  /**
+   * Decode the picked file far enough to know its size and length. Two of
+   * §9.12.5's guards land here, before any UI exists to be confused by them: a
+   * container the browser cannot open, and a file that reports no usable duration
+   * (a live stream reports `Infinity`, an audio-only file has no video track) —
+   * neither of which can be given an in/out range.
+   */
+  private async openVideoSession(file: File): Promise<void> {
+    this.videoBusy = true;
+    this.sliceStatus = null;
+    try {
+      const loaded = await loadVideoFile(file);
+      if (!Number.isFinite(loaded.duration) || loaded.duration <= 0) {
+        loaded.release();
+        this.sliceStatus = {
+          text: `“${file.name}” reports no usable duration, so there is no range to import from.`,
+          isError: true,
+        };
+        return;
+      }
+      // Every card shares the stage's top-right slot; this one takes it.
+      this.bulkPanelOpen = false;
+      this.setStageTool('select');
+      this.videoSession = {
+        fileName: file.name,
+        loaded,
+        inSeconds: 0,
+        outSeconds: loaded.duration,
+        fps: DEFAULT_VIDEO_IMPORT_FPS,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Video import failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.videoBusy = false;
+    }
+  }
+
+  /** Drop the session and let the decoder go. Safe to call when none is open. */
+  private closeVideoSession(): void {
+    const session = this.videoSession;
+    if (!session) {
+      return;
+    }
+    this.videoSession = null;
+    this.videoProgress = 0;
+    session.loaded.release();
+  }
+
+  /** Replace the session wholesale — Lit tracks the object, not its fields. */
+  private updateVideoSession(patch: Partial<VideoImportSession>): void {
+    if (!this.videoSession) {
+      return;
+    }
+    this.videoSession = { ...this.videoSession, ...patch };
+  }
+
+  /** The plan the card is currently showing, and the one Import runs. */
+  private get videoFramePlan(): VideoFramePlan | null {
+    const session = this.videoSession;
+    return session
+      ? planVideoFrameTimes({
+          duration: session.loaded.duration,
+          fps: session.fps,
+          inSeconds: session.inSeconds,
+          outSeconds: session.outSeconds,
+        })
+      : null;
+  }
+
+  /**
+   * §9.12.5's card: the fps picker and the in/out trim range, plus a live count of
+   * what they add up to. Every refusal the plan can return is stated here *before*
+   * the user commits, so Import is only ever enabled on a range that will actually
+   * produce frames.
+   */
+  private renderVideoImportTools() {
+    const session = this.videoSession;
+    const plan = this.videoFramePlan;
+    const clip = this.documentController?.activeClip;
+    if (!session || !plan || !clip) {
+      return null;
+    }
+
+    const busy = this.sliceBusy || this.videoBusy;
+    return html`
+      <div class="ag-frame-tools ag-video-tools" aria-label="Video import tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Video</span>
+          <span class="ag-frame-tools-value">${session.loaded.width}×${session.loaded.height}</span>
+        </div>
+        <p class="ag-frame-tools-hint">
+          ${session.fileName} — ${formatVideoTime(session.loaded.duration)}, appended to
+          <em>${clip.name}</em>.
+        </p>
+        <label class="ag-video-field">
+          <span class="ag-video-field-label">Frame rate</span>
+          <select
+            aria-label="Video import frame rate"
+            ?disabled=${busy}
+            @change=${(event: Event) =>
+              this.updateVideoSession({
+                fps: Number((event.target as HTMLSelectElement).value),
+              })}
+          >
+            ${VIDEO_IMPORT_FPS_CHOICES.map(
+              fps => html`<option value=${fps} ?selected=${fps === session.fps}>${fps} fps</option>`
+            )}
+          </select>
+        </label>
+        ${this.renderVideoRange('In', session.inSeconds, 'Video import range start', value =>
+          this.updateVideoSession({
+            inSeconds: Math.min(value, session.outSeconds),
+          })
+        )}
+        ${this.renderVideoRange('Out', session.outSeconds, 'Video import range end', value =>
+          this.updateVideoSession({
+            outSeconds: Math.max(value, session.inSeconds),
+          })
+        )}
+        <p class="ag-frame-tools-hint ag-video-plan ${plan.status === 'ok' ? '' : 'is-warning'}">
+          ${this.sliceBusy
+            ? `Grabbing frame ${this.videoProgress} of ${plan.times.length}…`
+            : describeVideoPlan(plan)}
+        </p>
+        <div class="ag-frame-tools-row">
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            ?disabled=${busy}
+            @click=${this.onCancelVideoImport}
+          >
+            Cancel
+          </button>
+          <button
+            class="ag-frame-tools-wide ag-video-apply"
+            type="button"
+            title=${plan.status === 'ok'
+              ? `Grab ${plan.times.length} frames and append them to ${clip.name}`
+              : describeVideoPlan(plan)}
+            ?disabled=${busy || plan.status !== 'ok'}
+            @click=${this.onImportVideoFrames}
+          >
+            ${this.sliceBusy ? 'Importing…' : 'Import'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  /** One in/out handle over the video's own timeline. */
+  private renderVideoRange(
+    label: string,
+    value: number,
+    ariaLabel: string,
+    apply: (next: number) => void
+  ) {
+    const duration = this.videoSession?.loaded.duration ?? 0;
+    return html`
+      <label class="ag-video-range">
+        <span class="ag-video-range-label">${label} <em>${formatVideoTime(value)}</em></span>
+        <input
+          type="range"
+          min="0"
+          max=${duration.toFixed(3)}
+          step="0.05"
+          .value=${String(value)}
+          aria-label=${ariaLabel}
+          ?disabled=${this.sliceBusy}
+          @input=${(event: Event) => apply(Number((event.target as HTMLInputElement).value))}
+        />
+      </label>
+    `;
+  }
+
+  private onCancelVideoImport = (): void => {
+    this.closeVideoSession();
+  };
+
+  /**
+   * §9.12.5's import, in §9.12.1's shape: every frame is grabbed and every file is
+   * written **first**, and then **one** document update appends the whole batch —
+   * so the import is a single undo step, never a half-imported clip.
+   *
+   * The write goes through `importOsFiles` + `addFrameTextures`, which is byte for
+   * byte the path an OS image drop takes: §8.2's managed-folder naming, the
+   * `sourceSize` stamp and the undo label are all shared rather than reimplemented
+   * here.
+   */
+  private onImportVideoFrames = async (): Promise<void> => {
+    const session = this.videoSession;
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    const plan = this.videoFramePlan;
+    if (!session || !controller || !clip || !plan || plan.status !== 'ok' || this.sliceBusy) {
+      return;
+    }
+
+    const frameCount = plan.times.length;
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Import frames from this video?',
+      message: `Grab ${frameCount} frame${frameCount === 1 ? '' : 's'} at ${
+        session.fps
+      } fps between ${formatVideoTime(plan.inSeconds)} and ${formatVideoTime(
+        plan.outSeconds
+      )}, and append them to "${clip.name}".`,
+      confirmLabel: `Import ${frameCount} frame${frameCount === 1 ? '' : 's'}`,
+      cancelLabel: 'Cancel',
+      disclaimer: `Each frame is written into the animation's own folder as a new ${session.loaded.width}×${session.loaded.height} PNG. The whole import is one undo step, but undo restores the document, not the files on disk. At most ${plan.maxFrames} frames per import.`,
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    this.videoProgress = 0;
+    const report: VideoImportReport = { imported: 0, skipped: 0, failed: 0 };
+    try {
+      const grab = await grabVideoFrames(session.loaded.video, {
+        times: plan.times,
+        namePrefix: 'video-frame',
+        onProgress: grabbed => {
+          this.videoProgress = grabbed;
+        },
+      });
+      report.skipped = grab.skipped;
+      report.failed = grab.failed;
+
+      if (grab.files.length > 0) {
+        const frameCountBefore = clip.frames.length;
+        const texturePaths = await controller.importOsFiles(grab.files);
+        await controller.addFrameTextures(texturePaths);
+        // Detected the way `deleteFramesByParity` detects its own outcome: the
+        // document can refuse an update, and then nothing was imported however
+        // many files exist on disk.
+        const added = (controller.activeClip?.frames.length ?? frameCountBefore) - frameCountBefore;
+        report.imported = Math.max(0, added);
+        report.failed += grab.files.length - report.imported;
+      }
+
+      this.sliceStatus = {
+        text: describeVideoImportReport(report, clip.name),
+        isError: report.failed > 0,
+      };
+      if (report.imported > 0) {
+        this.closeVideoSession();
+      }
+    } catch (error) {
+      this.sliceStatus = { text: `Video import failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+      this.videoProgress = 0;
+    }
+  };
+
   /**
    * Delete every selected frame. Multi-select is authored in the timeline
    * (ctrl/shift-click), but the *action* has to live somewhere that sees the whole
@@ -1131,15 +1884,289 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     `;
   }
 
+  // -- chroma key (§9.12.3) ---------------------------------------------------
+
+  /**
+   * Enter/leave the eyedropper. A transient mode, not a `stageTool`: it owns the
+   * plain left-click on the canvas, which crop, place and the overlay tools also
+   * want, so opening it closes them (and vice versa — `setStageTool`,
+   * `onToggleCrop` and `openPlaceSession` all close this one).
+   */
+  private onToggleChroma = (): void => {
+    if (this.chromaMode) {
+      this.closeChromaMode();
+      return;
+    }
+    if (!this.current) {
+      return;
+    }
+    this.cropMode = false;
+    this.cropRect = null;
+    this.cropDrag = null;
+    this.closePlaceSession();
+    this.stageTool = 'select';
+    this.chromaMode = true;
+    // Decode once for the whole session: the picker then samples synchronously
+    // on every pointer move instead of re-decoding the PNG per event.
+    void this.loadChromaPixels();
+  };
+
+  /** Leave chroma mode and forget the picked colour. Safe to call when it is off. */
+  private closeChromaMode(): void {
+    if (!this.chromaMode && !this.chromaColor && !this.chromaPixels) {
+      return;
+    }
+    this.chromaMode = false;
+    this.chromaColor = null;
+    this.chromaPixels = null;
+  }
+
+  private async loadChromaPixels(): Promise<void> {
+    const blob = this.current?.blob;
+    if (!blob) {
+      return;
+    }
+    try {
+      const pixels = await readImagePixels(blob);
+      // A frame switch (or a Cancel) can land while this is in flight — and the
+      // mode flag alone does not cover a *re-entry* on another frame, whose own
+      // decode can finish first, so the blob has to still be the decoded one.
+      if (this.chromaMode && this.current?.blob === blob) {
+        this.chromaPixels = pixels;
+      }
+    } catch (error) {
+      console.warn('[SpriteEditor] Failed to decode the image for the eyedropper', error);
+    }
+  }
+
+  /**
+   * Sample the pixel under the pointer. Coordinates come through the same
+   * `toImagePoint` crop uses, so the picker agrees with every other stage tool on
+   * where a pointer is — including under zoom and pan.
+   */
+  private pickChromaColor(event: PointerEvent): void {
+    const pixels = this.chromaPixels;
+    const resolved = this.toImagePoint(event);
+    if (!pixels || !resolved) {
+      return;
+    }
+    // A frame's stage box is the document's metrics, which for a UV-window frame
+    // is not the raster's size — but the raster tools (and therefore this one)
+    // are gated on `frameRasterHint`, so here the two spaces are the same.
+    const color = samplePixelColor(pixels, resolved.point.x, resolved.point.y);
+    if (color) {
+      this.chromaColor = color;
+    }
+  }
+
+  /**
+   * The transient bottom bar, in the same slot crop and place use — the three are
+   * mutually exclusive by construction, so only one is ever rendered.
+   */
+  private renderChromaToolbar() {
+    const color = this.chromaColor;
+    const clip = this.documentController?.activeClip;
+    return html`
+      <div class="ag-chroma-toolbar">
+        <span
+          class="ag-chroma-swatch ${color ? '' : 'is-empty'}"
+          style=${color ? `background: rgb(${color.r}, ${color.g}, ${color.b})` : ''}
+          aria-hidden="true"
+        ></span>
+        <span class="ag-crop-dims"
+          >${color
+            ? `rgb(${color.r}, ${color.g}, ${color.b})`
+            : 'Click the canvas to pick a colour'}</span
+        >
+        ${this.renderChromaSlider(
+          'Tolerance',
+          this.chromaTolerance,
+          'Chroma key tolerance',
+          value => {
+            this.chromaTolerance = value;
+          }
+        )}
+        ${this.renderChromaSlider(
+          'Softness',
+          this.chromaSoftness,
+          'Chroma key edge softness',
+          value => {
+            this.chromaSoftness = value;
+          }
+        )}
+        <div class="ag-prompt-spacer"></div>
+        <button class="ag-cancel-button" @click=${this.onCancelChroma}>Cancel</button>
+        ${clip
+          ? html`<button
+              class="ag-place-quick ag-chroma-clip"
+              type="button"
+              title="Key this colour out of every frame of the active clip"
+              ?disabled=${!color || this.chromaBusy || this.sliceBusy}
+              @click=${this.onApplyChromaToClip}
+            >
+              Apply to clip
+            </button>`
+          : null}
+        <button
+          class="ag-generate-button ag-crop-apply ag-chroma-apply"
+          ?disabled=${!color || this.chromaBusy}
+          @click=${this.onApplyChroma}
+        >
+          ${this.chromaBusy ? 'Keying…' : 'Apply'}
+        </button>
+      </div>
+    `;
+  }
+
+  /** One 0..100 % slider over a 0..1 chroma parameter. */
+  private renderChromaSlider(
+    label: string,
+    value: number,
+    ariaLabel: string,
+    apply: (next: number) => void
+  ) {
+    return html`
+      <label class="ag-chroma-slider">
+        <span class="ag-chroma-slider-label">${label} <em>${Math.round(value * 100)}%</em></span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          .value=${String(Math.round(value * 100))}
+          aria-label=${ariaLabel}
+          @input=${(event: Event) => apply(Number((event.target as HTMLInputElement).value) / 100)}
+        />
+      </label>
+    `;
+  }
+
+  private onCancelChroma = (): void => {
+    this.closeChromaMode();
+  };
+
+  /**
+   * Key the working image. Frame-bound, the result is a same-size replacement —
+   * the identity restamp (§9.12.3) — so it goes straight into the frame as a new
+   * frame file; otherwise it becomes the working image, exactly the split
+   * `onRemoveBackground` already makes.
+   */
+  private onApplyChroma = async (): Promise<void> => {
+    const current = this.current;
+    const color = this.chromaColor;
+    if (!current || !color || this.chromaBusy) {
+      return;
+    }
+
+    this.chromaBusy = true;
+    this.bgError = null;
+    try {
+      const result = await chromaKeyImage(current.blob, color, {
+        tolerance: this.chromaTolerance,
+        softness: this.chromaSoftness,
+      });
+      const writeBack = this.canWriteBackToFrame;
+      // Closed before the write-back, exactly as crop does — the frame is about
+      // to rebind onto the file this bake creates.
+      this.closeChromaMode();
+      if (writeBack) {
+        await this.writeBlobToBoundFrame(result.blob, { kind: 'replace' }, 'Chroma key frame');
+        return;
+      }
+      const objectUrl = this.trackUrl(URL.createObjectURL(result.blob));
+      this.setCurrent({
+        blob: result.blob,
+        mimeType: 'image/png',
+        objectUrl,
+        source: 'chroma-keyed',
+        width: result.width,
+        height: result.height,
+      });
+      // Keyed output carries alpha — force .png so a save cannot flatten it.
+      this.saveName = setImageExt(
+        `${stripImageExt(normalizeRelativePath(this.saveName) || 'cutout')}-keyed`,
+        'png'
+      );
+      this.sliceStatus = {
+        text: `Keyed out ${result.keyedPixels} pixel${result.keyedPixels === 1 ? '' : 's'}.`,
+        isError: false,
+      };
+    } catch (error) {
+      this.bgError = `Chroma key failed: ${describeError(error)}`;
+    } finally {
+      this.chromaBusy = false;
+    }
+  };
+
+  /**
+   * §9.12.3 × §9.12.4 — the same key over every frame of the clip, through the one
+   * batched path (write all files, one clip update, one invalidation pass).
+   */
+  private onApplyChromaToClip = async (): Promise<void> => {
+    const controller = this.documentController;
+    const clip = controller?.activeClip;
+    const color = this.chromaColor;
+    if (!controller || !clip || !color || this.chromaBusy || this.sliceBusy) {
+      return;
+    }
+
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Chroma key every frame?',
+      message: `Knock rgb(${color.r}, ${color.g}, ${color.b}) out of all ${
+        clip.frames.length
+      } frame${clip.frames.length === 1 ? '' : 's'} of "${clip.name}", at ${Math.round(
+        this.chromaTolerance * 100
+      )}% tolerance.`,
+      confirmLabel: 'Chroma key clip',
+      cancelLabel: 'Cancel',
+      isDangerous: true,
+      disclaimer:
+        'Every keyed frame is written as a new file. Undo restores the document, not the pixels on disk.',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const op: BulkRasterOp = {
+      kind: 'chroma-key',
+      color,
+      tolerance: this.chromaTolerance,
+      softness: this.chromaSoftness,
+    };
+    this.closeChromaMode();
+    this.sliceBusy = true;
+    this.sliceStatus = null;
+    try {
+      const report = await controller.applyRasterOpToClipFrames(op);
+      this.sliceStatus = {
+        text: describeBulkReport(report, `Chroma key: ${clip.name}`),
+        isError: report.failed > 0,
+      };
+    } catch (error) {
+      this.sliceStatus = { text: `Chroma key failed: ${describeError(error)}`, isError: true };
+    } finally {
+      this.sliceBusy = false;
+    }
+  };
+
   private setStageTool(tool: StageTool): void {
+    if (tool !== 'polygon' && this.polygonPreviewFrameIndex >= 0) {
+      // Leaving polygon mode abandons an uncommitted trace rather than leaving a
+      // draft nobody can see the Apply button for.
+      this.onCancelPolygonPreview();
+    }
     this.stageTool = tool;
     if (tool !== 'select') {
       this.overlays.setEditMode(tool);
-      // Crop, place and an overlay tool all want a plain left-drag; the last click wins.
+      // Crop, place, the eyedropper and an overlay tool all want a plain
+      // left-press; the last click wins.
       this.cropMode = false;
       this.cropRect = null;
       this.cropDrag = null;
       this.closePlaceSession();
+      this.closeChromaMode();
+      // …and this tool's own card takes the stage slot (see `closeStageCards`).
+      this.closeStageCards();
     }
   }
 
@@ -1384,9 +2411,9 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
 
     return html`
       <div
-        class="ag-stage ${this.cropMode ? 'is-cropping' : ''} ${this.stageView.isPanning
-          ? 'is-panning'
-          : ''}"
+        class="ag-stage ${this.cropMode ? 'is-cropping' : ''} ${this.chromaMode
+          ? 'is-picking'
+          : ''} ${this.stageView.isPanning ? 'is-panning' : ''}"
         ${ref(this.stageRef)}
         @wheel=${this.onStageWheel}
         @pointerdown=${this.onStagePointerDown}
@@ -1425,13 +2452,17 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
               <div class="ag-empty-body">${this.renderEmptyBody()}</div>
             </div>`}
         ${this.renderAnchorTools(frame)} ${this.renderPointTools(frame)}
+        ${this.renderPolygonTools(frame)} ${this.renderBulkFramesTools()}
+        ${this.renderVideoImportTools()}
         ${this.bgBusy ? html`<div class="ag-progress">${this.renderBgProgress()}</div>` : null}
       </div>
       ${this.placeSession
         ? this.renderPlaceToolbar()
         : this.cropMode
           ? this.renderCropToolbar()
-          : null}
+          : this.chromaMode
+            ? this.renderChromaToolbar()
+            : null}
       ${this.bgError ? html`<div class="ag-error ag-stage-error">${this.bgError}</div>` : null}
     `;
   }
@@ -1584,6 +2615,94 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
         >
           Add point
         </button>
+      </div>
+    `;
+  }
+
+  /**
+   * Polygon-mode side card (§9.12.2): the tolerance the auto-trace runs at, plus
+   * Apply / Discard for a trace that has not been committed yet. The polygon
+   * itself is drawn by the ordinary overlay — this card never renders geometry.
+   */
+  private renderPolygonTools(frame: AnimationFrame | null) {
+    if (this.stageTool !== 'polygon' || this.cropMode || !frame || !this.documentController) {
+      return null;
+    }
+
+    const controller = this.documentController;
+    const hint = this.frameRasterHint;
+    const pending = this.polygonPreviewFrameIndex >= 0;
+    return html`
+      <div class="ag-frame-tools" aria-label="Collision polygon tools">
+        <div class="ag-frame-tools-head">
+          <span class="ag-frame-tools-title">Polygon</span>
+          <span class="ag-frame-tools-value">${frame.collisionPolygon.length} pts</span>
+        </div>
+        <label class="ag-polygon-tolerance">
+          <span class="ag-polygon-tolerance-label">
+            Tolerance <em>${this.polygonTolerance.toFixed(1)} px</em>
+          </span>
+          <input
+            type="range"
+            min="0"
+            max="8"
+            step="0.5"
+            .value=${String(this.polygonTolerance)}
+            aria-label="Auto polygon tolerance in pixels"
+            @input=${(event: Event) => {
+              this.polygonTolerance = Number((event.target as HTMLInputElement).value);
+            }}
+            @change=${() => {
+              // Re-trace on release, not on every tick of the drag: the mask is
+              // cached, but a re-trace still walks the whole outline.
+              if (this.polygonPreviewFrameIndex >= 0) {
+                void this.runPolygonTrace();
+              }
+            }}
+          />
+        </label>
+        ${hint ? html`<p class="ag-frame-tools-hint">${hint}</p>` : null}
+        <div class="ag-frame-tools-row">
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Trace the polygon from this frame’s alpha channel"
+            ?disabled=${Boolean(hint) || this.polygonBusy}
+            @click=${() => void this.runPolygonTrace()}
+          >
+            ${this.polygonBusy ? 'Tracing…' : 'Auto'}
+          </button>
+          <button
+            class="ag-frame-tools-wide"
+            type="button"
+            title="Remove every vertex of this frame’s polygon"
+            @click=${() => void controller.clearPolygon()}
+          >
+            Clear
+          </button>
+        </div>
+        ${pending
+          ? html`
+              <div class="ag-frame-tools-row">
+                <button
+                  class="ag-frame-tools-wide ag-polygon-apply"
+                  type="button"
+                  title="Write the traced polygon into the frame"
+                  @click=${this.onApplyPolygonPreview}
+                >
+                  Apply
+                </button>
+                <button
+                  class="ag-frame-tools-wide"
+                  type="button"
+                  title="Discard the traced polygon"
+                  @click=${this.onCancelPolygonPreview}
+                >
+                  Discard
+                </button>
+              </div>
+            `
+          : null}
       </div>
     `;
   }
@@ -2196,6 +3315,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       event.preventDefault();
       return;
     }
+    // The eyedropper owns the plain left-press while it is open (§9.12.3). It is a
+    // transient mode, so it is routed here rather than through `stageTool` — the
+    // same slot crop occupies below, and mutually exclusive with it by
+    // construction.
+    if (this.chromaMode && event.button === 0) {
+      this.pickChromaColor(event);
+      this.stageRef.value?.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
     // A placement owns the stage while it is open: only its rect and handles start
     // a drag (they stop propagation before this runs), so a plain left-drag on the
     // background does nothing — there is no rubber-band in place mode.
@@ -2235,6 +3364,15 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (this.stageView.updatePan(event)) {
       return;
     }
+    // Dragging with the eyedropper down keeps re-sampling, which is what makes
+    // "slide onto the exact background pixel" possible at any zoom. Cheap because
+    // the RGBA was decoded once when the mode opened.
+    if (this.chromaMode) {
+      if (this.stageRef.value?.hasPointerCapture(event.pointerId)) {
+        this.pickChromaColor(event);
+      }
+      return;
+    }
     const placeDrag = this.placeDrag;
     if (placeDrag) {
       const placePoint = this.toImagePoint(event);
@@ -2261,6 +3399,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   private onStagePointerUp(event: PointerEvent): void {
     if (this.stageView.endPan(event)) {
       this.requestUpdate();
+      return;
+    }
+    if (this.chromaMode) {
+      this.releaseStagePointer(event);
       return;
     }
     if (this.placeDrag) {
@@ -2292,8 +3434,10 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (!this.current) {
       return;
     }
-    // Crop and place own the same left-drag; opening one closes the other.
+    // Crop, place and the eyedropper own the same left-press; opening one closes
+    // the others.
     this.closePlaceSession();
+    this.closeChromaMode();
     this.cropMode = !this.cropMode;
     this.cropRect = null;
     this.cropDrag = null;
@@ -2453,10 +3597,12 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
       texturePath,
     };
     this.placeRect = quickFitRect(incoming, frame, 'fit');
-    // Crop and the overlay tools all want the plain left-drag place mode now owns.
+    // Crop, the eyedropper and the overlay tools all want the plain left-press
+    // place mode now owns.
     this.cropMode = false;
     this.cropRect = null;
     this.cropDrag = null;
+    this.closeChromaMode();
     this.stageTool = 'select';
     return true;
   }
@@ -3057,11 +4203,16 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.cropMode = false;
     this.cropRect = null;
     this.cropDrag = null;
+    this.closeChromaMode();
   }
 
   private setCurrent(next: CurrentImage): void {
     const previous = this.current;
     this.current = next;
+    // The eyedropper's decoded RGBA describes the *previous* image, and the colour
+    // picked out of it means nothing against a different frame — a new working
+    // image always ends the session.
+    this.closeChromaMode();
     if (previous && previous.objectUrl !== next.objectUrl) {
       this.revokeUrl(previous.objectUrl);
     }
@@ -3215,6 +4366,85 @@ const describeTrimReport = (report: TrimClipReport, clipName: string): string =>
     parts.push(`${report.failed} failed`);
   }
   return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.4 — say what a bulk op did. Same rule as the trim's report: a clip of
+ * UV-window frames processes *nothing*, and silence there reads as a dead button,
+ * so the skips are always spelled out.
+ */
+const describeBulkReport = (report: BulkFrameReport, subject: string): string => {
+  const parts: string[] = [
+    report.processed > 0
+      ? `${subject} — ${report.processed} frame${report.processed === 1 ? '' : 's'}`
+      : `${subject} — nothing to do`,
+  ];
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.5 — say what the current fps/range add up to, including *why* a range is
+ * refused. Every status the plan can return names something the user can change,
+ * so none of them is allowed to read as "the button is broken".
+ */
+const describeVideoPlan = (plan: VideoFramePlan): string => {
+  switch (plan.status) {
+    case 'ok':
+      return `${plan.times.length} frame${plan.times.length === 1 ? '' : 's'} from ${formatVideoTime(
+        plan.inSeconds
+      )} to ${formatVideoTime(plan.outSeconds)}.`;
+    case 'too-many':
+      return `That range asks for ${plan.requested} frames; the cap is ${plan.maxFrames}. Narrow the range or lower the frame rate.`;
+    case 'no-duration':
+      return 'This video reports no usable duration.';
+    default:
+      return 'This range is shorter than one frame — widen it or raise the frame rate.';
+  }
+};
+
+/**
+ * §9.12.5 — say what the import did, in the same three buckets the trim and the
+ * bulk ops report. A video whose tail decodes to nothing imports fewer frames than
+ * it grabbed, and that has to be visible rather than looking like a short clip.
+ */
+const describeVideoImportReport = (report: VideoImportReport, clipName: string): string => {
+  const parts: string[] = [
+    report.imported > 0
+      ? `Imported ${report.imported} frame${report.imported === 1 ? '' : 's'} into ${clipName}`
+      : `Nothing imported into ${clipName}`,
+  ];
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.2 — state the outcome of a trace. Every non-`traced` status has a cause
+ * the user can act on, so none of them may be silent.
+ */
+const describeAutoPolygonReport = (report: AutoPolygonReport, tolerance: number): string => {
+  switch (report.status) {
+    case 'traced':
+      return `Traced ${report.vertexCount} vertices at ${tolerance.toFixed(1)} px — Apply to keep them.`;
+    case 'empty':
+      return 'This frame has no opaque pixels to trace.';
+    case 'unreadable':
+      return 'Could not read this frame’s pixels.';
+    case 'stale':
+      return 'The selection moved while tracing — nothing was applied. Try again.';
+    default:
+      return 'Select a frame with its own texture file to trace a polygon.';
+  }
 };
 
 declare global {

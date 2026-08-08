@@ -90,11 +90,15 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 3. **Types**: Never use `any`. Use explicit types or `unknown` with type guards.
 4. **Selection**: When creating nodes, update both `selection.nodeIds` and `selection.primaryNodeId`.
 5. **Portals**: Use `DropdownPortal` for floating UI (dropdowns, tooltips) to avoid clipping.
-5a. **Icons**: All UI icons render through `IconService.getIcon(...)` (vector SVG). Never hardcode emoji/glyphs as icons.
+   5a. **Icons**: All UI icons render through `IconService.getIcon(...)` (vector SVG). Never hardcode emoji/glyphs as icons.
 6. **Async Safety**: Use `CommandDispatcher` to handle command execution flow and errors.
 7. **Proactiveness**: If a command requires a service, check its availability and register if necessary.
 8. **Documentation**: Keep the canonical doc set current; do **not** add new `.md` files. The set is `README.md`, `AGENTS.md`, `CLAUDE.md`, and under `docs/`: `pix3-specification.md`, `nodes-and-systems.md`, `node-types-reference.md`, `property-schema-reference.md`, `architecture.md`. New material = a section in one of these + a row in CLAUDE.md's doc router (not a new file).
 9. **Plans**: Planning documents are the one exception to rule 8, and they all live in `.plans/` — active plans plus the operational `TODO.md` in the folder root, finished ones moved to `.plans/done/` via `git mv`. Never create a plan/TODO file at the repository root.
+10. **A green test suite is not verification.** Tests catch what someone thought to assert; they do not catch paint order, a dead affordance, or a gate nobody wrote. Anything user-facing gets checked in the running editor (chrome-devtools MCP), judged by state — `window.__PIX3_DEBUG__`, node/document properties, DOM measurements — with a screenshot only for genuinely visual questions. Clean up afterwards and confirm `git status samples/` is empty.
+11. **Verify against an independent measurement, not the tool's own output.** A restamped anchor satisfying the equation the restamp was derived from proves nothing; decode the source file and compute the answer another way. Real examples from this repo: the trim tool's anchor was confirmed by computing the PNG's alpha bounding box separately, the chroma key by predicting the affected pixel count from the source pixels, a bulk flip by comparing the output against a mirrored read of its input, and the video importer against a clip authored so a failed seek would show up as repeated pixels.
+12. **Suspect the harness before declaring a bug.** Measurement mistakes outnumber real regressions here: a wrong property name, `display: contents` reporting 0×0, a reading taken after playback ended, or dispatching only `change` at a control that reads its value in `@input`. Re-check how you measured, then report.
+13. **An implementation contract is derived, not authoritative.** A `.plans/` contract section can be incomplete or can have drifted from the product spec it was written against. Before implementing, read the source-of-truth section it derives from (a decision table, a drag matrix) and say so when the two disagree — implementing the contract literally and silently is how a row of a matrix ends up as a dead affordance.
 
 ## Development Commands
 

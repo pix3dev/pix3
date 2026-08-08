@@ -1504,6 +1504,20 @@ RDP with a tolerance in pixels. UI: a frame-tools action with a tolerance slider
 polygon live through the existing `renderPolygonOverlay` before committing one `applyClipUpdate`.
 The polygon overlay is already editable, so the tool only has to seed it.
 
+**Implementation notes.** The preview needs no new channel: the trace is written into the **frame
+draft** (`beginFrameDraft`/`updateFrameDraft`), which `selectedFrame` already returns in preference
+to the stored frame, so `renderPolygonOverlay` draws it and its vertices are draggable straight
+away; Apply is `commitFrameDraft` (one `applyClipUpdate`, one undo step) and Discard is
+`clearFrameDraft`. The alpha read is a new `readAlphaMask(blob, { alphaThreshold })` in
+`image-ops.ts`, next to `trimImageBlob` and available to the agent tool layer for the same reason;
+masks are cached per `<texturePath>|<threshold>` on the controller (and dropped by
+`invalidateTexture`) so dragging the tolerance slider does not re-decode the PNG. The tool shares
+the raster tools' `frameRasterHint` gate — a UV-window frame's file is the whole spritesheet, and an
+undecoded frame would author absolute pixels against the 256 px placeholder (§9.7 risk 2). The
+ISNet-mask alternative this section offers was not wired: the alpha channel is already the mask for
+every frame the editor writes, and reaching for `BackgroundRemovalService` would put a model load
+behind a geometry tool.
+
 #### 9.12.3 Chroma key
 
 Eyedropper on the stage (reuse the place/crop pointer routing pattern — a transient mode, not a
@@ -1512,12 +1526,95 @@ belongs in `@/services/image-gen/image-ops.ts` next to `trimImageBlob`, so the A
 agent tool layer get it for free. Write-back for a bound frame is
 `writeBlobToBoundFrame(blob, { kind: 'replace' })` at unchanged size — the identity restamp.
 
+**Implementation notes.**
+
+*Signature.* `chromaKeyImage(blob, color, options)` takes and returns a **`Blob`**, not the
+`imageData` this section names. Every other op in the module is blob-in/blob-out (`trimImageBlob`,
+`readAlphaMask`, `rotateImageBlob`), the frame write-back wants a blob, and an `ImageData` signature
+would have forced both the panel and the agent layer to grow their own decode/encode. Returns
+`{ blob, width, height, keyedPixels, softenedPixels }` — the counts are what the status line reports,
+so "nothing happened" is never silent.
+
+*Colour distance is plain RGB euclidean*, normalised by `√3·255` so `tolerance` is a 0..1 fraction a
+slider can carry. Justified in the function's own comment: the backgrounds this targets are flat —
+one near-uniform RGB across thousands of pixels — so a perceptual metric (CIEDE2000) buys nothing
+measurable, while a chroma-only metric (YCbCr) would additionally key *shaded* copies of the
+background colour, i.e. eat the shadowed side of the subject.
+
+*Edges: a hard cut by default, with the ramp available.* `softness` (same 0..1 units) is implemented
+and exposed as a second slider, but defaults to **0**. A hard cut is the predictable answer for the
+flat, hard-edged generated art this ships against, and a softened fringe is exactly the
+"near-transparent halo" §9.12.1's `alphaThreshold: 8` trim would then cut anyway. **No despill**:
+removing the key colour's contribution from surviving semi-transparent pixels needs an estimate of
+what is *behind* the subject, which a single flat-background still image does not carry — it is a
+video-keying concern. Existing alpha is *scaled*, never overwritten, so re-keying an already
+cut-out image cannot resurrect transparent pixels.
+
+*The eyedropper.* A transient mode (`chromaMode`), routed through
+`onStagePointerDown/Move/Up` in the same slot crop and place occupy, and mutually exclusive with both
+(`setStageTool`, `onToggleCrop`, `openPlaceSession` and Escape all close it; a new working image
+closes it too, because a colour picked off the previous frame means nothing against this one). Two
+new pure helpers back it — `readImagePixels(blob)` and `samplePixelColor(pixels, x, y)` — so the
+RGBA is decoded **once** when the mode opens and a drag re-samples synchronously per pointer move
+instead of re-decoding the PNG. Coordinates come from the same `toImagePoint` the crop tool uses, so
+the picker agrees with every other stage tool under zoom and pan.
+
+*Write-back* is the `onRemoveBackground` split verbatim: `canWriteBackToFrame` →
+`writeBlobToBoundFrame(blob, { kind: 'replace' }, 'Chroma key frame')`; otherwise the keyed blob
+becomes the working image (`source: 'chroma-keyed'`) and the save name is forced to `.png`.
+
 #### 9.12.4 Bulk frame ops
 
 Delete even/odd frames, and map any `image-ops` raster function over every frame of a clip.
 Managed-folder frames only (`isSequenceAnimationFrame`). Both follow §9.12.1's shape: write all files,
 then one `applyClipUpdate`, then one invalidation pass. Deleting frames needs no new file writes and
 is a plain single-step clip update.
+
+**Implementation notes.** Two controller methods, both returning
+`BulkFrameReport { processed, skipped, failed }` — deliberately the same three buckets
+`TrimClipReport` uses, so `sliceStatus` states every bulk outcome the same way and a clip of
+UV-window frames never looks like a dead button.
+
+- `deleteFramesByParity('even' | 'odd')` — parity is counted the way the **timeline labels** frames,
+  so `Frame 1` is odd. It writes and deletes nothing (the PNGs stay on disk, undo really restores the
+  clip), so it is delegated to the existing `removeFrames`, which already collapses the removal into
+  one operation and repairs the selection. Success is detected by comparing the frame count before
+  and after rather than by changing `removeFrames`' signature. A UV-window frame of the selected
+  parity is a *skip*: halving frames that all read one shared sheet is a slicing decision, not a
+  frame-list edit.
+- `applyRasterOpToClipFrames(op)` — `op` is a small union, not a callback, because each case has to
+  carry the `FrameRasterTransform` that re-derives the frame's geometry (`flip` → `{kind:'flip'}`,
+  `rotate` → `{kind:'rotate'}`, `chroma-key` → the identity `{kind:'replace'}`). Byte-for-byte
+  §9.12.1's shape, including `resolveTrimSourceSize` per frame (never the preview-texture fallback)
+  and the "already-tight"-style skips. Output is forced to PNG whatever the source encoding was: a
+  managed folder's frames are `<clip>_<nnnn>.png` by convention, so preserving a JPEG's encoding
+  would write a JPEG under a `.png` name — and for the chroma key would throw away the alpha it just
+  authored.
+
+**Where chroma key lives in the UI, and why not in the bulk card.** §9.12.4 asks for chroma key to be
+one of the bulk ops so the two features compose — it is, at the controller level
+(`{ kind: 'chroma-key', color, tolerance, softness }`). But it is *offered* from the chroma
+toolbar's **Apply to clip** button rather than from the bulk card, because it is the one op that
+needs a parameter the user has to pick off the canvas first; a blind "Chroma key" button in the card
+would have had nothing to key. So the flow is: eyedropper on one frame → tune tolerance → Apply (this
+frame) or Apply to clip (all of them). The card carries what needs no parameter: Drop every 2nd,
+Flip H, Flip V, Rotate 90°.
+
+**Confirms.** As §9.12.1 found, `DialogService` has no numeric input — only `showChoice` and a
+type-to-confirm field — so the parity confirm follows the trim's precedent and puts the parameter on
+the *buttons*: "Drop N even" / "Drop N odd" / Cancel. The raster ops take the plain
+`showConfirmation` with `isDangerous` and the same disclaimer the trim carries (new files are
+written; undo restores the document, not the pixels on disk — §9.7 risk 7).
+
+**Tests.** `image-ops.spec.ts` runs the real key over a real RGBA strip (only `createImageBitmap` and
+the 2D canvas are stood up), with greys chosen so the arithmetic is exact against a black key — a
+grey of value *v* sits at exactly *v*/255 of the maximum distance, which makes the ramp assertion
+(`153`, i.e. 60 % of 255) a checkable number rather than a recorded one. The controller spec runs the
+real `flipImageBlob` / `rotateImageBlob` / `chromaKeyImage` over a synthetic raster and asserts the
+batching invariant directly (every `writeBinaryFile` call order is less than the single
+`invokeAndPush`). The panel spec drives the eyedropper through a real `pointerdown` — happy-dom
+measures every element as 0×0, so the stage is given a real `getBoundingClientRect`, which is
+arranging state the browser fills, the same move `seedFrameMetrics` makes.
 
 #### 9.12.5 Video import
 
@@ -1526,3 +1623,148 @@ trim range → frames written by the §8.2 convention through the same
 `importOsFiles`-style append path the timeline already uses. Browser-only, no ffmpeg. Seek with
 `requestVideoFrameCallback` where available and fall back to `currentTime` stepping; the fallback
 must await the `seeked` event before each grab or it silently captures duplicate frames.
+
+**Implementation notes.**
+
+*Where it lives.* A new `src/ui/sprite-editor/video-frame-extract.ts` with its own spec, the split
+§9.12.2 made for `contour-trace.ts`: `planVideoFrameTimes` is **pure** (no DOM at all) and decides
+*which* timestamps to grab, `loadVideoFile` / `seekVideoTo` / `grabVideoFrames` touch the DOM but
+hold no policy, and the panel owns the picker, the confirm and the status line. It is deliberately
+*not* in `image-ops.ts`: everything there is blob-in/blob-out raster maths with no element lifetime
+to manage, whereas this holds a live `<video>` (and its object URL) open across a whole session.
+
+*The seek.* `seekVideoTo` waits for `requestVideoFrameCallback` where the element has one — a
+strictly better signal than `seeked`, because it fires when the frame has actually been *presented*
+— and for the `seeked` event where it does not (Firefox). Two details the contract does not name but
+the browser demands. First, **a seek to where the element already is does not reliably fire
+`seeked`**, and the first grab of a range starting at 0 is exactly that case, so the helper answers
+from state (`currentTime` within 1 µs *and* `readyState ≥ HAVE_CURRENT_DATA`) instead of waiting for
+an event that will never come. Second, `rVFC` on a *paused* element is a weaker promise than the spec
+reads like, so the 5 s per-seek timeout is not only a hang guard: if it expires and `seeked` was
+observed, the seek is taken; only a seek that never landed at all rejects. A rejected seek **aborts
+the whole run** rather than counting as one failure — an unseekable file fails every later timestamp
+identically, and at the cap that is 300 timeouts in a row.
+
+*Batching.* §9.12.1's shape, one level up: every frame is grabbed into a `File`, then
+`importOsFiles` writes the whole batch, then **one** `addFrameTextures` appends them — one
+`applyResourceUpdate`, one undo step. That is also why the grabbed PNGs are held in memory rather
+than streamed one at a time: `importOsFiles` numbers a run from `nextFrameFileNumber` *once*, so
+calling it per frame before the document update would hand every file the same number. Reusing that
+function (rather than writing files here) is what makes the §8.2 managed-folder naming, the
+`sourceSize` stamp and the undo label shared instead of reimplemented — the panel spec asserts the
+written paths continue the clip's own `idle_000N.png` sequence.
+
+*The cap is 300 frames*, stated in the card ("the cap is 300") and in the confirm's disclaimer. It
+is an order of magnitude past a hand-authored clip (SkyDefender's longest is 22) and is where the
+memory held by the un-written batch stops being invisible. Over it the plan returns `too-many`
+carrying `requested`, so the card can say *by how much* and Import stays disabled; it never silently
+imports a truncated range.
+
+*Guards.* Four, each with a test: a file the browser cannot decode (`loadVideoFile` waits for
+`loadeddata`, not merely `loadedmetadata`, and rejects on `error` or on a 15 s timeout — a truncated
+file fires neither event); a video with no usable duration (0, `NaN`, or the `Infinity` a live stream
+reports) and one with no video track at all; an in/out range holding less than one frame at the
+chosen fps; and the frame cap. All four are stated in the card *before* the user can commit, and
+Import is enabled only on a plan whose status is `ok`.
+
+*Reporting* is `{ imported, skipped, failed }` through the existing `sliceStatus` line, the same
+three buckets `TrimClipReport` and `BulkFrameReport` use. `skipped` is a timestamp the decoder had
+no frame for (a range running past the video's real end) — the same call `applyRasterOpToClipFrames`
+makes when a raster op hands back nothing — while a draw/encode failure is a `failed`. `imported` is
+measured as the clip's frame-count delta, the way `deleteFramesByParity` measures its own outcome, so
+a document that refuses the update cannot report success.
+
+*Deviations.* (1) The card has **no video preview** — the in/out range is picked against a numeric
+`m:ss.s` readout, not a scrubbed frame. A preview needs the element in the tree and a second render
+surface next to the stage's; it is a follow-up, not a blocker. (2) The confirm is the plain
+`showConfirmation`, not §9.12.1's `showChoice`: every parameter this tool takes (fps, in, out) is
+already on the card, so there is nothing left to put on the buttons. (3) The file picker is a
+detached `<input type="file">`, the way `generate-panel.ts` opens its reference picker —
+`showOpenFilePicker` appears nowhere in the editor, and a video is read as bytes and thrown away
+rather than kept as a project file handle.
+
+*Tests.* `video-frame-extract.spec.ts` runs the real planner and the real grab loop against a
+`FakeVideo` that models the one thing happy-dom cannot do: it keeps the *requested* time
+(`currentTime`) apart from the frame that would actually be painted (`presentedTime`), which only
+catches up when the seek completes. The canvas double records the presented one, so the
+duplicate-frame assertion is real — dropping the `await` in front of `seekVideoTo` was tried and
+turns four of those tests red. The panel spec drives the whole shipping path (picker → card → fps
+select → confirm → import) with only the three capabilities happy-dom lacks stood up (the OS picker,
+video decoding, the 2D canvas), and asserts the batching invariant directly: every `writeBinaryFile`
+call order is less than the single `invokeAndPush`.
+
+### 9.13 Verification log — the loose ends, closed 2026-08-04
+
+Three paths this track had implemented but never *executed*. All three were checked in a live editor
+(chrome-devtools MCP, SkyDefender), judged by state.
+
+**`sizeMode: 'native'` for a frame with no authored `sourceSize`** — the path exists
+(`AnimatedSprite2D.resolveFrameSourceSize`: authored → atlas → decoded image) but nothing had run it.
+Verified by building an `AnimatedSprite2D` in the live runtime over two *real* project textures of
+different sizes whose frames carry no `sourceSize` (`mg0001.png` 37×25, `ex0059.png` 128×128,
+confirmed against the PNG headers on disk), node 100×100. Predicted from the formula before
+measuring — `clipScale = nodeWidth / referenceSize.width = 100/37` — and measured exactly:
+
+| | frame 0 (37×25) | frame 1 (128×128) |
+|---|---|---|
+| `stretch` | 100 × 100 | 100 × 100 |
+| `native` | 100 × 67.568 | 345.946 × 345.946 |
+
+So the size really does come from the resolution chain rather than falling back to stretch, and the
+per-clip scale is applied to both axes. `sourceSize` on both frames read `{0,0}` throughout — the
+authored branch was never taken.
+
+**The `atlasSizeOf` branch in `Viewport2DProxyRegistry.resolveProxyFrameSourceSize`** — only
+reachable with an atlas resolver installed, which happens in `TextureAtlasService.prepareForPlay`.
+Verified in play mode: `mg0001.png` loads as an atlas view onto a 2048×2048 sheet, `atlasSizeOf`
+returns `{37, 25}`, and the proxy resolver handed a frame with no `sourceSize` returns `{37, 25}` —
+the frame's true size, not the sheet's. Had this branch been wrong the proxy would have sized the
+sprite to the whole atlas page.
+
+**Golden Layout re-dock** — previously only emulated with `remove()` + `appendChild`. Exercised
+through a real Golden Layout control (maximise → restore on the shell's stack), which re-parents the
+element and therefore drives the same `disconnectedCallback` → `connectedCallback` cycle a dock move
+does. The proof that it was not a no-op: the working image's object URL *changed*, i.e. teardown
+revoked it and `rehydrateObjectUrls` minted a new one — and the new one still resolves. Everything
+else survived: same component instance, same `AnimationDocumentController`, clip `burst`, frame 0,
+frame binding, the decoded 128×128 stage image and all 22 timeline cards. No new console errors.
+
+### 9.14 Review pass — what the PR #36 read found, and what it cost to fix
+
+An independent read of the phase-6 diff against this contract turned up one real defect and
+four smaller ones. All are fixed on the branch; the tests below fail without their fix.
+
+**The file-number reservation was missing on the import path.** `importOsFiles` numbered its files
+with `nextFrameFileNumber` and never reserved them, unlike every other write path (§9.5's
+`replaceFrameTexture`, §9.12.1's trim, §9.12.4's bulk op), which all go through
+`reserveFrameFileNumber` precisely because *un-referenced is not the same as free*: undo drops the
+document's reference to a file that redo still points at. Video import (§9.12.5) writes N files
+through this path at once, so the window was wide: import 12 frames → undo → any bake → redo, and
+the clip shows another frame's pixels. Measured rather than argued — with the reservation removed,
+the bake writes `idle_0002.png`, the same name the first imported frame holds. Reserved per file
+inside the loop, not once at the end, so a write that throws mid-run still protects what it wrote.
+
+**The chroma key rewrote frames it had not changed.** §9.12.4 above promised §9.12.1's
+"already-tight"-style skips; only the `width <= 0` guard was implemented. `chromaKeyImage` reports
+`keyedPixels` / `softenedPixels` and they were dropped on the floor, so a clip whose key colour
+appears in three of 22 frames burned 22 file numbers and reported "processed 22". `runFrameRasterOp`
+now surfaces a `changedPixels` count for the one op that can legitimately no-op, and a zero skips.
+
+**`traceSelectedFramePolygon` could stamp one frame's outline onto another.** The frame is read
+before `loadAlphaMask`'s decode (real work on first touch) and `beginFrameDraft` clones whatever is
+selected *after* it; the timeline stays clickable throughout. Guarded by re-checking frame identity
+after the await, with a new `stale` report status so the panel says what happened instead of
+claiming there is no frame.
+
+**The stage's top-right slot had no single owner.** The anchor / points / polygon cards are mutually
+exclusive through `stageTool`, and opening the video card closed the bulk card — but nothing closed
+them the other way, so two cards could render on top of each other with both toggles lit.
+`closeStageCards()` now enforces one occupant, on the same "the last click wins" rule `setStageTool`
+already applied to crop, place and the eyedropper. Its one exception is an import in flight: its
+decoder is mid-grab and releasing it would abort the run.
+
+**Two smaller ones.** `formatVideoTime` split before rounding, so 59.96 s read `0:60.0`; the
+eyedropper's decode guard tested `chromaMode` but not *which* image had been decoded, so a re-entry
+on another frame could sample stale pixels. And `seekVideoTo`'s "seek landed but `rVFC` never fired"
+branch — named in §9.12.5 as deliberate, not a hang guard — had no test, because the fake video
+always fired both signals together; it has one now.
