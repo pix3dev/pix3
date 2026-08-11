@@ -72,13 +72,16 @@ type DisplayItem =
   | { kind: 'text'; role: 'user' | 'assistant'; text: string }
   | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'tool'; call: LlmToolUseBlock; result: LlmToolResultBlock | null }
-  | { kind: 'metrics'; metric: AgentTurnMetric };
+  | { kind: 'metrics'; metric: AgentTurnMetric }
+  /** Boundary where the service compacted the history — the thread visibly jumps here. */
+  | { kind: 'divider' };
 
 /** Pair every tool-use block with its result and flatten the history into renderable items. */
 const toDisplayItems = (
   messages: readonly LlmMessage[],
   turnMetrics: Readonly<Record<number, AgentTurnMetric>>,
-  showMetrics: boolean
+  showMetrics: boolean,
+  compactedAtIndices: readonly number[] = []
 ): DisplayItem[] => {
   const resultsById = new Map<string, LlmToolResultBlock>();
   for (const message of messages) {
@@ -91,7 +94,11 @@ const toDisplayItems = (
   }
 
   const items: DisplayItem[] = [];
+  const compacted = new Set(compactedAtIndices);
   messages.forEach((message, index) => {
+    if (compacted.has(index)) {
+      items.push({ kind: 'divider' });
+    }
     const blocks: readonly LlmContentBlock[] =
       typeof message.content === 'string'
         ? [{ type: 'text', text: message.content }]
@@ -417,6 +424,7 @@ type RenderRow =
     }
   | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'metrics'; metric: AgentTurnMetric }
+  | { kind: 'divider' }
   | { kind: 'toolgroup'; id: string; tools: ToolEntry[] };
 
 /** Derived status for a single tool row or a whole group. */
@@ -701,7 +709,12 @@ export class AgentChatPanel extends ComponentBase {
   render() {
     const chatState = this.chatState;
     const items = chatState
-      ? toDisplayItems(chatState.messages, chatState.turnMetrics, this.debugMode)
+      ? toDisplayItems(
+          chatState.messages,
+          chatState.turnMetrics,
+          this.debugMode,
+          chatState.compactedAtIndices
+        )
       : [];
     const rows = this.buildRenderRows(items);
     const running = chatState?.status === 'running';
@@ -721,7 +734,7 @@ export class AgentChatPanel extends ComponentBase {
           ${rows.length === 0
             ? this.renderEmptyState()
             : rows.map(row => this.renderRow(row, running, firstPendingId))}
-          ${showThinking ? this.renderRunningIndicator() : null}
+          ${showThinking ? this.renderRunningIndicator() : null} ${this.renderPendingQuestion()}
         </div>
         ${this.debugView !== 'none' ? this.renderDebugDrawer() : null} ${this.renderBanners()}
         ${this.renderComposer()}
@@ -759,6 +772,8 @@ export class AgentChatPanel extends ComponentBase {
         });
       } else if (item.kind === 'image') {
         rows.push({ kind: 'image', role: item.role, mimeType: item.mimeType, data: item.data });
+      } else if (item.kind === 'divider') {
+        rows.push({ kind: 'divider' });
       } else {
         rows.push({ kind: 'metrics', metric: item.metric });
       }
@@ -839,6 +854,15 @@ export class AgentChatPanel extends ComponentBase {
           />
         </div>
       `;
+    }
+    if (row.kind === 'divider') {
+      // The service replaced the history here; without a marker the thread looks like it lost turns.
+      return html`<div
+        class="agent-compact-divider"
+        title="Earlier turns were summarized into a handoff to free context. Nothing you asked for was lost."
+      >
+        <span class="agent-compact-divider-label">context compacted</span>
+      </div>`;
     }
     return this.renderTextRow(row, running);
   }
@@ -1453,6 +1477,54 @@ export class AgentChatPanel extends ComponentBase {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * The agent's open question (the `ask_user` tool ended its turn on it). Options render as chips —
+   * one click sends the answer as the next user message, so a structural fork costs a click instead
+   * of a typed sentence. `allowFreeform` only governs the hint; the composer always stays usable.
+   */
+  private renderPendingQuestion() {
+    const pending = this.chatState?.pendingQuestion;
+    if (!pending || this.chatState?.status === 'running') {
+      return null;
+    }
+    return html`
+      <div class="agent-question">
+        <span class="agent-question-icon"
+          >${this.icons.getIcon('help-circle', IconSize.SMALL)}</span
+        >
+        <div class="agent-question-body">
+          <div class="agent-question-text">${pending.question}</div>
+          ${pending.options.length > 0
+            ? html`<div class="agent-question-options">
+                ${pending.options.map(
+                  option =>
+                    html`<button
+                      type="button"
+                      class="agent-question-chip"
+                      @click=${() => void this.answerQuestion(option)}
+                    >
+                      ${option}
+                    </button>`
+                )}
+              </div>`
+            : null}
+          ${pending.allowFreeform
+            ? html`<div class="agent-question-hint">…or answer in your own words below.</div>`
+            : null}
+        </div>
+      </div>
+    `;
+  }
+
+  /** Send a chip's text as the next user message (identical to typing it and pressing Enter). */
+  private async answerQuestion(answer: string): Promise<void> {
+    if (this.chat.isRunning()) {
+      return;
+    }
+    this.shouldStickToBottom = true;
+    await this.chat.send(answer);
   }
 
   private renderRunningIndicator() {

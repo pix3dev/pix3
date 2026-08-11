@@ -9,6 +9,7 @@ import { EditorTabService } from '@/services/editor/EditorTabService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { OperationService } from '@/services/core/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
+import { ensureSceneActive, openGameSurface } from '@/features/scripts/play-workspace';
 
 /**
  * Starts the game from the project's main scene (Project Settings →
@@ -26,12 +27,15 @@ export class StartMainSceneGameCommand extends CommandBase<void, void> {
     menuOrder: 101,
   };
 
-  private readonly editorTabService: EditorTabService;
   private readonly gamePlaySessionService: GamePlaySessionService;
 
-  constructor(editorTabService: EditorTabService, gamePlaySessionService: GamePlaySessionService) {
+  /**
+   * `editorTabService` is accepted for call-site compatibility but no longer used: which surface
+   * the game appears on is decided per workspace in `play-workspace` (Studio = a Golden-Layout
+   * tab, Flow = the permanently mounted stage).
+   */
+  constructor(_editorTabService: EditorTabService, gamePlaySessionService: GamePlaySessionService) {
     super();
-    this.editorTabService = editorTabService;
     this.gamePlaySessionService = gamePlaySessionService;
   }
 
@@ -59,14 +63,14 @@ export class StartMainSceneGameCommand extends CommandBase<void, void> {
   async execute(context: CommandContext): Promise<CommandExecutionResult<void>> {
     const mainScenePath = this.resolveMainScenePath(context);
     if (mainScenePath) {
-      await this.editorTabService.focusOrOpenScene(`res://${mainScenePath}`);
+      await ensureSceneActive(context.container, `res://${mainScenePath}`);
     } else if (!context.state.scenes.activeSceneId) {
       const firstDescriptor = Object.values(context.state.scenes.descriptors)[0];
       if (!firstDescriptor) {
         console.warn('[StartMainSceneGameCommand] No scenes available to play.');
         return { didMutate: false, payload: undefined };
       }
-      await this.editorTabService.focusOrOpenScene(firstDescriptor.filePath);
+      await ensureSceneActive(context.container, firstDescriptor.filePath);
     } else {
       console.warn(
         '[StartMainSceneGameCommand] No main scene configured (Project Settings → Default Export Scene Path); playing the active scene.'
@@ -87,8 +91,7 @@ export class StartMainSceneGameCommand extends CommandBase<void, void> {
     if (this.gamePlaySessionService.isPopoutOpen()) {
       await this.gamePlaySessionService.openOrFocusPopoutWindow();
     } else {
-      const gameTabResourceId = 'game-view-instance';
-      await this.editorTabService.openResourceTab('game', gameTabResourceId, {}, true);
+      await openGameSurface(context.container);
     }
 
     return {

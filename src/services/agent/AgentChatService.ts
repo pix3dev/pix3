@@ -63,6 +63,18 @@ export interface AgentTurnMetric {
   readonly predictedCacheTokens?: number;
 }
 
+/**
+ * A question the agent ended its turn on (the `ask_user` tool). The turn stops as soon as the call
+ * executes — a fork the user must resolve is a legitimate end of turn, not a failure — and the UI
+ * renders the options as clickable chips.
+ */
+export interface AgentPendingQuestion {
+  readonly question: string;
+  readonly options: readonly string[];
+  /** When true the composer stays usable for a typed answer instead of only the chips. */
+  readonly allowFreeform: boolean;
+}
+
 export interface AgentChatState {
   readonly status: AgentChatStatus;
   /** Wire-format conversation history (the single source of truth; the UI derives its view). */
@@ -85,12 +97,33 @@ export interface AgentChatState {
   readonly conversations: readonly AgentConversationMeta[];
   /** Id of the conversation currently shown, or null for a fresh unsaved one. */
   readonly activeConversationId: string | null;
+  /** Question the agent stopped on (`ask_user`), or null. Cleared by the next {@link send}. */
+  readonly pendingQuestion: AgentPendingQuestion | null;
+  /**
+   * Indices in {@link messages} where a context compaction replaced the history: the UI draws a
+   * "context compacted" divider before those messages, so the user sees why the thread jumps.
+   */
+  readonly compactedAtIndices: readonly number[];
 }
 
 /** Project-root files scanned (in order) for user-authored agent instructions. */
 const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'] as const;
 /** Cap the AGENTS.md slice of the system prompt so a huge file can't dominate the context. */
 const MAX_AGENTS_MD_CHARS = 16_000;
+/**
+ * The recipe map is authored to sit in the cached prefix (target < 4 KB); the cap is a guard
+ * against a hand-edited recipe.md, not an expected path.
+ */
+const MAX_RECIPE_MD_CHARS = 8_000;
+/**
+ * Iteration floor for a Flow turn (the Studio default is 40, and users lower it). Below this a
+ * turn cannot both build and prove an increment.
+ */
+const FLOW_MIN_TOOL_ITERATIONS = 60;
+/** How many times a Flow turn is pushed to prove a gameplay change before it may close unproven. */
+const FLOW_VERIFY_ATTEMPTS = 3;
+/** Recipe contract written into every Flow project by the prototype expander. */
+const RECIPE_MD_PATH = 'design/recipe.md';
 
 /** Cap serialized tool results so one verbose tool cannot blow up the context window. */
 const MAX_TOOL_RESULT_CHARS = 24_000;
@@ -139,6 +172,42 @@ const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
   return false;
 };
 
+/**
+ * Hard ceiling on ONE provider round-trip. A request that never resolves (no response, no error —
+ * seen with gateway providers whose upstream stalls) used to block the turn forever, with Stop as
+ * the user's only recourse. Racing the call against this deadline turns the hang into a normal
+ * transient failure that {@link AgentChatService.chatWithRetry}'s single retry can recover from.
+ */
+export const LLM_REQUEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Context watermarks as a fraction of the model's context window, measured from the last turn's
+ * (cache-inclusive) `inputTokens`. Measured but unacted-on until now: the history grew without
+ * bound until the provider refused. 60% nudges, 75% compacts, 90% is the emergency valve.
+ */
+export const CONTEXT_NUDGE_RATIO = 0.6;
+export const CONTEXT_COMPACT_RATIO = 0.75;
+export const CONTEXT_EMERGENCY_RATIO = 0.9;
+/** Below this, compaction is pointless — the history IS the task, and squashing it loses more. */
+const MIN_MESSAGES_TO_COMPACT = 8;
+/** Emergency trim keeps this many trailing messages intact (the work the model is mid-way through). */
+const EMERGENCY_KEEP_MESSAGES = 6;
+/** Replacement body for a tool result the emergency trim dropped. */
+const TRIMMED_MARKER = '[trimmed]';
+/** Design docs carried across a compaction (the agent's real memory lives on disk, not in history). */
+const HANDOFF_DOCS = ['design/brief.md', 'design/progress.md', 'design/decisions.md'] as const;
+/** Per-doc cap so a long brief can't refill the context we just freed. */
+const MAX_HANDOFF_DOC_CHARS = 4_000;
+/**
+ * At most two "you are stuck" directives per turn. The escalation costs an iteration and repeating
+ * it would itself become the loop it is trying to break.
+ */
+const MAX_STUCK_ESCALATIONS = 2;
+/** Consecutive all-error iterations that count as stuck. */
+const STUCK_ERROR_ITERATIONS = 3;
+/** Forced whole-file rewrites that count as stuck (the guard in fs_write reports each one). */
+const STUCK_FORCED_OVERWRITES = 2;
+
 /** HTTP statuses worth ONE automatic retry — transient server/gateway hiccups, not client errors. */
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 /** Message fragments that mark a transient upstream/gateway failure even without a clean status. */
@@ -174,6 +243,8 @@ const IDLE_STATE: AgentChatState = {
   turnMetrics: {},
   conversations: [],
   activeConversationId: null,
+  pendingQuestion: null,
+  compactedAtIndices: [],
 };
 
 /**
@@ -294,6 +365,11 @@ export class AgentChatService {
 
     await this.ensureLoaded();
 
+    // The user is answering (or ignoring) the agent's question — either way the fork is resolved.
+    if (this.state.pendingQuestion) {
+      this.setState({ pendingQuestion: null });
+    }
+
     // A fresh (unsaved) conversation gets its id/created-at on the first message.
     if (!this.state.activeConversationId) {
       this.setState({ activeConversationId: newConversationId() });
@@ -326,7 +402,15 @@ export class AgentChatService {
    */
   private async runToSettled(): Promise<void> {
     this.abortController = new AbortController();
-    this.setState({ status: 'running', errorMessage: null, errorKind: null, notice: null });
+    // Any open question is settled by the fact that we are running again (answered, or resumed
+    // past it) — a stale chip row would otherwise reappear when this turn finishes.
+    this.setState({
+      status: 'running',
+      errorMessage: null,
+      errorKind: null,
+      notice: null,
+      pendingQuestion: null,
+    });
     try {
       await this.runLoop(this.abortController.signal);
       this.setState({ status: 'idle', activeTool: null });
@@ -464,7 +548,17 @@ export class AgentChatService {
     const modelId = this.settings.getSelectedModelId(provider.id) ?? '';
     const apiKey = (await this.settings.getApiKey(provider.id)) ?? '';
     const baseUrl = this.settings.getBaseUrl(provider.id);
-    const maxIterations = Math.max(1, this.settings.getPreferences().maxToolIterations);
+    // Flow raises the floor on the iteration cap: a turn there has to reach a PROVEN playable
+    // increment (build → compile → play → game_input → report), and a cap tuned for one-off Studio
+    // edits force-stops it right after play_start — measured in the eval, where every capped turn
+    // ended with the errors never read.
+    const preferences = this.settings.getPreferences();
+    const maxIterations = Math.max(
+      1,
+      appState.ui.workspaceMode === 'flow'
+        ? Math.max(preferences.maxToolIterations, FLOW_MIN_TOOL_ITERATIONS)
+        : preferences.maxToolIterations
+    );
     // Model capabilities come from the (possibly live-fetched) catalog: strip tools for models
     // that can't call them, and pass the model's output budget instead of provider flat defaults.
     const model = this.modelCatalog.getModel(provider.id, modelId);
@@ -479,6 +573,10 @@ export class AgentChatService {
         : undefined;
     // AGENTS.md is authored per project; read it once per user turn so mid-session edits land.
     const agentsMd = await this.loadAgentsMd();
+    // The recipe map (Flow projects only) rides in the cached prefix next to AGENTS.md: it is the
+    // agent's map of stable node ids, tunables and extension points, and it is what keeps a turn
+    // extending the skeleton instead of rebuilding it.
+    const recipeMd = await this.loadRecipeMd();
     // Script inventory shares AGENTS.md's cadence: once per turn, so the agent always knows the
     // project's game-logic files exist (the scene outline names only nodes, never the .ts files).
     const scriptInventory = await this.loadScriptInventory();
@@ -493,16 +591,34 @@ export class AgentChatService {
     // repeat an exact failing call verbatim when the error gives them nothing new (observed with
     // read_skill on an invented section name) — detect the repeat and say so explicitly.
     const lastResultBySignature = new Map<string, string>();
+    // How many times each signature came back byte-identical. One repeat gets a text nudge (below);
+    // the SECOND repeat is the escalation trigger — measured: the model never consults the advisor
+    // on its own, so "consult when stuck" is dead prompt text without an external push.
+    const repeatCountBySignature = new Map<string, number>();
+    // Consecutive iterations whose tool results were ALL errors — the other shape of "stuck".
+    let consecutiveErrorIterations = 0;
+    // Forced whole-file rewrites (fs_write overwrite:true past the size guard) — measured in eval
+    // S4 as the signature of a model that has lost the thread of what it already changed.
+    let forcedOverwrites = 0;
+    let escalations = 0;
     // Fire the "you ended with no reply" nudge at most once, so an empty↔nudge exchange can't loop.
     let emptyAnswerNudged = false;
+    // Context-fill nudge fires once per turn; compaction/emergency trim have their own thresholds.
+    let contextNudged = false;
+    const contextWindow = model?.capabilities.contextWindow;
     // Verify-gate: cheap models edit a script and declare victory on `compile_scripts ok` without
     // ever running the game (a real session flipped a car's steering blind 4× and regressed). Track
     // whether game logic changed this turn with no game_input/game_observe proof since; nudge once.
     let unverifiedGameMutation = false;
-    let gameVerifyNudged = false;
+    // In Studio this is a NUDGE (one push, then the user is right there to judge the result). Flow
+    // has no such judge — the turn's whole promise is "playable and proven" — so there it becomes a
+    // GATE: the turn is not allowed to close unproven until the attempts run out, and then it must
+    // report the failure honestly rather than claim success.
+    const verifyAttemptLimit = appState.ui.workspaceMode === 'flow' ? FLOW_VERIFY_ATTEMPTS : 1;
+    let gameVerifyNudges = 0;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const system = this.buildSystemPrompt(agentsMd, advisorAvailable, scriptInventory);
+      const system = this.buildSystemPrompt(agentsMd, advisorAvailable, scriptInventory, recipeMd);
       const outboundMessages = modelSupportsImages
         ? this.state.messages
         : stripImagesForModel(this.state.messages);
@@ -609,15 +725,24 @@ export class AgentChatService {
           continue;
         }
         // Verify-gate: don't let a game-logic change close the turn unproven. `compile_scripts ok`
-        // is not proof, and `moved:true` is not proof of the RIGHT motion. Ask once for a real run.
-        if (unverifiedGameMutation && !gameVerifyNudged && iteration < maxIterations - 1) {
-          gameVerifyNudged = true;
+        // is not proof, and `moved:true` is not proof of the RIGHT motion.
+        if (
+          unverifiedGameMutation &&
+          gameVerifyNudges < verifyAttemptLimit &&
+          iteration < maxIterations - 1
+        ) {
+          gameVerifyNudges += 1;
+          const isLastAttempt = gameVerifyNudges >= verifyAttemptLimit;
           this.appendMessage({
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: "[Pix3] You changed game logic (a script or scene) this turn but never ran the game to prove it. Before finishing: play_start, then game_input/game_observe on the affected node(s). Check the DIRECTION of motion (expect:{Node:'forward'} → directionOk, or alignForward/delta), not just that it compiles or that `moved` is true — a car driving sideways still reports moved:true. If you genuinely cannot run it, say why in your summary.",
+                text:
+                  "[Pix3] You changed game logic (a script or scene) this turn but never ran the game to prove it. Before finishing: play_start, then game_input/game_observe on the affected node(s). Check the DIRECTION of motion (expect:{Node:'forward'} → directionOk, or alignForward/delta), not just that it compiles or that `moved` is true — a car driving sideways still reports moved:true." +
+                  (isLastAttempt
+                    ? ' This is the last reminder: if you genuinely cannot prove it, end your reply with what you tried, what you observed, and what you think is wrong — never with "Done!".'
+                    : ` Attempt ${gameVerifyNudges} of ${verifyAttemptLimit}.`),
               },
             ],
           });
@@ -629,6 +754,10 @@ export class AgentChatService {
       const results: LlmToolResultBlock[] = [];
       const images: LlmImageBlock[] = [];
       const repeatedCalls: string[] = [];
+      // First "you are stuck" signal seen this iteration (repeat / errors / forced rewrites).
+      let stuckReason: string | null = null;
+      let askedQuestion: AgentPendingQuestion | null = null;
+      let allToolsErrored = true;
       for (const call of calls) {
         if (signal.aborted) {
           throw new LlmError('aborted', 'The request was cancelled.');
@@ -644,8 +773,21 @@ export class AgentChatService {
             : JSON.stringify(executed.result.content);
         if (lastResultBySignature.get(signature) === resultText) {
           repeatedCalls.push(call.name);
+          const repeats = (repeatCountBySignature.get(signature) ?? 0) + 1;
+          repeatCountBySignature.set(signature, repeats);
+          if (repeats >= 2 && !stuckReason) {
+            stuckReason = `you have now made the same ${call.name} call ${repeats + 1} times and gotten the identical result`;
+          }
         }
         lastResultBySignature.set(signature, resultText);
+        if (executed.result.isError !== true) {
+          allToolsErrored = false;
+        }
+        // The fs_write guard reports a forced wholesale rewrite so the loop can count it — a full
+        // rewrite of an existing file is a stuck signal, not a normal edit (see AgentToolRegistry).
+        if (/"forcedOverwrite"\s*:\s*true/.test(resultText)) {
+          forcedOverwrites += 1;
+        }
         // A game-logic change is a script/scene write or a component edit; a design/progress .md
         // write or an asset op is not. A successful game_input/game_observe clears the debt.
         if (isGameLogicMutation(call.name, call.input)) {
@@ -655,6 +797,11 @@ export class AgentChatService {
           /"ok"\s*:\s*true/.test(resultText)
         ) {
           unverifiedGameMutation = false;
+        } else if (call.name === 'ask_user') {
+          askedQuestion = parseAskUser(call.input);
+          // A turn that honestly ends in a question is NOT an unverified turn — otherwise the
+          // verify-gate would drag an agent that hit a real fork into pointless verification.
+          unverifiedGameMutation = false;
         }
       }
       this.setState({ activeTool: null });
@@ -662,6 +809,14 @@ export class AgentChatService {
       // mixed tool-result + image content there. They are always kept in history (so the UI shows
       // them and vision models see them); the outbound request strips them for text-only models.
       const resultContent: LlmContentBlock[] = [...results, ...images];
+      // A question is a legitimate end of turn (§5.4): append the result so the history stays
+      // well-formed (every tool_use paired), surface the question, and stop — sending another
+      // request here would just have the model answer its own question.
+      if (askedQuestion) {
+        this.appendMessage({ role: 'user', content: resultContent });
+        this.setState({ pendingQuestion: askedQuestion });
+        return;
+      }
       if (repeatedCalls.length > 0) {
         resultContent.push({
           type: 'text',
@@ -678,7 +833,55 @@ export class AgentChatService {
           text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors; if you keep design/progress.md, fs_write the updated checklist so the next turn can resume; then reply with a short summary of what is done and what remains. Do not start new rewrites.`,
         });
       }
+
+      // Loop-breaker escalation. The plain repeat nudge above is advisory; these are directives,
+      // because a model that is genuinely stuck keeps re-reading the same advice.
+      if (allToolsErrored) {
+        consecutiveErrorIterations += 1;
+      } else {
+        consecutiveErrorIterations = 0;
+      }
+      if (!stuckReason && consecutiveErrorIterations >= STUCK_ERROR_ITERATIONS) {
+        stuckReason = `every tool call in the last ${consecutiveErrorIterations} iterations failed`;
+      }
+      if (!stuckReason && forcedOverwrites >= STUCK_FORCED_OVERWRITES) {
+        stuckReason = `you have force-overwritten ${forcedOverwrites} existing files wholesale instead of making targeted edits`;
+      }
+      if (stuckReason && escalations < MAX_STUCK_ESCALATIONS) {
+        escalations += 1;
+        resultContent.push({
+          type: 'text',
+          text: advisorAvailable
+            ? `[Pix3] You are stuck: ${stuckReason}. Call ask_advisor NOW — before any other tool — and pass, in \`context\`: the goal, the EXACT error text you got, and the relevant code you have already read. Then act on the answer. Do not repeat the failing call.`
+            : `[Pix3] You are stuck: ${stuckReason}. Change approach: read something you have not read yet, or try a different tool/argument shape. If you cannot make progress, stop and report honestly what you tried and what blocks you — do not keep retrying.`,
+        });
+      }
+
+      // Context management (§5.6). Fill ratio comes from the turn we just received; models that
+      // report no window opt out of all of this silently.
+      const fillRatio =
+        contextWindow && result.usage?.inputTokens ? result.usage.inputTokens / contextWindow : 0;
+      if (fillRatio >= CONTEXT_NUDGE_RATIO && fillRatio < CONTEXT_COMPACT_RATIO && !contextNudged) {
+        contextNudged = true;
+        resultContent.push({
+          type: 'text',
+          text: `[Pix3] Context is filling (${Math.round(fillRatio * 100)}% of the window). Update design/progress.md with what is done and proven, and close out the current increment — do not start a new one.`,
+        });
+      }
       this.appendMessage({ role: 'user', content: resultContent });
+
+      if (fillRatio >= CONTEXT_EMERGENCY_RATIO) {
+        // Old tool results are the bulkiest and least useful part of the history in hindsight.
+        this.trimOldToolResults();
+      }
+      if (fillRatio >= CONTEXT_COMPACT_RATIO) {
+        await this.compactConversation(
+          provider,
+          { apiKey, modelId, baseUrl },
+          model?.capabilities.maxOutputTokens,
+          signal
+        );
+      }
     }
 
     this.setState({
@@ -700,7 +903,7 @@ export class AgentChatService {
     signal: AbortSignal
   ): Promise<LlmResult> {
     try {
-      return await provider.chat(params, ctx);
+      return await this.chatWithTimeout(provider, params, ctx, signal);
     } catch (error) {
       if (!isTransientLlmError(error) || signal.aborted) {
         throw error;
@@ -710,8 +913,194 @@ export class AgentChatService {
       if (signal.aborted) {
         throw new LlmError('aborted', 'The request was cancelled.');
       }
-      return provider.chat(params, ctx);
+      return this.chatWithTimeout(provider, params, ctx, signal);
     }
+  }
+
+  /**
+   * One provider call raced against {@link LLM_REQUEST_TIMEOUT_MS}. The attempt runs on its OWN
+   * AbortController chained to the user's signal, so the timeout can cancel that attempt (freeing
+   * the socket) without aborting the user's turn — the retry above then gets a clean attempt. The
+   * timeout surfaces as a 408 LlmError, which {@link isTransientLlmError} already classifies as
+   * retryable; one that survives the retry propagates as a normal turn error.
+   */
+  private chatWithTimeout(
+    provider: LlmProvider,
+    params: ChatParams,
+    ctx: LlmRequestContext,
+    signal: AbortSignal
+  ): Promise<LlmResult> {
+    const attempt = new AbortController();
+    const forwardAbort = (): void => attempt.abort();
+    if (signal.aborted) {
+      attempt.abort();
+    } else {
+      signal.addEventListener('abort', forwardAbort);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        attempt.abort();
+        reject(
+          new LlmError(
+            'http',
+            `The model did not respond within ${Math.round(LLM_REQUEST_TIMEOUT_MS / 1000)}s — the request timed out.`,
+            408
+          )
+        );
+      }, LLM_REQUEST_TIMEOUT_MS);
+    });
+    return Promise.race([
+      provider.chat({ ...params, signal: attempt.signal }, ctx),
+      deadline,
+    ]).finally(() => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      signal.removeEventListener('abort', forwardAbort);
+    });
+  }
+
+  // ── Context management ──────────────────────────────────────────────────────
+
+  /**
+   * Emergency valve (≥90% of the window): replace the body of every tool-result block older than
+   * the last {@link EMERGENCY_KEEP_MESSAGES} messages with `[trimmed]`. Tool results are by far the
+   * bulkiest part of an agentic history and the least useful in hindsight. The stored history is
+   * rewritten (not just the outbound copy) so the context actually shrinks and stays shrunk.
+   */
+  private trimOldToolResults(): number {
+    const messages = this.state.messages;
+    const cutoff = messages.length - EMERGENCY_KEEP_MESSAGES;
+    if (cutoff <= 0) {
+      return 0;
+    }
+    let trimmed = 0;
+    const next = messages.map((message, index) => {
+      if (index >= cutoff || typeof message.content === 'string') {
+        return message;
+      }
+      const hasTrimmable = message.content.some(
+        block => block.type === 'tool-result' && block.content !== TRIMMED_MARKER
+      );
+      if (!hasTrimmable) {
+        return message;
+      }
+      trimmed += 1;
+      const content: LlmContentBlock[] = message.content.map(block =>
+        block.type === 'tool-result' ? { ...block, content: TRIMMED_MARKER } : block
+      );
+      return { role: message.role, content };
+    });
+    if (trimmed > 0) {
+      this.setState({ messages: next });
+      this.debugLog('context-trim', { messages: trimmed });
+    }
+    return trimmed;
+  }
+
+  /**
+   * Compact (≥75% of the window): ask the model — in one extra tool-free round-trip — for a handoff
+   * to its next self, then REPLACE the history with the user's original request plus that handoff
+   * and the project's design docs. Measured (eval, advisor section): the same task a long polluted
+   * conversation kept circling on is solved without help in a fresh conversation with a compact
+   * brief. Best-effort: if the handoff request fails we keep the full history rather than lose work
+   * (the emergency trim above still bounds the growth).
+   */
+  private async compactConversation(
+    provider: LlmProvider,
+    ctx: LlmRequestContext,
+    maxTokens: number | undefined,
+    signal: AbortSignal
+  ): Promise<void> {
+    const messages = this.state.messages;
+    if (messages.length < MIN_MESSAGES_TO_COMPACT) {
+      return;
+    }
+    // The user's original request is never summarized away — it IS the task.
+    const firstUser = messages.find(message => message.role === 'user');
+    if (!firstUser) {
+      return;
+    }
+
+    let handoff = '';
+    try {
+      const result = await this.chatWithTimeout(
+        provider,
+        {
+          messages: [
+            ...messages,
+            {
+              role: 'user',
+              content: [{ type: 'text', text: COMPACT_REQUEST_PROMPT }],
+            },
+          ],
+          system: COMPACT_SYSTEM_PROMPT,
+          maxTokens,
+          signal,
+        },
+        ctx,
+        signal
+      );
+      handoff = result.content
+        .filter((block): block is LlmTextBlock => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+        .trim();
+    } catch (error) {
+      this.debugLog('compact-failed', error);
+      return;
+    }
+    if (!handoff) {
+      return;
+    }
+
+    const docs = await this.loadHandoffDocs();
+    const lines = [
+      '[Pix3] The earlier conversation was compacted to free context. Handoff from your previous self:',
+      handoff,
+    ];
+    if (docs) {
+      lines.push('', 'Project design docs, as they currently are on disk:', docs);
+    }
+    lines.push(
+      '',
+      'Continue from here. The original request is the first message above — it still stands.'
+    );
+
+    const compacted: LlmMessage[] = [
+      firstUser,
+      { role: 'user', content: [{ type: 'text', text: lines.join('\n') }] },
+    ];
+    this.setState({
+      messages: compacted,
+      // The boundary sits before the handoff message; turn metrics were keyed by the OLD indices,
+      // so they are dropped rather than left pointing at unrelated messages.
+      compactedAtIndices: [...this.state.compactedAtIndices, compacted.length - 1],
+      turnMetrics: {},
+    });
+    // The cached prefix is gone with the history — a diff against the old request is meaningless.
+    this.previousRequestSignature = null;
+    this.debugLog('context-compacted', { handoffChars: handoff.length });
+  }
+
+  /** Read the project's design docs for a compaction handoff (best-effort, each capped). */
+  private async loadHandoffDocs(): Promise<string> {
+    const sections: string[] = [];
+    for (const path of HANDOFF_DOCS) {
+      try {
+        const content = await this.storage.readTextFile(path);
+        if (!content?.trim()) continue;
+        const body =
+          content.length > MAX_HANDOFF_DOC_CHARS
+            ? `${content.slice(0, MAX_HANDOFF_DOC_CHARS)}\n… [truncated]`
+            : content;
+        sections.push(`--- ${path} ---\n${body.trim()}`);
+      } catch {
+        // Missing doc is the common case (not every project keeps them).
+      }
+    }
+    return sections.join('\n\n');
   }
 
   /**
@@ -760,7 +1149,8 @@ export class AgentChatService {
     return this.buildSystemPrompt(
       await this.loadAgentsMd(),
       await this.isAdvisorAvailable(),
-      await this.loadScriptInventory()
+      await this.loadScriptInventory(),
+      await this.loadRecipeMd()
     ).text;
   }
 
@@ -782,7 +1172,8 @@ export class AgentChatService {
   private buildSystemPrompt(
     agentsMd: string | null,
     advisorAvailable = false,
-    scripts: readonly ScriptInventoryEntry[] = []
+    scripts: readonly ScriptInventoryEntry[] = [],
+    recipeMd: string | null = null
   ): { text: string; stableChars: number } {
     const soul = resolveSoul(this.settings.getPreferences());
 
@@ -813,6 +1204,7 @@ export class AgentChatService {
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
       "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",
+      '- Budget your exploration: read what you need in order to act, then act, then verify. Do not spend iterations surveying the project — a cheap model burned ~15 iterations on reconnaissance and hit the cap before changing anything. Prefer one targeted read over a directory sweep, and stop reading as soon as you can make the change.',
       '- Be concise. Reply in the language the user writes in.'
     );
 
@@ -839,6 +1231,20 @@ export class AgentChatService {
       lines.push(
         '',
         'Project-specific instructions (from AGENTS.md at the project root) — follow these:',
+        '"""',
+        trimmed.trim(),
+        '"""'
+      );
+    }
+
+    if (recipeMd) {
+      const trimmed =
+        recipeMd.length > MAX_RECIPE_MD_CHARS
+          ? `${recipeMd.slice(0, MAX_RECIPE_MD_CHARS)}\n… [recipe.md truncated]`
+          : recipeMd;
+      lines.push(
+        '',
+        'Recipe map (design/recipe.md) — this project was expanded from a playable recipe skeleton. These are its stable node ids, placeholders, tunables and declared extension points. EXTEND it at those points; do not rebuild what is already there:',
         '"""',
         trimmed.trim(),
         '"""'
@@ -1003,6 +1409,19 @@ export class AgentChatService {
     return null;
   }
 
+  /**
+   * Read the project's recipe map (best-effort). Present only in projects expanded from a Flow
+   * recipe; a missing file is the normal case everywhere else and yields null.
+   */
+  private async loadRecipeMd(): Promise<string | null> {
+    try {
+      const content = await this.storage?.readTextFile(RECIPE_MD_PATH);
+      return content && content.trim() ? content : null;
+    } catch {
+      return null;
+    }
+  }
+
   private debugLog(label: string, data: unknown): void {
     if (!this.settings.getPreferences().debugMode) {
       return;
@@ -1078,6 +1497,32 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+/** System prompt for the (tool-free) compaction round-trip. */
+const COMPACT_SYSTEM_PROMPT =
+  'You are summarizing your own working session so a fresh instance of yourself can continue it without re-reading the conversation. Be specific and factual; no pleasantries.';
+
+/** The compaction request itself — asks for exactly the four things a successor needs. */
+const COMPACT_REQUEST_PROMPT =
+  "[Pix3] Context is nearly full, so this conversation is about to be compacted. Write a compact handoff for the next instance of yourself, in four short sections: (1) DONE — what you changed, with file/node names; (2) PROVEN — what you actually verified and how (game_input/read_errors results), and what is still unverified; (3) NEXT — the single next step and how to verify it; (4) DECISIONS — choices already made (including the user's answers) that must not be revisited. Facts only, no narrative. Do not call any tools.";
+
+/**
+ * Read an `ask_user` call's arguments defensively — the question text is user-visible UI, so a
+ * malformed call must degrade to a readable prompt rather than render `undefined` as a chip.
+ */
+const parseAskUser = (input: unknown): AgentPendingQuestion => {
+  const args = isRecord(input) ? input : {};
+  const question =
+    typeof args.question === 'string' && args.question.trim()
+      ? args.question.trim()
+      : 'The agent asked a question but did not include its text.';
+  const options = Array.isArray(args.options)
+    ? args.options.filter(
+        (option): option is string => typeof option === 'string' && !!option.trim()
+      )
+    : [];
+  return { question, options, allowFreeform: args.allowFreeform !== false };
+};
 
 /** Rough tokens-per-character ratio for estimating the cacheable prefix (English/JSON ≈ 4). */
 const CHARS_PER_TOKEN = 4;

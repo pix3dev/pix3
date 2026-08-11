@@ -1,0 +1,45 @@
+# Pix3 Prefab (a .pix3scene with exactly ONE root node).
+# Spawned by scripts/Spawner.ts via scene.instantiate().
+#
+# It carries only FIXED defaults — above all its `core:Hitbox2D` GROUP, which is
+# what TouchRules matches on. Component config on a prefab INSTANCE cannot be
+# edited (the editor locks it), so every tunable lives on a plain node in
+# main.pix3scene instead. Change the group here and in TouchRules' `rules`.
+version: 1.0.0
+metadata:
+  author: Pix3 Recipe
+  description: Pickup — touching it scores
+root:
+  - id: pickup
+    type: Sprite2D
+    name: Pickup
+    properties:
+      texture: { type: 'texture', url: 'res://sprites/ph-pickup.png' }
+      width: 96
+      height: 96
+      effects:
+        - type: core:tint
+          params: { color: "#7ee787", amount: 1 }
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: pickup-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: circle
+          radius: 46
+          group: pickup
+          debugDraw: false
+      - id: pickup-pop
+        type: core:PopIn
+        enabled: true
+        config:
+          from: 0.2
+          duration: 0.25
+          easing: backOut
+          playOnStart: true
+          triggerEvent: ""
+    children: []

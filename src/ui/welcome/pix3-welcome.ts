@@ -1,15 +1,50 @@
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
 import './pix3-welcome.ts.css';
 import { ProjectService } from '@/services/project/ProjectService';
-import { IconService } from '@/services/editor/IconService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { CloudProjectService } from '@/services/cloud/CloudProjectService';
 import { DialogService } from '@/services/editor/DialogService';
 import type { ApiProject } from '@/services/cloud/ApiClient';
 import { appState } from '@/state';
 import type { RecentProjectEntry } from '@/services/project/ProjectService';
 import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
+import { ProjectTemplateService, type ProjectTemplate } from '@/services/project/ProjectTemplateService';
+import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
+import {
+  PrototypeBootstrapService,
+  type PrototypeBootstrapStatus,
+} from '@/services/flow/PrototypeBootstrapService';
+import {
+  ATTACHMENT_ROLES,
+  attachmentPreviewUrl,
+  attachmentRoleHint,
+  attachmentRoleLabel,
+  dragCarriesFiles,
+  formatAttachmentSize,
+  readFilesAsAttachments,
+  withAttachmentRole,
+  type ComposerAttachment,
+} from '@/ui/shared/composer-attachments';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 
+/**
+ * Prompts that show what this box is for. Deliberately concrete and deliberately spread across the
+ * recipe catalog — a first-time user reading them should be able to tell that a tapper, a runner and
+ * a playable ad are all reachable from the same field.
+ */
+const EXAMPLE_PROMPTS: readonly string[] = [
+  'a tapper: pop balloons before the timer runs out',
+  'an endless runner dodging obstacles',
+  'a playable ad for a match-3 game with a CTA',
+  'top-down survival: dodge falling rocks, grab coins',
+  'breakout with power-ups',
+];
+
+/**
+ * The welcome screen leads with the prompt: Flow is the default way in (design §1.1/§3.1), so
+ * "describe your game" is the primary content and the project lists moved below it. Nothing about
+ * opening an existing project changed — it just is no longer the first thing on screen.
+ */
 @customElement('pix3-welcome')
 export class Pix3Welcome extends ComponentBase {
   private static readonly DEFAULT_TAB_AUTHENTICATED = 'cloud';
@@ -30,6 +65,38 @@ export class Pix3Welcome extends ComponentBase {
 
   @inject(DialogService)
   private readonly dialogService!: DialogService;
+
+  @inject(ProjectTemplateService)
+  private readonly templateService!: ProjectTemplateService;
+
+  @inject(WorkspaceModeService)
+  private readonly workspaceModeService!: WorkspaceModeService;
+
+  @inject(PrototypeBootstrapService)
+  private readonly bootstrapService!: PrototypeBootstrapService;
+
+  @state()
+  private prompt = '';
+
+  @state()
+  private attachments: ComposerAttachment[] = [];
+
+  @state()
+  private attachWarning = '';
+
+  @state()
+  private pinnedRecipeId: string | null = null;
+
+  @state()
+  private bootstrapStatus: PrototypeBootstrapStatus = {
+    phase: 'idle',
+    message: '',
+    brief: null,
+    error: null,
+  };
+
+  @state()
+  private dragActive = false;
 
   @state()
   private recents: RecentProjectEntry[] = [];
@@ -67,9 +134,22 @@ export class Pix3Welcome extends ComponentBase {
   private disposeCloudSubscription?: () => void;
   private disposeProjectSubscription?: () => void;
   private disposeAuthSubscription?: () => void;
+  private disposeBootstrapSubscription?: () => void;
+  private attachmentSeq = 0;
+  private dragDepth = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.disposeBootstrapSubscription = this.bootstrapService.subscribe(status => {
+      this.bootstrapStatus = status;
+    });
+    // The whole page is the drop zone (design §3.1) — a reference dropped anywhere on the welcome
+    // screen is meant for the prompt, and making the user aim at the textarea is friction for
+    // nothing.
+    window.addEventListener('dragenter', this.onWindowDragEnter);
+    window.addEventListener('dragover', this.onWindowDragOver);
+    window.addEventListener('dragleave', this.onWindowDragLeave);
+    window.addEventListener('drop', this.onWindowDrop);
     this.disposeCloudSubscription = this.cloudProjectService.subscribe(state => {
       this.cloudProjects = state.projects;
       this.cloudProjectsLoading = state.isLoading;
@@ -109,6 +189,12 @@ export class Pix3Welcome extends ComponentBase {
   }
 
   disconnectedCallback(): void {
+    window.removeEventListener('dragenter', this.onWindowDragEnter);
+    window.removeEventListener('dragover', this.onWindowDragOver);
+    window.removeEventListener('dragleave', this.onWindowDragLeave);
+    window.removeEventListener('drop', this.onWindowDrop);
+    this.disposeBootstrapSubscription?.();
+    this.disposeBootstrapSubscription = undefined;
     this.disposeCloudSubscription?.();
     this.disposeCloudSubscription = undefined;
     this.disposeAuthSubscription?.();
@@ -127,6 +213,159 @@ export class Pix3Welcome extends ComponentBase {
     this.cloudProjectsError = null;
     void this.cloudProjectService.loadProjects();
   }
+
+  // ── Prompt hero ─────────────────────────────────────────────────────────────
+
+  private get isBootstrapping(): boolean {
+    return this.bootstrapStatus.phase === 'planning' || this.bootstrapStatus.phase === 'expanding';
+  }
+
+  private get canSubmitPrompt(): boolean {
+    return (
+      !this.isBootstrapping && (Boolean(this.prompt.trim()) || this.attachments.length > 0)
+    );
+  }
+
+  /** Recipe cards: the Flow catalog once it is installed, else the bundled 2D templates. */
+  private getRecipeCards(): ProjectTemplate[] {
+    const templates = this.templateService.getTemplates();
+    const recipes = templates.filter(template => template.id.startsWith('recipe-'));
+    return recipes.length > 0
+      ? recipes
+      : templates.filter(template => template.projectType === '2d');
+  }
+
+  private onPromptInput = (event: Event): void => {
+    this.prompt = (event.target as HTMLTextAreaElement).value;
+    if (this.bootstrapStatus.phase === 'error') {
+      this.bootstrapService.reset();
+    }
+  };
+
+  private onPromptKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      void this.onSubmitPrompt();
+    }
+  };
+
+  private onExampleChip = (example: string): void => {
+    this.prompt = example;
+    const textarea = this.querySelector<HTMLTextAreaElement>('.hero-input');
+    textarea?.focus();
+  };
+
+  /** A recipe card pins the genre; whatever is already typed still describes the game. */
+  private onRecipeCard = (templateId: string): void => {
+    this.pinnedRecipeId = this.pinnedRecipeId === templateId ? null : templateId;
+  };
+
+  /**
+   * Prompt → project. The workspace mode flips to Flow **before** the project exists so the shell
+   * that appears the moment it becomes ready is the Flow one — the alternative is a visible flash of
+   * the full editor, which is the exact impression this mode is trying not to give (design §3.6).
+   */
+  private onSubmitPrompt = async (): Promise<void> => {
+    if (!this.canSubmitPrompt) {
+      return;
+    }
+    this.projectError = null;
+    const previousMode = this.workspaceModeService.get();
+    this.workspaceModeService.set('flow', { persist: false });
+    try {
+      await this.bootstrapService.run({
+        prompt: this.prompt,
+        attachments: this.attachments,
+        ...(this.pinnedRecipeId ? { recipeId: this.pinnedRecipeId } : {}),
+      });
+    } catch (error) {
+      // Nothing was created, so leaving the shell in Flow would strand the user in an empty stage.
+      this.workspaceModeService.set(previousMode, { persist: false });
+      this.projectError =
+        error instanceof Error ? error.message : 'Failed to build the prototype.';
+    }
+  };
+
+  // ── Attachments (paste / drop / picker) ─────────────────────────────────────
+
+  private onPromptPaste = (event: ClipboardEvent): void => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length === 0) return; // Plain text paste falls through to the textarea.
+    event.preventDefault();
+    void this.addFiles(files);
+  };
+
+  private onFileInput = (event: Event): void => {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      void this.addFiles(input.files);
+    }
+    input.value = '';
+  };
+
+  private onPickFiles = (): void => {
+    this.querySelector<HTMLInputElement>('.hero-file-input')?.click();
+  };
+
+  private onWindowDragEnter = (event: DragEvent): void => {
+    if (!dragCarriesFiles(event)) return;
+    this.dragDepth += 1;
+    this.dragActive = true;
+  };
+
+  private onWindowDragOver = (event: DragEvent): void => {
+    if (!dragCarriesFiles(event)) return;
+    // Without this the browser navigates to the dropped file and the session is gone.
+    event.preventDefault();
+  };
+
+  private onWindowDragLeave = (event: DragEvent): void => {
+    if (!dragCarriesFiles(event)) return;
+    this.dragDepth = Math.max(0, this.dragDepth - 1);
+    if (this.dragDepth === 0) {
+      this.dragActive = false;
+    }
+  };
+
+  private onWindowDrop = (event: DragEvent): void => {
+    this.dragDepth = 0;
+    this.dragActive = false;
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      event.preventDefault();
+      void this.addFiles(files);
+    }
+  };
+
+  private async addFiles(files: FileList | File[]): Promise<void> {
+    const { attachments, warnings } = await readFilesAsAttachments(files, {
+      makeId: () => `hero-${this.attachmentSeq++}`,
+    });
+    if (attachments.length > 0) {
+      this.attachments = [...this.attachments, ...attachments];
+    }
+    this.attachWarning = warnings.join(' ');
+  }
+
+  private onCycleAttachmentRole = (id: string): void => {
+    const current = this.attachments.find(attachment => attachment.id === id);
+    if (!current || current.kind !== 'image') return;
+    const next = ATTACHMENT_ROLES[(ATTACHMENT_ROLES.indexOf(current.role) + 1) % ATTACHMENT_ROLES.length];
+    this.attachments = withAttachmentRole(this.attachments, id, next);
+  };
+
+  private onRemoveAttachment = (id: string): void => {
+    this.attachments = this.attachments.filter(attachment => attachment.id !== id);
+  };
 
   private onOpen = async (): Promise<void> => {
     this.projectError = null;
@@ -332,15 +571,217 @@ export class Pix3Welcome extends ComponentBase {
       .filter(item => item.entry.backend === 'local' || item.entry.backend === 'browser');
   }
 
+  private renderPromptHero() {
+    const status = this.bootstrapStatus;
+    return html`
+      <section class="welcome-hero" aria-label="Describe your game">
+        <h2 class="hero-title">Describe your game</h2>
+        <p class="hero-subtitle">
+          One sentence is enough. Pix3 builds a playable skeleton and an agent takes it from there.
+        </p>
+
+        <div class="hero-composer ${this.dragActive ? 'hero-composer--drag' : ''}">
+          <textarea
+            class="hero-input"
+            rows="3"
+            .value=${this.prompt}
+            placeholder="e.g. tap the falling coins, miss a bomb and you lose"
+            aria-label="Describe your game"
+            ?disabled=${this.isBootstrapping}
+            @input=${this.onPromptInput}
+            @keydown=${this.onPromptKeyDown}
+            @paste=${this.onPromptPaste}
+          ></textarea>
+
+          ${this.renderAttachments()}
+
+          <div class="hero-composer__bar">
+            <button
+              class="hero-attach"
+              type="button"
+              title="Attach a reference image or a design document"
+              ?disabled=${this.isBootstrapping}
+              @click=${this.onPickFiles}
+            >
+              ${this.iconService.getIcon('paperclip', IconSize.SMALL)}
+              <span>Attach</span>
+            </button>
+            <input
+              class="hero-file-input"
+              type="file"
+              multiple
+              accept="image/*,text/*,.md,.txt,.json,.csv,.yaml,.yml"
+              aria-label="Attach reference files"
+              hidden
+              @change=${this.onFileInput}
+            />
+            <span class="hero-hint">Paste, drop or attach references · Ctrl+Enter to build</span>
+            <button
+              class="hero-make"
+              type="button"
+              ?disabled=${!this.canSubmitPrompt}
+              @click=${this.onSubmitPrompt}
+            >
+              ${this.isBootstrapping
+                ? html`<span class="hero-spinner" aria-hidden="true"></span>`
+                : this.iconService.getIcon('zap', IconSize.SMALL)}
+              <span>${this.isBootstrapping ? 'Building…' : 'Make'}</span>
+            </button>
+          </div>
+        </div>
+
+        ${this.attachWarning
+          ? html`<div class="hero-warning" role="status">${this.attachWarning}</div>`
+          : null}
+        ${status.phase !== 'idle'
+          ? html`<div
+              class="hero-status ${status.phase === 'error' ? 'hero-status--error' : ''}"
+              role="status"
+            >
+              ${this.isBootstrapping
+                ? html`<span class="hero-spinner" aria-hidden="true"></span>`
+                : null}
+              <span>${status.error ?? status.message}</span>
+            </div>`
+          : null}
+
+        <div class="hero-examples">
+          ${EXAMPLE_PROMPTS.map(
+            example => html`
+              <button
+                class="hero-chip"
+                type="button"
+                ?disabled=${this.isBootstrapping}
+                @click=${() => this.onExampleChip(example)}
+              >
+                ${example}
+              </button>
+            `
+          )}
+        </div>
+
+        ${this.renderRecipeCards()}
+      </section>
+    `;
+  }
+
+  private renderRecipeCards() {
+    const recipes = this.getRecipeCards();
+    if (recipes.length === 0) {
+      return null;
+    }
+    return html`
+      <div class="hero-recipes" role="list" aria-label="Start from a recipe">
+        ${recipes.map(recipe => {
+          const pinned = this.pinnedRecipeId === recipe.id;
+          return html`
+            <button
+              class="hero-recipe ${pinned ? 'hero-recipe--pinned' : ''}"
+              type="button"
+              role="listitem"
+              aria-pressed=${pinned}
+              title=${recipe.description || recipe.title}
+              ?disabled=${this.isBootstrapping}
+              @click=${() => this.onRecipeCard(recipe.id)}
+            >
+              ${recipe.coverUrl
+                ? html`<img class="hero-recipe__cover" src=${recipe.coverUrl} alt="" />`
+                : html`<span class="hero-recipe__cover hero-recipe__cover--blank" aria-hidden="true"
+                    >${this.iconService.getIcon('grid', IconSize.LARGE)}</span
+                  >`}
+              <span class="hero-recipe__title">${recipe.title}</span>
+              ${pinned
+                ? html`<span class="hero-recipe__pin">
+                    ${this.iconService.getIcon('check', IconSize.SMALL)}
+                  </span>`
+                : null}
+            </button>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  private renderAttachments() {
+    if (this.attachments.length === 0) {
+      return null;
+    }
+    return html`
+      <div class="hero-attachments">
+        ${this.attachments.map(attachment =>
+          attachment.kind === 'image'
+            ? html`
+                <span class="hero-attachment hero-attachment--image" title=${attachment.name}>
+                  <img
+                    class="hero-attachment__thumb"
+                    src=${attachmentPreviewUrl(attachment)}
+                    alt=${attachment.name}
+                  />
+                  <button
+                    class="hero-attachment__role"
+                    type="button"
+                    title=${attachmentRoleHint(attachment.role)}
+                    aria-label="Reference role: ${attachmentRoleLabel(
+                      attachment.role
+                    )}. Click to change."
+                    @click=${() => this.onCycleAttachmentRole(attachment.id)}
+                  >
+                    ${attachmentRoleLabel(attachment.role)}
+                  </button>
+                  <button
+                    class="hero-attachment__remove"
+                    type="button"
+                    aria-label="Remove ${attachment.name}"
+                    @click=${() => this.onRemoveAttachment(attachment.id)}
+                  >
+                    ${this.iconService.getIcon('x-close', 12)}
+                  </button>
+                </span>
+              `
+            : html`
+                <span class="hero-attachment hero-attachment--doc" title=${attachment.name}>
+                  <span class="hero-attachment__icon" aria-hidden="true"
+                    >${this.iconService.getIcon('file-text', IconSize.SMALL)}</span
+                  >
+                  <span class="hero-attachment__name">${attachment.name}</span>
+                  <span class="hero-attachment__size"
+                    >${formatAttachmentSize(attachment.size)}</span
+                  >
+                  <button
+                    class="hero-attachment__remove"
+                    type="button"
+                    aria-label="Remove ${attachment.name}"
+                    @click=${() => this.onRemoveAttachment(attachment.id)}
+                  >
+                    ${this.iconService.getIcon('x-close', 12)}
+                  </button>
+                </span>
+              `
+        )}
+      </div>
+    `;
+  }
+
   protected render() {
     const localProjectItems = this.getLocalProjectItems();
 
     return html`
       <div class="welcome-root" role="region" aria-label="Welcome">
+        ${this.dragActive
+          ? html`<div class="welcome-dropzone" aria-hidden="true">
+              <span>Drop references anywhere</span>
+            </div>`
+          : null}
         <div class="welcome-card">
           <div class="welcome-header">
             <img src="/splash-logo.png" alt="Pix3" class="welcome-logo" />
             <div class="welcome-version">${CURRENT_EDITOR_VERSION.displayVersion}</div>
+          </div>
+
+          ${this.renderPromptHero()}
+
+          <div class="welcome-secondary">
+            <h3 class="welcome-secondary__title">Or work on an existing project</h3>
           </div>
 
           <div class="welcome-actions-grid">

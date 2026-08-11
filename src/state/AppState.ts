@@ -305,8 +305,17 @@ export interface PlayModeError {
   at: number;
 }
 
+/**
+ * Which shell the editor renders. `studio` is the full Golden-Layout editor (docks, tabs, menus);
+ * `flow` is the prompt-first shell — chat + a live game stage and nothing else. Both drive the SAME
+ * DI graph, project and undo stack, so switching is a component swap, never a reload.
+ */
+export type WorkspaceMode = 'flow' | 'studio';
+
 export interface UIState {
   theme: ThemeName;
+  /** Active shell. Golden Layout is only initialized once this reaches `studio`. */
+  workspaceMode: WorkspaceMode;
   isLayoutReady: boolean;
   focusedPanelId: string | null;
   commandPaletteOpen: boolean;
@@ -567,6 +576,7 @@ export const createInitialAppState = (): AppState => ({
   },
   ui: {
     theme: DEFAULT_THEME,
+    workspaceMode: 'studio',
     isLayoutReady: false,
     focusedPanelId: null,
     commandPaletteOpen: false,

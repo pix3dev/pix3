@@ -79,7 +79,10 @@ export class RouterService {
    * Pushes state changes into the URL without triggering a reload.
    */
   private syncStateToUrl(): void {
-    if (!appState.ui.isLayoutReady || appState.project.status !== 'ready') return;
+    // Flow has no Golden Layout, so `isLayoutReady` never flips there — gate on the shell actually
+    // being on screen instead, or a Flow session would never get its project into the URL.
+    const shellReady = appState.ui.workspaceMode === 'flow' || appState.ui.isLayoutReady;
+    if (!shellReady || appState.project.status !== 'ready') return;
 
     this.isUpdatingUrl = true;
     try {
@@ -110,7 +113,7 @@ export class RouterService {
       const currentUrl = window.location.href;
 
       let basePath = window.location.origin + window.location.pathname;
-      let newUrl = basePath + '#editor';
+      let newUrl = basePath + (appState.ui.workspaceMode === 'flow' ? '#flow' : '#editor');
 
       if (queryString) {
         newUrl += '?' + queryString;
@@ -129,7 +132,10 @@ export class RouterService {
    */
   async handleUrlChange(): Promise<void> {
     const params = this.parseUrl();
-    const isEditorActive = window.location.hash.startsWith('#editor');
+    // `#flow` is the same session as `#editor`, only rendered by the other shell — both must
+    // restore the project/scene from the URL.
+    const hash = window.location.hash;
+    const isEditorActive = hash.startsWith('#editor') || hash.startsWith('#flow');
 
     if (!isEditorActive) {
       return;

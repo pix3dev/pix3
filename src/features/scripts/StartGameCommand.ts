@@ -9,6 +9,7 @@ import { EditorTabService } from '@/services/editor/EditorTabService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { OperationService } from '@/services/core/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
+import { openGameSurface } from '@/features/scripts/play-workspace';
 
 export class StartGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
@@ -22,12 +23,15 @@ export class StartGameCommand extends CommandBase<void, void> {
     menuOrder: 102,
   };
 
-  private readonly editorTabService: EditorTabService;
   private readonly gamePlaySessionService: GamePlaySessionService;
 
-  constructor(editorTabService: EditorTabService, gamePlaySessionService: GamePlaySessionService) {
+  /**
+   * `editorTabService` is accepted for call-site compatibility but no longer used: which surface
+   * the game appears on is decided per workspace in `play-workspace` (Studio = a Golden-Layout
+   * tab, Flow = the permanently mounted stage).
+   */
+  constructor(_editorTabService: EditorTabService, gamePlaySessionService: GamePlaySessionService) {
     super();
-    this.editorTabService = editorTabService;
     this.gamePlaySessionService = gamePlaySessionService;
   }
 
@@ -59,8 +63,7 @@ export class StartGameCommand extends CommandBase<void, void> {
     if (this.gamePlaySessionService.isPopoutOpen()) {
       await this.gamePlaySessionService.openOrFocusPopoutWindow();
     } else {
-      const gameTabResourceId = 'game-view-instance';
-      await this.editorTabService.openResourceTab('game', gameTabResourceId, {}, true);
+      await openGameSurface(context.container);
     }
 
     return {

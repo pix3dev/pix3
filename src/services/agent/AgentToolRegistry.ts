@@ -139,6 +139,13 @@ const TEXT_EXTENSIONS = new Set([
 const MAX_LOG_ENTRIES = 200;
 
 /**
+ * Size above which overwriting an EXISTING file with fs_write is refused without an explicit
+ * `overwrite:true` + reason. Roughly a screenful of attention: below it a rewrite is cheap and
+ * harmless, above it a rewrite has measurably lost edits made earlier in the same session.
+ */
+const FS_WRITE_GUARD_CHARS = 2_000;
+
+/**
  * Property types whose value is a genuine string — never JSON-parse an agent-supplied string for
  * these (a color "#ff0000", an enum "idle", or a node reference must stay a string). Every OTHER
  * type — numbers, booleans, vectors, objects — may arrive stringified from some providers (see
@@ -303,6 +310,33 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.askAdvisor(args),
+      },
+      {
+        name: 'ask_user',
+        description:
+          'Ask the USER to settle a fork, and END YOUR TURN. The question is shown with its options as clickable chips; the answer arrives as the next user message. Ask ONLY about a fork that changes the STRUCTURE of the scene or the scripts — "win by score or by timer?", "enemies in waves or continuous?", "one level or a level list?" — where guessing wrong means rebuilding. Cosmetics and parameters (colors, sizes, speeds, counts, names, wording) you choose YOURSELF and state in one line ("made it 3 waves — say if that is wrong"). Asking about those turns the session into a questionnaire, which is worse than a wrong guess you can change in a second. One question per call, at most one per turn, and only after you have something playable to show.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: "The question, in the user's language. One sentence.",
+            },
+            options: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                '2-4 short answers shown as chips. Each must describe a concrete outcome, not "yes"/"no".',
+            },
+            allowFreeform: {
+              type: 'boolean',
+              description: 'Whether a typed answer also makes sense (default true).',
+            },
+          },
+          required: ['question'],
+          additionalProperties: false,
+        },
+        handler: args => this.askUser(args),
       },
       {
         name: 'scene_tree',
@@ -619,15 +653,30 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_write',
-        description:
-          'Write (create or overwrite) a project text file. Creates parent directories. Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.',
+        description: `Write (create or overwrite) a project text file. Creates parent directories. Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.`,
         inputSchema: {
           type: 'object',
-          properties: { path: { type: 'string' }, content: { type: 'string' } },
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+            overwrite: {
+              type: 'boolean',
+              description:
+                'Allow replacing an existing large file wholesale. Only for a genuine full rewrite — for a targeted change use str_replace instead.',
+            },
+            reason: {
+              type: 'string',
+              description: 'Why a wholesale rewrite is needed (required with overwrite:true).',
+            },
+          },
           required: ['path', 'content'],
           additionalProperties: false,
         },
-        handler: args => this.fsWrite(asString(args.path), asString(args.content)),
+        handler: args =>
+          this.fsWrite(asString(args.path), asString(args.content), {
+            overwrite: args.overwrite === true,
+            reason: typeof args.reason === 'string' ? args.reason.trim() : '',
+          }),
       },
       {
         name: 'str_replace',
@@ -731,7 +780,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report their rendered `text` (Label2D/Button2D — check a score/HUD value by reading it, not by screenshotting), `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -806,7 +855,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, the rendered `text` of label-like nodes (Label2D/Button2D — read the SCORE or HUD value straight off the node instead of screenshotting it), children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
         inputSchema: {
           type: 'object',
           properties: {
@@ -1127,6 +1176,36 @@ export class AgentToolRegistry {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  // -- ask the user ------------------------------------------------------------
+
+  /**
+   * Echo the question back as a structured result. The tool itself does nothing else — the real
+   * behaviour lives in {@link AgentChatService}, which ends the turn on this call and surfaces the
+   * question (with its options as chips) to the chat panel. Keeping the handler inert means an
+   * `ask_user` call in a non-chat context (a spec, a replayed history) is harmless.
+   */
+  private askUser(args: Record<string, unknown>): Record<string, unknown> {
+    const question = asString(args.question).trim();
+    if (!question) {
+      return { ok: false, error: 'ask_user needs a `question`.' };
+    }
+    const options = Array.isArray(args.options)
+      ? args.options
+          .filter((option): option is string => typeof option === 'string')
+          .map(option => option.trim())
+          .filter(option => option.length > 0)
+      : [];
+    const allowFreeform = args.allowFreeform !== false;
+    return {
+      ok: true,
+      asked: true,
+      question,
+      options,
+      allowFreeform,
+      note: 'The question was shown to the user and your turn ends here. Their answer arrives as the next user message — do not call more tools.',
+    };
   }
 
   // -- introspection ---------------------------------------------------------
@@ -1739,16 +1818,56 @@ export class AgentToolRegistry {
     };
   }
 
+  /**
+   * Write a file, with a guard against blind wholesale rewrites of existing content. Measured in a
+   * real eval run: the model rewrote a large file three times with byte-identical content, thinking
+   * it had changed a constant, and in another run a rewrite reverted a fix from earlier in the same
+   * session. Creating a NEW file is never blocked; only replacing an existing file bigger than
+   * {@link FS_WRITE_GUARD_CHARS} needs `overwrite:true` + a `reason`. A forced overwrite reports
+   * `forcedOverwrite: true` so the chat loop can count it as a "stuck" signal.
+   */
   private async fsWrite(
     path: string,
-    content: string
-  ): Promise<{ ok: true; path: string; reloadedScene?: string }> {
+    content: string,
+    options: { overwrite: boolean; reason: string } = { overwrite: false, reason: '' }
+  ): Promise<
+    | { ok: true; path: string; reloadedScene?: string; forcedOverwrite?: true; reason?: string }
+    | { ok: false; error: string; path: string; existingChars: number }
+  > {
     const safe = this.safePath(path);
+    let existing: string | null = null;
+    try {
+      existing = await this.storage.readTextFile(safe);
+    } catch {
+      // No such file (or binary) — a create, which is never guarded.
+    }
+    const isLargeRewrite = existing !== null && existing.length > FS_WRITE_GUARD_CHARS;
+    if (isLargeRewrite && !options.overwrite) {
+      return {
+        ok: false,
+        path: safe,
+        existingChars: existing?.length ?? 0,
+        error: `Refused: ${safe} already exists and is ${existing?.length ?? 0} characters. Rewriting it wholesale loses edits already in the file. Use str_replace for a targeted edit (fs_read the exact lines first, then replace them). If you genuinely mean to replace the whole file, call fs_write again with overwrite:true and a reason explaining why.`,
+      };
+    }
+    if (isLargeRewrite && !options.reason) {
+      return {
+        ok: false,
+        path: safe,
+        existingChars: existing?.length ?? 0,
+        error: `Refused: overwrite:true on ${safe} also needs a \`reason\` describing why the whole file must be replaced instead of edited with str_replace.`,
+      };
+    }
     // ProjectStorageService.writeTextFile bumps appState.project.fileRefreshSignal internally, so
     // open code tabs / the asset browser pick the change up — no direct appState mutation here.
     await this.storage.writeTextFile(safe, content);
     const reloadedScene = await this.reloadSceneIfOpen(safe);
-    return { ok: true, path: safe, ...(reloadedScene ? { reloadedScene } : {}) };
+    return {
+      ok: true,
+      path: safe,
+      ...(reloadedScene ? { reloadedScene } : {}),
+      ...(isLargeRewrite ? { forcedOverwrite: true as const, reason: options.reason } : {}),
+    };
   }
 
   /**

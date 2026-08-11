@@ -90,6 +90,7 @@ import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
 import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFolderCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
+import { SwitchWorkspaceModeCommand } from '@/features/editor/SwitchWorkspaceModeCommand';
 import { OpenSpriteEditorCommand } from '@/features/editor/OpenSpriteEditorCommand';
 import { OpenModelLabCommand } from '@/features/editor/OpenModelLabCommand';
 import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
@@ -118,6 +119,8 @@ import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigatio
 import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
 import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
+import type { WorkspaceMode } from '@/state/AppState';
+import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
 import { ProjectService } from '@/services/project/ProjectService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
@@ -154,6 +157,7 @@ import './home/pix3-project-home';
 import './collab/collab-participants-strip';
 import './collab/pix3-share-dialog';
 import './welcome/pix3-welcome';
+import './flow/pix3-flow-shell';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
 import './profiler/profiler-panel';
@@ -228,6 +232,9 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(RouterService)
   private readonly routerService!: RouterService;
 
+  @inject(WorkspaceModeService)
+  private readonly workspaceModeService!: WorkspaceModeService;
+
   @inject(ProjectSettingsService)
   private readonly projectSettingsService!: ProjectSettingsService;
 
@@ -265,6 +272,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @state()
   private isLayoutReady = appState.ui.isLayoutReady;
+
+  @state()
+  private workspaceMode: WorkspaceMode = appState.ui.workspaceMode;
 
   @state()
   private routerStatus = appState.router.status;
@@ -353,6 +363,10 @@ export class Pix3EditorShell extends ComponentBase {
   private watchedSceneIds = new Set<string>();
   private watchedScenePaths = new Map<string, string>();
   private tabsInitialized = false;
+  /** Golden Layout is built at most once per session, the first time Studio is on screen. */
+  private layoutInitStarted = false;
+  /** Project id whose remembered workspace mode has already been applied. */
+  private workspaceModeAppliedFor: string | null = null;
   private isResumingRouterTarget = false;
   private previousIsPlaying = appState.ui.isPlaying;
   private returnPanelAfterPlay: 'inspector' | 'profiler' | null = null;
@@ -397,6 +411,7 @@ export class Pix3EditorShell extends ComponentBase {
     const closeProjectCommand = new CloseProjectCommand();
     const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
+    const switchWorkspaceModeCommand = new SwitchWorkspaceModeCommand();
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
     const openModelLabCommand = new OpenModelLabCommand();
     const openAgentChatCommand = new OpenAgentChatCommand();
@@ -454,6 +469,7 @@ export class Pix3EditorShell extends ComponentBase {
       restartGameCommand,
       openGamePopoutWindowCommand,
       editorSettingsCommand,
+      switchWorkspaceModeCommand,
       openSpriteEditorCommand,
       openModelLabCommand,
       openAgentChatCommand,
@@ -643,32 +659,22 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.syncProfilerPanelFocusWithPlayMode();
       this.isLayoutReady = appState.ui.isLayoutReady;
-      this.shellReady = this.isLayoutReady;
+      this.workspaceMode = appState.ui.workspaceMode;
+      // Flow never mounts Golden Layout, so `isLayoutReady` stays false there forever — the shell
+      // is "ready" as soon as a project is open.
+      this.shellReady =
+        this.workspaceMode === 'flow' ? appState.project.status === 'ready' : this.isLayoutReady;
+      if (this.workspaceMode === 'studio') {
+        // Entering Studio for the first time is when Golden Layout is built (it is skipped
+        // entirely for a session that stays in Flow).
+        void this.updateComplete.then(() => this.ensureStudioLayout());
+      }
       this.requestUpdate();
     });
     // also subscribe to project state so we can initialize layout once a project is opened
     this.disposeProjectSubscription = subscribe(appState.project, () => {
-      // We now initialize layout unconditionally or when ready
-      const host = this.renderRoot.querySelector<HTMLDivElement>('.layout-host');
-      if (host && !this.shellReady) {
-        void this.layoutManager.initialize(host).then(async () => {
-          this.shellReady = true;
-          this.requestUpdate();
-
-          // Restore previously open tabs from session storage.
-          if (!this.tabsInitialized) {
-            this.tabsInitialized = true;
-
-            if (appState.project.id) {
-              // Wait for project scripts to be compiled before restoring the session
-              // to ensure custom components are available in the ScriptRegistry.
-              await this.waitForScripts();
-              await this.editorTabService.restoreProjectSession(appState.project.id);
-            }
-          }
-        });
-      }
-
+      this.applyProjectWorkspaceMode();
+      void this.ensureStudioLayout();
       this.requestUpdate();
     });
 
@@ -691,7 +697,8 @@ export class Pix3EditorShell extends ComponentBase {
 
       this.currentHash = window.location.hash || '#editor';
 
-      const isEditor = window.location.hash.startsWith('#editor');
+      const isEditor =
+        window.location.hash.startsWith('#editor') || window.location.hash.startsWith('#flow');
       if (typeof window !== 'undefined' && isEditor) {
         const { currentParams } = appState.router;
         const noTargetFound = !currentParams.projectId && !currentParams.localSessionId;
@@ -985,7 +992,8 @@ export class Pix3EditorShell extends ComponentBase {
       params.set('select', appState.selection.primaryNodeId);
     }
 
-    const nextHash = params.toString() ? `#editor?${params.toString()}` : '#editor';
+    const base = appState.ui.workspaceMode === 'flow' ? '#flow' : '#editor';
+    const nextHash = params.toString() ? `${base}?${params.toString()}` : base;
     this.currentHash = nextHash;
 
     if (window.location.hash !== nextHash) {
@@ -998,42 +1006,95 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   protected async firstUpdated(): Promise<void> {
+    this.applyProjectWorkspaceMode();
+    await this.ensureStudioLayout();
+  }
+
+  /**
+   * Build Golden Layout — but only in Studio, and only once. Flow deliberately never pays for it:
+   * a session that lives in the prompt-first shell should not construct the whole docking editor
+   * (and everything its panels pull in) just to leave it hidden.
+   *
+   * Called from every place a project or the workspace mode can change, so entering Studio later
+   * in the session initializes the layout at that moment instead.
+   */
+  private async ensureStudioLayout(): Promise<void> {
+    if (appState.ui.workspaceMode !== 'studio' || appState.project.status !== 'ready') {
+      return;
+    }
+    if (this.layoutInitStarted) {
+      return;
+    }
+    // The host only exists after the Studio branch of render() has run.
+    await this.updateComplete;
     const host = this.renderRoot.querySelector<HTMLDivElement>('.layout-host');
     if (!host) {
       return;
     }
+    this.layoutInitStarted = true;
+    await this.layoutManager.initialize(host);
+    this.shellReady = true;
+    this.requestUpdate();
 
-    // Only initialize the Golden Layout if a project is already opened.
-    if (appState.project.status === 'ready') {
-      await this.layoutManager.initialize(host);
-      this.shellReady = true;
-
-      // Open startup scene when no tabs exist.
-      if (!this.tabsInitialized) {
-        this.tabsInitialized = true;
-        if (appState.tabs.tabs.length === 0) {
-          const pending = appState.scenes.pendingScenePaths[0];
-          if (pending) {
-            if (import.meta.env.DEV) {
-              console.debug('[Pix3Editor] Opening startup scene tab', { pending });
-            }
-            await this.editorTabService.openResourceTab('scene', pending);
-          }
-        }
+    if (this.tabsInitialized) {
+      return;
+    }
+    this.tabsInitialized = true;
+    if (appState.project.id) {
+      // Wait for project scripts to compile before restoring the session, so custom components
+      // are already in the ScriptRegistry when the scene tabs reopen.
+      await this.waitForScripts();
+      await this.editorTabService.restoreProjectSession(appState.project.id);
+    }
+    if (appState.tabs.tabs.length === 0) {
+      const pending = appState.scenes.pendingScenePaths[0];
+      if (pending) {
+        await this.editorTabService.openResourceTab('scene', pending);
       }
     }
   }
 
+  /**
+   * Land a freshly opened project in the shell it belongs to: `#flow` in the URL, else whatever
+   * shell this project was last used in, else Studio. Runs once per opened project id so a manual
+   * "Open in Studio" is not undone by the next project-state notification.
+   */
+  private applyProjectWorkspaceMode(): void {
+    if (appState.project.status !== 'ready') {
+      return;
+    }
+    const projectId = appState.project.id;
+    if (!projectId || this.workspaceModeAppliedFor === projectId) {
+      return;
+    }
+    this.workspaceModeAppliedFor = projectId;
+    const mode = this.workspaceModeService.resolveForOpenedProject(projectId);
+    this.workspaceModeService.set(mode, { persist: false });
+  }
+
   protected render() {
+    // Flow renders its own header/stage and never mounts Golden Layout — but it shares every
+    // dialog host below, so Download HTML, project settings and the auth modal work identically
+    // in both shells.
+    const isFlow = this.workspaceMode === 'flow';
     return html`
-      <div class="editor-shell" data-ready=${this.shellReady ? 'true' : 'false'}>
-        <div class="toolbar-layer">
-          ${this.renderToolbar()} ${this.renderProjectNameLabel()} ${this.renderAccountPopover()}
-        </div>
-        <div class="workspace" role="presentation">
-          <div class="layout-host" role="application" aria-busy=${!this.isLayoutReady}></div>
-        </div>
-        <pix3-status-bar></pix3-status-bar>
+      <div
+        class="editor-shell"
+        data-workspace=${this.workspaceMode}
+        data-ready=${this.shellReady ? 'true' : 'false'}
+      >
+        ${isFlow
+          ? html`<pix3-flow-shell></pix3-flow-shell>`
+          : html`
+              <div class="toolbar-layer">
+                ${this.renderToolbar()} ${this.renderProjectNameLabel()}
+                ${this.renderAccountPopover()}
+              </div>
+              <div class="workspace" role="presentation">
+                <div class="layout-host" role="application" aria-busy=${!this.isLayoutReady}></div>
+              </div>
+              <pix3-status-bar></pix3-status-bar>
+            `}
         ${this.renderWorkspaceOverlay()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}

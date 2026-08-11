@@ -1,0 +1,10 @@
+id: recipe-arena-2d
+title: Arena 2D
+description: An avatar you steer inside a bounded field while spawners drip pickups and hazards; touch turns into score or damage, with lives, a timer and a win/lose flow. Dodgers, collectors, top-down survival, snake, and (by swapping the movement script) runners.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1080, height: 1920 }
+# The build/full-run entry scene (Project Settings → Default Export Scene Path).
+# The menu boots first; PLAY transitions to main.pix3scene (the game).
+entryScene: scenes/menu.pix3scene
+order: 60

@@ -5,10 +5,10 @@ import {
   type CommandPreconditionResult,
   type CommandMetadata,
 } from '@/core/command';
-import { EditorTabService } from '@/services/editor/EditorTabService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { OperationService } from '@/services/core/OperationService';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
+import { ensureSceneActive, openGameSurface } from '@/features/scripts/play-workspace';
 
 export interface StartSceneGameParams {
   /** Scene to play — `res://` path or project-relative (`scenes/x.pix3scene`). */
@@ -73,9 +73,6 @@ export class StartSceneGameCommand extends CommandBase<void, void> {
 
   async execute(context: CommandContext): Promise<CommandExecutionResult<void>> {
     const container = context.container;
-    const editorTabService = container.getService<EditorTabService>(
-      container.getOrCreateToken(EditorTabService)
-    );
     const gamePlaySessionService = container.getService<GamePlaySessionService>(
       container.getOrCreateToken(GamePlaySessionService)
     );
@@ -86,8 +83,9 @@ export class StartSceneGameCommand extends CommandBase<void, void> {
     const raw = this.params.scenePath.trim().replace(/\\/g, '/');
     const resourcePath = /^res:\/\//i.test(raw) ? raw : `res://${raw.replace(/^\/+/, '')}`;
 
-    // Focusing/opening the scene makes it the active scene the runner clones.
-    await editorTabService.focusOrOpenScene(resourcePath);
+    // Making it the active scene is what the runner clones from (a tab in Studio, a direct
+    // scene-graph load in Flow — see play-workspace).
+    await ensureSceneActive(container, resourcePath);
 
     await operationService.invoke(
       new SetPlayModeOperation({
@@ -99,8 +97,7 @@ export class StartSceneGameCommand extends CommandBase<void, void> {
     if (gamePlaySessionService.isPopoutOpen()) {
       await gamePlaySessionService.openOrFocusPopoutWindow();
     } else {
-      const gameTabResourceId = 'game-view-instance';
-      await editorTabService.openResourceTab('game', gameTabResourceId, {}, true);
+      await openGameSurface(container);
     }
 
     return {

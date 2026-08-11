@@ -1,4 +1,5 @@
 import { injectable } from '@/fw/di';
+import flowIncrement from './agent-skills/flow-increment.md?raw';
 import gamePrototype from './agent-skills/game-prototype.md?raw';
 import assetGeneration from './agent-skills/asset-generation.md?raw';
 import verifyAndFix from './agent-skills/verify-and-fix.md?raw';
@@ -24,6 +25,12 @@ export interface AgentSkill {
 @injectable()
 export class AgentSkillsService {
   private readonly skills: readonly AgentSkill[] = [
+    {
+      id: 'flow-increment',
+      whenToUse:
+        'working in the Flow workspace (a recipe skeleton is already playable) — read this FIRST there',
+      content: flowIncrement,
+    },
     {
       id: 'game-prototype',
       whenToUse: 'turning a GDD/design doc into a playable prototype (the overall build loop)',

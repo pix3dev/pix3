@@ -56,6 +56,14 @@ export interface LiveNodeSnapshot {
    */
   opacity?: number;
   /**
+   * The text the node actually RENDERS right now, for nodes that show one
+   * (Label2D/Button2D and every other UIControl2D subclass — the resolved
+   * value, so a localized `labelKey` reads as the translation). Absent for
+   * nodes with no text. Score/HUD verification was impossible without it: the
+   * agent could see a label existed but not the number on it.
+   */
+  text?: string;
+  /**
    * Direct child count. A spawner/pool container never MOVES — this (and
    * `visibleChildCount`) is how you tell it "did something".
    */
@@ -232,6 +240,35 @@ function diffJsonPaths(before: Json, after: Json, depth = 2): Record<string, [Js
   walk(before, after, '', depth);
   return out;
 }
+
+/** Longest text reported per node — a HUD line, not a dialogue script. */
+const MAX_SNAPSHOT_TEXT_CHARS = 200;
+
+/**
+ * The text a node renders, or null when it renders none. Every text-bearing 2D node descends from
+ * `UIControl2D`, which exposes `getDisplayText()` (localization already resolved); a user script
+ * node could expose a plain `text` property instead, so that is accepted as a fallback. Duck-typed
+ * on purpose: this service must not depend on the runtime's UI class hierarchy.
+ */
+const readDisplayText = (node: unknown): string | null => {
+  const candidate = node as { getDisplayText?: unknown; text?: unknown };
+  let value: unknown;
+  if (typeof candidate.getDisplayText === 'function') {
+    try {
+      value = (candidate.getDisplayText as () => unknown)();
+    } catch {
+      return null; // A throwing accessor must not break the whole snapshot.
+    }
+  } else if (typeof candidate.text === 'string') {
+    value = candidate.text;
+  }
+  if (typeof value !== 'string' || value.length === 0) {
+    return null;
+  }
+  return value.length > MAX_SNAPSHOT_TEXT_CHARS
+    ? `${value.slice(0, MAX_SNAPSHOT_TEXT_CHARS)}…`
+    : value;
+};
 
 /** Best-effort `key` value for a `code` (InputService latches both, scripts poll `code`). */
 const keyForCode = (code: string): string => {
@@ -645,6 +682,9 @@ export class GameInputService {
     const world = node.getWorldPosition(GameInputService.scratchWorld);
     const children = node.children ?? [];
     const opacity = (node as { opacity?: unknown }).opacity;
+    // UIControl2D (Label2D, Button2D, …) resolves its rendered text through getDisplayText() —
+    // duck-typed so the runtime's UI classes stay out of this service's imports.
+    const displayText = readDisplayText(node);
     return {
       nodeId: node.nodeId,
       name: node.name,
@@ -655,6 +695,7 @@ export class GameInputService {
       rotationZ: node.rotation.z,
       scale: { x: round3(node.scale.x), y: round3(node.scale.y), z: round3(node.scale.z) },
       ...(typeof opacity === 'number' ? { opacity: round3(opacity) } : {}),
+      ...(displayText !== null ? { text: displayText } : {}),
       childCount: children.length,
       visibleChildCount: children.reduce((n, child) => n + (child.visible !== false ? 1 : 0), 0),
     };

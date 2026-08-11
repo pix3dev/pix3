@@ -1,0 +1,42 @@
+# Pix3 Prefab (a .pix3scene with exactly ONE root node).
+# Spawned by scripts/Spawner.ts. Same shape as pickup.pix3scene — only the
+# hitbox GROUP (and the art) differ, and that group is what turns contact into
+# damage instead of score (see TouchRules' `rules`).
+version: 1.0.0
+metadata:
+  author: Pix3 Recipe
+  description: Hazard — touching it costs a life
+root:
+  - id: hazard
+    type: Sprite2D
+    name: Hazard
+    properties:
+      texture: { type: 'texture', url: 'res://sprites/ph-hazard.png' }
+      width: 104
+      height: 104
+      effects:
+        - type: core:tint
+          params: { color: "#ff4d6d", amount: 1 }
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: hazard-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: circle
+          radius: 44
+          group: hazard
+          debugDraw: false
+      - id: hazard-pop
+        type: core:PopIn
+        enabled: true
+        config:
+          from: 0.2
+          duration: 0.25
+          easing: backOut
+          playOnStart: true
+          triggerEvent: ""
+    children: []

@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState } from '@/state';
-import { AgentChatService } from './AgentChatService';
-import { LlmError, type LlmMessage, type LlmResult } from '@/services/llm/LlmTypes';
+import { AgentChatService, LLM_REQUEST_TIMEOUT_MS } from './AgentChatService';
+import {
+  LlmError,
+  type ChatParams,
+  type LlmMessage,
+  type LlmResult,
+} from '@/services/llm/LlmTypes';
 
 const textResult = (text: string): LlmResult => ({
   content: [{ type: 'text', text }],
@@ -28,6 +33,8 @@ interface Fakes {
   ) => Promise<Array<{ name: string; kind: 'file' | 'directory'; path: string }>>;
   /** When set, the model catalog reports this vision capability for the active model. */
   supportsImages?: boolean;
+  /** When set, the model catalog reports this context window (drives the context watermarks). */
+  contextWindow?: number;
   /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */
   advisorAvailable?: boolean;
   /** Soul preferences shaping the system-prompt persona. Defaults to the Brobot preset. */
@@ -60,9 +67,18 @@ const buildService = (fakes: Fakes): AgentChatService => {
     },
     modelCatalog: {
       getModel: () =>
-        fakes.supportsImages === undefined
+        fakes.supportsImages === undefined && fakes.contextWindow === undefined
           ? undefined
-          : { capabilities: { supportsImages: fakes.supportsImages } },
+          : {
+              capabilities: {
+                ...(fakes.supportsImages === undefined
+                  ? {}
+                  : { supportsImages: fakes.supportsImages }),
+                ...(fakes.contextWindow === undefined
+                  ? {}
+                  : { contextWindow: fakes.contextWindow }),
+              },
+            },
     },
     toolRegistry: { specs: () => [], execute: fakes.execute },
     advisorService: {
@@ -354,6 +370,141 @@ describe('AgentChatService', () => {
 
     expect(chat).toHaveBeenCalledTimes(3);
     expect(service.getState().status).toBe('idle');
+  });
+
+  it('ends the turn on ask_user and exposes the question with its options', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('ask_user', 'c1', {
+          question: 'Win by score or by timer?',
+          options: ['by score', 'by timer'],
+        })
+      )
+      // Must never be reached — the turn stops as soon as ask_user executes.
+      .mockResolvedValueOnce(textResult('should not be sent'));
+    const execute = vi.fn(async () => ({ ok: true, asked: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('build me a tapper');
+
+    expect(chat).toHaveBeenCalledTimes(1);
+    const state = service.getState();
+    expect(state.status).toBe('idle');
+    // user, assistant(tool-use), user(tool-result) — and then it stops.
+    expect(state.messages).toHaveLength(3);
+    expect(state.pendingQuestion).toEqual({
+      question: 'Win by score or by timer?',
+      options: ['by score', 'by timer'],
+      allowFreeform: true,
+    });
+  });
+
+  it('ask_user clears the verify debt, so the gate does not chase a turn that ends in a question', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
+      .mockResolvedValueOnce(toolCallResult('ask_user', 'c2', { question: 'Waves or endless?' }))
+      .mockResolvedValueOnce(textResult('never reached'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('add enemies');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+    expect(service.getState().pendingQuestion?.question).toBe('Waves or endless?');
+  });
+
+  it('clears the pending question on the next send', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('ask_user', 'c1', { question: 'A or B?' }))
+      .mockResolvedValueOnce(textResult('going with A'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({ ok: true })),
+      put: vi.fn(async () => undefined),
+    });
+
+    await service.send('go');
+    expect(service.getState().pendingQuestion).not.toBeNull();
+
+    await service.send('A');
+    expect(service.getState().pendingQuestion).toBeNull();
+  });
+
+  it('escalates to ask_advisor when the same call repeats twice with the identical result', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c1', { id: 'nope' }))
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c2', { id: 'nope' }))
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c3', { id: 'nope' }))
+      .mockResolvedValueOnce(textResult('ok, asking the advisor next time'));
+    const execute = vi.fn(async () => ({ ok: false, error: 'unknown skill' }));
+    const service = buildService({
+      chat,
+      execute,
+      put: vi.fn(async () => undefined),
+      advisorAvailable: true,
+      maxToolIterations: 6,
+    });
+
+    await service.send('go');
+
+    const state = service.getState();
+    // First repeat (message 4) only gets the advisory nudge…
+    expect(JSON.stringify(state.messages[4].content)).not.toMatch(/ask_advisor NOW/);
+    // …the second repeat gets the directive.
+    expect(JSON.stringify(state.messages[6].content)).toMatch(/ask_advisor NOW/);
+  });
+
+  it('escalation tells the model to change approach when no advisor is configured', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c1', { id: 'nope' }))
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c2', { id: 'nope' }))
+      .mockResolvedValueOnce(toolCallResult('read_skill', 'c3', { id: 'nope' }))
+      .mockResolvedValueOnce(textResult('fine'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({ ok: false, error: 'unknown skill' })),
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 6,
+    });
+
+    await service.send('go');
+
+    const escalation = JSON.stringify(service.getState().messages[6].content);
+    expect(escalation).toMatch(/You are stuck/);
+    expect(escalation).toMatch(/Change approach/);
+    expect(escalation).not.toMatch(/ask_advisor/);
+  });
+
+  it('escalates after three consecutive iterations of nothing but tool errors', async () => {
+    let n = 0;
+    // Distinct args each time, so this is the error-streak trigger, not the repeat trigger.
+    const chat = vi.fn(async () =>
+      n < 3
+        ? toolCallResult('fs_read', `c${n}`, { path: `missing-${n++}.ts` })
+        : textResult('giving up cleanly')
+    );
+    const execute = vi.fn(async () => {
+      throw new Error('File not found');
+    });
+    const service = buildService({
+      chat,
+      execute,
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 6,
+    });
+
+    await service.send('read them');
+
+    // Third all-error iteration → message index 6 carries the escalation.
+    expect(JSON.stringify(service.getState().messages[6].content)).toMatch(/You are stuck/);
   });
 
   it('stops at the tool-iteration cap with a notice (not an error)', async () => {
@@ -704,6 +855,195 @@ describe('AgentChatService', () => {
     expect(put).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'proj-1', messages: expect.any(Array) })
     );
+  });
+
+  describe('context management', () => {
+    /** A tool-call turn that reports a nearly-full context window. */
+    const fullContextToolCall = (id: string): LlmResult => ({
+      ...toolCallResult('scene_tree', id),
+      usage: { inputTokens: 800, outputTokens: 10 },
+    });
+
+    it('nudges once at the 60% watermark without touching the history', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...toolCallResult('scene_tree', 'c1'),
+          usage: { inputTokens: 650, outputTokens: 5 },
+        })
+        .mockResolvedValueOnce(textResult('done'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({})),
+        put: vi.fn(async () => undefined),
+        contextWindow: 1000,
+      });
+
+      await service.send('go');
+
+      const state = service.getState();
+      expect(JSON.stringify(state.messages[2].content)).toMatch(/Context is filling/);
+      expect(JSON.stringify(state.messages[2].content)).toMatch(/progress\.md/);
+      expect(state.compactedAtIndices).toEqual([]);
+    });
+
+    it('compacts at 75%: keeps the original request, drops the middle, carries the docs over', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(fullContextToolCall('c1'))
+        .mockResolvedValueOnce(fullContextToolCall('c2'))
+        .mockResolvedValueOnce(fullContextToolCall('c3'))
+        .mockResolvedValueOnce(fullContextToolCall('c4'))
+        // The extra tool-free round-trip that produces the handoff.
+        .mockResolvedValueOnce(textResult('DONE: spawner wired. NEXT: score HUD.'))
+        .mockResolvedValueOnce(textResult('carrying on'));
+      const readTextFile = vi.fn(async (path: string) => {
+        if (path === 'design/brief.md') return 'A tapper about coins.';
+        throw new Error('not found');
+      });
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ scannedEverything: 'x'.repeat(200) })),
+        put: vi.fn(async () => undefined),
+        contextWindow: 1000,
+        maxToolIterations: 6,
+        readTextFile,
+      });
+
+      await service.send('build a coin tapper');
+
+      const state = service.getState();
+      // The handoff request itself must go out WITHOUT tools (it is a summary, not a work turn).
+      expect(chat.mock.calls[4][0].tools).toBeUndefined();
+      // History is now: original request, handoff, and the reply that followed it.
+      expect(state.messages).toHaveLength(3);
+      expect(JSON.stringify(state.messages[0].content)).toContain('build a coin tapper');
+      const handoff = JSON.stringify(state.messages[1].content);
+      expect(handoff).toContain('DONE: spawner wired');
+      expect(handoff).toContain('A tapper about coins.');
+      // The bulky middle (tool results) is gone.
+      expect(JSON.stringify(state.messages)).not.toContain('scannedEverything');
+      expect(state.compactedAtIndices).toEqual([1]);
+    });
+
+    it('does not compact a short history, however full the context is', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(fullContextToolCall('c1'))
+        .mockResolvedValueOnce(textResult('done'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({})),
+        put: vi.fn(async () => undefined),
+        contextWindow: 1000,
+      });
+
+      await service.send('go');
+
+      // 4 messages < the 8-message floor → the request is still verbatim in the history.
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(service.getState().compactedAtIndices).toEqual([]);
+      expect(JSON.stringify(service.getState().messages[0].content)).toContain('go');
+    });
+
+    it('keeps the full history when the handoff round-trip fails', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(fullContextToolCall('c1'))
+        .mockResolvedValueOnce(fullContextToolCall('c2'))
+        .mockResolvedValueOnce(fullContextToolCall('c3'))
+        .mockResolvedValueOnce(fullContextToolCall('c4'))
+        .mockRejectedValueOnce(new LlmError('unknown', 'handoff failed'))
+        .mockResolvedValueOnce(textResult('carrying on with everything'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({})),
+        put: vi.fn(async () => undefined),
+        contextWindow: 1000,
+        maxToolIterations: 6,
+      });
+
+      await service.send('build a coin tapper');
+
+      const state = service.getState();
+      expect(state.status).toBe('idle');
+      expect(state.compactedAtIndices).toEqual([]);
+      expect(state.messages.length).toBeGreaterThan(8);
+    });
+
+    it('emergency-trims old tool results at 90% (in the stored history, not just the wire)', async () => {
+      const emergency = (id: string): LlmResult => ({
+        ...toolCallResult('scene_tree', id),
+        usage: { inputTokens: 950, outputTokens: 5 },
+      });
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(emergency('c1'))
+        .mockResolvedValueOnce(emergency('c2'))
+        .mockResolvedValueOnce(emergency('c3'))
+        .mockResolvedValueOnce(emergency('c4'))
+        // Handoff request fails, so only the trim is observable.
+        .mockRejectedValueOnce(new LlmError('unknown', 'no handoff'))
+        .mockResolvedValueOnce(textResult('ok'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ hugePayload: 'y'.repeat(300) })),
+        put: vi.fn(async () => undefined),
+        contextWindow: 1000,
+        maxToolIterations: 6,
+      });
+
+      await service.send('go');
+
+      const serialized = JSON.stringify(service.getState().messages);
+      expect(serialized).toContain('[trimmed]');
+      // The most recent results stay readable; only the old ones are dropped.
+      expect(serialized.match(/hugePayload/g)?.length ?? 0).toBeLessThan(4);
+    });
+
+    it('does nothing at all when the model reports no context window', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ...toolCallResult('scene_tree', 'c1'),
+          usage: { inputTokens: 999_999, outputTokens: 5 },
+        })
+        .mockResolvedValueOnce(textResult('done'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({})),
+        put: vi.fn(async () => undefined),
+      });
+
+      await service.send('go');
+
+      expect(JSON.stringify(service.getState().messages)).not.toMatch(/Context is filling/);
+      expect(service.getState().compactedAtIndices).toEqual([]);
+    });
+  });
+
+  it('times out a hung provider request, retries once, then surfaces it as a turn error', async () => {
+    vi.useFakeTimers();
+    try {
+      // A request that never settles — the failure mode the timeout exists for.
+      const chat = vi.fn((_params: ChatParams) => new Promise<LlmResult>(() => {}));
+      const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+      const turn = service.send('hi');
+      await vi.advanceTimersByTimeAsync(LLM_REQUEST_TIMEOUT_MS); // first attempt times out
+      await vi.advanceTimersByTimeAsync(600); // retry backoff
+      await vi.advanceTimersByTimeAsync(LLM_REQUEST_TIMEOUT_MS); // retry times out too
+      await turn;
+
+      expect(chat).toHaveBeenCalledTimes(2);
+      const state = service.getState();
+      expect(state.status).toBe('error');
+      expect(state.errorMessage).toMatch(/timed out/);
+      // The attempt is aborted so the socket is freed…
+      expect(chat.mock.calls[0][0].signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('composeFix starts a fresh conversation and prefills subscribed composers', async () => {

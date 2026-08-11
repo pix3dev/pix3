@@ -4,9 +4,9 @@ import { AgentSkillsService } from './AgentSkillsService';
 describe('AgentSkillsService', () => {
   const service = new AgentSkillsService();
 
-  it('bundles the three P0 skill packs with non-empty content', () => {
+  it('bundles the shipped skill packs with non-empty content', () => {
     const ids = service.list().map(skill => skill.id);
-    expect(ids).toEqual(['game-prototype', 'asset-generation', 'verify-and-fix']);
+    expect(ids).toEqual(['flow-increment', 'game-prototype', 'asset-generation', 'verify-and-fix']);
     for (const skill of service.list()) {
       expect(skill.content.length).toBeGreaterThan(100);
       expect(skill.whenToUse).toBeTruthy();
@@ -15,8 +15,10 @@ describe('AgentSkillsService', () => {
 
   it('emits one index line per skill', () => {
     const lines = service.indexLines();
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toMatch(/^- game-prototype — /);
+    expect(lines).toHaveLength(4);
+    // flow-increment leads the index on purpose: in Flow it is the first thing the agent should read.
+    expect(lines[0]).toMatch(/^- flow-increment — /);
+    expect(lines[1]).toMatch(/^- game-prototype — /);
   });
 
   it('reads the whole skill by id', () => {

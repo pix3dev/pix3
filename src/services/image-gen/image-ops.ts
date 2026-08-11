@@ -694,6 +694,323 @@ export async function chromaKeyImage(
   }
 }
 
+// -- palette extraction / tinting -------------------------------------------
+
+/** One entry of an extracted palette: the colour plus how much of the image it covers. */
+export interface PaletteSwatch {
+  readonly color: RgbColor;
+  /** `#rrggbb`, lower-case — the form scenes, briefs and generate-prompts all use. */
+  readonly hex: string;
+  /** Fraction (0..1) of the sampled pixels this swatch represents. */
+  readonly weight: number;
+}
+
+export interface PaletteOptions {
+  /** Pixels at or below this alpha are ignored (a cut-out's transparent field is not a colour). */
+  alphaThreshold?: number;
+  /**
+   * Upper bound on how many pixels are actually read. The image is walked with a stride rather
+   * than downsampled, so the result does not depend on canvas resampling — which keeps the palette
+   * byte-for-byte reproducible for the same input. Default 8192.
+   */
+  maxSamples?: number;
+}
+
+/** `#rrggbb` (lower-case) for a colour. Channels are rounded and clamped to 0..255. */
+export const rgbToHex = (color: RgbColor): string => {
+  const channel = (value: number): string =>
+    clamp(Math.round(value), 0, 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
+};
+
+/**
+ * Parse `#rgb` / `#rrggbb` (with or without the hash) into channels, or null when it isn't a
+ * colour. Deliberately strict: a silent "black" for a typo'd hex would tint every placeholder in a
+ * generated project to mud, and the caller can fall back far better than this function can.
+ */
+export const hexToRgb = (hex: string): RgbColor | null => {
+  const value = hex.trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(value)) {
+    return {
+      r: parseInt(value[0] + value[0], 16),
+      g: parseInt(value[1] + value[1], 16),
+      b: parseInt(value[2] + value[2], 16),
+    };
+  }
+  if (/^[0-9a-f]{6}$/i.test(value)) {
+    return {
+      r: parseInt(value.slice(0, 2), 16),
+      g: parseInt(value.slice(2, 4), 16),
+      b: parseInt(value.slice(4, 6), 16),
+    };
+  }
+  return null;
+};
+
+/** Perceptual luminance (ITU-R BT.601), 0..255. Used to order a palette light → dark. */
+export const colorLuminance = (color: RgbColor): number =>
+  0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+
+interface ColorSample {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+/**
+ * Median-cut colour quantization over already-decoded pixels.
+ *
+ * This is the deterministic half of {@link extractPalette} and the reason Flow does **not** ask a
+ * model for hex codes: quantizing the user's own style reference is free, instant, and exact, while
+ * a model's guess at "the palette of this image" is neither. (The vision helper still earns its
+ * place for what quantization cannot see — rendering style, line, lighting, mood.)
+ *
+ * Median cut rather than k-means for one reason that matters here: it has no random seeding, so the
+ * same reference image always yields the same palette, and a re-run of the same prompt cannot
+ * silently recolour a project.
+ *
+ * One deliberate departure from textbook median cut: a box is split at the **widest gap** along its
+ * widest channel, not at its median sample. Textbook median cut balances *population*, which on a
+ * style reference is the wrong objective — three shades of one flat background would be torn into
+ * separate swatches while a small saturated accent (a logo, a UI highlight) gets averaged into
+ * whichever half it fell in. Splitting at the gap separates *clusters* instead, and `weight` still
+ * reports coverage so a caller that wants the dominant colour just takes the first entry.
+ */
+export const quantizePixels = (
+  pixels: ImagePixels,
+  count: number,
+  options: PaletteOptions = {}
+): PaletteSwatch[] => {
+  const wanted = Math.max(1, Math.floor(count));
+  const threshold = clamp(Math.round(options.alphaThreshold ?? 8), 0, 255);
+  const maxSamples = Math.max(1, Math.floor(options.maxSamples ?? 8192));
+  const total = pixels.width * pixels.height;
+  if (total <= 0) {
+    return [];
+  }
+
+  const stride = Math.max(1, Math.ceil(total / maxSamples));
+  const samples: ColorSample[] = [];
+  for (let index = 0; index < total; index += stride) {
+    const offset = index * 4;
+    if (pixels.data[offset + 3] <= threshold) {
+      continue;
+    }
+    samples.push({
+      r: pixels.data[offset],
+      g: pixels.data[offset + 1],
+      b: pixels.data[offset + 2],
+    });
+  }
+  if (samples.length === 0) {
+    return [];
+  }
+
+  let boxes: ColorSample[][] = [samples];
+  while (boxes.length < wanted) {
+    const splittable = boxes
+      .map((box, index) => ({ index, range: boxRange(box) }))
+      .filter(entry => entry.range.spread > 0)
+      // Widest box first; ties break on index so the split order is fixed.
+      .sort((a, b) => b.range.spread - a.range.spread || a.index - b.index);
+    const target = splittable[0];
+    if (!target) {
+      break;
+    }
+    const box = boxes[target.index];
+    const channel = target.range.channel;
+    const sorted = [...box].sort(
+      (a, b) => a[channel] - b[channel] || a.r - b.r || a.g - b.g || a.b - b.b
+    );
+    const cut = widestGapIndex(sorted, channel);
+    const left = sorted.slice(0, cut);
+    const right = sorted.slice(cut);
+    if (left.length === 0 || right.length === 0) {
+      break;
+    }
+    boxes = boxes.flatMap((current, index) => (index === target.index ? [left, right] : [current]));
+  }
+
+  return boxes
+    .map(box => {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (const sample of box) {
+        r += sample.r;
+        g += sample.g;
+        b += sample.b;
+      }
+      const color: RgbColor = {
+        r: Math.round(r / box.length),
+        g: Math.round(g / box.length),
+        b: Math.round(b / box.length),
+      };
+      return { color, hex: rgbToHex(color), weight: box.length / samples.length };
+    })
+    // Most-covering colour first — that is the one a caller wants for a background fill.
+    .sort((a, b) => b.weight - a.weight || a.hex.localeCompare(b.hex));
+};
+
+/**
+ * Index at which a channel-sorted box splits into its two furthest-apart clusters: the position of
+ * the largest step between consecutive values. Ties go to the earlier (and therefore stable) index.
+ */
+const widestGapIndex = (sorted: readonly ColorSample[], channel: 'r' | 'g' | 'b'): number => {
+  let bestIndex = 1;
+  let bestGap = -1;
+  for (let index = 1; index < sorted.length; index += 1) {
+    const gap = sorted[index][channel] - sorted[index - 1][channel];
+    if (gap > bestGap) {
+      bestGap = gap;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+};
+
+/** Widest channel of a box and how wide it is (0 when every sample is identical). */
+const boxRange = (box: readonly ColorSample[]): { channel: 'r' | 'g' | 'b'; spread: number } => {
+  let minR = 255;
+  let maxR = 0;
+  let minG = 255;
+  let maxG = 0;
+  let minB = 255;
+  let maxB = 0;
+  for (const sample of box) {
+    if (sample.r < minR) minR = sample.r;
+    if (sample.r > maxR) maxR = sample.r;
+    if (sample.g < minG) minG = sample.g;
+    if (sample.g > maxG) maxG = sample.g;
+    if (sample.b < minB) minB = sample.b;
+    if (sample.b > maxB) maxB = sample.b;
+  }
+  const spreadR = maxR - minR;
+  const spreadG = maxG - minG;
+  const spreadB = maxB - minB;
+  if (spreadG >= spreadR && spreadG >= spreadB) {
+    return { channel: 'g', spread: spreadG };
+  }
+  if (spreadR >= spreadB) {
+    return { channel: 'r', spread: spreadR };
+  }
+  return { channel: 'b', spread: spreadB };
+};
+
+/**
+ * Extract up to `count` dominant colours from an image, most-covering first. Returns an empty array
+ * when the image can't be decoded (no canvas in this context) — callers must treat that as
+ * "unknown" and keep whatever palette they already had, never as "no colours".
+ */
+export async function extractPalette(
+  source: Blob,
+  count = 5,
+  options: PaletteOptions = {}
+): Promise<PaletteSwatch[]> {
+  const pixels = await readImagePixels(source);
+  if (!pixels) {
+    return [];
+  }
+  return quantizePixels(pixels, count, options);
+}
+
+export interface TintOptions extends EncodeOptions {
+  /**
+   * How much of the tint to apply, 0..1. 1 (default) is a full multiply; lower values mix back
+   * toward the original colour, which is how a placeholder keeps a little of its own hue.
+   */
+  strength?: number;
+  /** Pixels at or below this alpha are left untouched (nothing to tint). Default 0. */
+  alphaThreshold?: number;
+}
+
+/**
+ * Multiply-tint an image with a solid colour, preserving its alpha channel exactly — the operation
+ * that turns a recipe's near-white placeholder art into the brief's palette, so a freshly expanded
+ * project looks deliberate rather than grey before a single asset has been generated.
+ *
+ * Multiply (not replace) because the placeholders carry their own shading: `out = src · tint / 255`
+ * keeps every gradient and outline and simply pulls the whole sprite toward the target hue, which
+ * is why near-white source art is a requirement of the recipe contract — white is multiply's
+ * identity, so the tint lands at full strength.
+ *
+ * **Per-pixel rather than `globalCompositeOperation: 'multiply'` + `'destination-in'`.** The
+ * composite recipe reaches the same place for fully-opaque pixels but not for anti-aliased edges:
+ * the multiply pass composites a fully-opaque fill over a partly-transparent backdrop, dragging
+ * fringe pixels toward the flat tint colour, and the `destination-in` pass then restores the alpha
+ * around that already-wrong colour — a visible halo on every sprite edge. Reading the bytes keeps
+ * alpha untouched by construction, costs microseconds at sprite sizes, and matches how
+ * {@link chromaKeyImage} works in this module. Returns the source unchanged when the colour can't
+ * be parsed or no canvas is available.
+ */
+export async function tintImage(
+  source: Blob,
+  hexColor: string,
+  options: TintOptions = {}
+): Promise<RasterResult> {
+  const tint = hexToRgb(hexColor);
+  if (!tint || !canUseBitmap()) {
+    const size = await readBlobSize(source);
+    return { blob: source, width: size?.width ?? 0, height: size?.height ?? 0 };
+  }
+
+  const bitmap = await createImageBitmap(source);
+  try {
+    const width = bitmap.width;
+    const height = bitmap.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('2D canvas context unavailable');
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    tintPixelsInPlace(imageData.data, tint, options);
+    ctx.putImageData(imageData, 0, 0);
+    const blob = await canvasToBlob(canvas, {
+      mimeType: options.mimeType ?? 'image/png',
+      quality: options.quality,
+    });
+    return { blob, width, height };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * The tint itself: `out = lerp(src, src · tint / 255, strength)` per channel, alpha untouched.
+ * Exported so the arithmetic is testable without a canvas — {@link tintImage} calls exactly this
+ * over the bytes it reads back from the context.
+ */
+export const tintPixelsInPlace = (
+  data: Uint8ClampedArray,
+  tint: RgbColor,
+  options: TintOptions = {}
+): void => {
+  const strength = clamp(options.strength ?? 1, 0, 1);
+  const threshold = clamp(Math.round(options.alphaThreshold ?? 0), 0, 255);
+  if (strength === 0) {
+    return;
+  }
+  for (let index = 0; index < data.length; index += 4) {
+    if (data[index + 3] <= threshold) {
+      continue;
+    }
+    data[index] = mixChannel(data[index], tint.r, strength);
+    data[index + 1] = mixChannel(data[index + 1], tint.g, strength);
+    data[index + 2] = mixChannel(data[index + 2], tint.b, strength);
+  }
+};
+
+const mixChannel = (source: number, tint: number, strength: number): number => {
+  const multiplied = (source * tint) / 255;
+  return Math.round(source + (multiplied - source) * strength);
+};
+
 export interface AlphaStats {
   /** True when any pixel is meaningfully transparent (alpha ≤ 250 for >0.5% of pixels). */
   readonly hasAlpha: boolean;

@@ -23,6 +23,14 @@ pix3-editor-shell {
   color: var(--fg-0);
 }
 
+/* Flow brings its own header and stage; the shell is just a full-bleed host for it. */
+.editor-shell[data-workspace='flow'] {
+  grid-template-rows: 1fr;
+  block-size: 100vh;
+  block-size: 100dvh;
+  overflow: hidden;
+}
+
 .toolbar-layer {
   position: relative;
 }

@@ -1938,3 +1938,91 @@ pix3-agent-chat-panel .agent-ctx-chip--scene .agent-ctx-chip-icon {
 pix3-agent-chat-panel .agent-ctx-chip--more {
   color: var(--fg-2);
 }
+
+/* ── Agent question (ask_user) + compaction divider ─────────────────────── */
+
+/* The agent ended its turn on a fork it needs the user to settle. */
+pix3-agent-chat-panel .agent-question {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.4rem 0.6rem 0.2rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  background: var(--accent-soft);
+}
+
+pix3-agent-chat-panel .agent-question-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  color: var(--pix3-accent-color, #f5ae39);
+}
+
+pix3-agent-chat-panel .agent-question-icon svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+pix3-agent-chat-panel .agent-question-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+pix3-agent-chat-panel .agent-question-text {
+  color: var(--fg-0);
+  line-height: 1.45;
+}
+
+pix3-agent-chat-panel .agent-question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+pix3-agent-chat-panel .agent-question-chip {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-question-chip:hover {
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  background: rgba(var(--pix3-accent-rgb), 0.14);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-question-hint {
+  color: var(--fg-2);
+  font-size: 0.68rem;
+}
+
+/* Marks where the service replaced the history with a compact handoff. */
+pix3-agent-chat-panel .agent-compact-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0.6rem;
+  color: var(--fg-2);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+pix3-agent-chat-panel .agent-compact-divider::before,
+pix3-agent-chat-panel .agent-compact-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line-1);
+}

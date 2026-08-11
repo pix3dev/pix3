@@ -59,6 +59,7 @@ describe('AgentToolRegistry', () => {
       expect.arrayContaining([
         'read_skill',
         'ask_advisor',
+        'ask_user',
         'scene_tree',
         'node_inspect',
         'find_nodes',
@@ -368,6 +369,27 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  describe('ask_user', () => {
+    it('echoes the question and options back as a structured result', async () => {
+      const result = (await buildRegistry().execute('ask_user', {
+        question: 'Win by score or by timer?',
+        options: ['by score', 'by timer'],
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(true);
+      expect(result.question).toBe('Win by score or by timer?');
+      expect(result.options).toEqual(['by score', 'by timer']);
+      expect(result.allowFreeform).toBe(true);
+    });
+
+    it('rejects an empty question', async () => {
+      const result = (await buildRegistry().execute('ask_user', { question: '  ' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+    });
+  });
+
   describe('analyze_image', () => {
     it('captures the viewport and routes it to the vision helper', async () => {
       const captureScreenshot = vi.fn(() => ({
@@ -666,6 +688,75 @@ describe('AgentToolRegistry', () => {
       expect(storage.writeTextFile).toHaveBeenCalledWith('scripts/spin.ts', 'code');
       expect(result).toEqual({ ok: true, path: 'scripts/spin.ts' });
       expect(appState.project.fileRefreshSignal || 0).toBeGreaterThan(before);
+    });
+
+    it('fs_write creates a NEW file without needing overwrite (the guard never blocks creation)', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'scripts/Brand.ts',
+        content: 'x'.repeat(9000),
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.forcedOverwrite).toBeUndefined();
+      expect(storage.files.get('scripts/Brand.ts')).toHaveLength(9000);
+    });
+
+    it('fs_write REFUSES to overwrite a large existing file and points at str_replace', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/Big.ts', 'a'.repeat(2500));
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'scripts/Big.ts',
+        content: 'replaced',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/str_replace/);
+      expect(result.existingChars).toBe(2500);
+      // The refusal must be a no-op on disk — that is the whole point of the guard.
+      expect(storage.writeTextFile).not.toHaveBeenCalled();
+      expect(storage.files.get('scripts/Big.ts')).toBe('a'.repeat(2500));
+    });
+
+    it('fs_write overwrites a small existing file without ceremony', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+      const result = (await registry.execute('fs_write', {
+        path: 'scripts/a.ts',
+        content: 'export const x = 2;',
+      })) as Record<string, unknown>;
+      expect(result.ok).toBe(true);
+      expect(storage.files.get('scripts/a.ts')).toBe('export const x = 2;');
+    });
+
+    it('fs_write with overwrite:true still needs a reason, then writes and reports forcedOverwrite', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/Big.ts', 'a'.repeat(2500));
+      const registry = buildRegistry({ storage });
+
+      const noReason = (await registry.execute('fs_write', {
+        path: 'scripts/Big.ts',
+        content: 'replaced',
+        overwrite: true,
+      })) as Record<string, unknown>;
+      expect(noReason.ok).toBe(false);
+      expect(String(noReason.error)).toMatch(/reason/);
+      expect(storage.writeTextFile).not.toHaveBeenCalled();
+
+      const forced = (await registry.execute('fs_write', {
+        path: 'scripts/Big.ts',
+        content: 'replaced',
+        overwrite: true,
+        reason: 'the whole controller is being replaced by the new state machine',
+      })) as Record<string, unknown>;
+      expect(forced.ok).toBe(true);
+      // The chat loop counts this flag as a "stuck" signal.
+      expect(forced.forcedOverwrite).toBe(true);
+      expect(storage.files.get('scripts/Big.ts')).toBe('replaced');
     });
 
     it('fs_write to an OPEN scene file force-reloads that scene', async () => {
