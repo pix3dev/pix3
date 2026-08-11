@@ -1,5 +1,10 @@
 import { injectable } from '@/fw/di';
 import { REASONING_EFFORTS, type ReasoningEffort } from '@/services/llm/LlmTypes';
+import {
+  isNeural3DProviderId,
+  type Neural3DProviderId,
+} from '@/services/model-gen/neural/Neural3DProvider';
+import { STROPHE_DEFAULT_3D_FAMILY } from '@/services/model-gen/neural/StropheModel3DProvider';
 import type { ModelGenMode } from '@/services/model-gen/model-gen-types';
 
 /**
@@ -44,6 +49,14 @@ export interface ModelLabPreferences {
    * Model3DGenSettingsService.getPreferences} always returns it populated (defaults to `scenes`).
    */
   sceneSaveFolder?: string;
+  /**
+   * Which backend the neural (image→3D) lane runs on. `strophe` needs no proxy and bills credits;
+   * `tripo` talks to Tripo3D directly but only works where the dev proxies exist. Optional in the
+   * type so pre-existing preference literals stay valid.
+   */
+  neural3dProviderId?: Neural3DProviderId;
+  /** Strophe family id for the neural lane (e.g. `tripo`, `hunyuan3d`, `meshy`). */
+  neural3dFamilyId?: string;
 }
 
 const STORAGE_KEY = 'pix3.modelLabSettings:v1';
@@ -75,6 +88,11 @@ const DEFAULT_SCORE_THRESHOLD = 0.7;
 const DEFAULT_MAX_ITERATIONS_PER_PASS = 3;
 const DEFAULT_SAVE_FOLDER = 'models';
 const DEFAULT_SCENE_SAVE_FOLDER = 'scenes';
+/**
+ * Strophe is the default neural-3D backend: it needs no proxy (CORS on both the API and the result
+ * URLs), so it is the only one of the two that works in a production static build.
+ */
+const DEFAULT_NEURAL_3D_PROVIDER: Neural3DProviderId = 'strophe';
 
 @injectable()
 export class Model3DGenSettingsService {
@@ -163,6 +181,8 @@ export class Model3DGenSettingsService {
       mode: 'quality',
       saveFolder: DEFAULT_SAVE_FOLDER,
       sceneSaveFolder: DEFAULT_SCENE_SAVE_FOLDER,
+      neural3dProviderId: DEFAULT_NEURAL_3D_PROVIDER,
+      neural3dFamilyId: STROPHE_DEFAULT_3D_FAMILY,
     };
   }
 
@@ -219,6 +239,13 @@ export class Model3DGenSettingsService {
           typeof parsed.sceneSaveFolder === 'string' && parsed.sceneSaveFolder.trim()
             ? parsed.sceneSaveFolder
             : defaults.sceneSaveFolder,
+        neural3dProviderId: isNeural3DProviderId(parsed.neural3dProviderId)
+          ? parsed.neural3dProviderId
+          : defaults.neural3dProviderId,
+        neural3dFamilyId:
+          typeof parsed.neural3dFamilyId === 'string' && parsed.neural3dFamilyId.trim()
+            ? parsed.neural3dFamilyId
+            : defaults.neural3dFamilyId,
       };
     } catch {
       return defaults;

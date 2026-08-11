@@ -134,6 +134,7 @@ const DEFAULT_NEURAL_STATE: NeuralGenState = {
   modelRevision: 0,
   canGenerate: true,
   taskId: null,
+  providerLabel: '',
 };
 
 const DEFAULT_SCENE_GEN_STATE: SceneGenState = {
@@ -333,8 +334,10 @@ export class ModelLabPanel extends ComponentBase {
   @state() private gen: ModelGenState = DEFAULT_GEN_STATE;
   @state() private sceneGen: SceneGenState = DEFAULT_SCENE_GEN_STATE;
   @state() private neural: NeuralGenState = DEFAULT_NEURAL_STATE;
-  /** Whether a Tripo3D API key is configured — gates the neural Generate button. */
+  /** Whether the active neural backend has an API key configured — gates the Generate button. */
   @state() private neuralKeySet = false;
+  /** Label of the configured neural backend ('Strophe' | 'Tripo3D'), for copy that names it. */
+  @state() private neuralProviderLabel = '';
   @state() private prefs: ModelLabPreferences = DEFAULT_PREFS;
   @state() private refreshingProviderId: string | null = null;
 
@@ -602,7 +605,7 @@ export class ModelLabPanel extends ComponentBase {
     `;
   }
 
-  /** The Procedural | Neural (Tripo3D) generation-mode selector (model lane only). */
+  /** The Procedural | Neural generation-mode selector (model lane only). */
   private renderModelGenModeToggle() {
     return html`
       <div class="ml-mode-switch" role="group" aria-label="Model generation mode">
@@ -620,7 +623,7 @@ export class ModelLabPanel extends ComponentBase {
           aria-pressed=${this.modelGenMode === 'neural'}
           @click=${() => this.setModelGenMode('neural')}
         >
-          Neural (Tripo3D)
+          Neural${this.neuralProviderLabel ? ` (${this.neuralProviderLabel})` : ''}
         </button>
       </div>
     `;
@@ -680,15 +683,16 @@ export class ModelLabPanel extends ComponentBase {
     `;
   }
 
-  /** Neural (Tripo3D) inputs: reuses the staged reference; adds a note, Generate/Stop, and progress. */
+  /** Neural inputs: reuses the staged reference; adds a note, Generate/Stop, and progress. */
   private renderNeuralModelInputs() {
     const running = !this.neural.canGenerate;
     const canGenerate = !!this.reference && this.neural.canGenerate && this.neuralKeySet;
+    const backend = this.neuralProviderLabel || 'The neural backend';
     return html`
       <section class="model-lab-section">
         <p class="ml-field-note">
-          Tripo3D is a neural image→3D service (metered — requires an API key). Generation uses the
-          reference image only.
+          ${backend} is a neural image→3D service (metered — requires an API key). Generation uses
+          the reference image only. Switch backends in Settings → Strophe.
         </p>
         ${running
           ? html`<button
@@ -711,7 +715,7 @@ export class ModelLabPanel extends ComponentBase {
           : null}
         ${!running && this.reference && !this.neuralKeySet
           ? html`<p class="model-lab-status is-error">
-              Add a Tripo3D API key in Settings to generate.
+              Add a ${backend} API key in Settings to generate.
             </p>`
           : null}
         ${this.renderNeuralProgress()}
@@ -1362,14 +1366,15 @@ export class ModelLabPanel extends ComponentBase {
       </section>
 
       <section class="model-lab-section">
-        <h3>Tripo3D API key</h3>
+        <h3>${this.neuralProviderLabel || 'Neural'} API key</h3>
         <p class="ml-field-note">
-          Used for neural (Tripo3D) image→3D generation. Stored locally (SecretStorage).
+          Used for neural image→3D generation by the backend selected in Settings → Strophe. Stored
+          locally (SecretStorage).
         </p>
         <input
           type="password"
           class="ml-input ml-neural-key-input"
-          placeholder=${this.neuralKeySet ? '•••••••• (key set)' : 'Paste your Tripo3D API key'}
+          placeholder=${this.neuralKeySet ? '•••••••• (key set)' : 'Paste your API key'}
           spellcheck="false"
           autocomplete="off"
         />
@@ -1844,8 +1849,12 @@ export class ModelLabPanel extends ComponentBase {
     }
   }
 
-  /** Refresh the cached "is a Tripo3D key configured?" flag (gates the neural Generate button). */
+  /**
+   * Refresh the cached "is a key configured?" flag (gates the neural Generate button) and the active
+   * backend's label. Both depend on the configured backend, so this re-runs when preferences change.
+   */
   private async refreshNeuralKey(): Promise<void> {
+    this.neuralProviderLabel = this.neuralGen.getProviderLabel();
     try {
       this.neuralKeySet = await this.neuralGen.hasKey();
     } catch {
@@ -1854,7 +1863,12 @@ export class ModelLabPanel extends ComponentBase {
   }
 
   private onPrefs(prefs: ModelLabPreferences): void {
+    const backendChanged = this.prefs?.neural3dProviderId !== prefs.neural3dProviderId;
     this.prefs = prefs;
+    // The neural key + label belong to whichever backend is selected, so re-resolve on a switch.
+    if (backendChanged) {
+      void this.refreshNeuralKey();
+    }
     if (!this.saveFolderSeeded) {
       this.saveFolder = prefs.saveFolder;
       this.saveFolderSeeded = true;

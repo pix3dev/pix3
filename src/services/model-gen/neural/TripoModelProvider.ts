@@ -1,6 +1,12 @@
 import { inject, injectable } from '@/fw/di';
 import { SecretStorageService } from '@/services/core/SecretStorageService';
 import { base64ToBlob } from '@/services/image-gen/image-ops';
+import type {
+  Neural3DInput,
+  Neural3DOptions,
+  Neural3DProvider,
+  Neural3DResult,
+} from './Neural3DProvider';
 
 /** SecretStorage id under which the Tripo3D API key is persisted. */
 export const TRIPO_SECRET_ID = 'tripo';
@@ -26,25 +32,14 @@ export type TripoStatusClass = 'done' | 'failed' | 'in-progress';
 /** The image file-type Tripo expects in a create-task payload / upload filename. */
 export type TripoFileType = 'png' | 'jpg' | 'jpeg' | 'webp';
 
-export interface TripoGenerateInput {
-  /** MIME type of the source image (e.g. `image/png`). */
-  readonly mimeType: string;
-  /** Base64 payload of the source image (no `data:` prefix). */
-  readonly base64: string;
-}
-
-export interface TripoGenerateOptions {
-  readonly signal?: AbortSignal;
-  /** Progress callback; `stage` ∈ 'uploading' | 'queued' | 'running' | 'downloading'. */
-  readonly onProgress?: (progress: number, stage: string) => void;
-}
-
-export interface TripoGenerateResult {
-  /** The raw downloaded GLB bytes. */
-  readonly glb: Blob;
-  /** The Tripo task id that produced the model. */
-  readonly taskId: string;
-}
+/**
+ * Tripo's lane shares the neural-lane contract; these aliases keep the historical names working for
+ * existing call sites while `NeuralModelGenService` talks to the backend-agnostic
+ * {@link Neural3DProvider}.
+ */
+export type TripoGenerateInput = Neural3DInput;
+export type TripoGenerateOptions = Neural3DOptions;
+export type TripoGenerateResult = Neural3DResult;
 
 /**
  * Low-level Tripo3D image→model API client. Mirrors the metered-provider pattern: the API key lives
@@ -53,7 +48,10 @@ export interface TripoGenerateResult {
  * the exact field names — so it is factored into pure, unit-tested helpers.
  */
 @injectable()
-export class TripoModelProvider {
+export class TripoModelProvider implements Neural3DProvider {
+  readonly id = 'tripo';
+  readonly label = 'Tripo3D';
+
   @inject(SecretStorageService)
   private readonly secrets!: SecretStorageService;
 

@@ -19,6 +19,8 @@
 - **[agent-eval-scenarios.md](agent-eval-scenarios.md)** / **[agent-eval-results.md](agent-eval-results.md)** — живой eval-suite встроенного агента (сценарии S1–S4 + скоркард) и записи прогонов. Держим активными: используются при каждом тюнинге промптов/тулов.
 - **[p1-m-feature-designs.md](p1-m-feature-designs.md)** — design-спеки P1 M-фич: particles (trails/sub-emitters), shader-effects, audio-buses, cutscene-director реализованы; осталась секция **video-recording** (единственная нереализованная).
 - **[postprocess-effects-list-design.md](postprocess-effects-list-design.md)** — design-спека attached-effect списка на PostProcess (по образцу shipped GeometryMesh-паттерна); **не реализована** — нода остаётся с фиксированными слотами.
+- **[strophe-api-spec.md](strophe-api-spec.md)** — спецификация-запрос к команде Strophe (strophe.app), по которой они и построили своё API. Разблокирован 2026-08-11: API существует (`https://strophe.app/api/v1`), CORS проверен на живых запросах — прокси не нужен. В работе MVP на картинки и image→3D; что подтвердилось и что просим доделать — [strophe-integration-feedback.md](strophe-integration-feedback.md).
+- **[strophe-integration-feedback.md](strophe-integration-feedback.md)** — документ для передачи менеджеру Strophe: результаты живой проверки их API против нашей спеки + приоритизированный список доработок.
 **Базис верификации:** commit `1afac13`, 2026-08-01 (перепроверка статусов по исходникам);
 статусы sprite-editor и frozen-переносов — `0d72c60`, 2026-08-10.
 
@@ -28,7 +30,6 @@
 
 - [frozen/multiplayer-platform.md](frozen/multiplayer-platform.md) — мультиплеер-платформа: WsCore как Room Fabric, headless-рантайм в isolated-vm, guest-first JWT. Phase 0 закрыта, из Phase 1 сделаны протокол, компоненты репликации, spawn/despawn и editor-UX «Play Online»; остальное заморожено.
 - [frozen/desktop-version.md](frozen/desktop-version.md) — десктоп-обёртка (single-file exe + MS Store, C#/Photino). Вернуться после стабилизации редактора.
-- [frozen/strophe-api-spec.md](frozen/strophe-api-spec.md) — спецификация-запрос к команде Strophe (strophe.app): «Connect Strophe» один раз, дальше редактор и агент генерируют ассеты на их кредитах без чужих API-ключей у нас. Заблокирован снаружи: API на их стороне не существует, работать не над чем до ответа команды Strophe.
 
 ## Выполненные планы ([done/](done/))
 

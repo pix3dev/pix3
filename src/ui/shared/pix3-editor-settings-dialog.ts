@@ -23,6 +23,15 @@ import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService'
 import { BRIDGE_TOKEN_SECRET_ID, DEFAULT_BRIDGE_URL } from '@/services/llm/BridgeProviders';
 import { formatPricingHint, type LlmModel } from '@/services/llm/LlmTypes';
 import { IconService, IconSize } from '@/services/editor/IconService';
+import {
+  StropheAccountService,
+  STROPHE_KEY_HELP_URL,
+  describeSpendHeadroom,
+} from '@/services/strophe/StropheAccountService';
+import type { StropheAccount, StropheFamilySummary } from '@/services/strophe/StropheTypes';
+import { Model3DGenSettingsService } from '@/services/model-gen/Model3DGenSettingsService';
+import { STROPHE_DEFAULT_3D_FAMILY } from '@/services/model-gen/neural/StropheModel3DProvider';
+import type { Neural3DProviderId } from '@/services/model-gen/neural/Neural3DProvider';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
 import './pix3-editor-settings-dialog.ts.css';
@@ -70,6 +79,12 @@ const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
       { id: 'background', label: 'Background Removal' },
     ],
   },
+  {
+    id: 'strophe',
+    label: 'Strophe',
+    icon: 'zap',
+    description: 'One metered account for image and image→3D generation, paid in Strophe credits.',
+  },
 ];
 
 @customElement('pix3-editor-settings-dialog')
@@ -106,6 +121,12 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @inject(IconService)
   private readonly icons!: IconService;
+
+  @inject(StropheAccountService)
+  private readonly strophe!: StropheAccountService;
+
+  @inject(Model3DGenSettingsService)
+  private readonly modelLabSettings!: Model3DGenSettingsService;
 
   @state()
   private activeSection: EditorSettingsTab = 'general';
@@ -264,6 +285,33 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private defaultSaveMaxSize = 0;
 
+  // -- Strophe (metered image + image→3D generation) --------------------------
+  @state()
+  private stropheKeyConfigured = false;
+
+  @state()
+  private stropheKeyInput = '';
+
+  @state()
+  private stropheBusy = false;
+
+  @state()
+  private stropheMessage: string | null = null;
+
+  /** Account snapshot for the connected key (plan, scopes, spend headroom); null = not connected. */
+  @state()
+  private stropheAccount: StropheAccount | null = null;
+
+  /** Cached image→3D families, for the 3D model picker. */
+  @state()
+  private strophe3dFamilies: readonly StropheFamilySummary[] = [];
+
+  @state()
+  private neural3dProviderId: Neural3DProviderId = 'strophe';
+
+  @state()
+  private neural3dFamilyId = STROPHE_DEFAULT_3D_FAMILY;
+
   connectedCallback(): void {
     super.connectedCallback();
     this.activeSection = this.editorSettingsService.getInitialTab();
@@ -303,6 +351,11 @@ export class EditorSettingsDialog extends ComponentBase {
     this.bridgeUrlInput = agentPrefs.bridgeUrl;
     this.bridgeAvailable = this.bridge.isAvailable();
     void this.refreshBridgeStatus();
+
+    const modelLabPrefs = this.modelLabSettings.getPreferences();
+    this.neural3dProviderId = modelLabPrefs.neural3dProviderId ?? 'strophe';
+    this.neural3dFamilyId = modelLabPrefs.neural3dFamilyId ?? STROPHE_DEFAULT_3D_FAMILY;
+    void this.refreshStropheStatus();
 
     // Re-render (and re-derive custom-mode) when a live model catalog lands in the background.
     this.disposeCatalogSubscription = this.llmModelCatalog.subscribe(() => {
@@ -416,6 +469,8 @@ export class EditorSettingsDialog extends ComponentBase {
           return this.renderAgentSoulsTab();
         }
         return this.renderAgentModelTab();
+      case 'strophe':
+        return this.renderStropheTab();
       case 'images':
         return this.activeSubtab === 'background'
           ? this.renderImagesBackgroundTab()
@@ -1382,6 +1437,147 @@ export class EditorSettingsDialog extends ComponentBase {
     `;
   }
 
+  /**
+   * Strophe: one metered account that serves both the image lane (as a provider in AI Images) and the
+   * Model Lab neural image→3D lane. Key entry is here rather than duplicated per lane because it is
+   * one credential for one account.
+   */
+  private renderStropheTab() {
+    const account = this.stropheAccount;
+    const scopes = account?.token?.scopes ?? [];
+    const families = this.strophe3dFamilies.filter(family => family.available);
+    const usingStrophe3d = this.neural3dProviderId === 'strophe';
+
+    return html`
+      <div class="settings-field">
+        <span class="key-label">
+          API Key
+          <span class="key-status ${this.stropheKeyConfigured ? 'is-set' : 'is-unset'}">
+            ${this.stropheKeyConfigured ? 'Connected' : 'Not set'}
+          </span>
+        </span>
+        <div class="key-row">
+          <input
+            type="password"
+            autocomplete="off"
+            placeholder=${this.stropheKeyConfigured ? '•••••••• stored' : 'Paste your Strophe key'}
+            .value=${this.stropheKeyInput}
+            @input=${this.onStropheKeyInput}
+          />
+          <button
+            class="btn-key-save"
+            @click=${this.onSaveStropheKey}
+            ?disabled=${!this.stropheKeyInput.trim() || this.stropheBusy}
+          >
+            ${this.stropheBusy ? 'Checking…' : 'Save'}
+          </button>
+          ${this.stropheKeyConfigured
+            ? html`<button
+                class="btn-key-clear"
+                @click=${this.onClearStropheKey}
+                ?disabled=${this.stropheBusy}
+              >
+                Clear
+              </button>`
+            : null}
+        </div>
+        <div class="hint">
+          ${this.stropheMessage
+            ? html`<span>${this.stropheMessage}</span>`
+            : html`Create a key in
+                <a href=${STROPHE_KEY_HELP_URL} target="_blank" rel="noreferrer"
+                  >Strophe → Settings → Integrations</a
+                >. The key is checked against your account before it is stored, then kept encrypted
+                in this browser only.`}
+        </div>
+      </div>
+
+      ${account
+        ? html`<div class="settings-field">
+            <span class="key-label">Account</span>
+            <div class="hint">
+              ${describeSpendHeadroom(account)}${account.plan
+                ? html` · plan ${account.plan}`
+                : ''}${account.team?.name ? html` · team ${account.team.name}` : ''}
+            </div>
+            ${scopes.length > 0
+              ? html`<div class="hint">Key scopes: ${scopes.join(', ')}</div>`
+              : null}
+            ${account.availableCredits === null
+              ? html`<div class="hint">
+                  This account bills against a shared team pool, so Strophe does not report a credit
+                  balance — the figure above is this key's own daily allowance.
+                </div>`
+              : null}
+          </div>`
+        : null}
+
+      <div class="settings-field">
+        <div class="hint">
+          A Strophe key is a password to the account's credits, so give it only the scopes the
+          editor needs (<code>catalog:read</code>, <code>generations:read</code>,
+          <code>generations:write</code>, <code>files:write</code>, <code>account:read</code>) and
+          set a daily credit limit on it. Both are per-key settings in the Strophe console, and they
+          cap what a leaked key — or an agent running unattended — can spend.
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <span class="key-label">Image generation</span>
+        <div class="hint">
+          Strophe appears as a provider in <strong>AI Images → Generation</strong>; pick a model
+          there. Each image is charged separately, so a count of 4 costs four generations. Strophe
+          exposes no transparency flag, so transparent cutouts still run through the local (free)
+          background removal.
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Neural image→3D backend</span>
+          <select @change=${this.onNeural3dProviderChange}>
+            <option value="strophe" ?selected=${usingStrophe3d}>Strophe (credits)</option>
+            <option value="tripo" ?selected=${!usingStrophe3d}>Tripo3D direct (own key)</option>
+          </select>
+        </label>
+        <div class="hint">
+          Used by Model Lab's neural lane. Strophe needs no proxy and works in a production build;
+          Tripo3D direct requires the dev-only proxy routes.
+        </div>
+      </div>
+
+      ${usingStrophe3d
+        ? html`<div class="settings-field">
+            <label class="select-row">
+              <span>3D model</span>
+              <select @change=${this.onNeural3dFamilyChange} ?disabled=${families.length === 0}>
+                ${families.length === 0
+                  ? html`<option value=${this.neural3dFamilyId}>
+                      ${this.stropheKeyConfigured ? 'Loading…' : 'Connect a key first'}
+                    </option>`
+                  : families.map(
+                      family =>
+                        html`<option
+                          value=${family.id}
+                          ?selected=${family.id === this.neural3dFamilyId}
+                        >
+                          ${family.name}${family.price
+                            ? ` — ${family.price.credits} credits`
+                            : ''}${family.generationTime ? ` · ~${family.generationTime}s` : ''}
+                        </option>`
+                    )}
+              </select>
+            </label>
+            <div class="hint">
+              PBR textures are requested when the model supports them. Strophe reports no numeric
+              progress, so Model Lab's progress bar is interpolated from the model's own time
+              estimate.
+            </div>
+          </div>`
+        : null}
+    `;
+  }
+
   private renderImagesBackgroundTab() {
     return html`
       <div class="settings-field">
@@ -1441,6 +1637,96 @@ export class EditorSettingsDialog extends ComponentBase {
   private onDefaultSaveSizeChange(e: Event): void {
     this.defaultSaveMaxSize = Number((e.target as HTMLSelectElement).value) || 0;
     this.aiImageSettings.updatePreferences({ defaultSaveMaxSize: this.defaultSaveMaxSize });
+  }
+
+  // -- Strophe handlers -------------------------------------------------------
+
+  /**
+   * Refresh "is a key stored", the account snapshot and the 3D family list. Failures are swallowed:
+   * this runs on dialog open, so a network blip must not surface as an error the user did not ask for.
+   */
+  private async refreshStropheStatus(): Promise<void> {
+    try {
+      this.stropheKeyConfigured = await this.strophe.hasKey();
+    } catch {
+      this.stropheKeyConfigured = false;
+    }
+    if (!this.stropheKeyConfigured) {
+      this.stropheAccount = null;
+      this.strophe3dFamilies = [];
+      return;
+    }
+    this.stropheAccount = await this.strophe.getAccountStatus();
+    try {
+      this.strophe3dFamilies = await this.strophe.listFamilies('3d');
+    } catch {
+      this.strophe3dFamilies = [];
+    }
+  }
+
+  private onStropheKeyInput(e: Event): void {
+    this.stropheKeyInput = (e.target as HTMLInputElement).value;
+    this.stropheMessage = null;
+  }
+
+  /**
+   * Verify the pasted key against `/account` BEFORE storing it, so a typo or a key without the right
+   * scopes is reported here rather than at the first generation. Nothing is stored if the check fails.
+   */
+  private async onSaveStropheKey(): Promise<void> {
+    const key = this.stropheKeyInput.trim();
+    if (!key) {
+      return;
+    }
+    this.stropheBusy = true;
+    this.stropheMessage = null;
+    try {
+      const account = await this.strophe.verifyKey(key);
+      await this.strophe.setKey(key);
+      this.stropheAccount = account;
+      this.stropheKeyConfigured = true;
+      this.stropheKeyInput = '';
+      this.stropheMessage = `Connected — ${describeSpendHeadroom(account)}.`;
+      try {
+        this.strophe3dFamilies = await this.strophe.listFamilies('3d', { refresh: true });
+      } catch {
+        this.strophe3dFamilies = [];
+      }
+    } catch (error) {
+      this.stropheMessage = `Key rejected: ${error instanceof Error ? error.message : 'unknown error'}`;
+    } finally {
+      this.stropheBusy = false;
+    }
+  }
+
+  private async onClearStropheKey(): Promise<void> {
+    this.stropheBusy = true;
+    try {
+      await this.strophe.clearKey();
+      this.stropheKeyConfigured = false;
+      this.stropheAccount = null;
+      this.strophe3dFamilies = [];
+      this.stropheKeyInput = '';
+      this.stropheMessage = 'API key removed.';
+    } catch (error) {
+      this.stropheMessage = `Failed to remove key: ${error instanceof Error ? error.message : 'unknown error'}`;
+    } finally {
+      this.stropheBusy = false;
+    }
+  }
+
+  private onNeural3dProviderChange(e: Event): void {
+    const value = (e.target as HTMLSelectElement).value;
+    this.neural3dProviderId = value === 'tripo' ? 'tripo' : 'strophe';
+    this.modelLabSettings.updatePreferences({ neural3dProviderId: this.neural3dProviderId });
+    if (this.neural3dProviderId === 'strophe' && this.strophe3dFamilies.length === 0) {
+      void this.refreshStropheStatus();
+    }
+  }
+
+  private onNeural3dFamilyChange(e: Event): void {
+    this.neural3dFamilyId = (e.target as HTMLSelectElement).value;
+    this.modelLabSettings.updatePreferences({ neural3dFamilyId: this.neural3dFamilyId });
   }
 
   private async refreshAiKeyStatus(): Promise<void> {

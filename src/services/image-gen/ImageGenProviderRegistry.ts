@@ -1,12 +1,13 @@
 import { injectable } from '@/fw/di';
 import { GeminiImageProvider } from './GeminiImageProvider';
 import { OpenAIImageProvider } from './OpenAIImageProvider';
+import { StropheImageProvider } from './StropheImageProvider';
 import type { ImageGenProvider } from './ImageGenTypes';
 
 /**
- * Registry of available AI image-generation providers. Ships with Gemini ("Nano Banana") and OpenAI
- * (GPT Image). Additional providers register here once implemented. The default provider is the
- * first registered one.
+ * Registry of available AI image-generation providers. Ships with Gemini ("Nano Banana"), OpenAI
+ * (GPT Image) and Strophe (metered aggregator — one key, credits, many upstream models). Additional
+ * providers register here once implemented. The default provider is the first registered one.
  */
 @injectable()
 export class ImageGenProviderRegistry {
@@ -16,6 +17,7 @@ export class ImageGenProviderRegistry {
   constructor() {
     this.register(new GeminiImageProvider());
     this.register(new OpenAIImageProvider());
+    this.register(new StropheImageProvider());
   }
 
   register(provider: ImageGenProvider): void {

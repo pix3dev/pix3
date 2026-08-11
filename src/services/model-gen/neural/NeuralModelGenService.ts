@@ -4,10 +4,10 @@ import { inject, injectable } from '@/fw/di';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { createCenteredPreviewRoot } from '@/services/assets/GltfBlobLoader';
 import { ensureGlbExtension, normalizeModelPath } from '@/services/model-gen/Model3DExportService';
-import {
-  TripoModelProvider,
-  type TripoGenerateInput,
-} from '@/services/model-gen/neural/TripoModelProvider';
+import { Model3DGenSettingsService } from '@/services/model-gen/Model3DGenSettingsService';
+import { TripoModelProvider } from '@/services/model-gen/neural/TripoModelProvider';
+import { StropheModel3DProvider } from '@/services/model-gen/neural/StropheModel3DProvider';
+import type { Neural3DInput, Neural3DProvider } from '@/services/model-gen/neural/Neural3DProvider';
 
 export type NeuralGenStatus =
   | 'idle'
@@ -30,8 +30,10 @@ export interface NeuralGenState {
   modelRevision: number;
   /** False while a run is in flight. */
   canGenerate: boolean;
-  /** The Tripo task id of the last/current run, or null. */
+  /** The backend job id of the last/current run, or null. */
   taskId: string | null;
+  /** Label of the backend the lane is currently configured to use (for UI copy). */
+  providerLabel: string;
 }
 
 const INITIAL_STATE: NeuralGenState = {
@@ -42,14 +44,21 @@ const INITIAL_STATE: NeuralGenState = {
   modelRevision: 0,
   canGenerate: true,
   taskId: null,
+  providerLabel: '',
 };
 
 /**
- * Orchestrator for the neural (Tripo3D) image→3D lane of the Model Lab — the counterpart to the
- * procedural {@link import('@/services/model-gen/Model3DGenService').Model3DGenService}. It drives
- * {@link TripoModelProvider} through upload → task → poll → download, maps progress onto an immutable
- * {@link NeuralGenState} exposed via {@link subscribe}, keeps the RAW downloaded GLB bytes (so a save
- * is lossless — no re-export), and parses a NEW centered preview `THREE.Group` each run.
+ * Orchestrator for the neural image→3D lane of the Model Lab — the counterpart to the procedural
+ * {@link import('@/services/model-gen/Model3DGenService').Model3DGenService}. It drives the
+ * configured {@link Neural3DProvider} through upload → job → poll → download, maps progress onto an
+ * immutable {@link NeuralGenState} exposed via {@link subscribe}, keeps the RAW downloaded GLB bytes
+ * (so a save is lossless — no re-export), and parses a NEW centered preview `THREE.Group` each run.
+ *
+ * Two backends are available and chosen by the `neural3dProviderId` Model Lab preference: **Strophe**
+ * (default — metered credits, no proxy required, so it also works in a production static build) and
+ * **Tripo3D** direct (needs the `/tripo-proxy` + `/tripo-download` dev proxies, since Tripo sends no
+ * CORS headers). The provider is resolved per call, so switching the preference takes effect on the
+ * next run without a reload.
  *
  * Ownership mirrors the procedural lane: this service builds a new Group per run and NEVER disposes a
  * Group it has handed out via {@link getModel} — the panel disposes what it holds.
@@ -57,7 +66,13 @@ const INITIAL_STATE: NeuralGenState = {
 @injectable()
 export class NeuralModelGenService {
   @inject(TripoModelProvider)
-  private readonly provider!: TripoModelProvider;
+  private readonly tripo!: TripoModelProvider;
+
+  @inject(StropheModel3DProvider)
+  private readonly strophe!: StropheModel3DProvider;
+
+  @inject(Model3DGenSettingsService)
+  private readonly settings!: Model3DGenSettingsService;
 
   @inject(ProjectStorageService)
   private readonly storage!: ProjectStorageService;
@@ -89,20 +104,37 @@ export class NeuralModelGenService {
   }
 
   /**
-   * Run one generation job end-to-end. Resolves on done / error / cancel (all reflected in
-   * {@link NeuralGenState}, never thrown). A second call while a job runs is ignored. Requires a
-   * configured Tripo3D key — without one it lands on `error` with a Settings-pointing message.
+   * The backend this lane is configured to use. Resolved from preferences on every call so a settings
+   * change applies immediately.
    */
-  async generate(input: TripoGenerateInput): Promise<void> {
+  getProvider(): Neural3DProvider {
+    const preferred = this.settings.getPreferences().neural3dProviderId;
+    if (preferred === 'tripo') {
+      return this.tripo;
+    }
+    this.strophe.setFamilyId(
+      this.settings.getPreferences().neural3dFamilyId ?? this.strophe.getFamilyId()
+    );
+    return this.strophe;
+  }
+
+  /**
+   * Run one generation job end-to-end. Resolves on done / error / cancel (all reflected in
+   * {@link NeuralGenState}, never thrown). A second call while a job runs is ignored. Requires a key
+   * for the configured backend — without one it lands on `error` with a Settings-pointing message.
+   */
+  async generate(input: Neural3DInput): Promise<void> {
     if (this.abortController) {
       return;
     }
-    if (!(await this.provider.hasKey())) {
+    const provider = this.getProvider();
+    if (!(await provider.hasKey())) {
       this.setState({
         status: 'error',
         progress: 0,
         stage: '',
-        error: 'Add a Tripo3D API key in Settings.',
+        error: `Add a ${provider.label} API key in Settings.`,
+        providerLabel: provider.label,
       });
       return;
     }
@@ -117,10 +149,11 @@ export class NeuralModelGenService {
       error: null,
       canGenerate: false,
       taskId: null,
+      providerLabel: provider.label,
     });
 
     try {
-      const { glb, taskId } = await this.provider.generateGlb(input, {
+      const { glb, taskId } = await provider.generateGlb(input, {
         signal,
         onProgress: (progress, stage) => {
           this.setState({ status: mapStageToStatus(stage), progress, stage });
@@ -191,16 +224,23 @@ export class NeuralModelGenService {
     return { path: relativePath, bytes: buffer.byteLength };
   }
 
+  /** Whether the configured backend has a key. */
   hasKey(): Promise<boolean> {
-    return this.provider.hasKey();
+    return this.getProvider().hasKey();
   }
 
+  /** Store a key for the configured backend (each backend owns its own secret id). */
   setKey(value: string): Promise<void> {
-    return this.provider.setKey(value);
+    return this.getProvider().setKey(value);
   }
 
   clearKey(): Promise<void> {
-    return this.provider.clearKey();
+    return this.getProvider().clearKey();
+  }
+
+  /** Label of the configured backend, for UI copy that names the service. */
+  getProviderLabel(): string {
+    return this.getProvider().label;
   }
 
   dispose(): void {

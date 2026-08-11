@@ -100,6 +100,12 @@ export interface ImageGenProvider {
 
 export type ImageGenErrorKind =
   | 'missing-key'
+  /**
+   * The account is out of credits, or the request exceeded a spend limit. Distinct from `http`
+   * because the fix is "top up / raise the cap", not "retry" — providers that meter in credits
+   * (Strophe) report it as its own machine-readable code.
+   */
+  | 'billing'
   | 'network'
   | 'http'
   | 'blocked'
