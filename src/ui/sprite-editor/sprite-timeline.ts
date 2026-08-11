@@ -10,6 +10,9 @@ import {
   type GenerationDragPayload,
 } from '@/ui/shared/asset-drag-drop';
 import { isSequenceAnimationFrame, type AnimationClip, type AnimationFrame } from '@pix3/runtime';
+// Registers `pix3-number-field` (drag-to-scrub). The FPS box is the one numeric
+// field on this surface, and it should scrub exactly like every inspector field.
+import '@/ui/object-inspector/property-editors';
 
 import type { AnimationDocumentController } from './animation-document-controller';
 import {
@@ -116,20 +119,20 @@ export class SpriteTimeline extends ComponentBase {
 
     const isPingPong = activeClip.playbackMode === 'ping-pong';
     return html`
-      <label class="timeline-fps" title="Frames per second">
+      <div class="timeline-fps" title="Frames per second — drag to scrub, click to type">
         <span class="timeline-fps-label">FPS</span>
-        <input
+        <pix3-number-field
           class="timeline-fps-input"
-          type="number"
-          min="1"
-          max="240"
-          step="1"
-          .value=${String(activeClip.fps)}
+          .value=${activeClip.fps}
+          .step=${1}
+          .precision=${0}
+          .min=${1}
+          .max=${240}
           aria-label="Clip frames per second"
-          @change=${(event: Event) =>
-            void controller.updateClipFps(Number((event.target as HTMLInputElement).value))}
-        />
-      </label>
+          @commit-change=${(event: CustomEvent<{ value: number }>) =>
+            void controller.updateClipFps(event.detail.value)}
+        ></pix3-number-field>
+      </div>
       ${this.renderTransportToggle(
         'repeat',
         'Loop the clip',

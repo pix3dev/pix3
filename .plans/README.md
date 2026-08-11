@@ -1,7 +1,7 @@
 # .plans
 
 Дом для планирования Pix3: **все** планы живут здесь — активные стратегические в корне папки,
-выполненные — в [done/](done/) для ретроспективы.
+выполненные — в [done/](done/) для ретроспективы, отложенные — в [frozen/](frozen/).
 
 Разделение обязанностей:
 
@@ -14,19 +14,21 @@
 - **[ROADMAP.md](ROADMAP.md)** — основной план: цель, проверка гипотез по коду, приоритеты P0–P3 по осям «сочность / кат-сцены / agent pipeline / бизнес», критерии готовности, порядок исполнения.
 - **[TODO.md](TODO.md)** — операционная раскладка тех же приоритетов по задачам.
 - **[cross-engine-ideas.md](cross-engine-ideas.md)** — аудит фич из других движков (Godot, Unity, Unreal, Cocos, Defold и инструментов playable-индустрии): что уже есть в Pix3, что стоит перенять, что осознанно пропускаем. Колонка «В Pix3» — снимок на момент аудита (`d591e68`); текущий статус смотреть в ROADMAP.
-- **[multiplayer-platform.md](multiplayer-platform.md)** — мультиплеер-платформа: WsCore как Room Fabric, headless-рантайм в isolated-vm, guest-first JWT. Phase 0 закрыта, Phase 1 в работе (протокол, компоненты репликации, spawn/despawn и editor-UX «Play Online» — сделаны).
 - **[asset-store-admin.md](asset-store-admin.md)** — серверный курируемый Asset Store: фазы A–D (сервер, клиент-провайдер + админ-UI, OS drag&drop, lifecycle-добивка) реализованы; осталась Phase E — версионирование / «update available», коллекции-паки, OPFS-кэш, CDN.
 - **[asset-library.md](asset-library.md)** — библиотека ассетов: Phase 1 / MVP (builtin + user-OPFS, панель, publish, self-contained bundles) реализован, personal-scope синхронизируется с collab-сервером; остались `team`-scope (источник объявлен в `library-sources.ts`, серверной части нет) и API для агента.
-- **[strophe-api-spec.md](strophe-api-spec.md)** — спецификация-запрос к команде Strophe (strophe.app): «Connect Strophe» один раз, дальше редактор и агент генерируют ассеты на их кредитах без чужих API-ключей у нас. Статус: предложение к обсуждению, API на их стороне ещё не существует.
 - **[agent-eval-scenarios.md](agent-eval-scenarios.md)** / **[agent-eval-results.md](agent-eval-results.md)** — живой eval-suite встроенного агента (сценарии S1–S4 + скоркард) и записи прогонов. Держим активными: используются при каждом тюнинге промптов/тулов.
 - **[p1-m-feature-designs.md](p1-m-feature-designs.md)** — design-спеки P1 M-фич: particles (trails/sub-emitters), shader-effects, audio-buses, cutscene-director реализованы; осталась секция **video-recording** (единственная нереализованная).
 - **[postprocess-effects-list-design.md](postprocess-effects-list-design.md)** — design-спека attached-effect списка на PostProcess (по образцу shipped GeometryMesh-паттерна); **не реализована** — нода остаётся с фиксированными слотами.
-- **[sprite-editor-design.md](sprite-editor-design.md)** — единый Sprite Editor (Construct-3-класса UX поверх файловой реальности Pix3). **Реализовано целиком**: фазы 1–3 (шелл на картинку и `.pix3anim`, флипбук-панель удалена, генерация вынесена в док-панель `Generate`), рантайм R1/R2 (в npm с `@pix3/runtime@1.3.0`), фаза 5 (§9.11 place mode + вставка из истории) и фаза 6 power tools (§9.12: trim frames, auto collision polygon, chroma key, bulk frame ops, video import). §9.13 — журнал живых проверок. Кандидат на переезд в `done/` после мерджа PR #36.
-- **[model-lab-3d-generator.md](model-lab-3d-generator.md)** — Model Lab: reference-image → процедурная Three.js-фабрика → GLB. Фазы 1–6 (ядро, панель `src/ui/model-lab/`) реализованы; в бэклоге — **B0: нейронный image→3D провайдер** (честный вывод: процедурная реконструкция проигрывает специализированным 3D-генераторам).
-- **[browser-storage-projects.md](browser-storage-projects.md)** — «проект без выбора папки»: OPFS-бэкенд `'browser'`, дефолт в create-диалоге, Move to Folder. Реализовано (MVP); держим в активных до явной ручной проверки OPFS-сценария в редакторе.
-- **[desktop-version.md](desktop-version.md)** — десктоп-обёртка (single-file exe + MS Store, C#/Photino). **Приоритет низкий** — вернуться после стабилизации редактора.
+**Базис верификации:** commit `1afac13`, 2026-08-01 (перепроверка статусов по исходникам);
+статусы sprite-editor и frozen-переносов — `0d72c60`, 2026-08-10.
 
-**Базис верификации:** commit `1afac13`, 2026-08-01 (перепроверка статусов по исходникам).
+## Отложенные планы ([frozen/](frozen/))
+
+Спроектированы, но сознательно не в работе — вернуться, когда изменится приоритет:
+
+- [frozen/multiplayer-platform.md](frozen/multiplayer-platform.md) — мультиплеер-платформа: WsCore как Room Fabric, headless-рантайм в isolated-vm, guest-first JWT. Phase 0 закрыта, из Phase 1 сделаны протокол, компоненты репликации, spawn/despawn и editor-UX «Play Online»; остальное заморожено.
+- [frozen/desktop-version.md](frozen/desktop-version.md) — десктоп-обёртка (single-file exe + MS Store, C#/Photino). Вернуться после стабилизации редактора.
+- [frozen/strophe-api-spec.md](frozen/strophe-api-spec.md) — спецификация-запрос к команде Strophe (strophe.app): «Connect Strophe» один раз, дальше редактор и агент генерируют ассеты на их кредитах без чужих API-ключей у нас. Заблокирован снаружи: API на их стороне не существует, работать не над чем до ответа команды Strophe.
 
 ## Выполненные планы ([done/](done/))
 
@@ -50,6 +52,9 @@
 - [done/library-script-packing.md](done/library-script-packing.md) — self-contained prefab-бандлы библиотеки: упаковка `user:`-скриптов и ассетов, на которые ссылается код (two-bucket модель, `originalPathFiles`, rebuild скриптов перед вставкой, «Add as scene»).
 - [done/agent-verify-transient-visuals.md](done/agent-verify-transient-visuals.md) — верификация transient-визуалов агентом: `game_input {type:'hover'}`, activity/state-delta в `NodeWatchRecorder`, вердикт вместо таймингового скриншота (A–C сделаны, D осознанно отложена).
 - [done/spine-runtime-node.md](done/spine-runtime-node.md) — `SpineSkeleton2D`: Spine как **опциональная host-injected** зависимость (структурный контракт вместо импорта), общий `SpineSkeletonView` для нода и вьюпорт-прокси, страницы атласа вне pre-launch атласа, бандл рантайма в HTML/zip-экспорт (PR #30, #31).
+- [done/browser-storage-projects.md](done/browser-storage-projects.md) — «проект без выбора папки»: OPFS-бэкенд `'browser'`, дефолт в create-диалоге, промоут в обычную папку. Ручная проверка в живом редакторе закрыта 2026-08-11 (§5.1): создание без пикера, переживание reload, ассеты из OPFS в play mode, бейдж `Browser` в recents и deep-link — подтверждены данными. Осталось за человеком: сам `Move to Folder` (нативный directory picker, CDP его не водит). Открытый дефект — активация после промпта «Unsaved Changes» оставляет сироту в OPFS (§5.1).
+- [done/model-lab-3d-generator.md](done/model-lab-3d-generator.md) — Model Lab: reference-image → процедурная Three.js-фабрика → GLB (+ scene-лейн: бриф → YAML → `.pix3scene`). Фазы 1–6 (ядро пайплайна, панель `src/ui/model-lab/`) shipped. Незапланированный бэклог остаётся в §Backlog плана, приоритетный пункт **B0 — нейронный image→3D провайдер** вынесен в [ROADMAP.md](ROADMAP.md) P3: честный вывод из живого использования — процедурная реконструкция проигрывает специализированным 3D-генераторам, а архитектура (сохранение/превью/add-to-scene) уже готова принять GLB из внешнего API.
+- [done/sprite-editor-design.md](done/sprite-editor-design.md) — единый Sprite Editor (Construct-3-класса UX поверх файловой реальности Pix3): фазы 1–3 (единый шелл на картинку и `.pix3anim`, флипбук-панель удалена, генерация вынесена в док-панель `Generate`), рантайм R1/R2 (в npm с `@pix3/runtime@1.3.0`), фаза 5 (§9.11 place mode + вставка из истории), фаза 6 power tools (§9.12: trim frames, auto collision polygon, chroma key, bulk frame ops, video import), §9.13 — журнал живых проверок, §9.14 — разбор ревью PR #36. Мерджи: PR #35, #36.
 - [done/group2d-autosize-resize-design.md](done/group2d-autosize-resize-design.md) — Group2D fit-to-contents + Figma-style пропорциональный resize детей: Phase 1 (commit `7cd1bac`) + Phase 2 (auto-fit при создании группы) + Phase 3 (Ctrl-drag box-only, меню `Edit → Fit Group to Contents` + `Mod+Alt+F`), спеки и live-верификация. Осознанно НЕ сделано: реактивный auto-size флаг и вынос планировщика в рантайм (`Group2D.scaleContents`) — см. §7.
 
 ## Как поддерживать
@@ -57,4 +62,5 @@
 - Все планы (включая операционный `TODO.md`) живут в `.plans/` — в корне репозитория плановых файлов не заводим.
 - При изменении приоритетов сначала обновлять `ROADMAP.md` (оси и критерии), потом раскладывать в `TODO.md`.
 - Когда план полностью реализован — переносить его в `done/` через `git mv` (не удалять: архив нужен для ретроспективы) и оставлять в списке выше одну строку с тем, что осталось за скоупом.
+- Когда план сознательно откладывается (спроектирован, но не в работе) — `git mv` в `frozen/` со строкой в разделе «Отложенные планы»: что успели сделать и при каком условии возвращаемся.
 - Оценки сложности — в стиле `TODO.md`: S / M / L.

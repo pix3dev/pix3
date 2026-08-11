@@ -365,6 +365,28 @@ describe('SpriteTimeline', () => {
     expect(controller.isPreviewPlaying).toBe(false);
   });
 
+  it('commits the scrubbed FPS once, on release rather than per preview step', async () => {
+    const controller = createController();
+    const updateClipFps = vi.spyOn(controller, 'updateClipFps').mockResolvedValue(undefined);
+    const timeline = await mountTimeline(controller);
+    const field = timeline.querySelector<HTMLElement>('.timeline-fps-input');
+
+    expect(field?.tagName.toLowerCase()).toBe('pix3-number-field');
+
+    // Scrubbing streams `preview-change`; each one would be its own undo entry
+    // (`updateClipFps` → `applyResourceUpdate` → `invokeAndPush`), so only the
+    // release must reach the controller.
+    field?.dispatchEvent(
+      new CustomEvent('preview-change', { detail: { value: 19 }, bubbles: true })
+    );
+    expect(updateClipFps).not.toHaveBeenCalled();
+
+    field?.dispatchEvent(
+      new CustomEvent('commit-change', { detail: { value: 24 }, bubbles: true })
+    );
+    expect(updateClipFps).toHaveBeenCalledExactlyOnceWith(24);
+  });
+
   it('stops observing its controller once disconnected', async () => {
     const controller = createController();
     const unsubscribe = vi.fn();

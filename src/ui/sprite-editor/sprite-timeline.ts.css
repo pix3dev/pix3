@@ -56,16 +56,14 @@ pix3-sprite-timeline .timeline-fps-label {
   color: var(--fg-3);
 }
 
+/*
+ * `pix3-number-field` brings its own (shadow-DOM) box: border, background and a
+ * 30px row that lines up with the 2rem transport buttons. Only the outer width
+ * is ours — the field is `flex: 1` on its host and would otherwise stretch.
+ */
 pix3-sprite-timeline .timeline-fps-input {
-  width: 3.5rem;
-  padding: 0.2rem 0.3rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-1);
-  background: var(--bg-2);
-  color: var(--fg-0);
-  font: inherit;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  width: 4rem;
 }
 
 pix3-sprite-timeline .editor-toolbar-button:disabled {
