@@ -34,12 +34,38 @@ import { STROPHE_DEFAULT_3D_FAMILY } from '@/services/model-gen/neural/StropheMo
 import type { Neural3DProviderId } from '@/services/model-gen/neural/Neural3DProvider';
 import type { BgRemovalEngine, BgRemovalQuality } from '@/services/bg-removal/types';
 import type { Navigation2DSettings } from '@/state/AppState';
+import { CURRENT_EDITOR_VERSION } from '@/version';
 import './pix3-editor-settings-dialog.ts.css';
 
 interface SettingsSubtab {
   id: string;
   label: string;
 }
+
+/**
+ * Public product links surfaced in Settings → About. The editor is often reached through a bare
+ * URL someone was handed, so this is the one place in the app that says where Pix3 actually lives.
+ */
+const PIX3_LINKS: readonly { href: string; icon: string; label: string; hint: string }[] = [
+  {
+    href: 'https://pix3.dev',
+    icon: 'globe',
+    label: 'pix3.dev',
+    hint: 'Project landing page — what Pix3 is, what it does, and where it is going.',
+  },
+  {
+    href: 'https://editor.pix3.dev',
+    icon: 'edit-3',
+    label: 'editor.pix3.dev',
+    hint: 'The hosted editor. Share this link to open Pix3 in any browser.',
+  },
+  {
+    href: 'https://github.com/pix3dev/pix3',
+    icon: 'github',
+    label: 'github.com/pix3dev/pix3',
+    hint: 'Source, issue tracker and releases.',
+  },
+];
 
 interface SettingsSectionDef {
   id: EditorSettingsTab;
@@ -84,6 +110,12 @@ const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     label: 'Strophe',
     icon: 'zap',
     description: 'One metered account for image and image→3D generation, paid in Strophe credits.',
+  },
+  {
+    id: 'about',
+    label: 'About',
+    icon: 'info',
+    description: 'Version and where to find Pix3 outside this tab.',
   },
 ];
 
@@ -475,7 +507,44 @@ export class EditorSettingsDialog extends ComponentBase {
         return this.activeSubtab === 'background'
           ? this.renderImagesBackgroundTab()
           : this.renderImagesGenerationTab();
+      case 'about':
+        return this.renderAboutTab();
     }
+  }
+
+  private renderAboutTab() {
+    return html`
+      <div class="settings-field">
+        <span class="key-label">Version</span>
+        <div class="hint">
+          Pix3 Editor
+          ${CURRENT_EDITOR_VERSION.displayVersion}${CURRENT_EDITOR_VERSION.publishedAt
+            ? ` · published ${new Date(CURRENT_EDITOR_VERSION.publishedAt).toLocaleDateString()}`
+            : ''}
+        </div>
+      </div>
+
+      <div class="settings-field">
+        <div class="about-links">
+          ${PIX3_LINKS.map(
+            link => html`
+              <a class="about-link" href=${link.href} target="_blank" rel="noreferrer">
+                <span class="about-link-icon">
+                  ${this.icons.getIcon(link.icon, IconSize.MEDIUM)}
+                </span>
+                <span class="about-link-text">
+                  <span class="about-link-label">${link.label}</span>
+                  <span class="about-link-hint">${link.hint}</span>
+                </span>
+                <span class="about-link-external">
+                  ${this.icons.getIcon('external-link', IconSize.SMALL)}
+                </span>
+              </a>
+            `
+          )}
+        </div>
+      </div>
+    `;
   }
 
   /** First sub-tab id of a section, or '' when the section has none. */

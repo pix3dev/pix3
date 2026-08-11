@@ -6,7 +6,7 @@ import {
 } from '@/features/editor/UpdateEditorSettingsOperation';
 
 /** Sidebar section the Editor Settings dialog can open on. */
-export type EditorSettingsTab = 'general' | 'agent' | 'images' | 'strophe';
+export type EditorSettingsTab = 'general' | 'agent' | 'images' | 'strophe' | 'about';
 
 export interface EditorSettingsDialogInstance {
   id: string;

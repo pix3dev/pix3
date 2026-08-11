@@ -1,5 +1,9 @@
 # Pix3 Editor
 
+### ▶ [Open the editor: **editor.pix3.dev**](https://editor.pix3.dev)
+
+Runs in the browser — nothing to install. Project site and feature tour: **[pix3.dev](https://pix3.dev)**.
+
 ![Pix3 Editor Screenshot](design_assets/screenshot.png)
 
 Pix3 is a browser-based editor for building rich HTML5 scenes that combine 2D and 3D layers.
@@ -259,7 +263,7 @@ The project uses multiple `tsconfig` files to manage different scopes:
 npm run dev
 ```
 
-Open the app at `http://localhost:5173`.
+Open the app at `http://localhost:8123` (the port `vite.config.ts` pins).
 
 ## Deployment
 

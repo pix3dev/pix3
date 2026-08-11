@@ -527,6 +527,65 @@ pix3-editor-settings-dialog .soul-custom .soul-custom-prompt {
   line-height: 1.45;
 }
 
+/* About: product links (landing, hosted editor, repository). */
+pix3-editor-settings-dialog .about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+pix3-editor-settings-dialog .about-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+pix3-editor-settings-dialog .about-link:hover {
+  border-color: var(--pix3-accent-color);
+  background: var(--bg-3, var(--bg-2));
+}
+
+pix3-editor-settings-dialog .about-link .about-link-icon,
+pix3-editor-settings-dialog .about-link .about-link-external {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--fg-3);
+}
+
+pix3-editor-settings-dialog .about-link:hover .about-link-icon,
+pix3-editor-settings-dialog .about-link:hover .about-link-external {
+  color: var(--pix3-accent-color);
+}
+
+pix3-editor-settings-dialog .about-link .about-link-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+pix3-editor-settings-dialog .about-link .about-link-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+pix3-editor-settings-dialog .about-link .about-link-hint {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--fg-3);
+}
+
 pix3-editor-settings-dialog .dialog-actions {
   display: flex;
   gap: 0.5rem;
