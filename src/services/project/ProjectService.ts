@@ -663,6 +663,9 @@ export class ProjectService {
   ): Promise<void> {
     const backend = options.backend ?? 'local';
     try {
+      // Creating a project while another one is open (the Flow prompt path) must not inherit its
+      // documents — see clearOpenDocumentState for what a shared scene id did.
+      this.clearOpenDocumentState();
       // Browser projects need their id up front (it names the OPFS directory);
       // local projects pick a folder first, then mint an id.
       let handle: FileSystemDirectoryHandle;
@@ -1466,6 +1469,18 @@ export class ProjectService {
     appState.project.manifest = null;
     appState.project.openProgress = createInitialProjectOpenProgressState();
     appState.project.hybridSync = createInitialHybridSyncState();
+    this.clearOpenDocumentState();
+  }
+
+  /**
+   * Drop every per-project document: loaded scenes, open tabs, selection, camera memory.
+   *
+   * Scene ids are derived from the scene's PATH, so two different projects both have a
+   * `scenes-main`. Leaving the previous project's descriptors in place made the next project
+   * "already have" that scene and reuse the stale graph — a pinball generated on top of a snake
+   * opened the snake's board, with the right recipe docs on disk and the wrong game on screen.
+   */
+  private clearOpenDocumentState(): void {
     appState.scenes.activeSceneId = null;
     appState.scenes.descriptors = {};
     appState.scenes.hierarchies = {};

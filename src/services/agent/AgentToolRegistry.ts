@@ -3,6 +3,7 @@ import { appState } from '@/state';
 import { guessMimeType } from '@/core/remote-preview/protocol';
 import { ensureAssetTypeFolder } from '@/core/asset-categories';
 import {
+  clearScriptDiagnosticErrors,
   componentToDTO,
   errors as capturedErrors,
   installErrorCapture,
@@ -2075,6 +2076,12 @@ export class AgentToolRegistry {
   private async checkScripts(): Promise<Record<string, unknown>> {
     try {
       const summary = await this.diagnostics.checkProject();
+      if (summary.errorCount === 0) {
+        // A clean check means every script diagnostic in the ring buffer is history. Leaving them
+        // there made read_errors keep reporting a type error that had already been fixed — measured:
+        // an agent spent iterations re-investigating a line that was by then a comment.
+        clearScriptDiagnosticErrors();
+      }
       return {
         ok: true,
         filesChecked: summary.filesChecked,

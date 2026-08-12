@@ -341,3 +341,24 @@ export function errors(): CapturedError[] {
 export function clearErrors(): void {
   errorBuffer.length = 0;
 }
+
+/**
+ * Marker every script-diagnostic message carries (`scripts/Foo.ts:12:3 — …`), used to retire them
+ * once a fresh type-check comes back clean.
+ */
+const SCRIPT_DIAGNOSTIC_PATTERN = /^\s*(?:src\/)?scripts\/[^\s]+\.ts:\d+:\d+\s+—/;
+
+/**
+ * Drop compile/type-check diagnostics from the buffer, keeping genuine runtime errors.
+ *
+ * Diagnostics are snapshots of a moment in the source; once a later check-run reports zero errors
+ * they are provably stale, and a stale one is actively harmful — `read_errors` kept surfacing a
+ * type error whose line had since become a comment, and the agent burned iterations chasing it.
+ */
+export function clearScriptDiagnosticErrors(): void {
+  for (let i = errorBuffer.length - 1; i >= 0; i--) {
+    if (SCRIPT_DIAGNOSTIC_PATTERN.test(errorBuffer[i].message)) {
+      errorBuffer.splice(i, 1);
+    }
+  }
+}

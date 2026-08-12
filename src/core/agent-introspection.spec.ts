@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { NodeBase } from '@pix3/runtime';
 import {
   clearErrors,
+  clearScriptDiagnosticErrors,
   componentToDTO,
   errors,
   installErrorCapture,
@@ -103,5 +104,23 @@ describe('agent-introspection', () => {
     expect(captured.some(e => e.message.includes('smoke-test-error'))).toBe(true);
     clearErrors();
     expect(errors()).toEqual([]);
+  });
+});
+
+describe('clearScriptDiagnosticErrors', () => {
+  beforeEach(() => {
+    clearErrors();
+  });
+
+  it('retires stale script diagnostics but keeps real runtime errors', () => {
+    installErrorCapture();
+    console.error('scripts/TouchRules.ts:165:20 — Argument of type "number" is not assignable.');
+    console.error('TypeError: Cannot read properties of null (reading "position")');
+
+    clearScriptDiagnosticErrors();
+
+    const remaining = errors().map(entry => entry.message);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).toContain('Cannot read properties of null');
   });
 });
