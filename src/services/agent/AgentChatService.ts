@@ -8,6 +8,7 @@ import { ProjectStorageService } from '@/services/project/ProjectStorageService'
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
+import { BRIDGE_TOKEN_SECRET_ID } from '@/services/llm/BridgeProviders';
 import {
   AgentChatHistoryStore,
   type AgentConversationMeta,
@@ -45,8 +46,27 @@ export interface AgentAttachments {
   readonly texts?: readonly AgentTextAttachment[];
 }
 
-/** Timing / token accounting for a single provider round-trip (surfaced only in debug mode). */
+/**
+ * Who answered one assistant turn. Recorded per turn rather than read from the current settings,
+ * because the selection can change mid-conversation (a bridge comes up, the user switches models)
+ * and a reply must keep saying which model actually produced it.
+ */
+export interface AgentTurnOrigin {
+  readonly providerId: string;
+  /** Human label of the provider as it was registered (e.g. "Claude Code (MAX)"). */
+  readonly providerLabel: string;
+  readonly modelId: string;
+  /** True when the request went through the local Pix3AgentBridge instead of straight from the tab. */
+  readonly viaBridge: boolean;
+}
+
+/**
+ * Timing / token accounting for a single provider round-trip. The timings are debug-only; the
+ * {@link AgentTurnOrigin} rides along because it is shown in the chat at all times.
+ */
 export interface AgentTurnMetric {
+  /** Which provider/model produced this turn (absent on turns recorded before this was tracked). */
+  readonly origin?: AgentTurnOrigin;
   /** Wall-clock time for the provider request (ms). */
   readonly elapsedMs: number;
   /** Full (cache-inclusive) prompt size the model read this turn. */
@@ -340,6 +360,7 @@ export class AgentChatService {
           conversations,
           activeConversationId: latest.id,
           messages: record?.messages ?? [],
+          turnMetrics: record?.turnMetrics ?? {},
         });
         this.activeCreatedAt = record?.createdAt ?? Date.now();
       } else {
@@ -472,6 +493,7 @@ export class AgentChatService {
         conversations: this.state.conversations,
         activeConversationId: record.id,
         messages: record.messages ?? [],
+        turnMetrics: record.turnMetrics ?? {},
       });
       this.activeCreatedAt = record.createdAt ?? Date.now();
     } catch {
@@ -549,6 +571,14 @@ export class AgentChatService {
     const modelId = this.settings.getSelectedModelId(provider.id) ?? '';
     const apiKey = (await this.settings.getApiKey(provider.id)) ?? '';
     const baseUrl = this.settings.getBaseUrl(provider.id);
+    // Stamped onto every assistant turn below so the chat can say who answered. Bridge-backed
+    // providers are exactly the ones authenticating with the shared pairing token.
+    const origin: AgentTurnOrigin = {
+      providerId: provider.id,
+      providerLabel: provider.label,
+      modelId,
+      viaBridge: provider.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID,
+    };
     // Flow raises the floor on the iteration cap: a turn there has to reach a PROVEN playable
     // increment (build → compile → play → game_input → report), and a cap tuned for one-off Studio
     // edits force-stops it right after play_start — measured in the eval, where every capped turn
@@ -678,6 +708,7 @@ export class AgentChatService {
       const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
       this.recordTurnMetric(assistantIndex, {
+        origin,
         elapsedMs,
         inputTokens: result.usage?.inputTokens,
         outputTokens: result.usage?.outputTokens,
@@ -888,7 +919,7 @@ export class AgentChatService {
     // The cap was hit. Never leave the user with a silent stop: one final round-trip with tools
     // DISABLED, so the model has no choice but to answer in words. Measured: a capped turn ended
     // with 60 tool calls and not one sentence for the user, even though the work was mostly done.
-    await this.forceClosingSummary(provider, { apiKey, modelId, baseUrl }, model, signal);
+    await this.forceClosingSummary(provider, { apiKey, modelId, baseUrl }, model, origin, signal);
 
     this.setState({
       notice: `Stopped after ${maxIterations} tool iterations (the cap is configurable in the agent settings). Send a follow-up message to continue.`,
@@ -903,6 +934,7 @@ export class AgentChatService {
     provider: LlmProvider,
     ctx: LlmRequestContext,
     model: LlmModel | undefined,
+    origin: AgentTurnOrigin,
     signal: AbortSignal
   ): Promise<void> {
     if (signal.aborted) {
@@ -919,6 +951,7 @@ export class AgentChatService {
     });
     try {
       const system = this.buildSystemPrompt(null, false, [], null);
+      const startedAt = performance.now();
       const result = await this.chatWithTimeout(
         provider,
         {
@@ -930,7 +963,15 @@ export class AgentChatService {
         ctx,
         signal
       );
+      const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
+      // The wrap-up is a real reply, so it carries the same attribution as any other.
+      this.recordTurnMetric(assistantIndex, {
+        origin,
+        elapsedMs: performance.now() - startedAt,
+        inputTokens: result.usage?.inputTokens,
+        outputTokens: result.usage?.outputTokens,
+      });
     } catch {
       // A capped turn with no summary is bad; a capped turn that also throws is worse.
     }
@@ -1521,6 +1562,7 @@ export class AgentChatService {
       projectId,
       title: deriveConversationTitle(messages),
       messages: [...messages],
+      turnMetrics: { ...this.state.turnMetrics },
       createdAt: this.activeCreatedAt,
       updatedAt: Date.now(),
     };

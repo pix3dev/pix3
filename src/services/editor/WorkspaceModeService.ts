@@ -81,6 +81,25 @@ export class WorkspaceModeService {
     this.set(this.get() === 'flow' ? 'studio' : 'flow');
   }
 
+  /**
+   * The prompt-hero path: show `mode` now AND claim the project that is about to be generated.
+   *
+   * Both halves are load-bearing. The choice cannot be persisted (its project does not exist yet)
+   * and must not be written onto whatever project happens to still be open — the user is leaving
+   * it. But a plain `set(mode, { persist: false })` never parks anything, so the moment the fresh
+   * project reaches `ready` the shell resolves it to its default and drops the user into Studio,
+   * mid-generation. Parking the mode is what makes the freshly created project inherit it.
+   */
+  claimNextProject(mode: WorkspaceMode): void {
+    this.pendingMode = mode;
+    this.set(mode, { persist: false });
+  }
+
+  /** Drop a parked mode whose project was never created (the prompt path failed). */
+  clearPendingMode(): void {
+    this.pendingMode = null;
+  }
+
   subscribe(listener: (mode: WorkspaceMode) => void): () => void {
     this.listeners.add(listener);
     listener(this.get());
@@ -90,10 +109,9 @@ export class WorkspaceModeService {
   /** Remember `mode` for a project id without switching to it (used right after project creation). */
   remember(mode: WorkspaceMode, projectId = appState.project.id): void {
     if (!projectId) {
-      // No project yet — this is the prompt-hero path, where Flow is chosen BEFORE the project it
-      // will hold exists. Park the choice; the first project to open claims it. Without this the
-      // shell resolves the freshly created project to its default (Studio) and throws the user out
-      // of Flow the moment their game finishes generating.
+      // No project to hang the choice on — park it and let the first project to open claim it, the
+      // same hand-off `claimNextProject` makes explicit. Otherwise the shell resolves that project
+      // to its default (Studio) and undoes a mode the user just picked.
       this.pendingMode = mode;
       return;
     }

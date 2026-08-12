@@ -80,13 +80,68 @@ describe('AgentSettingsService', () => {
     localStorage.clear();
   });
 
-  it('defaults to the first provider and a sane loop cap', () => {
+  it('defaults to no pinned provider and a sane loop cap', () => {
+    // No provider id is baked in: prefs load long before the bridge probe answers, so a stored
+    // default would freeze the session onto Gemini before the bridge could register.
     const prefs = buildService().getPreferences();
-    expect(prefs.selectedProviderId).toBe('gemini');
+    expect(prefs.selectedProviderId).toBe('');
+    expect(prefs.providerPinned).toBe(false);
     expect(prefs.maxToolIterations).toBe(40);
     expect(prefs.customBaseUrl).toBe('');
     expect(prefs.modelByProvider).toEqual({});
     expect(prefs.debugMode).toBe(false);
+  });
+
+  it('resolves an unpinned selection to the bridge, not to the built-in Gemini', () => {
+    const service = buildService();
+    expect(service.getSelectedProvider()?.id).toBe('anthropic'); // first bridge entry
+    expect(service.isProviderAutoSelected()).toBe(true);
+  });
+
+  it('falls back to Gemini only when no bridge provider is registered', () => {
+    const service = new AgentSettingsService();
+    const registry = new LlmProviderRegistry(); // Gemini only — bridge unreachable.
+    Object.defineProperty(service, 'registry', { value: registry, configurable: true });
+    Object.defineProperty(service, 'secrets', {
+      value: new FakeSecretStorage(),
+      configurable: true,
+    });
+    expect(service.getSelectedProvider()?.id).toBe('gemini');
+  });
+
+  it('honours a pinned pick over the bridge, and pins on any explicit write', () => {
+    const service = buildService();
+    service.updatePreferences({ selectedProviderId: 'gemini' });
+    expect(service.getPreferences().providerPinned).toBe(true);
+    expect(service.getSelectedProvider()?.id).toBe('gemini');
+    expect(service.isProviderAutoSelected()).toBe(false);
+    // …and it survives a reload, so a deliberate choice is not re-decided every session.
+    expect(buildService().getSelectedProvider()?.id).toBe('gemini');
+  });
+
+  it('re-resolves when a pinned provider is gone instead of pretending it answered', () => {
+    buildService().updatePreferences({ selectedProviderId: 'cerebras' });
+    // Fresh registry without the bridge: the pin cannot be honoured this session.
+    const service = new AgentSettingsService();
+    Object.defineProperty(service, 'registry', {
+      value: new LlmProviderRegistry(),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'secrets', {
+      value: new FakeSecretStorage(),
+      configurable: true,
+    });
+    expect(service.getSelectedProvider()?.id).toBe('gemini');
+    expect(service.isProviderAutoSelected()).toBe(true);
+  });
+
+  it('treats prefs written before the pin flag existed as unpinned', () => {
+    // Their stored id was whatever the default was that day, not a decision — honouring it would
+    // keep an upgraded user on Gemini with a paired bridge sitting right there.
+    localStorage.setItem('pix3.agentSettings:v1', JSON.stringify({ selectedProviderId: 'gemini' }));
+    const service = buildService();
+    expect(service.getPreferences().providerPinned).toBe(false);
+    expect(service.getSelectedProvider()?.id).toBe('anthropic');
   });
 
   it('defaults the soul to Brobot with empty custom fields', () => {

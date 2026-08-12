@@ -32,6 +32,24 @@ describe('WorkspaceModeService', () => {
     expect(new WorkspaceModeService().resolveForOpenedProject('fresh-project')).toBe('flow');
   });
 
+  it('claims the next project without persisting the mode onto the open one', () => {
+    // The prompt hero can be reached with a project still open. Flow belongs to the project that is
+    // about to be generated, not to the one the user is leaving.
+    const service = new WorkspaceModeService();
+    appState.project.id = 'the-open-one';
+    service.claimNextProject('flow');
+    expect(appState.ui.workspaceMode).toBe('flow');
+    expect(service.resolveForOpenedProject('the-generated-one')).toBe('flow');
+    expect(new WorkspaceModeService().resolveForOpenedProject('the-open-one')).toBe('studio');
+  });
+
+  it('drops a claim whose project was never created', () => {
+    const service = new WorkspaceModeService();
+    service.claimNextProject('flow');
+    service.clearPendingMode();
+    expect(service.resolveForOpenedProject('unrelated')).toBe('studio');
+  });
+
   it('consumes the pending mode only once', () => {
     const service = new WorkspaceModeService();
     service.set('flow');

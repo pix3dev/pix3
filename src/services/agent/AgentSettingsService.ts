@@ -5,7 +5,19 @@ import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { REASONING_EFFORTS, type LlmProvider, type ReasoningEffort } from '@/services/llm/LlmTypes';
 
 export interface AgentPreferences {
+  /**
+   * The provider the user picked, or `''` for "decide for me". Only meaningful together with
+   * {@link providerPinned} — see {@link AgentSettingsService.getSelectedProvider}.
+   */
   selectedProviderId: string;
+  /**
+   * Whether {@link selectedProviderId} is a deliberate choice (the user picked it in the model
+   * picker or in Settings) rather than a value that was filled in for them. An unpinned selection
+   * is re-resolved on every turn, so a paired bridge takes over as soon as it is reachable instead
+   * of the session quietly answering from the static default. Preferences written before this flag
+   * existed load as unpinned — their stored id was the default of the day, not a decision.
+   */
+  providerPinned: boolean;
   /** Selected model id per provider id. */
   modelByProvider: Record<string, string>;
   /**
@@ -107,6 +119,11 @@ export class AgentSettingsService {
 
   updatePreferences(patch: Partial<AgentPreferences>): void {
     const next: AgentPreferences = { ...this.ensureLoaded(), ...patch };
+    // Every caller that writes a provider id is a user action (the model picker, the Settings
+    // dropdown, the debug bridge acting for the user) — so writing one is what pins it.
+    if (patch.selectedProviderId !== undefined && patch.providerPinned === undefined) {
+      next.providerPinned = Boolean(patch.selectedProviderId);
+    }
     if (patch.modelByProvider) {
       next.modelByProvider = { ...this.ensureLoaded().modelByProvider, ...patch.modelByProvider };
     }
@@ -153,10 +170,34 @@ export class AgentSettingsService {
     this.notify();
   }
 
-  /** Resolve the currently-selected provider (falls back to the default provider). */
+  /**
+   * The provider that will actually serve the next turn — the single source of truth for both the
+   * agent loop and every piece of UI that names the model, so what the user reads is what answers.
+   *
+   * A pinned pick wins while it resolves. Anything else (never picked, or pinned to a provider that
+   * is currently gone) goes through {@link LlmProviderRegistry.getPreferred}, which prefers a bridge
+   * lane over the static Gemini default.
+   */
   getSelectedProvider(): LlmProvider | undefined {
     const prefs = this.ensureLoaded();
-    return this.registry.get(prefs.selectedProviderId) ?? this.registry.getDefault();
+    if (prefs.providerPinned) {
+      const pinned = this.registry.get(prefs.selectedProviderId);
+      if (pinned) {
+        return pinned;
+      }
+    }
+    return this.registry.getPreferred();
+  }
+
+  /**
+   * True when {@link getSelectedProvider} is answering with a provider the user never chose (or is
+   * standing in for a pinned one that has gone missing). The UI labels that case, because an
+   * auto-picked provider silently spending a different budget than the user assumed is exactly the
+   * failure this resolution order exists to prevent.
+   */
+  isProviderAutoSelected(): boolean {
+    const prefs = this.ensureLoaded();
+    return !prefs.providerPinned || !this.registry.get(prefs.selectedProviderId);
   }
 
   /** Resolve the selected model id for a provider (falls back to its first model). */
@@ -255,9 +296,12 @@ export class AgentSettingsService {
   }
 
   private defaults(): AgentPreferences {
-    const defaultProvider = this.registry.getDefault();
+    // Deliberately NOT the registry's default: these prefs load long before the bridge probe
+    // answers, so baking a provider id in here would freeze the session onto Gemini before the
+    // bridge ever had a chance to register. Empty + unpinned means "resolve it per turn".
     return {
-      selectedProviderId: defaultProvider?.id ?? '',
+      selectedProviderId: '',
+      providerPinned: false,
       modelByProvider: {},
       reasoningEffortByModel: {},
       customBaseUrl: '',
@@ -294,6 +338,10 @@ export class AgentSettingsService {
           typeof parsed.selectedProviderId === 'string' && parsed.selectedProviderId
             ? parsed.selectedProviderId
             : defaults.selectedProviderId,
+        providerPinned:
+          typeof parsed.providerPinned === 'boolean'
+            ? parsed.providerPinned
+            : defaults.providerPinned,
         modelByProvider:
           parsed.modelByProvider && typeof parsed.modelByProvider === 'object'
             ? { ...(parsed.modelByProvider as Record<string, string>) }

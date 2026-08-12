@@ -1,5 +1,6 @@
 import { injectable } from '@/fw/di';
 import type { LlmMessage } from '@/services/llm/LlmTypes';
+import type { AgentTurnMetric } from './AgentChatService';
 
 /** One persisted conversation — the wire-format message history of one agent chat. */
 export interface AgentConversationRecord {
@@ -10,6 +11,12 @@ export interface AgentConversationRecord {
   /** Short human label derived from the first user message. */
   title: string;
   messages: LlmMessage[];
+  /**
+   * Per-assistant-turn metrics keyed by index into {@link messages} — persisted for the provider
+   * attribution they carry, so a reopened conversation still says which model wrote each reply
+   * (records written before this existed simply have none).
+   */
+  turnMetrics?: Record<number, AgentTurnMetric>;
   createdAt: number;
   updatedAt: number;
 }

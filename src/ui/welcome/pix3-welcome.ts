@@ -310,7 +310,9 @@ export class Pix3Welcome extends ComponentBase {
       return; // A later refresh already answered; its result wins.
     }
     const ready = providers.filter((_, index) => configured[index]);
-    const selectedId = this.agentSettings.getPreferences().selectedProviderId;
+    // The provider that would actually answer, not the stored preference — an unpinned pick
+    // resolves to the bridge when one is paired, and this strip is where the user checks that.
+    const selectedId = this.agentSettings.getSelectedProvider()?.id;
     const active = ready.find(provider => provider.id === selectedId) ?? ready[0];
     this.aiKeyConfigured = ready.length > 0;
     this.aiProviderLabel = active?.label ?? '';
@@ -377,6 +379,10 @@ export class Pix3Welcome extends ComponentBase {
    * Prompt → project. The workspace mode flips to Flow **before** the project exists so the shell
    * that appears the moment it becomes ready is the Flow one — the alternative is a visible flash of
    * the full editor, which is the exact impression this mode is trying not to give (design §3.6).
+   *
+   * `claimNextProject` rather than `set`: flipping the current shell is only half of it — the
+   * project that is about to be generated has to inherit Flow too, or the shell resolves it to its
+   * default the instant it becomes ready and the whole generation plays out in Studio.
    */
   private onSubmitPrompt = async (): Promise<void> => {
     if (!this.canSubmitPrompt) {
@@ -384,7 +390,7 @@ export class Pix3Welcome extends ComponentBase {
     }
     this.projectError = null;
     const previousMode = this.workspaceModeService.get();
-    this.workspaceModeService.set('flow', { persist: false });
+    this.workspaceModeService.claimNextProject('flow');
     try {
       await this.bootstrapService.run({
         prompt: this.prompt,
@@ -392,7 +398,9 @@ export class Pix3Welcome extends ComponentBase {
         ...(this.pinnedRecipeId ? { recipeId: this.pinnedRecipeId } : {}),
       });
     } catch (error) {
-      // Nothing was created, so leaving the shell in Flow would strand the user in an empty stage.
+      // Nothing was created, so leaving the shell in Flow would strand the user in an empty stage —
+      // and the unclaimed Flow must not be inherited by whatever project the user opens next.
+      this.workspaceModeService.clearPendingMode();
       this.workspaceModeService.set(previousMode, { persist: false });
       this.projectError = error instanceof Error ? error.message : 'Failed to build the prototype.';
     }

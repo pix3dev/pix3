@@ -6,6 +6,7 @@ import {
   AgentChatService,
   type AgentChatState,
   type AgentTurnMetric,
+  type AgentTurnOrigin,
 } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
@@ -69,7 +70,7 @@ type ComposerAttachment =
 
 /** One rendered chat entry, derived from the wire history (tool calls paired with their results). */
 type DisplayItem =
-  | { kind: 'text'; role: 'user' | 'assistant'; text: string }
+  | { kind: 'text'; role: 'user' | 'assistant'; text: string; origin?: AgentTurnOrigin }
   | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'tool'; call: LlmToolUseBlock; result: LlmToolResultBlock | null }
   | { kind: 'metrics'; metric: AgentTurnMetric }
@@ -103,9 +104,19 @@ const toDisplayItems = (
       typeof message.content === 'string'
         ? [{ type: 'text', text: message.content }]
         : message.content;
+    // Attribution belongs to the assistant MESSAGE (one provider round-trip), so only its first
+    // text block carries it — a reply split across several blocks shows one badge, not a column.
+    let originPending = turnMetrics[index]?.origin;
     for (const block of blocks) {
       if (block.type === 'text' && block.text.trim()) {
-        items.push({ kind: 'text', role: message.role, text: block.text });
+        const origin = message.role === 'assistant' ? originPending : undefined;
+        originPending = undefined;
+        items.push({
+          kind: 'text',
+          role: message.role,
+          text: block.text,
+          ...(origin && { origin }),
+        });
       } else if (block.type === 'tool-use') {
         items.push({ kind: 'tool', call: block, result: resultsById.get(block.id) ?? null });
       } else if (block.type === 'image') {
@@ -125,6 +136,24 @@ const toDisplayItems = (
     }
   });
   return items;
+};
+
+/**
+ * One or two letters standing in for a provider logo. Vendor marks are not ours to ship, so the
+ * badge uses the provider's own initials — "CC" for Claude Code (MAX), "G" for Google Gemini —
+ * which stays readable for the custom endpoints a user names themselves.
+ */
+const providerMonogram = (label: string): string => {
+  const words = label
+    .replace(/[()]/g, ' ')
+    .split(/[\s/_-]+/)
+    .filter(Boolean);
+  if (words.length === 0) return '?';
+  return words
+    .slice(0, 2)
+    .map(word => word[0])
+    .join('')
+    .toUpperCase();
 };
 
 /** Format a turn's timing / throughput for the debug metrics line. */
@@ -419,6 +448,8 @@ type RenderRow =
       kind: 'text';
       role: 'user' | 'assistant';
       text: string;
+      /** Provider/model that produced this reply, when it is known (assistant rows only). */
+      origin?: AgentTurnOrigin;
       firstAssistant: boolean;
       lastAssistant: boolean;
     }
@@ -569,6 +600,8 @@ export class AgentChatPanel extends ComponentBase {
 
   @state() private chatState: AgentChatState | null = null;
   @state() private providerId = '';
+  /** True when {@link providerId} was resolved for the user rather than picked by them. */
+  @state() private providerAutoSelected = true;
   @state() private modelId = '';
   @state() private customBaseUrl = '';
   /** Whether the current provider has a key (drives the model-picker button tint + empty-state). */
@@ -644,9 +677,7 @@ export class AgentChatPanel extends ComponentBase {
       this.applyComposePrefill(text);
     });
     this.disposeSettingsSubscription = this.settings.subscribe(prefs => {
-      this.providerId = prefs.selectedProviderId;
-      this.modelId = this.settings.getSelectedModelId(prefs.selectedProviderId) ?? '';
-      this.reasoningEffort = this.settings.getReasoningEffort(this.providerId, this.modelId);
+      this.syncSelectedProvider();
       this.customBaseUrl = prefs.customBaseUrl;
       this.agentName = resolveSoul(prefs).name;
       this.debugMode = prefs.debugMode;
@@ -669,6 +700,10 @@ export class AgentChatPanel extends ComponentBase {
     // ran before that came back "no key configured" for a perfectly paired bridge and never
     // corrected itself — so a Flow user was told to add an API key they already had.
     this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      // The bridge appearing can also CHANGE who answers: an unpinned selection prefers a bridge
+      // lane over Gemini, so the picker has to re-resolve here or it would keep naming the model
+      // that was going to answer a second ago.
+      this.syncSelectedProvider();
       void this.refreshKeyConfigured();
       this.requestUpdate();
     });
@@ -702,6 +737,18 @@ export class AgentChatPanel extends ComponentBase {
     this.closeModelPicker();
     this.closeReasoningPicker();
     super.disconnectedCallback();
+  }
+
+  /**
+   * Mirror the provider that will actually serve the next turn (not the raw stored preference —
+   * those differ whenever the pick is unpinned or points at a provider that is currently gone, and
+   * a picker naming a model that is not the one answering is worse than no picker at all).
+   */
+  private syncSelectedProvider(): void {
+    this.providerId = this.settings.getSelectedProvider()?.id ?? '';
+    this.providerAutoSelected = this.settings.isProviderAutoSelected();
+    this.modelId = this.settings.getSelectedModelId(this.providerId) ?? '';
+    this.reasoningEffort = this.settings.getReasoningEffort(this.providerId, this.modelId);
   }
 
   protected updated(): void {
@@ -772,6 +819,7 @@ export class AgentChatPanel extends ComponentBase {
           kind: 'text',
           role: item.role,
           text: item.text,
+          ...(item.origin && { origin: item.origin }),
           firstAssistant: false,
           lastAssistant: false,
         });
@@ -882,11 +930,7 @@ export class AgentChatPanel extends ComponentBase {
     const showActions = row.lastAssistant && !running;
     return html`
       <div class="agent-left-row">
-        ${row.firstAssistant
-          ? html`<span class="agent-avatar"
-              >${this.icons.getIcon('sparkles', IconSize.SMALL)}</span
-            >`
-          : html`<span class="agent-avatar-gutter"></span>`}
+        ${this.renderReplyAvatar(row)}
         <div class="agent-message is-assistant">
           <div class="agent-message-md">${renderMarkdownLite(row.text)}</div>
           ${showActions
@@ -913,6 +957,37 @@ export class AgentChatPanel extends ComponentBase {
             : null}
         </div>
       </div>
+    `;
+  }
+
+  /**
+   * The gutter mark left of a reply. When we know which model produced it, that mark IS the answer
+   * to "who am I talking to": a monogram of the provider, tinted by how the request travelled
+   * (through the local bridge, or straight from this tab with a key the browser holds). It is
+   * deliberately not debug-only — a session silently answering from the wrong provider is
+   * indistinguishable from the right one until the bill or the quota says otherwise.
+   *
+   * Replies with no recorded origin (conversations from before this was tracked) keep the generic
+   * agent glyph on the first one, exactly as before.
+   */
+  private renderReplyAvatar(row: Extract<RenderRow, { kind: 'text' }>) {
+    const origin = row.origin;
+    if (!origin) {
+      return row.firstAssistant
+        ? html`<span class="agent-avatar">${this.icons.getIcon('sparkles', IconSize.SMALL)}</span>`
+        : html`<span class="agent-avatar-gutter"></span>`;
+    }
+    const label = origin.providerLabel || origin.providerId;
+    const transport = origin.viaBridge
+      ? 'via Pix3AgentBridge — the key stays on your machine'
+      : 'called directly from this browser with your stored key';
+    return html`
+      <span
+        class="agent-avatar agent-avatar--llm ${origin.viaBridge ? 'is-bridge' : 'is-direct'}"
+        title=${`${label}\n${origin.modelId || 'model not reported'}\n${transport}`}
+      >
+        <span class="agent-avatar-monogram">${providerMonogram(label)}</span>
+      </span>
     `;
   }
 
@@ -974,6 +1049,11 @@ export class AgentChatPanel extends ComponentBase {
     const model = this.modelCatalog.getModel(this.providerId, this.modelId);
     const label = model?.label ?? (this.modelId || 'Select model');
     const providerHint = provider?.label ?? '';
+    // An auto-selected provider is named as such: the user never chose it, and the whole point of
+    // showing it here is that they can see it is not the one they assumed.
+    const autoHint = this.providerAutoSelected
+      ? '\nAuto-selected (a paired bridge wins over the built-in Gemini) — pick a model to pin it.'
+      : '';
     return html`
       <button
         type="button"
@@ -983,7 +1063,7 @@ export class AgentChatPanel extends ComponentBase {
         aria-haspopup="listbox"
         aria-expanded=${String(this.modelPickerOpen)}
         title=${this.keyConfigured
-          ? `${providerHint} · ${label}`
+          ? `${providerHint} · ${label}${autoHint}`
           : `No API key for ${providerHint || 'this provider'} — click to add one`}
         @click=${() => this.toggleModelPicker()}
       >

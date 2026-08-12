@@ -382,7 +382,9 @@ export class EditorSettingsDialog extends ComponentBase {
     void this.refreshAiKeyStatus();
 
     const agentPrefs = this.agentSettings.getPreferences();
-    this.llmProviderId = agentPrefs.selectedProviderId || this.llmProviders.getDefault()?.id || '';
+    // The provider that will actually serve a turn (an unpinned pick resolves to the bridge when
+    // one is paired), so opening Settings shows what is in use rather than what was last stored.
+    this.llmProviderId = this.agentSettings.getSelectedProvider()?.id ?? '';
     this.llmModelId = this.agentSettings.getSelectedModelId(this.llmProviderId) ?? '';
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);

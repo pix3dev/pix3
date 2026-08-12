@@ -37,6 +37,8 @@ interface Fakes {
   contextWindow?: number;
   /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */
   advisorAvailable?: boolean;
+  /** Secret id of the fake provider — set it to the bridge token to exercise `viaBridge`. */
+  apiKeySecretId?: string;
   /** Soul preferences shaping the system-prompt persona. Defaults to the Brobot preset. */
   soulId?: string;
   customSoulName?: string;
@@ -46,7 +48,13 @@ interface Fakes {
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
 const buildService = (fakes: Fakes): AgentChatService => {
   const service = new AgentChatService();
-  const provider = { id: 'fake', chat: fakes.chat };
+  const provider = {
+    id: 'fake',
+    label: 'Fake Provider',
+    // Not the bridge token — turns stamped from this provider read as a direct browser call.
+    apiKeySecretId: fakes.apiKeySecretId ?? 'ai-provider:fake:api-key',
+    chat: fakes.chat,
+  };
   const overrides: Record<string, unknown> = {
     settings: {
       getSelectedProvider: () => provider,
@@ -126,6 +134,46 @@ describe('AgentChatService', () => {
       content: [{ type: 'text', text: 'hello!' }],
     });
     expect(state.totalUsage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  });
+
+  it('stamps each assistant turn with the provider that produced it', async () => {
+    // The chat shows this per reply. Recorded at send time rather than read from settings later,
+    // because the selection can change mid-conversation and a reply must keep its own attribution.
+    const chat = vi.fn(async () => textResult('hello!'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+
+    await service.send('hi');
+
+    expect(service.getState().turnMetrics[1]?.origin).toEqual({
+      providerId: 'fake',
+      providerLabel: 'Fake Provider',
+      modelId: 'fake-model',
+      viaBridge: false,
+    });
+  });
+
+  it('marks a turn as bridge-served when the provider authenticates with the pairing token', async () => {
+    const chat = vi.fn(async () => textResult('hello!'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      apiKeySecretId: 'ai-provider:pix3-bridge:token',
+    });
+
+    await service.send('hi');
+
+    expect(service.getState().turnMetrics[1]?.origin?.viaBridge).toBe(true);
+  });
+
+  it('persists turn metrics so a reopened conversation keeps its attribution', async () => {
+    const put = vi.fn(async (_record: { turnMetrics?: Record<number, unknown> }) => undefined);
+    const chat = vi.fn(async () => textResult('hello!'));
+    const service = buildService({ chat, execute: vi.fn(), put });
+
+    await service.send('hi');
+
+    expect(put.mock.calls.at(-1)?.[0].turnMetrics?.[1]).toBeDefined();
   });
 
   it('executes tool calls, feeds results (with toolName) back, and continues to the final reply', async () => {

@@ -364,6 +364,26 @@ pix3-agent-chat-panel .agent-avatar-gutter {
   width: 26px;
 }
 
+/* Provider monogram: which model wrote this reply. The bridge lane keeps the accent (the local,
+   key-never-leaves-the-machine path); a direct browser call is drawn plainly so the two are told
+   apart at a glance rather than only in the tooltip. */
+pix3-agent-chat-panel .agent-avatar--llm {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+
+pix3-agent-chat-panel .agent-avatar--llm.is-direct {
+  background: var(--bg-3);
+  border-color: var(--line-1);
+  color: var(--fg-1);
+}
+
+pix3-agent-chat-panel .agent-avatar-monogram {
+  line-height: 1;
+}
+
 pix3-agent-chat-panel .agent-empty {
   margin: auto;
   max-width: 26rem;

@@ -12,7 +12,8 @@ import type { LlmProvider } from './LlmTypes';
  * {@link import('./BridgeConnectionService').BridgeConnectionService}. When the bridge is down the
  * dynamic set is empty, so those providers simply don't exist and the UI shows a setup call to action.
  *
- * The default provider is the first registered one (Gemini).
+ * The default provider is the first registered one (Gemini); {@link LlmProviderRegistry.getPreferred}
+ * is what an unpinned selection resolves through, and it puts the bridge ahead of that default.
  */
 @injectable()
 export class LlmProviderRegistry {
@@ -64,6 +65,26 @@ export class LlmProviderRegistry {
 
   getDefault(): LlmProvider | undefined {
     return this.staticOrder.length > 0 ? this.providers.get(this.staticOrder[0]) : undefined;
+  }
+
+  /**
+   * Which provider to use when the user has not pinned one: **a bridge lane first**, the static
+   * default (Gemini) only as a fallback.
+   *
+   * Running the bridge is a deliberate act — the user installed it, paired it and put keys in it —
+   * so an unpinned session answering from Gemini instead is never what was meant, and it is the
+   * kind of wrong that hides: both lanes just work, and the bill/quota lands somewhere else. Within
+   * the bridge the discovery order decides, which puts the providers the user explicitly configured
+   * (`provider add <id> --key …`) ahead of the always-advertised Claude Code lane.
+   */
+  getPreferred(): LlmProvider | undefined {
+    for (const id of this.bridgeOrder) {
+      const provider = this.providers.get(id);
+      if (provider && !provider.hidden) {
+        return provider;
+      }
+    }
+    return this.getDefault();
   }
 
   private registerStatic(provider: LlmProvider): void {

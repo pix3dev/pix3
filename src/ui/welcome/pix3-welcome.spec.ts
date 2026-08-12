@@ -299,12 +299,21 @@ describe('Pix3Welcome prompt hero', () => {
   class WorkspaceModeServiceStub {
     mode = 'studio';
     calls: string[] = [];
+    /** The mode the project that is about to be generated will inherit. */
+    pendingMode: string | null = null;
     set = vi.fn((mode: string) => {
       this.mode = mode;
       this.calls.push(mode);
     });
     get = () => this.mode;
     remember = vi.fn();
+    claimNextProject = vi.fn((mode: string) => {
+      this.pendingMode = mode;
+      this.set(mode);
+    });
+    clearPendingMode = vi.fn(() => {
+      this.pendingMode = null;
+    });
   }
 
   class PrototypeBootstrapServiceStub {
@@ -368,7 +377,10 @@ describe('Pix3Welcome prompt hero', () => {
     // the instance is shared across the tests in this file — reset it rather than assume a fresh one.
     workspaceStub.mode = 'studio';
     workspaceStub.calls = [];
+    workspaceStub.pendingMode = null;
     workspaceStub.set.mockClear();
+    workspaceStub.claimNextProject.mockClear();
+    workspaceStub.clearPendingMode.mockClear();
     bootstrap.run.mockClear();
     bootstrap.modeWhenRun = null;
     bootstrap.lastRequest = null;
@@ -401,6 +413,9 @@ describe('Pix3Welcome prompt hero', () => {
     expect(bootstrap.run).toHaveBeenCalledTimes(1);
     expect(bootstrap.modeWhenRun).toBe('flow');
     expect(workspaceStub?.calls[0]).toBe('flow');
+    // Flipping the shell is only half of it: the project the bootstrap is about to create has to
+    // inherit Flow, or it resolves to Studio the instant it becomes ready — mid-generation.
+    expect(workspaceStub?.pendingMode).toBe('flow');
   });
 
   it('sends the typed prompt and the pinned recipe together', async () => {
@@ -452,6 +467,8 @@ describe('Pix3Welcome prompt hero', () => {
     await welcome.updateComplete;
 
     expect(workspaceStub?.calls).toEqual(['flow', 'studio']);
+    // …and the claim goes with it, so the next project the user opens keeps its own shell.
+    expect(workspaceStub?.pendingMode).toBeNull();
     expect(welcome.querySelector('.welcome-error')?.textContent).toContain('planner exploded');
   });
 
@@ -500,7 +517,10 @@ describe('Pix3Welcome setup status', () => {
   class AgentSettingsServiceStub {
     keyedProviders = new Set<string>();
     hasApiKey = vi.fn(async (providerId: string) => this.keyedProviders.has(providerId));
-    getPreferences = vi.fn(() => ({ selectedProviderId: 'gemini' }));
+    getPreferences = vi.fn(() => ({ selectedProviderId: '', providerPinned: false }));
+    /** The strip names whoever would actually answer, so the stub answers the same question. */
+    selectedProvider: { id: string } | undefined = { id: 'gemini' };
+    getSelectedProvider = vi.fn(() => this.selectedProvider);
     private listeners = new Set<(prefs: unknown) => void>();
     subscribe(listener: (prefs: unknown) => void): () => void {
       this.listeners.add(listener);

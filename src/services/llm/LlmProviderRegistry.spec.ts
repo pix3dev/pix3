@@ -52,6 +52,27 @@ describe('LlmProviderRegistry', () => {
     expect(registry.list().map(p => p.id)).toEqual(['gemini']);
   });
 
+  it('prefers a bridge lane over the static default, and falls back to it when the bridge is down', () => {
+    const registry = new LlmProviderRegistry();
+    // Nothing from the bridge yet: Gemini is all there is.
+    expect(registry.getPreferred()?.id).toBe('gemini');
+
+    registry.setBridgeProviders([makeProvider('openai'), makeProvider('claude-bridge')]);
+    expect(registry.getPreferred()?.id).toBe('openai');
+
+    registry.setBridgeProviders([]);
+    expect(registry.getPreferred()?.id).toBe('gemini');
+  });
+
+  it('skips hidden bridge providers when picking the preferred one', () => {
+    const registry = new LlmProviderRegistry();
+    registry.setBridgeProviders([
+      { ...makeProvider('retired'), hidden: true },
+      makeProvider('openai'),
+    ]);
+    expect(registry.getPreferred()?.id).toBe('openai');
+  });
+
   it('never drops the static gemini provider when swapping bridge sets', () => {
     const registry = new LlmProviderRegistry();
     registry.setBridgeProviders([makeProvider('gemini', 'shadow'), makeProvider('openai')]);

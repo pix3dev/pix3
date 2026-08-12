@@ -4,6 +4,9 @@ import { resolve } from 'path';
 export default defineConfig({
   test: {
     environment: 'happy-dom',
+    // Repairs the ambient `localStorage` when the Node build hands us an unusable one — see the
+    // file for why this is global setup and not a per-spec stub.
+    setupFiles: ['./vitest.setup.ts'],
     include: [
       'src/**/*.spec.ts',
       'packages/pix3-runtime/src/**/*.spec.ts',
