@@ -382,9 +382,20 @@ export class AgentChatService {
     this.previousRequestSignature = null;
     try {
       const conversations = await this.historyStore.list(projectId);
+      // The guard above is not enough: reading history is async, and in Flow the panel mounts for a
+      // freshly created project at the same moment the bootstrap sends that project's FIRST turn.
+      // Applying a load that started before the turn wipes it mid-run — the user watched the agent
+      // work for three steps and then saw an empty chat, with nothing in history (a turn is only
+      // persisted once it completes). Whoever moved the conversation on while we were reading wins.
+      if (this.isRunning() || this.state.messages.length > 0) {
+        return;
+      }
       if (conversations.length > 0) {
         const latest = conversations[0]; // list() returns newest first
         const record = await this.historyStore.get(latest.id);
+        if (this.isRunning() || this.state.messages.length > 0) {
+          return;
+        }
         this.setState({
           ...IDLE_STATE,
           conversations,
@@ -398,6 +409,9 @@ export class AgentChatService {
         this.activeCreatedAt = 0;
       }
     } catch {
+      if (this.isRunning() || this.state.messages.length > 0) {
+        return;
+      }
       this.setState({ ...IDLE_STATE });
     }
   }

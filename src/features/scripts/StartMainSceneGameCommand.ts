@@ -77,6 +77,13 @@ export class StartMainSceneGameCommand extends CommandBase<void, void> {
       );
     }
 
+    // Play mode is flipped by the operation below, and `GamePlaySessionService` starts the runtime
+    // off that flag — so flipping it without a scene puts the app in a state where nothing runs but
+    // everything (Game tab, Flow stage, `play_start`, every agent verification) believes it does.
+    if (!context.state.scenes.activeSceneId) {
+      throw new Error('Cannot start the game: no scene could be opened.');
+    }
+
     const operationService = context.container.getService<OperationService>(
       context.container.getOrCreateToken(OperationService)
     );

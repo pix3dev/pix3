@@ -77,7 +77,17 @@ export const ensureSceneActive = async (
   const dispatcher = container.getService<CommandDispatcher>(
     container.getOrCreateToken(CommandDispatcher)
   );
-  await dispatcher.execute(new LoadSceneCommand({ filePath: resourcePath, sceneId }));
+  const loaded = await dispatcher.execute(
+    new LoadSceneCommand({ filePath: resourcePath, sceneId })
+  );
+
+  // A blocked command is not an exception: `CommandDispatcher.execute` warns and returns false when
+  // preconditions fail (a project that flipped out of `ready` mid-await is enough). Swallowing that
+  // is what turns "the scene never opened" into the far more confusing "play mode is on, the stage
+  // is black, and the next start is refused because the game is already running".
+  if (!loaded || !appState.scenes.activeSceneId) {
+    throw new Error(`Could not open the scene ${resourcePath}.`);
+  }
 };
 
 /**

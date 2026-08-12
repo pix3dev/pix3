@@ -87,6 +87,12 @@ export class StartSceneGameCommand extends CommandBase<void, void> {
     // scene-graph load in Flow — see play-workspace).
     await ensureSceneActive(container, resourcePath);
 
+    // Same guard as `game.start-main`: play mode without an active scene starts nothing while every
+    // reader of `isPlaying` believes the game is up.
+    if (!context.state.scenes.activeSceneId) {
+      throw new Error(`Cannot start the game: ${resourcePath} could not be opened.`);
+    }
+
     await operationService.invoke(
       new SetPlayModeOperation({
         isPlaying: true,

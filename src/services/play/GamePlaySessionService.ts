@@ -93,6 +93,8 @@ export class GamePlaySessionService {
   private networkService?: NetworkService;
   private focusCleanup?: () => void;
   private focusPauseSuppressed = false;
+  /** True between a failed launch and the next one, so its banner is not cleared by its own stop. */
+  private startFailed = false;
   private syncPromise: Promise<void> = Promise.resolve();
   private readonly onPopoutAspectChange = (event: Event): void => {
     const target = event.target as HTMLSelectElement;
@@ -291,7 +293,11 @@ export class GamePlaySessionService {
       this.updateHostRunningState(false);
       // Play mode has ended; the banner ("the game may have stopped updating")
       // no longer applies. The failure is retained in the Logs panel.
-      this.runtimeErrorBridge.clearPlayModeError();
+      // Exception: a start that *failed* switches play mode back off itself, and that banner is the
+      // only thing telling the user why the stage is empty — it must survive its own stop.
+      if (!this.startFailed) {
+        this.runtimeErrorBridge.clearPlayModeError();
+      }
       return;
     }
 
@@ -320,6 +326,26 @@ export class GamePlaySessionService {
     return null;
   }
 
+  /**
+   * Undo a launch that never reached a scene. `isPlaying` is what the Game tab, the Flow stage,
+   * `play_start` and every agent verification read — leaving it on after a failed start hands them
+   * a game that does not exist, and the next start is refused as "already running", so the stage
+   * stays black for the rest of the session. Turning it back off makes the failure recoverable:
+   * the Restart button and `play_start` both work again.
+   */
+  private async abortFailedStart(): Promise<void> {
+    this.startFailed = true;
+    this.detachRuntime();
+    if (appState.ui.isPlaying) {
+      await this.operationService.invoke(
+        new SetPlayModeOperation({
+          isPlaying: false,
+          status: 'stopped',
+        })
+      );
+    }
+  }
+
   private async restartRuntime(): Promise<void> {
     const host = this.getPreferredHost();
     if (!host) {
@@ -333,6 +359,7 @@ export class GamePlaySessionService {
     this.detachRuntime();
     this.activeHostKind = host.kind;
     this.updateHostRunningState(false);
+    this.startFailed = false;
     // Each launch/restart begins with a clean slate — clear any banner from a
     // previous run so a fresh attempt isn't shadowed by a stale error.
     this.runtimeErrorBridge.clearPlayModeError();
@@ -378,6 +405,7 @@ export class GamePlaySessionService {
       this.runtimeErrorBridge.reportPlayModeFailure(
         'Cannot start the game: no active scene is open.'
       );
+      await this.abortFailedStart();
       return;
     }
 

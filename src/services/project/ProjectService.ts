@@ -1507,6 +1507,14 @@ export class ProjectService {
    * opened the snake's board, with the right recipe docs on disk and the wrong game on screen.
    */
   private clearOpenDocumentState(): void {
+    // A game cannot keep playing into a project whose scenes just went away. Left on, `isPlaying`
+    // makes the play session re-attach the runtime to the NEXT project's stage the moment its host
+    // registers — with no active scene yet, which is the "Cannot start the game: no active scene is
+    // open." the Flow prompt path showed on its first frame — and then blocks that project's own
+    // launch with "Game is already running". Shell routing, not an editing action, hence a direct
+    // write like everything else this method resets.
+    appState.ui.isPlaying = false;
+    appState.ui.playModeStatus = 'stopped';
     appState.scenes.activeSceneId = null;
     appState.scenes.descriptors = {};
     appState.scenes.hierarchies = {};

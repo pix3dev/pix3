@@ -39,6 +39,8 @@ interface Fakes {
   advisorAvailable?: boolean;
   /** Secret id of the fake provider — set it to the bridge token to exercise `viaBridge`. */
   apiKeySecretId?: string;
+  /** Conversation-list reader; override to control WHEN a history load resolves. */
+  historyList?: () => Promise<unknown[]>;
   /** Soul preferences shaping the system-prompt persona. Defaults to the Brobot preset. */
   soulId?: string;
   customSoulName?: string;
@@ -94,7 +96,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
         fakes.advisorAvailable ? { modelId: 'adv-model', apiKey: 'k' } : null,
     },
     historyStore: {
-      list: async () => [],
+      list: fakes.historyList ?? (async () => []),
       get: async () => undefined,
       put: fakes.put,
       delete: async () => undefined,
@@ -117,6 +119,32 @@ const buildService = (fakes: Fakes): AgentChatService => {
 describe('AgentChatService', () => {
   beforeEach(() => {
     appState.project.id = 'proj-1';
+  });
+
+  it('does not let a slow history load wipe a turn that started meanwhile', async () => {
+    // Flow's first turn: the chat panel mounts for the brand-new project (ensureLoaded) at the same
+    // moment the bootstrap sends the first message. The load resolving second must not clobber it.
+    let releaseList: () => void = () => {};
+    const listed = new Promise<void>(resolve => {
+      releaseList = resolve;
+    });
+    const service = buildService({
+      chat: vi.fn(async () => textResult('on it')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      historyList: async () => {
+        await listed;
+        return [];
+      },
+    });
+
+    appState.project.id = 'proj-fresh';
+    const loading = service.ensureLoaded();
+    await service.send('build me a tapper');
+    releaseList();
+    await loading;
+
+    expect(service.getState().messages).toHaveLength(2);
   });
 
   it('appends the user message and the assistant text reply', async () => {

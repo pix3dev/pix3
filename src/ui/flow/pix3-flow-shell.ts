@@ -53,6 +53,11 @@ const persistPlanOpen = (open: boolean): void => {
   }
 };
 
+/** How many times a stage launch is attempted before the failure reaches the user. */
+const STAGE_START_ATTEMPTS = 4;
+/** Gap between those attempts — long enough for a project to finish settling, short enough to feel instant. */
+const STAGE_START_RETRY_MS = 500;
+
 /**
  * The Flow workspace: chat on the left, a live game stage on the right, one header of actions —
  * and nothing else. No docks, no tabs, no file tree (design §4).
@@ -271,12 +276,38 @@ export class Pix3FlowShell extends ComponentBase {
     this.plan = await this.planService.load();
   }
 
-  private async startStage(): Promise<void> {
+  /**
+   * Launch the stage, retrying a few times before showing the user a failure.
+   *
+   * The first launch races project bootstrap: scripts are still compiling, the manifest is still
+   * landing, and the project can briefly leave `ready` — any of which makes the scene load blocked
+   * (a blocked command is a `false` return, not a throw) and hands the user a red error where their
+   * game should be. The race is transient by nature, so a bounded retry is the honest fix; what is
+   * NOT acceptable is the silent version, where play mode flips on with no scene and the stage stays
+   * black for the rest of the session.
+   */
+  private async startStage(attempt = 0): Promise<void> {
+    let failure: string | null = null;
     try {
-      await this.commandDispatcher.executeById('game.start-main');
+      if (await this.commandDispatcher.executeById('game.start-main')) {
+        return;
+      }
+      failure = 'The game could not be started.';
     } catch (error) {
-      this.stageError = error instanceof Error ? error.message : String(error);
+      failure = error instanceof Error ? error.message : String(error);
     }
+
+    if (attempt + 1 < STAGE_START_ATTEMPTS) {
+      await new Promise(resolve => setTimeout(resolve, STAGE_START_RETRY_MS));
+      await this.startStage(attempt + 1);
+      return;
+    }
+    // Someone else won the race and the game is up (the agent's own `play_start`, a restart after a
+    // turn): there is nothing to report, and a banner over a running game is worse than silence.
+    if (appState.ui.isPlaying && !appState.ui.playModeError) {
+      return;
+    }
+    this.stageError = failure;
   }
 
   private async restartStage(): Promise<void> {
