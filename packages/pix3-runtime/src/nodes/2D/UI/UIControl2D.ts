@@ -36,14 +36,96 @@ export interface UIControl2DProps extends Node2DProps {
 export abstract class UIControl2D extends Node2D {
   // Control state
   private _enabled: boolean = true;
-  label: string;
-  /** Localization key; when non-empty and localization is active, its translation replaces `label`. */
-  labelKey: string;
-  labelFontFamily: string;
-  labelFontSize: number;
-  labelColor: string;
-  labelAlign: 'left' | 'center' | 'right';
+  // Label state is exposed through accessors that re-render on change. As plain fields these were a
+  // trap: the inspector wrote them through a schema `setValue` that called `updateLabel()` by hand,
+  // so authoring worked, while a script's `btn.label = 'X'` changed the field and drew nothing —
+  // `getDisplayText()` (and therefore the agent's `game_observe.text`) reported the new text that
+  // was never on screen. Setters keep the two paths from diverging.
+  private _label: string;
+  private _labelKey: string;
+  private _labelFontFamily: string;
+  private _labelFontSize: number;
+  private _labelColor: string;
+  private _labelAlign: 'left' | 'center' | 'right';
+  /**
+   * True once the constructor has finished, so setters know whether a re-render is safe: during
+   * construction subclass fields (`size`, skin meshes) are not in place yet, and the base
+   * constructor already ends with one deliberate `updateLabel()`.
+   */
+  private labelReactive = false;
   texturePath: string | null;
+
+  get label(): string {
+    return this._label;
+  }
+
+  set label(value: string) {
+    if (this._label === value) return;
+    this._label = value;
+    this.refreshLabelIfReactive();
+  }
+
+  /** Localization key; when non-empty and localization is active, its translation replaces `label`. */
+  get labelKey(): string {
+    return this._labelKey;
+  }
+
+  set labelKey(value: string) {
+    if (this._labelKey === value) return;
+    this._labelKey = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelFontFamily(): string {
+    return this._labelFontFamily;
+  }
+
+  set labelFontFamily(value: string) {
+    if (this._labelFontFamily === value) return;
+    this._labelFontFamily = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelFontSize(): number {
+    return this._labelFontSize;
+  }
+
+  set labelFontSize(value: number) {
+    if (this._labelFontSize === value) return;
+    this._labelFontSize = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelColor(): string {
+    return this._labelColor;
+  }
+
+  set labelColor(value: string) {
+    if (this._labelColor === value) return;
+    this._labelColor = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelAlign(): 'left' | 'center' | 'right' {
+    return this._labelAlign;
+  }
+
+  set labelAlign(value: 'left' | 'center' | 'right') {
+    if (this._labelAlign === value) return;
+    this._labelAlign = value;
+    this.refreshLabelIfReactive();
+  }
+
+  /**
+   * Re-render the label unless we are still inside a constructor. The equality guards on each setter
+   * mean a script assigning the same text every frame costs nothing; a real change rebuilds the
+   * canvas texture once.
+   */
+  private refreshLabelIfReactive(): void {
+    if (this.labelReactive) {
+      this.updateLabel();
+    }
+  }
 
   // Pointer state
   protected isHovering: boolean = false;
@@ -66,21 +148,25 @@ export abstract class UIControl2D extends Node2D {
     super(props, nodeType);
 
     this._enabled = props.enabled ?? true;
-    this.label = props.label ?? '';
-    this.labelKey = props.labelKey ?? '';
-    this.labelFontFamily = props.labelFontFamily ?? 'Arial';
-    this.labelFontSize = props.labelFontSize ?? 16;
-    this.labelColor = props.labelColor ?? '#ffffff';
-    this.labelAlign = props.labelAlign ?? 'center';
+    // Backing fields, not the setters: nothing is renderable yet this early.
+    this._label = props.label ?? '';
+    this._labelKey = props.labelKey ?? '';
+    this._labelFontFamily = props.labelFontFamily ?? 'Arial';
+    this._labelFontSize = props.labelFontSize ?? 16;
+    this._labelColor = props.labelColor ?? '#ffffff';
+    this._labelAlign = props.labelAlign ?? 'center';
     this.texturePath = props.texturePath ?? null;
 
     if (this.texturePath) {
       this.tryLoadTextureFromPath(this.texturePath);
     }
 
-    if (this.label.trim().length > 0 || this.labelKey.length > 0) {
+    if (this._label.trim().length > 0 || this._labelKey.length > 0) {
       this.updateLabel();
     }
+    // From here on, a label assignment re-renders — including from a subclass constructor, which
+    // runs after this one and therefore has its own props in place.
+    this.labelReactive = true;
   }
 
   protected override disposeResources(): void {
@@ -402,11 +488,11 @@ export abstract class UIControl2D extends Node2D {
           name: 'label',
           type: 'string',
           ui: { label: 'Label', group: 'Label', description: 'Text displayed on the control' },
+          // The setters re-render (and dispose the old texture) on change, so every label
+          // setValue here is a plain assignment.
           getValue: n => (n as UIControl2D).label,
           setValue: (n, v) => {
-            const control = n as UIControl2D;
-            control.label = String(v);
-            control.updateLabel();
+            (n as UIControl2D).label = String(v);
           },
         },
         {
@@ -421,9 +507,7 @@ export abstract class UIControl2D extends Node2D {
           },
           getValue: n => (n as UIControl2D).labelKey,
           setValue: (n, v) => {
-            const control = n as UIControl2D;
-            control.labelKey = String(v);
-            control.updateLabel();
+            (n as UIControl2D).labelKey = String(v);
           },
         },
         {
@@ -432,11 +516,7 @@ export abstract class UIControl2D extends Node2D {
           ui: { label: 'Font Size', group: 'Label', min: 8, max: 64, step: 1 },
           getValue: n => (n as UIControl2D).labelFontSize,
           setValue: (n, v) => {
-            const control = n as UIControl2D;
-            control.labelFontSize = Number(v);
-            control.labelTexture?.dispose();
-            control.labelTexture = null;
-            control.updateLabel();
+            (n as UIControl2D).labelFontSize = Number(v);
           },
         },
         {
@@ -445,11 +525,7 @@ export abstract class UIControl2D extends Node2D {
           ui: { label: 'Font Color', group: 'Label' },
           getValue: n => (n as UIControl2D).labelColor,
           setValue: (n, v) => {
-            const control = n as UIControl2D;
-            control.labelColor = String(v);
-            control.labelTexture?.dispose();
-            control.labelTexture = null;
-            control.updateLabel();
+            (n as UIControl2D).labelColor = String(v);
           },
         },
         {
@@ -462,13 +538,9 @@ export abstract class UIControl2D extends Node2D {
           },
           getValue: n => (n as UIControl2D).labelAlign,
           setValue: (n, v) => {
-            const control = n as UIControl2D;
             const val = String(v);
             if (val === 'left' || val === 'center' || val === 'right') {
-              control.labelAlign = val;
-              control.labelTexture?.dispose();
-              control.labelTexture = null;
-              control.updateLabel();
+              (n as UIControl2D).labelAlign = val;
             }
           },
         },

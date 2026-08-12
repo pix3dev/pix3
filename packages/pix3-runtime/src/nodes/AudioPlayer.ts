@@ -1,5 +1,6 @@
 import { NodeBase, type NodeBaseProps } from './NodeBase';
 import type { PropertySchema } from '../fw/property-schema';
+import { installReactiveSchemaProperties } from '../fw/reactive-schema-properties';
 import { AUDIO_BUS_NAMES, type AudioBusName, type AudioPlayback } from '../core/AudioService';
 
 export interface AudioPlayerProps extends Omit<NodeBaseProps, 'type'> {
@@ -38,6 +39,10 @@ export class AudioPlayer extends NodeBase {
     this.volumeVariation = AudioPlayer.clampVariation(
       props.volumeVariation ?? this.properties.volumeVariation
     );
+
+    // Last: a script's `player.autoplay = false` now re-arms the autoPlayed latch, and the other
+    // audio fields pick up the Inspector's normalization/clamping on direct assignment.
+    installReactiveSchemaProperties(this, AudioPlayer.getPropertySchema);
   }
 
   get treeIcon(): string {

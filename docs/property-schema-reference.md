@@ -121,6 +121,41 @@ reverts to the node's current value.
 
 ---
 
+### Make script assignments behave like the Inspector (required for every new node)
+
+A `setValue` that does more than assign — clamps, rebuilds geometry, repaints a canvas texture,
+pushes a colour into a material — creates two different write paths. The Inspector calls
+`setValue`, so authoring works. A game script writes the field, and nothing is redrawn:
+
+```typescript
+bar.setValue(30);  // clamps, then updateBarVisuals() — the bar moves
+bar.value = 30;    // field changes, NOTHING is redrawn
+```
+
+The second spelling is the natural one, it type-checks, and the getter afterwards returns `30` —
+so state-based verification (including the agent's `game_observe`) confirms a success that never
+reached the screen. The runtime shipped **31** such properties across 16 node types before this was
+measured; `UIControl2D.label` was found only because a human looked at the canvas.
+
+So end every concrete node's constructor with:
+
+```typescript
+installReactiveSchemaProperties(this, CustomNode.getPropertySchema);
+```
+
+It converts each schema property the instance stores as a plain field into an accessor that routes
+writes through `setValue`, leaves properties that are already accessors alone, and is idempotent.
+Two rules:
+
+- It must be the **last** statement — the refresh work usually needs the node's meshes and size.
+- Put it in **concrete** classes only, never an abstract base: a base constructor runs before the
+  subclass's fields exist. A leaf's merged schema already covers inherited properties.
+
+`reactive-schema-coverage.spec.ts` fails if a node type the `SceneLoader` can build never calls it,
+so forgetting is caught rather than shipped. What the mechanism cannot fix: mutating a `readonly`
+vector in place (`sprite.tileOffset.x += dt`) never assigns the property, so nothing runs — expose a
+method for those.
+
 ## The funnel rule (the one fragile spot)
 
 Any code that needs a node's **full** schema MUST call

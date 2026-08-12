@@ -345,8 +345,14 @@ export function clearErrors(): void {
 /**
  * Marker every script-diagnostic message carries (`scripts/Foo.ts:12:3 — …`), used to retire them
  * once a fresh type-check comes back clean.
+ *
+ * Deliberately NOT anchored to the start of the message: diagnostics reach the buffer through the
+ * Logger, which prefixes them (`[Pix3 ERROR] scripts/Foo.ts:12:3 — …`). An anchored pattern matched
+ * only the bare form the unit test fed it, so in the real editor nothing was ever retired and
+ * `read_errors` went on reporting type errors the agent had already fixed. The ` — ` separator is
+ * what keeps this from eating a genuine runtime error whose stack mentions a script path.
  */
-const SCRIPT_DIAGNOSTIC_PATTERN = /^\s*(?:src\/)?scripts\/[^\s]+\.ts:\d+:\d+\s+—/;
+const SCRIPT_DIAGNOSTIC_PATTERN = /(?:^|\s)(?:src\/)?scripts\/[^\s]+\.ts:\d+:\d+\s+—/;
 
 /**
  * Drop compile/type-check diagnostics from the buffer, keeping genuine runtime errors.

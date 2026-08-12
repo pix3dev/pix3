@@ -23,6 +23,8 @@ interface FakeLiveNode {
   rotation: { z: number };
   scale: { x: number; y: number; z: number };
   opacity?: number;
+  /** Ancestor chain, walked to decide whether the node is actually on screen. */
+  parent?: { visible: boolean; name: string; parent?: unknown } | null;
   children: FakeChild[];
   getWorldPosition(target: { set(x: number, y: number, z: number): unknown }): {
     x: number;
@@ -75,6 +77,8 @@ const makeRuntime = (nodes: FakeLiveNode[]) => {
     getLiveNodeById: (id: string) => nodes.find(n => n.nodeId === id) ?? null,
     findLiveNodeByName: (name: string) =>
       nodes.find(n => n.name.toLowerCase() === name.toLowerCase()) ?? null,
+    findLiveNodesByName: (name: string, limit = Number.POSITIVE_INFINITY) =>
+      nodes.filter(n => n.name.toLowerCase() === name.toLowerCase()).slice(0, limit),
     getLiveRootNodes: () => nodes,
     // Project world (x, y) with the plain logical mapping of a 1920x1080 view onto the 960x540 backing store.
     projectWorldPointToCanvas: (x: number, y: number) => ({
@@ -179,6 +183,190 @@ describe('GameInputService', () => {
     // Node at world (0,0) → backing (480, 270) → client: rect.left + 480/960*480 = 340, rect.top + 270/540*270 = 185.
     expect(events[0].x).toBeCloseTo(340, 3);
     expect(events[0].y).toBeCloseTo(185, 3);
+  });
+
+  it('flags a tap target whose name matches more than one live node', async () => {
+    // The exact shape an agent leaves behind: an abandoned scratch node reusing a real node's
+    // name. Both ids are generated, so the name is all the caller has to go on.
+    const real = makeLiveNode({
+      nodeId: 'button2d-111',
+      name: 'Cell',
+      position: { x: 0, y: 0, z: 0 },
+    });
+    const stray = makeLiveNode({
+      nodeId: 'button2d-222',
+      name: 'Cell',
+      position: { x: 200, y: 0, z: 0 },
+    });
+    const runtime = makeRuntime([real, stray]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'Cell', holdMs: 20 }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.ambiguousTargets).toEqual(['Cell']);
+  });
+
+  describe('scene swaps', () => {
+    /**
+     * A tap that navigates: the live roots are replaced mid-window, exactly as
+     * `SceneRunner.runGraph` does on `changeScene`. Verified live in the editor first — tapping
+     * "Menu Button" in the tic-tac-toe prototype swapped the roots Game Root → Menu Root.
+     */
+    const runtimeThatNavigatesOnTap = () => {
+      const button = makeLiveNode({ nodeId: 'menu-button', name: 'Menu Button' });
+      const roots = [button];
+      const runtime = makeRuntime(roots);
+      window.addEventListener(
+        'pointerdown',
+        () => {
+          roots.splice(0, roots.length, makeLiveNode({ nodeId: 'menu-root', name: 'Menu Root' }));
+        },
+        { once: true }
+      );
+      return runtime;
+    };
+
+    it('reports SCENE CHANGED rather than NO ACTIVITY when the input navigates away', async () => {
+      const { service } = buildService(runtimeThatNavigatesOnTap());
+
+      const result = await service.run([{ type: 'tap', target: 'Menu Button', holdMs: 20 }], {
+        observe: ['Menu Button'],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.sceneChanged).toEqual({
+        fromRoots: ['Menu Button'],
+        toRoots: ['Menu Root'],
+      });
+      expect(result.verdict).toMatch(/^SCENE CHANGED/);
+      expect(result.verdict).not.toMatch(/NO ACTIVITY/);
+    });
+
+    it('produces a verdict on a scene swap even with nothing observed', async () => {
+      const { service } = buildService(runtimeThatNavigatesOnTap());
+
+      const result = await service.run([{ type: 'tap', target: 'Menu Button', holdMs: 20 }]);
+
+      expect(result.verdict).toMatch(/^SCENE CHANGED/);
+    });
+
+    it('does not cry scene-swap when the same scene keeps running', async () => {
+      const runtime = makeRuntime([makeLiveNode({ name: 'Player' })]);
+      const { service } = buildService(runtime);
+
+      const result = await service.run([{ type: 'wait', ms: 10 }], { observe: ['Player'] });
+
+      expect(result.sceneChanged).toBeUndefined();
+      expect(result.verdict).not.toMatch(/SCENE CHANGED/);
+    });
+  });
+
+  it('reports a UI control as disabled, which is why its press never registers', async () => {
+    // The RETRY button case: the recipe binds the handler and leaves the button disabled until its
+    // own game-over path re-enables it. A script that shows the overlay itself skips that, so the
+    // button is on screen, the tap is dispatched, and nothing happens — indistinguishable from a
+    // broken handler until the snapshot says `enabled: false`.
+    const button = makeLiveNode({ nodeId: 'retry-button', name: 'Retry Button', visible: true });
+    Object.assign(button, { enabled: false, isHovering: false, isPressed: false });
+    const runtime = makeRuntime([button]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'Retry Button', holdMs: 20 }], {
+      observe: ['Retry Button'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.observed?.['Retry Button'].after?.control).toEqual({
+      enabled: false,
+      hovering: false,
+      pressed: false,
+    });
+  });
+
+  it('omits control state for a node that is not a UI control', async () => {
+    const runtime = makeRuntime([makeLiveNode({ name: 'Player' })]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'wait', ms: 10 }], { observe: ['Player'] });
+
+    expect(result.observed?.Player.after?.control).toBeUndefined();
+  });
+
+  it('does not flag a target resolved by a unique nodeId', async () => {
+    const runtime = makeRuntime([
+      makeLiveNode({ nodeId: 'cell-0', name: 'Cell', position: { x: 0, y: 0, z: 0 } }),
+      makeLiveNode({ nodeId: 'cell-1', name: 'Cell', position: { x: 200, y: 0, z: 0 } }),
+    ]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'cell-0', holdMs: 20 }]);
+
+    expect(result.ok).toBe(true);
+    expect(result.ambiguousTargets).toBeUndefined();
+  });
+
+  it('refuses to tap a node whose ancestor is hidden, naming the ancestor', async () => {
+    // The retry-button shape: the button and label were set visible, the parent overlay was not, so
+    // the tap landed in empty space and the turn read it as dead game logic.
+    const overlay = { visible: false, name: 'Result Overlay', parent: null };
+    const button = makeLiveNode({
+      nodeId: 'retry-button',
+      name: 'Retry Button',
+      visible: true,
+      parent: overlay,
+    });
+    const runtime = makeRuntime([button]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'Retry Button' }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Result Overlay/);
+    expect(result.error).toMatch(/cannot reach it|not on screen/i);
+  });
+
+  it('refuses to tap a node that is itself invisible', async () => {
+    const node = makeLiveNode({ name: 'Hidden', visible: false });
+    const runtime = makeRuntime([node]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'Hidden' }]);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/visible: false/);
+  });
+
+  it('reports an off-screen watched node in the verdict instead of plain NO ACTIVITY', async () => {
+    const overlay = { visible: false, name: 'Result Overlay', parent: null };
+    const label = makeLiveNode({
+      nodeId: 'result-label',
+      name: 'Result Label',
+      visible: true,
+      parent: overlay,
+    });
+    const tappable = makeLiveNode({ nodeId: 'cell-0', name: 'cell-0', visible: true });
+    const runtime = makeRuntime([label, tappable]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'tap', target: 'cell-0', holdMs: 20 }], {
+      observe: ['Result Label'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.observed?.['Result Label'].after?.hiddenByAncestor).toBe('Result Overlay');
+    expect(result.verdict).toMatch(/NOT ON SCREEN/);
+  });
+
+  it('leaves hiddenByAncestor absent when the whole chain is visible', async () => {
+    const layer = { visible: true, name: 'HUD', parent: null };
+    const node = makeLiveNode({ name: 'Score Label', visible: true, parent: layer });
+    const runtime = makeRuntime([node]);
+    const { service } = buildService(runtime);
+
+    const result = await service.run([{ type: 'wait', ms: 10 }], { observe: ['Score Label'] });
+
+    expect(result.observed?.['Score Label'].after?.hiddenByAncestor).toBeUndefined();
   });
 
   it('names the missing node when a tap target is not found', async () => {

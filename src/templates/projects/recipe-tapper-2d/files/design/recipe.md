@@ -82,6 +82,16 @@ Replacing a whole script the list above names is expected: use `fs_write` with
 `overwrite: true` and a short `reason` (the size guard only blocks *silent*
 wholesale rewrites).
 
+## Ending a run belongs to GameRules
+
+The result overlay and RETRY are **owned by `GameRules`**: it hides the overlay on
+start and keeps `retry-button` **disabled**, then `finish(won)` shows the overlay,
+writes the result text, enables RETRY and freezes the gameplay nodes. For a custom
+win/lose condition call `finish(true|false)` on that component — do NOT show the
+overlay yourself. A hand-rolled ending leaves RETRY on screen with its handler bound
+and `enabled: false`, i.e. a button that can never be pressed (`game_observe` reports
+`control: { enabled: false }`; that is the tell).
+
 ## Do not touch
 
 - The node ids above (rename `name`, never `id`), and the signal names.

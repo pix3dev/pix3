@@ -123,4 +123,29 @@ describe('clearScriptDiagnosticErrors', () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0]).toContain('Cannot read properties of null');
   });
+
+  it('retires diagnostics in the shape the Logger actually emits', () => {
+    installErrorCapture();
+    // Verbatim from a live session: the Logger prefixes the level and appends the diag object, so
+    // a start-anchored pattern missed every real diagnostic while this test's bare form passed.
+    console.error(
+      "[Pix3 ERROR] scripts/TicTacToe.ts:87:9 — Type 'unknown' is not assignable to type 'string'. (ts2322) [object Object]"
+    );
+    console.error('[Pix3 ERROR] TypeError: btn.setText is not a function');
+
+    clearScriptDiagnosticErrors();
+
+    const remaining = errors().map(entry => entry.message);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).toContain('btn.setText is not a function');
+  });
+
+  it('keeps a runtime error whose stack merely mentions a script path', () => {
+    installErrorCapture();
+    console.error('TypeError: undefined is not an object\n    at onUpdate (scripts/Foo.ts:12:3)');
+
+    clearScriptDiagnosticErrors();
+
+    expect(errors()).toHaveLength(1);
+  });
 });

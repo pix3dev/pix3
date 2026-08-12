@@ -147,6 +147,21 @@ const MAX_LOG_ENTRIES = 200;
 const FS_WRITE_GUARD_CHARS = 2_000;
 
 /**
+ * A file this small is returned WHOLE even when the agent asked for a line range. Measured in a
+ * dogfooding run: the agent paged through a 15.4 KB `main.pix3scene` **six times** because each
+ * str_replace shifted its anchors, spending 16 of 40 iterations on reading. The whole file fits in
+ * one tool result (`MAX_TOOL_RESULT_CHARS` = 24 000, and JSON escaping of newlines/quotes inflates
+ * text by well under 50 %), so serving it in full is strictly cheaper than the paging loop.
+ */
+const FS_READ_FULL_CHARS = 16_000;
+
+/** Lines of the updated file returned on each side of a successful str_replace. */
+const STR_REPLACE_CONTEXT_LINES = 8;
+
+/** Hard cap on the post-edit context, so an edit inside very long lines cannot flood the result. */
+const STR_REPLACE_CONTEXT_CHARS = 2_000;
+
+/**
  * Property types whose value is a genuine string — never JSON-parse an agent-supplied string for
  * these (a color "#ff0000", an enum "idle", or a node reference must stay a string). Every OTHER
  * type — numbers, booleans, vectors, objects — may arrive stringified from some providers (see
@@ -341,7 +356,8 @@ export class AgentToolRegistry {
       },
       {
         name: 'scene_tree',
-        description: 'Return the active scene as a node tree, expanded up to maxDepth levels.',
+        description:
+          "Return the EDITOR's active scene as a node tree, expanded up to maxDepth levels. This is the authored graph, not the running game: if the game has navigated to another scene the result carries `staleWhilePlaying` naming the live roots — read what is actually on screen with game_observe.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -412,7 +428,7 @@ export class AgentToolRegistry {
         description:
           'Create a new node in the active scene (undoable). Use it to build scenes and — importantly — to turn placeholder art into real graphics, e.g. add a Sprite2D that shows a generated texture. `nodeType` is case-insensitive; creatable types: ' +
           CREATABLE_NODE_TYPES.join(', ') +
-          ". Pass `texturePath` (res://…) for sprites (it also auto-sizes them), an optional `parentId` (defaults to a sensible root) and `position` {x,y}, and a `properties` object for anything else (color/width/height/label/opacity/…) applied via set_property after creation. Returns the new nodeId. To REPLACE an existing placeholder such as a ColorRect2D with a sprite, prefer convert_node_type — it keeps the node's transform, components and children.",
+          ". Pass `texturePath` (res://…) for sprites (it also auto-sizes them), an optional `parentId` (defaults to a sensible root) and `position` {x,y}, and a `properties` object for anything else (color/width/height/label/opacity/…) applied via set_property after creation. Returns the new nodeId, plus a `warning` + `duplicateNameNodeIds` when the chosen `name` already exists in the scene (name-based addressing in game_input/game_observe then becomes ambiguous — rename or delete). To REPLACE an existing placeholder such as a ColorRect2D with a sprite, prefer convert_node_type — it keeps the node's transform, components and children.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -626,8 +642,7 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_read',
-        description:
-          'Read a project file. Text files return their content plus `totalLines`; binary files return metadata (size, mimeType) only. For LARGE files (e.g. a big .pix3scene) read a RANGE with `offset` (1-based start line) and `limit` (line count) — the result then also reports `startLine`, `endLine` and `hasMore`. Reading an exact range is the reliable way to copy text verbatim for a str_replace edit on a big file (a full read may be truncated in transit).',
+        description: `Read a project file. Text files return their content plus \`totalLines\`; binary files return metadata (size, mimeType) only. For LARGE files (e.g. a big .pix3scene) read a RANGE with \`offset\` (1-based start line) and \`limit\` (line count) — the result then also reports \`startLine\`, \`endLine\` and \`hasMore\`. Reading an exact range is the reliable way to copy text verbatim for a str_replace edit on a big file (a full read may be truncated in transit). A file under ${FS_READ_FULL_CHARS} characters is ALWAYS returned whole and says so in \`note\`, even if you asked for a range — you then have the complete file, so do not page through it.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -682,7 +697,7 @@ export class AgentToolRegistry {
       {
         name: 'str_replace',
         description:
-          'Make a TARGETED edit to an existing project text file: replace an exact `old_string` with `new_string`, leaving everything else byte-for-byte. PREFER THIS over fs_write for changing existing code — a full rewrite can silently drop or revert other parts of the file (a real session regressed a working fix that way). `old_string` must match the file EXACTLY (indentation and whitespace included) and be UNIQUE — include a few surrounding lines to pin it down. It makes NO change and returns an error if `old_string` is not found or matches more than once; read the error, widen the context, and retry. Pass replace_all:true to replace every occurrence. Use fs_write only to CREATE a file or rewrite it wholesale. Editing the active .pix3scene reloads it (same as fs_write).',
+          'Make a TARGETED edit to an existing project text file: replace an exact `old_string` with `new_string`, leaving everything else byte-for-byte. PREFER THIS over fs_write for changing existing code — a full rewrite can silently drop or revert other parts of the file (a real session regressed a working fix that way). `old_string` must match the file EXACTLY (indentation and whitespace included) and be UNIQUE — include a few surrounding lines to pin it down. It makes NO change and returns an error if `old_string` is not found or matches more than once; read the error, widen the context, and retry. Pass replace_all:true to replace every occurrence. Use fs_write only to CREATE a file or rewrite it wholesale. Editing the active .pix3scene reloads it (same as fs_write). On success the result carries `context` — the surrounding lines of the file AS IT NOW IS (verbatim, with `startLine`/`endLine`) — plus the new `totalLines`. Anchor your NEXT edit on that text instead of re-reading the file: line numbers shift after every edit, the returned context does not.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -725,14 +740,14 @@ export class AgentToolRegistry {
       {
         name: 'compile_scripts',
         description:
-          'Compile the project user scripts (esbuild). Returns compilation diagnostics as the result — a syntax check for agent edits before play.',
+          'Build and register the project user scripts, THEN type-check them — one call, the whole answer. `ok: false` means either the bundle failed (see `error`/`file`/`line`) or the bundle registered but TypeScript found problems (`errorCount` > 0 with `diagnostics`: { file, line, column, message, category, code }). Do NOT follow this with check_scripts: the type diagnostics are already in this result.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.compileScripts(),
       },
       {
         name: 'check_scripts',
         description:
-          'Type-check ALL project scripts and return semantic + syntax problems with { file, line, column, message, category, code }. Catches TypeScript type errors that compile_scripts (esbuild, transpile-only) misses — e.g. assigning to the read-only `position`/`rotation`/`scale`, wrong argument types, misspelled imports. Use this to find why a script misbehaves and to verify your own edits.',
+          'Type-check ALL project scripts WITHOUT rebuilding, returning { file, line, column, message, category, code } problems. compile_scripts already runs this check and reports the same diagnostics, so after an edit just compile — reach for this only to re-check untouched code (e.g. why a script misbehaves when you changed nothing).',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.checkScripts(),
       },
@@ -781,7 +796,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report their rendered `text` (Label2D/Button2D — check a score/HUD value by reading it, not by screenshotting), `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report their rendered `text` (Label2D/Button2D — check a score/HUD value by reading it, not by screenshotting), `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity. Tapping a node that is off screen is REFUSED with the reason (its own `visible: false`, or `hiddenByAncestor` — an invisible parent hides the whole subtree), instead of dispatching into empty space and looking like dead game logic. If the input navigated the game to ANOTHER SCENE, the result says so via `sceneChanged` {fromRoots,toRoots} and the verdict leads with SCENE CHANGED — the watched nodes died with the old scene, so re-observe against the new one instead of reading their deltas as a dead reaction.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -856,7 +871,7 @@ export class AgentToolRegistry {
       {
         name: 'game_observe',
         description:
-          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, the rendered `text` of label-like nodes (Label2D/Button2D — read the SCORE or HUD value straight off the node instead of screenshotting it), children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree).",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, the rendered `text` of label-like nodes (Label2D/Button2D — read the SCORE or HUD value straight off the node instead of screenshotting it), children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree). `visible` is the node's OWN flag and is NOT proof it is on screen: when an ancestor is hidden the snapshot carries `hiddenByAncestor` and the `hint` says NOT ON SCREEN — an invisible parent hides the whole subtree, so such a node draws nothing and cannot be tapped no matter what its own properties say. A UI control (Button2D/Checkbox2D/Slider2D/…) also reports `control: { enabled, hovering, pressed }` — READ IT FIRST when a button does nothing: `enabled: false` means the press can never register (the recipe may keep a result-overlay button disabled until its own game-over path enables it), and `hovering` tells you whether the pointer reached the control's bounds at all.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -1243,7 +1258,9 @@ export class AgentToolRegistry {
     );
   }
 
-  private sceneTree(maxDepth: number): (NodeDTO & { sceneVersion: string }) | null {
+  private sceneTree(
+    maxDepth: number
+  ): (NodeDTO & { sceneVersion: string; staleWhilePlaying?: string }) | null {
     const graph = this.sceneManager.getActiveSceneGraph();
     if (!graph) return null;
     const roots = graph.rootNodes.filter((n): n is NodeBase => n instanceof NodeBase);
@@ -1258,7 +1275,30 @@ export class AgentToolRegistry {
       properties: null,
       children: roots.map(root => nodeToDTO(root, maxDepth - 1)),
     };
-    return { ...tree, sceneVersion: graph.version };
+    return { ...tree, sceneVersion: graph.version, ...this.playingElsewhereNote(roots) };
+  }
+
+  /**
+   * This tool reads the EDITOR's authored graph. Once the game navigates (`scene.changeScene`, a
+   * menu button), the running scene is a different one — and a tree that quietly describes the
+   * scene you are NOT looking at is worse than no tree: paired with a mis-read game_input verdict
+   * it led to the conclusion that a working scene transition had done nothing.
+   */
+  private playingElsewhereNote(
+    authoredRoots: readonly NodeBase[]
+  ): { staleWhilePlaying?: string } | Record<string, never> {
+    if (!appState.ui.isPlaying) return {};
+    const liveRoots = this.playSession.getActiveRuntime()?.runner.getLiveRootNodes() ?? [];
+    if (liveRoots.length === 0) return {};
+    const authoredIds = new Set(authoredRoots.map(root => root.nodeId));
+    if (liveRoots.some(root => authoredIds.has(root.nodeId))) return {};
+    return {
+      staleWhilePlaying: `The RUNNING game is in a different scene (live roots: ${liveRoots
+        .map(root => root.name || root.nodeId)
+        .join(
+          ', '
+        )}). This tree is the editor's open scene — the game navigated away from it. Use game_observe for what is actually on screen.`,
+    };
   }
 
   private nodeInspect(nodeId: string): (NodeDTO & { components?: unknown[] }) | null {
@@ -1334,7 +1374,8 @@ export class AgentToolRegistry {
    * every node has. Used only to make a failed set_property self-explanatory.
    */
   private describeNodeProperties(node: NodeBase): string[] {
-    const own = node.properties && typeof node.properties === 'object' ? Object.keys(node.properties) : [];
+    const own =
+      node.properties && typeof node.properties === 'object' ? Object.keys(node.properties) : [];
     return [...new Set([...own, 'position', 'rotation', 'scale', 'visible', 'name'])];
   }
 
@@ -1406,13 +1447,33 @@ export class AgentToolRegistry {
     }
     await this.saveActiveSceneBestEffort();
 
-    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    const graph = this.sceneManager.getActiveSceneGraph();
+    const node = graph?.nodeMap.get(nodeId);
+    // Names are how the agent addresses nodes at runtime (game_input/game_observe resolve by name),
+    // so a fresh duplicate makes every later reference ambiguous. Observed in a dogfooding run: the
+    // agent created a second `cell-0`, changed its mind, and left the orphan wired to nothing.
+    // Warn instead of refusing — duplicate names are legal, and the create already happened.
+    const createdName = node?.name ?? '';
+    const duplicateNodeIds = createdName
+      ? [...(graph?.nodeMap.values() ?? [])]
+          .filter(
+            other =>
+              other instanceof NodeBase && other.name === createdName && other.nodeId !== nodeId
+          )
+          .map(other => (other as NodeBase).nodeId)
+      : [];
     return {
       ok: true,
       nodeId,
       nodeType: node?.type ?? nodeType,
       name: node?.name,
       ...(Object.keys(propertyErrors).length > 0 ? { propertyErrors } : {}),
+      ...(duplicateNodeIds.length > 0
+        ? {
+            duplicateNameNodeIds: duplicateNodeIds,
+            warning: `The scene already had ${duplicateNodeIds.length} other node(s) named "${createdName}". Addressing by name is now ambiguous — rename this one with set_property, or delete it if you created it by mistake.`,
+          }
+        : {}),
     };
   }
 
@@ -1806,7 +1867,7 @@ export class AgentToolRegistry {
     offset?: number,
     limit?: number
   ): Promise<
-    | { path: string; content: string; totalLines: number }
+    | { path: string; content: string; totalLines: number; note?: string }
     | {
         path: string;
         content: string;
@@ -1826,6 +1887,16 @@ export class AgentToolRegistry {
       const totalLines = lines.length;
       if (offset === undefined && limit === undefined) {
         return { path: safe, content, totalLines };
+      }
+      // A range was requested, but the file is small enough to hand over whole — do that instead of
+      // letting the agent page a moving target. See FS_READ_FULL_CHARS.
+      if (content.length <= FS_READ_FULL_CHARS) {
+        return {
+          path: safe,
+          content,
+          totalLines,
+          note: `Range ignored: the whole file is only ${content.length} characters, so all ${totalLines} lines are here. You have the complete file — no follow-up range reads needed.`,
+        };
       }
       const startLine = Math.min(Math.max(1, offset ?? 1), totalLines);
       const startIdx = startLine - 1;
@@ -1914,7 +1985,14 @@ export class AgentToolRegistry {
     newString: string,
     replaceAll: boolean
   ): Promise<
-    | { ok: true; path: string; replacements: number; reloadedScene?: string }
+    | {
+        ok: true;
+        path: string;
+        replacements: number;
+        totalLines: number;
+        context?: { startLine: number; endLine: number; text: string };
+        reloadedScene?: string;
+      }
     | { ok: false; error: string }
   > {
     const safe = this.safePath(path);
@@ -1950,19 +2028,21 @@ export class AgentToolRegistry {
         error: `old_string matches ${count} places in ${safe}. Include surrounding lines to make it unique, or pass replace_all:true to change all ${count}.`,
       };
     }
-    let updated: string;
-    if (replaceAll) {
-      updated = content.split(oldString).join(newString);
-    } else {
-      const at = content.indexOf(oldString);
-      updated = content.slice(0, at) + newString + content.slice(at + oldString.length);
-    }
+    // The FIRST match sits at the same offset in both strings (everything before it is untouched),
+    // so its post-edit span is [at, at + newString.length) in `updated` for both modes.
+    const at = content.indexOf(oldString);
+    const updated = replaceAll
+      ? content.split(oldString).join(newString)
+      : content.slice(0, at) + newString + content.slice(at + oldString.length);
     await this.storage.writeTextFile(safe, updated);
     const reloadedScene = await this.reloadSceneIfOpen(safe);
+    const context = sliceEditContext(updated, at, at + newString.length);
     return {
       ok: true,
       path: safe,
       replacements: replaceAll ? count : 1,
+      totalLines: updated.split('\n').length,
+      ...(context ? { context } : {}),
       ...(reloadedScene ? { reloadedScene } : {}),
     };
   }
@@ -2054,12 +2134,24 @@ export class AgentToolRegistry {
       // force: the agent's automation window is typically unfocused, which would defer the build.
       await this.projectScriptLoader.syncAndBuild({ force: true });
       await this.projectScriptLoader.ensureReady();
+      // esbuild only transpiles, so a green bundle says nothing about types: measured, an agent
+      // wrote a script calling a method that does not exist, read `ok: true`, and only found out
+      // three iterations later via a separate check_scripts (plus two loop-breaker hits on the
+      // repeats). Folding the type-check in makes one call the whole answer.
+      const typeCheck = await this.runTypeCheck();
       return {
-        ok: true,
+        ok: typeCheck.errorCount === 0,
+        bundled: true,
+        registered: true,
         fileCount: files.size,
         bytes: result.code.length,
         warnings: result.warnings,
-        registered: true,
+        ...typeCheck.report,
+        ...(typeCheck.errorCount > 0
+          ? {
+              message: `The bundle built and registered, but ${typeCheck.errorCount} type error(s) remain — fix them in the listed files. No need to call check_scripts, this result already is it.`,
+            }
+          : {}),
       };
     } catch (error) {
       const compileError = error as CompilationError;
@@ -2074,6 +2166,23 @@ export class AgentToolRegistry {
   }
 
   private async checkScripts(): Promise<Record<string, unknown>> {
+    const typeCheck = await this.runTypeCheck();
+    if (typeCheck.error !== undefined) {
+      return { ok: false, error: typeCheck.error };
+    }
+    return { ok: true, ...typeCheck.report };
+  }
+
+  /**
+   * Full project type-check, shared by `check_scripts` and the tail of `compile_scripts`. A
+   * type-checker that cannot load is reported as `typeCheck: 'unavailable'` rather than as a
+   * failure — it must not turn a good bundle into a red result.
+   */
+  private async runTypeCheck(): Promise<{
+    errorCount: number;
+    report: Record<string, unknown>;
+    error?: string;
+  }> {
     try {
       const summary = await this.diagnostics.checkProject();
       if (summary.errorCount === 0) {
@@ -2083,16 +2192,20 @@ export class AgentToolRegistry {
         clearScriptDiagnosticErrors();
       }
       return {
-        ok: true,
-        filesChecked: summary.filesChecked,
         errorCount: summary.errorCount,
-        warningCount: summary.warningCount,
-        diagnostics: summary.diagnostics,
+        report: {
+          filesChecked: summary.filesChecked,
+          errorCount: summary.errorCount,
+          warningCount: summary.warningCount,
+          diagnostics: summary.diagnostics,
+        },
       };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        errorCount: 0,
+        report: { typeCheck: 'unavailable', typeCheckError: message },
+        error: message,
       };
     }
   }
@@ -2756,6 +2869,54 @@ const countOccurrences = (haystack: string, needle: string): number => {
     index = haystack.indexOf(needle, index + needle.length);
   }
   return count;
+};
+
+/**
+ * Verbatim slice of `text` around the byte range [from, to), widened to whole lines plus
+ * {@link STR_REPLACE_CONTEXT_LINES} on each side. Returned after a successful str_replace so the
+ * agent can anchor its NEXT edit on lines it just received instead of re-reading the file — the
+ * measured cost of the alternative was six full re-reads of one 15.4 KB scene in a single turn.
+ *
+ * Context lines are dropped from the outside in until the slice fits {@link
+ * STR_REPLACE_CONTEXT_CHARS}; the text stays byte-exact (never elided mid-line), so it is always
+ * safe to copy into the next `old_string`. Returns null when even the edited lines alone exceed the
+ * cap — better no context than context the agent cannot trust as verbatim.
+ */
+const sliceEditContext = (
+  text: string,
+  from: number,
+  to: number
+): { startLine: number; endLine: number; text: string } | null => {
+  const lines = text.split('\n');
+  const lineStarts: number[] = [];
+  let cursor = 0;
+  for (const line of lines) {
+    lineStarts.push(cursor);
+    cursor += line.length + 1; // + '\n'
+  }
+  const lineOf = (index: number): number => {
+    let low = 0;
+    let high = lineStarts.length - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (lineStarts[mid]! <= index) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+  const coreFirst = lineOf(from);
+  const coreLast = lineOf(Math.max(from, to - 1));
+  for (let pad = STR_REPLACE_CONTEXT_LINES; pad >= 0; pad -= 1) {
+    const first = Math.max(0, coreFirst - pad);
+    const last = Math.min(lines.length - 1, coreLast + pad);
+    const slice = lines.slice(first, last + 1).join('\n');
+    if (slice.length <= STR_REPLACE_CONTEXT_CHARS || pad === 0) {
+      return pad === 0 && slice.length > STR_REPLACE_CONTEXT_CHARS
+        ? null
+        : { startLine: first + 1, endLine: last + 1, text: slice };
+    }
+  }
+  return null;
 };
 
 const asString = (value: unknown): string => {

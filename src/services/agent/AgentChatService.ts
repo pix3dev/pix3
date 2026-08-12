@@ -186,12 +186,42 @@ const GAME_MUTATION_COMPONENT_TOOLS = new Set([
  */
 const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
   if (GAME_MUTATION_COMPONENT_TOOLS.has(toolName)) return true;
-  if (toolName === 'fs_write') {
+  // `str_replace` counts as much as `fs_write`: the skills tell the agent to prefer it for edits, so
+  // a gate that only watched fs_write was blind to the documented edit path — a whole increment
+  // could be authored with str_replace and close the turn with no game proof demanded.
+  if (toolName === 'fs_write' || toolName === 'str_replace') {
     const path = (input as { path?: unknown } | null | undefined)?.path;
     return typeof path === 'string' && /\.(ts|pix3scene)$/i.test(path);
   }
   return false;
 };
+
+/**
+ * Tools that change project or engine state, so an earlier identical result stops being evidence of
+ * a loop. Used to reset the loop-breaker's memory — without it, an agent that edited a script,
+ * recompiled and re-ran `play_start {scene, reload:true}` (exactly what that tool documents) got
+ * scolded for a "repeat" and escalated to the stuck directive on its third legitimate restart.
+ * Deliberately excludes the play and observation tools: their own repeats are what the breaker
+ * exists to catch.
+ */
+const STATE_CHANGING_TOOLS = new Set([
+  'set_property',
+  'create_node',
+  'convert_node_type',
+  'move_node',
+  'add_component',
+  'set_component_property',
+  'remove_component',
+  'run_command',
+  'fs_write',
+  'str_replace',
+  'fs_delete',
+  'compile_scripts',
+  'generate_asset',
+  'process_asset',
+  'generate_model_3d',
+  'generate_scene_3d',
+]);
 
 /**
  * Hard ceiling on ONE provider round-trip. A request that never resolves (no response, no error —
@@ -812,6 +842,19 @@ export class AgentChatService {
           }
         }
         lastResultBySignature.set(signature, resultText);
+        // A successful state change makes every OTHER remembered result stale: re-running the same
+        // observation now CAN return something different, so the nudge's own claim ("repeating it
+        // will not change anything") would be false. This call's own signature is kept, so a
+        // mutating tool that truly repeats itself verbatim is still caught.
+        if (STATE_CHANGING_TOOLS.has(call.name) && executed.result.isError !== true) {
+          const ownRepeats = repeatCountBySignature.get(signature);
+          lastResultBySignature.clear();
+          repeatCountBySignature.clear();
+          lastResultBySignature.set(signature, resultText);
+          if (ownRepeats !== undefined) {
+            repeatCountBySignature.set(signature, ownRepeats);
+          }
+        }
         if (executed.result.isError !== true) {
           allToolsErrored = false;
         }
@@ -1288,7 +1331,7 @@ export class AgentChatService {
       '- If a node property is recomputed every frame by a script/component (e.g. a controller that drives position along a path), a one-off scene/property edit will NOT hold at runtime — configure the script instead (set_component_property on its exposed fields). If the behaviour genuinely needs a script code change, make it and say so in your reply.',
       '- To give a node behaviour, attach a component: call list_component_types, then add_component (built-in "core:*" behaviours or a project "user:*" script), then configure it with set_component_property. Never hand-edit scene files to add a component.',
       '- For custom logic, write a Script subclass with fs_write under scripts/, run compile_scripts, then attach it with add_component using its "user:<ExportName>" type.',
-      '- After editing scripts with fs_write, run compile_scripts to check they build.',
+      '- After editing scripts with fs_write, run compile_scripts: it builds, registers AND type-checks in one call, returning any type diagnostics itself. Never chase it with check_scripts.',
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
       '- File paths are relative to the project root.',
       "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",

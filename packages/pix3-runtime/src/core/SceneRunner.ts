@@ -652,25 +652,44 @@ export class SceneRunner {
 
   /**
    * Case-insensitive exact-name lookup over the running clone (first match in
-   * DFS order). Convenience for automation that targets nodes the way a user
-   * talks about them ("PlayButton") rather than by id.
+   * forward DFS order, same order as `findNodeById`). Convenience for automation
+   * that targets nodes the way a user talks about them ("PlayButton") rather than
+   * by id. See `findLiveNodesByName` when the caller must detect duplicates.
    */
   findLiveNodeByName(name: string): NodeBase | null {
+    return this.findLiveNodesByName(name, 1)[0] ?? null;
+  }
+
+  /**
+   * Every node of the running clone whose name matches, in forward DFS order, capped at `limit`.
+   * Callers that resolve a user- or agent-supplied name use this to notice that the name is
+   * ambiguous instead of silently acting on one of several nodes.
+   */
+  findLiveNodesByName(name: string, limit = Number.POSITIVE_INFINITY): NodeBase[] {
     const needle = name.toLowerCase();
-    const stack: NodeBase[] = [...(this.runtimeGraph?.rootNodes ?? [])];
+    const matches: NodeBase[] = [];
+    // Forward pre-order: the stack is fed children in REVERSE so `pop()` yields the first child
+    // first. The old push-in-order/pop version walked the tree backwards, so a duplicated name
+    // resolved to the LAST such node — which is how an abandoned scratch node, appended at the
+    // end of a parent, stole taps aimed at the real one.
+    const stack: NodeBase[] = [...(this.runtimeGraph?.rootNodes ?? [])].reverse();
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
       if (node.name.toLowerCase() === needle) {
-        return node;
+        matches.push(node);
+        if (matches.length >= limit) {
+          return matches;
+        }
       }
-      for (const child of node.children) {
+      for (let i = node.children.length - 1; i >= 0; i -= 1) {
+        const child = node.children[i];
         if (child instanceof NodeBase) {
           stack.push(child);
         }
       }
     }
-    return null;
+    return matches;
   }
 
   /**

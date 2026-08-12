@@ -742,3 +742,52 @@ describe('SceneRunner scene transitions (loadAndStartScene)', () => {
     expect(runGraphSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('SceneRunner live-node name lookup', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Root ▸ [Cell(b), Group ▸ Cell(d), Cell(e)] — three nodes sharing one name at three depths. */
+  const startDuplicateNameGraph = async (): Promise<SceneRunner> => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1 as unknown as number);
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+    const root = new NodeBase({ id: 'root', name: 'Root' });
+    const cellB = new NodeBase({ id: 'b', name: 'Cell' });
+    const group = new NodeBase({ id: 'group', name: 'Group' });
+    const cellD = new NodeBase({ id: 'd', name: 'Cell' });
+    const cellE = new NodeBase({ id: 'e', name: 'Cell' });
+    group.add(cellD);
+    root.add(cellB, group, cellE);
+    const nodes = [root, cellB, group, cellD, cellE];
+
+    await (runner as unknown as { runGraph: (graph: SceneGraph) => Promise<void> }).runGraph({
+      version: '1.0.0',
+      metadata: {},
+      rootNodes: [root],
+      nodeMap: new Map(nodes.map(n => [n.nodeId, n])),
+    });
+    return runner;
+  };
+
+  it('returns the FIRST duplicate in forward DFS order, not the last', async () => {
+    const runner = await startDuplicateNameGraph();
+    // The stack-based walk used to pop children in reverse, so this resolved to the last "Cell" —
+    // an abandoned scratch node appended to a parent stole taps aimed at the real one.
+    expect(runner.findLiveNodeByName('Cell')?.nodeId).toBe('b');
+    runner.stop();
+  });
+
+  it('lists every duplicate in tree order so callers can report the ambiguity', async () => {
+    const runner = await startDuplicateNameGraph();
+    expect(runner.findLiveNodesByName('cell').map(n => n.nodeId)).toEqual(['b', 'd', 'e']);
+    expect(runner.findLiveNodesByName('Cell', 2).map(n => n.nodeId)).toEqual(['b', 'd']);
+    expect(runner.findLiveNodesByName('Nope')).toEqual([]);
+    runner.stop();
+  });
+});

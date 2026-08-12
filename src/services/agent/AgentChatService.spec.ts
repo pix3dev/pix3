@@ -347,6 +347,77 @@ describe('AgentChatService', () => {
     expect(JSON.stringify(state.messages[4].content)).toMatch(/repeated an identical read_skill/);
   });
 
+  it('does not call a repeat a loop when a state-changing tool ran in between', async () => {
+    // Measured: edit → compile → play_start(reload) → edit → compile → play_start(reload) is the
+    // documented fix loop, but play_start returns the same payload every time, so the breaker
+    // scolded a legitimate restart and escalated to the stuck directive on the third one.
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('play_start', 'c1', { scene: 'scenes/main.pix3scene', reload: true })
+      )
+      .mockResolvedValueOnce(
+        toolCallResult('str_replace', 'c2', { path: 'scripts/Car.ts', old_string: 'a' })
+      )
+      .mockResolvedValueOnce(
+        toolCallResult('play_start', 'c3', { scene: 'scenes/main.pix3scene', reload: true })
+      )
+      .mockResolvedValueOnce(toolCallResult('game_input', 'c4', { steps: [] }))
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async (name: string) =>
+      name === 'play_start' ? { ok: true, scene: 'scenes/main.pix3scene' } : { ok: true }
+    );
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    const state = service.getState();
+    expect(JSON.stringify(state.messages)).not.toMatch(/repeated an identical/);
+  });
+
+  it('still flags a repeat when nothing changed between the two identical calls', async () => {
+    // The guard above must not blind the breaker: read-only calls in between change nothing.
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('play_start', 'c1', { scene: 'scenes/main.pix3scene', reload: true })
+      )
+      .mockResolvedValueOnce(toolCallResult('play_status', 'c2', {}))
+      .mockResolvedValueOnce(
+        toolCallResult('play_start', 'c3', { scene: 'scenes/main.pix3scene', reload: true })
+      )
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async () => ({ ok: true, scene: 'scenes/main.pix3scene' }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix it');
+
+    expect(JSON.stringify(service.getState().messages)).toMatch(/repeated an identical play_start/);
+  });
+
+  it('gates the turn on a str_replace script edit, not just fs_write', async () => {
+    // The skills tell the agent to prefer str_replace for edits, so the gate must watch it too.
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('str_replace', 'c1', { path: 'scripts/Car.ts', old_string: 'a' })
+      )
+      .mockResolvedValueOnce(textResult('Fixed the steering.'))
+      .mockResolvedValueOnce(toolCallResult('game_input', 'c2', { steps: [] }))
+      .mockResolvedValueOnce(textResult('Verified: it drives forward.'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('fix the car direction');
+
+    const gate = service
+      .getState()
+      .messages.find(
+        m => m.role === 'user' && JSON.stringify(m.content).includes('changed game logic')
+      );
+    expect(gate).toBeDefined();
+  });
+
   it('gates the turn: nudges once when game logic changed but the game was never run', async () => {
     const chat = vi
       .fn()

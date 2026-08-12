@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Texture, DoubleSide, Quaternion } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 
@@ -67,6 +68,9 @@ export class AnimatedSprite3D extends Node3D {
 
     // Drive the sprite material's alpha from the node opacity / fade APIs.
     this.registerOpacityMaterial(this.material);
+
+    // Last: script writes to width/height/color now rebuild the plane / retint the material.
+    installReactiveSchemaProperties(this, AnimatedSprite3D.getPropertySchema);
   }
 
   get currentFrame(): number {

@@ -52,6 +52,27 @@ screenshot plus `analyze_image` costs several iterations, answers "I don't see i
 not, and cannot tell you a number. Keep screenshots for questions that are genuinely visual —
 "does this look like a snake?" — and never use them to locate a node.
 
+**`visible: true` does NOT mean on screen.** It is the node's own flag; an invisible ancestor
+hides the entire subtree, so the node draws nothing and cannot be tapped. Showing a result label
+and a retry button while leaving their parent overlay hidden reads as a perfect win screen in
+every property and shows nothing on the stage — that exact mistake cost two turns. When a node is
+in that state the snapshot carries `hiddenByAncestor` and the `hint`/`verdict` say NOT ON SCREEN,
+and a tap on it is refused with the reason. To reveal an overlay, make the **container** visible.
+
+**A button that does nothing: read `control` before theorising.** `game_observe` reports
+`control: { enabled, hovering, pressed }` for every UI control. `enabled: false` means the press
+can never register — the recipe binds the result-overlay's RETRY handler and leaves the button
+disabled until *its own* game-over path enables it, so a script that shows the overlay itself gets
+an on-screen button that ignores every tap. `hovering: false` after a hover means the pointer never
+reached its bounds. Measured: three turns were spent guessing at engine internals for a button whose
+snapshot said `enabled: false` all along.
+
+**Start each verification from a known state.** Re-run `play_start` (or `play_restart`) before the
+input sequence that proves the increment. Driving a fresh sequence onto a board left over from the
+previous attempt makes the `before` snapshot already satisfy what you are testing — an agent
+"proved" a reset that never happened because the cells it read were dirty from the run before.
+Read your own `before` values: if they already show the end state, the run proves nothing.
+
 If after a few honest attempts you cannot prove it, **say so plainly** — what you tried, what
 you saw, what you think is wrong. A truthful "I could not get the collision to register"
 beats a cheerful "Done!" that the user disproves in two seconds on the stage.

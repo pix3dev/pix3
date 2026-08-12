@@ -16,6 +16,7 @@ import { OVERLAY_2D_FLAG } from '../../../core/render-order-2d';
 import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface ScrollContainer2DProps extends Group2DProps {
   scrollY?: number;
@@ -139,6 +140,11 @@ export class ScrollContainer2D extends Group2D {
     this.thumbMesh.visible = false;
     this.thumbMesh.name = `${this.name}-ScrollbarThumb`;
     this.add(this.thumbMesh);
+
+    // Last: most scrollbar props self-heal via the per-tick syncScrollbarVisuals(), but that only
+    // runs inside the game loop — this makes script writes apply the schema's clamps and repaint
+    // the materials immediately (and outside play mode at all).
+    installReactiveSchemaProperties(this, ScrollContainer2D.getPropertySchema);
   }
 
   get scrollY(): number {

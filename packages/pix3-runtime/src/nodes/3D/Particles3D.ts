@@ -22,6 +22,7 @@ import {
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import type { NodeBase } from '../NodeBase';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { Node3D, type Node3DProps } from '../Node3D';
 
 export type ParticleEmitterShape = 'point' | 'sphere' | 'box';
@@ -247,6 +248,10 @@ export class Particles3D extends Node3D {
     if (this.prewarm && this.playing) {
       this.prewarmSimulation();
     }
+
+    // Last: script writes to particleShape / maxParticles now swap the instanced geometry and
+    // reallocate the instance buffers instead of silently desyncing from the allocated attributes.
+    installReactiveSchemaProperties(this, Particles3D.getPropertySchema);
   }
 
   get texturePath(): string | null {

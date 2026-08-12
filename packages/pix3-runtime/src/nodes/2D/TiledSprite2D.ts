@@ -1,6 +1,7 @@
 import { BufferGeometry, Mesh, MeshBasicMaterial, Texture, Vector2 } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { configure2DTexture } from '../../core/configure-2d-texture';
 import {
@@ -101,6 +102,10 @@ export class TiledSprite2D extends Node2D {
     this.mesh.name = `${this.name}-Mesh`;
     this.applyAnchorOffset();
     this.add(this.mesh);
+
+    // Last: `panel.width = 300` / `panel.patchMode = 'tile'` now rebuild the geometry like the
+    // Inspector does. (In-place `tileOffset.x += dt` still bypasses this — no assignment fires.)
+    installReactiveSchemaProperties(this, TiledSprite2D.getPropertySchema);
   }
 
   private buildGeometryParams() {

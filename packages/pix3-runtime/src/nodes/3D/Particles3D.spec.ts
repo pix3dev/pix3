@@ -1,6 +1,7 @@
 import { BufferAttribute, InstancedMesh, Matrix4, Quaternion, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 
+import { reactiveSchemaPropertyNames } from '../../fw/reactive-schema-properties';
 import { Node3D } from '../Node3D';
 import { Particles3D } from './Particles3D';
 
@@ -279,5 +280,37 @@ describe('Particles3D sub-emitters', () => {
     // discarded (isPrewarming guard) and the pool stayed bounded.
     expect(priv(node).deathScratch.length).toBe(0);
     expect(priv(node).activeCount).toBeLessThanOrEqual(8);
+  });
+});
+
+describe('Particles3D script assignments', () => {
+  it('swaps the instanced geometry when a script assigns particleShape directly', () => {
+    const node = new Particles3D({ id: 'shape', name: 'Shape', maxParticles: 8 });
+    expect(priv(node).instancedMesh?.geometry.type).toBe('PlaneGeometry');
+
+    node.particleShape = 'cube';
+
+    // The consequence, not the field: the renderer was rebuilt around the new geometry.
+    expect(priv(node).instancedMesh?.geometry.type).toBe('BoxGeometry');
+  });
+
+  it('reallocates the instance buffers when a script raises maxParticles directly', () => {
+    const node = new Particles3D({ id: 'grow', name: 'Grow', maxParticles: 8 });
+
+    node.maxParticles = 32;
+
+    // Before the reactive install this only changed the number, leaving 8-slot attributes that
+    // updateParticles would index past. Now the pool and GPU attributes actually grow.
+    const mesh = priv(node).instancedMesh;
+    expect(priv(node).particles.length).toBe(32);
+    expect(mesh?.instanceMatrix.count).toBe(32);
+    expect(mesh?.instanceColor?.count).toBe(32);
+  });
+
+  it('installs reactive accessors for particleShape and maxParticles', () => {
+    const node = new Particles3D({ id: 'names', name: 'Names', maxParticles: 8 });
+    const reactive = reactiveSchemaPropertyNames(node);
+    expect(reactive.has('particleShape')).toBe(true);
+    expect(reactive.has('maxParticles')).toBe(true);
   });
 });

@@ -3,6 +3,10 @@ import { Color } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
+import {
+  assignWithoutSchemaRefresh,
+  installReactiveSchemaProperties,
+} from '../../fw/reactive-schema-properties';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import type { SpineAsset, SpineAssetRequest } from '../../core/spine/SpineAsset';
 import {
@@ -88,6 +92,11 @@ export class SpineSkeleton2D extends Node2D implements InstancePropertySchemaPro
 
     this.tintColor.set(this.color);
     this.syncSerializedProperties();
+
+    // Last: `spine.color = '#f00'` now reaches the private tintColor the per-frame applyTint
+    // reads (a bare field write NEVER applied, not even later), and skin/animation/timeScale
+    // writes hit the view. Every routed setValue tolerates a still-loading null view.
+    installReactiveSchemaProperties(this, SpineSkeleton2D.getPropertySchema);
   }
 
   /** The three files this node needs, or null while any of them is unset. */
@@ -206,10 +215,13 @@ export class SpineSkeleton2D extends Node2D implements InstancePropertySchemaPro
     }
 
     if ((options.trackIndex ?? 0) === 0) {
-      this.animation = name;
+      // The track is already playing with the CALLER's options. A plain assignment would re-enter the
+      // schema refresh, which re-plays track 0 with the authored `{loop: this.loop}` and discards the
+      // mix/offset the caller asked for — so record the name without re-running the refresh.
+      assignWithoutSchemaRefresh(this, 'animation', name);
       this.properties.animation = name;
     }
-    this.isPlaying = true;
+    assignWithoutSchemaRefresh(this, 'isPlaying', true);
     this.properties.isPlaying = true;
     return true;
   }

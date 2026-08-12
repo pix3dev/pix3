@@ -84,7 +84,7 @@ For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to r
   configure it. Never hand-edit a scene file just to add a component.
 - **Tweak a property** on an existing node → `set_property` (undoable).
 - **Custom logic** → `fs_write` a `Script` subclass under `scripts/`, run `compile_scripts`
-  (then `check_scripts` for type errors), then `add_component` with its `user:<ExportName>`
+  (it type-checks too — no separate `check_scripts`), then `add_component` with its `user:<ExportName>`
   type. See the `pix3-game-dev` skill / the project `AGENTS.md` for the Script shape and the
   engine API (`this.scene`, `this.input`, `this.node`, `this.findNode(...)`).
 - **New scene structure** (nodes that don't exist yet) → edit the `.pix3scene` YAML with
@@ -105,8 +105,8 @@ For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to r
 
 ## 4½. Engine API traps (these compile clean and then break at runtime)
 
-Every one of these passes `compile_scripts` and, if you cast to `any`, `check_scripts` too —
-then throws or silently does nothing on the first frame:
+Every one of these passes `compile_scripts` clean — including its type-check, if you cast to
+`any` — then throws or silently does nothing on the first frame:
 
 - **`position` / `rotation` / `scale` are read-only references** (three.js). Never assign
   them: `node.position = {x, y}` and `node.rotation = angle` throw

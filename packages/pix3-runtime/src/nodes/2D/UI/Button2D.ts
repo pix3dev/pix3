@@ -2,6 +2,7 @@ import { Mesh, MeshBasicMaterial, type Texture, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../../fw/property-schema-utils';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 import {
   ShaderEffectStack,
   type ShaderEffectEntry,
@@ -124,6 +125,10 @@ export class Button2D
         this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
       }
     }
+
+    // Last: `btn.width = 200` from a script now rescales the drawn mesh, not just the hit bounds
+    // (isPointInBounds reads the fields) — before, the click zone silently desynced from the picture.
+    installReactiveSchemaProperties(this, Button2D.getPropertySchema);
   }
 
   /** The shader-effect stack driving the button skin material. */

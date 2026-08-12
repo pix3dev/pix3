@@ -12,6 +12,7 @@ import { SceneLoader } from '../../../core/SceneLoader';
 import { SceneSaver } from '../../../core/SceneSaver';
 import type { SceneService } from '../../../core/SceneService';
 import { ScriptRegistry } from '../../../core/ScriptRegistry';
+import { reactiveSchemaPropertyNames } from '../../../fw/reactive-schema-properties';
 
 function createLoader(preloadTextures: string[] = []): SceneLoader {
   const assetLoader = new AssetLoader(new ResourceManager('/'), new AudioService());
@@ -440,5 +441,73 @@ describe('ScrollContainer2D', () => {
     container.tick(1 / 60);
 
     expect(container.scrollY).toBeCloseTo(32, 5);
+  });
+});
+
+describe('ScrollContainer2D script assignments (reactive schema properties)', () => {
+  it('repaints the scrollbar materials immediately, without waiting for a tick', () => {
+    // syncScrollbarVisuals() self-heals colours every tick — but only inside the game loop; a
+    // script (or the agent, outside play mode) assigning them must not need one.
+    const { container } = createScrollContainer();
+    const { thumb, track } = getScrollbarMaterials(container);
+
+    container.scrollbarColor = '#ff0000';
+    container.scrollbarTrackColor = '#00ff00';
+
+    expect(thumb.color.getHex()).toBe(0xff0000);
+    expect(track.color.getHex()).toBe(0x00ff00);
+  });
+
+  it('applies the schema clamps to script-assigned numbers', () => {
+    const { container } = createScrollContainer();
+
+    container.wheelSensitivity = 0;
+    container.scrollbarWidth = 0;
+    container.scrollbarMinHeight = 1;
+
+    expect(container.wheelSensitivity).toBe(0.1);
+    expect(container.scrollbarWidth).toBe(2);
+    expect(container.scrollbarMinHeight).toBe(8);
+  });
+
+  it('drops the loaded thumb texture when a script clears the ref, and keeps the field null', () => {
+    const { container } = createScrollContainer();
+    const { thumb } = getScrollbarMaterials(container);
+    const thumbTexture = new Texture();
+    container.scrollbarThumbTexture = { type: 'texture', url: 'res://ui/thumb.png' };
+    container.setScrollbarThumbTexture(thumbTexture);
+    expect(thumb.map).toBe(thumbTexture);
+
+    container.scrollbarThumbTexture = null;
+
+    expect(container.scrollbarThumbTexture).toBeNull();
+    expect(thumb.map).toBeNull();
+    expect(baseOpacityOf(thumb)).toBeCloseTo(0.92, 5);
+  });
+
+  it('installs reactive accessors for every own schema field', () => {
+    const { container } = createScrollContainer();
+    const names = reactiveSchemaPropertyNames(container);
+    for (const expected of [
+      'dragScrollEnabled',
+      'wheelScrollEnabled',
+      'inertiaEnabled',
+      'showScrollbar',
+      'wheelSensitivity',
+      'dragThreshold',
+      'inertiaDamping',
+      'scrollbarWidth',
+      'scrollbarMinHeight',
+      'scrollbarInset',
+      'scrollbarColor',
+      'scrollbarTrackColor',
+      'scrollbarThumbTexture',
+      'scrollbarTrackTexture',
+    ]) {
+      expect(names.has(expected), `${expected} should be reactive`).toBe(true);
+    }
+    // scrollY and the Group2D width/height are class accessors — already reactive by design.
+    expect(names.has('scrollY')).toBe(false);
+    expect(names.has('width')).toBe(false);
   });
 });

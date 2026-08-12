@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { getNaturalTextureSize } from '../../core/texture-natural-size';
 
@@ -80,6 +81,9 @@ export class Sprite3D extends Node3D {
 
     // Drive the sprite material's alpha from the node opacity / fade APIs.
     this.registerOpacityMaterial(this.material);
+
+    // Last: a script's `sprite.width = 2` now rebuilds the plane via setSize, like the Inspector.
+    installReactiveSchemaProperties(this, Sprite3D.getPropertySchema);
   }
 
   get texturePath(): string | null {

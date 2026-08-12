@@ -9,6 +9,7 @@ import {
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 
 export interface MeshInstanceProps extends Omit<Node3DProps, 'type'> {
   src?: string | null; // res:// or templ:// path to .glb/.gltf
@@ -45,6 +46,10 @@ export class MeshInstance extends Node3D {
 
     // Nothing to propagate here: the shadow flags are set above, and the loaded model's children
     // get them from applyShadowPropertiesToChildren once the GLTF resolves.
+
+    // Last: `model.castShadow = x` from a script now propagates to the loaded GLTF's child meshes —
+    // the container itself never renders, so the flag only ever meant anything via propagation.
+    installReactiveSchemaProperties(this, MeshInstance.getPropertySchema);
   }
 
   get isPlaying(): boolean {

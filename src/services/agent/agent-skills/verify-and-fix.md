@@ -12,10 +12,11 @@ declare a feature done without running it.
    lines you mean to change with `str_replace` (fails loudly if the anchor isn't unique). A full
    `fs_write` rewrite risks silently dropping or reverting the rest of the file — reserve it for
    creating a file. Never re-emit a whole script to flip one sign or constant.
-1. **Compile scripts** after editing anything under `scripts/`: `compile_scripts` (fast syntax
-   check). If it reports an error, fix that file and repeat. Then `check_scripts` for
-   TypeScript type errors (things esbuild misses — e.g. assigning to the read-only
-   `position`/`rotation`/`scale`, wrong argument types, bad imports).
+1. **Compile scripts** after editing anything under `scripts/`: `compile_scripts` — it builds,
+   registers, *and* type-checks in one call. `ok: false` means either the bundle broke or
+   `errorCount` type errors came back in `diagnostics` (read-only `position`/`rotation`/`scale`,
+   wrong argument types, bad imports). Fix those files and compile again. **Do not call
+   `check_scripts` after a compile** — the same diagnostics are already in the compile result.
 2. **Run it**: `play_start`, then `play_status`. Give it a moment, then `read_errors` (runtime
    errors: thrown exceptions, rejections) and `read_logs` (log output). A clean run has no
    captured errors.
@@ -89,7 +90,7 @@ declare a feature done without running it.
   (`'KeyW'`, `'ArrowUp'`) — `event.key` is case-sensitive (`'ArrowUp'`, never `'arrowup'`).
 - **`Cannot assign to read only property 'position'/'rotation'`** — three.js transforms are
   read-only references; use `node.position.set(x, y, z)` / `node.rotation.z = radians`. Never
-  hide this with `as any` — that's what `check_scripts` exists to catch.
+  hide this with `as any` — that's what the type-check inside `compile_scripts` exists to catch.
 - **Moves, but in the WRONG direction (sideways / backwards / turns the wrong way)** — this is a
   math bug, not a "does it move" bug, and blind sign-flipping never converges. Verify with
   `game_input`/`game_observe` and read `alignForward`/`alignRight`, don't guess. `rotation.z`

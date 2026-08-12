@@ -2,6 +2,7 @@ import { Mesh, MeshBasicMaterial, PlaneGeometry, CanvasTexture, Vector2 } from '
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface InventorySlot2DProps extends UIControl2DProps {
   width?: number;
@@ -76,6 +77,10 @@ export class InventorySlot2D extends UIControl2D {
     if (this.showQuantity && this.quantity > 0) {
       this.updateQuantityDisplay();
     }
+
+    // Last: `slot.quantity = 5` (and size/colour writes) from a script now repaints the slot the
+    // way the Inspector does, instead of only changing the field.
+    installReactiveSchemaProperties(this, InventorySlot2D.getPropertySchema);
   }
 
   private createBorder(): void {
@@ -145,7 +150,15 @@ export class InventorySlot2D extends UIControl2D {
       this.quantityMesh.renderOrder = 1001;
       this.quantityMesh.position.z = 0.2;
       this.add(this.quantityMesh);
+      return;
     }
+
+    // The badge already exists, so point its material at the texture we just painted. Without this
+    // the mesh kept sampling the FIRST texture — which was disposed a few lines above — so the count
+    // rendered on screen never changed again after the first draw.
+    const material = this.quantityMesh.material as MeshBasicMaterial;
+    material.map = this.quantityTexture;
+    material.needsUpdate = true;
   }
 
   override isPointInBounds(worldPoint: Vector2): boolean {

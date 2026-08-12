@@ -1,0 +1,78 @@
+/* Studio ↔ Vibe switch. Light-DOM component: every rule is scoped under the host tag so the
+   generic `.mode-switch*` names cannot leak into the shells that embed it. */
+
+pix3-mode-switch {
+  display: inline-flex;
+  flex: none;
+}
+
+pix3-mode-switch .mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-1);
+}
+
+pix3-mode-switch .mode-switch__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+pix3-mode-switch .mode-switch__option svg {
+  display: block;
+  inline-size: 14px;
+  block-size: 14px;
+  flex: none;
+}
+
+/* The mode you are in is the filled half — this is a state indicator first, an action second. */
+pix3-mode-switch .mode-switch__option[data-current='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--fg-0);
+  cursor: default;
+}
+
+pix3-mode-switch .mode-switch__option[data-current='false']:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-mode-switch .mode-switch__option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+pix3-mode-switch .mode-switch__divider {
+  inline-size: 0;
+  block-size: 12px;
+  margin: 0 3px;
+  border-inline-start: 1px solid var(--line-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  pix3-mode-switch .mode-switch__option {
+    transition: none;
+  }
+}

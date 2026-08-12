@@ -25,6 +25,13 @@ interface MainMenuSection {
   groupedItems?: Array<{ label: string; items: MainMenuItem[] }>;
 }
 
+/**
+ * Synthetic section id for the "…" button. The menu bar is width-capped so it can never reach the
+ * centred project name, and whatever no longer fits is folded into this one dropdown — its groups
+ * are the sections that were dropped, so nothing becomes unreachable.
+ */
+const OVERFLOW_SECTION_ID = '__overflow__';
+
 @customElement('pix3-main-menu')
 export class Pix3MainMenu extends ComponentBase {
   @inject(CommandRegistry)
@@ -52,17 +59,35 @@ export class Pix3MainMenu extends ComponentBase {
   @state()
   private menuSections: MainMenuSection[] = [];
 
+  /** How many sections still fit on the bar; the rest live under the "…" button. */
+  @state()
+  private inlineSectionCount = Number.POSITIVE_INFINITY;
+
   private portalElement: HTMLElement | null = null;
+
+  /**
+   * Natural width of each section button, captured while it was on the bar. Sections folded into
+   * the overflow have no box to measure, so without this cache the bar could never grow back.
+   */
+  private readonly sectionWidths = new Map<string, number>();
+
+  private resizeObserver?: ResizeObserver;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.menuSections = this.buildMenuSections();
     document.addEventListener('click', this.handleDocumentClick);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.fitSectionsToWidth());
+      this.resizeObserver.observe(this);
+    }
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener('click', this.handleDocumentClick);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
     this.removePortal();
   }
 
@@ -72,11 +97,68 @@ export class Pix3MainMenu extends ComponentBase {
 
   protected updated(): void {
     this.ensureMenuFocusGroup();
+    this.fitSectionsToWidth();
     if (this.activeSection) {
       this.createPortal();
       this.updateMenuPosition();
     } else {
       this.removePortal();
+    }
+  }
+
+  /**
+   * Decide how many sections fit on the bar. The host has a CSS-fixed inline size (see
+   * `pix3-main-menu.ts.css`), so the available width depends on the window and never on how many
+   * buttons are currently rendered — that is what keeps this from oscillating between two counts.
+   */
+  private fitSectionsToWidth(): void {
+    const bar = this.querySelector<HTMLElement>('.menu-bar');
+    if (!bar || this.menuSections.length === 0) {
+      return;
+    }
+
+    for (const button of bar.querySelectorAll<HTMLElement>('.menu-section-button[data-section]')) {
+      const id = button.dataset.section;
+      const width = button.getBoundingClientRect().width;
+      if (id && id !== OVERFLOW_SECTION_ID && width > 0) {
+        this.sectionWidths.set(id, width);
+      }
+    }
+
+    const available = bar.clientWidth;
+    if (available === 0) {
+      return;
+    }
+
+    const logoWidth =
+      bar.querySelector<HTMLElement>('.menu-logo-button')?.getBoundingClientRect().width ?? 0;
+    const logoMargin = Number.parseFloat(
+      getComputedStyle(bar.querySelector('.menu-logo-button') ?? bar).marginRight
+    );
+    const widths = this.menuSections.map(section => this.sectionWidths.get(section.id) ?? 0);
+    if (widths.some(width => width === 0)) {
+      // Not measured yet (first paint renders every section) — try again next frame.
+      return;
+    }
+
+    const base = logoWidth + (Number.isFinite(logoMargin) ? logoMargin : 0);
+    const total = widths.reduce((sum, width) => sum + width, base);
+    let count = this.menuSections.length;
+    if (total > available) {
+      const overflowWidth =
+        bar.querySelector<HTMLElement>('.menu-section-button--overflow')?.getBoundingClientRect()
+          .width ?? 40;
+      let used = base + overflowWidth;
+      count = 0;
+      for (const width of widths) {
+        if (used + width > available) break;
+        used += width;
+        count += 1;
+      }
+    }
+
+    if (count !== this.inlineSectionCount) {
+      this.inlineSectionCount = count;
     }
   }
 
@@ -136,7 +218,10 @@ export class Pix3MainMenu extends ComponentBase {
       if (dropdown) {
         dropdown.style.position = 'fixed';
         dropdown.style.top = `${triggerRect.bottom + 4}px`;
-        dropdown.style.left = `${triggerRect.left}px`;
+        // The "…" trigger sits at the right end of the bar, so a left-aligned panel can hang off
+        // the window; pull it back in rather than letting it clip.
+        const maxLeft = window.innerWidth - dropdown.offsetWidth - 8;
+        dropdown.style.left = `${Math.max(8, Math.min(triggerRect.left, maxLeft))}px`;
 
         // Re-attach event listeners to the portal menu items
         this.attachPortalEventListeners();
@@ -147,7 +232,7 @@ export class Pix3MainMenu extends ComponentBase {
   private renderMenuToString(): string {
     if (!this.activeSection) return '';
 
-    const section = this.menuSections.find(s => s.id === this.activeSection);
+    const section = this.getSectionForDropdown(this.activeSection);
     if (!section) return '';
 
     const renderItem = (item: MainMenuItem): string => {
@@ -381,26 +466,72 @@ export class Pix3MainMenu extends ComponentBase {
           >
             <img src="/menu-logo.png" alt="Pix3" class="menu-logo" />
           </button>
-          ${this.menuSections.map(
-            section => html`
-              <button
-                class="menu-section-button ${this.activeSection === section.id
-                  ? 'menu-section-button--active'
-                  : ''}"
-                data-section=${section.id}
-                @click=${() => this.toggleSection(section.id)}
-                @mouseenter=${() => this.handleSectionHover(section.id)}
-                @mouseleave=${this.handleSectionMouseLeave}
-                aria-haspopup="menu"
-                aria-expanded=${this.activeSection === section.id}
-              >
-                ${section.label}
-              </button>
-            `
-          )}
+          ${this.menuSections
+            .slice(0, this.inlineSectionCount)
+            .map(section => this.renderSectionButton(section.id, section.label))}
+          ${this.overflowSections.length > 0
+            ? this.renderSectionButton(
+                OVERFLOW_SECTION_ID,
+                this.iconService.getIcon('more-horizontal', IconSize.MEDIUM),
+                'More menus'
+              )
+            : null}
         </div>
       </div>
     `;
+  }
+
+  private renderSectionButton(id: string, label: unknown, ariaLabel?: string) {
+    const isOverflow = id === OVERFLOW_SECTION_ID;
+    return html`
+      <button
+        class="menu-section-button ${this.activeSection === id ? 'menu-section-button--active' : ''}
+        ${isOverflow ? 'menu-section-button--overflow' : ''}"
+        data-section=${id}
+        title=${ariaLabel ?? ''}
+        aria-label=${ariaLabel ?? ''}
+        @click=${() => this.toggleSection(id)}
+        @mouseenter=${() => this.handleSectionHover(id)}
+        @mouseleave=${this.handleSectionMouseLeave}
+        aria-haspopup="menu"
+        aria-expanded=${this.activeSection === id}
+      >
+        ${label}
+      </button>
+    `;
+  }
+
+  /** Sections that no longer fit on the bar, in menu order. */
+  private get overflowSections(): MainMenuSection[] {
+    return this.menuSections.slice(this.inlineSectionCount);
+  }
+
+  /**
+   * The section a dropdown should render. For the "…" button this is synthesised on the fly: each
+   * dropped section becomes a labelled group, so the overflow panel reads like the menus it stands
+   * in for rather than one flat list.
+   */
+  private getSectionForDropdown(id: string): MainMenuSection | undefined {
+    if (id !== OVERFLOW_SECTION_ID) {
+      return this.menuSections.find(section => section.id === id);
+    }
+    const hidden = this.overflowSections;
+    if (hidden.length === 0) {
+      return undefined;
+    }
+    return {
+      id: OVERFLOW_SECTION_ID,
+      label: 'More menus',
+      items: [],
+      groupedItems: hidden.flatMap(section =>
+        section.groupedItems?.length
+          ? section.groupedItems.map(group => ({
+              label: `${section.label} — ${group.label}`,
+              items: group.items,
+            }))
+          : [{ label: section.label, items: section.items }]
+      ),
+    };
   }
 
   private async openNodeTypePicker(): Promise<void> {

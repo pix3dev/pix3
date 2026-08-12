@@ -2,6 +2,7 @@ import { Mesh, MeshBasicMaterial, Texture } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import {
   ShaderEffectStack,
   type ShaderEffectEntry,
@@ -146,6 +147,10 @@ export class Sprite2D extends Node2D implements InstancePropertySchemaProvider, 
         this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
       }
     }
+
+    // Last: `sprite.width = 200` now rescales the mesh like the Inspector — updateSize is
+    // private, so a script resizing a sprite previously had no working spelling at all.
+    installReactiveSchemaProperties(this, Sprite2D.getPropertySchema);
   }
 
   /** The shader-effect stack driving this sprite's material. */

@@ -808,6 +808,60 @@ describe('AgentToolRegistry', () => {
       );
     });
 
+    it('str_replace returns the post-edit neighbourhood so the next anchor needs no re-read', async () => {
+      const storage = makeStorage();
+      const lines = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+      lines[19] = 'const speed = 1;';
+      storage.files.set('scripts/big.ts', lines.join('\n'));
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('str_replace', {
+        path: 'scripts/big.ts',
+        old_string: 'const speed = 1;',
+        new_string: 'const speed = 4;',
+      })) as Record<string, unknown>;
+
+      const context = result.context as { startLine: number; endLine: number; text: string };
+      expect(result.totalLines).toBe(40);
+      // Edited line 20, 8 lines of context on each side.
+      expect(context).toMatchObject({ startLine: 12, endLine: 28 });
+      expect(context.text).toContain('const speed = 4;');
+      // Byte-exact against the file as it now is — the agent may copy it into the next old_string.
+      const updated = storage.files.get('scripts/big.ts')!.split('\n');
+      expect(context.text).toBe(updated.slice(11, 28).join('\n'));
+    });
+
+    it('str_replace context is clamped at the file edges and reflects the NEW line count', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/short.ts', 'a\nb\nc');
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('str_replace', {
+        path: 'scripts/short.ts',
+        old_string: 'b',
+        new_string: 'b1\nb2',
+      })) as Record<string, unknown>;
+
+      expect(result.totalLines).toBe(4);
+      expect(result.context).toEqual({ startLine: 1, endLine: 4, text: 'a\nb1\nb2\nc' });
+    });
+
+    it('str_replace omits context when the edited lines alone blow the cap', async () => {
+      const storage = makeStorage();
+      // One line far past STR_REPLACE_CONTEXT_CHARS — no honest verbatim slice exists.
+      storage.files.set('scripts/wide.ts', `const blob = '${'z'.repeat(3000)}';`);
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('str_replace', {
+        path: 'scripts/wide.ts',
+        old_string: 'const blob',
+        new_string: 'const data',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.context).toBeUndefined();
+    });
+
     it('str_replace refuses (no write) when old_string is not found', async () => {
       const storage = makeStorage();
       const registry = buildRegistry({ storage });
@@ -901,29 +955,54 @@ describe('AgentToolRegistry', () => {
       });
     });
 
-    it('fs_read returns a line range with offset/limit', async () => {
+    /** A file comfortably over FS_READ_FULL_CHARS, so ranged reads are actually honoured. */
+    const hugeFile = (lines: number): string =>
+      Array.from({ length: lines }, (_, i) => `l${i + 1}${'x'.repeat(200)}`).join('\n');
+
+    it('fs_read returns a line range with offset/limit on a large file', async () => {
       const storage = makeStorage();
-      storage.files.set('scripts/big.ts', 'l1\nl2\nl3\nl4\nl5');
+      storage.files.set('scripts/big.ts', hugeFile(100));
       const registry = buildRegistry({ storage });
+      const all = hugeFile(100).split('\n');
+
       expect(
         await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 2, limit: 2 })
       ).toEqual({
         path: 'scripts/big.ts',
-        content: 'l2\nl3',
-        totalLines: 5,
+        content: all.slice(1, 3).join('\n'),
+        totalLines: 100,
         startLine: 2,
         endLine: 3,
         hasMore: true,
       });
       // Reading to the end reports hasMore:false.
-      expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 4 })).toEqual({
+      expect(await registry.execute('fs_read', { path: 'scripts/big.ts', offset: 99 })).toEqual({
         path: 'scripts/big.ts',
-        content: 'l4\nl5',
-        totalLines: 5,
-        startLine: 4,
-        endLine: 5,
+        content: all.slice(98).join('\n'),
+        totalLines: 100,
+        startLine: 99,
+        endLine: 100,
         hasMore: false,
       });
+    });
+
+    it('fs_read ignores the range on a SMALL file and hands over the whole thing', async () => {
+      // Measured cost of the alternative: six paged re-reads of one 15.4 KB scene in a single turn,
+      // because every str_replace shifted the line numbers the agent was paging by.
+      const storage = makeStorage();
+      storage.files.set('scripts/small.ts', 'l1\nl2\nl3\nl4\nl5');
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_read', {
+        path: 'scripts/small.ts',
+        offset: 2,
+        limit: 2,
+      })) as Record<string, unknown>;
+
+      expect(result.content).toBe('l1\nl2\nl3\nl4\nl5');
+      expect(result.totalLines).toBe(5);
+      expect(result.hasMore).toBeUndefined();
+      expect(String(result.note)).toMatch(/whole file/i);
     });
 
     it('fs_list maps directory entries', async () => {
@@ -931,6 +1010,54 @@ describe('AgentToolRegistry', () => {
       expect(await registry.execute('fs_list', { path: 'scenes' })).toEqual([
         { name: 'main.pix3scene', kind: 'file', path: 'scenes/main.pix3scene', size: 42 },
       ]);
+    });
+  });
+
+  describe('create_node duplicate names', () => {
+    /**
+     * The create command selects the new node, which is how its id surfaces — so the stub sets
+     * primaryNodeId and drops the node into the graph, mimicking the real operation.
+     */
+    const run = async (existingNames: string[], newName: string) => {
+      appState.project.status = 'ready';
+      const nodeMap = new Map<string, NodeBase>();
+      existingNames.forEach((name, i) =>
+        nodeMap.set(`old${i}`, makeNode({ nodeId: `old${i}`, name, type: 'Button2D' }))
+      );
+      const graph = { rootNodes: [], nodeMap };
+      const dispatcher = {
+        execute: vi.fn(async (_cmd: unknown) => {
+          if (!nodeMap.has('fresh')) {
+            nodeMap.set('fresh', makeNode({ nodeId: 'fresh', name: newName, type: 'Button2D' }));
+            appState.selection.primaryNodeId = 'fresh';
+          }
+          return true;
+        }),
+        executeById: vi.fn(),
+      };
+      const registry = buildRegistry({
+        dispatcher,
+        sceneManager: { getActiveSceneGraph: () => graph },
+      });
+      return (await registry.execute('create_node', {
+        nodeType: 'Button2D',
+        name: newName,
+      })) as Record<string, unknown>;
+    };
+
+    it('warns (but still creates) when the name collides with an existing node', async () => {
+      const result = await run(['cell-0'], 'cell-0');
+      expect(result.ok).toBe(true);
+      expect(result.nodeId).toBe('fresh');
+      expect(result.duplicateNameNodeIds).toEqual(['old0']);
+      expect(String(result.warning)).toMatch(/ambiguous/i);
+    });
+
+    it('stays silent when the name is unique', async () => {
+      const result = await run(['cell-0'], 'cell-1');
+      expect(result.ok).toBe(true);
+      expect(result.warning).toBeUndefined();
+      expect(result.duplicateNameNodeIds).toBeUndefined();
     });
   });
 
@@ -1439,6 +1566,85 @@ describe('AgentToolRegistry', () => {
     expect(result.registered).toBe(true);
     expect(projectScriptLoader.syncAndBuild).toHaveBeenCalledTimes(1);
     expect(projectScriptLoader.ensureReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('compile_scripts reports type errors from its own check instead of a bare ok', async () => {
+    const storage = {
+      listDirectory: vi.fn(async (dir: string) =>
+        dir === 'scripts'
+          ? [{ name: 'Car.ts', kind: 'file' as const, path: 'scripts/Car.ts', size: 1 }]
+          : []
+      ),
+      readTextFile: vi.fn(async () => 'export class Car extends Script {}'),
+    };
+    const compiler = { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) };
+    const projectScriptLoader = {
+      syncAndBuild: vi.fn(async () => undefined),
+      ensureReady: vi.fn(async () => undefined),
+    };
+    const diagnostics = {
+      checkProject: vi.fn(async () => ({
+        filesChecked: 1,
+        errorCount: 1,
+        warningCount: 0,
+        diagnostics: [
+          {
+            file: 'scripts/Car.ts',
+            line: 3,
+            column: 5,
+            message: "Property 'setText' does not exist on type 'Button2D'.",
+            category: 'error',
+            code: 2339,
+          },
+        ],
+      })),
+    };
+    const registry = buildRegistry({ storage, compiler, projectScriptLoader, diagnostics });
+    const result = (await registry.execute('compile_scripts')) as {
+      ok: boolean;
+      bundled?: boolean;
+      registered?: boolean;
+      errorCount?: number;
+      diagnostics?: unknown[];
+      message?: string;
+    };
+    // The bundle succeeded and registered, but types are broken: `ok` must be false so the agent
+    // fixes it now instead of learning about it from a separate check_scripts three turns later.
+    expect(result.ok).toBe(false);
+    expect(result.bundled).toBe(true);
+    expect(result.registered).toBe(true);
+    expect(result.errorCount).toBe(1);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.message).toMatch(/check_scripts/);
+    expect(diagnostics.checkProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('compile_scripts stays green when the type-checker itself is unavailable', async () => {
+    const storage = {
+      listDirectory: vi.fn(async (dir: string) =>
+        dir === 'scripts'
+          ? [{ name: 'Car.ts', kind: 'file' as const, path: 'scripts/Car.ts', size: 1 }]
+          : []
+      ),
+      readTextFile: vi.fn(async () => 'export class Car extends Script {}'),
+    };
+    const compiler = { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) };
+    const projectScriptLoader = {
+      syncAndBuild: vi.fn(async () => undefined),
+      ensureReady: vi.fn(async () => undefined),
+    };
+    const diagnostics = {
+      checkProject: vi.fn(async () => {
+        throw new Error('monaco failed to load');
+      }),
+    };
+    const registry = buildRegistry({ storage, compiler, projectScriptLoader, diagnostics });
+    const result = (await registry.execute('compile_scripts')) as {
+      ok: boolean;
+      typeCheck?: string;
+    };
+    expect(result.ok).toBe(true);
+    expect(result.typeCheck).toBe('unavailable');
   });
 
   it('read_errors returns the captured ring buffer', async () => {

@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, CircleGeometry, Vector2, Vector3 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface Joystick2DProps extends Node2DProps {
   radius?: number;
@@ -85,6 +86,10 @@ export class Joystick2D extends Node2D {
       this.visibilityTarget = 0;
       this.applyVisibility();
     }
+
+    // Last: `joystick.floating = true` from a script now hides/resets the visuals like the
+    // Inspector does, instead of only flipping the flag.
+    installReactiveSchemaProperties(this, Joystick2D.getPropertySchema);
   }
 
   override tick(dt: number): void {

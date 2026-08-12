@@ -7,6 +7,7 @@ import { IconService, IconSize } from '@/services/editor/IconService';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { FlowPlanService, type FlowPlan, type FlowPlanStep } from '@/services/flow/FlowPlanService';
 import '@/ui/agent-chat/pix3-agent-chat-panel';
+import '@/ui/shared/pix3-mode-switch';
 import './pix3-flow-shell.ts.css';
 
 const EMPTY_PLAN: FlowPlan = { pitch: null, title: null, steps: [] };
@@ -16,6 +17,8 @@ const MIN_CHAT_WIDTH = 300;
 const MIN_STAGE_WIDTH = 360;
 const DEFAULT_CHAT_WIDTH = 420;
 const CHAT_WIDTH_KEY = 'pix3.flow.chatWidth:v1';
+
+const PLAN_OPEN_KEY = 'pix3.flow.planOpen:v1';
 
 const loadChatWidth = (): number => {
   try {
@@ -31,6 +34,22 @@ const persistChatWidth = (width: number): void => {
     localStorage.setItem(CHAT_WIDTH_KEY, String(width));
   } catch {
     // A split that forgets itself is a small loss; never break the shell over storage.
+  }
+};
+
+const loadPlanOpen = (): boolean => {
+  try {
+    return localStorage.getItem(PLAN_OPEN_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
+
+const persistPlanOpen = (open: boolean): void => {
+  try {
+    localStorage.setItem(PLAN_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    // Same as the split width: a forgotten preference must never break the shell.
   }
 };
 
@@ -78,6 +97,9 @@ export class Pix3FlowShell extends ComponentBase {
 
   @state()
   private stageError: string | null = null;
+
+  @state()
+  private planOpen = loadPlanOpen();
 
   private chatWidth = loadChatWidth();
   private stageHost?: HTMLElement;
@@ -303,8 +325,16 @@ export class Pix3FlowShell extends ComponentBase {
 
   private setChatWidth(width: number): void {
     const body = this.querySelector<HTMLElement>('.flow-body');
-    const max = body ? body.getBoundingClientRect().width - MIN_STAGE_WIDTH : MIN_CHAT_WIDTH;
-    this.chatWidth = Math.round(Math.min(Math.max(width, MIN_CHAT_WIDTH), Math.max(max, MIN_CHAT_WIDTH)));
+    // The plan panel sits in the same row, so its width is not available to the chat/stage split —
+    // measured rather than assumed, since it is a rail when collapsed and a panel when open.
+    const planWidth =
+      this.querySelector<HTMLElement>('.flow-plan-panel')?.getBoundingClientRect().width ?? 0;
+    const max = body
+      ? body.getBoundingClientRect().width - MIN_STAGE_WIDTH - planWidth
+      : MIN_CHAT_WIDTH;
+    this.chatWidth = Math.round(
+      Math.min(Math.max(width, MIN_CHAT_WIDTH), Math.max(max, MIN_CHAT_WIDTH))
+    );
     body?.style.setProperty('--flow-chat-width', `${this.chatWidth}px`);
     this.fitStage();
   }
@@ -333,6 +363,7 @@ export class Pix3FlowShell extends ComponentBase {
             </div>
             ${this.renderStageBar()}
           </main>
+          ${this.renderPlanPanel()}
         </div>
       </div>
     `;
@@ -342,15 +373,21 @@ export class Pix3FlowShell extends ComponentBase {
     const title = this.plan.title ?? appState.project.projectName ?? 'Untitled game';
     return html`
       <header class="flow-header">
+        <div class="flow-header__lead">
+          <button
+            class="flow-logo"
+            type="button"
+            title="Close project and return to the welcome screen"
+            aria-label="Close project"
+            @click=${() => void this.commandDispatcher.executeById('project.close')}
+          >
+            <img src="/menu-logo.png" alt="Pix3" class="flow-logo__img" />
+          </button>
+        </div>
         <div class="flow-header__identity">
           <span class="flow-header__title" title=${title}>${title}</span>
-          ${this.plan.pitch
-            ? html`<span class="flow-header__pitch" title=${this.plan.pitch}
-                >${this.plan.pitch}</span
-              >`
-            : null}
+          <pix3-mode-switch></pix3-mode-switch>
         </div>
-        ${this.renderPlanTracker()}
         <div class="flow-header__actions">
           <button
             class="flow-action"
@@ -368,30 +405,74 @@ export class Pix3FlowShell extends ComponentBase {
           >
             ${this.icons.getIcon('download', IconSize.SMALL)}<span>Download HTML</span>
           </button>
-          <button
-            class="flow-action flow-action--ghost"
-            type="button"
-            title="Open the same project in the full editor"
-            @click=${() => void this.commandDispatcher.executeById('editor.switch-workspace-mode')}
-          >
-            ${this.icons.getIcon('sliders', IconSize.SMALL)}<span>Open in Studio</span>
-          </button>
         </div>
       </header>
     `;
   }
 
-  private renderPlanTracker() {
+  /**
+   * The increment checklist, docked to the right of the stage and collapsible to a rail.
+   *
+   * It used to live in the header, where it was wrong twice over: the steps are sentences, so they
+   * were ellipsized to uselessness in a row of chips, and they pushed on the project identity next
+   * to them. Here they wrap, and the whole thing folds away when the user just wants to play.
+   */
+  private renderPlanPanel() {
+    const done = this.plan.steps.filter(step => step.status === 'done').length;
+    const total = this.plan.steps.length;
+    const progress = total > 0 ? `${done}/${total}` : '';
+    const label = this.planOpen
+      ? 'Hide plan'
+      : total > 0
+        ? `Show plan (${done} of ${total} done)`
+        : 'Show plan';
+    return html`
+      <aside
+        class="flow-plan-panel ${this.planOpen ? '' : 'flow-plan-panel--collapsed'}"
+        aria-label="Plan"
+      >
+        <div class="flow-plan-panel__head">
+          <button
+            class="flow-plan-panel__toggle"
+            type="button"
+            aria-expanded=${this.planOpen ? 'true' : 'false'}
+            title=${label}
+            aria-label=${label}
+            @click=${this.togglePlan}
+          >
+            ${this.icons.getIcon(this.planOpen ? 'chevron-right' : 'list', IconSize.SMALL)}
+          </button>
+          ${this.planOpen
+            ? html`<span class="flow-plan-panel__title">Plan</span> ${progress
+                  ? html`<span class="flow-plan-panel__count">${progress}</span>`
+                  : null}`
+            : progress
+              ? html`<span class="flow-plan-panel__count">${progress}</span>`
+              : null}
+        </div>
+        ${this.planOpen ? this.renderPlanSteps() : null}
+      </aside>
+    `;
+  }
+
+  private renderPlanSteps() {
     if (this.plan.steps.length === 0) {
-      return html`<div class="flow-plan flow-plan--empty">
-        ${this.isAgentRunning
-          ? html`<span class="flow-plan__spinner"></span><span>Working…</span>`
-          : null}
-      </div>`;
+      return html`
+        <div class="flow-plan flow-plan--empty">
+          ${this.isAgentRunning
+            ? html`<span class="flow-plan__spinner"></span><span>Working…</span>`
+            : html`<span>No plan yet — ask for a change and the steps appear here.</span>`}
+        </div>
+      `;
     }
     return html`
-      <div class="flow-plan" role="list" aria-label="Plan">
+      <div class="flow-plan" role="list">
         ${this.plan.steps.map(step => this.renderPlanStep(step))}
+        ${this.isAgentRunning
+          ? html`<span class="flow-plan__working"
+              ><span class="flow-plan__spinner"></span><span>Working…</span></span
+            >`
+          : null}
       </div>
     `;
   }
@@ -400,15 +481,25 @@ export class Pix3FlowShell extends ComponentBase {
     const icon =
       step.status === 'done' ? 'check-circle' : step.status === 'active' ? 'loader' : 'circle';
     return html`
-      <span
-        class="flow-plan__step flow-plan__step--${step.status}"
-        role="listitem"
-        title=${step.note ?? step.title}
-      >
-        ${this.icons.getIcon(icon, IconSize.SMALL)}<span class="flow-plan__label">${step.title}</span>
+      <span class="flow-plan__step flow-plan__step--${step.status}" role="listitem">
+        ${this.icons.getIcon(icon, IconSize.SMALL)}
+        <span class="flow-plan__body">
+          <span class="flow-plan__label">${step.title}</span>
+          ${step.note ? html`<span class="flow-plan__note">${step.note}</span>` : null}
+        </span>
       </span>
     `;
   }
+
+  private readonly togglePlan = (): void => {
+    this.planOpen = !this.planOpen;
+    persistPlanOpen(this.planOpen);
+    // The stage column just changed width; re-letterbox it rather than wait for the observer.
+    this.updateComplete.then(() => {
+      this.setChatWidth(this.chatWidth);
+      this.fitStage();
+    });
+  };
 
   private renderStageBar() {
     const toolLabel = this.activeTool ? this.activeTool.replace(/_/g, ' ') : null;
@@ -419,7 +510,9 @@ export class Pix3FlowShell extends ComponentBase {
           type="button"
           title=${this.isPlaying ? 'Stop' : 'Play'}
           @click=${() =>
-            void this.commandDispatcher.executeById(this.isPlaying ? 'game.stop' : 'game.start-main')}
+            void this.commandDispatcher.executeById(
+              this.isPlaying ? 'game.stop' : 'game.start-main'
+            )}
         >
           ${this.icons.getIcon(this.isPlaying ? 'square' : 'play', IconSize.SMALL)}
         </button>

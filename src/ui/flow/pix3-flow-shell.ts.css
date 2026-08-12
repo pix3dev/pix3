@@ -19,9 +19,11 @@ pix3-flow-shell .flow-shell {
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
 
+/* Equal side columns keep the middle one centred on the header regardless of what the logo/plan
+   and the actions weigh — the same "project name + mode switch in the middle" reading as Studio. */
 pix3-flow-shell .flow-header {
   display: grid;
-  grid-template-columns: minmax(140px, 22%) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   padding: 8px 12px;
@@ -29,24 +31,61 @@ pix3-flow-shell .flow-header {
   background: var(--bg-1);
 }
 
-pix3-flow-shell .flow-header__identity {
+pix3-flow-shell .flow-header__lead {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
 
+pix3-flow-shell .flow-header__identity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Same affordance as Studio's menu-bar logo: it is the way back to the welcome screen. */
+pix3-flow-shell .flow-logo {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+pix3-flow-shell .flow-logo:hover {
+  background: var(--bg-2);
+}
+
+pix3-flow-shell .flow-logo:active {
+  background: var(--bg-3);
+}
+
+pix3-flow-shell .flow-logo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+pix3-flow-shell .flow-logo__img {
+  display: block;
+  height: 26px;
+  width: auto;
+  object-fit: contain;
+}
+
+/* The middle grid column is content-sized, so the title has to cap itself — otherwise a long game
+   name would eat the actions instead of ellipsizing. */
 pix3-flow-shell .flow-header__title {
+  max-inline-size: 34vw;
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-pix3-flow-shell .flow-header__pitch {
-  font-size: 11px;
-  color: var(--fg-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -97,14 +136,90 @@ pix3-flow-shell .flow-action svg {
   flex: none;
 }
 
-/* ── Plan tracker ───────────────────────────────────────────────────────── */
+/* ── Plan sidebar ───────────────────────────────────────────────────────── */
+
+/* Docked right of the stage, not in the header: the steps are sentences, and a header row of chips
+   ellipsized them into noise. Collapses to a rail so the toggle is always reachable without a
+   floating button over the game. */
+pix3-flow-shell .flow-plan-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 260px;
+  border-left: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+pix3-flow-shell .flow-plan-panel--collapsed {
+  width: 38px;
+}
+
+pix3-flow-shell .flow-plan-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  min-height: 38px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+pix3-flow-shell .flow-plan-panel--collapsed .flow-plan-panel__head {
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+}
+
+pix3-flow-shell .flow-plan-panel__title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--fg-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+pix3-flow-shell .flow-plan-panel__count {
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+pix3-flow-shell .flow-plan-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-flow-shell .flow-plan-panel__toggle:hover {
+  background: var(--bg-2);
+  border-color: var(--line-2);
+  color: var(--fg-0);
+}
+
+pix3-flow-shell .flow-plan-panel__toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+pix3-flow-shell .flow-plan-panel__toggle svg {
+  width: 14px;
+  height: 14px;
+}
 
 pix3-flow-shell .flow-plan {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
-  min-width: 0;
-  overflow: hidden;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
   color: var(--fg-2);
   font-size: 11px;
 }
@@ -112,29 +227,46 @@ pix3-flow-shell .flow-plan {
 pix3-flow-shell .flow-plan--empty {
   gap: 6px;
   color: var(--fg-3);
+  line-height: 1.45;
 }
 
+/* Steps wrap onto as many lines as they need — that is the whole reason this left the header. */
 pix3-flow-shell .flow-plan__step {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 999px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-1);
   background: var(--bg-2);
   border: 1px solid transparent;
-  max-width: 200px;
+  line-height: 1.35;
 }
 
-pix3-flow-shell .flow-plan__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+pix3-flow-shell .flow-plan__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+pix3-flow-shell .flow-plan__note {
+  color: var(--fg-3);
+}
+
+pix3-flow-shell .flow-plan__working {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--fg-3);
 }
 
 pix3-flow-shell .flow-plan__step svg {
   width: 12px;
   height: 12px;
   flex: none;
+  /* Nudge onto the first text line's optical centre. */
+  margin-top: 2px;
 }
 
 pix3-flow-shell .flow-plan__step--done {
@@ -179,8 +311,9 @@ pix3-flow-shell .flow-plan__spinner {
 
 pix3-flow-shell .flow-body {
   display: grid;
-  /* Width is driven by the splitter (JS sets --flow-chat-width); the fallback is the first paint. */
-  grid-template-columns: var(--flow-chat-width, 420px) auto minmax(0, 1fr);
+  /* Width is driven by the splitter (JS sets --flow-chat-width); the fallback is the first paint.
+     The last column is the plan sidebar, which sizes itself (panel or rail). */
+  grid-template-columns: var(--flow-chat-width, 420px) auto minmax(0, 1fr) auto;
   min-height: 0;
 }
 
@@ -228,6 +361,9 @@ pix3-flow-shell .flow-stage {
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   min-width: 0;
+  /* The host is sized in px by fitStage; clipping keeps a stale measurement inside the column
+     instead of letting the canvas paint over the chat. */
+  overflow: hidden;
   background: var(--bg-0);
 }
 
@@ -318,9 +454,13 @@ pix3-flow-shell .flow-stage__status {
 }
 
 @media (max-width: 900px) {
+  /* THREE rows, not four: the splitter below is `display: none`, and a hidden grid item is not
+     placed at all — so the tracks shifted by one and the stage inherited the splitter's 0 px row.
+     That is why the stacked stage measured exactly 0 px high and the canvas painted over the chat.
+     The stage also keeps a floor, so an open plan strip can never squeeze it away again. */
   pix3-flow-shell .flow-body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 0 minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(240px, 1fr) auto;
   }
 
   pix3-flow-shell .flow-chat {
@@ -330,5 +470,19 @@ pix3-flow-shell .flow-stage__status {
 
   pix3-flow-shell .flow-splitter {
     display: none;
+  }
+
+  /* Stacked layout: the sidebar becomes a bottom strip, capped so it never eats the stage. */
+  pix3-flow-shell .flow-plan-panel,
+  pix3-flow-shell .flow-plan-panel--collapsed {
+    width: auto;
+    max-height: 30vh;
+    border-left: none;
+    border-top: 1px solid var(--line-1);
+  }
+
+  pix3-flow-shell .flow-plan-panel--collapsed .flow-plan-panel__head {
+    flex-direction: row;
+    padding: 8px;
   }
 }

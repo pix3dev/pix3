@@ -282,12 +282,38 @@ export class ProjectService {
     return this.getHandleFromIndexedDB(id);
   }
 
+  /**
+   * The session id a local folder was already filed under, or null if it is genuinely new.
+   *
+   * Picking the same folder twice used to mint a second id, which forked its recents entry and
+   * orphaned everything keyed by project id — the remembered workspace mode (Flow vs Studio), the
+   * open tabs, the asset-browser state — so a re-picked project came back looking untouched.
+   * Matching is by `isSameEntry` on the persisted handles, the only identity a picked directory
+   * has (names collide, and there is no path).
+   */
+  private async findRecentProjectIdForHandle(
+    handle: FileSystemDirectoryHandle
+  ): Promise<string | null> {
+    for (const entry of this.getRecentProjects()) {
+      if (entry.backend !== 'local' || !entry.id) continue;
+      try {
+        const known = await this.getPersistedProjectDirectoryHandle(entry.id);
+        if (known && (await known.isSameEntry(handle))) {
+          return entry.id;
+        }
+      } catch {
+        // A handle we can no longer read cannot be matched; keep scanning the rest.
+      }
+    }
+    return null;
+  }
+
   async openProjectViaPicker(): Promise<void> {
     try {
       const handle = await this.fs.requestProjectDirectory('readwrite');
-      // try to persist the handle and associate it with a recent entry id
-      // prefer secure randomUUID when available; otherwise fallback to timestamp-based id
-      const id = this.createProjectSessionId();
+      // Reuse the id this folder was already filed under, if any; only a folder we have never seen
+      // gets a fresh one (secure randomUUID where available, timestamp otherwise).
+      const id = (await this.findRecentProjectIdForHandle(handle)) ?? this.createProjectSessionId();
 
       appState.project.id = id;
       appState.project.backend = 'local';

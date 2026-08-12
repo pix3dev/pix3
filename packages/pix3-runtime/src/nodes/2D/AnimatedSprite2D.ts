@@ -12,6 +12,7 @@ import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 import { parseEventArgs } from '../../core/parse-event-args';
 import type { PropertySchema } from '../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import {
   ShaderEffectStack,
   type ShaderEffectEntry,
@@ -152,6 +153,10 @@ export class AnimatedSprite2D
         this.effectStack.attach(entry.type, { enabled: entry.enabled, params: entry.params });
       }
     }
+
+    // Last: `sprite.currentClip = 'run'` now switches the PLAYING clip (syncActiveClip is
+    // private — the field alone changed only what got serialized), and color/size writes repaint.
+    installReactiveSchemaProperties(this, AnimatedSprite2D.getPropertySchema);
   }
 
   /** The shader-effect stack driving this sprite's material. */

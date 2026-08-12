@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Mesh } from 'three';
+import { Mesh, type PlaneGeometry } from 'three';
 
+import { reactiveSchemaPropertyNames } from '../../fw/reactive-schema-properties';
 import { Sprite3D } from './Sprite3D';
 
 /** Read the opacity of the sprite's plane material. */
@@ -83,5 +84,41 @@ describe('Sprite3D opacity', () => {
 
     sprite.tick(0.5);
     expect(sprite.opacity).toBeCloseTo(1);
+  });
+});
+
+/** Parameters of the plane geometry currently mounted on the sprite's mesh. */
+const planeParameters = (sprite: Sprite3D): { width: number; height: number } => {
+  const mesh = sprite.children.find(child => child instanceof Mesh) as Mesh;
+  return (mesh.geometry as PlaneGeometry).parameters;
+};
+
+describe('Sprite3D script assignments', () => {
+  it('rebuilds the plane geometry when a script assigns width/height directly', () => {
+    const sprite = new Sprite3D({ id: 's7', name: 'Sprite' });
+
+    sprite.width = 4;
+    sprite.height = 3;
+
+    // The consequence, not the field: the mounted geometry was actually rebuilt at the new size.
+    expect(planeParameters(sprite).width).toBe(4);
+    expect(planeParameters(sprite).height).toBe(3);
+  });
+
+  it('routes assignments through setSize, so invalid sizes are rejected like the Inspector', () => {
+    const sprite = new Sprite3D({ id: 's8', name: 'Sprite', width: 2, height: 2 });
+
+    sprite.width = -5;
+
+    expect(sprite.width).toBe(2);
+    expect(planeParameters(sprite).width).toBe(2);
+  });
+
+  it('installs reactive accessors for the schema-backed plain fields', () => {
+    const sprite = new Sprite3D({ id: 's9', name: 'Sprite' });
+    const reactive = reactiveSchemaPropertyNames(sprite);
+    for (const name of ['width', 'height', 'texture', 'billboard', 'billboardRoll']) {
+      expect(reactive.has(name), `${name} should be reactive`).toBe(true);
+    }
   });
 });

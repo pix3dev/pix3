@@ -1,12 +1,22 @@
+/* The bar owns a fixed slice of the toolbar rather than sizing to its buttons: it must stop short
+   of the centred project name, and a content-sized bar would change width every time a section
+   folded into the overflow — which would make the fit calculation oscillate. */
+pix3-main-menu {
+  display: block;
+  inline-size: var(--toolbar-side-reserve, min(470px, 36vw));
+  min-inline-size: 0;
+}
+
 .main-menu {
   position: relative;
-  display: inline-block;
+  display: block;
 }
 
 .menu-bar {
   display: flex;
   align-items: center;
   gap: 0;
+  overflow: hidden;
 }
 
 .pix3-menu-portal {
@@ -19,6 +29,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   height: 32px;
   padding: 0 12px;
   background: none;
@@ -41,9 +52,21 @@
   background-color: var(--bg-3);
 }
 
+.menu-section-button--overflow {
+  padding: 0 8px;
+  flex: none;
+}
+
+.menu-section-button--overflow svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
 .menu-logo-button {
   display: inline-flex;
   align-items: center;
+  flex: none;
   padding: 2px 4px;
   margin-right: 12px;
   border: none;

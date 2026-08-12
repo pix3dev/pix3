@@ -41,7 +41,19 @@ export interface LiveNodeSnapshot {
   nodeId: string;
   name: string;
   type: string;
+  /** The node's OWN visible flag — not whether it is on screen (see `hiddenByAncestor`). */
   visible: boolean;
+  /**
+   * Name of the nearest ancestor whose `visible` is false, when this node's own flag is true.
+   * Present ONLY in that mismatch case, which is almost always a bug in the game: three.js skips
+   * an invisible subtree, so the node renders nothing and cannot be tapped even though every
+   * property reads "shown".
+   *
+   * This is the exact shape that fooled an agent (and me) for two turns: a script made a result
+   * label and a retry button `visible = true` and left their parent overlay hidden, so `visible`
+   * and `text` both reported a win screen that was never on screen and whose button was untappable.
+   */
+  hiddenByAncestor?: string;
   /** Local position — the value `set_property position` writes. */
   position: { x: number; y: number; z: number };
   /** World position — what actually moved on screen. */
@@ -74,6 +86,16 @@ export interface LiveNodeSnapshot {
    * `childCount`.
    */
   visibleChildCount: number;
+  /**
+   * Interaction state of a UI control (`Button2D`, `Checkbox2D`, `Slider2D`, … — any
+   * `UIControl2D`). Absent for everything else.
+   *
+   * This is what tells "the input never reached the button" apart from "the button fired and the
+   * handler did nothing" — the two have identical symptoms otherwise, and without it a dead RETRY
+   * button cost three turns of guessing. `enabled: false` is the single most common cause; `hovering`
+   * proves the pointer landed on the control's bounds at all.
+   */
+  control?: { enabled: boolean; hovering: boolean; pressed: boolean };
 }
 
 /**
@@ -167,6 +189,28 @@ export interface GameInputResult {
    * NOT mean the game is dead — a spawner/pool/HUD reacts without moving.
    */
   verdict?: string;
+  /**
+   * Names that matched more than one live node. The call still ran (against the first match in
+   * tree order), but the target it hit is not the one the name uniquely identifies — say so
+   * rather than let a duplicate name quietly redirect taps to a stray node.
+   */
+  ambiguousTargets?: string[];
+  /** Set when the input swapped the running scene — see {@link SceneSwap}. */
+  sceneChanged?: SceneSwap;
+}
+
+/**
+ * The running scene was replaced during the window (`scene.changeScene`, a menu button, a restart).
+ * Worth its own channel because every other signal reads as absence: the watched nodes vanish with
+ * the old scene, so their deltas degrade to "gone" and the fused verdict said NO ACTIVITY for what
+ * was in fact the loudest possible reaction. Observed in a dogfooding run and mis-diagnosed as dead
+ * input.
+ */
+export interface SceneSwap {
+  /** Root node names of the scene that was running before. */
+  fromRoots: string[];
+  /** Root node names of the scene running now. */
+  toRoots: string[];
 }
 
 export interface GameObserveResult {
@@ -185,6 +229,8 @@ export interface GameObserveResult {
   game?: GameStateDelta;
   /** One-line fused summary — present when sampleMs > 0 (a window was recorded). */
   verdict?: string;
+  /** Set when the scene swapped during a sampled window — see {@link SceneSwap}. */
+  sceneChanged?: SceneSwap;
 }
 
 const MAX_TOTAL_MS = 15_000;
@@ -205,6 +251,8 @@ const DIRECTION_ALIGN_MIN = 0.7;
 const SYNTHETIC_POINTER_ID = 31337;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+const isNonEmptyString = (value: string | undefined): value is string =>
+  typeof value === 'string' && value.length > 0;
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
@@ -268,6 +316,47 @@ const readDisplayText = (node: unknown): string | null => {
   return value.length > MAX_SNAPSHOT_TEXT_CHARS
     ? `${value.slice(0, MAX_SNAPSHOT_TEXT_CHARS)}…`
     : value;
+};
+
+/**
+ * Name (or id) of the nearest ancestor that is hidden, or null when the whole chain up to the root
+ * is visible. Call only for a node whose own `visible` is true — the interesting case is the
+ * mismatch, where every property of the node claims it is shown and three.js draws nothing.
+ */
+const hiddenByAncestorName = (node: { parent?: unknown }): string | null => {
+  let current = node.parent as
+    | { visible?: unknown; name?: unknown; nodeId?: unknown; parent?: unknown }
+    | null
+    | undefined;
+  // The three.js Scene at the top has visible === true, so the walk ends naturally at the root.
+  while (current) {
+    if (current.visible === false) {
+      const name = typeof current.name === 'string' && current.name ? current.name : null;
+      const id = typeof current.nodeId === 'string' && current.nodeId ? current.nodeId : null;
+      return name ?? id ?? 'an ancestor';
+    }
+    current = current.parent as typeof current;
+  }
+  return null;
+};
+
+/**
+ * Interaction state of a `UIControl2D`, or null for a node that is not one. Duck-typed on the three
+ * members every control keeps (`isHovering`/`isPressed` are `protected`, which is a compile-time
+ * notion only) so this service stays independent of the runtime's UI class hierarchy.
+ */
+const readControlState = (
+  node: unknown
+): { enabled: boolean; hovering: boolean; pressed: boolean } | null => {
+  const candidate = node as { enabled?: unknown; isHovering?: unknown; isPressed?: unknown };
+  if (typeof candidate.isHovering !== 'boolean' || typeof candidate.isPressed !== 'boolean') {
+    return null;
+  }
+  return {
+    enabled: candidate.enabled !== false,
+    hovering: candidate.isHovering,
+    pressed: candidate.isPressed,
+  };
 };
 
 /** Best-effort `key` value for a `code` (InputService latches both, scripts poll `code`). */
@@ -345,6 +434,7 @@ export class GameInputService {
     const recorder = observeQueries.length ? this.makeRecorder(runner, observeQueries) : null;
     try {
       const before = this.snapshotMany(runner, observeQueries);
+      const rootsBefore = this.rootIdentity(runner);
       const gameBefore = this.snapshotGame();
       recorder?.start();
 
@@ -388,19 +478,29 @@ export class GameInputService {
       }
 
       const newErrors = this.newErrorsSince(errorsBefore);
+      const ambiguousTargets = this.ambiguousQueries(runner, [
+        ...steps.flatMap(step => [step.target, step.to?.target]).filter(isNonEmptyString),
+        ...observeQueries,
+      ]);
+      const sceneChanged = this.detectSceneSwap(rootsBefore, this.rootIdentity(runner));
       return {
         ok: true,
         stepsRun,
         resumedFromFocusPause: wasPaused,
+        ...(ambiguousTargets.length ? { ambiguousTargets } : {}),
+        ...(sceneChanged ? { sceneChanged } : {}),
         ...(observeQueries.length ? { observed } : {}),
         ...(game ? { game } : {}),
-        ...(observeQueries.length || game
+        // A scene swap is a reaction in its own right, so it earns a verdict even when nothing was
+        // being watched — otherwise the single loudest outcome of a tap is reported as silence.
+        ...(observeQueries.length || game || sceneChanged
           ? {
               verdict: this.buildVerdict(
                 observed,
                 game,
                 newErrors.length,
-                recorder?.droppedWatchCount ?? 0
+                recorder?.droppedWatchCount ?? 0,
+                sceneChanged
               ),
             }
           : {}),
@@ -436,14 +536,45 @@ export class GameInputService {
     // A `null` snapshot has two very different causes; tell them apart so the model doesn't read
     // "warming up" as "no such node" and rename things that were fine (or vice-versa).
     const hasLiveNodes = runtime.runner.getLiveRootNodes().length > 0;
-    const hintFor = (unresolved: string[]): string | undefined => {
-      if (unresolved.length === 0) return undefined;
-      return hasLiveNodes
-        ? `Not resolved by name/id: ${unresolved.join(', ')}. Check exact names with scene_tree.`
-        : 'Play mode is still warming up (no live nodes yet) — wait ~300ms and retry.';
+    // Names shared by several live nodes are reported alongside: the snapshot below is of one of
+    // them, chosen by tree order, which is not what the caller asked for.
+    const ambiguous = this.ambiguousQueries(runtime.runner, targets);
+    const ambiguityNote = ambiguous.length
+      ? `Ambiguous — more than one live node is named: ${ambiguous.join(', ')}. Reported values are the first match in tree order; target by nodeId (scene_tree) to be sure.`
+      : undefined;
+    // A node whose own flag says visible while an ancestor hides it is the single most misleading
+    // state a snapshot can carry, so it goes in the hint rather than waiting to be noticed in a
+    // field: "visible: true, text: ПОБЕДА" described a win screen that was never drawn.
+    const offScreenNote = (
+      snapshots: Array<[string, LiveNodeSnapshot | null]>
+    ): string | undefined => {
+      const hidden = snapshots
+        .filter(([, snap]) => snap?.hiddenByAncestor !== undefined)
+        .map(([query, snap]) => `${query} (behind hidden "${snap?.hiddenByAncestor}")`);
+      return hidden.length
+        ? `NOT ON SCREEN despite visible: true — ${hidden.join(', ')}. An invisible ancestor hides the whole subtree: these nodes render nothing and cannot be tapped. Show the ancestor.`
+        : undefined;
+    };
+    const hintFor = (
+      unresolved: string[],
+      snapshots: Array<[string, LiveNodeSnapshot | null]>
+    ): string | undefined => {
+      const unresolvedNote =
+        unresolved.length === 0
+          ? undefined
+          : hasLiveNodes
+            ? `Not resolved by name/id: ${unresolved.join(', ')}. Check exact names with scene_tree.`
+            : 'Play mode is still warming up (no live nodes yet) — wait ~300ms and retry.';
+      return (
+        [offScreenNote(snapshots), unresolvedNote, ambiguityNote].filter(Boolean).join(' ') ||
+        undefined
+      );
     };
     if (!(sampleMs > 0)) {
-      const hint = hintFor(first.filter(([, snap]) => snap === null).map(([query]) => query));
+      const hint = hintFor(
+        first.filter(([, snap]) => snap === null).map(([query]) => query),
+        first
+      );
       const game = this.describeGameDelta(null, this.snapshotGame());
       return {
         ok: true,
@@ -457,6 +588,7 @@ export class GameInputService {
     const recorder = this.makeRecorder(runtime.runner, targets);
     this.playSession.setFocusPauseSuppressed(true);
     try {
+      const rootsBefore = this.rootIdentity(runtime.runner);
       const gameBefore = this.snapshotGame();
       recorder.start();
       await sleep(clampedMs);
@@ -474,15 +606,19 @@ export class GameInputService {
       const hint = hintFor(
         Object.entries(movement)
           .filter(([, delta]) => delta.after === null)
-          .map(([query]) => query)
+          .map(([query]) => query),
+        // End-of-window state: a node that was hidden all along should say so here, not in `first`.
+        Object.entries(movement).map(([query, delta]) => [query, delta.after])
       );
+      const sceneChanged = this.detectSceneSwap(rootsBefore, this.rootIdentity(runtime.runner));
       return {
         ok: true,
         nodes: Object.fromEntries(first),
         movement,
         sampleMs: clampedMs,
         ...(game ? { game } : {}),
-        verdict: this.buildVerdict(movement, game, 0, recorder.droppedWatchCount),
+        ...(sceneChanged ? { sceneChanged } : {}),
+        verdict: this.buildVerdict(movement, game, 0, recorder.droppedWatchCount, sceneChanged),
         ...(hint ? { hint } : {}),
       };
     } finally {
@@ -636,6 +772,16 @@ export class GameInputService {
       if (!node) {
         return `No live node named or with id "${target}" in the running scene. Check game_observe / scene_tree for names.`;
       }
+      // Refuse rather than dispatch into empty space: an off-screen node still projects to a valid
+      // canvas point, so tapping it "succeeded" with no reaction and read as dead game logic. This
+      // cost two turns on a retry button whose parent overlay was never shown.
+      if (!node.visible) {
+        return `Node "${target}" has visible: false, so it is not on screen and cannot be tapped. Show it first (or fix whatever should have shown it).`;
+      }
+      const hiddenBy = hiddenByAncestorName(node);
+      if (hiddenBy !== null) {
+        return `Node "${target}" is visible itself but its ancestor "${hiddenBy}" is hidden, so nothing of it is on screen and a tap cannot reach it. Make "${hiddenBy}" visible — showing only the children is the bug.`;
+      }
       backing = runtime.runner.projectNodeToCanvas(node);
       if (!backing) {
         return `Node "${target}" could not be projected to the canvas (no camera or zero-sized canvas).`;
@@ -667,6 +813,49 @@ export class GameInputService {
     return runner.getLiveNodeById(query) ?? runner.findLiveNodeByName(query);
   }
 
+  /**
+   * Of `queries`, the ones that resolve by NAME to more than one live node. An id hit is unique by
+   * construction and never ambiguous. Duplicated names are common in agent-built scenes (an
+   * abandoned scratch node keeps the name it was given), and resolving one silently sends taps to
+   * whichever copy tree order happens to reach first.
+   */
+  /**
+   * Live scene roots plus their display names, captured for a later {@link detectSceneSwap}. Held
+   * by object identity, not nodeId: `runGraph` re-clones the authored graph, so a swap BACK to the
+   * same scene (or a restart) reuses the authored ids while every live node is a new instance.
+   */
+  private rootIdentity(runner: SceneRunner): { nodes: readonly NodeBase[]; names: string[] } {
+    // Copied, not aliased: getLiveRootNodes() hands back the graph's own array, so a "before"
+    // capture that kept the reference could quietly become the "after" list.
+    const nodes = [...runner.getLiveRootNodes()];
+    return { nodes, names: nodes.map(root => root.name || root.nodeId) };
+  }
+
+  /**
+   * Did the running scene get replaced between the two captures? Every root being a different
+   * instance is exactly what `SceneRunner.runGraph` does on `changeScene` / restart, and nothing
+   * else produces it — an ordinary spawn/despawn keeps at least one root alive.
+   */
+  private detectSceneSwap(
+    before: { nodes: readonly NodeBase[]; names: string[] },
+    after: { nodes: readonly NodeBase[]; names: string[] }
+  ): SceneSwap | undefined {
+    if (before.nodes.length === 0 || after.nodes.length === 0) return undefined;
+    if (after.nodes.some(root => before.nodes.includes(root))) return undefined;
+    return { fromRoots: before.names, toRoots: after.names };
+  }
+
+  private ambiguousQueries(runner: SceneRunner, queries: readonly string[]): string[] {
+    const ambiguous: string[] = [];
+    for (const query of new Set(queries)) {
+      if (runner.getLiveNodeById(query)) continue;
+      if (runner.findLiveNodesByName(query, 2).length > 1) {
+        ambiguous.push(query);
+      }
+    }
+    return ambiguous;
+  }
+
   private snapshotMany(
     runner: SceneRunner,
     queries: string[]
@@ -685,11 +874,14 @@ export class GameInputService {
     // UIControl2D (Label2D, Button2D, …) resolves its rendered text through getDisplayText() —
     // duck-typed so the runtime's UI classes stay out of this service's imports.
     const displayText = readDisplayText(node);
+    const hiddenBy = node.visible ? hiddenByAncestorName(node) : null;
+    const control = readControlState(node);
     return {
       nodeId: node.nodeId,
       name: node.name,
       type: node.type,
       visible: node.visible,
+      ...(hiddenBy !== null ? { hiddenByAncestor: hiddenBy } : {}),
       position: { x: node.position.x, y: node.position.y, z: node.position.z },
       worldPosition: { x: world.x, y: world.y, z: world.z },
       rotationZ: node.rotation.z,
@@ -698,6 +890,7 @@ export class GameInputService {
       ...(displayText !== null ? { text: displayText } : {}),
       childCount: children.length,
       visibleChildCount: children.reduce((n, child) => n + (child.visible !== false ? 1 : 0), 0),
+      ...(control !== null ? { control } : {}),
     };
   }
 
@@ -897,7 +1090,8 @@ export class GameInputService {
     observed: Record<string, ObservedNodeDelta>,
     game: GameStateDelta | undefined,
     newErrorCount: number,
-    droppedWatchCount: number
+    droppedWatchCount: number,
+    sceneChanged?: SceneSwap
   ): string {
     const parts: string[] = [];
     const staticContainers: string[] = [];
@@ -934,14 +1128,31 @@ export class GameInputService {
         ? ` (${droppedWatchCount} extra watched node(s) not tracked — cap is 8)`
         : '';
 
+    // An off-screen watched node explains a dead-looking result better than any guess in the tail,
+    // so it leads the verdict: "no activity" invited debugging the input path when the real answer
+    // was that the node is not drawn at all.
+    const offScreen = Object.entries(observed)
+      .filter(([, delta]) => delta.after?.hiddenByAncestor !== undefined)
+      .map(([query, delta]) => `${query} (behind hidden "${delta.after?.hiddenByAncestor}")`);
+    const offScreenTail = offScreen.length
+      ? ` NOT ON SCREEN despite visible: true — ${offScreen.join(', ')}: an invisible ancestor hides the whole subtree, so these render nothing and cannot be tapped.`
+      : '';
+
+    // A scene swap leads unconditionally: it invalidates every other line of the verdict (the
+    // watched nodes were destroyed with their scene, so their deltas describe corpses) and it is
+    // the one outcome the old wording actively mis-reported as NO ACTIVITY.
+    if (sceneChanged) {
+      const errs = newErrorCount > 0 ? ` ${newErrorCount} new runtime error(s).` : '';
+      return `SCENE CHANGED: the running scene was replaced (roots ${sceneChanged.fromRoots.join(', ') || '—'} → ${sceneChanged.toRoots.join(', ') || '—'}). That IS the reaction — the nodes you were watching belong to the old scene and no longer exist, so their deltas below mean nothing. Re-observe against the new scene's nodes (game_observe with no names lists its roots); scene_tree still shows the EDITOR's scene, not this one.${errs}${dropped}`;
+    }
     if (anyActivity) {
       const tail = staticContainers.length
         ? ` Own positions of ${staticContainers.join(', ')} did not move — normal for spawners/pools/HUD.`
         : '';
-      return `GAMEPLAY REACTED: ${parts.join('; ')}.${tail}${dropped}`;
+      return `GAMEPLAY REACTED: ${parts.join('; ')}.${tail}${offScreenTail}${dropped}`;
     }
     const errs = newErrorCount > 0 ? `${newErrorCount} new error(s)` : 'no new errors';
-    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no component or game state changed, ${errs}. If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
+    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no component or game state changed, ${errs}.${offScreenTail} If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */

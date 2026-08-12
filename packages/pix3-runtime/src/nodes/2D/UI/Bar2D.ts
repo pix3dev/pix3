@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface Bar2DProps extends UIControl2DProps {
   width?: number;
@@ -88,6 +89,9 @@ export class Bar2D extends UIControl2D {
     }
 
     this.updateBarVisuals();
+
+    // Last: from here a script's `bar.value = 30` runs the same clamp + redraw the Inspector does.
+    installReactiveSchemaProperties(this, Bar2D.getPropertySchema);
   }
 
   private createBorder(): void {

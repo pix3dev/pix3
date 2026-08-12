@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../core/shared-quad-geometry';
 import { BATCHABLE_2D_KEY } from '../../core/batch-2d';
 
@@ -41,6 +42,10 @@ export class ColorRect2D extends Node2D {
     this.mesh.scale.set(this.width, this.height, 1);
     this.mesh.userData[BATCHABLE_2D_KEY] = true;
     this.add(this.mesh);
+
+    // Last: `rect.color = '#f00'` now reaches the material and `rect.width` the mesh scale,
+    // same as the Inspector — a script flash/fade previously changed only the fields.
+    installReactiveSchemaProperties(this, ColorRect2D.getPropertySchema);
   }
 
   static getPropertySchema(): PropertySchema {

@@ -153,6 +153,7 @@ import './shared/pix3-node-type-picker';
 import './shared/pix3-playable-export-dialog';
 import './shared/pix3-playable-export-progress-dialog';
 import './shared/pix3-status-bar';
+import './shared/pix3-mode-switch';
 import './home/pix3-project-home';
 import './collab/collab-participants-strip';
 import './collab/pix3-share-dialog';
@@ -1352,7 +1353,10 @@ export class Pix3EditorShell extends ComponentBase {
 
   private renderProjectNameLabel() {
     return html`
-      <span class="project-name-label">${appState.project.projectName ?? 'No project open'}</span>
+      <div class="project-identity">
+        <span class="project-name-label">${appState.project.projectName ?? 'No project open'}</span>
+        <pix3-mode-switch></pix3-mode-switch>
+      </div>
     `;
   }
 

@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface Checkbox2DProps extends UIControl2DProps {
   size?: number;
@@ -68,6 +69,10 @@ export class Checkbox2D extends UIControl2D {
     if (this.label.trim().length > 0) {
       this.updateLabel();
     }
+
+    // Last: `checkbox.checked = true` from a script now draws/removes the checkmark like the
+    // Inspector does — toggle() was the only working spelling before.
+    installReactiveSchemaProperties(this, Checkbox2D.getPropertySchema);
   }
 
   /** Horizontal gap between the box's right edge and the label plane. */

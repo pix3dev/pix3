@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface Slider2DProps extends UIControl2DProps {
   width?: number;
@@ -98,6 +99,10 @@ export class Slider2D extends UIControl2D {
     this.add(this.handleMesh);
 
     this.updateSliderVisuals();
+
+    // Last: setValue() is private, so `slider.value = 30` was the only spelling scripts had — and it
+    // moved nothing. From here it runs the same clamp + redraw + axis emit the Inspector does.
+    installReactiveSchemaProperties(this, Slider2D.getPropertySchema);
   }
 
   override isPointInBounds(worldPoint: Vector2): boolean {

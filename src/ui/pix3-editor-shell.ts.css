@@ -1,4 +1,9 @@
 :root {
+  /* Width reserved at each end of the Studio toolbar: the menu bar is capped to it on the left and
+     the centred project name / mode switch starts after it on both sides, so the two can never
+     collide. Shrinks with the window, at which point the menu folds its tail under "…". */
+  --toolbar-side-reserve: min(470px, 36vw);
+
   --pix3-z-base: 1;
   --pix3-z-floating: 10;
   --pix3-z-popover: 100;
@@ -60,20 +65,37 @@ pix3-toolbar {
   color: var(--fg-1);
 }
 
-.project-name-label {
+/* Centered over the toolbar: project name plus the Studio/Flow switch, the same pairing Flow's
+   header shows. The row stays click-through so it never steals toolbar clicks; only the switch
+   inside it takes pointer events.
+   The symmetric inline inset is the same reserve the menu bar is capped to (`--toolbar-side-reserve`,
+   consumed by `pix3-main-menu`), so the pair stays centred on the window and can never ride over
+   the menu on the left or the play/account controls on the right — on a narrow window the menu
+   folds its tail into a "…" button instead, and the name here ellipsizes. */
+.project-identity {
   position: absolute;
-  inset-inline-start: 50%;
-  inset-block-start: 50%;
-  transform: translate(-50%, -50%);
-  max-inline-size: min(40%, 420px);
+  inset-block: 0;
+  inset-inline: var(--toolbar-side-reserve);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: var(--pix3-z-base);
+}
+
+.project-identity pix3-mode-switch {
+  pointer-events: auto;
+}
+
+.project-name-label {
+  min-inline-size: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 600;
   color: var(--fg-1);
-  pointer-events: none;
-  z-index: var(--pix3-z-base);
 }
 
 .toolbar-group--play {

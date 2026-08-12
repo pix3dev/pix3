@@ -11,6 +11,7 @@ import {
   type LabelVAlign,
 } from '../../../core/label-text-layout';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 import { resolveLocalizedText } from '../../../core/localization/active-localization';
 import type { TrParams } from '../../../core/localization/localization-types';
 
@@ -65,6 +66,10 @@ export class Label2D extends UIControl2D {
     // Re-render with the Label2D-specific fields now that they are set (the
     // base constructor already ran updateLabel with defaults).
     this.updateLabel();
+
+    // Last: `label.width = 200` from a script now re-wraps and repaints the text like the Inspector
+    // does (the base label props are already accessors; this covers Label2D's own box fields).
+    installReactiveSchemaProperties(this, Label2D.getPropertySchema);
   }
 
   override getDisplayText(): string {
@@ -81,16 +86,19 @@ export class Label2D extends UIControl2D {
     if (this.labelKey === '' && this.label === text) {
       return;
     }
-    this.labelKey = '';
+    // `labelKey` and `label` are re-rendering accessors, so clear the params BETWEEN them is not
+    // safe to skip: set the params first, then let the last assignment do the single re-render.
     this.labelKeyParams = null;
+    this.labelKey = '';
     this.label = text;
+    // Explicit: when only the params changed, neither assignment above tripped its equality guard.
     this.updateLabel();
   }
 
   /** Bind the label to a translation key; re-resolves on locale change (via the tree walk). */
   setTextKey(key: string, params?: TrParams): void {
-    this.labelKey = key;
     this.labelKeyParams = params ?? null;
+    this.labelKey = key;
     this.updateLabel();
   }
 

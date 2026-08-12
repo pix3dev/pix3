@@ -123,6 +123,7 @@ export * from './shader-effects';
 // Framework
 export * from './fw/property-schema';
 export * from './fw/property-schema-utils';
+export * from './fw/reactive-schema-properties';
 
 // Decorators
 export { property, state } from 'lit/decorators.js';
