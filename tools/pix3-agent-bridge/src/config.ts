@@ -161,13 +161,31 @@ export const loadConfig = (): BridgeConfig => {
   // Persist on first run (or after a legacy-token migration) so the token is stable across restarts.
   if (!existed || !stored.token) {
     saveConfig(config);
+  } else {
+    // Configs written by older versions are 0644 — re-tighten them on every boot rather than only
+    // when something happens to rewrite the file.
+    restrictPermissions();
   }
   return config;
 };
 
+/**
+ * Tighten the config to owner-only. It holds the pairing token AND every provider API key, so on a
+ * shared machine the default 0644 hands all of it to any other local account. Best-effort: chmod is
+ * a near-no-op on Windows, and a config on an exotic filesystem must not stop the bridge booting.
+ */
+const restrictPermissions = (): void => {
+  try {
+    fs.chmodSync(CONFIG_DIR, 0o700);
+    fs.chmodSync(CONFIG_PATH, 0o600);
+  } catch {
+    /* not supported here — the token check is still the real gate */
+  }
+};
+
 /** Persist only the durable fields (token, port, custom origins, providers) — never the merged defaults. */
 export const saveConfig = (config: BridgeConfig): void => {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   const customOrigins = config.origins.filter(o => !DEFAULT_ORIGINS.includes(o));
   const persisted = {
     token: config.token,
@@ -176,4 +194,5 @@ export const saveConfig = (config: BridgeConfig): void => {
     providers: config.providers,
   };
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+  restrictPermissions();
 };

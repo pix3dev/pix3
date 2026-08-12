@@ -35,6 +35,11 @@
   --danger-line: oklch(0.7 0.18 25 / 0.42);
   --warn: oklch(0.82 0.15 80);
   --warn-soft: oklch(0.82 0.15 80 / 0.16);
+  /* Healthy/connected status. Distinct from --presence-* (collaborator identity,
+     which starts at amber) so an "all good" indicator never reads as a warning. */
+  --ok: oklch(0.76 0.17 150);
+  --ok-soft: oklch(0.76 0.17 150 / 0.16);
+  --ok-line: oklch(0.76 0.17 150 / 0.42);
 
   /* Axis identity — transform/size fields, gizmo parity (X red · Y green · Z blue).
      Width maps to X, height to Y. Consumed by pix3-number-field's axis chip. */

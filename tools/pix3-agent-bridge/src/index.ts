@@ -25,8 +25,11 @@
  *
  * Security model (defense in depth for a localhost service):
  *   - binds to 127.0.0.1 only;
- *   - pairing token (generated once, stored in ~/.pix3/agent-bridge.json, printed on start) must
- *     accompany every API request (x-api-key / Authorization) — blocks other local processes/pages;
+ *   - pairing token (generated once, stored 0600 in ~/.pix3/agent-bridge.json, printed on start as a
+ *     one-click `#bridge-token=` link) must accompany every API request (x-api-key / Authorization).
+ *     This is the layer the Origin allowlist below CANNOT provide: CORS is a browser mechanism, so a
+ *     local process with no Origin header — a malicious npm postinstall, any other CLI — would
+ *     otherwise spend the stored provider keys and the MAX subscription freely;
  *   - browser `Origin` allowlist (editor.pix3.dev / cloud.pix3.dev + local dev) — anything else 403;
  *   - `Host` header must be localhost — blocks DNS-rebinding;
  *   - the proxy lane never takes the upstream host from the client (fixed per provider) → no SSRF,
@@ -86,6 +89,25 @@ const AGENT_SDK_MODELS = [
 const log = (line: string): void => {
   console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
 };
+
+/**
+ * Origins that are an editor a human opens, so a pairing link makes sense for them. `cloud.pix3.dev`
+ * is the collab/API backend, and the 127.0.0.1 spelling of the dev server would just print the same
+ * link twice — both are still allowed origins, they just get no link.
+ */
+const NON_EDITOR_ORIGINS = new Set(['https://cloud.pix3.dev', 'http://127.0.0.1:8123']);
+
+/**
+ * One-click pairing: the token travels in the URL **fragment**, which browsers never send to the
+ * server, so it stays out of the editor host's access logs. The editor consumes it on load and
+ * immediately strips it from the address bar.
+ */
+const pairingLinks = (config: BridgeConfig): string[] =>
+  config.origins
+    .filter(origin => !NON_EDITOR_ORIGINS.has(origin))
+    // Local dev first: someone running the bridge from a terminal is usually on the local editor.
+    .sort((a, b) => Number(b.includes('localhost')) - Number(a.includes('localhost')))
+    .map(origin => `${origin}/#bridge-token=${encodeURIComponent(config.token)}`);
 
 const hostAllowed = (req: IncomingMessage): boolean => {
   const host = (req.headers.host ?? '').toLowerCase();
@@ -194,7 +216,7 @@ const startServer = (config: BridgeConfig): void => {
         {
           ok: true,
           name: 'pix3-agent-bridge',
-          hint: 'Paste the pairing token from the bridge console into pix3 (Settings → AI Agent).',
+          hint: 'Open the pairing link the bridge printed on start, or paste its token into pix3 (Settings → Agent (LLM)).',
         },
         origin
       );
@@ -304,13 +326,18 @@ const startServer = (config: BridgeConfig): void => {
       .map(([id]) => id);
     console.log('');
     console.log(`  Pix3AgentBridge listening on http://127.0.0.1:${config.port}`);
-    console.log(`  Pairing token:   ${config.token}`);
+    console.log('');
+    console.log('  Pair the editor — open one of these (the editor stores the token and cleans the URL):');
+    for (const link of pairingLinks(config)) {
+      console.log(`    ${link}`);
+    }
+    console.log('');
+    console.log(`  Pairing token:   ${config.token}   (only if you paste it by hand)`);
     console.log(`  Allowed origins: ${config.origins.join(', ')}`);
     console.log(
       `  Proxy providers: ${enabled.length > 0 ? enabled.join(', ') : '(none — add one: pix3-agent-bridge provider add openai --key sk-...)'}`
     );
     console.log('');
-    console.log('  In pix3: Settings → AI Agent → paste the pairing token; advanced providers appear when enabled here.');
     console.log('  Agent-SDK (MAX) lane auth comes from your Claude Code login (`claude login`).');
     console.log('');
   });

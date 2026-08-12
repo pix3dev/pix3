@@ -10,6 +10,10 @@ import { type ApiProject } from '@/services/cloud/ApiClient';
 import { appState, resetAppState } from '@/state';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
 import { PrototypeBootstrapService } from '@/services/flow/PrototypeBootstrapService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 
 type TestWelcomeElement = HTMLElement & { updateComplete: Promise<unknown> };
 
@@ -463,5 +467,183 @@ describe('Pix3Welcome prompt hero', () => {
     expect(
       hero.compareDocumentPosition(openButton) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+});
+
+/**
+ * The setup strip. Its whole job is to answer "can the prompt above actually reach a model?" before
+ * the user types anything — so the assertions are about what it REPORTS, and that every control
+ * lands in the existing Editor Settings dialog rather than duplicating key storage here.
+ */
+describe('Pix3Welcome setup status', () => {
+  class EditorSettingsServiceStub {
+    showSettings = vi.fn(async (_tab?: string) => undefined);
+  }
+
+  class BridgeConnectionServiceStub {
+    available = false;
+    entries: Array<{ id: string; label: string; kind: string }> = [];
+    probe = vi.fn(async () => undefined);
+    getBridgeUrl = () => 'http://127.0.0.1:8484';
+    isAvailable = () => this.available;
+    getEntries = () => [...this.entries];
+    private listeners = new Set<() => void>();
+    subscribe(listener: () => void): () => void {
+      this.listeners.add(listener);
+      return () => this.listeners.delete(listener);
+    }
+    emit(): void {
+      this.listeners.forEach(listener => listener());
+    }
+  }
+
+  class AgentSettingsServiceStub {
+    keyedProviders = new Set<string>();
+    hasApiKey = vi.fn(async (providerId: string) => this.keyedProviders.has(providerId));
+    getPreferences = vi.fn(() => ({ selectedProviderId: 'gemini' }));
+    private listeners = new Set<(prefs: unknown) => void>();
+    subscribe(listener: (prefs: unknown) => void): () => void {
+      this.listeners.add(listener);
+      listener(this.getPreferences());
+      return () => this.listeners.delete(listener);
+    }
+  }
+
+  class LlmProviderRegistryStub {
+    providers = [{ id: 'gemini', label: 'Google Gemini' }];
+    list = () => this.providers;
+  }
+
+  const mountStatus = async (): Promise<{
+    welcome: TestWelcomeElement;
+    settings: EditorSettingsServiceStub;
+    bridge: BridgeConnectionServiceStub;
+    agent: AgentSettingsServiceStub;
+  }> => {
+    resetAppState();
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(ProjectService),
+      ProjectServiceStub,
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(IconService), IconServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(
+      container.getOrCreateToken(ProjectLifecycleService),
+      ProjectLifecycleServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(CloudProjectService),
+      CloudProjectServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(EditorSettingsService),
+      EditorSettingsServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(BridgeConnectionService),
+      BridgeConnectionServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(AgentSettingsService),
+      AgentSettingsServiceStub,
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(LlmProviderRegistry),
+      LlmProviderRegistryStub,
+      'singleton'
+    );
+
+    const settings = container.getService<EditorSettingsServiceStub>(
+      container.getOrCreateToken(EditorSettingsService)
+    );
+    const bridge = container.getService<BridgeConnectionServiceStub>(
+      container.getOrCreateToken(BridgeConnectionService)
+    );
+    const agent = container.getService<AgentSettingsServiceStub>(
+      container.getOrCreateToken(AgentSettingsService)
+    );
+    // Singletons persist across the tests in this file — reset rather than assume a fresh instance.
+    settings.showSettings.mockClear();
+    bridge.probe.mockClear();
+    bridge.available = false;
+    bridge.entries = [];
+    agent.keyedProviders.clear();
+
+    const welcome = document.createElement('pix3-welcome') as TestWelcomeElement;
+    document.body.appendChild(welcome);
+    await welcome.updateComplete;
+    return { welcome, settings, bridge, agent };
+  };
+
+  /** The key check is async; let its promise chain settle before reading the rendered chips. */
+  const settle = async (welcome: TestWelcomeElement): Promise<void> => {
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+    }
+    await welcome.updateComplete;
+  };
+
+  it('warns that no key is configured and opens the agent settings tab', async () => {
+    const { welcome, settings } = await mountStatus();
+    await settle(welcome);
+
+    const chip = welcome.querySelector('.welcome-chip--warn') as HTMLButtonElement;
+    expect(chip?.textContent).toContain('No AI key');
+
+    chip.click();
+    expect(settings.showSettings).toHaveBeenCalledWith('agent');
+  });
+
+  it('names the provider once a key exists, without a reload', async () => {
+    const { welcome, bridge, agent } = await mountStatus();
+    await settle(welcome);
+    expect(welcome.querySelector('.welcome-chip--warn')).toBeTruthy();
+
+    agent.keyedProviders.add('gemini');
+    bridge.emit(); // Any settings/bridge change re-runs the key check.
+    await settle(welcome);
+
+    const chip = welcome.querySelector('.welcome-chip--ok') as HTMLButtonElement;
+    expect(chip?.textContent).toContain('Google Gemini');
+    expect(welcome.querySelector('.welcome-chip--warn')).toBeNull();
+  });
+
+  it('reports the bridge and re-probes it on demand', async () => {
+    const { welcome, bridge } = await mountStatus();
+    await settle(welcome);
+
+    // Mounting probes once on its own: the bridge is usually started after the editor tab.
+    expect(bridge.probe).toHaveBeenCalled();
+    expect(welcome.textContent).toContain('Bridge offline');
+
+    bridge.available = true;
+    bridge.entries = [
+      { id: 'openai', label: 'OpenAI', kind: 'openai' },
+      { id: 'anthropic', label: 'Anthropic', kind: 'anthropic' },
+    ];
+    bridge.emit();
+    await settle(welcome);
+    expect(welcome.textContent).toContain('Bridge · 2 providers');
+
+    const before = bridge.probe.mock.calls.length;
+    (welcome.querySelectorAll('.welcome-tool')[0] as HTMLButtonElement).click();
+    await settle(welcome);
+    expect(bridge.probe.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('opens the full editor settings from the gear button', async () => {
+    const { welcome, settings } = await mountStatus();
+    await settle(welcome);
+
+    const tools = welcome.querySelectorAll('.welcome-tool');
+    (tools[tools.length - 1] as HTMLButtonElement).click();
+    expect(settings.showSettings).toHaveBeenCalledWith('general');
   });
 });

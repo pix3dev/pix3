@@ -67,6 +67,22 @@ const PIX3_LINKS: readonly { href: string; icon: string; label: string; hint: st
   },
 ];
 
+/**
+ * Recognisable API-key shapes, so a provider key pasted into the bridge's pairing-token field is
+ * caught at the point of entry instead of surfacing later as an unexplained 401. Prefixes only —
+ * matching on length would reject a future bridge token format.
+ */
+const PROVIDER_KEY_PREFIXES: ReadonlyArray<{ prefix: string; vendor: string }> = [
+  { prefix: 'AIza', vendor: 'Google Gemini' },
+  { prefix: 'sk-ant-', vendor: 'Anthropic' },
+  { prefix: 'csk-', vendor: 'Cerebras' },
+  { prefix: 'sk-', vendor: 'OpenAI-style' },
+];
+
+/** The vendor whose key format this string matches, or null when it could be a pairing token. */
+const recogniseProviderKey = (value: string): string | null =>
+  PROVIDER_KEY_PREFIXES.find(entry => value.startsWith(entry.prefix))?.vendor ?? null;
+
 interface SettingsSectionDef {
   id: EditorSettingsTab;
   label: string;
@@ -259,6 +275,10 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @state()
   private bridgeMessage: string | null = null;
+
+  /** Renders {@link bridgeMessage} as a correction rather than a neutral note. */
+  @state()
+  private bridgeMessageIsWarning = false;
 
   /** The command text most recently copied to the clipboard (drives the transient "Copied" glyph). */
   @state()
@@ -840,8 +860,9 @@ export class EditorSettingsDialog extends ComponentBase {
         </h3>
         <div class="hint">
           Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine
-          so keys never enter the browser. Gemini works without it. Start it, then paste the pairing
-          token it prints below and add providers:
+          so keys never enter the browser. Gemini works without it. Start it and open the pairing
+          link it prints — that stores the token for you; the field below is only for pasting it by
+          hand. Then add providers:
         </div>
         ${this.renderCommandBlock('npx @pix3/agent-bridge')}
         ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}
@@ -881,7 +902,11 @@ export class EditorSettingsDialog extends ComponentBase {
               Recheck
             </button>
           </div>
-          ${this.bridgeMessage ? html`<div class="hint">${this.bridgeMessage}</div>` : null}
+          ${this.bridgeMessage
+            ? html`<div class="hint ${this.bridgeMessageIsWarning ? 'hint--warn' : ''}">
+                ${this.bridgeMessage}
+              </div>`
+            : null}
         </div>
 
         <div class="settings-field">
@@ -906,11 +931,26 @@ export class EditorSettingsDialog extends ComponentBase {
 
   private onBridgeTokenInput = (event: Event): void => {
     this.bridgeTokenInput = (event.target as HTMLInputElement).value;
+    if (this.bridgeMessageIsWarning) {
+      // The correction applied to the value that has just been replaced.
+      this.bridgeMessage = null;
+      this.bridgeMessageIsWarning = false;
+    }
   };
 
   private onSaveBridgeToken = async (): Promise<void> => {
     const token = this.bridgeTokenInput.trim();
     if (!token) return;
+    // The two fields on this pane both take an opaque secret, and pasting a provider key here is the
+    // easy mistake to make — it stores fine and then every request comes back 401 with nothing on
+    // screen explaining why. A recognisable provider prefix can never be a bridge token.
+    const providerKeyVendor = recogniseProviderKey(token);
+    if (providerKeyVendor) {
+      this.bridgeMessageIsWarning = true;
+      this.bridgeMessage = `That looks like a ${providerKeyVendor} API key, not the bridge pairing token. Provider keys go in the API Key field below (or onto the bridge itself with "pix3-agent-bridge provider add"). The pairing token is the one the bridge prints on start — or just open the pairing link it prints next to it.`;
+      return;
+    }
+    this.bridgeMessageIsWarning = false;
     this.bridgeBusy = true;
     this.bridgeMessage = null;
     try {
@@ -930,6 +970,7 @@ export class EditorSettingsDialog extends ComponentBase {
 
   private onClearBridgeToken = async (): Promise<void> => {
     this.bridgeBusy = true;
+    this.bridgeMessageIsWarning = false;
     try {
       await this.bridge.setToken('');
       this.bridgeTokenConfigured = false;
@@ -954,6 +995,7 @@ export class EditorSettingsDialog extends ComponentBase {
   private onProbeBridge = async (): Promise<void> => {
     this.bridgeBusy = true;
     this.bridgeMessage = null;
+    this.bridgeMessageIsWarning = false;
     try {
       await this.bridge.probe();
       this.bridgeAvailable = this.bridge.isAvailable();

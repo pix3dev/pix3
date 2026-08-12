@@ -40,9 +40,13 @@ pix3-welcome {
   position: fixed;
   inset: 0;
   display: grid;
-  place-items: center;
+  /* `safe` keeps the card reachable when it is taller than the viewport: plain centring would push
+     its top edge above the scroll origin and the first rows would be unreachable. */
+  place-items: safe center;
   width: 100%;
   height: 100%;
+  overflow: auto;
+  padding: 1.5rem;
   z-index: var(--pix3-z-overlay);
   pointer-events: auto;
   background-color: var(--bg-0);
@@ -56,58 +60,148 @@ pix3-welcome {
 }
 .welcome-card {
   background: var(--bg-1);
-  padding: 3rem 2.5rem;
+  padding: 1.5rem 1.75rem 1.75rem;
   border: 1px solid var(--line-1);
   border-radius: var(--radius-3);
   max-width: 50rem;
   color: var(--fg-0);
   pointer-events: auto;
-  text-align: center;
+  text-align: left;
 }
 .welcome-header {
-  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
 }
 .welcome-logo {
-  max-width: 230px;
+  width: 118px;
+  max-width: 40vw;
   height: auto;
   display: block;
-  margin: 0 auto 1rem auto;
   animation: logoBounceIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
+/* Setup strip — pushed to the far end of the header row, away from the brand. */
+.welcome-setup {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.welcome-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.welcome-chip:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.welcome-chip__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--fg-3);
+  flex-shrink: 0;
+}
+
+.welcome-chip--ok .welcome-chip__dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+
+/* Amber, not red: a missing key blocks the prompt but nothing is broken yet. */
+.welcome-chip--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--fg-0);
+}
+
+.welcome-chip--warn .welcome-chip__dot {
+  background: var(--warn);
+}
+
+/* The bridge is optional — offline is a state, not a fault, so it stays muted. */
+.welcome-chip--idle .welcome-chip__dot {
+  background: var(--fg-3);
+}
+
+.welcome-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.welcome-tool:hover:not([disabled]) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.welcome-tool[disabled] {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.welcome-tool--busy svg {
+  animation: welcomeSpin 0.8s linear infinite;
+}
+
 .welcome-version {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.8rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 999px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   color: var(--fg-1);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
 }
 
 .welcome-actions-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-.action-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  /* Stacked, not side by side: in the narrow secondary column a two-up row wraps "Start New
+     Project" onto a second line. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0;
 }
 .action-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
+  justify-content: flex-start;
+  gap: 0.55rem;
   width: 100%;
-  aspect-ratio: auto;
-  height: 120px;
   background: var(--bg-2);
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-2);
@@ -120,7 +214,7 @@ pix3-welcome {
     border-color 0.15s ease,
     color 0.15s ease;
   pointer-events: auto;
-  padding: 1rem;
+  padding: 0.65rem 0.75rem;
 }
 .action-btn:hover {
   background: var(--accent-soft);
@@ -133,20 +227,21 @@ pix3-welcome {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
   color: var(--accent);
 }
 .action-label {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  text-align: center;
+  text-align: left;
   line-height: 1.3;
 }
 .recent-list {
-  margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--line-1);
+  margin-top: 1.25rem;
+  padding-top: 0;
+  border-top: none;
   color: var(--fg-1);
 }
 .recent-list h3 {
@@ -183,10 +278,10 @@ pix3-welcome {
   border-radius: var(--radius-1);
   background: transparent;
   color: var(--fg-1);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 0.55rem 0.95rem;
+  padding: 0.45rem 0.8rem;
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -203,7 +298,11 @@ pix3-welcome {
 }
 
 .project-tabs__panel {
-  margin-top: 1rem;
+  margin-top: 0.75rem;
+  /* The list is the one part of the card that grows without bound, so it scrolls inside itself
+     instead of pushing the rest of the card past the viewport. */
+  max-height: 17rem;
+  overflow-y: auto;
 }
 
 .recent-row {
@@ -222,14 +321,14 @@ pix3-welcome {
   border: 1px solid var(--line-1);
   color: inherit;
   text-align: left;
-  padding: 0.75rem;
+  padding: 0.55rem 0.65rem;
   border-radius: var(--radius-2);
   cursor: pointer;
   pointer-events: auto;
   transition:
     background 0.15s ease,
     border-color 0.15s ease;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
 }
 .recent-item:hover:not([disabled]) {
@@ -344,14 +443,13 @@ pix3-welcome {
 
 .cloud-project-delete {
   flex-shrink: 0;
-  min-width: 6.75rem;
-  padding: 0.8rem 0.95rem;
+  padding: 0.5rem 0.65rem;
   border-radius: var(--radius-2);
   border: 1px solid var(--danger-line);
   background: var(--danger-soft);
   color: var(--danger);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 700;
   transition:
     background 0.15s ease,
@@ -424,33 +522,51 @@ pix3-welcome {
 
 /* ── Prompt hero ──────────────────────────────────────────────────────────────
    Flow is the default way in, so the prompt is the primary content of the card
-   and the project lists sit below it. Every rule is scoped under the host tag:
+   and the project lists sit in the column beside it. Every rule is scoped under the host tag:
    these class names (.hero-*, .welcome-*) are generic enough that an unscoped
    rule would leak into panels that happen to share a word. */
 
 pix3-welcome .welcome-card {
-  max-width: 56rem;
-  width: min(94vw, 56rem);
+  max-width: 66rem;
+  width: min(94vw, 66rem);
+}
+
+/* Two columns: the prompt (the default way in) keeps the wider one, opening an existing project
+   sits beside it instead of below — that is what used to push the card past the viewport. */
+pix3-welcome .welcome-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: start;
+}
+
+pix3-welcome .welcome-column {
+  min-width: 0;
+}
+
+pix3-welcome .welcome-column--secondary {
+  padding-left: 1.75rem;
+  border-left: 1px solid var(--line-1);
 }
 
 pix3-welcome .welcome-hero {
   text-align: left;
-  margin-bottom: 1.75rem;
+  margin-bottom: 0;
 }
 
 pix3-welcome .hero-title {
   font-family: var(--font-ui);
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   font-weight: 700;
-  margin: 0 0 0.35rem 0;
+  margin: 0 0 0.3rem 0;
   color: var(--fg-0);
 }
 
 pix3-welcome .hero-subtitle {
-  margin: 0 0 1rem 0;
+  margin: 0 0 0.85rem 0;
   color: var(--fg-2);
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 pix3-welcome .hero-composer {
@@ -477,7 +593,7 @@ pix3-welcome .hero-composer--drag {
 pix3-welcome .hero-input {
   width: 100%;
   resize: vertical;
-  min-height: 4.5rem;
+  min-height: 3.5rem;
   border: none;
   background: transparent;
   color: var(--fg-0);
@@ -606,8 +722,8 @@ pix3-welcome .hero-warning {
 pix3-welcome .hero-examples {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
-  margin-top: 0.9rem;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
 }
 
 pix3-welcome .hero-chip {
@@ -632,9 +748,9 @@ pix3-welcome .hero-chip:hover:not([disabled]) {
 
 pix3-welcome .hero-recipes {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
-  gap: 0.6rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.85rem;
 }
 
 pix3-welcome .hero-recipe {
@@ -783,17 +899,10 @@ pix3-welcome .hero-attachment__remove:hover {
   color: var(--fg-0);
 }
 
-pix3-welcome .welcome-secondary {
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--line-1);
-  text-align: left;
-}
-
 pix3-welcome .welcome-secondary__title {
-  margin: 0 0 1rem 0;
+  margin: 0 0 0.85rem 0;
   font-family: var(--font-ui);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -814,9 +923,25 @@ pix3-welcome .welcome-dropzone {
   pointer-events: none;
 }
 
+/* Below this the two columns stop fitting side by side; the secondary one drops under the prompt and
+   its divider moves from the left edge to the top. */
+@media (max-width: 960px) {
+  pix3-welcome .welcome-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+
+  pix3-welcome .welcome-column--secondary {
+    padding-left: 0;
+    padding-top: 1.25rem;
+    border-left: none;
+    border-top: 1px solid var(--line-1);
+  }
+}
+
 @media (max-width: 720px) {
   pix3-welcome .welcome-card {
-    width: min(92vw, 56rem);
+    width: min(92vw, 66rem);
   }
 
   pix3-welcome .hero-composer__bar {
@@ -826,5 +951,25 @@ pix3-welcome .welcome-dropzone {
   pix3-welcome .hero-hint {
     order: 3;
     flex-basis: 100%;
+  }
+}
+
+/* Short viewports (laptop screens with the browser chrome eating the height) — trim the vertical
+   rhythm rather than let the card grow into a scrollbar. */
+@media (max-height: 780px) {
+  .welcome-card {
+    padding: 1.1rem 1.5rem 1.35rem;
+  }
+
+  .welcome-header {
+    margin-bottom: 0.9rem;
+  }
+
+  .welcome-logo {
+    width: 96px;
+  }
+
+  .project-tabs__panel {
+    max-height: 11rem;
   }
 }

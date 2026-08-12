@@ -196,6 +196,15 @@ pix3-editor-settings-dialog .settings-field .hint {
   line-height: 1.4;
 }
 
+/* A correction the user has to act on, not background prose. */
+pix3-editor-settings-dialog .settings-field .hint--warn {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--fg-0);
+}
+
 pix3-editor-settings-dialog .settings-section {
   margin-top: 0.5rem;
   padding-top: 1rem;

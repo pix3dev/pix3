@@ -13,6 +13,10 @@ import {
   type ProjectTemplate,
 } from '@/services/project/ProjectTemplateService';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import {
   PrototypeBootstrapService,
   type PrototypeBootstrapStatus,
@@ -45,8 +49,10 @@ const EXAMPLE_PROMPTS: readonly string[] = [
 
 /**
  * The welcome screen leads with the prompt: Flow is the default way in (design §1.1/§3.1), so
- * "describe your game" is the primary content and the project lists moved below it. Nothing about
- * opening an existing project changed — it just is no longer the first thing on screen.
+ * "describe your game" is the primary content and opening an existing project sits in a narrower
+ * column beside it. Stacking the two put the project lists past the bottom of the viewport on a
+ * laptop screen, where the card neither shrank nor scrolled; two columns keep the whole screen
+ * reachable without hiding anything.
  */
 @customElement('pix3-welcome')
 export class Pix3Welcome extends ComponentBase {
@@ -78,8 +84,37 @@ export class Pix3Welcome extends ComponentBase {
   @inject(PrototypeBootstrapService)
   private readonly bootstrapService!: PrototypeBootstrapService;
 
+  @inject(EditorSettingsService)
+  private readonly editorSettingsService!: EditorSettingsService;
+
+  @inject(BridgeConnectionService)
+  private readonly bridge!: BridgeConnectionService;
+
+  @inject(AgentSettingsService)
+  private readonly agentSettings!: AgentSettingsService;
+
+  @inject(LlmProviderRegistry)
+  private readonly llmRegistry!: LlmProviderRegistry;
+
   @state()
   private prompt = '';
+
+  @state()
+  private bridgeAvailable = false;
+
+  @state()
+  private bridgeProviderCount = 0;
+
+  @state()
+  private bridgeProbing = false;
+
+  /** True once ANY registered provider has a key (Gemini's own key, or the bridge pairing token). */
+  @state()
+  private aiKeyConfigured = false;
+
+  /** Label of the provider the prompt will actually use, when it has a key. */
+  @state()
+  private aiProviderLabel = '';
 
   @state()
   private attachments: ComposerAttachment[] = [];
@@ -138,14 +173,33 @@ export class Pix3Welcome extends ComponentBase {
   private disposeProjectSubscription?: () => void;
   private disposeAuthSubscription?: () => void;
   private disposeBootstrapSubscription?: () => void;
+  private disposeBridgeSubscription?: () => void;
+  private disposeAgentSettingsSubscription?: () => void;
   private attachmentSeq = 0;
   private dragDepth = 0;
+  /** Guards the async key check against an out-of-order answer from an earlier refresh. */
+  private aiStatusSeq = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.disposeBootstrapSubscription = this.bootstrapService.subscribe(status => {
       this.bootstrapStatus = status;
     });
+    // The bridge and the API keys decide whether the prompt above can build anything at all, so the
+    // welcome screen reports them instead of letting the user find out from a failed build.
+    this.readBridgeState();
+    this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      this.readBridgeState();
+      // Bridge providers register only after a successful probe, so the key check has to re-run:
+      // asking before discovery answers reports "no key" for a perfectly paired bridge.
+      void this.refreshAiStatus();
+    });
+    this.disposeAgentSettingsSubscription = this.agentSettings.subscribe(() => {
+      void this.refreshAiStatus();
+    });
+    // The bridge is usually started AFTER the editor tab, so the boot probe result is stale by the
+    // time anyone reads this screen.
+    void this.probeBridge();
     // The whole page is the drop zone (design §3.1) — a reference dropped anywhere on the welcome
     // screen is meant for the prompt, and making the user aim at the textarea is friction for
     // nothing.
@@ -198,6 +252,10 @@ export class Pix3Welcome extends ComponentBase {
     window.removeEventListener('drop', this.onWindowDrop);
     this.disposeBootstrapSubscription?.();
     this.disposeBootstrapSubscription = undefined;
+    this.disposeBridgeSubscription?.();
+    this.disposeBridgeSubscription = undefined;
+    this.disposeAgentSettingsSubscription?.();
+    this.disposeAgentSettingsSubscription = undefined;
     this.disposeCloudSubscription?.();
     this.disposeCloudSubscription = undefined;
     this.disposeAuthSubscription?.();
@@ -216,6 +274,60 @@ export class Pix3Welcome extends ComponentBase {
     this.cloudProjectsError = null;
     void this.cloudProjectService.loadProjects();
   }
+
+  // ── AI setup status ─────────────────────────────────────────────────────────
+
+  private readBridgeState(): void {
+    this.bridgeAvailable = this.bridge.isAvailable();
+    this.bridgeProviderCount = this.bridge.getEntries().length;
+  }
+
+  private async probeBridge(): Promise<void> {
+    this.bridgeProbing = true;
+    try {
+      await this.bridge.probe();
+    } catch {
+      // An unreachable bridge is the normal case, not an error to report — the chip says "offline".
+    } finally {
+      this.bridgeProbing = false;
+      this.readBridgeState();
+      await this.refreshAiStatus();
+    }
+  }
+
+  /**
+   * "Can this screen's prompt reach a model?" — true when any registered provider has a key. Gemini
+   * carries the user's own key; every bridge-backed provider shares the pairing token, so a paired
+   * bridge answers yes for all of them at once.
+   */
+  private async refreshAiStatus(): Promise<void> {
+    const seq = ++this.aiStatusSeq;
+    const providers = this.llmRegistry.list().filter(provider => !provider.hidden);
+    const configured = await Promise.all(
+      providers.map(provider => this.agentSettings.hasApiKey(provider.id).catch(() => false))
+    );
+    if (seq !== this.aiStatusSeq) {
+      return; // A later refresh already answered; its result wins.
+    }
+    const ready = providers.filter((_, index) => configured[index]);
+    const selectedId = this.agentSettings.getPreferences().selectedProviderId;
+    const active = ready.find(provider => provider.id === selectedId) ?? ready[0];
+    this.aiKeyConfigured = ready.length > 0;
+    this.aiProviderLabel = active?.label ?? '';
+  }
+
+  private onOpenAiSettings = (): void => {
+    // Reflect whatever the user changed in the dialog the moment it closes.
+    void this.editorSettingsService.showSettings('agent').then(() => this.probeBridge());
+  };
+
+  private onOpenEditorSettings = (): void => {
+    void this.editorSettingsService.showSettings('general').then(() => this.probeBridge());
+  };
+
+  private onRecheckBridge = (): void => {
+    void this.probeBridge();
+  };
 
   // ── Prompt hero ─────────────────────────────────────────────────────────────
 
@@ -763,6 +875,69 @@ export class Pix3Welcome extends ComponentBase {
     `;
   }
 
+  /**
+   * The setup strip: the AI key and the bridge, both of which the prompt depends on and neither of
+   * which used to be visible until a build failed. Every control lands in the same Editor Settings
+   * dialog the running editor uses — this is a shortcut into it, not a second place to store keys.
+   */
+  private renderSetupStatus() {
+    const bridgeLabel = this.bridgeAvailable
+      ? `Bridge · ${this.bridgeProviderCount} provider${this.bridgeProviderCount === 1 ? '' : 's'}`
+      : 'Bridge offline';
+    return html`
+      <div class="welcome-setup" aria-label="AI setup status">
+        <button
+          class="welcome-chip ${this.aiKeyConfigured ? 'welcome-chip--ok' : 'welcome-chip--warn'}"
+          type="button"
+          title=${this.aiKeyConfigured
+            ? `Model provider: ${this.aiProviderLabel}. Click to change keys and models.`
+            : 'No API key configured yet — the prompt above needs one. Click to add a key.'}
+          @click=${this.onOpenAiSettings}
+        >
+          <span class="welcome-chip__dot" aria-hidden="true"></span>
+          <span
+            >${this.aiKeyConfigured
+              ? `AI: ${this.aiProviderLabel}`
+              : 'No AI key — set one up'}</span
+          >
+        </button>
+
+        <button
+          class="welcome-chip ${this.bridgeAvailable ? 'welcome-chip--ok' : 'welcome-chip--idle'}"
+          type="button"
+          title=${this.bridgeAvailable
+            ? `Pix3AgentBridge reachable at ${this.bridge.getBridgeUrl()}`
+            : `No bridge at ${this.bridge.getBridgeUrl()} — run "npx @pix3/agent-bridge" to add OpenAI, Anthropic and Zen. Click to set it up.`}
+          @click=${this.onOpenAiSettings}
+        >
+          <span class="welcome-chip__dot" aria-hidden="true"></span>
+          <span>${bridgeLabel}</span>
+        </button>
+
+        <button
+          class="welcome-tool ${this.bridgeProbing ? 'welcome-tool--busy' : ''}"
+          type="button"
+          title="Re-check the bridge connection"
+          aria-label="Re-check the bridge connection"
+          ?disabled=${this.bridgeProbing}
+          @click=${this.onRecheckBridge}
+        >
+          ${this.iconService.getIcon('refresh-cw', IconSize.SMALL)}
+        </button>
+
+        <button
+          class="welcome-tool"
+          type="button"
+          title="Editor settings"
+          aria-label="Editor settings"
+          @click=${this.onOpenEditorSettings}
+        >
+          ${this.iconService.getIcon('settings', IconSize.SMALL)}
+        </button>
+      </div>
+    `;
+  }
+
   protected render() {
     const localProjectItems = this.getLocalProjectItems();
 
@@ -777,160 +952,168 @@ export class Pix3Welcome extends ComponentBase {
           <div class="welcome-header">
             <img src="/splash-logo.png" alt="Pix3" class="welcome-logo" />
             <div class="welcome-version">${CURRENT_EDITOR_VERSION.displayVersion}</div>
+            ${this.renderSetupStatus()}
           </div>
 
-          ${this.renderPromptHero()}
+          <div class="welcome-columns">
+            <div class="welcome-column welcome-column--primary">${this.renderPromptHero()}</div>
 
-          <div class="welcome-secondary">
-            <h3 class="welcome-secondary__title">Or work on an existing project</h3>
-          </div>
+            <aside class="welcome-column welcome-column--secondary" aria-label="Existing projects">
+              <h3 class="welcome-secondary__title">Or work on an existing project</h3>
 
-          <div class="welcome-actions-grid">
-            <div class="action-column">
-              <button @click=${this.onOpen} class="action-btn">
-                <span class="action-icon">${this.iconService.getIcon('folder-outline', 18)}</span>
-                <span class="action-label">Open Project</span>
-              </button>
-            </div>
-            <div class="action-column">
-              <button @click=${this.onStartNew} class="action-btn">
-                <span class="action-icon"
-                  >${this.iconService.getIcon('plus-circle-outline', 20)}</span
-                >
-                <span class="action-label">Start New Project</span>
-              </button>
-            </div>
-          </div>
+              <div class="welcome-actions-grid">
+                <button @click=${this.onOpen} class="action-btn">
+                  <span class="action-icon">${this.iconService.getIcon('folder-outline', 18)}</span>
+                  <span class="action-label">Open Project</span>
+                </button>
+                <button @click=${this.onStartNew} class="action-btn">
+                  <span class="action-icon"
+                    >${this.iconService.getIcon('plus-circle-outline', 18)}</span
+                  >
+                  <span class="action-label">Start New Project</span>
+                </button>
+              </div>
 
-          ${this.projectError
-            ? html`<div class="recent-error welcome-error" role="alert">${this.projectError}</div>`
-            : null}
+              ${this.projectError
+                ? html`<div class="recent-error welcome-error" role="alert">
+                    ${this.projectError}
+                  </div>`
+                : null}
 
-          <div class="recent-list project-tabs">
-            <div class="project-tabs__nav" role="tablist" aria-label="Project sources">
-              <button
-                class="project-tab ${this.activeTab === 'cloud' ? 'project-tab--active' : ''}"
-                type="button"
-                role="tab"
-                aria-selected=${this.activeTab === 'cloud'}
-                @click=${() => this.setActiveTab('cloud')}
-              >
-                Cloud Projects
-              </button>
-              <button
-                class="project-tab ${this.activeTab === 'local' ? 'project-tab--active' : ''}"
-                type="button"
-                role="tab"
-                aria-selected=${this.activeTab === 'local'}
-                @click=${() => this.setActiveTab('local')}
-              >
-                Local Projects
-              </button>
-            </div>
+              <div class="recent-list project-tabs">
+                <div class="project-tabs__nav" role="tablist" aria-label="Project sources">
+                  <button
+                    class="project-tab ${this.activeTab === 'cloud' ? 'project-tab--active' : ''}"
+                    type="button"
+                    role="tab"
+                    aria-selected=${this.activeTab === 'cloud'}
+                    @click=${() => this.setActiveTab('cloud')}
+                  >
+                    Cloud Projects
+                  </button>
+                  <button
+                    class="project-tab ${this.activeTab === 'local' ? 'project-tab--active' : ''}"
+                    type="button"
+                    role="tab"
+                    aria-selected=${this.activeTab === 'local'}
+                    @click=${() => this.setActiveTab('local')}
+                  >
+                    Local Projects
+                  </button>
+                </div>
 
-            <div class="project-tabs__panel" role="tabpanel">
-              ${this.activeTab === 'cloud'
-                ? html`
-                    ${!this.isAuthenticated
-                      ? html`
-                          <div class="cloud-auth-status">
-                            <button
-                              type="button"
-                              class="cloud-auth-status__button"
-                              @click=${this.onLoginRequest}
-                            >
-                              Login
-                            </button>
-                            <div class="cloud-auth-status__hint">Login to load cloud projects.</div>
-                          </div>
-                        `
-                      : this.cloudProjectsLoading && this.cloudProjects.length === 0
-                        ? html`<div class="recent-empty">Loading cloud projects...</div>`
-                        : this.cloudProjects.length
+                <div class="project-tabs__panel" role="tabpanel">
+                  ${this.activeTab === 'cloud'
+                    ? html`
+                        ${!this.isAuthenticated
+                          ? html`
+                              <div class="cloud-auth-status">
+                                <button
+                                  type="button"
+                                  class="cloud-auth-status__button"
+                                  @click=${this.onLoginRequest}
+                                >
+                                  Login
+                                </button>
+                                <div class="cloud-auth-status__hint">
+                                  Login to load cloud projects.
+                                </div>
+                              </div>
+                            `
+                          : this.cloudProjectsLoading && this.cloudProjects.length === 0
+                            ? html`<div class="recent-empty">Loading cloud projects...</div>`
+                            : this.cloudProjects.length
+                              ? html`<ul>
+                                    ${this.cloudProjects.map(p => {
+                                      const isDeleting = this.deletingCloudProjectId === p.id;
+                                      return html`<li>
+                                        <div class="recent-row">
+                                          <button
+                                            class="recent-item"
+                                            data-cloud-id="${p.id}"
+                                            ?disabled=${isDeleting}
+                                            @click=${this.onCloudProject}
+                                          >
+                                            <span class="folder-icon" aria-hidden="true"
+                                              >${this.iconService.getIcon(
+                                                'cloud-outline',
+                                                18
+                                              )}</span
+                                            >
+                                            <span class="recent-name">${p.name}</span>
+                                            <span class="recent-backend">Cloud</span>
+                                            <span class="recent-time"
+                                              >${this.formatTime(
+                                                new Date(p.updated_at).getTime()
+                                              )}</span
+                                            >
+                                          </button>
+                                          ${this.isCloudProjectOwner(p)
+                                            ? html`
+                                                <button
+                                                  class="cloud-project-delete"
+                                                  type="button"
+                                                  data-cloud-delete-id="${p.id}"
+                                                  ?disabled=${isDeleting}
+                                                  @click=${this.onDeleteCloudProject}
+                                                  aria-label="Delete cloud project ${p.name}"
+                                                >
+                                                  ${isDeleting ? 'Deleting...' : 'Delete'}
+                                                </button>
+                                              `
+                                            : null}
+                                        </div>
+                                      </li>`;
+                                    })}
+                                  </ul>
+                                  ${this.cloudProjectsError
+                                    ? html`<div class="recent-error">
+                                        ${this.cloudProjectsError}
+                                      </div>`
+                                    : null}`
+                              : html`<div class="recent-empty">No cloud projects yet.</div>`}
+                      `
+                    : html`
+                        ${localProjectItems.length
                           ? html`<ul>
-                                ${this.cloudProjects.map(p => {
-                                  const isDeleting = this.deletingCloudProjectId === p.id;
-                                  return html`<li>
+                              ${localProjectItems.map(
+                                ({ entry, recentIndex }) =>
+                                  html`<li>
                                     <div class="recent-row">
                                       <button
                                         class="recent-item"
-                                        data-cloud-id="${p.id}"
-                                        ?disabled=${isDeleting}
-                                        @click=${this.onCloudProject}
+                                        data-recent-index="${recentIndex}"
+                                        @click=${this.onRecent}
                                       >
                                         <span class="folder-icon" aria-hidden="true"
-                                          >${this.iconService.getIcon('cloud-outline', 18)}</span
+                                          >${this.getProjectIcon(entry)}</span
                                         >
-                                        <span class="recent-name">${p.name}</span>
-                                        <span class="recent-backend">Cloud</span>
+                                        <span class="recent-name">${entry.name}</span>
+                                        <span class=${this.getProjectBadgeClass(entry)}
+                                          >${this.getProjectBadgeLabel(entry)}</span
+                                        >
                                         <span class="recent-time"
-                                          >${this.formatTime(
-                                            new Date(p.updated_at).getTime()
-                                          )}</span
+                                          >${this.formatTime(entry.lastOpenedAt)}</span
                                         >
                                       </button>
-                                      ${this.isCloudProjectOwner(p)
-                                        ? html`
-                                            <button
-                                              class="cloud-project-delete"
-                                              type="button"
-                                              data-cloud-delete-id="${p.id}"
-                                              ?disabled=${isDeleting}
-                                              @click=${this.onDeleteCloudProject}
-                                              aria-label="Delete cloud project ${p.name}"
-                                            >
-                                              ${isDeleting ? 'Deleting...' : 'Delete'}
-                                            </button>
-                                          `
-                                        : null}
+                                      <button
+                                        class="recent-remove"
+                                        title="Remove from recent"
+                                        data-recent-index="${recentIndex}"
+                                        @click=${this.onRemoveRecent}
+                                        aria-label="Remove recent"
+                                      >
+                                        ${this.iconService.getIcon('x-close', 12)}
+                                      </button>
                                     </div>
-                                  </li>`;
-                                })}
-                              </ul>
-                              ${this.cloudProjectsError
-                                ? html`<div class="recent-error">${this.cloudProjectsError}</div>`
-                                : null}`
-                          : html`<div class="recent-empty">No cloud projects yet.</div>`}
-                  `
-                : html`
-                    ${localProjectItems.length
-                      ? html`<ul>
-                          ${localProjectItems.map(
-                            ({ entry, recentIndex }) =>
-                              html`<li>
-                                <div class="recent-row">
-                                  <button
-                                    class="recent-item"
-                                    data-recent-index="${recentIndex}"
-                                    @click=${this.onRecent}
-                                  >
-                                    <span class="folder-icon" aria-hidden="true"
-                                      >${this.getProjectIcon(entry)}</span
-                                    >
-                                    <span class="recent-name">${entry.name}</span>
-                                    <span class=${this.getProjectBadgeClass(entry)}
-                                      >${this.getProjectBadgeLabel(entry)}</span
-                                    >
-                                    <span class="recent-time"
-                                      >${this.formatTime(entry.lastOpenedAt)}</span
-                                    >
-                                  </button>
-                                  <button
-                                    class="recent-remove"
-                                    title="Remove from recent"
-                                    data-recent-index="${recentIndex}"
-                                    @click=${this.onRemoveRecent}
-                                    aria-label="Remove recent"
-                                  >
-                                    ${this.iconService.getIcon('x-close', 12)}
-                                  </button>
-                                </div>
-                              </li>`
-                          )}
-                        </ul>`
-                      : html`<div class="recent-empty">No local projects yet.</div>`}
-                  `}
-            </div>
+                                  </li>`
+                              )}
+                            </ul>`
+                          : html`<div class="recent-empty">No local projects yet.</div>`}
+                      `}
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
       </div>

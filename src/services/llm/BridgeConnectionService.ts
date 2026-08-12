@@ -13,6 +13,40 @@ import {
 /** Legacy secret id for the bridge pairing token, pre-rename (single Claude-Code lane). */
 const LEGACY_TOKEN_SECRET_ID = 'ai-provider:claude-bridge:api-key';
 
+/** URL-fragment key of the bridge's one-click pairing link (`…/#bridge-token=<token>`). */
+const PAIRING_FRAGMENT_KEY = 'bridge-token';
+
+const hashEntries = (hash: string): string[] =>
+  (hash.startsWith('#') ? hash.slice(1) : hash).split('&').filter(Boolean);
+
+const entryKey = (entry: string): string => {
+  const separator = entry.indexOf('=');
+  return separator < 0 ? entry : entry.slice(0, separator);
+};
+
+/**
+ * Pull the pairing token out of a location hash. The hash may carry other routing (`#welcome`), so
+ * the key is matched as one entry among `&`-separated pairs rather than assumed to be alone.
+ */
+export const readPairingTokenFromHash = (hash: string): string | null => {
+  for (const entry of hashEntries(hash)) {
+    if (entryKey(entry) !== PAIRING_FRAGMENT_KEY) continue;
+    const raw = entry.slice(entry.indexOf('=') + 1);
+    try {
+      return decodeURIComponent(raw).trim() || null;
+    } catch {
+      return raw.trim() || null; // Malformed escape — take it verbatim; the bridge decides.
+    }
+  }
+  return null;
+};
+
+/** The same hash with the pairing entry removed, so the token never lingers in the address bar. */
+export const stripPairingTokenFromHash = (hash: string): string => {
+  const kept = hashEntries(hash).filter(entry => entryKey(entry) !== PAIRING_FRAGMENT_KEY);
+  return kept.length > 0 ? `#${kept.join('&')}` : '';
+};
+
 const VALID_KINDS: readonly BridgeProviderKind[] = ['openai', 'anthropic', 'agent-sdk'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,6 +99,12 @@ export class BridgeConnectionService {
   /** First probe on startup, after migrating any pre-rename pairing token. */
   async initialize(): Promise<void> {
     await this.migrateLegacyToken();
+    await this.consumePairingLink();
+    // The bridge is often started while the editor tab is already open, in which case its pairing
+    // link only changes the fragment of the loaded page — no reload, so `initialize` never re-runs.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hashchange', this.onHashChange);
+    }
     await this.probe();
   }
 
@@ -123,10 +163,54 @@ export class BridgeConnectionService {
   }
 
   dispose(): void {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('hashchange', this.onHashChange);
+    }
     this.listeners.clear();
   }
 
   // -- internals -------------------------------------------------------------
+
+  private onHashChange = (): void => {
+    void this.consumePairingLink().then(paired => {
+      if (paired) {
+        void this.probe();
+      }
+    });
+  };
+
+  /**
+   * One-click pairing. The bridge prints `<editor>/#bridge-token=<token>`; opening it stores the
+   * token and strips it from the URL right away — so a shared screenshot, a copied address or the
+   * session history never carries it. Returns true when a token was actually taken.
+   */
+  private async consumePairingLink(): Promise<boolean> {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    const { hash } = window.location;
+    const token = readPairingTokenFromHash(hash);
+    if (!token) {
+      return false;
+    }
+    // Strip first: if storing throws (locked secret store), the token still must not stay in the bar.
+    const remaining = stripPairingTokenFromHash(hash);
+    try {
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.search}${remaining}`
+      );
+    } catch {
+      /* Non-navigable context — proceed with storing anyway. */
+    }
+    try {
+      await this.secrets.setSecret(BRIDGE_TOKEN_SECRET_ID, token);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   private async runProbe(): Promise<void> {
     const token = await this.getToken();
