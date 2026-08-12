@@ -522,9 +522,33 @@ describe('AgentChatService', () => {
 
     const state = service.getState();
     expect(state.status).toBe('idle');
-    expect(chat).toHaveBeenCalledTimes(3);
+    // 3 tool iterations + the forced, tools-disabled closing summary: a capped turn must still
+    // tell the user what happened instead of stopping mid-work in silence.
+    expect(chat).toHaveBeenCalledTimes(4);
+    expect((chat.mock.calls[3] as unknown as [ChatParams])[0].tools).toBeUndefined();
     expect(state.notice).toMatch(/3 tool iterations/);
     expect(state.errorMessage).toBeNull();
+  });
+
+  it('closes a capped turn with a written summary even when the model kept calling tools', async () => {
+    let n = 0;
+    const chat = vi.fn(async (params: { tools?: unknown }) =>
+      params.tools === undefined
+        ? textResult('Here is where the game stands…')
+        : toolCallResult('scene_tree', `call-${n++}`)
+    );
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({})),
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 2,
+    });
+
+    await service.send('build the thing');
+
+    const last = service.getState().messages.at(-1);
+    expect(last?.role).toBe('assistant');
+    expect(JSON.stringify(last?.content)).toContain('Here is where the game stands');
   });
 
   it('treats an abort as a clean stop, keeping the partial history', async () => {

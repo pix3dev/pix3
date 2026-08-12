@@ -738,7 +738,7 @@ export class AgentToolRegistry {
       {
         name: 'play_start',
         description:
-          'Enter play mode (start the game). Without `scene` plays the active scene (auto-opens the project scene if none). Pass `scene` (res:// or project-relative .pix3scene path) to play that exact scene regardless of which tab is active; `reload: true` additionally re-reads it from disk first — use after compiling scripts when the scene was opened before the compile (stale graph drops user:* components).',
+          'Enter play mode (start the game). Idempotent: if the game is ALREADY running it returns ok with `alreadyRunning: true` — you do not need to play_stop first, and you should not. Without `scene` plays the active scene (auto-opens the project scene if none). Pass `scene` (res:// or project-relative .pix3scene path) to play that exact scene, restarting whatever is running; `reload: true` additionally re-reads it from disk first — use after compiling scripts when the scene was opened before the compile (stale graph drops user:* components). To pick up a fresh script build in the scene that is already playing, use play_restart.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1320,8 +1320,39 @@ export class AgentToolRegistry {
     );
     if (ok) {
       await this.saveActiveSceneBestEffort();
+      return { ok };
     }
-    return { ok };
+    // A bare `{ok:false}` teaches the model nothing, so it guesses — measured: it retried the same
+    // call, then went looking for a scene file to hand-edit. Say which of the two things went
+    // wrong (no such node, or the schema has no such property) and list what the node does have.
+    return { ok: false, error: this.explainSetPropertyFailure(nodeId, propertyPath) };
+  }
+
+  /**
+   * Property names a node actually exposes: its live `properties` bag plus the transform fields
+   * every node has. Used only to make a failed set_property self-explanatory.
+   */
+  private describeNodeProperties(node: NodeBase): string[] {
+    const own = node.properties && typeof node.properties === 'object' ? Object.keys(node.properties) : [];
+    return [...new Set([...own, 'position', 'rotation', 'scale', 'visible', 'name'])];
+  }
+
+  /** Why an UpdateObjectPropertyCommand refused: unknown node, or a property the schema lacks. */
+  private explainSetPropertyFailure(nodeId: string, propertyPath: string): string {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) {
+      return 'No active scene — open or play a scene first.';
+    }
+    const node = graph.nodeMap.get(nodeId);
+    if (!node) {
+      return `No node "${nodeId}" in the active scene. Use scene_tree or find_nodes to get a real nodeId (ids are case-sensitive).`;
+    }
+    const root = propertyPath.split('.')[0];
+    const available = this.describeNodeProperties(node);
+    if (available.length > 0 && !available.includes(root)) {
+      return `"${node.name}" (${node.type}) has no property "${propertyPath}". Its schema exposes: ${available.join(', ')}. If the value is driven every frame by a script/component, configure the component with set_component_property instead.`;
+    }
+    return `The editor refused to set "${propertyPath}" on "${node.name}" (${node.type}). Check the value shape with node_inspect — a vector wants {"x":…,"y":…}, a rotation a number in radians — or configure the owning component with set_component_property.`;
   }
 
   private async createNode(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -2633,8 +2664,20 @@ export class AgentToolRegistry {
   private async playStart(
     scene: string | undefined,
     reload: boolean
-  ): Promise<{ ok: boolean; scene?: string; reloaded?: boolean; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    scene?: string;
+    reloaded?: boolean;
+    alreadyRunning?: boolean;
+    error?: string;
+  }> {
     if (!scene) {
+      // "Start" while the game is already running is not a failure — it is the normal state in
+      // the Flow workspace, whose stage plays continuously. The old `ok:false` sent agents into a
+      // stop→start dance that burned ~9 tool iterations of a single turn before any real work.
+      if (appState.ui.isPlaying) {
+        return { ok: true, alreadyRunning: true };
+      }
       return this.playCommand('game.start');
     }
     let safe: string;
@@ -2649,6 +2692,12 @@ export class AgentToolRegistry {
     let reloaded = false;
     if (reload) {
       reloaded = (await this.reloadSceneIfOpen(safe)) !== null;
+    }
+    // A named scene while something is already playing means "play THIS one now": stop first so
+    // the start command's precondition passes, instead of reporting a failure the caller must
+    // decode. Restarting the already-running scene is also what `reload` is asking for.
+    if (appState.ui.isPlaying) {
+      await this.dispatcher.executeById('game.stop');
     }
     const ok = await this.dispatcher.execute(new StartSceneGameCommand({ scenePath: safe }));
     return { ok, scene: safe, reloaded };

@@ -664,7 +664,12 @@ export class AgentChatPanel extends ComponentBase {
       this.requestUpdate();
     });
     // Re-render when the bridge connects/disconnects so its providers appear/disappear in the picker.
+    // The key check has to re-run here too: `hasApiKey` resolves through the provider REGISTRY, and
+    // the bridge's providers are registered only after its discovery probe answers. A check that
+    // ran before that came back "no key configured" for a perfectly paired bridge and never
+    // corrected itself — so a Flow user was told to add an API key they already had.
     this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      void this.refreshKeyConfigured();
       this.requestUpdate();
     });
 

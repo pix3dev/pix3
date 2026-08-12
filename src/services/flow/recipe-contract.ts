@@ -108,7 +108,10 @@ export const parseRecipePlaceholders = (markdown: string): RecipePlaceholder[] =
     if (!file || /^-{2,}$/.test(file) || /^file$/i.test(file)) continue;
     placeholders.push({
       role: role.toLowerCase().replace(/`/g, ''),
-      file: file.replace(/[`*]/g, '').replace(/^res:\/\//i, '').trim(),
+      file: file
+        .replace(/[`*]/g, '')
+        .replace(/^res:\/\//i, '')
+        .trim(),
       target: target.replace(/[`*]/g, ''),
     });
   }
@@ -372,17 +375,25 @@ export const paletteColorForRole = (role: string, palette: readonly string[]): s
   }
   const last = palette[palette.length - 1];
   const at = (index: number): string => palette[Math.min(index, palette.length - 1)];
+  // Role vocabularies differ between recipes (`avatar`/`threat` in arena-2d, `player`/`enemy`
+  // elsewhere), so synonyms are folded together here rather than forced on recipe authors.
   switch (normalizeRole(role)) {
     case 'background':
+    case 'board':
       return palette[0];
     case 'player':
+    case 'avatar':
+    case 'hero':
       return last;
     case 'enemy':
     case 'obstacle':
     case 'hazard':
+    case 'threat':
+    case 'bomb':
       return palette.length > 1 ? palette[palette.length - 2] : last;
     case 'collectible':
     case 'pickup':
+    case 'coin':
       return at(1);
     case 'ui':
     case 'hud':
@@ -392,4 +403,8 @@ export const paletteColorForRole = (role: string, palette: readonly string[]): s
   }
 };
 
-const normalizeRole = (role: string): string => role.trim().toLowerCase().replace(/[\s_-]+/g, '');
+const normalizeRole = (role: string): string =>
+  role
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');

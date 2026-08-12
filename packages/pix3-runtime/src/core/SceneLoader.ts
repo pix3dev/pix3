@@ -376,7 +376,12 @@ export class SceneLoader {
           component.enabled = componentDef.enabled ?? true;
 
           const configData = componentDef.config ?? {};
-          component.config = { ...configData };
+          // MERGE over the class defaults, never replace them. A scene stores only the values that
+          // were authored/edited, so a wholesale replace silently wiped every default the script's
+          // constructor set — a field added to a script after the scene was written came back
+          // `undefined` (and numeric defaults collapsed to 0/1), with no error anywhere. Measured
+          // twice in one session: a grid size of 100 became 1 and a prefab path became "".
+          component.config = { ...component.config, ...configData };
 
           // Set config values using PropertySchema if available
           const properties = this.getComponentSchemaProperties(componentDef.type);
@@ -666,7 +671,8 @@ export class SceneLoader {
 
       component.enabled = componentDef.enabled ?? true;
       const configData = componentDef.config ?? {};
-      component.config = { ...configData };
+      // Merge over the class defaults — see the note in the sibling loader path above.
+      component.config = { ...component.config, ...configData };
 
       const properties = this.getComponentSchemaProperties(componentDef.type);
       if (properties && configData) {

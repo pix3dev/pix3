@@ -74,6 +74,9 @@ export class ProjectScriptLoaderService {
   // code editor so relative imports resolve. Updated on every build.
   private lastCollectedFiles: Map<string, string> = new Map();
 
+  /** Project id the last build ran for — `scriptsStatus` alone cannot tell a stale ready apart. */
+  private lastBuiltProjectId: string | null = null;
+
   // Enable auto-compilation
   enableAutoCompilation = true;
 
@@ -85,14 +88,24 @@ export class ProjectScriptLoaderService {
     document.addEventListener('visibilitychange', this.handlePageActivityChange);
 
     let lastStatus = appState.project.status;
+    let lastProjectId = appState.project.id;
 
-    // Watch for project status changes to trigger initial compilation
+    // Watch for project status changes to trigger initial compilation. The project ID is watched
+    // too: creating or opening a project while another one is already open flips the id WITHOUT
+    // ever leaving `ready`, so a status-only check skipped the build entirely and the new project
+    // ran with the previous project's classes still registered (seen in Flow, where a prompt
+    // builds a project on top of the open one: its scenes loaded with every `user:*` component
+    // missing from the registry).
     this.disposeSubscription = subscribe(appState.project, () => {
       const currentStatus = appState.project.status;
-      if (currentStatus === 'ready' && lastStatus !== 'ready' && this.enableAutoCompilation) {
+      const currentProjectId = appState.project.id;
+      const becameReady = currentStatus === 'ready' && lastStatus !== 'ready';
+      const switchedProject = currentStatus === 'ready' && currentProjectId !== lastProjectId;
+      if ((becameReady || switchedProject) && this.enableAutoCompilation) {
         void this.syncAndBuild();
       }
       lastStatus = currentStatus;
+      lastProjectId = currentProjectId;
     });
   }
 
@@ -139,11 +152,19 @@ export class ProjectScriptLoaderService {
       return;
     }
 
-    if (appState.project.scriptsStatus === 'ready' || appState.project.scriptsStatus === 'error') {
+    // A `ready` status left over from the PREVIOUS project is worse than no status at all: the
+    // caller (a scene load) would proceed against the old project's registered classes. Compare
+    // what was actually built against the project we are in now.
+    const isStale = this.lastBuiltProjectId !== appState.project.id;
+
+    if (
+      !isStale &&
+      (appState.project.scriptsStatus === 'ready' || appState.project.scriptsStatus === 'error')
+    ) {
       return;
     }
 
-    if (appState.project.scriptsStatus === 'idle' || this.pendingBuildWhileHidden) {
+    if (isStale || appState.project.scriptsStatus === 'idle' || this.pendingBuildWhileHidden) {
       await this.syncAndBuild({ force: true });
     }
 
@@ -181,6 +202,7 @@ export class ProjectScriptLoaderService {
   private async performSyncAndBuild(): Promise<void> {
     try {
       appState.project.scriptsStatus = 'loading';
+      this.lastBuiltProjectId = appState.project.id;
       this.logger.info('Compiling project scripts...');
 
       // Step 1: List all .ts files in supported script directories

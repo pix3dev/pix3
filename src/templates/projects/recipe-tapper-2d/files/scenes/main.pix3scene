@@ -1,11 +1,13 @@
 # Pix3 Scene File (YAML)
-# Arena 2D — the GAME scene, and the editor's startup scene: this is the one to
-# iterate on and the one agents open and play directly. A full build boots the
-# MENU (see menu.pix3scene), whose PLAY button transitions here.
+# Tapper 2D — the GAME scene, and the editor's startup scene: iterate here.
+# A full build boots the MENU (menu.pix3scene), whose PLAY transitions here.
+#
+# Objects fall into the board; tapping them is the whole game. A tap is
+# hit-tested (scripts/TouchRules.ts) against the `core:Hitbox2D` group each
+# prefab carries: `target` scores, `hazard` costs a life.
 #
 # Stable node ids (design/recipe.md is the contract — do not rename these):
-#   game-root, game-background, board, player,
-#   spawner-pickups, spawner-hazards,
+#   game-root, game-background, board, spawner-targets, spawner-hazards,
 #   hud, score-label, time-label, lives-bar, menu-button,
 #   result-overlay, result-label, retry-button
 #
@@ -14,7 +16,7 @@
 version: 1.0.0
 metadata:
   author: Pix3 Recipe
-  description: Arena gameplay — spawners drop pickups and hazards into a bounded field
+  description: Tapper gameplay — falling objects, tap the good ones, avoid the bad
 root:
   - id: game-root
     type: Group2D
@@ -31,9 +33,9 @@ root:
         type: user:GameRules
         enabled: true
         config:
-          winMode: score
-          targetScore: 12
-          timeLimitSec: 45
+          winMode: time
+          targetScore: 18
+          timeLimitSec: 30
           startingLives: 3
           resultNode: result-overlay
           resultLabel: result-label
@@ -43,14 +45,14 @@ root:
           menuButton: menu-button
           menuScene: res://scenes/menu.pix3scene
           gameScene: res://scenes/main.pix3scene
-          freezeNodes: spawner-pickups,spawner-hazards,player
+          freezeNodes: spawner-targets,spawner-hazards
       - id: touch-rules
         type: user:TouchRules
         enabled: true
         config:
-          playerNode: player
-          touchRadius: 62
-          rules: "pickup:score:1;hazard:damage:1"
+          rules: "target:score:1;hazard:damage:1"
+          tapRadius: 40
+          missPenalty: 0
           consume: true
           scoreSound: ""
           damageSound: ""
@@ -94,9 +96,9 @@ root:
                 scale: [1, 1]
                 rotation: 0
             children: []
-          - id: spawner-pickups
+          - id: spawner-targets
             type: Group2D
-            name: Spawner Pickups
+            name: Spawner Targets
             properties:
               width: 900
               height: 60
@@ -105,21 +107,21 @@ root:
                 scale: [1, 1]
                 rotation: 0
             components:
-              - id: pickup-spawner
+              - id: target-spawner
                 type: user:Spawner
                 enabled: true
                 config:
-                  prefab: res://scenes/prefabs/pickup.pix3scene
+                  prefab: res://scenes/prefabs/target.pix3scene
                   parentNode: ""
-                  intervalSec: 1.0
-                  intervalJitter: 0.35
-                  maxAlive: 10
-                  spawnWidth: 880
+                  intervalSec: 0.85
+                  intervalJitter: 0.3
+                  maxAlive: 8
+                  spawnWidth: 820
                   spawnHeight: 60
                   gridSnap: 0
                   driftX: 0
-                  driftY: -300
-                  lifetimeSec: 7
+                  driftY: -230
+                  lifetimeSec: 8
                   despawnRadius: 1450
                   startDelaySec: 0.3
             children: []
@@ -140,42 +142,17 @@ root:
                 config:
                   prefab: res://scenes/prefabs/hazard.pix3scene
                   parentNode: ""
-                  intervalSec: 1.8
-                  intervalJitter: 0.6
-                  maxAlive: 8
-                  spawnWidth: 880
+                  intervalSec: 2.2
+                  intervalJitter: 0.8
+                  maxAlive: 5
+                  spawnWidth: 820
                   spawnHeight: 60
                   gridSnap: 0
                   driftX: 0
-                  driftY: -380
-                  lifetimeSec: 6
+                  driftY: -260
+                  lifetimeSec: 8
                   despawnRadius: 1450
-                  startDelaySec: 1.2
-            children: []
-          - id: player
-            type: Sprite2D
-            name: Player
-            properties:
-              texture: { type: 'texture', url: 'res://sprites/ph-avatar.png' }
-              width: 120
-              height: 120
-              effects:
-                - type: core:tint
-                  params: { color: "#ffffff", amount: 1 }
-              transform:
-                position: [0, -520]
-                scale: [1, 1]
-                rotation: 0
-            components:
-              - id: player-controller
-                type: user:PlayerController
-                enabled: true
-                config:
-                  mode: pointer
-                  speed: 620
-                  radius: 60
-                  boundsNode: board
-                  deadZone: 4
+                  startDelaySec: 1.5
             children: []
       - id: hud
         type: CanvasLayer2D
@@ -220,7 +197,7 @@ root:
             type: Label2D
             name: Time Label
             properties:
-              label: "45"
+              label: "30"
               labelFontSize: 44
               labelColor: "#f5ae39"
               labelAlign: center

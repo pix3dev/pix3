@@ -1,0 +1,10 @@
+id: recipe-bouncer-2d
+title: Bouncer 2D
+description: A ball under gravity bounces off walls, bumpers and a paddle you steer; hits score, a bottom drain costs a life. Continuous (swept) collision, so nothing tunnels at speed — arkanoid, pong, plinko, pinball.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1080, height: 1920 }
+# The build/full-run entry scene (Project Settings → Default Export Scene Path).
+# The menu boots first; PLAY transitions to main.pix3scene (the game).
+entryScene: scenes/menu.pix3scene
+order: 61

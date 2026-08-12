@@ -45,6 +45,13 @@ Before you close a turn that changed game logic: `play_start`, then `game_input`
 `game_observe` on the affected node, checking the signal that matches the mechanic (see
 `game-prototype` §3), then `read_errors`.
 
+**Verify with state, not with pictures.** `game_observe` returns real positions, scale, opacity,
+child counts and rendered `text` — that is how you check "the apple sits on a grid cell"
+(`position.x % cellSize === 0`) or "the score went up" (read `score-label`'s `text`). A
+screenshot plus `analyze_image` costs several iterations, answers "I don't see it" as often as
+not, and cannot tell you a number. Keep screenshots for questions that are genuinely visual —
+"does this look like a snake?" — and never use them to locate a node.
+
 If after a few honest attempts you cannot prove it, **say so plainly** — what you tried, what
 you saw, what you think is wrong. A truthful "I could not get the collision to register"
 beats a cheerful "Done!" that the user disproves in two seconds on the stage.
@@ -89,6 +96,28 @@ Your memory is the `design/*.md` files, not this conversation — it gets compac
 - read file sections, not whole files (`fs_read` with `offset`/`limit`, `read_skill` with
   `section`);
 - prefer `str_replace` for edits. A full `fs_write` over an existing file is how a previous
-  session silently reverted its own working fix — the editor now refuses it for larger files
-  unless you pass `overwrite: true` with a reason, and that refusal is a hint, not an obstacle
-  to route around.
+  session silently reverted its own working fix — the editor refuses it for larger files unless
+  you pass `overwrite: true` with a `reason`.
+
+**When the recipe blesses replacing a file** (`recipe.md` says "REPLACE … entirely" — typically
+the movement script, because a grid stepper or a jumper shares nothing with free movement),
+that IS the sanctioned path. Do it in one call:
+
+```
+fs_write { path: "scripts/PlayerController.ts", content: "…",
+           overwrite: true, reason: "recipe-blessed swap: grid locomotion" }
+```
+
+Do not go looking for a way around the refusal, and do not rebuild the file through a dozen
+`str_replace` calls.
+
+## 8. The stage is already running
+
+In Flow the game plays continuously next to the chat — you did not start it and you should not
+stop it.
+
+- `play_start` while it is running returns `alreadyRunning: true`. That is success. Do NOT
+  `play_stop` just so `play_start` can "work".
+- To pick up a fresh script build: `compile_scripts`, then **`play_restart`** (one call).
+- `play_stop` is for the rare case where you must edit with nothing ticking — start it again
+  before you finish, because a stopped stage is a black screen for the user.

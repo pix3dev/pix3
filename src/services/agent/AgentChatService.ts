@@ -21,6 +21,7 @@ import {
   type LlmErrorKind,
   type LlmImageBlock,
   type LlmMessage,
+  type LlmModel,
   type LlmProvider,
   type LlmRequestContext,
   type LlmResult,
@@ -884,9 +885,55 @@ export class AgentChatService {
       }
     }
 
+    // The cap was hit. Never leave the user with a silent stop: one final round-trip with tools
+    // DISABLED, so the model has no choice but to answer in words. Measured: a capped turn ended
+    // with 60 tool calls and not one sentence for the user, even though the work was mostly done.
+    await this.forceClosingSummary(provider, { apiKey, modelId, baseUrl }, model, signal);
+
     this.setState({
       notice: `Stopped after ${maxIterations} tool iterations (the cap is configurable in the agent settings). Send a follow-up message to continue.`,
     });
+  }
+
+  /**
+   * Ask for a plain-language wrap-up with tools switched off. Best-effort: a failure here must not
+   * turn a capped-but-useful turn into an error, so it swallows everything.
+   */
+  private async forceClosingSummary(
+    provider: LlmProvider,
+    ctx: LlmRequestContext,
+    model: LlmModel | undefined,
+    signal: AbortSignal
+  ): Promise<void> {
+    if (signal.aborted) {
+      return;
+    }
+    this.appendMessage({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: '[Pix3] You have run out of tool iterations for this turn. No more tools — answer in words only: what is working in the game right now, what you changed, what you could NOT prove, and the single most useful next step. Be honest about anything unfinished; never claim something works if you did not see it run.',
+        },
+      ],
+    });
+    try {
+      const system = this.buildSystemPrompt(null, false, [], null);
+      const result = await this.chatWithTimeout(
+        provider,
+        {
+          messages: this.state.messages,
+          system: system.text,
+          maxTokens: model?.capabilities.maxOutputTokens,
+          signal,
+        },
+        ctx,
+        signal
+      );
+      this.appendMessage({ role: 'assistant', content: result.content });
+    } catch {
+      // A capped turn with no summary is bad; a capped turn that also throws is worse.
+    }
   }
 
   /**

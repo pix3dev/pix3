@@ -1,0 +1,10 @@
+id: recipe-tapper-2d
+title: Tapper 2D
+description: Objects fall into the field and tapping them is the whole game — good ones score, one bad type costs a life, and a countdown ends the run. Whack-a-mole, catch-the-falling, clickers.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1080, height: 1920 }
+# The build/full-run entry scene (Project Settings → Default Export Scene Path).
+# The menu boots first; PLAY transitions to main.pix3scene (the game).
+entryScene: scenes/menu.pix3scene
+order: 62

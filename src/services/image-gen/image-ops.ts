@@ -719,9 +719,7 @@ export interface PaletteOptions {
 /** `#rrggbb` (lower-case) for a colour. Channels are rounded and clamped to 0..255. */
 export const rgbToHex = (color: RgbColor): string => {
   const channel = (value: number): string =>
-    clamp(Math.round(value), 0, 255)
-      .toString(16)
-      .padStart(2, '0');
+    clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0');
   return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
 };
 
@@ -833,25 +831,27 @@ export const quantizePixels = (
     boxes = boxes.flatMap((current, index) => (index === target.index ? [left, right] : [current]));
   }
 
-  return boxes
-    .map(box => {
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      for (const sample of box) {
-        r += sample.r;
-        g += sample.g;
-        b += sample.b;
-      }
-      const color: RgbColor = {
-        r: Math.round(r / box.length),
-        g: Math.round(g / box.length),
-        b: Math.round(b / box.length),
-      };
-      return { color, hex: rgbToHex(color), weight: box.length / samples.length };
-    })
-    // Most-covering colour first — that is the one a caller wants for a background fill.
-    .sort((a, b) => b.weight - a.weight || a.hex.localeCompare(b.hex));
+  return (
+    boxes
+      .map(box => {
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        for (const sample of box) {
+          r += sample.r;
+          g += sample.g;
+          b += sample.b;
+        }
+        const color: RgbColor = {
+          r: Math.round(r / box.length),
+          g: Math.round(g / box.length),
+          b: Math.round(b / box.length),
+        };
+        return { color, hex: rgbToHex(color), weight: box.length / samples.length };
+      })
+      // Most-covering colour first — that is the one a caller wants for a background fill.
+      .sort((a, b) => b.weight - a.weight || a.hex.localeCompare(b.hex))
+  );
 };
 
 /**

@@ -229,7 +229,10 @@ describe('generated design docs', () => {
 
   it('records unknown tunables for the agent instead of applying them', () => {
     const declared = new Map<string, RecipeTunable>([
-      ['playerSpeed', { key: 'playerSpeed', node: 'player', property: 'speed', min: 100, max: 900 }],
+      [
+        'playerSpeed',
+        { key: 'playerSpeed', node: 'player', property: 'speed', min: 100, max: 900 },
+      ],
     ]);
     const resolution = resolveTunables({ playerSpeed: 5000, enemyWaves: 3 }, declared);
 

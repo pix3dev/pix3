@@ -43,9 +43,7 @@ function options(overrides: Partial<BallOptions> = {}): BallOptions {
 }
 
 function inside(ball: BallState): boolean {
-  return (
-    Math.abs(ball.x) <= HALF_W - RADIUS + 1 && Math.abs(ball.y) <= HALF_H - RADIUS + 1
-  );
+  return Math.abs(ball.x) <= HALF_W - RADIUS + 1 && Math.abs(ball.y) <= HALF_H - RADIUS + 1;
 }
 
 describe('ball-collision sweep', () => {
@@ -119,9 +117,12 @@ describe('ball-collision sweep', () => {
     const bumper: CircleCollider[] = [{ cx: 0, cy: 0, r: 50, restitution: 1.4, id: 'bumper' }];
     const ball: BallState = { x: -300, y: 0, vx: 900, vy: 0 };
     const before = Math.hypot(ball.vx, ball.vy);
-    const hits = stepBall(ball, options({ substeps: 2 }), [], bumper, 1 / 60);
+    const hits: string[] = [];
+    for (let frame = 0; frame < 120 && hits.length === 0; frame++) {
+      hits.push(...stepBall(ball, options({ substeps: 2 }), [], bumper, 1 / 60).map(h => h.id));
+    }
 
-    expect(hits.map(h => h.id)).toContain('bumper');
+    expect(hits).toContain('bumper');
     expect(ball.vx).toBeLessThan(0);
     expect(Math.hypot(ball.vx, ball.vy)).toBeGreaterThan(before);
   });

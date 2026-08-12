@@ -34,9 +34,9 @@ the multiply gives you that palette colour.
 
 | role | file | node/prefab |
 | --- | --- | --- |
-| avatar | `ph-avatar.png` | `player` |
-| collectible | `ph-pickup.png` | `prefabs/pickup.pix3scene` |
-| threat | `ph-hazard.png` | `prefabs/hazard.pix3scene` |
+| avatar | `sprites/ph-avatar.png` | `player` |
+| collectible | `sprites/ph-pickup.png` | `prefabs/pickup.pix3scene` |
+| threat | `sprites/ph-hazard.png` | `prefabs/hazard.pix3scene` |
 
 ## Tunables
 
@@ -53,7 +53,7 @@ tunables:
   touchRadius: { node: game-root, component: "user:TouchRules", property: touchRadius, min: 4, max: 600, default: 62 }
   touchRules: { node: game-root, component: "user:TouchRules", property: rules, default: "pickup:score:1;hazard:damage:1" }
   winMode: { node: game-root, component: "user:GameRules", property: winMode, default: score }
-  targetScore: { node: game-root, component: "user:GameRules", property: targetScore, min: 1, max: 999, default: 12 }
+  targetScore: { node: game-root, component: "user:GameRules", property: targetScore, min: 1, max: 99999, default: 12 }
   timeLimitSec: { node: game-root, component: "user:GameRules", property: timeLimitSec, min: 0, max: 600, default: 45 }
   startingLives: { node: game-root, component: "user:GameRules", property: startingLives, min: 1, max: 20, default: 3 }
   bgColor: { node: game-background, property: color, default: "#141a2e" }
@@ -69,6 +69,8 @@ schema clamps out-of-range values rather than rejecting them.
   is the only file that reads input and writes `player.position`. A grid stepper,
   a jumper (velocity + gravity) or an auto-runner all drop in as long as the file
   still exports a `PlayerController` class and keeps the node inside `board`.
+  Write it in ONE call — `fs_write` with `overwrite: true` and a `reason` (the
+  size guard refuses a silent wholesale rewrite; this one is sanctioned).
 - **Trail / body behind the avatar.** Add a `segment` prefab (`Sprite2D` +
   `core:Hitbox2D` in a hazard group). In the locomotion script, on each completed
   step `scene.instantiate` a segment at the vacated position into a `segments`

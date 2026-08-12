@@ -11,6 +11,29 @@ import './pix3-flow-shell.ts.css';
 
 const EMPTY_PLAN: FlowPlan = { pitch: null, title: null, steps: [] };
 
+/** Chat/stage split: the chat needs room to read, the stage room to play. */
+const MIN_CHAT_WIDTH = 300;
+const MIN_STAGE_WIDTH = 360;
+const DEFAULT_CHAT_WIDTH = 420;
+const CHAT_WIDTH_KEY = 'pix3.flow.chatWidth:v1';
+
+const loadChatWidth = (): number => {
+  try {
+    const raw = Number.parseInt(localStorage.getItem(CHAT_WIDTH_KEY) ?? '', 10);
+    return Number.isFinite(raw) && raw >= MIN_CHAT_WIDTH ? raw : DEFAULT_CHAT_WIDTH;
+  } catch {
+    return DEFAULT_CHAT_WIDTH;
+  }
+};
+
+const persistChatWidth = (width: number): void => {
+  try {
+    localStorage.setItem(CHAT_WIDTH_KEY, String(width));
+  } catch {
+    // A split that forgets itself is a small loss; never break the shell over storage.
+  }
+};
+
 /**
  * The Flow workspace: chat on the left, a live game stage on the right, one header of actions —
  * and nothing else. No docks, no tabs, no file tree (design §4).
@@ -56,11 +79,19 @@ export class Pix3FlowShell extends ComponentBase {
   @state()
   private stageError: string | null = null;
 
+  private chatWidth = loadChatWidth();
   private stageHost?: HTMLElement;
+  private stageFrame?: HTMLElement;
+  private resizeObserver?: ResizeObserver;
   private disposeUi?: () => void;
   private disposeAgent?: () => void;
   private disposeProject?: () => void;
-  private autoStarted = false;
+  /**
+   * Project id whose stage was already auto-started. Not a boolean: a prompt builds a NEW project
+   * while the previous one is still open, so a one-shot flag left the freshly generated game
+   * sitting on a black stage.
+   */
+  private autoStartedProjectId: string | null = null;
   /** True while the last agent turn touched the game, so the stage is restarted when it settles. */
   private stageDirty = false;
 
@@ -70,6 +101,7 @@ export class Pix3FlowShell extends ComponentBase {
     this.disposeUi = subscribe(appState.ui, () => {
       this.isPlaying = appState.ui.isPlaying;
       this.stageError = appState.ui.playModeError?.message ?? null;
+      this.fitStage();
     });
 
     this.disposeProject = subscribe(appState.project, () => {
@@ -87,6 +119,8 @@ export class Pix3FlowShell extends ComponentBase {
       this.playSession.unregisterTabHost(this.stageHost);
       this.stageHost = undefined;
     }
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
     this.disposeUi?.();
     this.disposeUi = undefined;
     this.disposeAgent?.();
@@ -97,23 +131,95 @@ export class Pix3FlowShell extends ComponentBase {
 
   protected firstUpdated(): void {
     this.stageHost = this.querySelector<HTMLElement>('.flow-stage__host') ?? undefined;
+    this.stageFrame = this.querySelector<HTMLElement>('.flow-stage__frame') ?? undefined;
     if (this.stageHost) {
       this.playSession.registerTabHost(this.stageHost, window);
     }
+    if (this.stageFrame) {
+      this.resizeObserver = new ResizeObserver(() => this.fitStage());
+      this.resizeObserver.observe(this.stageFrame);
+    }
+    this.setChatWidth(this.chatWidth);
+    this.fitStage();
     void this.onProjectChanged();
+  }
+
+  /**
+   * Letterbox the stage to the game's own aspect ratio instead of stretching it to the panel.
+   * A playable authored at 1080×1920 that is shown at 16:9 is not the game the user is making —
+   * and the aspect the runtime renders at is what the exported HTML will use.
+   */
+  private fitStage(): void {
+    const host = this.stageHost;
+    const frame = this.stageFrame;
+    if (!host || !frame) {
+      return;
+    }
+    const styles = getComputedStyle(frame);
+    const rect = frame.getBoundingClientRect();
+    const available = {
+      width: Math.max(
+        0,
+        rect.width -
+          Number.parseFloat(styles.paddingLeft || '0') -
+          Number.parseFloat(styles.paddingRight || '0')
+      ),
+      height: Math.max(
+        0,
+        rect.height -
+          Number.parseFloat(styles.paddingTop || '0') -
+          Number.parseFloat(styles.paddingBottom || '0')
+      ),
+    };
+    if (available.width <= 0 || available.height <= 0) {
+      return;
+    }
+
+    const target = this.resolveStageAspect();
+    let width = available.width;
+    let height = width / target;
+    if (height > available.height) {
+      height = available.height;
+      width = height * target;
+    }
+    host.style.width = `${Math.floor(width)}px`;
+    host.style.height = `${Math.floor(height)}px`;
+  }
+
+  /**
+   * The aspect to fit: the project's own authored viewport, always.
+   *
+   * Deliberately NOT `appState.ui.gameAspectRatio` — that is a Studio affordance (the Game tab's
+   * aspect picker) with no control anywhere in Flow, so a stale "16:9 landscape" left over from
+   * some earlier session silently rendered a 1080×1920 game into a wide box: the field floated in
+   * the middle and the anchored HUD flew off to the edges of a viewport the game was never
+   * designed for. In Flow what you see is the shape the exported HTML will have.
+   */
+  private resolveStageAspect(): number {
+    const base = appState.project.manifest?.viewportBaseSize;
+    if (base && base.width > 0 && base.height > 0) {
+      return base.width / base.height;
+    }
+    return 16 / 9;
   }
 
   private async onProjectChanged(): Promise<void> {
     if (appState.project.status !== 'ready') {
-      this.autoStarted = false;
       return;
     }
+    const projectId = appState.project.id;
     await this.refreshPlan();
-    if (!this.autoStarted && !appState.ui.isPlaying) {
-      this.autoStarted = true;
+    this.fitStage();
+    if (projectId && this.autoStartedProjectId !== projectId) {
+      this.autoStartedProjectId = projectId;
       // The stage is alive from the first frame the user sees — they poke their game while the
-      // agent is still working on the first increment (design §3.2).
-      await this.startStage();
+      // agent is still working on the first increment (design §3.2). Starting also loads the
+      // project's main scene, which in Flow nothing else does (there are no tabs to open it).
+      if (appState.ui.isPlaying) {
+        await this.restartStage();
+      } else {
+        await this.startStage();
+      }
     }
   }
 
@@ -163,6 +269,46 @@ export class Pix3FlowShell extends ComponentBase {
     }
   }
 
+  /** Drag the chat/stage divider. Width is persisted so the split survives a reload. */
+  private readonly onSplitterDown = (event: PointerEvent): void => {
+    const body = this.querySelector<HTMLElement>('.flow-body');
+    if (!body) return;
+    event.preventDefault();
+    const bodyLeft = body.getBoundingClientRect().left;
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+    const onMove = (move: PointerEvent): void => this.setChatWidth(move.clientX - bodyLeft);
+    const onUp = (): void => {
+      target.releasePointerCapture(event.pointerId);
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+      persistChatWidth(this.chatWidth);
+    };
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+  };
+
+  private readonly onSplitterKey = (event: KeyboardEvent): void => {
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === 'ArrowLeft') {
+      this.setChatWidth(this.chatWidth - step);
+    } else if (event.key === 'ArrowRight') {
+      this.setChatWidth(this.chatWidth + step);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    persistChatWidth(this.chatWidth);
+  };
+
+  private setChatWidth(width: number): void {
+    const body = this.querySelector<HTMLElement>('.flow-body');
+    const max = body ? body.getBoundingClientRect().width - MIN_STAGE_WIDTH : MIN_CHAT_WIDTH;
+    this.chatWidth = Math.round(Math.min(Math.max(width, MIN_CHAT_WIDTH), Math.max(max, MIN_CHAT_WIDTH)));
+    body?.style.setProperty('--flow-chat-width', `${this.chatWidth}px`);
+    this.fitStage();
+  }
+
   protected render() {
     return html`
       <div class="flow-shell">
@@ -171,6 +317,15 @@ export class Pix3FlowShell extends ComponentBase {
           <aside class="flow-chat" aria-label="Flow chat">
             <pix3-agent-chat-panel></pix3-agent-chat-panel>
           </aside>
+          <div
+            class="flow-splitter"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize chat"
+            tabindex="0"
+            @pointerdown=${this.onSplitterDown}
+            @keydown=${this.onSplitterKey}
+          ></div>
           <main class="flow-stage" aria-label="Game stage">
             <div class="flow-stage__frame">
               <div class="flow-stage__host"></div>

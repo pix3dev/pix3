@@ -1,20 +1,26 @@
 # Pix3 Scene File (YAML)
-# Arena 2D — the GAME scene, and the editor's startup scene: this is the one to
-# iterate on and the one agents open and play directly. A full build boots the
-# MENU (see menu.pix3scene), whose PLAY button transitions here.
+# Bouncer 2D — the GAME scene, and the editor's startup scene: iterate here.
+# A full build boots the MENU (menu.pix3scene), whose PLAY transitions here.
+#
+# The physics is NOT engine physics. `scripts/BallBody.ts` runs a swept
+# (continuous) circle solver and reads its colliders from the LIVE WORLD
+# TRANSFORMS of the marker nodes below — so rotating `paddle` (or adding
+# flippers) works with no extra code, and no `core:Hitbox2D` is involved:
+#   walls/*   -> oriented boxes    bumpers/* -> circles
+#   paddles/* -> oriented boxes    drain     -> trigger box (lose a ball)
 #
 # Stable node ids (design/recipe.md is the contract — do not rename these):
-#   game-root, game-background, board, player,
-#   spawner-pickups, spawner-hazards,
+#   game-root, game-background, board, walls, wall-left, wall-right, wall-top,
+#   bumpers, bumper-a, bumper-b, bumper-c, paddles, paddle, ball, drain,
 #   hud, score-label, time-label, lives-bar, menu-button,
 #   result-overlay, result-label, retry-button
 #
 # 2D coordinates: origin at the canvas centre, X right, Y UP. Node order in the
-# tree is paint order (later/deeper draws on top).
+# tree is paint order (later/deeper draws on top). `rotation` here is DEGREES.
 version: 1.0.0
 metadata:
   author: Pix3 Recipe
-  description: Arena gameplay — spawners drop pickups and hazards into a bounded field
+  description: Bouncer gameplay — a ball under gravity, a paddle, bumpers and a drain
 root:
   - id: game-root
     type: Group2D
@@ -32,8 +38,8 @@ root:
         enabled: true
         config:
           winMode: score
-          targetScore: 12
-          timeLimitSec: 45
+          targetScore: 1500
+          timeLimitSec: 0
           startingLives: 3
           resultNode: result-overlay
           resultLabel: result-label
@@ -43,15 +49,14 @@ root:
           menuButton: menu-button
           menuScene: res://scenes/menu.pix3scene
           gameScene: res://scenes/main.pix3scene
-          freezeNodes: spawner-pickups,spawner-hazards,player
+          freezeNodes: ball,paddle
       - id: touch-rules
         type: user:TouchRules
         enabled: true
         config:
-          playerNode: player
-          touchRadius: 62
-          rules: "pickup:score:1;hazard:damage:1"
-          consume: true
+          ballNode: ball
+          rules: "bumper:score:100;paddle:score:10;drain:damage:1"
+          minImpactSpeed: 60
           scoreSound: ""
           damageSound: ""
     children:
@@ -75,10 +80,10 @@ root:
         type: Group2D
         name: Board
         properties:
-          width: 980
-          height: 1480
+          width: 1000
+          height: 1600
           transform:
-            position: [0, -80]
+            position: [0, -60]
             scale: [1, 1]
             rotation: 0
         children:
@@ -86,96 +91,200 @@ root:
             type: ColorRect2D
             name: Board Floor
             properties:
-              width: 980
-              height: 1480
+              width: 1000
+              height: 1600
               color: "#1d2743"
               transform:
                 position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
             children: []
-          - id: spawner-pickups
-            type: Group2D
-            name: Spawner Pickups
+          - id: drain
+            type: ColorRect2D
+            name: Drain
             properties:
-              width: 900
-              height: 60
+              width: 1000
+              height: 160
+              color: "#ff4d6d"
+              opacity: 0.22
               transform:
-                position: [0, 690]
+                position: [0, -760]
                 scale: [1, 1]
                 rotation: 0
-            components:
-              - id: pickup-spawner
-                type: user:Spawner
-                enabled: true
-                config:
-                  prefab: res://scenes/prefabs/pickup.pix3scene
-                  parentNode: ""
-                  intervalSec: 1.0
-                  intervalJitter: 0.35
-                  maxAlive: 10
-                  spawnWidth: 880
-                  spawnHeight: 60
-                  gridSnap: 0
-                  driftX: 0
-                  driftY: -300
-                  lifetimeSec: 7
-                  despawnRadius: 1450
-                  startDelaySec: 0.3
             children: []
-          - id: spawner-hazards
+          - id: walls
             type: Group2D
-            name: Spawner Hazards
+            name: Walls
             properties:
-              width: 900
-              height: 60
+              width: 1000
+              height: 1600
               transform:
-                position: [0, 690]
+                position: [0, 0]
                 scale: [1, 1]
                 rotation: 0
-            components:
-              - id: hazard-spawner
-                type: user:Spawner
-                enabled: true
-                config:
-                  prefab: res://scenes/prefabs/hazard.pix3scene
-                  parentNode: ""
-                  intervalSec: 1.8
-                  intervalJitter: 0.6
-                  maxAlive: 8
-                  spawnWidth: 880
-                  spawnHeight: 60
-                  gridSnap: 0
-                  driftX: 0
-                  driftY: -380
-                  lifetimeSec: 6
-                  despawnRadius: 1450
-                  startDelaySec: 1.2
-            children: []
-          - id: player
+            children:
+              - id: wall-left
+                type: ColorRect2D
+                name: Wall Left
+                properties:
+                  width: 40
+                  height: 1600
+                  color: "#39456f"
+                  transform:
+                    position: [-480, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: wall-right
+                type: ColorRect2D
+                name: Wall Right
+                properties:
+                  width: 40
+                  height: 1600
+                  color: "#39456f"
+                  transform:
+                    position: [480, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: wall-top
+                type: ColorRect2D
+                name: Wall Top
+                properties:
+                  width: 1000
+                  height: 40
+                  color: "#39456f"
+                  transform:
+                    position: [0, 780]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: bumpers
+            type: Group2D
+            name: Bumpers
+            properties:
+              width: 1000
+              height: 1600
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: bumper-a
+                type: Sprite2D
+                name: Bumper A
+                properties:
+                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                  width: 160
+                  height: 160
+                  effects:
+                    - type: core:tint
+                      params: { color: "#7ee787", amount: 1 }
+                  transform:
+                    position: [-230, 260]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: bumper-b
+                type: Sprite2D
+                name: Bumper B
+                properties:
+                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                  width: 160
+                  height: 160
+                  effects:
+                    - type: core:tint
+                      params: { color: "#7ee787", amount: 1 }
+                  transform:
+                    position: [230, 260]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: bumper-c
+                type: Sprite2D
+                name: Bumper C
+                properties:
+                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                  width: 160
+                  height: 160
+                  effects:
+                    - type: core:tint
+                      params: { color: "#7ee787", amount: 1 }
+                  transform:
+                    position: [0, 520]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: paddles
+            type: Group2D
+            name: Paddles
+            properties:
+              width: 1000
+              height: 1600
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: paddle
+                type: Sprite2D
+                name: Paddle
+                properties:
+                  texture: { type: 'texture', url: 'res://sprites/ph-paddle.png' }
+                  width: 300
+                  height: 60
+                  effects:
+                    - type: core:tint
+                      params: { color: "#f5ae39", amount: 1 }
+                  transform:
+                    position: [0, -620]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: paddle-controller
+                    type: user:PaddleController
+                    enabled: true
+                    config:
+                      mode: pointer
+                      speed: 1800
+                      halfWidth: 150
+                      boundsNode: board
+                children: []
+          - id: ball
             type: Sprite2D
-            name: Player
+            name: Ball
             properties:
-              texture: { type: 'texture', url: 'res://sprites/ph-avatar.png' }
-              width: 120
-              height: 120
+              texture: { type: 'texture', url: 'res://sprites/ph-ball.png' }
+              width: 60
+              height: 60
               effects:
                 - type: core:tint
                   params: { color: "#ffffff", amount: 1 }
               transform:
-                position: [0, -520]
+                position: [0, 120]
                 scale: [1, 1]
                 rotation: 0
             components:
-              - id: player-controller
-                type: user:PlayerController
+              - id: ball-body
+                type: user:BallBody
                 enabled: true
                 config:
-                  mode: pointer
-                  speed: 620
-                  radius: 60
-                  boundsNode: board
-                  deadZone: 4
+                  radius: 30
+                  gravity: -1600
+                  maxSpeed: 1900
+                  minSpeed: 380
+                  damping: 0.999
+                  substeps: 4
+                  launchSpeed: 900
+                  launchAngleDeg: 72
+                  wallsNode: walls
+                  paddlesNode: paddles
+                  bumpersNode: bumpers
+                  drainNode: drain
+                  wallRestitution: 1
+                  paddleRestitution: 1.05
+                  bumperRestitution: 1.3
+                  resetDelaySec: 0.7
             children: []
       - id: hud
         type: CanvasLayer2D
@@ -196,7 +305,7 @@ root:
               scoreLabel: score-label
               scoreFormat: "SCORE {value}"
               timeLabel: time-label
-              timeFormat: "{value}"
+              timeFormat: "{value}s"
               livesBar: lives-bar
         children:
           - id: score-label
@@ -208,7 +317,7 @@ root:
               labelColor: "#ffffff"
               labelAlign: left
               transform:
-                position: [-340, 850]
+                position: [-340, 880]
                 scale: [1, 1]
                 rotation: 0
               layout:
@@ -220,12 +329,12 @@ root:
             type: Label2D
             name: Time Label
             properties:
-              label: "45"
+              label: "0s"
               labelFontSize: 44
               labelColor: "#f5ae39"
               labelAlign: center
               transform:
-                position: [0, 850]
+                position: [0, 880]
                 scale: [1, 1]
                 rotation: 0
               layout:
@@ -246,7 +355,7 @@ root:
               backBackgroundColor: "#2a3352"
               showBorder: false
               transform:
-                position: [340, 855]
+                position: [340, 885]
                 scale: [1, 1]
                 rotation: 0
               layout:
@@ -268,7 +377,7 @@ root:
               pressedColor: "#1d2743"
               buttonAction: back-to-menu
               transform:
-                position: [-400, -880]
+                position: [-400, -900]
                 scale: [1, 1]
                 rotation: 0
               layout:

@@ -8,7 +8,10 @@ import type { ApiProject } from '@/services/cloud/ApiClient';
 import { appState } from '@/state';
 import type { RecentProjectEntry } from '@/services/project/ProjectService';
 import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleService';
-import { ProjectTemplateService, type ProjectTemplate } from '@/services/project/ProjectTemplateService';
+import {
+  ProjectTemplateService,
+  type ProjectTemplate,
+} from '@/services/project/ProjectTemplateService';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
 import {
   PrototypeBootstrapService,
@@ -221,9 +224,7 @@ export class Pix3Welcome extends ComponentBase {
   }
 
   private get canSubmitPrompt(): boolean {
-    return (
-      !this.isBootstrapping && (Boolean(this.prompt.trim()) || this.attachments.length > 0)
-    );
+    return !this.isBootstrapping && (Boolean(this.prompt.trim()) || this.attachments.length > 0);
   }
 
   /** Recipe cards: the Flow catalog once it is installed, else the bundled 2D templates. */
@@ -281,8 +282,7 @@ export class Pix3Welcome extends ComponentBase {
     } catch (error) {
       // Nothing was created, so leaving the shell in Flow would strand the user in an empty stage.
       this.workspaceModeService.set(previousMode, { persist: false });
-      this.projectError =
-        error instanceof Error ? error.message : 'Failed to build the prototype.';
+      this.projectError = error instanceof Error ? error.message : 'Failed to build the prototype.';
     }
   };
 
@@ -359,7 +359,8 @@ export class Pix3Welcome extends ComponentBase {
   private onCycleAttachmentRole = (id: string): void => {
     const current = this.attachments.find(attachment => attachment.id === id);
     if (!current || current.kind !== 'image') return;
-    const next = ATTACHMENT_ROLES[(ATTACHMENT_ROLES.indexOf(current.role) + 1) % ATTACHMENT_ROLES.length];
+    const next =
+      ATTACHMENT_ROLES[(ATTACHMENT_ROLES.indexOf(current.role) + 1) % ATTACHMENT_ROLES.length];
     this.attachments = withAttachmentRole(this.attachments, id, next);
   };
 

@@ -229,9 +229,29 @@ describe('paletteColorForRole', () => {
     expect(paletteColorForRole('enemy', palette)).toBe('#5c8374');
   });
 
+  it('folds the role synonyms recipes actually use onto the same colours', () => {
+    // recipe-arena-2d writes `avatar`/`threat` where others write `player`/`enemy`; both must land
+    // on the same swatch or the two recipes would come out looking unrelated.
+    expect(paletteColorForRole('avatar', palette)).toBe(paletteColorForRole('player', palette));
+    expect(paletteColorForRole('threat', palette)).toBe(paletteColorForRole('enemy', palette));
+    expect(paletteColorForRole('pickup', palette)).toBe(
+      paletteColorForRole('collectible', palette)
+    );
+    // …and the three of them stay distinct from each other.
+    expect(
+      new Set([
+        paletteColorForRole('avatar', palette),
+        paletteColorForRole('threat', palette),
+        paletteColorForRole('background', palette),
+      ]).size
+    ).toBe(3);
+  });
+
   it('normalises role spelling and falls back for unknown roles', () => {
     expect(paletteColorForRole('  Background ', palette)).toBe('#101820');
-    expect(paletteColorForRole('power-up', palette)).toBe(paletteColorForRole('collectible', palette));
+    expect(paletteColorForRole('power-up', palette)).toBe(
+      paletteColorForRole('collectible', palette)
+    );
   });
 
   it('never indexes past a short palette, and reports nothing for an empty one', () => {

@@ -179,8 +179,23 @@ pix3-flow-shell .flow-plan__spinner {
 
 pix3-flow-shell .flow-body {
   display: grid;
-  grid-template-columns: minmax(320px, 30%) minmax(0, 1fr);
+  /* Width is driven by the splitter (JS sets --flow-chat-width); the fallback is the first paint. */
+  grid-template-columns: var(--flow-chat-width, 420px) auto minmax(0, 1fr);
   min-height: 0;
+}
+
+pix3-flow-shell .flow-splitter {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+pix3-flow-shell .flow-splitter:hover,
+pix3-flow-shell .flow-splitter:focus-visible {
+  background: var(--accent-line);
+  outline: none;
 }
 
 pix3-flow-shell .flow-chat {
@@ -227,6 +242,7 @@ pix3-flow-shell .flow-stage__frame {
 
 pix3-flow-shell .flow-stage__host {
   position: relative;
+  /* Sized in JS (fitStage) to the game's aspect; these are only the pre-measure defaults. */
   width: 100%;
   height: 100%;
   border-radius: var(--radius-3);
@@ -304,11 +320,15 @@ pix3-flow-shell .flow-stage__status {
 @media (max-width: 900px) {
   pix3-flow-shell .flow-body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 0 minmax(0, 1fr);
   }
 
   pix3-flow-shell .flow-chat {
     border-right: none;
     border-bottom: 1px solid var(--line-1);
+  }
+
+  pix3-flow-shell .flow-splitter {
+    display: none;
   }
 }

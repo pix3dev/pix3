@@ -1,4 +1,5 @@
 import { inject, injectable } from '@/fw/di';
+import { appState } from '@/state';
 import {
   createDefaultProjectManifest,
   createDefaultQualitySettings,
@@ -23,6 +24,7 @@ import {
   parseRecipeTunables,
   resolveTunables,
   type RecipePlaceholder,
+  type RecipeTunable,
   type ScenePatch,
   type TunableResolution,
 } from '@/services/flow/recipe-contract';
@@ -31,7 +33,11 @@ import {
   type ComposerAttachment,
   type ComposerImageAttachment,
 } from '@/ui/shared/composer-attachments';
-import { FLOW_BRIEF_PATH, FLOW_DECISIONS_PATH, FLOW_PROGRESS_PATH } from '@/services/flow/FlowPlanService';
+import {
+  FLOW_BRIEF_PATH,
+  FLOW_DECISIONS_PATH,
+  FLOW_PROGRESS_PATH,
+} from '@/services/flow/FlowPlanService';
 
 // ---------------------------------------------------------------------------
 // The brief (design §5.3)
@@ -92,6 +98,16 @@ export interface PrototypeBrief {
 export const FALLBACK_RECIPE_ID = 'recipe-arena-2d';
 
 /** Recipe ids the planner may choose from, with the one-liners it needs to choose well. */
+/**
+ * Recipe ids the planner may pick that are served by an existing template folder under another
+ * name. The playable-ad "recipe" is the shipped `playable-2d` template (tap-gate + CTA + store
+ * hook) promoted into the catalog with a `design/recipe.md`; without this alias the planner's
+ * correct answer would silently fall back to the arena recipe.
+ */
+const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
+  'recipe-playable-ad': 'playable-2d',
+};
+
 const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: 'recipe-tapper-2d',
@@ -162,6 +178,8 @@ const DOC_EXCERPT_CHARS = 4000;
 const MAX_VISION_IMAGES = 2;
 /** Colours quantized out of a style reference. */
 const PALETTE_SIZE = 5;
+/** How long the first agent turn waits for the shell to open the scene before going anyway. */
+const SCENE_WAIT_MS = 10_000;
 
 /**
  * Turns one prompt (plus any references) into an open, playable project: one planner call for the
@@ -481,7 +499,9 @@ export class PrototypeBootstrapService {
         `Template "${templateId}" has no design/recipe.md, so no tunables or placeholders were applied.`
       );
     }
-    const declared = recipe ? parseRecipeTunables(recipe) : new Map();
+    const declared: ReadonlyMap<string, RecipeTunable> = recipe
+      ? parseRecipeTunables(recipe)
+      : new Map<string, RecipeTunable>();
     const placeholders = recipe ? parseRecipePlaceholders(recipe) : [];
 
     const resolution = resolveTunables(brief.tunables, declared);
@@ -605,18 +625,42 @@ export class PrototypeBootstrapService {
       if (!color || !/\.(png|jpe?g|webp)$/i.test(placeholder.file)) {
         continue;
       }
+      const path = await this.resolvePlaceholderPath(placeholder.file);
+      if (!path) {
+        notes.push(`Placeholder "${placeholder.file}" is not in the project; nothing was tinted.`);
+        continue;
+      }
       try {
-        const source = await this.storage.readBlob(placeholder.file);
+        const source = await this.storage.readBlob(path);
         const tinted = await tintImage(source, color);
         if (tinted.blob !== source) {
-          await this.storage.writeBinaryFile(placeholder.file, await tinted.blob.arrayBuffer());
+          await this.storage.writeBinaryFile(path, await tinted.blob.arrayBuffer());
         }
       } catch (error) {
         notes.push(
-          `Could not tint ${placeholder.file}: ${error instanceof Error ? error.message : String(error)}`
+          `Could not tint ${path}: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
+  }
+
+  /**
+   * Recipes name placeholders however reads best in their table — `sprites/ph-player.png` in one,
+   * a bare `ph-avatar.png` in another — so the path is resolved against the conventional sprite
+   * folders rather than requiring every recipe author to spell out the same prefix.
+   */
+  private async resolvePlaceholderPath(file: string): Promise<string | null> {
+    const base = file.split('/').pop() ?? file;
+    const candidates = [file, `sprites/${base}`, `assets/sprites/${base}`, base];
+    for (const candidate of candidates) {
+      try {
+        await this.storage.readBlob(candidate);
+        return candidate;
+      } catch {
+        // Try the next conventional location.
+      }
+    }
+    return null;
   }
 
   private async writeDesignDocs(
@@ -647,8 +691,23 @@ export class PrototypeBootstrapService {
    * solved without hints when it starts from a compact brief.
    */
   async startFirstTurn(brief: PrototypeBrief, prompt: string): Promise<void> {
+    // The system prompt carries a scene outline, and the Flow shell opens the scene as it starts the
+    // stage — a turn sent a beat too early would start the agent on an empty outline and it would
+    // spend its first tool calls re-discovering a project that was about to load anyway.
+    await this.waitForActiveScene();
     await this.agentChat.newConversation();
     await this.agentChat.send(renderFirstTurnMessage(brief, prompt));
+  }
+
+  /** Resolve once a scene is active, or after {@link SCENE_WAIT_MS} — never blocking forever. */
+  private async waitForActiveScene(): Promise<void> {
+    const deadline = Date.now() + SCENE_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (appState.scenes.activeSceneId) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
   }
 
   // -- helpers ---------------------------------------------------------------
@@ -656,8 +715,9 @@ export class PrototypeBootstrapService {
   /** The recipe the planner named, else the fallback recipe, else whatever template exists. */
   private resolveTemplateId(recipeId: string, notes: string[]): string {
     const available = this.templates.getTemplates();
-    if (available.some(template => template.id === recipeId)) {
-      return recipeId;
+    const aliased = RECIPE_TEMPLATE_ALIASES[recipeId] ?? recipeId;
+    if (available.some(template => template.id === aliased)) {
+      return aliased;
     }
     if (available.some(template => template.id === FALLBACK_RECIPE_ID)) {
       notes.push(`Planner asked for \`${recipeId}\`; started from ${FALLBACK_RECIPE_ID}.`);
@@ -755,9 +815,8 @@ export class PrototypeBootstrapService {
 // Pure helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
-const isImageAttachment = (
-  attachment: ComposerAttachment
-): attachment is ComposerImageAttachment => attachment.kind === 'image';
+const isImageAttachment = (attachment: ComposerAttachment): attachment is ComposerImageAttachment =>
+  attachment.kind === 'image';
 
 const toImageBlock = (image: ComposerImageAttachment): LlmImageBlock => ({
   type: 'image',
@@ -787,13 +846,13 @@ export const buildPlannerPrompt = (
   palette: readonly string[],
   visionNotes: readonly string[]
 ): string => {
-  const lines: string[] = [`IDEA: ${request.prompt.trim() || '(no text — see the references)'}`, ''];
+  const lines: string[] = [
+    `IDEA: ${request.prompt.trim() || '(no text — see the references)'}`,
+    '',
+  ];
 
   if (request.recipeId) {
-    lines.push(
-      `The user already chose the recipe: use "${request.recipeId}" as \`recipeId\`.`,
-      ''
-    );
+    lines.push(`The user already chose the recipe: use "${request.recipeId}" as \`recipeId\`.`, '');
   } else {
     lines.push('RECIPE CATALOG (choose exactly one id):');
     for (const recipe of RECIPE_CATALOG) {
@@ -962,7 +1021,8 @@ export const validateBrief = (
       const role = asText(raw.role);
       if (!name || !role) continue;
       const spec = isRecord(raw.assetSpec) ? raw.assetSpec : {};
-      const sizeHint = typeof spec.sizeHint === 'number' && spec.sizeHint > 0 ? spec.sizeHint : undefined;
+      const sizeHint =
+        typeof spec.sizeHint === 'number' && spec.sizeHint > 0 ? spec.sizeHint : undefined;
       entities.push({
         role,
         name,

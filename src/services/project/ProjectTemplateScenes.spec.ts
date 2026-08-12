@@ -100,6 +100,9 @@ describe('bundled project templates', () => {
       'minigame-2d',
       'playable-2d',
       'playable-3d',
+      'recipe-arena-2d',
+      'recipe-bouncer-2d',
+      'recipe-tapper-2d',
     ]);
   });
 

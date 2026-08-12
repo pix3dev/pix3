@@ -1,0 +1,100 @@
+# Pix3 Scene File (YAML)
+# Tapper 2D — the MENU scene. This is the project's ENTRY / export scene
+# (Project Settings → Default Export Scene Path): a full build and "Start Game"
+# boot here. PLAY transitions to the game scene (main.pix3scene) via a fade.
+# Wired by scripts/MenuFlow.ts. Iterate on the GAME in main.pix3scene.
+version: 1.0.0
+metadata:
+  author: Pix3 Recipe
+  description: Menu scene — entry point; PLAY transitions to the game
+root:
+  - id: menu-root
+    type: Group2D
+    name: Menu Root
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: menu-flow
+        type: user:MenuFlow
+        enabled: true
+        config:
+          gameScene: res://scenes/main.pix3scene
+          playButton: play-button
+    children:
+      - id: menu-background
+        type: ColorRect2D
+        name: Menu Background
+        properties:
+          width: 1080
+          height: 1920
+          color: "#141a2e"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: title-label
+        type: Label2D
+        name: Title Label
+        properties:
+          label: "{{PROJECT_NAME}}"
+          labelFontSize: 96
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [0, 420]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []
+      - id: subtitle-label
+        type: Label2D
+        name: Subtitle Label
+        properties:
+          label: "TAP FAST. MISS NOTHING."
+          labelFontSize: 40
+          labelColor: "#93a3c9"
+          labelAlign: center
+          transform:
+            position: [0, 300]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []
+      - id: play-button
+        type: Button2D
+        name: Play Button
+        properties:
+          width: 480
+          height: 140
+          label: "PLAY"
+          labelFontSize: 56
+          labelColor: "#141a2e"
+          backgroundColor: "#f5ae39"
+          hoverColor: "#ffc862"
+          pressedColor: "#d4922a"
+          buttonAction: play
+          transform:
+            position: [0, -60]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []

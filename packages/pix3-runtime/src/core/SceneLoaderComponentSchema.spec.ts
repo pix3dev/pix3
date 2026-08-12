@@ -71,6 +71,55 @@ root:
           foo: 42
 `;
 
+/**
+ * A component with real constructor defaults — the shape every recipe/user script has. A scene
+ * only stores the values that were authored, so the loader must MERGE over these defaults.
+ */
+class DefaultedComponent extends Script {
+  constructor(id: string, type: string) {
+    super(id, type);
+    this.config = { cellSize: 100, prefabPath: 'res://scenes/prefabs/segment.pix3scene', lives: 3 };
+  }
+}
+
+describe('SceneLoader component config defaults', () => {
+  it('merges the scene config over the class defaults instead of replacing them', async () => {
+    const { loader, registry } = makeLoader();
+    registry.registerComponent({
+      id: 'user:DefaultedComponent',
+      displayName: 'DefaultedComponent',
+      description: 'test',
+      category: 'Project',
+      componentClass: DefaultedComponent,
+      keywords: [],
+    });
+
+    // The scene stores ONE overridden field — as it would after an editor edit, or after a script
+    // gained new config fields that predate the scene file.
+    const yaml = `version: '1.0.0'
+root:
+  - id: panel
+    type: ColorRect2D
+    name: Panel
+    components:
+      - id: comp-1
+        type: 'user:DefaultedComponent'
+        enabled: true
+        config:
+          lives: 5
+`;
+
+    const graph = await loader.parseScene(yaml, { filePath: 'res://scenes/main.pix3scene' });
+    const config = graph.rootNodes[0].components[0].config;
+
+    expect(config.lives).toBe(5);
+    // Without the merge these came back undefined, and the game silently ran with a grid size of
+    // `undefined` and an empty prefab path — no error, just a broken game.
+    expect(config.cellSize).toBe(100);
+    expect(config.prefabPath).toBe('res://scenes/prefabs/segment.pix3scene');
+  });
+});
+
 describe('SceneLoader component schema robustness', () => {
   afterEach(() => {
     vi.restoreAllMocks();

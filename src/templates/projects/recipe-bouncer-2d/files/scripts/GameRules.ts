@@ -26,8 +26,8 @@ export class GameRules extends Script {
     super(id, type);
     this.config = {
       winMode: 'score',
-      targetScore: 12,
-      timeLimitSec: 45,
+      targetScore: 1500,
+      timeLimitSec: 0,
       startingLives: 3,
       resultNode: 'result-overlay',
       resultLabel: 'result-label',
@@ -38,7 +38,7 @@ export class GameRules extends Script {
       menuScene: 'res://scenes/menu.pix3scene',
       gameScene: 'res://scenes/main.pix3scene',
       // Comma-separated node ids frozen (all their components disabled) on game over.
-      freezeNodes: 'spawner-pickups,spawner-hazards,player',
+      freezeNodes: 'ball,paddle',
     };
   }
 

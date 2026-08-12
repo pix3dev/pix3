@@ -246,7 +246,9 @@ describe('chromaKeyImage', () => {
 });
 
 /** Build an {@link ImagePixels} out of `[r,g,b,a]` tuples, one row tall. */
-const pixelRow = (colors: ReadonlyArray<readonly [number, number, number, number]>): ImagePixels => {
+const pixelRow = (
+  colors: ReadonlyArray<readonly [number, number, number, number]>
+): ImagePixels => {
   const data = new Uint8ClampedArray(colors.length * 4);
   colors.forEach(([r, g, b, a], index) => {
     data[index * 4] = r;
