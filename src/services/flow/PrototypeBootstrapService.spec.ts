@@ -5,6 +5,7 @@ import {
   fallbackBrief,
   deriveTitle,
   renderBriefMarkdown,
+  renderFirstTurnMessage,
   renderProgressMarkdown,
   summarizeDocument,
   validateBrief,
@@ -242,5 +243,35 @@ describe('generated design docs', () => {
     expect(markdown).toContain('For the agent — asked for, not applied');
     expect(markdown).toContain('`enemyWaves`: 3');
     expect(markdown).toContain('- a bootstrap note');
+  });
+});
+
+describe('renderFirstTurnMessage', () => {
+  const brief = fallbackBrief('a coin tapper');
+
+  it('carries the plan and takes only the first increment', () => {
+    const message = renderFirstTurnMessage(brief, 'a coin tapper');
+
+    expect(message).toContain('**first increment only**');
+    expect(message).not.toContain('Project map');
+  });
+
+  it('inlines the project map so the agent does not spend its first hops re-reading it', () => {
+    // Measured: 22 of 55 round-trips in a first increment were reads of a project that had just
+    // been generated. The map is the cheap half of that fix — it must reach the model verbatim.
+    const map = [
+      '## Project map — the current contents of every script and scene',
+      '',
+      '### scripts/Spawner.ts',
+      '```ts',
+      'export class Spawner {}',
+      '```',
+    ].join('\n');
+
+    const message = renderFirstTurnMessage(brief, 'a coin tapper', map);
+
+    expect(message).toContain('### scripts/Spawner.ts');
+    expect(message).toContain('export class Spawner {}');
+    expect(message.indexOf('Project map')).toBeGreaterThan(message.indexOf('first increment only'));
   });
 });

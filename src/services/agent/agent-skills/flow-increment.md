@@ -52,6 +52,10 @@ screenshot plus `analyze_image` costs several iterations, answers "I don't see i
 not, and cannot tell you a number. Keep screenshots for questions that are genuinely visual —
 "does this look like a snake?" — and never use them to locate a node.
 
+The harness enforces this: while a gameplay change of yours is unproven, `viewport_screenshot`
+and `analyze_image` refuse and point you back at `game_input`/`game_observe`. When the question
+really is visual, pass `visualReason` saying so and they run.
+
 **`visible: true` does NOT mean on screen.** It is the node's own flag; an invisible ancestor
 hides the entire subtree, so the node draws nothing and cannot be tapped. Showing a result label
 and a retry button while leaving their parent overlay hidden reads as a perfect win screen in

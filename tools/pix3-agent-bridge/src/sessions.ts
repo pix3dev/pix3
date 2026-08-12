@@ -33,12 +33,19 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   HttpError,
   extractToolResults,
+  effortOf,
   isRecord,
   renderTranscript,
   systemToText,
   toUserContent,
 } from './wire.ts';
-import type { WireBlock, WireMessagesRequest, WireToolDefinition, WireToolResult } from './wire.ts';
+import type {
+  WireBlock,
+  WireEffort,
+  WireMessagesRequest,
+  WireToolDefinition,
+  WireToolResult,
+} from './wire.ts';
 
 const MCP_SERVER_NAME = 'pix3';
 const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
@@ -134,6 +141,8 @@ export class BridgeSession {
   closed = false;
 
   private readonly log: Logger;
+  /** Reasoning depth this session was started with; undefined = the model's own default. */
+  private readonly effort: WireEffort | undefined;
   private readonly q: Query;
   private readonly input = new AsyncQueue<SDKUserMessage>();
   private readonly toolNames: Set<string>;
@@ -156,12 +165,16 @@ export class BridgeSession {
     this.lastSystem = systemToText(request.system);
     const tools = request.tools ?? [];
     this.toolNames = new Set(tools.map(tool => tool.name));
+    this.effort = effortOf(request);
 
     this.q = query({
       prompt: this.input,
       options: {
         model: request.model,
         systemPrompt: this.lastSystem || undefined,
+        // Session-wide: the SDK takes it at construction, so a request asking for a different
+        // effort is routed to a different session (see `effortMatches`).
+        ...(this.effort === undefined ? {} : { effort: this.effort }),
         // pix3's tools, exposed verbatim (JSON Schema and all) via an in-process MCP server.
         mcpServers: {
           [MCP_SERVER_NAME]: { type: 'sdk', name: MCP_SERVER_NAME, instance: this.buildMcpServer(tools) },
@@ -197,6 +210,11 @@ export class BridgeSession {
   toolsMatch(tools: readonly WireToolDefinition[] | undefined): boolean {
     const names = (tools ?? []).map(tool => tool.name);
     return names.length === this.toolNames.size && names.every(name => this.toolNames.has(name));
+  }
+
+  /** A session's reasoning depth is fixed at construction, so a changed effort needs a new one. */
+  effortMatches(request: WireMessagesRequest): boolean {
+    return effortOf(request) === this.effort;
   }
 
   /** Advance the session with one pix3 request and wait for the next assistant boundary. */
@@ -536,7 +554,8 @@ export class SessionManager {
           !candidate.busy &&
           candidate.transcriptLen === request.messages.length - 1 &&
           candidate.model === request.model &&
-          candidate.toolsMatch(request.tools)
+          candidate.toolsMatch(request.tools) &&
+          candidate.effortMatches(request)
       );
       if (session) return session.handleRequest(request, signal);
       this.log(

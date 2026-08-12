@@ -423,6 +423,36 @@ describe('AgentChatService', () => {
     expect(JSON.stringify(service.getState().messages)).toMatch(/repeated an identical play_start/);
   });
 
+  it('refuses a screenshot while a gameplay change is unproven (Flow only), and runs it with a visualReason', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('str_replace', 'c1', { path: 'scripts/Score.ts', old_string: 'a' })
+      )
+      .mockResolvedValueOnce(toolCallResult('viewport_screenshot', 'c2', {}))
+      .mockResolvedValueOnce(
+        toolCallResult('viewport_screenshot', 'c3', { visualReason: 'checking the HUD layout' })
+      )
+      .mockResolvedValueOnce(toolCallResult('game_input', 'c4', { steps: [] }))
+      .mockResolvedValueOnce(textResult('score goes up'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+    appState.ui.workspaceMode = 'flow';
+
+    try {
+      await service.send('make tapping score');
+    } finally {
+      appState.ui.workspaceMode = 'studio';
+    }
+
+    const executedTools = execute.mock.calls.map(call => (call as unknown[])[0]);
+    expect(executedTools.filter(name => name === 'viewport_screenshot')).toHaveLength(1);
+    const refusal = JSON.stringify(service.getState().messages).includes(
+      'is unavailable right now'
+    );
+    expect(refusal).toBe(true);
+  });
+
   it('gates the turn on a str_replace script edit, not just fs_write', async () => {
     // The skills tell the agent to prefer str_replace for edits, so the gate must watch it too.
     const chat = vi

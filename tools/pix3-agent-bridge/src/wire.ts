@@ -23,7 +23,26 @@ export interface WireMessagesRequest {
   readonly system?: string | WireBlock[];
   readonly messages: WireMessage[];
   readonly tools?: WireToolDefinition[];
+  /** Anthropic adaptive-thinking knob (`{ effort: "low" | … }`), as pix3's provider emits it. */
+  readonly output_config?: { readonly effort?: string };
 }
+
+/** Effort levels both sides speak: pix3's `output_config.effort` and the SDK's `effort` option. */
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export type WireEffort = (typeof EFFORT_LEVELS)[number];
+
+/**
+ * The reasoning depth a request asks for, or undefined for the model's default.
+ *
+ * pix3 has always emitted this (its Anthropic provider writes `output_config.effort`) and the
+ * bridge always dropped it, so a mechanical edit-and-verify hop thought as hard as a design
+ * question — measured as 15–69 s tails on steps that read a file or restarted the game.
+ */
+export const effortOf = (request: WireMessagesRequest): WireEffort | undefined => {
+  const effort = request.output_config?.effort;
+  return EFFORT_LEVELS.find(level => level === effort);
+};
 
 export interface WireToolResult {
   readonly toolUseId: string;

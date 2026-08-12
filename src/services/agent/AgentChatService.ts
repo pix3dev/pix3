@@ -30,6 +30,7 @@ import {
   type LlmToolResultBlock,
   type LlmToolUseBlock,
   type LlmUsage,
+  type ReasoningEffort,
 } from '@/services/llm/LlmTypes';
 
 export type AgentChatStatus = 'idle' | 'running' | 'error';
@@ -195,6 +196,28 @@ const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
   }
   return false;
 };
+
+/** Tools that answer by LOOKING. Expensive on this lane, and blind to everything state-shaped. */
+const VISUAL_TOOLS = new Set(['viewport_screenshot', 'analyze_image']);
+
+/**
+ * Refusal handed back instead of running a visual tool while the turn owes a gameplay proof.
+ *
+ * The `flow-increment` skill has told the agent to verify by state since the feature shipped, and a
+ * measured increment still spent ~65 s of its ~460 s on one screenshot plus four vision calls to
+ * "check" a scoring change. A rule the harness does not enforce is a rule that holds only when the
+ * model feels like it — so the harness enforces it, and says what to do instead.
+ */
+const hasVisualReason = (input: unknown): boolean => {
+  const reason = (input as { visualReason?: unknown } | null | undefined)?.visualReason;
+  return typeof reason === 'string' && reason.trim().length > 0;
+};
+
+const visualToolRefusal = (toolName: string): string =>
+  JSON.stringify({
+    ok: false,
+    error: `${toolName} is unavailable right now: you changed game logic and have not proven it in the running game yet. A picture cannot show that a score went up, a timer ticked or a hitbox fired — drive the game with game_input and read the delta with game_observe. If the thing you need to check really is visual (art, layout, colour, overlap), call it again with visualReason explaining that.`,
+  });
 
 /**
  * Tools that change project or engine state, so an earlier identical result stops being evidence of
@@ -641,7 +664,8 @@ export class AgentChatService {
       model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
     // Reasoning-depth level, only when the (possibly live-fetched) model advertises the chosen one —
     // so the provider can emit it verbatim and a stale/unsupported pick is quietly ignored.
-    const reasoningPref = this.settings.getReasoningEffort(provider.id, modelId);
+    const reasoningPref =
+      this.settings.getReasoningEffort(provider.id, modelId) ?? this.defaultReasoningEffort();
     const reasoningEffort =
       reasoningPref && model?.capabilities.reasoningEfforts?.includes(reasoningPref)
         ? reasoningPref
@@ -837,6 +861,21 @@ export class AgentChatService {
       for (const call of calls) {
         if (signal.aborted) {
           throw new LlmError('aborted', 'The request was cancelled.');
+        }
+        // Flow only: Studio has a user watching who may well WANT a screenshot mid-turn.
+        if (
+          appState.ui.workspaceMode === 'flow' &&
+          unverifiedGameMutation &&
+          VISUAL_TOOLS.has(call.name) &&
+          !hasVisualReason(call.input)
+        ) {
+          results.push({
+            type: 'tool-result',
+            toolUseId: call.id,
+            content: visualToolRefusal(call.name),
+            isError: true,
+          });
+          continue;
         }
         this.setState({ activeTool: call.name });
         const executed = await this.executeToolCall(call);
@@ -1552,6 +1591,18 @@ export class AgentChatService {
       }
     }
     return null;
+  }
+
+  /**
+   * Reasoning depth when the user has not pinned one.
+   *
+   * In Flow the wait *is* the product: a measured increment spent 55 round-trips at a 5.4 s median,
+   * with the 15 s–69 s tails all being thinking time on steps whose shape (read this file, patch
+   * that line, restart and tap) does not reward it. Studio keeps the model's own default, where a
+   * user watching a single deliberate edit would rather have the deeper answer.
+   */
+  private defaultReasoningEffort(): ReasoningEffort | undefined {
+    return appState.ui.workspaceMode === 'flow' ? 'low' : undefined;
   }
 
   /**

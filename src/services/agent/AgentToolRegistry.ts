@@ -942,6 +942,11 @@ export class AgentToolRegistry {
               description:
                 'Margin around framed content as a fraction of its size, 0–1 (default ~0.15). Smaller = tighter crop.',
             },
+            visualReason: {
+              type: 'string',
+              description:
+                'Why LOOKING is required rather than reading state (art, layout, colour, overlap). Required while a gameplay change of yours is still unproven — there, verify with game_input/game_observe instead; a picture cannot show whether the score went up.',
+            },
           },
           additionalProperties: false,
         },
@@ -963,6 +968,11 @@ export class AgentToolRegistry {
               type: 'string',
               description:
                 'What to ask about the image. For verification, ask a yes/no checklist ("(1) exactly ONE subject, not a whole scene? (2) centered, not cut off?") — an open "describe it" answer reads as success even when the content is wrong. Defaults to a general description.',
+            },
+            visualReason: {
+              type: 'string',
+              description:
+                'Why LOOKING is required rather than reading state (art, layout, colour, overlap). Required while a gameplay change of yours is still unproven — there, verify with game_input/game_observe instead; a picture cannot show whether the score went up.',
             },
           },
           required: ['source'],

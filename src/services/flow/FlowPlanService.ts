@@ -87,6 +87,29 @@ const extractPitch = (markdown: string): string | null => {
 };
 
 /**
+ * A numbered plan step, as models keep rewriting the checklist into: `1. tap coins ← DONE`.
+ *
+ * Observed live: an increment that rewrote `design/progress.md` as a numbered list emptied the plan
+ * tracker to "No plan yet" while the agent was reporting real progress against it. The file is the
+ * agent's own memory in its own words, so the parser meets it where it is — a status word anywhere
+ * on the line (DONE / IN PROGRESS / TODO, or a leading `[x]`) decides the marker.
+ */
+const matchNumberedStep = (line: string): RegExpMatchArray | null => {
+  const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+  if (!numbered) return null;
+  const body = numbered[1].trim();
+  const done = /(^|\s|←|->|—)(done|готово|✅|\[x\])\b/i.test(body) || /^\[x\]/i.test(body);
+  const active = /\b(in progress|current|активн|в работе|\(now\))\b/i.test(body);
+  const marker = done ? 'x' : active ? '~' : ' ';
+  // Strip the status word itself so the tracker shows the step, not the bookkeeping.
+  const title = body
+    .replace(/\s*(?:←|->|—|--)?\s*\b(done|готово|in progress|current|✅)\b.*$/i, '')
+    .replace(/^\[[ xX]\]\s*/, '')
+    .trim();
+  return [line, marker, title || body] as unknown as RegExpMatchArray;
+};
+
+/**
  * Parse a markdown checklist into plan steps. `- [x]` is done, `- [ ]` is pending, and `- [~]`
  * (or a trailing "(in progress)") marks the increment being worked on right now — the skill asks
  * the agent to mark exactly one that way so the tracker can show what is happening.
@@ -94,7 +117,7 @@ const extractPitch = (markdown: string): string | null => {
 export const parseChecklist = (markdown: string): FlowPlanStep[] => {
   const steps: FlowPlanStep[] = [];
   for (const line of markdown.split('\n')) {
-    const match = line.match(/^\s*[-*]\s*\[([ xX~>])\]\s*(.+)$/);
+    const match = line.match(/^\s*[-*]\s*\[([ xX~>])\]\s*(.+)$/) ?? matchNumberedStep(line);
     if (!match) continue;
     const marker = match[1].toLowerCase();
     let title = match[2].trim();
