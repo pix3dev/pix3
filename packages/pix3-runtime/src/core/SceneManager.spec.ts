@@ -56,3 +56,26 @@ describe('SceneManager active-scene pointer', () => {
     expect(manager.getActiveSceneGraph()).toBe(graphA);
   });
 });
+
+describe('SceneManager without a SceneSaver', () => {
+  it('works for everything but serialization, and says so clearly', () => {
+    // The exported player constructs it this way on purpose: no saver means the
+    // serializer — and every node class it imports for serialization, plus
+    // `yaml.stringify` — stays out of the bundle. See
+    // `.plans/playable-export-size.md`.
+    const manager = new SceneManager({} as SceneLoader);
+    const graph = makeGraph('root');
+
+    manager.setActiveSceneGraph('a', graph);
+    expect(manager.getActiveSceneGraph()).toBe(graph);
+
+    expect(() => manager.serializeScene(graph)).toThrowError(/No SceneSaver was provided/);
+  });
+
+  it('serializes through the saver when a host provides one', () => {
+    const saver = { serializeScene: () => 'version: "1.0.0"\n' } as unknown as SceneSaver;
+    const manager = new SceneManager({} as SceneLoader, saver);
+
+    expect(manager.serializeScene(makeGraph('root'))).toBe('version: "1.0.0"\n');
+  });
+});

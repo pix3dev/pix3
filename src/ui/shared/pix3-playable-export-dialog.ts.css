@@ -109,3 +109,24 @@ pix3-playable-export-dialog .btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+pix3-playable-export-dialog .dialog-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--fg-0);
+  cursor: pointer;
+}
+
+pix3-playable-export-dialog .dialog-toggle-row input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+pix3-playable-export-dialog .dialog-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-2);
+}

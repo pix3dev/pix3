@@ -178,6 +178,11 @@ export default defineConfig(async ({ mode }) => {
               (id.includes('node_modules/three/') ||
                 id.includes('node_modules/@dimforge/rapier3d-compat/') ||
                 id.includes('node_modules/yaml/') ||
+                // Both are embedded as SOURCE for playable export only, and both are
+                // big (~620 KiB and ~520 KiB of raw text): precaching them for offline
+                // editing would cost more than the whole editor shell.
+                id.includes('node_modules/postprocessing/') ||
+                id.includes('node_modules/@esotericsoftware/spine-threejs/') ||
                 id.includes('packages/pix3-runtime/'));
             return isPlayableExportVendorSource
               ? 'assets/export-vendor/[name]-[hash].js'

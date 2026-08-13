@@ -290,6 +290,17 @@ export default defineConfig({
         find: /^virtual:runtime-spine$/,
         replacement: resolve(projectDir, 'src/generated/spine-runtime.ts'),
       },
+      {
+        // Same shape for `postprocessing`: registered when a scene places a
+        // PostProcess node, empty otherwise.
+        find: /^virtual:runtime-postprocessing$/,
+        replacement: resolve(projectDir, 'src/generated/postprocessing-runtime.ts'),
+      },
+      {
+        // Installs the multiplayer NetworkService only for projects that use it.
+        find: /^virtual:runtime-network$/,
+        replacement: resolve(projectDir, 'src/generated/network-runtime.ts'),
+      },
     ],
     dedupe: ['three'],
   },

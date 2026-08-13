@@ -1745,6 +1745,7 @@ export class Pix3EditorShell extends ComponentBase {
           .dialogId=${this.activePlayableExportDialog.id}
           .scenePaths=${this.activePlayableExportDialog.scenePaths}
           .selectedScenePath=${this.activePlayableExportDialog.selectedScenePath}
+          .offerCompression=${this.activePlayableExportDialog.offerCompression === true}
         ></pix3-playable-export-dialog>
       </div>
     `;
@@ -1789,16 +1790,17 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   private onPlayableExportConfirmed(e: CustomEvent): void {
-    const { dialogId, scenePath } = e.detail as {
+    const { dialogId, scenePath, compress } = e.detail as {
       dialogId?: string;
       scenePath?: string;
+      compress?: boolean;
     };
 
     if (typeof dialogId !== 'string' || typeof scenePath !== 'string') {
       return;
     }
 
-    this.playableExportDialogService.confirm(dialogId, scenePath);
+    this.playableExportDialogService.confirm(dialogId, { scenePath, compress: compress === true });
   }
 
   private onPlayableExportCancelled(e: CustomEvent): void {

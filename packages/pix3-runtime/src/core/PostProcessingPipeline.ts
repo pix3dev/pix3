@@ -17,13 +17,35 @@ import type {
 import type { PostProcessConfig } from '../nodes/PostProcess';
 
 type PostprocessingModule = typeof import('postprocessing');
+type PostprocessingModuleLoader = () => Promise<PostprocessingModule>;
 
 let modulePromise: Promise<PostprocessingModule> | null = null;
+let moduleLoader: PostprocessingModuleLoader = () => import('postprocessing');
+
+/**
+ * Overrides how the `postprocessing` module is obtained.
+ *
+ * The default is the code-split `import('postprocessing')`, which is right for
+ * hosts whose bundler can fetch a chunk (the editor, a Vite project build). A
+ * **single-file playable export** cannot: there is no chunk to fetch and no
+ * import map to resolve the bare specifier, so the dynamic import used to reject
+ * and post-processing silently never turned on. Those builds instead generate a
+ * module that imports `postprocessing` statically and registers it here — the
+ * same arrangement as `setSpineModuleLoader`, and the reason a project without a
+ * `PostProcess` node still ships none of it.
+ */
+export function setPostprocessingModuleLoader(loader: PostprocessingModuleLoader): void {
+  if (moduleLoader === loader) {
+    return;
+  }
+  moduleLoader = loader;
+  modulePromise = null;
+}
 
 /** Shared, idempotent loader for the `postprocessing` module (code-split). */
 function loadPostprocessing(): Promise<PostprocessingModule> {
   if (!modulePromise) {
-    modulePromise = import('postprocessing');
+    modulePromise = moduleLoader();
   }
   return modulePromise;
 }

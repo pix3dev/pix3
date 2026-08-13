@@ -66,6 +66,18 @@ export interface VirtualBundleOptions {
    * `constructor.name`: node types, script ids and property schemas are all explicit strings.
    */
   readonly minify?: boolean;
+  /**
+   * Output format. `esm` by default, which is what in-editor script compilation
+   * and the plain playable export need.
+   *
+   * `iife` exists for the **compressed** playable export: its bootstrap decompresses
+   * the bundle at runtime and injects it as a classic `<script>`'s `textContent`,
+   * which cannot carry `import`/`export` statements. That also makes the output
+   * runnable in containers where module scripts are refused (`data:` iframes, some
+   * MRAID webviews) — the same reason the generated Vite project rewrites its output
+   * to classic scripts (`src/templates/build/vite.config.ts.tpl`).
+   */
+  readonly format?: 'esm' | 'iife';
 }
 
 interface VirtualFileSystemPluginOptions {
@@ -183,7 +195,7 @@ export class ScriptCompilerService {
           loader: 'ts',
         },
         bundle: true,
-        format: 'esm',
+        format: options.format ?? 'esm',
         platform: 'browser',
         target: 'es2022',
         minify: options.minify === true,

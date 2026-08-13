@@ -14,7 +14,10 @@ import {
   formatExportBytes,
   summarizeInclusionReasons,
 } from '@/services/export/export-report';
-import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
+import {
+  PlayableExportDialogService,
+  type PlayableExportDialogResult,
+} from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
 import type {
   PlayableHtmlBuildService,
@@ -85,8 +88,8 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
     this.loggingService.info(`[Playable Zip Export] Starting export for "${projectName}"`);
 
     try {
-      const entryScenePath = await this.promptForEntryScenePath(context);
-      if (!entryScenePath) {
+      const selection = await this.promptForEntryScenePath(context);
+      if (!selection) {
         return { didMutate: false, payload: undefined };
       }
 
@@ -100,7 +103,7 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
         const playableHtmlBuildService = await this.playableHtmlBuildService();
         artifact = await playableHtmlBuildService.buildPlayableZip(context, {
           title: projectName,
-          entryScenePath,
+          entryScenePath: selection.scenePath,
         });
       } finally {
         this.playableExportProgressDialogService.close();
@@ -152,7 +155,11 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
     return { didMutate: false, payload: undefined };
   }
 
-  private async promptForEntryScenePath(context: CommandContext): Promise<string | null> {
+  // No compression toggle here: a zip already deflates its entries, so gzipping the
+  // bundle inside it would only add base64 overhead.
+  private async promptForEntryScenePath(
+    context: CommandContext
+  ): Promise<PlayableExportDialogResult | null> {
     const scenePaths = Array.from(
       new Set(
         Object.values(context.state.scenes.descriptors)

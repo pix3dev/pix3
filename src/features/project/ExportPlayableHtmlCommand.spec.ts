@@ -35,6 +35,10 @@ const createBuildArtifact = (
       rawAssetsBytes: 512,
       base64AssetsBytes: 684,
       base64ExpansionBytes: 172,
+      uncompressedBundleBytes: 0,
+      compressedBundleBytes: 0,
+      compressionSavedBytes: 0,
+      strippedModulePaths: [],
       codeAndWrapperBytes: 340,
       assetEntries: [
         {
@@ -102,7 +106,7 @@ describe('ExportPlayableHtmlCommand', () => {
       showConfirmation: vi.fn(async (_options: DialogOptions) => true),
     };
     const playableExportDialogService = {
-      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+      showDialog: vi.fn(async () => ({ scenePath: 'scenes/main.pix3scene', compress: false })),
     };
     const playableExportProgressDialogService = {
       showDialog: vi.fn(),
@@ -163,10 +167,14 @@ describe('ExportPlayableHtmlCommand', () => {
     expect(playableExportDialogService.showDialog).toHaveBeenCalledWith({
       scenePaths: ['scenes/main.pix3scene'],
       selectedScenePath: 'scenes/main.pix3scene',
+      // The single-file HTML export is the one path where compression pays off.
+      offerCompression: true,
     });
     expect(buildService.buildPlayableHtml).toHaveBeenCalledWith(context, {
       title: 'Demo Project',
       entryScenePath: 'scenes/main.pix3scene',
+      // Whatever the dialog returned, verbatim — the command never decides this itself.
+      compress: false,
     });
     expect(playableExportProgressDialogService.showDialog).toHaveBeenCalledWith({
       title: 'Building Playable HTML',
@@ -232,7 +240,7 @@ describe('ExportPlayableHtmlCommand', () => {
       showConfirmation: vi.fn(async () => true),
     };
     const playableExportDialogService = {
-      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+      showDialog: vi.fn(async () => ({ scenePath: 'scenes/main.pix3scene', compress: false })),
     };
     const playableExportProgressDialogService = {
       showDialog: vi.fn(),
@@ -303,7 +311,7 @@ describe('ExportPlayableHtmlCommand', () => {
       showConfirmation: vi.fn(async () => true),
     };
     const playableExportDialogService = {
-      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+      showDialog: vi.fn(async () => ({ scenePath: 'scenes/main.pix3scene', compress: false })),
     };
     const playableExportProgressDialogService = {
       showDialog: vi.fn(),
@@ -381,7 +389,7 @@ describe('ExportPlayableHtmlCommand', () => {
       showConfirmation: vi.fn(async () => false),
     };
     const playableExportDialogService = {
-      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+      showDialog: vi.fn(async () => ({ scenePath: 'scenes/main.pix3scene', compress: false })),
     };
     const playableExportProgressDialogService = {
       showDialog: vi.fn(),
@@ -509,6 +517,7 @@ describe('ExportPlayableHtmlCommand', () => {
     const result = await command.execute(context);
 
     expect(playableExportDialogService.showDialog).toHaveBeenCalledWith({
+      offerCompression: true,
       scenePaths: ['scenes/default.pix3scene', 'scenes/main.pix3scene'],
       selectedScenePath: 'scenes/default.pix3scene',
     });
@@ -533,7 +542,7 @@ describe('ExportPlayableHtmlCommand', () => {
       showConfirmation: vi.fn(async () => true),
     };
     const playableExportDialogService = {
-      showDialog: vi.fn(async () => 'scenes/main.pix3scene'),
+      showDialog: vi.fn(async () => ({ scenePath: 'scenes/main.pix3scene', compress: false })),
     };
     const playableExportProgressDialogService = {
       showDialog: vi.fn(),

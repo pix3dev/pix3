@@ -71,11 +71,31 @@ export interface RuntimeProjectBuildModel {
    * so projects that never use it ship none of its ~500 KB.
    */
   readonly usesSpine: boolean;
+  /**
+   * True when a scene places a `PostProcess` node (or a script names it). The
+   * `postprocessing` module is ~314 KiB minified, so it is only wired in — and,
+   * for a playable export, only vendored at all — when something uses it.
+   */
+  readonly usesPostProcessing: boolean;
+  /** True when anything in the project mentions multiplayer — see {@link mentionedNames}. */
+  readonly usesNetwork: boolean;
+  /** True when a shipped asset is a `.glb`/`.gltf`, or a script names `GLTFLoader`. */
+  readonly usesGltf: boolean;
+  /**
+   * Every identifier-like token found in the shipped scenes/prefabs and in the
+   * project's own scripts. The playable export asks this set whether a runtime
+   * module can be stripped from the bundle, so it is deliberately a *superset*
+   * of what is really used: a false positive costs kilobytes, a false negative
+   * would ship a broken game. See `.plans/playable-export-size.md` §2 Р4.
+   */
+  readonly mentionedNames: ReadonlySet<string>;
   readonly warnings: readonly string[];
 }
 
 /** Kept in sync with the editor's own dependency: the skeleton data format is minor-locked. */
 const SPINE_RUNTIME_DEPENDENCY_RANGE = '~4.3';
+/** Kept in sync with the editor's own `postprocessing` dependency. */
+const POSTPROCESSING_DEPENDENCY_RANGE = '^6.39.2';
 const RUNTIME_BUILD_COMMAND = 'vite build';
 const RUNTIME_DEV_COMMAND = 'vite';
 const PROJECT_SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
@@ -108,6 +128,23 @@ const SPINE_NODE_PATTERN = /(^|\s)type:\s*['"]?SpineSkeleton2D['"]?\s*(#.*)?$/m;
  * in a project whose authored scenes contain no skeleton yet.
  */
 const SPINE_SCRIPT_PATTERN = /\bSpineSkeleton2D\b/;
+/**
+ * Identifier-like tokens, including the `core:Follow` shape used by component ids
+ * in scene YAML. Feeds {@link RuntimeProjectBuildModel.mentionedNames}.
+ */
+const MENTIONED_NAME_PATTERN = /[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)*/g;
+/** Names that mean "this project talks to the multiplayer stack". */
+const NETWORK_MENTION_NAMES = [
+  'network',
+  'Network',
+  'NetworkService',
+  'NetworkedNode',
+  'ReplicatedTransform',
+  'NetworkedNodeBehavior',
+  'ReplicatedTransformBehavior',
+  'core:NetworkedNode',
+  'core:ReplicatedTransform',
+] as const;
 const RELATIVE_IMPORT_PATTERN =
   /\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 const PROJECT_SOURCE_IMPORT_SUFFIXES = [
@@ -179,6 +216,11 @@ export class ProjectBuildService {
       warnings
     );
     const usesSpine = this.scanFoundSpineNode;
+    const mentionedNames = this.scanMentionedNames;
+    const mentions = (name: string): boolean => mentionedNames.has(name);
+    const usesPostProcessing = mentions('PostProcess');
+    const usesNetwork = NETWORK_MENTION_NAMES.some(mentions);
+    const usesGltf = mentions('GLTFLoader') || assetPaths.some(path => /\.(glb|gltf)$/i.test(path));
     // With pruning on, a scene that did not survive the reachability scan must
     // also leave the navigable manifest — listing a scene the bundle does not
     // carry would only produce a runtime load failure.
@@ -208,9 +250,13 @@ export class ProjectBuildService {
         assetPaths,
         quality,
         localization,
-        usesSpine
+        { usesSpine, usesPostProcessing, usesNetwork }
       ),
       usesSpine,
+      usesPostProcessing,
+      usesNetwork,
+      usesGltf,
+      mentionedNames,
       warnings,
     };
   }
@@ -225,7 +271,10 @@ export class ProjectBuildService {
     const ensuredDirectories = new Set<string>();
     const writtenFiles = await this.writeGeneratedFiles(model.files, ensuredDirectories);
 
-    const packageJsonUpdated = await this.mergePackageJsonPatch(model.usesSpine);
+    const packageJsonUpdated = await this.mergePackageJsonPatch(
+      model.usesSpine,
+      model.usesPostProcessing
+    );
     createdDirectories = ensuredDirectories.size;
 
     return {
@@ -332,6 +381,20 @@ export class ProjectBuildService {
    */
   private scanFoundSpineNode = false;
 
+  /**
+   * Every identifier seen while scanning scenes/prefabs and project scripts —
+   * see {@link RuntimeProjectBuildModel.mentionedNames}. Filled by the same pass
+   * as {@link scanFoundSpineNode}, for the same reason (re-reading every text to
+   * answer these questions would double the scan cost).
+   */
+  private scanMentionedNames = new Set<string>();
+
+  private collectMentionedNames(contents: string): void {
+    for (const match of contents.matchAll(MENTIONED_NAME_PATTERN)) {
+      this.scanMentionedNames.add(match[0]);
+    }
+  }
+
   private async collectAssetPaths(
     scenePaths: string[],
     entryScenePath: string,
@@ -390,6 +453,7 @@ export class ProjectBuildService {
     };
 
     this.scanFoundSpineNode = false;
+    this.scanMentionedNames = new Set<string>();
 
     const allSceneLikeFiles = (await this.discoverFilesByExtension('.', '.pix3scene')).map(path =>
       this.normalizeResourcePath(path)
@@ -435,6 +499,7 @@ export class ProjectBuildService {
       if (!this.scanFoundSpineNode && SPINE_SCRIPT_PATTERN.test(sourceContents)) {
         this.scanFoundSpineNode = true;
       }
+      this.collectMentionedNames(sourceContents);
     }
 
     // One fixpoint over both queues. Directory expansion has to feed back into the
@@ -491,6 +556,7 @@ export class ProjectBuildService {
           if (!this.scanFoundSpineNode && SPINE_NODE_PATTERN.test(contents)) {
             this.scanFoundSpineNode = true;
           }
+          this.collectMentionedNames(contents);
         } catch {
           warnings.push(`Failed to scan resource for asset references: ${scannablePath}`);
         }
@@ -914,7 +980,10 @@ export class ProjectBuildService {
     return !EXCLUDED_PROJECT_SCRIPT_SUFFIXES.some(suffix => normalized.endsWith(suffix));
   }
 
-  private async mergePackageJsonPatch(usesSpine: boolean): Promise<boolean> {
+  private async mergePackageJsonPatch(
+    usesSpine: boolean,
+    usesPostProcessing: boolean
+  ): Promise<boolean> {
     const patchTemplate = this.getPackagePatchTemplate();
     if (!patchTemplate) {
       return false;
@@ -951,6 +1020,14 @@ export class ProjectBuildService {
         '@esotericsoftware/spine-threejs': SPINE_RUNTIME_DEPENDENCY_RANGE,
       });
     }
+    if (usesPostProcessing) {
+      // Same rule for `postprocessing` (~314 KiB minified): a dependency only for
+      // projects that place a PostProcess node. Without this the generated project
+      // could not resolve the effect stack at all.
+      this.mergeStringMap(existing, 'dependencies', {
+        postprocessing: POSTPROCESSING_DEPENDENCY_RANGE,
+      });
+    }
     this.mergeStringMap(existing, 'devDependencies', patch.devDependencies ?? {});
 
     const json = JSON.stringify(existing, null, 2) + '\n';
@@ -984,6 +1061,66 @@ export class ProjectBuildService {
     ].join('\n');
   }
 
+  /**
+   * Source of the generated `virtual:runtime-postprocessing` module.
+   *
+   * Static import for the same reason as Spine: a single-file export has no chunk
+   * to fetch and no import map, so the runtime's default
+   * `import('postprocessing')` could never resolve there — post-processing simply
+   * never turned on. Registering the module up front fixes that, and projects
+   * without a PostProcess node still ship none of it.
+   */
+  private buildPostProcessingRuntimeModule(usesPostProcessing: boolean): string {
+    if (!usesPostProcessing) {
+      return [
+        '// No PostProcess node in this project: the effect stack is not bundled.',
+        'export {};',
+        '',
+      ].join('\n');
+    }
+
+    return [
+      "import * as postprocessing from 'postprocessing';",
+      "import { setPostprocessingModuleLoader } from '@pix3/runtime';",
+      '',
+      'setPostprocessingModuleLoader(() =>',
+      "  Promise.resolve(postprocessing as unknown as typeof import('postprocessing'))",
+      ');',
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * Source of the generated `virtual:runtime-network` module.
+   *
+   * Multiplayer is ~59 KiB of protocol code that a single-player build never
+   * touches, and the player's entry point used to construct `NetworkService`
+   * unconditionally. This module is the seam: the real installer when anything in
+   * the project mentions networking, a no-op otherwise.
+   */
+  private buildNetworkRuntimeModule(usesNetwork: boolean): string {
+    if (!usesNetwork) {
+      return [
+        '// Nothing in this project mentions multiplayer: `src/net/**` is not bundled.',
+        "import type { SceneRunner } from '@pix3/runtime';",
+        '',
+        'export function installNetworkService(_runner: SceneRunner): void {}',
+        '',
+      ].join('\n');
+    }
+
+    return [
+      "import { NetworkService, setNetworkPrefabTable, type SceneRunner } from '@pix3/runtime';",
+      "import { netKindTable } from './scene-manifest';",
+      '',
+      'export function installNetworkService(runner: SceneRunner): void {',
+      '  setNetworkPrefabTable(netKindTable);',
+      '  runner.setNetworkService(new NetworkService());',
+      '}',
+      '',
+    ].join('\n');
+  }
+
   private buildGeneratedFiles(
     projectName: string,
     scenePaths: readonly string[],
@@ -991,7 +1128,11 @@ export class ProjectBuildService {
     assetPaths: readonly string[],
     quality: QualitySettings,
     localization: RuntimeLocalizationConfig,
-    usesSpine: boolean
+    usage: {
+      readonly usesSpine: boolean;
+      readonly usesPostProcessing: boolean;
+      readonly usesNetwork: boolean;
+    }
   ): ReadonlyMap<string, string> {
     const replacements: Record<string, string> = {
       PROJECT_NAME: projectName,
@@ -1018,7 +1159,15 @@ export class ProjectBuildService {
         this.collectNetKindPrefabPaths(assetPaths)
       )
     );
-    files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usesSpine));
+    files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usage.usesSpine));
+    files.set(
+      'src/generated/postprocessing-runtime.ts',
+      this.buildPostProcessingRuntimeModule(usage.usesPostProcessing)
+    );
+    files.set(
+      'src/generated/network-runtime.ts',
+      this.buildNetworkRuntimeModule(usage.usesNetwork)
+    );
     files.set('asset-manifest.json', JSON.stringify({ files: assetPaths }, null, 2) + '\n');
 
     for (const [sourcePath, sourceContents] of Object.entries(runtimeSourceFiles)) {

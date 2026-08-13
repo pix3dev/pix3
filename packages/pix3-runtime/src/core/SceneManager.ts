@@ -1,6 +1,11 @@
 import type { NodeBase } from '../nodes/NodeBase';
 import { SceneLoader, type ParseSceneOptions } from './SceneLoader';
-import { SceneSaver } from './SceneSaver';
+// TYPE-ONLY on purpose: a value import would pin SceneSaver — and with it every
+// node class it imports for serialization — into any bundle that constructs a
+// SceneManager. Exported players never save, so they pass no saver and the whole
+// serializer (plus `yaml.stringify`) tree-shakes away. See
+// `.plans/playable-export-size.md` §2 Р5.
+import type { SceneSaver } from './SceneSaver';
 import { Node2D } from '../nodes/Node2D';
 
 export interface SceneGraph {
@@ -13,15 +18,21 @@ export interface SceneGraph {
 
 export class SceneManager {
   private readonly sceneLoader: SceneLoader;
-  private readonly sceneSaver: SceneSaver;
+  private readonly sceneSaver: SceneSaver | null;
 
   private readonly sceneGraphs = new Map<string, SceneGraph>();
   private readonly groupMaps = new Map<string, Map<string, Set<NodeBase>>>();
   private activeSceneId: string | null = null;
 
-  constructor(sceneLoader: SceneLoader, sceneSaver: SceneSaver) {
+  /**
+   * `sceneSaver` is optional: only hosts that write scenes back out (the editor)
+   * need it. A runtime player that omits it keeps the serializer out of its
+   * bundle entirely; {@link serializeScene} then throws instead of silently
+   * returning nothing.
+   */
+  constructor(sceneLoader: SceneLoader, sceneSaver?: SceneSaver | null) {
     this.sceneLoader = sceneLoader;
-    this.sceneSaver = sceneSaver;
+    this.sceneSaver = sceneSaver ?? null;
   }
 
   /** Runtime prefab spawn — see {@link SceneLoader.instantiatePrefab}. */
@@ -34,6 +45,13 @@ export class SceneManager {
   }
 
   serializeScene(graph: SceneGraph): string {
+    if (!this.sceneSaver) {
+      throw new Error(
+        '[SceneManager] No SceneSaver was provided — this host cannot serialize scenes. ' +
+          'Pass a SceneSaver to the SceneManager constructor if you need to save or clone scenes.'
+      );
+    }
+
     return this.sceneSaver.serializeScene(graph);
   }
 

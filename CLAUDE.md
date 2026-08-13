@@ -17,6 +17,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Script lifecycle / registry / serialization | `docs/pix3-specification.md` → "Script Component System" |
 | Prefabs / keyframe animation / localization / signals / groups | `docs/pix3-specification.md` → "Node Prefabs System" / "Keyframe Animation" / "Localization" / "Signals Engine" / "Groups Engine" |
 | 2D draw order, overlay flag, texture-goes-black bug | this file → "2D overlay rendering" |
+| Why the exported .html weighs what it does / export size | this file → "Playable export size" |
 | Viewport not repainting / render-on-demand | this file → "Editor viewport renders on demand" |
 | Command / Operation / undo wiring | `AGENTS.md` → "Commands and Operations"; code in `src/features/<area>/` |
 | Editor UI (Lit, panels, icons, theming) | `AGENTS.md` → "Component System" + `pix3-ui-conventions` skill |
@@ -109,6 +110,17 @@ The 2D layer is a separate render pass with an orthographic camera, drawn over t
 ### Spine is an optional, host-injected dependency (non-obvious)
 
 `SpineSkeleton2D` renders through `@esotericsoftware/spine-threejs` (`~4.3`), which the runtime **never imports**: `packages/pix3-runtime/src/core/spine/spine-module.ts` hand-declares the structural subset it uses, and the host registers a loader (`setSpineModuleLoader(() => import('@esotericsoftware/spine-threejs'))` — `src/core/lazy-spine.ts`, called from `main.ts` and `player-main.ts`). Reasons: consumer projects compile our TS sources, so a type import would make Spine mandatory for every game; the Spine Runtimes License is a poor fit for an always-installed dependency; and the literal dynamic import must live in the host for its bundler to emit a lazy chunk. Two more load-bearing details: atlas **pages must never go through the pre-launch atlas** (their UVs come from the `.atlas` file — the loader reads page blobs directly and `TextureAtlasService` excludes them), and spine adds its batch meshes **lazily**, so the editor proxy re-stamps `LAYER_2D` on the view's children after every update (three.js layers are per-object, not inherited; the runtime's per-frame `assign2DLayers` covers play mode).
+
+### Playable export size (non-obvious)
+
+The single-file HTML export is mostly **code**, not assets (measured: 1.22 MiB of 1.34 MiB for a 2D pinball), and three.js is ~550 KiB of that with a hard floor of 491 KiB for any bundle that touches `WebGLRenderer` — so tree-shaking cannot reach it and only compression can. Consequences worth knowing before you touch `PlayableHtmlBuildService`:
+
+- **Compression is a per-export choice, not a default** (`PlayableHtmlBuildOptions.compress`). It roughly halves the file, which is the budget ad networks measure, but base64-of-gzip cannot be re-compressed, so it makes the *wire* size worse anywhere the channel already gzips (ordinary hosting, our publish flow, a network that measures the zip). Compressed builds are bundled as `iife` and injected as a classic `<script>`'s `textContent` — deliberately not blob/`data:`/`eval`, which sandboxed and opaque-origin ad containers refuse.
+- **What ships is decided by `RuntimeProjectBuildModel.mentionedNames`** — every identifier found in the shipped scenes/prefabs and project scripts. A module is left out only if *nothing* mentions it, and unused node types / `core:` behaviours are replaced by stubs with identical export names (`strippable-runtime-modules.ts`). The table there is guarded by a spec that recomputes the runtime's value-import graph from disk: **if you add `import { SomeNode } from …` to a module a player always keeps, that spec fails** — which is the point.
+- **A player must not construct `SceneSaver`.** It value-imports every node class for serialization, so having it in the bundle pins all of them; `SceneManager` takes it optionally and the runtime entry boots via `SceneRunner.loadAndStartScene` (`startScene` clones the graph by serializing to YAML and re-parsing it, which a player does not need).
+- **Optional heavy libraries are wired through a generated `virtual:runtime-*` module** (spine, postprocessing, network) with a **static** import inside it — a dynamic import would become a chunk a single-file HTML can never fetch, and a bare specifier left unaliased is silently externalised into an unresolvable import. That last one was a real shipped bug for `postprocessing`.
+
+Full measurements and the deferred work: `.plans/playable-export-size.md`.
 
 ### Editor viewport renders on demand (non-obvious)
 

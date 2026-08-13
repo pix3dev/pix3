@@ -9,7 +9,10 @@ import {
 import { DialogService, type DialogExpandableSection } from '@/services/editor/DialogService';
 import { LoggingService } from '@/services/core/LoggingService';
 import { ProjectBuildService } from '@/services/export/ProjectBuildService';
-import { PlayableExportDialogService } from '@/services/export/PlayableExportDialogService';
+import {
+  PlayableExportDialogService,
+  type PlayableExportDialogResult,
+} from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
 import type {
   PlayableHtmlBuildService,
@@ -84,15 +87,16 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     this.loggingService.info(`[Playable Export] Starting export for "${projectName}"`);
 
     try {
-      const entryScenePath = await this.promptForEntryScenePath(context);
-      if (!entryScenePath) {
+      const selection = await this.promptForEntryScenePath(context);
+      if (!selection) {
         this.loggingService.info('[Playable Export] Export cancelled during scene selection');
         return { didMutate: false, payload: undefined };
       }
 
       const artifact = await this.buildPlayableHtmlWithProgress(context, {
         title: projectName,
-        entryScenePath,
+        entryScenePath: selection.scenePath,
+        compress: selection.compress,
       });
 
       const allWarnings = [...artifact.warnings, ...artifact.bundleWarnings];
@@ -174,11 +178,14 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     options: {
       title: string;
       entryScenePath: string;
+      compress: boolean;
     }
   ): Promise<PlayableHtmlBuildArtifact> {
     this.playableExportProgressDialogService.showDialog({
       title: 'Building Playable HTML',
-      message: 'Bundling scripts and embedding project assets into a single HTML file.',
+      message: options.compress
+        ? 'Bundling scripts, embedding project assets, and compressing the bundle into a single HTML file.'
+        : 'Bundling scripts and embedding project assets into a single HTML file.',
     });
     await this.waitForProgressDialogPaint();
 
@@ -201,7 +208,9 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     });
   }
 
-  private async promptForEntryScenePath(context: CommandContext): Promise<string | null> {
+  private async promptForEntryScenePath(
+    context: CommandContext
+  ): Promise<PlayableExportDialogResult | null> {
     // Reuse the build service's scene resolution so the picker offers exactly the scenes
     // that will be bundled — loaded descriptors when any are open, disk discovery otherwise
     // (e.g. when launched from the Project Home tab with no scene loaded).
@@ -229,6 +238,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
     return await this.playableExportDialogService.showDialog({
       scenePaths: uniqueScenePaths,
       selectedScenePath: initialSelection,
+      offerCompression: true,
     });
   }
 
@@ -334,13 +344,40 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   }
 
   private buildBundleSizeSummaryLines(report: PlayableHtmlBundleSizeReport): string[] {
-    return [
+    const compressed = report.compressedBundleBytes > 0;
+    // With compression the file no longer *contains* the asset base64 as text, so the
+    // asset lines describe the input and are measured against the bundle they went
+    // into, not against the (much smaller) output file.
+    const reference = compressed
+      ? report.outputHtmlBytes + report.compressionSavedBytes
+      : report.outputHtmlBytes;
+
+    const lines = [
       `  Output HTML: ${this.formatBytes(report.outputHtmlBytes)} (${report.outputHtmlBytes} bytes)`,
-      `  Embedded assets (raw): ${this.formatBytes(report.rawAssetsBytes)} (${this.formatPercent(report.rawAssetsBytes, report.outputHtmlBytes)} of output)`,
-      `  Embedded assets (base64 payload): ${this.formatBytes(report.base64AssetsBytes)} (${this.formatPercent(report.base64AssetsBytes, report.outputHtmlBytes)} of output)`,
-      `  Base64 expansion overhead: +${this.formatBytes(report.base64ExpansionBytes)} (${this.formatPercent(report.base64ExpansionBytes, report.outputHtmlBytes)} of output)`,
-      `  JS/HTML + metadata wrapper: ${this.formatBytes(report.codeAndWrapperBytes)} (${this.formatPercent(report.codeAndWrapperBytes, report.outputHtmlBytes)} of output)`,
     ];
+
+    if (compressed) {
+      lines.push(
+        `  Bundle: ${this.formatBytes(report.uncompressedBundleBytes)} -> ${this.formatBytes(report.compressedBundleBytes)} gzip (embedded as base64)`,
+        `  Saved by compression: ${this.formatBytes(report.compressionSavedBytes)} (${this.formatPercent(report.compressionSavedBytes, reference)} of the uncompressed file)`
+      );
+    }
+
+    lines.push(
+      `  Embedded assets (raw): ${this.formatBytes(report.rawAssetsBytes)} (${this.formatPercent(report.rawAssetsBytes, reference)} of ${compressed ? 'the uncompressed file' : 'output'})`,
+      `  Embedded assets (base64 payload): ${this.formatBytes(report.base64AssetsBytes)} (${this.formatPercent(report.base64AssetsBytes, reference)} of ${compressed ? 'the uncompressed file' : 'output'})`,
+      `  Base64 expansion overhead: +${this.formatBytes(report.base64ExpansionBytes)} (${this.formatPercent(report.base64ExpansionBytes, reference)} of ${compressed ? 'the uncompressed file' : 'output'})`,
+      `  JS/HTML + metadata wrapper: ${this.formatBytes(report.codeAndWrapperBytes)} (${this.formatPercent(report.codeAndWrapperBytes, reference)} of ${compressed ? 'the uncompressed file' : 'output'})`
+    );
+
+    if (report.strippedModulePaths.length > 0) {
+      lines.push(
+        `  Runtime modules left out (unused): ${report.strippedModulePaths.length}` +
+          ` (${report.strippedModulePaths.slice(0, 3).join(', ')}${report.strippedModulePaths.length > 3 ? ', …' : ''})`
+      );
+    }
+
+    return lines;
   }
 
   private buildEmbeddedAssetsSection(

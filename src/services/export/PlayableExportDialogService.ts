@@ -3,11 +3,23 @@ import { injectable } from '@/fw/di';
 export interface PlayableExportDialogOptions {
   readonly scenePaths: readonly string[];
   readonly selectedScenePath: string;
+  /**
+   * Offer the gzip self-extracting toggle. Only the single-file HTML export does:
+   * a zip already deflates its entries, so compressing the bundle inside it would
+   * only cost base64 overhead.
+   */
+  readonly offerCompression?: boolean;
+}
+
+export interface PlayableExportDialogResult {
+  readonly scenePath: string;
+  /** Only meaningful when {@link PlayableExportDialogOptions.offerCompression} was set. */
+  readonly compress: boolean;
 }
 
 export interface PlayableExportDialogInstance extends PlayableExportDialogOptions {
   readonly id: string;
-  resolve: (scenePath: string | null) => void;
+  resolve: (result: PlayableExportDialogResult | null) => void;
 }
 
 @injectable()
@@ -16,7 +28,9 @@ export class PlayableExportDialogService {
   private listeners = new Set<(dialog: PlayableExportDialogInstance | null) => void>();
   private nextId = 0;
 
-  async showDialog(options: PlayableExportDialogOptions): Promise<string | null> {
+  async showDialog(
+    options: PlayableExportDialogOptions
+  ): Promise<PlayableExportDialogResult | null> {
     if (this.activeDialog) {
       return null;
     }
@@ -26,10 +40,10 @@ export class PlayableExportDialogService {
       this.activeDialog = {
         id,
         ...options,
-        resolve: (scenePath: string | null) => {
+        resolve: (result: PlayableExportDialogResult | null) => {
           this.activeDialog = null;
           this.notifyListeners();
-          resolve(scenePath);
+          resolve(result);
         },
       };
 
@@ -37,12 +51,12 @@ export class PlayableExportDialogService {
     });
   }
 
-  confirm(dialogId: string, scenePath: string): void {
+  confirm(dialogId: string, result: PlayableExportDialogResult): void {
     if (!this.activeDialog || this.activeDialog.id !== dialogId) {
       return;
     }
 
-    this.activeDialog.resolve(scenePath);
+    this.activeDialog.resolve(result);
   }
 
   cancel(dialogId: string): void {

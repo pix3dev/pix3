@@ -1028,4 +1028,112 @@ describe('ProjectBuildService', () => {
     );
     expect(model.entryScenePath).toBe('scenes/main.pix3scene');
   });
+  it('installs the multiplayer service only for projects that mention networking', async () => {
+    const networkedFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  - type: Sprite2D\n    components:\n      - type: core:ReplicatedTransform\n',
+    });
+    const networkedService = new ProjectBuildService();
+    Object.defineProperty(networkedService, 'fs', { value: networkedFs, configurable: true });
+
+    const networkedModel = await networkedService.buildRuntimeProjectModel(createContext());
+
+    expect(networkedModel.usesNetwork).toBe(true);
+    const networkModule = networkedModel.files.get('src/generated/network-runtime.ts') ?? '';
+    expect(networkModule).toContain('new NetworkService()');
+    expect(networkModule).toContain('setNetworkPrefabTable(netKindTable)');
+
+    const soloFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: Sprite2D\n',
+    });
+    const soloService = new ProjectBuildService();
+    Object.defineProperty(soloService, 'fs', { value: soloFs, configurable: true });
+
+    const soloModel = await soloService.buildRuntimeProjectModel(createContext());
+
+    // ~59 KiB of protocol code that a single-player build never runs: the installer
+    // becomes a no-op so the bundler never reaches src/net/**.
+    expect(soloModel.usesNetwork).toBe(false);
+    const soloModule = soloModel.files.get('src/generated/network-runtime.ts') ?? '';
+    expect(soloModule).toContain('export function installNetworkService');
+    expect(soloModule).not.toContain('new NetworkService()');
+  });
+
+  it('registers the postprocessing module only for projects that place a PostProcess node', async () => {
+    const effectsFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: PostProcess # bloom\n',
+    });
+    const effectsService = new ProjectBuildService();
+    Object.defineProperty(effectsService, 'fs', { value: effectsFs, configurable: true });
+
+    const effectsModel = await effectsService.buildRuntimeProjectModel(createContext());
+
+    expect(effectsModel.usesPostProcessing).toBe(true);
+    const module = effectsModel.files.get('src/generated/postprocessing-runtime.ts') ?? '';
+    // Static import on purpose: a single-file export has no chunk to fetch, which is
+    // why the runtime's default dynamic import silently never resolved there.
+    expect(module).toContain("import * as postprocessing from 'postprocessing'");
+    expect(module).toContain('setPostprocessingModuleLoader');
+
+    const plainFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: Sprite2D\n',
+    });
+    const plainService = new ProjectBuildService();
+    Object.defineProperty(plainService, 'fs', { value: plainFs, configurable: true });
+
+    const plainModel = await plainService.buildRuntimeProjectModel(createContext());
+
+    expect(plainModel.usesPostProcessing).toBe(false);
+    expect(plainModel.files.get('src/generated/postprocessing-runtime.ts') ?? '').not.toContain(
+      "from 'postprocessing'"
+    );
+  });
+
+  it('reports glTF use from shipped assets and from scripts', async () => {
+    const modelFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  - type: MeshInstance\n    properties:\n      model: res://models/ship.glb\n',
+      'models/ship.glb': 'glb-bytes',
+    });
+    const modelService = new ProjectBuildService();
+    Object.defineProperty(modelService, 'fs', { value: modelFs, configurable: true });
+
+    expect((await modelService.buildRuntimeProjectModel(createContext())).usesGltf).toBe(true);
+
+    const spriteFs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene': 'root:\n  - type: Sprite2D\n',
+      'scripts/loader.ts': 'const loader = new GLTFLoader();\n',
+    });
+    const spriteService = new ProjectBuildService();
+    Object.defineProperty(spriteService, 'fs', { value: spriteFs, configurable: true });
+
+    const scriptModel = await spriteService.buildRuntimeProjectModel(createContext());
+
+    // A script that loads models itself must keep the loader even with no .glb on disk.
+    expect(scriptModel.usesGltf).toBe(true);
+  });
+
+  it('indexes every name a scene or script mentions, component ids included', async () => {
+    const fs = createInMemoryFs({
+      'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),
+      'scenes/main.pix3scene':
+        'root:\n  - type: Button2D\n    components:\n      - type: core:Follow\n',
+      'scripts/game.ts': 'export class Game { spawn() { return new Slider2D(); } }\n',
+    });
+    const service = new ProjectBuildService();
+    Object.defineProperty(service, 'fs', { value: fs, configurable: true });
+
+    const model = await service.buildRuntimeProjectModel(createContext());
+
+    expect(model.mentionedNames.has('Button2D')).toBe(true);
+    expect(model.mentionedNames.has('core:Follow')).toBe(true);
+    expect(model.mentionedNames.has('Slider2D')).toBe(true);
+    expect(model.mentionedNames.has('Checkbox2D')).toBe(false);
+  });
 });
