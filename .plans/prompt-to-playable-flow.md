@@ -683,6 +683,12 @@ GDD, где написано «match-3 с ограничением ходов»,
 | Стабильный кэш-префикс: убрать динамику из system prompt, порядок «system → скиллы → recipe.md → tools». Механизм `cache_control` уже есть — нужна стабильность содержимого | S | [AgentChatService.ts](../src/services/agent/AgentChatService.ts), [AgentSettingsService.ts](../src/services/agent/AgentSettingsService.ts) |
 | «Budget your exploration» в system prompt; `text` в live-снапшотах | S | [AgentChatService.ts](../src/services/agent/AgentChatService.ts), [AgentToolRegistry.ts](../src/services/agent/AgentToolRegistry.ts) |
 
+Отдельно от таблицы, но той же фазой по смыслу: **как агент играет в проверяемую игру** —
+[agent-gameplay-testing.md](agent-gameplay-testing.md). Там разобрано, почему ввод по
+wall-clock-таймеру не масштабируется на динамические игры, и предложены `TimeMode` в рантайме,
+`game_run` с покадровыми ассертами (закрывает «проверял с грязной доски» из §11.3 структурно,
+а не эвристикой) и бот-политика. Фазы 1–2 того плана — прямое продолжение этой.
+
 **Критерий:** прогон S1/S3 из [agent-eval-scenarios.md](agent-eval-scenarios.md) **без
 вмешательств судьи**; беседа переживает компакцию без потери задачи (проверяется прогоном,
 где контекст заведомо переполняется); ни одной полной перезаписи файла >N КБ за прогон;
