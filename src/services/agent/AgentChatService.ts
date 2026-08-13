@@ -10,6 +10,7 @@ import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/Agent
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import { BRIDGE_TOKEN_SECRET_ID } from '@/services/llm/BridgeProviders';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import {
   AgentChatHistoryStore,
   type AgentConversationMeta,
@@ -339,6 +340,33 @@ const isTransientLlmError = (error: unknown): error is LlmError => {
   return false;
 };
 
+/**
+ * True when a failed round-trip is specifically the {@link LLM_REQUEST_TIMEOUT_MS} deadline firing —
+ * surfaced by {@link AgentChatService.chatWithTimeout} as a 408 `LlmError` — rather than any other
+ * transient failure. Deliberately narrower than {@link isTransientLlmError}: an overloaded-provider
+ * 529 (mapped to a retryable 5xx) is transient too, but it says nothing about the SESSION being dead,
+ * so it must not feed the wedged-session heuristic below.
+ */
+const isRequestTimeout = (error: unknown): error is LlmError =>
+  error instanceof LlmError && error.kind === 'http' && error.status === 408;
+
+/**
+ * Consecutive whole-turn failures classified by {@link isRequestTimeout} before
+ * {@link AgentChatService} stops offering "Try again" into the same dead session and instead
+ * recovers on its own (drop the bridge session, continue in a fresh conversation, resend once).
+ * N=2 is the observed real case: an initial send and one manual "Try again" both timed out
+ * identically against the same wedged Claude-Code-SDK session — only starting a new conversation
+ * (which the user had to discover on their own) actually recovered it.
+ */
+const MAX_CONSECUTIVE_TIMEOUTS_BEFORE_RECOVERY = 2;
+
+/** Plain-language explanation inserted as the first message of a session recovered from a wedged
+ *  provider session, so the user sees why the thread jumped instead of the turn just silently
+ *  retrying into the same dead session. Not a `[Pix3]` model-directed nudge — this one is FOR the
+ *  user, and rides in an `assistant`-role message so it reads as the agent explaining itself. */
+const WEDGED_SESSION_RECOVERY_NOTICE =
+  'The connection to the model stalled twice in a row, which looks like a wedged session rather than a slow reply. I started a fresh conversation and resent your last message.';
+
 const IDLE_STATE: AgentChatState = {
   status: 'idle',
   messages: [],
@@ -391,6 +419,9 @@ export class AgentChatService {
   @inject(ProjectStorageService)
   private readonly storage!: ProjectStorageService;
 
+  @inject(BridgeConnectionService)
+  private readonly bridgeConnection!: BridgeConnectionService;
+
   private state: AgentChatState = IDLE_STATE;
   private readonly listeners = new Set<(state: AgentChatState) => void>();
   private abortController: AbortController | null = null;
@@ -411,6 +442,13 @@ export class AgentChatService {
    * meaningless.
    */
   private previousRequestSignature: string | null = null;
+  /**
+   * Consecutive whole-turn failures classified by {@link isRequestTimeout} (across `send`/`resume`
+   * calls — one manual "Try again" counts the same as the original send). Reset by any OTHER
+   * outcome (success, abort, a different error kind) so only a genuinely consecutive run of
+   * timeouts can reach {@link MAX_CONSECUTIVE_TIMEOUTS_BEFORE_RECOVERY}.
+   */
+  private consecutiveTimeouts = 0;
 
   getState(): AgentChatState {
     return this.state;
@@ -537,16 +575,24 @@ export class AgentChatService {
       return null;
     }
 
-    const summary = this.lastAssistantText().slice(0, FLOW_HANDOFF_SUMMARY_CHARS);
-    const map = await buildProjectMap(this.storage).catch(() => '');
-    const lines = [
+    return this.buildHandoffContext([
       '---',
       '',
       'Context from the previous increment (this is a fresh conversation — `design/progress.md`,',
       '`design/brief.md` and `design/recipe.md` hold the rest):',
-      '',
-      summary || '(no summary was recorded)',
-    ];
+    ]);
+  }
+
+  /**
+   * Shared summarizer behind every "start a fresh conversation, carry context forward" path
+   * ({@link flowIncrementHandoff} and the wedged-session recovery below): the last assistant reply
+   * (as the best available summary of where things stand) plus the live project map, under a
+   * caller-supplied header explaining WHY this is a fresh conversation.
+   */
+  private async buildHandoffContext(headerLines: readonly string[]): Promise<string> {
+    const summary = this.lastAssistantText().slice(0, FLOW_HANDOFF_SUMMARY_CHARS);
+    const map = await buildProjectMap(this.storage).catch(() => '');
+    const lines = [...headerLines, '', summary || '(no summary was recorded)'];
     if (map) {
       lines.push('', map);
     }
@@ -589,6 +635,17 @@ export class AgentChatService {
    * either way.
    */
   private async runToSettled(): Promise<void> {
+    await this.runAttempt(/* allowRecovery */ true);
+  }
+
+  /**
+   * One `runLoop` attempt, with the wedged-session auto-recovery layered on top. `allowRecovery`
+   * guards against a recovery loop: the retry this method issues after a successful recovery always
+   * passes `false`, so at most one auto-recovery happens per user message (§ "Guard against loops").
+   * If that retry ALSO times out, it surfaces the honest failure via the normal error banner —
+   * never a silent swallow, never a second automatic recovery.
+   */
+  private async runAttempt(allowRecovery: boolean): Promise<void> {
     this.abortController = new AbortController();
     // Any open question is settled by the fact that we are running again (answered, or resumed
     // past it) — a stale chip row would otherwise reappear when this turn finishes.
@@ -601,24 +658,89 @@ export class AgentChatService {
     });
     try {
       await this.runLoop(this.abortController.signal);
+      this.consecutiveTimeouts = 0;
       this.setState({ status: 'idle', activeTool: null });
     } catch (error) {
       if (error instanceof LlmError && error.kind === 'aborted') {
+        this.consecutiveTimeouts = 0;
         this.setState({ status: 'idle', activeTool: null, notice: 'Stopped.' });
+      } else if (isRequestTimeout(error)) {
+        this.consecutiveTimeouts += 1;
+        if (allowRecovery && this.consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS_BEFORE_RECOVERY) {
+          const recovered = await this.recoverFromWedgedSession();
+          if (recovered) {
+            this.abortController = null;
+            await this.runAttempt(/* allowRecovery */ false);
+            return;
+          }
+        }
+        this.surfaceError(error);
       } else {
-        const kind = error instanceof LlmError ? error.kind : 'unknown';
-        const message = error instanceof Error ? error.message : String(error);
-        this.setState({
-          status: 'error',
-          activeTool: null,
-          errorMessage: message,
-          errorKind: kind,
-        });
+        // Any other outcome (a different error kind) breaks the "consecutive" streak.
+        this.consecutiveTimeouts = 0;
+        this.surfaceError(error);
       }
     } finally {
       this.abortController = null;
       this.persist();
     }
+  }
+
+  private surfaceError(error: unknown): void {
+    const kind = error instanceof LlmError ? error.kind : 'unknown';
+    const message = error instanceof Error ? error.message : String(error);
+    this.setState({ status: 'error', activeTool: null, errorMessage: message, errorKind: kind });
+  }
+
+  /**
+   * Recover from a wedged provider session: best-effort drop it on the bridge (bridge-backed
+   * providers only — a direct Gemini call has no bridge session to reset), then start a fresh
+   * conversation carrying a handoff forward and resend the message the dead session never answered.
+   * The user sees {@link WEDGED_SESSION_RECOVERY_NOTICE} as the first line of the new conversation —
+   * this must never happen silently, or Flow (a non-technical user watching a live stage) reads it
+   * as the product hanging.
+   *
+   * Returns false (nothing changed) only if there is no coherent message to resend — the message
+   * history's last entry is not a `user` turn, which should not happen on this path but is checked
+   * defensively rather than assumed.
+   */
+  private async recoverFromWedgedSession(): Promise<boolean> {
+    const messages = this.state.messages;
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.role !== 'user') {
+      return false;
+    }
+
+    const provider = this.settings.getSelectedProvider();
+    if (provider?.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID) {
+      try {
+        await this.bridgeConnection.resetSessions();
+      } catch {
+        // Non-fatal by contract (see resetSessions' own doc) — belt-and-suspenders here too: an
+        // old/unreachable bridge must never block the fresh-conversation handoff below.
+      }
+    }
+
+    const handoff = await this.buildHandoffContext([
+      '---',
+      '',
+      'Context carried from the previous conversation, which stopped responding:',
+    ]);
+    const resendContent: LlmContentBlock[] =
+      typeof lastMessage.content === 'string'
+        ? [{ type: 'text', text: lastMessage.content }]
+        : [...lastMessage.content];
+    resendContent.push({ type: 'text', text: handoff });
+
+    await this.newConversation();
+    this.setState({ activeConversationId: newConversationId() });
+    this.activeCreatedAt = Date.now();
+    this.appendMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: WEDGED_SESSION_RECOVERY_NOTICE }],
+    });
+    this.appendMessage({ role: 'user', content: resendContent });
+    return true;
   }
 
   /** Abort the running turn (the partial history is kept). */

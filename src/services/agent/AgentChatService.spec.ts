@@ -45,6 +45,8 @@ interface Fakes {
   soulId?: string;
   customSoulName?: string;
   customSoulPrompt?: string;
+  /** Fake for `BridgeConnectionService.resetSessions()`. Defaults to a no-op success. */
+  resetSessions?: ReturnType<typeof vi.fn>;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -102,6 +104,9 @@ const buildService = (fakes: Fakes): AgentChatService => {
       delete: async () => undefined,
     },
     sceneManager: { getActiveSceneGraph: () => null },
+    bridgeConnection: {
+      resetSessions: fakes.resetSessions ?? vi.fn(async () => true),
+    },
     storage: {
       readTextFile:
         fakes.readTextFile ??
@@ -1318,6 +1323,164 @@ describe('AgentChatService', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('wedged-session recovery', () => {
+    /** Exactly what {@link AgentChatService.chatWithTimeout} throws when the deadline fires. */
+    const timeoutError = (): LlmError =>
+      new LlmError('http', 'The model did not respond within 180s — the request timed out.', 408);
+
+    it('recovers automatically after two consecutive timeouts: resets the bridge session and resends once', async () => {
+      const resetSessions = vi.fn(async () => true);
+      // 2 rejections per whole-turn attempt (the internal chatWithRetry single retry): turn 1 (send),
+      // turn 2 (resume — the observed "Try again"), then the auto-recovery's resend succeeds.
+      const chat = vi
+        .fn()
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockResolvedValueOnce(textResult('recovered after handoff'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        apiKeySecretId: 'ai-provider:pix3-bridge:token',
+        resetSessions,
+      });
+
+      await service.send('hi');
+      expect(service.getState().status).toBe('error'); // 1st timeout: plain "Try again", no recovery yet
+
+      await service.resume(); // the manual "Try again" from the observed bug
+
+      expect(chat).toHaveBeenCalledTimes(5);
+      expect(resetSessions).toHaveBeenCalledTimes(1);
+      const state = service.getState();
+      expect(state.status).toBe('idle');
+      // Fresh conversation: a plain-language notice, the resent message (+ handoff), then the reply.
+      expect(state.messages).toHaveLength(3);
+      expect(state.messages[0].role).toBe('assistant');
+      expect(JSON.stringify(state.messages[0])).toMatch(/fresh conversation/);
+      expect(JSON.stringify(state.messages[1])).toContain('hi');
+      expect(state.messages[2]).toEqual({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'recovered after handoff' }],
+      });
+    });
+
+    it('proceeds with the fresh-conversation handoff even when the bridge reset call fails (old/unreachable bridge)', async () => {
+      const resetSessions = vi.fn(async () => {
+        throw new Error('404 Not Found');
+      });
+      const chat = vi
+        .fn()
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockResolvedValueOnce(textResult('recovered anyway'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        apiKeySecretId: 'ai-provider:pix3-bridge:token',
+        resetSessions,
+      });
+
+      await service.send('hi');
+      await service.resume();
+
+      expect(resetSessions).toHaveBeenCalledTimes(1);
+      const state = service.getState();
+      expect(state.status).toBe('idle');
+      expect(state.messages).toHaveLength(3);
+      expect(state.messages[2]).toEqual({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'recovered anyway' }],
+      });
+    });
+
+    it('a success between two timeouts resets the counter, so the next timeout does not trigger recovery', async () => {
+      const resetSessions = vi.fn(async () => true);
+      const chat = vi
+        .fn()
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockResolvedValueOnce(textResult('all good'))
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError());
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        apiKeySecretId: 'ai-provider:pix3-bridge:token',
+        resetSessions,
+      });
+
+      await service.send('hi'); // timeout #1
+      expect(service.getState().status).toBe('error');
+
+      await service.resume(); // succeeds — resets the streak
+      expect(service.getState().status).toBe('idle');
+
+      await service.resume(); // timeout again, but the streak is back to 1 — no recovery
+      const state = service.getState();
+      expect(state.status).toBe('error');
+      expect(state.errorMessage).toMatch(/timed out/);
+      expect(resetSessions).not.toHaveBeenCalled();
+    });
+
+    it('a timeout in the recovered conversation surfaces the honest failure instead of looping', async () => {
+      const resetSessions = vi.fn(async () => true);
+      // Every attempt times out — including the auto-recovery's own resend.
+      const chat = vi.fn(async () => {
+        throw timeoutError();
+      });
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        apiKeySecretId: 'ai-provider:pix3-bridge:token',
+        resetSessions,
+      });
+
+      await service.send('hi'); // 2 calls, timeout #1
+      await service.resume(); // 2 calls, timeout #2 -> triggers recovery -> resend also times out (2 calls)
+
+      const state = service.getState();
+      expect(state.status).toBe('error');
+      expect(state.errorMessage).toMatch(/timed out/);
+      expect(chat).toHaveBeenCalledTimes(6);
+      // Recovery was attempted exactly once, never a second time on the recovered conversation's own timeout.
+      expect(resetSessions).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not attempt a bridge reset for a non-bridge provider, but still recovers with a fresh conversation', async () => {
+      const resetSessions = vi.fn(async () => true);
+      const chat = vi
+        .fn()
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockRejectedValueOnce(timeoutError())
+        .mockResolvedValueOnce(textResult('recovered'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        // Default apiKeySecretId — not the bridge token (e.g. a direct Gemini call).
+        resetSessions,
+      });
+
+      await service.send('hi');
+      await service.resume();
+
+      expect(resetSessions).not.toHaveBeenCalled();
+      const state = service.getState();
+      expect(state.status).toBe('idle');
+      expect(state.messages).toHaveLength(3);
+    });
   });
 
   it('composeFix starts a fresh conversation and prefills subscribed composers', async () => {

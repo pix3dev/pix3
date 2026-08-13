@@ -146,6 +146,41 @@ export class BridgeConnectionService {
     return [...this.entries];
   }
 
+  /**
+   * Ask the bridge to drop wedged Agent-SDK sessions (`POST /v1/sessions/reset`, bridge ≥0.3.0). An
+   * empty body closes whatever the bridge itself considers stalled — see the bridge README's
+   * "Wedged sessions" section. Called by {@link import('@/services/agent/AgentChatService').AgentChatService}
+   * after it observes consecutive request timeouts on a bridge-backed provider, so the NEXT attempt
+   * (in a fresh conversation) starts a healthy session instead of re-entering the dead one.
+   *
+   * Version-tolerant by design: an older bridge 404s/405s this route, and the bridge may simply be
+   * unreachable. Both are expected, non-exceptional outcomes here — this method never throws, and
+   * the caller must treat `false` as "nothing to do," never as a reason to abandon its own recovery
+   * (the fresh-conversation handoff is valuable on its own, bridge or no bridge).
+   */
+  async resetSessions(): Promise<boolean> {
+    const token = await this.getToken();
+    if (!token) {
+      return false;
+    }
+    const bridgeUrl = this.getBridgeUrl();
+    try {
+      const response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/v1/sessions/reset`, {
+        method: 'POST',
+        headers: { 'x-pix3-bridge-token': token, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (!response.ok) {
+        return false;
+      }
+      await response.json().catch(() => null);
+      return true;
+    } catch {
+      // Unreachable bridge / older bridge without the route / malformed response — all non-fatal.
+      return false;
+    }
+  }
+
   /** Contact the bridge, refresh availability, and rebuild the dynamic provider set. */
   async probe(): Promise<void> {
     if (this.probing) {
