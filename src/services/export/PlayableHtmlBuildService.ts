@@ -24,11 +24,16 @@ export interface PlayableHtmlBuildOptions extends ProjectBuildOptions {
    * Ship the bundle gzip'd, with a small bootstrap that inflates it in the browser
    * (`DecompressionStream`) and runs it as a classic script.
    *
-   * Cuts the **file** roughly in half, which is the budget ad networks measure. It
-   * is the wrong trade whenever the delivery channel compresses for you (ordinary
-   * hosting, our own publish flow with `Content-Encoding: gzip`, a network that
-   * measures the zip): base64 of gzip cannot be re-compressed, so the wire size
-   * grows by a third. Hence an option, not a default of the pipeline.
+   * Cuts the **file** by roughly two thirds, which is the budget ad networks
+   * measure (Snake: 969,872 → 347,444 bytes, −64%).
+   *
+   * What it costs is paid on channels that compress for you, and how much depends
+   * on which codec they use — measured on the same export: over `Content-Encoding:
+   * gzip` the pre-compressed payload is 261,325 bytes against 258,987 for the plain
+   * file (+0.9%, deflate re-packs base64 almost perfectly), but over **brotli** —
+   * what most CDNs actually negotiate — it is 259,810 against 215,242 (+21%),
+   * because brotli beats gzip on the plain text and cannot touch the payload.
+   * Hence an option, and not one the publish flow turns on.
    */
   readonly compress?: boolean;
 }

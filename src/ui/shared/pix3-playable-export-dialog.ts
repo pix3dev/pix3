@@ -85,10 +85,10 @@ export class Pix3PlayableExportDialog extends ComponentBase {
                     <span>Compress output (gzip, self-extracting)</span>
                   </label>
                   <div class="dialog-hint">
-                    Roughly halves the .html file — the size playable-ad networks measure. Turn it
-                    off when the file is served over a channel that already compresses (ordinary
-                    hosting, or a network that measures the zip): a compressed payload cannot be
-                    compressed again, so the transfer would grow instead.
+                    Cuts the .html file by about two thirds — the size playable-ad networks measure.
+                    Turn it off when the file is served over a channel that compresses for you: over
+                    gzip the transfer is a wash (+1%), but over brotli — what most CDNs negotiate —
+                    it costs about 20%, because a compressed payload cannot be compressed again.
                   </div>
                 </div>
               `

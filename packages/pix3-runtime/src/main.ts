@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import {
   AssetLoader,
+  ATLAS_MANIFEST_PATH,
   AudioService,
   installAtlasFromManifest,
   registerBuiltInScripts,
@@ -82,7 +83,16 @@ async function bootstrap(): Promise<void> {
     });
   }
   // Pre-packed atlas (if the export shipped one) → texture views onto sheets.
-  await installAtlasFromManifest(assetLoader, resourceManager);
+  // A single-file build has no sibling files on disk, so probing for a manifest it
+  // did not embed is a request that can never succeed — and in a sandboxed playable
+  // container it is a visible network error on every run. Builds that ship assets as
+  // real files (zip export, hosted) embed nothing and keep probing.
+  if (
+    !resourceManager.hasEmbeddedResources ||
+    resourceManager.hasEmbeddedResource(ATLAS_MANIFEST_PATH)
+  ) {
+    await installAtlasFromManifest(assetLoader, resourceManager);
+  }
   // `loadAndStartScene` (the `changeScene` path) reads, parses and runs the graph
   // directly. `startScene` would instead clone the graph by serializing it to YAML
   // and re-parsing it — which in a player means parsing the entry scene twice and

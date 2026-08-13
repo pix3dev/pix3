@@ -33,8 +33,11 @@ const resolveRelativeImport = (fromFile: string, specifier: string): string | nu
   return null;
 };
 
+// `path.relative` yields backslashes on Windows; the table is written with `/`.
+// Without this the graph keys never match a single table entry, so the guard
+// quietly degrades into "no importer found anywhere" on a Windows checkout.
 const toModulePath = (absolutePath: string): string =>
-  path.relative(RUNTIME_SRC, absolutePath).replace(/\.ts$/, '');
+  path.relative(RUNTIME_SRC, absolutePath).split(path.sep).join('/').replace(/\.ts$/, '');
 
 /**
  * Value importers per module path, mirroring what the bundler sees: `import type`
