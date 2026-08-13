@@ -19,6 +19,13 @@
  * routing/correlation. When nothing matches (bridge restart, edited history, model switch) the
  * manager degrades gracefully: it starts a fresh session whose first user message is a plain-text
  * transcript of the history.
+ *
+ * Wedge handling (a session that accepts input and then goes silent forever — observed in the
+ * field): every SDK message stamps `lastProgress`, and a turn that dies after ≥ WEDGE_MIN_TURN_MS
+ * with zero model output marks the session `wedged`. Wedged sessions are skipped when routing (so
+ * the user's "Try again" starts a fresh session instead of re-entering the dead one), reaped by the
+ * manager's watchdog sweep, preferred as eviction victims, and closable on demand through
+ * `SessionManager.reset()` (`POST /v1/sessions/reset`).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -30,6 +37,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { DEFAULT_STALL_TIMEOUT_MS, normalizeStallTimeoutMs } from './config.ts';
 import {
   HttpError,
   extractToolResults,
@@ -52,7 +60,26 @@ const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 /** Hard cap on how long one `/v1/messages` request may wait for the model. */
 const RESPONSE_TIMEOUT_MS = 20 * 60 * 1000;
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
-const MAX_SESSIONS = 4;
+export const MAX_SESSIONS = 4;
+/**
+ * Absolute ceiling on live sessions. `MAX_SESSIONS` is the target, but evicting a session that is
+ * actively streaming output would break a working chat, so the manager is allowed to overshoot up to
+ * here rather than kill a healthy producer (see `pickVictim`).
+ */
+export const HARD_MAX_SESSIONS = MAX_SESSIONS * 2;
+/**
+ * How long a turn must have run with ZERO model output before its failure (client abort or the
+ * request timeout) counts as evidence that the session is wedged rather than merely cancelled.
+ *
+ * A human hitting "stop" answers in seconds, and the editor's own request timeout is 180 s, so 120 s
+ * separates the two: every client-timeout abort clears the bar, almost no manual cancel does. The
+ * penalty for a false positive is only a fresh session seeded by transcript replay.
+ */
+const WEDGE_MIN_TURN_MS = 120_000;
+/** A session that has streamed something this recently is treated as alive and never evicted. */
+const PRODUCING_WINDOW_MS = 30_000;
+/** How often the sweeper runs (idle reaping + the wedge watchdog). */
+const SWEEP_INTERVAL_MS = 60_000;
 
 export type Logger = (line: string) => void;
 
@@ -132,12 +159,45 @@ export interface BridgeResponse {
   readonly body: Record<string, unknown>;
 }
 
-export class BridgeSession {
+/**
+ * The slice of a session the {@link SessionManager} depends on. {@link BridgeSession} is the only
+ * production implementation; the interface exists so the manager's routing / watchdog / eviction
+ * logic can be exercised without spawning a real Claude Code CLI.
+ */
+export interface ManagedSession {
+  readonly id: string;
+  readonly model: string;
+  /** Expected `messages.length` of the NEXT request if this chat simply continues. */
+  transcriptLen: number;
+  readonly lastActivity: number;
+  /** Timestamp of the last thing the SDK produced for this session (any message). */
+  readonly lastProgress: number;
+  readonly closed: boolean;
+  readonly busy: boolean;
+  /** True once a long turn failed without the model producing anything — see {@link WEDGE_MIN_TURN_MS}. */
+  readonly wedged: boolean;
+  hasPendingToolUse(toolUseId: string): boolean;
+  toolsMatch(tools: readonly WireToolDefinition[] | undefined): boolean;
+  effortMatches(request: WireMessagesRequest): boolean;
+  handleRequest(request: WireMessagesRequest, signal: AbortSignal): Promise<BridgeResponse>;
+  handleTranscriptReplay(
+    request: WireMessagesRequest,
+    transcript: string,
+    signal: AbortSignal
+  ): Promise<BridgeResponse>;
+  close(reason: string): void;
+  /** Best-effort interrupt, then close. Used for sessions that stopped responding. */
+  forceClose(reason: string): void;
+}
+
+export class BridgeSession implements ManagedSession {
   readonly id = randomUUID().slice(0, 8);
   model: string;
   /** Expected `messages.length` of pix3's NEXT request if this chat simply continues. */
   transcriptLen = 0;
   lastActivity = Date.now();
+  /** Last time the SDK produced anything at all for this session (assistant, tool call, result…). */
+  lastProgress = Date.now();
   closed = false;
 
   private readonly log: Logger;
@@ -158,6 +218,12 @@ export class BridgeSession {
   private pendingContextRefresh: string | null = null;
   /** Set after an interrupt: the interrupted turn's late `result` must not answer a new request. */
   private discardNextResult = false;
+  /** When the turn currently being waited on started (0 = no turn in flight). */
+  private turnStartedAt = 0;
+  /** Did the model emit real output (assistant block / tool call) during the current turn? */
+  private producedInTurn = false;
+  /** Set when a long turn failed with no model output at all; cleared by a real answer. */
+  private wedgedSince: number | null = null;
 
   constructor(request: WireMessagesRequest, log: Logger) {
     this.log = log;
@@ -201,6 +267,15 @@ export class BridgeSession {
 
   get busy(): boolean {
     return this.waiting !== null;
+  }
+
+  /**
+   * A long request already died on this session without the model producing a single block. The
+   * manager stops routing to a wedged session (so the user's "Try again" lands on a fresh one) and
+   * the watchdog reaps it on the next sweep.
+   */
+  get wedged(): boolean {
+    return this.wedgedSince !== null;
   }
 
   hasPendingToolUse(toolUseId: string): boolean {
@@ -262,6 +337,21 @@ export class BridgeSession {
     }
   }
 
+  /**
+   * Tear down a session that stopped responding. The interrupt is fire-and-forget on purpose: a
+   * wedged CLI may never settle it (that is exactly why we are here), so it must not gate the close
+   * that frees the slot.
+   */
+  forceClose(reason: string): void {
+    if (this.closed) return;
+    try {
+      void this.q.interrupt().catch(() => {});
+    } catch {
+      /* transport already gone */
+    }
+    this.close(reason);
+  }
+
   // -- request plumbing -------------------------------------------------------
 
   private awaitResponse(
@@ -271,9 +361,12 @@ export class BridgeSession {
     const waiting = new Deferred<BridgeResponse>();
     this.waiting = waiting;
     this.requestLen = request.messages.length;
+    this.turnStartedAt = Date.now();
+    this.producedInTurn = false;
     this.waitingTimer = setTimeout(() => {
       if (this.waiting === waiting) {
         this.waiting = null;
+        this.noteTurnFailed('the 20-minute request timeout expired');
         waiting.reject(new HttpError(504, 'Timed out waiting for the model.'));
       }
     }, RESPONSE_TIMEOUT_MS);
@@ -344,6 +437,7 @@ export class BridgeSession {
     if (this.waiting !== waiting) return;
     this.log(`[${this.id}] request aborted by client — interrupting`);
     this.waiting = null;
+    this.noteTurnFailed('the client gave up on the request');
     waiting.reject(new HttpError(499, 'Request cancelled.'));
     this.buffer = [];
     this.discardNextResult = true;
@@ -355,6 +449,36 @@ export class BridgeSession {
     for (const call of this.pending.splice(0)) {
       call.resolve({ content: [{ type: 'text', text: message }], isError: true });
     }
+  }
+
+  /**
+   * The SDK is alive: any message on the stream (even a bare `result` or `system`) resets the
+   * busy-stall clock the manager's watchdog reads.
+   */
+  private noteHeartbeat(): void {
+    this.lastProgress = Date.now();
+  }
+
+  /** Real model output for the current turn — the signal that distinguishes slow from wedged. */
+  private noteOutput(): void {
+    this.lastProgress = Date.now();
+    this.producedInTurn = true;
+  }
+
+  /**
+   * A waiting turn ended without an answer. If it ran long and the model never produced anything,
+   * that is the wedge signature from the field: the CLI accepted the input and went silent forever,
+   * so every retry routed back here would time out identically.
+   */
+  private noteTurnFailed(cause: string): void {
+    const ranFor = this.turnStartedAt > 0 ? Date.now() - this.turnStartedAt : 0;
+    this.turnStartedAt = 0;
+    if (this.producedInTurn || ranFor < WEDGE_MIN_TURN_MS || this.wedgedSince !== null) return;
+    this.wedgedSince = Date.now();
+    this.log(
+      `[${this.id}] looks wedged: ${Math.round(ranFor / 1000)}s with no model output and ${cause} — ` +
+        'no new requests will be routed here; the watchdog will close it'
+    );
   }
 
   private failWaiting(error: unknown): void {
@@ -369,6 +493,7 @@ export class BridgeSession {
   private async pump(): Promise<void> {
     try {
       for await (const message of this.q) {
+        this.noteHeartbeat();
         if (message.type === 'assistant' && !message.parent_tool_use_id) {
           this.onAssistantMessage(message.message as unknown as Record<string, unknown>);
         } else if (message.type === 'result') {
@@ -389,6 +514,7 @@ export class BridgeSession {
   }
 
   private onAssistantMessage(message: Record<string, unknown>): void {
+    this.noteOutput();
     const content = Array.isArray(message.content) ? (message.content as WireBlock[]) : [];
     for (const block of content) {
       if (block.type === 'tool_use') {
@@ -429,6 +555,7 @@ export class BridgeSession {
 
   /** Handler for the in-process MCP server: park the call until pix3 posts its tool_result. */
   private onToolCall(name: string, input: unknown): Promise<CallToolResult> {
+    this.noteOutput();
     this.log(`[${this.id}] tool call: ${name}`);
     return new Promise<CallToolResult>(resolve => {
       this.pending.push({ name, input, resolve });
@@ -486,6 +613,9 @@ export class BridgeSession {
       );
     this.buffer = [];
     this.waiting = null;
+    // A real answer is proof of life: clear any wedge suspicion raised by earlier failed turns.
+    this.turnStartedAt = 0;
+    this.wedgedSince = null;
     this.transcriptLen = this.requestLen + 1;
     waiting.resolve({
       status: 200,
@@ -523,25 +653,75 @@ export class BridgeSession {
   }
 }
 
+/** Factory seam so tests can drive the manager without spawning a Claude Code CLI. */
+export type SessionFactory = (request: WireMessagesRequest, log: Logger) => ManagedSession;
+
+export interface SessionManagerOptions {
+  /** Watchdog threshold; defaults to {@link DEFAULT_STALL_TIMEOUT_MS}. */
+  readonly stallTimeoutMs?: number;
+  readonly createSession?: SessionFactory;
+  /** Injectable clock (tests). */
+  readonly now?: () => number;
+  /** Set false to drive {@link SessionManager.sweep} manually (tests). */
+  readonly autoSweep?: boolean;
+}
+
+/** Cheap health snapshot for the discovery response. */
+export interface SessionStats {
+  readonly total: number;
+  readonly busy: number;
+  readonly stalled: number;
+  readonly stallTimeoutMs: number;
+}
+
+export interface ResetOptions {
+  /** Close only the session with this id (as printed in the bridge log / `sessionKey` in stats). */
+  readonly sessionKey?: string;
+  /** Close every live session, healthy ones included. */
+  readonly all?: boolean;
+}
+
+export interface ResetResult {
+  readonly closed: number;
+  readonly remaining: number;
+  /** Sessions still considered wedged after the reset (should normally be 0). */
+  readonly stalled: number;
+  readonly scope: 'all' | 'session' | 'stalled';
+  /** Present when the request could not be honoured literally (e.g. unknown `sessionKey`). */
+  readonly note?: string;
+}
+
 export class SessionManager {
   private readonly log: Logger;
-  private sessions: BridgeSession[] = [];
-  private readonly sweeper: NodeJS.Timeout;
+  private sessions: ManagedSession[] = [];
+  private readonly sweeper: NodeJS.Timeout | null;
+  private readonly stallTimeoutMs: number;
+  private readonly factory: SessionFactory;
+  private readonly now: () => number;
 
-  constructor(log: Logger) {
+  constructor(log: Logger, options: SessionManagerOptions = {}) {
     this.log = log;
-    this.sweeper = setInterval(() => this.sweep(), 60_000);
-    this.sweeper.unref();
+    this.stallTimeoutMs = normalizeStallTimeoutMs(options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS);
+    this.factory = options.createSession ?? ((request, logger) => new BridgeSession(request, logger));
+    this.now = options.now ?? (() => Date.now());
+    if (options.autoSweep === false) {
+      this.sweeper = null;
+    } else {
+      this.sweeper = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
+      this.sweeper.unref();
+    }
   }
 
   async handle(request: WireMessagesRequest, signal: AbortSignal): Promise<BridgeResponse> {
-    this.sessions = this.sessions.filter(session => !session.closed);
+    this.dropClosed();
     const last = request.messages[request.messages.length - 1];
     const toolResults = extractToolResults(last);
 
     if (toolResults.length > 0) {
-      const session = this.sessions.find(candidate =>
-        toolResults.every(result => candidate.hasPendingToolUse(result.toolUseId))
+      const session = this.sessions.find(
+        candidate =>
+          !candidate.wedged &&
+          toolResults.every(result => candidate.hasPendingToolUse(result.toolUseId))
       );
       if (session) return session.handleRequest(request, signal);
       this.log('tool results with no live session (bridge restarted?) — replaying transcript');
@@ -552,6 +732,9 @@ export class SessionManager {
       const session = this.sessions.find(
         candidate =>
           !candidate.busy &&
+          // A wedged session answers nothing, so continuing a chat on it just reproduces the
+          // timeout the user already saw ("Try again" used to land right back in it).
+          !candidate.wedged &&
           candidate.transcriptLen === request.messages.length - 1 &&
           candidate.model === request.model &&
           candidate.toolsMatch(request.tools) &&
@@ -570,8 +753,116 @@ export class SessionManager {
   }
 
   closeAll(reason: string): void {
-    clearInterval(this.sweeper);
-    for (const session of this.sessions.splice(0)) session.close(reason);
+    if (this.sweeper) clearInterval(this.sweeper);
+    for (const session of this.sessions.splice(0)) this.safeClose(session, reason, false);
+  }
+
+  stats(): SessionStats {
+    this.dropClosed();
+    const now = this.now();
+    return {
+      total: this.sessions.length,
+      busy: this.sessions.filter(session => session.busy).length,
+      stalled: this.sessions.filter(session => this.stalledReason(session, now) !== null).length,
+      stallTimeoutMs: this.stallTimeoutMs,
+    };
+  }
+
+  /**
+   * Client-driven recovery for `POST /v1/sessions/reset`. Idempotent, never throws, and closing
+   * nothing is a success — the caller just wants to be sure no wedged session survives.
+   */
+  reset(options: ResetOptions = {}): ResetResult {
+    this.dropClosed();
+    const now = this.now();
+    const live = [...this.sessions];
+    let scope: ResetResult['scope'] = 'stalled';
+    let victims: ManagedSession[] = [];
+    let note: string | undefined;
+
+    if (options.all === true) {
+      scope = 'all';
+      victims = live;
+    } else if (typeof options.sessionKey === 'string' && options.sessionKey) {
+      scope = 'session';
+      victims = live.filter(session => session.id === options.sessionKey);
+      if (victims.length === 0) {
+        note = `No live session has key "${options.sessionKey}" — nothing to close.`;
+      }
+    } else {
+      victims = live.filter(session => this.stalledReason(session, now) !== null);
+    }
+
+    for (const session of victims) {
+      this.safeClose(session, `reset requested by the editor (${scope})`, true);
+    }
+    this.dropClosed();
+    const stalled = this.sessions.filter(session => this.stalledReason(session, now) !== null).length;
+    this.log(
+      `reset (${scope}): closed ${victims.length}, ${this.sessions.length} session(s) remain` +
+        (stalled > 0 ? `, ${stalled} still stalled` : '')
+    );
+    return {
+      closed: victims.length,
+      remaining: this.sessions.length,
+      stalled,
+      scope,
+      ...(note ? { note } : {}),
+    };
+  }
+
+  /**
+   * Watchdog + idle reaper. Public so tests can trip it with a faked clock; production runs it every
+   * {@link SWEEP_INTERVAL_MS}.
+   */
+  sweep(): void {
+    const now = this.now();
+    for (const session of [...this.sessions]) {
+      if (session.closed) {
+        this.forget(session);
+        continue;
+      }
+      const stalled = this.stalledReason(session, now);
+      if (stalled) {
+        this.log(`[${session.id}] watchdog: ${stalled}`);
+        this.safeClose(session, `watchdog: ${stalled}`, true);
+        continue;
+      }
+      if (!session.busy && now - session.lastActivity > IDLE_TIMEOUT_MS) {
+        this.safeClose(session, 'idle timeout', false);
+      }
+    }
+  }
+
+  /** Why this session looks wedged, or null if it looks healthy. */
+  private stalledReason(session: ManagedSession, now: number): string | null {
+    if (session.closed) return null;
+    if (session.wedged) return 'a long request ended with no model output at all';
+    if (session.busy && now - session.lastProgress > this.stallTimeoutMs) {
+      return `busy with no model output for ${Math.round((now - session.lastProgress) / 1000)}s`;
+    }
+    return null;
+  }
+
+  private dropClosed(): void {
+    this.sessions = this.sessions.filter(session => !session.closed);
+  }
+
+  private forget(session: ManagedSession): void {
+    this.sessions = this.sessions.filter(candidate => candidate !== session);
+  }
+
+  /** Drop the session from the pool, then close it. Never throws — a mid-abort close is fine. */
+  private safeClose(session: ManagedSession, reason: string, force: boolean): void {
+    this.forget(session);
+    try {
+      if (force) session.forceClose(reason);
+      else session.close(reason);
+    } catch (error) {
+      this.log(
+        `[${session.id}] close failed (${reason}): ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private replay(request: WireMessagesRequest, signal: AbortSignal): Promise<BridgeResponse> {
@@ -590,27 +881,54 @@ export class SessionManager {
     return session.handleTranscriptReplay(request, transcript, signal);
   }
 
-  private create(request: WireMessagesRequest): BridgeSession {
+  private create(request: WireMessagesRequest): ManagedSession {
+    this.dropClosed();
     while (this.sessions.length >= MAX_SESSIONS) {
-      const idle = this.sessions.filter(session => !session.busy);
-      const victim = (idle.length > 0 ? idle : this.sessions).reduce((a, b) =>
-        a.lastActivity <= b.lastActivity ? a : b
-      );
-      this.sessions = this.sessions.filter(session => session !== victim);
-      victim.close('evicted (too many sessions)');
+      const victim = this.pickVictim();
+      if (!victim) {
+        // Every slot holds a session that is actively streaming. Overshooting the soft cap is far
+        // cheaper than killing a working chat, so serve the request and let the sweeper catch up.
+        if (this.sessions.length < HARD_MAX_SESSIONS) {
+          this.log(
+            `session cap ${MAX_SESSIONS} reached but all sessions are producing output — ` +
+              `allowing ${this.sessions.length + 1} temporarily`
+          );
+          break;
+        }
+        // At the hard ceiling something has to go: the least recently productive session.
+        const stalest = this.sessions.reduce((a, b) => (a.lastProgress <= b.lastProgress ? a : b));
+        this.safeClose(stalest, 'evicted (hard session limit reached)', true);
+        continue;
+      }
+      this.safeClose(victim, 'evicted (too many sessions)', victim.busy);
     }
-    const session = new BridgeSession(request, this.log);
+    const session = this.factory(request, this.log);
     this.sessions.push(session);
     return session;
   }
 
-  private sweep(): void {
-    const now = Date.now();
-    for (const session of [...this.sessions]) {
-      if (session.closed || (!session.busy && now - session.lastActivity > IDLE_TIMEOUT_MS)) {
-        this.sessions = this.sessions.filter(candidate => candidate !== session);
-        if (!session.closed) session.close('idle timeout');
-      }
-    }
+  /**
+   * Choose a session to sacrifice, most-expendable first:
+   *   1. wedged / stalled sessions (dead weight — this is what used to shrink capacity for good);
+   *   2. the least recently used idle session;
+   *   3. a busy session that has produced nothing for a while (stalest first).
+   * Returns null when every session is genuinely streaming output — the caller must not kill one.
+   */
+  private pickVictim(): ManagedSession | null {
+    const now = this.now();
+    const oldestBy = (
+      sessions: readonly ManagedSession[],
+      key: (session: ManagedSession) => number
+    ): ManagedSession | null =>
+      sessions.length === 0 ? null : sessions.reduce((a, b) => (key(a) <= key(b) ? a : b));
+
+    const stalled = this.sessions.filter(session => this.stalledReason(session, now) !== null);
+    if (stalled.length > 0) return oldestBy(stalled, session => session.lastProgress);
+
+    const idle = this.sessions.filter(session => !session.busy);
+    if (idle.length > 0) return oldestBy(idle, session => session.lastActivity);
+
+    const quiet = this.sessions.filter(session => now - session.lastProgress > PRODUCING_WINDOW_MS);
+    return oldestBy(quiet, session => session.lastProgress);
   }
 }

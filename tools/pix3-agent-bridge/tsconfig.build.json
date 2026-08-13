@@ -1,5 +1,7 @@
 {
   "extends": "./tsconfig.json",
+  // Tests are type-checked by `tsconfig.json` but never shipped in the published build.
+  "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "noEmit": false,
     "outDir": "dist",

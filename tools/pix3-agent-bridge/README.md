@@ -30,7 +30,43 @@ npx @pix3/agent-bridge
 On start it prints a **pairing token**. In the editor: **Settings → AI Agent**, paste the token.
 Providers you've enabled below then appear in the model picker.
 
-Options: `--port <n>` (default 8484), `--origin <url>` (repeatable — extra allowed browser origins).
+Options: `--port <n>` (default 8484), `--origin <url>` (repeatable — extra allowed browser origins),
+`--stall-timeout-ms <n>` (wedged-session watchdog, see below).
+
+## Wedged sessions (Claude Code lane)
+
+A Claude Code session can occasionally accept a message and then go silent forever. The bridge
+detects that instead of leaving the editor stuck on "the model did not respond":
+
+- **Progress tracking** — every message the CLI emits stamps the session. A turn that dies (client
+  gave up, or the 20-minute request cap) after **≥ 120 s with no model output at all** marks the
+  session *wedged*.
+- **Routing** — wedged sessions are skipped, so the user's next message / "Try again" starts a fresh
+  session (seeded with a transcript replay) instead of re-entering the dead one.
+- **Watchdog** — a sweep every 60 s force-closes any session that is wedged, or that has been busy
+  with **no output for longer than the stall timeout (default 5 minutes)**. The threshold sits well
+  above the editor's own 180 s per-request timeout so it can never kill a merely slow turn. Override
+  with `--stall-timeout-ms <n>`, `PIX3_BRIDGE_STALL_TIMEOUT_MS=<n>`, or `"stallTimeoutMs": <n>` in
+  the config file (floor: 60000).
+- **Capacity** — wedged sessions are the first eviction victims, so they can no longer permanently
+  shrink the session pool. A session that is actively streaming is never evicted; the bridge
+  temporarily exceeds its soft session cap instead.
+- **Manual reset** — `POST /v1/sessions/reset` (pairing token required, like every API route):
+
+  ```bash
+  # close whatever looks wedged (empty body):
+  curl -X POST http://127.0.0.1:8484/v1/sessions/reset -H "x-pix3-bridge-token: $TOKEN"
+  # → {"closed":1,"remaining":0,"stalled":0,"scope":"stalled"}
+
+  # close everything, or one session by the id the bridge logs:
+  curl -X POST http://127.0.0.1:8484/v1/sessions/reset -H "x-pix3-bridge-token: $TOKEN" \
+    -H 'content-type: application/json' -d '{"all":true}'
+  curl -X POST http://127.0.0.1:8484/v1/sessions/reset -H "x-pix3-bridge-token: $TOKEN" \
+    -H 'content-type: application/json' -d '{"sessionKey":"1a2b3c4d"}'
+  ```
+
+  It is idempotent and closing zero sessions is a success. `GET /v1/providers` also reports
+  `sessions: { total, busy, stalled, stallTimeoutMs }` so the editor can surface the state.
 
 ## Manage providers
 
@@ -70,6 +106,16 @@ changes (a base-URL/kind change to a provider you're actively using is picked up
 
 ## Config file
 
-`~/.pix3/agent-bridge.json` holds the pairing token and the provider table (kind, base URL, key,
-enabled). It is migrated automatically from the old `claude-bridge.json` (the pairing token carries
-over) on first run.
+`~/.pix3/agent-bridge.json` holds the pairing token, the provider table (kind, base URL, key,
+enabled) and optional `port` / `origins` / `stallTimeoutMs` overrides. It is migrated automatically
+from the old `claude-bridge.json` (the pairing token carries over) on first run.
+
+## Develop
+
+```bash
+npm install
+npm start          # run from source (node runs the TS directly)
+npm test           # node --test (session watchdog/reset unit tests + HTTP contract tests)
+npm run type-check
+npm run build
+```

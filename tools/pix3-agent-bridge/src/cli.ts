@@ -72,7 +72,8 @@ const usage = (): void => {
   console.log(
     [
       'Usage:',
-      '  pix3-agent-bridge                         start the bridge server',
+      '  pix3-agent-bridge [--port <n>] [--origin <url>] [--stall-timeout-ms <n>]',
+      '                                            start the bridge server',
       '  pix3-agent-bridge provider list',
       '  pix3-agent-bridge provider add <id> [--key <k>] [--base-url <url>] [--kind openai|anthropic] [--label <l>]',
       '  pix3-agent-bridge provider set-key <id> <key>',

@@ -5,9 +5,11 @@
  *
  * It does two jobs, both on 127.0.0.1:
  *
- *   1. Agent-SDK lane (`POST /v1/messages`, `GET /v1/models`): serves the Anthropic Messages wire
- *      shape from a real Claude Agent SDK (Claude Code / Pro/MAX subscription) session — no API key,
- *      usage draws from the subscription. This is the original bridge behaviour (see sessions.ts).
+ *   1. Agent-SDK lane (`POST /v1/messages`, `GET /v1/models`, `POST /v1/sessions/reset`): serves the
+ *      Anthropic Messages wire shape from a real Claude Agent SDK (Claude Code / Pro/MAX
+ *      subscription) session — no API key, usage draws from the subscription. This is the original
+ *      bridge behaviour (see sessions.ts); `/v1/sessions/reset` is the escape hatch for a session
+ *      that stopped responding.
  *
  *   2. Provider proxy lane (`ALL /providers/:id/*`, `GET /v1/providers`): a credential-injecting
  *      reverse proxy for metered providers (OpenAI, Anthropic API, OpenCode Zen, custom
@@ -21,7 +23,8 @@
  * Usage:
  *   npx @pix3/agent-bridge                       (requires a `claude login`-ed Claude Code for lane 1)
  *   npx @pix3/agent-bridge provider add openai --key sk-...
- *   Options: --port <n> (default 8484), --origin <url> (repeatable, extra allowed origins)
+ *   Options: --port <n> (default 8484), --origin <url> (repeatable, extra allowed origins),
+ *            --stall-timeout-ms <n> (wedged-session watchdog; default 300000)
  *
  * Security model (defense in depth for a localhost service):
  *   - binds to 127.0.0.1 only;
@@ -41,9 +44,14 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { SessionManager } from './sessions.ts';
-import { HttpError, parseMessagesRequest } from './wire.ts';
-import { loadConfig, RESERVED_PROVIDER_IDS, type BridgeConfig } from './config.ts';
+import { SessionManager, type ResetOptions } from './sessions.ts';
+import { HttpError, isRecord, parseMessagesRequest } from './wire.ts';
+import {
+  loadConfig,
+  normalizeStallTimeoutMs,
+  RESERVED_PROVIDER_IDS,
+  type BridgeConfig,
+} from './config.ts';
 import { runProviderCommand, usage } from './cli.ts';
 import { forwardToProvider } from './proxy.ts';
 
@@ -136,8 +144,25 @@ const readBody = (req: IncomingMessage): Promise<Buffer> =>
     req.on('error', reject);
   });
 
+/**
+ * Body of `POST /v1/sessions/reset`. Every field is optional and an absent/empty body is the common
+ * case ("close whatever looks wedged"), so parsing is deliberately forgiving.
+ */
+const parseResetOptions = (raw: string): ResetOptions => {
+  const text = raw.trim();
+  if (!text) return {};
+  const parsed: unknown = JSON.parse(text);
+  if (!isRecord(parsed)) throw new HttpError(400, 'Reset body must be a JSON object.');
+  return {
+    ...(typeof parsed.sessionKey === 'string' && parsed.sessionKey
+      ? { sessionKey: parsed.sessionKey }
+      : {}),
+    ...(parsed.all === true ? { all: true } : {}),
+  };
+};
+
 const startServer = (config: BridgeConfig): void => {
-  const manager = new SessionManager(log);
+  const manager = new SessionManager(log, { stallTimeoutMs: config.stallTimeoutMs });
 
   const withCors = (
     corsOrigin: string | null,
@@ -238,7 +263,36 @@ const startServer = (config: BridgeConfig): void => {
       const providers = Object.entries(config.providers)
         .filter(([, p]) => p.enabled && p.apiKey)
         .map(([id, p]) => ({ id, label: p.label, kind: p.kind, enabled: true }));
-      sendJson(res, 200, { providers: [...providers, AGENT_SDK_PROVIDER] }, origin);
+      // `sessions` is additive: older editors ignore it, newer ones can surface "1 stalled session"
+      // and offer the reset below. Counts only — no ids, no content.
+      sendJson(
+        res,
+        200,
+        { providers: [...providers, AGENT_SDK_PROVIDER], sessions: manager.stats() },
+        origin
+      );
+      return;
+    }
+
+    /**
+     * Escape hatch for a wedged Agent-SDK session: the editor can force the bridge to drop it so the
+     * next message starts from a healthy one. Closing zero sessions is a success — the caller only
+     * wants the guarantee that nothing wedged survives.
+     */
+    if (req.method === 'POST' && pathname === '/v1/sessions/reset') {
+      try {
+        const options = parseResetOptions((await readBody(req)).toString('utf8'));
+        sendJson(res, 200, manager.reset(options), origin);
+      } catch (error) {
+        if (error instanceof HttpError) {
+          sendError(res, error.status, error.message, origin);
+        } else if (error instanceof SyntaxError) {
+          sendError(res, 400, 'Request body is not valid JSON.', origin);
+        } else {
+          log(`session reset failed: ${error instanceof Error ? error.message : String(error)}`);
+          sendError(res, 500, 'Session reset failed.', origin);
+        }
+      }
       return;
     }
 
@@ -339,6 +393,9 @@ const startServer = (config: BridgeConfig): void => {
     );
     console.log('');
     console.log('  Agent-SDK (MAX) lane auth comes from your Claude Code login (`claude login`).');
+    console.log(
+      `  Wedged-session watchdog: ${Math.round(config.stallTimeoutMs / 1000)}s (--stall-timeout-ms / PIX3_BRIDGE_STALL_TIMEOUT_MS).`
+    );
     console.log('');
   });
 
@@ -366,10 +423,13 @@ const main = (): void => {
   }
 
   const config = loadConfig();
-  // Serve-time flag overrides (not persisted): --port, --origin (repeatable).
+  // Serve-time flag overrides (not persisted): --port, --origin (repeatable), --stall-timeout-ms.
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--port' && argv[i + 1]) config.port = Number(argv[i + 1]);
     if (argv[i] === '--origin' && argv[i + 1]) config.origins.push(argv[i + 1]);
+    if (argv[i] === '--stall-timeout-ms' && argv[i + 1]) {
+      config.stallTimeoutMs = normalizeStallTimeoutMs(argv[i + 1]);
+    }
   }
   startServer(config);
 };

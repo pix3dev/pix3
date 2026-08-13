@@ -50,6 +50,8 @@ export interface BridgeConfig {
   port: number;
   origins: string[];
   providers: Record<string, ProviderConfig>;
+  /** Watchdog threshold for wedged Agent-SDK sessions — see {@link DEFAULT_STALL_TIMEOUT_MS}. */
+  stallTimeoutMs: number;
 }
 
 /**
@@ -85,6 +87,33 @@ export const PROVIDER_PRESETS: Record<string, Omit<ProviderConfig, 'apiKey' | 'e
 };
 
 export const DEFAULT_PORT = 8484;
+
+/**
+ * Watchdog threshold: how long an Agent-SDK session may sit BUSY (an HTTP request waiting on the
+ * model) with no output at all from the CLI before the bridge declares it wedged, interrupts it and
+ * frees its slot.
+ *
+ * Sizing: the editor gives up on one `/v1/messages` call after 180 s
+ * (`LLM_REQUEST_TIMEOUT_MS` in pix3's `AgentChatService`), so anything at or below that would race
+ * the client's own timeout and could kill a session that is merely slow. 5 minutes sits well above
+ * it while staying far below the 20-minute per-request hard cap in sessions.ts — a session that has
+ * produced nothing for five minutes is dead, not thinking (a thinking-hard turn still emits
+ * assistant / tool-call messages, each of which counts as progress).
+ *
+ * Override (most specific wins): `PIX3_BRIDGE_STALL_TIMEOUT_MS` env var, `--stall-timeout-ms <n>`
+ * serve flag, `stallTimeoutMs` in `~/.pix3/agent-bridge.json`.
+ */
+export const DEFAULT_STALL_TIMEOUT_MS = 5 * 60_000;
+
+/** Floor for the watchdog threshold — below this it would start racing the editor's 180 s timeout. */
+export const MIN_STALL_TIMEOUT_MS = 60_000;
+
+/** Clamp an operator-supplied watchdog threshold; anything unusable falls back to the default. */
+export const normalizeStallTimeoutMs = (value: unknown): number => {
+  const ms = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return DEFAULT_STALL_TIMEOUT_MS;
+  return Math.max(MIN_STALL_TIMEOUT_MS, Math.round(ms));
+};
 
 export const DEFAULT_ORIGINS = [
   'https://editor.pix3.dev',
@@ -156,6 +185,9 @@ export const loadConfig = (): BridgeConfig => {
       ...(Array.isArray(stored.origins) ? stored.origins.filter(o => typeof o === 'string') : []),
     ],
     providers: parseProviders(stored.providers),
+    stallTimeoutMs: normalizeStallTimeoutMs(
+      process.env.PIX3_BRIDGE_STALL_TIMEOUT_MS ?? stored.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS
+    ),
   };
 
   // Persist on first run (or after a legacy-token migration) so the token is stable across restarts.
@@ -191,6 +223,9 @@ export const saveConfig = (config: BridgeConfig): void => {
     token: config.token,
     ...(config.port !== DEFAULT_PORT ? { port: config.port } : {}),
     ...(customOrigins.length > 0 ? { origins: customOrigins } : {}),
+    ...(config.stallTimeoutMs !== DEFAULT_STALL_TIMEOUT_MS
+      ? { stallTimeoutMs: config.stallTimeoutMs }
+      : {}),
     providers: config.providers,
   };
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
