@@ -33,6 +33,7 @@ import {
   type ComposerAttachment,
   type ComposerImageAttachment,
 } from '@/ui/shared/composer-attachments';
+import { buildProjectMap } from '@/services/flow/flow-project-map';
 import {
   FLOW_BRIEF_PATH,
   FLOW_DECISIONS_PATH,
@@ -180,16 +181,6 @@ const MAX_VISION_IMAGES = 2;
 const PALETTE_SIZE = 5;
 /** How long the first agent turn waits for the shell to open the scene before going anyway. */
 const SCENE_WAIT_MS = 10_000;
-/**
- * How much recipe source may ride along in the first message. A whole recipe is ~40 KB (~10K
- * tokens) and it lands in the cached prefix, which is far cheaper than the ten round-trips the
- * agent otherwise spends reading it back file by file.
- */
-const PROJECT_MAP_BUDGET_CHARS = 90_000;
-/** Fence + path heading around each inlined file, charged against the budget. */
-const PROJECT_MAP_SECTION_OVERHEAD = 64;
-/** Where project scripts live — mirrors the agent's own inventory scan. */
-const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
 
 /**
  * Turns one prompt (plus any references) into an open, playable project: one planner call for the
@@ -706,79 +697,9 @@ export class PrototypeBootstrapService {
     // spend its first tool calls re-discovering a project that was about to load anyway.
     await this.waitForActiveScene();
     await this.agentChat.newConversation();
-    await this.agentChat.send(renderFirstTurnMessage(brief, prompt, await this.buildProjectMap()));
-  }
-
-  /**
-   * The scripts and scenes the fresh project ships, inlined byte-for-byte into the first message.
-   *
-   * Measured on a first increment: 22 of 55 model round-trips (~170 s of the ~460 s turn) were the
-   * agent reading a project that had just been generated from a recipe — ten `fs_read`s, plus
-   * `scene_tree`, `fs_list` and `find_nodes` rebuilding a map that already existed. Handing it over
-   * up front costs ~10K tokens ONCE, in the cached prefix (cache reads measured at ~98 % on this
-   * lane), and removes the reads from the critical path.
-   *
-   * Byte-for-byte matters: these are `str_replace` anchors. A summary would force a re-read.
-   */
-  private async buildProjectMap(): Promise<string> {
-    const sections: string[] = [];
-    const skipped: string[] = [];
-    let budget = PROJECT_MAP_BUDGET_CHARS;
-
-    const add = (path: string, language: string, contents: string): void => {
-      if (contents.length + PROJECT_MAP_SECTION_OVERHEAD > budget) {
-        skipped.push(path);
-        return;
-      }
-      budget -= contents.length + PROJECT_MAP_SECTION_OVERHEAD;
-      sections.push(`### ${path}\n\`\`\`${language}\n${contents.replace(/\s+$/, '')}\n\`\`\``);
-    };
-
-    for (const path of await this.listScripts()) {
-      const contents = await this.readOptional(path);
-      if (contents) add(path, 'ts', contents);
-    }
-    for (const path of await this.listScenes()) {
-      const contents = await this.readOptional(path);
-      if (contents) add(path, 'yaml', contents);
-    }
-
-    if (sections.length === 0) {
-      return '';
-    }
-    const note =
-      skipped.length > 0
-        ? `\n\nToo large to inline, \`fs_read\` them if you need them: ${skipped.join(', ')}.`
-        : '';
-    return [
-      '## Project map — the current contents of every script and scene',
-      '',
-      'This is the live text of these files, byte-for-byte. Do **not** `fs_read` any of them before',
-      'your first edit; you would get back exactly what is below. After an edit, `str_replace`',
-      'returns the updated neighbourhood, so you do not need to re-read them afterwards either.',
-      '',
-      ...sections,
-      note,
-    ].join('\n');
-  }
-
-  /** Every project script file, in the same directories the agent's own inventory scans. */
-  private async listScripts(): Promise<string[]> {
-    const found: string[] = [];
-    for (const directory of SCRIPT_DIRECTORIES) {
-      let entries;
-      try {
-        entries = await this.storage.listDirectory(directory);
-      } catch {
-        continue;
-      }
-      for (const entry of entries) {
-        if (entry.kind === 'file' && /\.(ts|js)$/i.test(entry.name)) {
-          found.push(entry.path);
-        }
-      }
-    }
-    return found;
+    await this.agentChat.send(
+      renderFirstTurnMessage(brief, prompt, await buildProjectMap(this.storage))
+    );
   }
 
   /** Resolve once a scene is active, or after {@link SCENE_WAIT_MS} — never blocking forever. */

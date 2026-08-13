@@ -453,6 +453,79 @@ describe('AgentChatService', () => {
     expect(refusal).toBe(true);
   });
 
+  it('starts a fat Flow increment in a fresh conversation, carrying a handoff', async () => {
+    // Measured across three increments: one conversation ran 44K -> 144K input tokens because only
+    // the bootstrap's first turn got a clean start, and per-hop latency tracks context size.
+    const chat = vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'increment done: the snake grows' }],
+      stopReason: 'end_turn' as const,
+      usage: { inputTokens: 90_000, outputTokens: 5 },
+    }));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+    appState.ui.workspaceMode = 'flow';
+
+    try {
+      await service.send('build the movement');
+      const afterFirst = service.getState().messages.length;
+      await service.send('now add walls');
+
+      const state = service.getState();
+      // Fresh conversation: the new turn does not carry the previous exchange.
+      expect(state.messages.length).toBeLessThan(afterFirst + 2);
+      const sent = JSON.stringify(state.messages[0]);
+      expect(sent).toContain('now add walls');
+      expect(sent).toContain('increment done: the snake grows');
+    } finally {
+      appState.ui.workspaceMode = 'studio';
+    }
+  });
+
+  it('keeps a small Flow conversation going instead of resetting it', async () => {
+    const chat = vi.fn(async () => textResult('done'));
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+    appState.ui.workspaceMode = 'flow';
+
+    try {
+      await service.send('build the movement');
+      await service.send('one more thing');
+      expect(service.getState().messages).toHaveLength(4);
+    } finally {
+      appState.ui.workspaceMode = 'studio';
+    }
+  });
+
+  it('calls out retuning one property over and over, even though no two calls are identical', async () => {
+    // Measured: an increment set the same component property eight times with a different value
+    // each time, so the byte-equality repeat check never fired and the turn burned its whole cap.
+    const tweak = (id: string, value: number) =>
+      toolCallResult('set_component_property', id, {
+        nodeId: 'player',
+        componentId: 'snake-controller',
+        propertyName: 'moveInterval',
+        value,
+      });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(tweak('c1', 0.15))
+      .mockResolvedValueOnce(tweak('c2', 0.3))
+      .mockResolvedValueOnce(tweak('c3', 0.6))
+      .mockResolvedValueOnce(tweak('c4', 1.5))
+      .mockResolvedValueOnce(textResult('stopping to think'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({ ok: true })),
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 8,
+    });
+
+    await service.send('make it faster');
+
+    const nudged = JSON.stringify(service.getState().messages).includes(
+      'the value is not what is wrong'
+    );
+    expect(nudged).toBe(true);
+  });
+
   it('gates the turn on a str_replace script edit, not just fs_write', async () => {
     // The skills tell the agent to prefer str_replace for edits, so the gate must watch it too.
     const chat = vi

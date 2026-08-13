@@ -60,6 +60,14 @@ describe('parseChecklist — numbered plans', () => {
     expect(steps[1].status).toBe('todo');
   });
 
+  it('reads a status wrapped in markdown emphasis', () => {
+    // Live: `1. move snake ... — **DONE**` showed as todo with a stray `**` in the label.
+    const steps = parseChecklist('1. move snake in four directions — **DONE**');
+
+    expect(steps[0].status).toBe('done');
+    expect(steps[0].title).toBe('move snake in four directions');
+  });
+
   it('marks the step a numbered plan calls current', () => {
     const steps = parseChecklist('1. build the loop — DONE\n2. add bombs (in progress)');
 

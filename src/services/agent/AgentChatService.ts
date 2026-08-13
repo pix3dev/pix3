@@ -1,5 +1,6 @@
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
+import { buildProjectMap } from '@/services/flow/flow-project-map';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
@@ -197,6 +198,38 @@ const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
   return false;
 };
 
+/** How many times one property may be retuned in a turn before it counts as thrash. */
+const KNOB_TWEAK_LIMIT = 4;
+
+/**
+ * Prompt size at which a Flow increment starts in a fresh conversation instead of continuing.
+ * Below it the thread is cheap and continuity is worth more; above it every hop pays for history.
+ */
+const FLOW_FRESH_CONVERSATION_TOKENS = 60_000;
+/** How much of the previous increment's summary is carried into that fresh conversation. */
+const FLOW_HANDOFF_SUMMARY_CHARS = 1_500;
+
+/**
+ * Identity of the property a call is tuning — `tool:target:property`, with the VALUE left out.
+ *
+ * Only the two property setters qualify. Re-setting one property four times in a single turn is
+ * thrash in a way that re-editing one file four times is not: an edit builds on the last one, a
+ * retune replaces it, so the fourth attempt is evidence the value was never the problem.
+ */
+const tuningKnobSignature = (toolName: string, input: unknown): string | null => {
+  if (toolName !== 'set_component_property' && toolName !== 'set_property') return null;
+  const args = (input ?? {}) as {
+    nodeId?: unknown;
+    componentId?: unknown;
+    propertyName?: unknown;
+    propertyPath?: unknown;
+  };
+  const target = [args.nodeId, args.componentId].filter(part => typeof part === 'string').join('/');
+  const property = typeof args.propertyName === 'string' ? args.propertyName : args.propertyPath;
+  if (!target || typeof property !== 'string') return null;
+  return `${toolName}:${target}:${property}`;
+};
+
 /** Tools that answer by LOOKING. Expensive on this lane, and blind to everything state-shaped. */
 const VISUAL_TOOLS = new Set(['viewport_screenshot', 'analyze_image']);
 
@@ -363,6 +396,8 @@ export class AgentChatService {
   private abortController: AbortController | null = null;
   /** Project id whose conversations are currently loaded (histories are per project). */
   private loadedProjectId: string | null = null;
+  /** Cache-inclusive prompt size of the most recent request — what a fat conversation costs. */
+  private lastRequestInputTokens = 0;
   /** createdAt of the active conversation (0 = not yet persisted). */
   private activeCreatedAt = 0;
   /** Composer prefill channel — carries "Fix with Agent" prompts to the panel. */
@@ -454,9 +489,15 @@ export class AgentChatService {
 
     await this.ensureLoaded();
 
+    const handoff = await this.flowIncrementHandoff();
+
     // The user is answering (or ignoring) the agent's question — either way the fork is resolved.
     if (this.state.pendingQuestion) {
       this.setState({ pendingQuestion: null });
+    }
+
+    if (handoff) {
+      await this.newConversation();
     }
 
     // A fresh (unsaved) conversation gets its id/created-at on the first message.
@@ -465,8 +506,66 @@ export class AgentChatService {
       this.activeCreatedAt = Date.now();
     }
 
-    this.appendMessage({ role: 'user', content: buildUserContent(trimmed, images, texts) });
+    this.appendMessage({
+      role: 'user',
+      content: buildUserContent(handoff ? `${trimmed}\n\n${handoff}` : trimmed, images, texts),
+    });
     await this.runToSettled();
+  }
+
+  /**
+   * In Flow, start each new increment in a FRESH conversation once the current one has grown fat —
+   * and carry the handoff (last summary + the project map) into it.
+   *
+   * Measured across three increments of one prototype: the conversation ran 44K → 144K input tokens
+   * because only the bootstrap's first turn got a clean start, and per-hop latency tracks context
+   * (~0.11 s per 1K tokens), so the third increment paid ~8 s a hop for history it never used. A new
+   * conversation costs one ~5–10 s cold start on the bridge lane and repays it within two hops
+   * (design §5.4, and the same reasoning the bootstrap already applies to increment one).
+   *
+   * Returns the text to append to the user's message, or null to continue the current conversation:
+   * a small conversation stays (a short clarifying exchange must not lose its thread), and so does
+   * an answer to the agent's own `ask_user` question.
+   */
+  private async flowIncrementHandoff(): Promise<string | null> {
+    if (
+      appState.ui.workspaceMode !== 'flow' ||
+      this.state.pendingQuestion ||
+      this.state.messages.length === 0 ||
+      this.lastRequestInputTokens < FLOW_FRESH_CONVERSATION_TOKENS
+    ) {
+      return null;
+    }
+
+    const summary = this.lastAssistantText().slice(0, FLOW_HANDOFF_SUMMARY_CHARS);
+    const map = await buildProjectMap(this.storage).catch(() => '');
+    const lines = [
+      '---',
+      '',
+      'Context from the previous increment (this is a fresh conversation — `design/progress.md`,',
+      '`design/brief.md` and `design/recipe.md` hold the rest):',
+      '',
+      summary || '(no summary was recorded)',
+    ];
+    if (map) {
+      lines.push('', map);
+    }
+    return lines.join('\n');
+  }
+
+  /** Text of the most recent assistant message, flattened. */
+  private lastAssistantText(): string {
+    for (let i = this.state.messages.length - 1; i >= 0; i--) {
+      const message = this.state.messages[i];
+      if (message.role !== 'assistant' || typeof message.content === 'string') continue;
+      const text = message.content
+        .filter((block): block is LlmTextBlock => block.type === 'text')
+        .map(block => block.text)
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+    return '';
   }
 
   /**
@@ -694,6 +793,8 @@ export class AgentChatService {
     // the SECOND repeat is the escalation trigger — measured: the model never consults the advisor
     // on its own, so "consult when stuck" is dead prompt text without an external push.
     const repeatCountBySignature = new Map<string, number>();
+    // How many times each single property ("knob") was set this turn, whatever the value.
+    const knobTweaks = new Map<string, number>();
     // Consecutive iterations whose tool results were ALL errors — the other shape of "stuck".
     let consecutiveErrorIterations = 0;
     // Forced whole-file rewrites (fs_write overwrite:true past the size guard) — measured in eval
@@ -775,6 +876,7 @@ export class AgentChatService {
       this.accumulateUsage(result.usage);
       const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
+      this.lastRequestInputTokens = result.usage?.inputTokens ?? this.lastRequestInputTokens;
       this.recordTurnMetric(assistantIndex, {
         origin,
         elapsedMs,
@@ -895,6 +997,18 @@ export class AgentChatService {
           }
         }
         lastResultBySignature.set(signature, resultText);
+        // Tuning the SAME knob over and over is thrash even when no two calls are identical — the
+        // measured case retuned one component property eight times with a different value each
+        // time, so the byte-equality check above never fired and the turn burned its whole
+        // iteration budget. The knob's identity, not its value, is what repeats.
+        const knob = tuningKnobSignature(call.name, call.input);
+        if (knob) {
+          const tweaks = (knobTweaks.get(knob) ?? 0) + 1;
+          knobTweaks.set(knob, tweaks);
+          if (tweaks >= KNOB_TWEAK_LIMIT && !stuckReason) {
+            stuckReason = `you have now set ${knob.split(':').slice(1).join('.')} ${tweaks} times in this turn — the value is not what is wrong`;
+          }
+        }
         // A successful state change makes every OTHER remembered result stale: re-running the same
         // observation now CAN return something different, so the nudge's own claim ("repeating it
         // will not change anything") would be false. This call's own signature is kept, so a

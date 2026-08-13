@@ -163,6 +163,34 @@ export function defineProperty(
 }
 
 /**
+ * Bring a loosely-typed incoming value to the type the schema declares.
+ *
+ * Editor UI always sends the right type; automation does not. An agent tool passes model JSON
+ * straight through, so `"1.5"` reaches a `number` property, gets stored as a string, survives every
+ * arithmetic that JS coerces (`"1.5" * 2`) and breaks the one it does not (`"1.5" + 1`), while the
+ * saved scene grows a quoted number next to real ones. Only unambiguous conversions are made —
+ * anything else is handed through untouched for `validation.validate` to reject.
+ */
+export function coerceToPropertyType(type: PropertyType, value: unknown): unknown {
+  if (type === 'number' && typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return value;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  if (type === 'boolean' && typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+    return value;
+  }
+  if (type === 'string' && (typeof value === 'number' || typeof value === 'boolean')) {
+    return String(value);
+  }
+  return value;
+}
+
+/**
  * Helper to create a group definition.
  */
 export function defineGroup(

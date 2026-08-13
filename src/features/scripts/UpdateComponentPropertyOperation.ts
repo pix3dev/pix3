@@ -5,7 +5,7 @@ import type {
   OperationMetadata,
 } from '@/core/Operation';
 import type { PropertyDefinition } from '@/fw';
-import { SceneManager, ScriptRegistry } from '@pix3/runtime';
+import { coerceToPropertyType, SceneManager, ScriptRegistry } from '@pix3/runtime';
 
 export interface UpdateComponentPropertyParams {
   nodeId: string;
@@ -65,7 +65,14 @@ export class UpdateComponentPropertyOperation implements Operation<OperationInvo
       return { didMutate: false };
     }
 
-    if (!this.validatePropertyUpdate(propDef, this.params.value)) {
+    // Coerce BEFORE validating: a caller that types the value loosely (the agent's
+    // `set_component_property` passes model JSON straight through) otherwise stores `"1.5"` in a
+    // number property. It survives arithmetic by coercion until it doesn't (`"1.5" + 1` is
+    // `"1.51"`), and it lands in the saved `.pix3scene` as a quoted string next to real numbers —
+    // which cost one measured Flow increment its entire iteration budget chasing the quotes.
+    const nextValue = coerceToPropertyType(propDef.type, this.params.value);
+
+    if (!this.validatePropertyUpdate(propDef, nextValue)) {
       return { didMutate: false };
     }
 
@@ -77,15 +84,15 @@ export class UpdateComponentPropertyOperation implements Operation<OperationInvo
     const previousValue = hasPreviousValueOverride ? this.params.previousValue : currentValue;
     const currentValueJson = JSON.stringify(currentValue);
     const previousValueJson = JSON.stringify(previousValue);
-    const nextValueJson = JSON.stringify(this.params.value);
+    const nextValueJson = JSON.stringify(nextValue);
 
     if (currentValueJson === nextValueJson && previousValueJson === nextValueJson) {
       return { didMutate: false };
     }
 
     if (currentValueJson !== nextValueJson) {
-      propDef.setValue(component, this.params.value);
-      component.config[this.params.propertyName] = this.params.value;
+      propDef.setValue(component, nextValue);
+      component.config[this.params.propertyName] = nextValue;
     }
 
     const activeSceneId = state.scenes.activeSceneId;
@@ -102,8 +109,8 @@ export class UpdateComponentPropertyOperation implements Operation<OperationInvo
           this.markSceneDirty(state, activeSceneId);
         },
         redo: async () => {
-          propDef.setValue(component, this.params.value);
-          component.config[this.params.propertyName] = this.params.value;
+          propDef.setValue(component, nextValue);
+          component.config[this.params.propertyName] = nextValue;
           this.markSceneDirty(state, activeSceneId);
         },
       },

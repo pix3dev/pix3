@@ -97,7 +97,9 @@ const extractPitch = (markdown: string): string | null => {
 const matchNumberedStep = (line: string): RegExpMatchArray | null => {
   const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
   if (!numbered) return null;
-  const body = numbered[1].trim();
+  // Emphasis first: models write `— **DONE**`, and `**` is not a word boundary, so a status test
+  // run against the raw line silently reads as "not done" and leaves the stars in the label.
+  const body = numbered[1].replace(/[*_`]/g, '').trim();
   const done = /(^|\s|←|->|—)(done|готово|✅|\[x\])\b/i.test(body) || /^\[x\]/i.test(body);
   const active = /\b(in progress|current|активн|в работе|\(now\))\b/i.test(body);
   const marker = done ? 'x' : active ? '~' : ' ';

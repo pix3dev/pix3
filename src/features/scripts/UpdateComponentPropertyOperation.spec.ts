@@ -98,6 +98,24 @@ const createOperationContext = () => {
 };
 
 describe('UpdateComponentPropertyOperation', () => {
+  it('stores a number property as a number even when the caller passes a string', async () => {
+    // Automation (the agent's set_component_property) passes model JSON through verbatim. Left
+    // as-is, `"1.5"` reached the saved scene as a quoted number — one measured increment spent its
+    // whole iteration budget chasing those quotes.
+    const { context, component } = createOperationContext();
+
+    const result = await new UpdateComponentPropertyOperation({
+      nodeId: 'node-1',
+      componentId: 'comp-1',
+      propertyName: 'speed',
+      value: '1.5',
+    }).perform(context);
+
+    expect(result.didMutate).toBe(true);
+    expect(component.config.speed).toBe(1.5);
+    expect(typeof component.config.speed).toBe('number');
+  });
+
   it('updates component property and supports undo/redo', async () => {
     const { context, component, state } = createOperationContext();
     const operation = new UpdateComponentPropertyOperation({

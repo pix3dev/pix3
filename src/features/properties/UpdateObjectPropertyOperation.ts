@@ -10,7 +10,7 @@ import { Group2D } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
-import { getNodePropertySchema } from '@pix3/runtime';
+import { coerceToPropertyType, getNodePropertySchema } from '@pix3/runtime';
 import { getRuntimeLivePropertySink } from '@pix3/runtime';
 import type { PropertyDefinition } from '@/fw';
 import type { ServiceContainer } from '@/fw/di';
@@ -38,7 +38,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
 
   async perform(context: OperationContext): Promise<OperationInvokeResult> {
     const { container, state } = context;
-    const { nodeId, propertyPath, value } = this.params;
+    const { nodeId, propertyPath, value: rawValue } = this.params;
 
     const sceneManager = container.getService<SceneManager>(
       container.getOrCreateToken(SceneManager)
@@ -60,7 +60,7 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       // Defensive fallback for runtime/editor schema drift.
       if (propertyPath === 'opacity' && node instanceof Node2D) {
         const previousValue = node.opacity;
-        const nextValueRaw = Number(value);
+        const nextValueRaw = Number(rawValue);
         if (!Number.isFinite(nextValueRaw)) {
           return { didMutate: false };
         }
@@ -111,6 +111,10 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       }
       return { didMutate: false };
     }
+
+    // Same reason as the component-property path: automation types values loosely, and a `"1.5"`
+    // stored in a number property reaches the saved scene as a quoted number.
+    const value = coerceToPropertyType(propDef.type, rawValue);
 
     const validation = this.validatePropertyUpdate(node, propDef, value);
     if (!validation.isValid) {
