@@ -21,6 +21,52 @@ export const LABEL_LINE_HEIGHT_FACTOR = 1.25;
 /** Extra logical px around auto-sized label boxes so glyph overhang isn't clipped. */
 export const LABEL_AUTO_SIZE_BLEED = 4;
 
+/** Upper bound for `Label2D.glowStrength` (more passes stop reading as glow). */
+export const LABEL_GLOW_STRENGTH_LIMIT = 4;
+
+/**
+ * Blur radius in logical px for one glow pass. Scales with the font size so a
+ * 12 px HUD label and a 96 px title glow proportionally at the same strength.
+ */
+export function labelGlowBlurPx(fontSize: number, glowStrength: number): number {
+  if (!(glowStrength > 0) || !(fontSize > 0)) {
+    return 0;
+  }
+  return fontSize * 0.35 * Math.min(glowStrength, LABEL_GLOW_STRENGTH_LIMIT);
+}
+
+/**
+ * How many times the glyph is re-filled under `shadowBlur`. Canvas shadows are
+ * additive, so a second/third pass is how a glow gets *brighter* rather than
+ * merely wider.
+ */
+export function labelGlowPasses(glowStrength: number): number {
+  if (!(glowStrength > 0)) {
+    return 0;
+  }
+  return Math.min(3, Math.max(1, Math.ceil(glowStrength)));
+}
+
+/**
+ * Extra logical px the label canvas must grow on EACH side so a glow blur or an
+ * outline stroke is not clipped at the box edge. Exactly 0 while both are off, so
+ * an undecorated label keeps its historical canvas size (and pixels).
+ */
+export function labelDecorationPadding(
+  fontSize: number,
+  glowStrength = 0,
+  outlineWidth = 0
+): number {
+  const blur = labelGlowBlurPx(fontSize, glowStrength);
+  const outline = outlineWidth > 0 ? outlineWidth : 0;
+  if (blur <= 0 && outline <= 0) {
+    return 0;
+  }
+  // The visible extent of a canvas shadow is ~1.5× its blur radius; the stroke is
+  // centred on the glyph outline, so half of it sits outside.
+  return Math.ceil(blur * 1.5 + outline + 2);
+}
+
 export interface LabelLayoutLine {
   text: string;
   width: number;
@@ -127,6 +173,14 @@ export interface LabelPaintOptions {
    * everything.
    */
   visibleCharacters?: number;
+  /** Glow colour; empty/omitted glows in the text {@link color}. */
+  glowColor?: string;
+  /** Glow amount 0..{@link LABEL_GLOW_STRENGTH_LIMIT}; 0 (default) = no glow. */
+  glowStrength?: number;
+  /** Outline colour (default `#000000`), used when {@link outlineWidth} > 0. */
+  outlineColor?: string;
+  /** Outline half-width in logical px; 0 (default) = no outline. */
+  outlineWidth?: number;
 }
 
 /**
@@ -162,6 +216,20 @@ export function paintLabelCanvas(ctx: CanvasRenderingContext2D, options: LabelPa
     startY = height - paddingY - layout.textHeight;
   }
 
+  // Decoration (off by default): an outline underlay drawn with strokeText, then
+  // additive glow passes under ctx.shadowBlur, then the plain fill on top.
+  const glowStrength = Math.min(LABEL_GLOW_STRENGTH_LIMIT, Math.max(0, options.glowStrength ?? 0));
+  const glowBlur = labelGlowBlurPx(options.fontSize, glowStrength);
+  const glowPasses = labelGlowPasses(glowStrength);
+  const glowColor = options.glowColor?.trim() ? options.glowColor : options.color;
+  const outlineWidth = Math.max(0, options.outlineWidth ?? 0);
+  if (outlineWidth > 0) {
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.lineWidth = outlineWidth * 2;
+    ctx.strokeStyle = options.outlineColor?.trim() ? options.outlineColor : '#000000';
+  }
+
   let budget = options.visibleCharacters ?? Infinity;
   for (let i = 0; i < layout.lines.length; i++) {
     if (budget <= 0) {
@@ -173,6 +241,19 @@ export function paintLabelCanvas(ctx: CanvasRenderingContext2D, options: LabelPa
     if (shown.length === 0) {
       continue;
     }
-    ctx.fillText(shown, x, startY + i * layout.lineHeight + layout.lineHeight / 2);
+    const y = startY + i * layout.lineHeight + layout.lineHeight / 2;
+    if (outlineWidth > 0) {
+      ctx.strokeText(shown, x, y);
+    }
+    if (glowBlur > 0) {
+      ctx.save();
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = glowBlur;
+      for (let pass = 0; pass < glowPasses; pass++) {
+        ctx.fillText(shown, x, y);
+      }
+      ctx.restore();
+    }
+    ctx.fillText(shown, x, y);
   }
 }

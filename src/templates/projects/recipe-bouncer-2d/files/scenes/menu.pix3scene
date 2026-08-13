@@ -3,11 +3,32 @@
 # (Project Settings → Default Export Scene Path): a full build and "Start Game"
 # boot here. PLAY transitions to the game scene (main.pix3scene) via a fade.
 # Wired by scripts/MenuFlow.ts. Iterate on the GAME in main.pix3scene.
+#
+# Same neon recipe as the game scene: darkest ColorRect + a tinted radial
+# gradient placeholder, a `PostProcess` node so bright accents bloom, and
+# Label2D's own glow on the text. Nothing here is a CanvasLayer2D, so the title
+# gets BOTH the canvas glow and the bloom — keep `menuBloomIntensity` modest or
+# large white type turns to mush.
 version: 1.0.0
 metadata:
   author: Pix3 Recipe
   description: Menu scene — entry point; PLAY transitions to the game
 root:
+  - id: menu-post-fx
+    type: PostProcess
+    name: Menu Post FX
+    properties:
+      affect2D: true
+      bloomEnabled: true
+      bloomIntensity: 0.7
+      bloomThreshold: 0.6
+      bloomSmoothing: 0.2
+      bloomRadius: 0.8
+      vignetteEnabled: true
+      vignetteOffset: 0.28
+      vignetteDarkness: 0.55
+      chromaticAberrationEnabled: false
+    children: []
   - id: menu-root
     type: Group2D
     name: Menu Root
@@ -32,7 +53,7 @@ root:
         properties:
           width: 1080
           height: 1920
-          color: "#141a2e"
+          color: "#05030f"
           transform:
             position: [0, 0]
             scale: [1, 1]
@@ -42,16 +63,74 @@ root:
             horizontalAlign: stretch
             verticalAlign: stretch
         children: []
+      - id: menu-bg-glow
+        type: Sprite2D
+        name: Menu Background Glow
+        properties:
+          texture: { type: 'texture', url: 'res://sprites/ph-bg.png' }
+          width: 1080
+          height: 1920
+          effects:
+            - type: core:tint
+              params: { color: "#5a2df0", amount: 1 }
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      # The project title is patched into this node on project creation — keep
+      # the id. `width` is set so a long title WRAPS instead of running off
+      # screen (Label2D word-wraps to its box; 0 would auto-size and overflow).
       - id: title-label
         type: Label2D
         name: Title Label
         properties:
           label: "{{PROJECT_NAME}}"
-          labelFontSize: 96
+          labelFontSize: 112
           labelColor: "#ffffff"
           labelAlign: center
+          width: 960
+          glowColor: "#2ef2ff"
+          glowStrength: 2.5
           transform:
             position: [0, 420]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        components:
+          - id: title-pop
+            type: core:PopIn
+            enabled: true
+            config:
+              from: 0.55
+              duration: 0.5
+              easing: backOut
+              playOnStart: true
+              triggerEvent: ""
+          - id: title-breathe
+            type: core:Sine
+            enabled: true
+            config:
+              amplitude: 12
+              frequency: 0.28
+              axis: y
+        children: []
+      - id: title-rule
+        type: ColorRect2D
+        name: Title Rule
+        properties:
+          width: 520
+          height: 6
+          color: "#2ef2ff"
+          transform:
+            position: [0, 352]
             scale: [1, 1]
             rotation: 0
           layout:
@@ -65,10 +144,12 @@ root:
         properties:
           label: "KEEP THE BALL ALIVE."
           labelFontSize: 40
-          labelColor: "#93a3c9"
+          labelColor: "#8ffcff"
           labelAlign: center
+          glowColor: "#2ef2ff"
+          glowStrength: 1
           transform:
-            position: [0, 300]
+            position: [0, 280]
             scale: [1, 1]
             rotation: 0
           layout:
@@ -84,10 +165,10 @@ root:
           height: 140
           label: "PLAY"
           labelFontSize: 56
-          labelColor: "#141a2e"
-          backgroundColor: "#f5ae39"
-          hoverColor: "#ffc862"
-          pressedColor: "#d4922a"
+          labelColor: "#0d0724"
+          backgroundColor: "#ffd23f"
+          hoverColor: "#ffe98a"
+          pressedColor: "#d49a1f"
           buttonAction: play
           transform:
             position: [0, -60]
@@ -97,4 +178,14 @@ root:
             enabled: true
             horizontalAlign: center
             verticalAlign: center
+        components:
+          - id: play-pop
+            type: core:PopIn
+            enabled: true
+            config:
+              from: 0.7
+              duration: 0.45
+              easing: backOut
+              playOnStart: true
+              triggerEvent: ""
         children: []

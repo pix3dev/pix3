@@ -240,10 +240,17 @@ A multiline text label for 2D UI. Wraps text to a fixed box, aligns it in both a
 | `width` | number | 0 | Fixed box width; text word-wraps to it. 0 = auto-size (no wrap) |
 | `height` | number | 0 | Fixed box height for vertical alignment. 0 = auto-size to the lines |
 | `typewriterSpeed` | number | 0 | Characters per second for the typewriter reveal; 0 = off |
+| `glowColor` | color | #ffffff | Glow colour; inert while `glowStrength` is 0 |
+| `glowStrength` | number | 0 | Neon glow around the glyphs (0–4); 0 = off |
+| `outlineColor` | color | #000000 | Outline colour; inert while `outlineWidth` is 0 |
+| `outlineWidth` | number | 0 | Contrast outline half-width in px; 0 = off |
 
 **Usage Notes:**
 - The box is centered on the node position (like other UI controls); alignment places the text inside that box.
 - Set `width` manually to get word wrap — there is no auto-grow layout yet.
+- **Glow/outline are canvas-drawn** (`ctx.shadowBlur` passes + a `strokeText` underlay), not post-processing — which is exactly why HUD text can glow: a `CanvasLayer2D` subtree is drawn *after* the post-processing composer and can never bloom. Both are off by default, so existing scenes are unchanged.
+- Turning either on grows the label's canvas (and the mesh showing it) by a bleed on each side so the blur/stroke isn't clipped; the tap target stays the authored box.
+- `glowStrength` 1 is a subtle halo, 2–3 reads as neon (each whole step adds an additive shadow pass, capped at 3); the blur scales with `labelFontSize`, so a HUD label and a title glow proportionally.
 - Scripts: `setText(text)` replaces the text and restarts the typewriter; `skipTypewriter()` completes it instantly; `restartTypewriter()` replays it; `isTyping` reports progress; the node emits `'typewriter-complete'` when the reveal finishes.
 - The typewriter runs in play mode only (it advances in `tick`); the editor viewport always shows the full text.
 

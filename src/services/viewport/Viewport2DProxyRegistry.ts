@@ -26,6 +26,7 @@ import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
 import {
   LABEL_AUTO_SIZE_BLEED,
+  labelDecorationPadding,
   layoutLabelText,
   paintLabelCanvas,
   type LabelLayout,
@@ -1889,7 +1890,13 @@ export class Viewport2DProxyRegistry {
     const dprRaw = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const dpr = Math.max(1, Math.min(3, dprRaw));
 
-    const { width, height, layout } = this.measureLabel2DBox(node);
+    const { width: boxWidth, height: boxHeight, layout } = this.measureLabel2DBox(node);
+    // Mirror of the runtime's decoration bleed: glow/outline grow the canvas and
+    // the mesh, never the authored box the text aligns to.
+    const fontSize = Math.max(1, node.labelFontSize || 16);
+    const pad = labelDecorationPadding(fontSize, node.glowStrength ?? 0, node.outlineWidth ?? 0);
+    const width = boxWidth + pad * 2;
+    const height = boxHeight + pad * 2;
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(width * dpr));
@@ -1907,12 +1914,18 @@ export class Viewport2DProxyRegistry {
     paintLabelCanvas(ctx, {
       layout,
       fontFamily: node.labelFontFamily,
-      fontSize: Math.max(1, node.labelFontSize || 16),
+      fontSize,
       color: node.labelColor,
       align: node.labelAlign,
       vAlign: node.labelVAlign,
       width,
       height,
+      paddingX: pad,
+      paddingY: pad,
+      glowColor: node.glowColor,
+      glowStrength: node.glowStrength ?? 0,
+      outlineColor: node.outlineColor,
+      outlineWidth: node.outlineWidth ?? 0,
     });
 
     const texture = new THREE.CanvasTexture(canvas);

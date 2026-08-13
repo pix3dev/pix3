@@ -37,6 +37,13 @@ a conversation.
   a stale checklist reads as a frozen product.
 - Every increment ends **playable**. Never leave the game in a state where the stage is broken
   and the fix is "in the next turn".
+- **Before building a genre staple, recall the real one.** One thought, not research: how is
+  this thing built in the actual genre — which geometry, gaps and angles make it PLAYABLE
+  (flippers pivot wide so their tips guard one narrow centre gap and the sides are walled off;
+  bricks sit where the ball can reach; a snake grid fits the field)? Write the 2–3 constraints
+  you are building to into `design/decisions.md`, then build to them. The canonical version is
+  in your training data — consult it before the first `create_node`, not after the user sees a
+  broken board.
 
 ## 3. Prove it, then say what you proved
 
@@ -55,6 +62,15 @@ not, and cannot tell you a number. Keep screenshots for questions that are genui
 The harness enforces this: while a gameplay change of yours is unproven, `viewport_screenshot`
 and `analyze_image` refuse and point you back at `game_input`/`game_observe`. When the question
 really is visual, pass `visualReason` saying so and they run.
+
+**Prove the FUNCTION, not the mechanism.** "The key moves the flipper" is mechanism; the
+increment's purpose is "the flipper can save the ball". After a mechanic lands, run the game
+twice: a few seconds with NO input (`game_observe`), then a driven run (`game_input`) — the
+driven run must measurably beat the unattended one (survival time, score, game state). An
+increment that leaves the game losing itself in seconds regardless of input is NOT done,
+whatever the per-node verdicts say — and the stage idles unattended between turns, so an
+instantly-lost board is what the user stares at. Measured: a flipper increment shipped with
+every key "proven" while the ball drained around the flippers' open sides in ~3 s, every run.
 
 **`visible: true` does NOT mean on screen.** It is the node's own flag; an invisible ancestor
 hides the entire subtree, so the node draws nothing and cannot be tapped. Showing a result label
@@ -112,6 +128,12 @@ Placeholders are already in place and already tinted to the brief's palette. Gen
 the background (`queue_asset` when it exists, otherwise as a late increment) and keep playing
 the game with placeholders until then. The chat must never sit for 40 seconds waiting on an
 image.
+
+**Juice is cheap — spend it as you go.** `scene.juice.burst(target)`,
+`scene.juice.floatText('+100', { at: target })`, `scene.audio.sfx('score')` and `Label2D`'s
+`glowColor`/`glowStrength` are one-liners with no assets and no setup. Add the sound, the burst
+and the score popup **in the same increment as the mechanic they belong to** — feel deferred to a
+late "polish" increment is feel the user never gets to see.
 
 ## 7. Keep your own context small
 

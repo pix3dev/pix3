@@ -433,6 +433,36 @@ export class AudioService {
       );
   }
 
+  /**
+   * Output sample rate, or null when Web Audio is unavailable. Together with
+   * {@link createBuffer} this is the whole surface procedural audio needs (see
+   * {@link ./SfxSynth}) — no caller has to reach for the raw AudioContext.
+   */
+  getSampleRate(): number | null {
+    return this.context?.sampleRate ?? null;
+  }
+
+  /**
+   * Allocate an empty buffer at the output sample rate for callers that synthesize
+   * their own samples. Null (never a throw) when Web Audio is unavailable, which is
+   * what makes procedural SFX a silent no-op in headless runs and tests.
+   */
+  createBuffer(lengthSamples: number, channels = 1): AudioBuffer | null {
+    if (!this.context) {
+      return null;
+    }
+    try {
+      return this.context.createBuffer(
+        Math.max(1, Math.floor(channels)),
+        Math.max(1, Math.floor(lengthSamples)),
+        this.context.sampleRate
+      );
+    } catch (error) {
+      console.warn('[AudioService] Failed to allocate an AudioBuffer:', error);
+      return null;
+    }
+  }
+
   async decodeAudioData(audioData: ArrayBuffer): Promise<AudioBuffer> {
     if (!this.context) {
       throw new Error('AudioContext is unavailable.');

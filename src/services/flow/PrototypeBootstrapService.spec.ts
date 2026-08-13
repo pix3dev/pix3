@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildPlannerPrompt,
+  defaultThemeForRecipe,
+  effectiveTheme,
   extractJsonObject,
   fallbackBrief,
   deriveTitle,
   renderBriefMarkdown,
   renderFirstTurnMessage,
   renderProgressMarkdown,
+  renderStyleMarkdown,
   summarizeDocument,
+  themedTunables,
   validateBrief,
+  DEFAULT_THEME,
   FALLBACK_RECIPE_ID,
+  PLANNER_SYSTEM_PROMPT,
+  THEME_TUNABLES,
+  type PrototypeBrief,
 } from './PrototypeBootstrapService';
 import { parseChecklist } from './FlowPlanService';
 import { resolveTunables, type RecipeTunable } from './recipe-contract';
@@ -138,6 +147,43 @@ describe('validateBrief', () => {
     expect(brief.entities.map(entity => entity.name)).toEqual(['Hero']);
   });
 
+  it('keeps a theme the packs know, whatever case the model wrote it in', () => {
+    const { brief, issues } = validateBrief(
+      { ...wellFormed, style: { ...wellFormed.style, theme: 'Neon' } },
+      'a bubble tapper'
+    );
+
+    expect(brief.style.theme).toBe('neon');
+    expect(issues).toEqual([]);
+  });
+
+  it('drops an unknown theme so the recipe default applies, and says which one was asked for', () => {
+    const { brief, issues } = validateBrief(
+      { ...wellFormed, style: { ...wellFormed.style, theme: 'vaporwave' } },
+      'a bubble tapper'
+    );
+
+    expect(brief.style.theme).toBeUndefined();
+    expect(effectiveTheme(brief)).toBe(defaultThemeForRecipe('recipe-tapper-2d'));
+    expect(issues.join(' ')).toContain('vaporwave');
+  });
+
+  it('keeps the wow beats and drops the entries that are not text', () => {
+    const { brief } = validateBrief(
+      { ...wellFormed, wow: ['combo popups', 42, '  ', 'a board tilt'] },
+      'a bubble tapper'
+    );
+
+    expect(brief.wow).toEqual(['combo popups', 'a board tilt']);
+  });
+
+  it('leaves wow absent when the planner returns none — spectacle is never defaulted', () => {
+    expect(validateBrief(wellFormed, 'a bubble tapper').brief.wow).toBeUndefined();
+    expect(
+      validateBrief({ ...wellFormed, wow: 'lots of juice' }, 'a tapper').brief.wow
+    ).toBeUndefined();
+  });
+
   it('substitutes the default checklist when the planner returns no increments', () => {
     const { brief, issues } = validateBrief({ ...wellFormed, increments: [] }, 'a bubble tapper');
 
@@ -173,6 +219,81 @@ describe('validateBrief', () => {
   });
 });
 
+/**
+ * Style packs are the deterministic half of the "wow" floor: the first frame has to look chosen
+ * rather than defaulted, and it has to cost the agent nothing. So the pack is code, it reaches the
+ * scene only through tunables the recipe declares, and anything it names that the recipe has not
+ * caught up with must degrade into a sentence for the agent rather than a blind YAML edit.
+ */
+describe('style themes', () => {
+  const briefWith = (patch: Partial<PrototypeBrief>): PrototypeBrief => ({
+    ...fallbackBrief('a neon pinball'),
+    ...patch,
+  });
+  const bouncer = briefWith({ recipeId: 'recipe-bouncer-2d' });
+
+  it('takes the look from the recipe genre when the brief names none', () => {
+    expect(effectiveTheme(bouncer)).toBe('neon');
+    expect(effectiveTheme(briefWith({ recipeId: 'recipe-tapper-2d' }))).toBe(DEFAULT_THEME);
+  });
+
+  it('lets a theme the brief names beat the genre default', () => {
+    const retro = briefWith({
+      recipeId: 'recipe-bouncer-2d',
+      style: { palette: [], artStyle: '', mood: '', theme: 'retro' },
+    });
+
+    expect(effectiveTheme(retro)).toBe('retro');
+    expect(themedTunables(retro).bgColor).toBe(THEME_TUNABLES.retro.bgColor);
+  });
+
+  it('puts the pack UNDER the brief: a tunable the idea asked for always wins', () => {
+    const values = themedTunables({ ...bouncer, tunables: { bloomIntensity: 0.2 } });
+
+    expect(values.bloomIntensity).toBe(0.2);
+    expect(values.boardColor).toBe(THEME_TUNABLES.neon.boardColor);
+  });
+
+  it('leaves the background to a palette measured from the user reference', () => {
+    // The pack is a default, and a colour quantized out of the user's own image is not.
+    const withPalette = briefWith({
+      recipeId: 'recipe-bouncer-2d',
+      style: { palette: ['#123456', '#abcdef'], artStyle: '', mood: '' },
+    });
+
+    expect(themedTunables(withPalette).bgColor).toBeUndefined();
+    expect(themedTunables(withPalette).boardColor).toBe(THEME_TUNABLES.neon.boardColor);
+  });
+
+  it('degrades a pack key the recipe does not declare into a note, never a guessed patch', () => {
+    // `bloomIntensity` exists in the bouncer recipe and nowhere else; the older recipes must not
+    // acquire an invented tuning point just because the neon pack mentions one.
+    const declared = new Map<string, RecipeTunable>([
+      ['bgColor', { key: 'bgColor', node: 'game-background', property: 'color' }],
+    ]);
+    const resolution = resolveTunables(themedTunables(bouncer), declared);
+
+    expect(resolution.applied.map(entry => entry.tunable.key)).toEqual(['bgColor']);
+    expect(resolution.unknown.map(entry => entry.key)).toEqual(['boardColor', 'bloomIntensity']);
+
+    const markdown = renderBriefMarkdown(bouncer, 'a neon pinball', resolution, []);
+    expect(markdown).toContain('For the agent — asked for, not applied');
+    expect(markdown).toContain('`bloomIntensity`');
+  });
+
+  it('records the chosen look in both documents the agent reads back', () => {
+    const briefMarkdown = renderBriefMarkdown(
+      bouncer,
+      'a neon pinball',
+      { applied: [], unknown: [], rejected: [] },
+      []
+    );
+
+    expect(briefMarkdown).toMatch(/^- Theme: neon \(recipe default\)$/m);
+    expect(renderStyleMarkdown(bouncer, [])).toContain('**Theme:** neon');
+  });
+});
+
 describe('deriveTitle', () => {
   it('takes the first few words and capitalizes them', () => {
     expect(deriveTitle('a runner with obstacles and coins and more')).toBe(
@@ -204,6 +325,36 @@ describe('summarizeDocument', () => {
   });
 });
 
+/**
+ * What the planner is told about the skeleton is the difference between a first turn that builds
+ * flippers and a first turn that rebuilds controls the project already shipped with — the single
+ * most expensive way an increment can be wasted, so the rule text is held here.
+ */
+describe('planner prompt', () => {
+  it('tells the planner the recipe already plays and the first increment is the mechanic', () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain('ALREADY ships a playable skeleton');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('never write "controls"');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('makes this game THIS game');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('`wow` is 2 to 4 spectacle beats');
+    expect(PLANNER_SYSTEM_PROMPT).toContain('`style.theme` is one of neon, pastel, retro, minimal');
+  });
+
+  it('shows a JSON shape carrying a theme, wow beats and a mechanic-first plan', () => {
+    const shape = extractJsonObject(buildPlannerPrompt({ prompt: 'a snake game' }, [], [], []));
+
+    expect(shape).not.toBeNull();
+    expect((shape?.style as { theme?: string }).theme).toBe('minimal');
+    expect(shape?.wow).toHaveLength(2);
+    const increments = shape?.increments as string[];
+    expect(increments[0]).not.toMatch(/controls|core loop/i);
+    // An em dash inside an item would be parsed as the tracker's note tail, so the example must
+    // not teach the shape that breaks it.
+    for (const item of [...increments, ...(shape?.wow as string[])]) {
+      expect(item).not.toContain('—');
+    }
+  });
+});
+
 describe('generated design docs', () => {
   const brief = fallbackBrief('a coin tapper');
 
@@ -212,8 +363,27 @@ describe('generated design docs', () => {
 
     expect(steps).toHaveLength(brief.increments.length);
     expect(steps.filter(step => step.status === 'active')).toHaveLength(1);
-    expect(steps[0]).toMatchObject({ status: 'active', title: 'Controls and the core loop' });
+    // Even the blind fallback checklist opens on what makes the game itself: the recipe already
+    // shipped the controls and the loop, so an increment for them is a wasted turn.
+    expect(steps[0]).toMatchObject({ status: 'active', title: brief.increments[0] });
+    expect(steps[0].title).not.toMatch(/controls|core loop/i);
     expect(steps[1].status).toBe('todo');
+  });
+
+  it('appends the wow beats to the same checklist as late pending items', () => {
+    const withWow: PrototypeBrief = {
+      ...brief,
+      wow: ['combo popups on a streak', 'slow motion on the last life'],
+    };
+
+    const steps = parseChecklist(renderProgressMarkdown(withWow));
+
+    expect(steps).toHaveLength(brief.increments.length + 2);
+    expect(steps.filter(step => step.status === 'active')).toHaveLength(1);
+    expect(steps.slice(-2).map(step => [step.title, step.status])).toEqual([
+      ['combo popups on a streak', 'todo'],
+      ['slow motion on the last life', 'todo'],
+    ]);
   });
 
   it('writes a brief whose title and pitch lines the Flow header can read back', () => {

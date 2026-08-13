@@ -73,18 +73,29 @@ function collectTextureUrls(yamlText: string): string[] {
 describe('bundled project templates', () => {
   beforeAll(() => {
     // happy-dom has no canvas 2D context; Label2D/Button2D render label text
-    // through it, so parseScene needs this minimal stub.
+    // through it, so parseScene needs this minimal stub. It has to cover the glow
+    // and outline passes too (`save`/`restore`/`strokeText` + the shadow fields):
+    // a template that authors `glowStrength`/`outlineWidth` would otherwise fail
+    // here on a missing stub method rather than on anything wrong with the scene.
     const canvasProto = HTMLCanvasElement.prototype as unknown as {
       getContext: (id: string) => unknown;
     };
     canvasProto.getContext = vi.fn(() => ({
       setTransform: () => undefined,
       scale: () => undefined,
+      save: () => undefined,
+      restore: () => undefined,
       fillRect: () => undefined,
       clearRect: () => undefined,
       fillText: () => undefined,
+      strokeText: () => undefined,
       measureText: () => ({ width: 0 }),
       fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 0,
+      lineJoin: '',
+      shadowColor: '',
+      shadowBlur: 0,
       font: '',
       textBaseline: '',
       textAlign: '',

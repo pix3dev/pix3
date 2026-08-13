@@ -8,10 +8,24 @@
 # flippers) works with no extra code, and no `core:Hitbox2D` is involved:
 #   walls/*   -> oriented boxes    bumpers/* -> circles
 #   paddles/* -> oriented boxes    drain     -> trigger box (lose a ball)
+# `board-trim` is DECORATION ONLY — it hangs off `board`, not off `walls`, so
+# its strips are not colliders. Never move a visual into a collider group.
+#
+# The neon look is three cheap ingredients, all authored here:
+#   1. `post-fx` (PostProcess, affect2D) — bloom picks up whatever is bright
+#      (cyan trim, gold paddle, white ball, bumper cores) + a light vignette.
+#   2. `bg-glow` — a near-white radial-gradient placeholder tinted violet, over
+#      the darkest ColorRect (`game-background`). ColorRect2D has no gradient.
+#   3. HUD `Label2D` glow (`glowColor`/`glowStrength`): the HUD is a
+#      CanvasLayer2D, drawn AFTER post-processing, so it can never bloom —
+#      its glow is canvas-drawn instead. (`outlineColor`/`outlineWidth` are the
+#      matching knobs for text that has to sit over busy gameplay; the HUD here
+#      sits over plain background, so glow alone carries it.)
 #
 # Stable node ids (design/recipe.md is the contract — do not rename these):
-#   game-root, game-background, board, walls, wall-left, wall-right, wall-top,
-#   bumpers, bumper-a, bumper-b, bumper-c, paddles, paddle, ball, drain,
+#   post-fx, game-root, game-background, bg-glow, board, board-floor,
+#   board-trim, walls, wall-left, wall-right, wall-top, bumpers, bumper-a,
+#   bumper-b, bumper-c, paddles, paddle, ball, drain,
 #   hud, score-label, time-label, lives-bar, menu-button,
 #   result-overlay, result-label, retry-button
 #
@@ -22,6 +36,24 @@ metadata:
   author: Pix3 Recipe
   description: Bouncer gameplay — a ball under gravity, a paddle, bumpers and a drain
 root:
+  # Renders nothing; the renderer picks it up and builds the effect stack.
+  # `bloomIntensity` is a recipe tunable (design/recipe.md) — the Flow theme
+  # pack turns it up for neon and down for pastel.
+  - id: post-fx
+    type: PostProcess
+    name: Post FX
+    properties:
+      affect2D: true
+      bloomEnabled: true
+      bloomIntensity: 0.9
+      bloomThreshold: 0.58
+      bloomSmoothing: 0.2
+      bloomRadius: 0.78
+      vignetteEnabled: true
+      vignetteOffset: 0.3
+      vignetteDarkness: 0.5
+      chromaticAberrationEnabled: false
+    children: []
   - id: game-root
     type: Group2D
     name: Game Root
@@ -57,6 +89,12 @@ root:
           ballNode: ball
           rules: "bumper:score:100;paddle:score:10;drain:damage:1"
           minImpactSpeed: 60
+          punchAmount: 0.34
+          hitstopMs: 50
+          burstCount: 18
+          popupFormat: "+{value}"
+          feedbackColor: "#ffe066"
+          sfxEnabled: true
           scoreSound: ""
           damageSound: ""
     children:
@@ -66,7 +104,26 @@ root:
         properties:
           width: 1080
           height: 1920
-          color: "#141a2e"
+          color: "#05030f"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: bg-glow
+        type: Sprite2D
+        name: Background Glow
+        properties:
+          texture: { type: 'texture', url: 'res://sprites/ph-bg.png' }
+          width: 1080
+          height: 1920
+          effects:
+            - type: core:tint
+              params: { color: "#5a2df0", amount: 1 }
           transform:
             position: [0, 0]
             scale: [1, 1]
@@ -87,13 +144,15 @@ root:
             scale: [1, 1]
             rotation: 0
         children:
+          # Translucent so the background glow reads through the playfield.
           - id: board-floor
             type: ColorRect2D
             name: Board Floor
             properties:
               width: 1000
               height: 1600
-              color: "#1d2743"
+              color: "#120a33"
+              opacity: 0.62
               transform:
                 position: [0, 0]
                 scale: [1, 1]
@@ -105,8 +164,8 @@ root:
             properties:
               width: 1000
               height: 160
-              color: "#ff4d6d"
-              opacity: 0.22
+              color: "#ff2d6f"
+              opacity: 0.18
               transform:
                 position: [0, -760]
                 scale: [1, 1]
@@ -129,7 +188,7 @@ root:
                 properties:
                   width: 40
                   height: 1600
-                  color: "#39456f"
+                  color: "#1c1245"
                   transform:
                     position: [-480, 0]
                     scale: [1, 1]
@@ -141,7 +200,7 @@ root:
                 properties:
                   width: 40
                   height: 1600
-                  color: "#39456f"
+                  color: "#1c1245"
                   transform:
                     position: [480, 0]
                     scale: [1, 1]
@@ -153,12 +212,78 @@ root:
                 properties:
                   width: 1000
                   height: 40
-                  color: "#39456f"
+                  color: "#1c1245"
                   transform:
                     position: [0, 780]
                     scale: [1, 1]
                     rotation: 0
                 children: []
+          # Decoration only (see the header): thin bright strips hugging the
+          # inner faces of the walls. Bright enough to cross the bloom
+          # threshold, thin enough to read as a neon tube rather than a slab.
+          - id: board-trim
+            type: Group2D
+            name: Board Trim
+            properties:
+              width: 1000
+              height: 1600
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: trim-left
+                type: ColorRect2D
+                name: Trim Left
+                properties:
+                  width: 10
+                  height: 1560
+                  color: "#2ef2ff"
+                  transform:
+                    position: [-455, -20]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trim-right
+                type: ColorRect2D
+                name: Trim Right
+                properties:
+                  width: 10
+                  height: 1560
+                  color: "#2ef2ff"
+                  transform:
+                    position: [455, -20]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trim-top
+                type: ColorRect2D
+                name: Trim Top
+                properties:
+                  width: 920
+                  height: 10
+                  color: "#2ef2ff"
+                  transform:
+                    position: [0, 755]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trim-drain
+                type: ColorRect2D
+                name: Trim Drain Line
+                properties:
+                  width: 920
+                  height: 6
+                  color: "#ff2d6f"
+                  transform:
+                    position: [0, -676]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          # Each bumper is a Group2D so its collider stays one circle
+          # (radius = width/2) while the visual is two concentric rings: a
+          # magenta corona and a bright core that bloom-glows. `punchScale`
+          # on the group pops both together.
           - id: bumpers
             type: Group2D
             name: Bumpers
@@ -171,50 +296,131 @@ root:
                 rotation: 0
             children:
               - id: bumper-a
-                type: Sprite2D
+                type: Group2D
                 name: Bumper A
                 properties:
-                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
                   width: 160
                   height: 160
-                  effects:
-                    - type: core:tint
-                      params: { color: "#7ee787", amount: 1 }
                   transform:
                     position: [-230, 260]
                     scale: [1, 1]
                     rotation: 0
-                children: []
+                children:
+                  - id: bumper-a-halo
+                    type: Sprite2D
+                    name: Bumper A Halo
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 216
+                      height: 216
+                      opacity: 0.55
+                      effects:
+                        - type: core:tint
+                          params: { color: "#ff6cf2", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
+                  - id: bumper-a-core
+                    type: Sprite2D
+                    name: Bumper A Core
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 160
+                      height: 160
+                      effects:
+                        - type: core:tint
+                          params: { color: "#8ffcff", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
               - id: bumper-b
-                type: Sprite2D
+                type: Group2D
                 name: Bumper B
                 properties:
-                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
                   width: 160
                   height: 160
-                  effects:
-                    - type: core:tint
-                      params: { color: "#7ee787", amount: 1 }
                   transform:
                     position: [230, 260]
                     scale: [1, 1]
                     rotation: 0
-                children: []
+                children:
+                  - id: bumper-b-halo
+                    type: Sprite2D
+                    name: Bumper B Halo
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 216
+                      height: 216
+                      opacity: 0.55
+                      effects:
+                        - type: core:tint
+                          params: { color: "#ff6cf2", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
+                  - id: bumper-b-core
+                    type: Sprite2D
+                    name: Bumper B Core
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 160
+                      height: 160
+                      effects:
+                        - type: core:tint
+                          params: { color: "#8ffcff", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
               - id: bumper-c
-                type: Sprite2D
+                type: Group2D
                 name: Bumper C
                 properties:
-                  texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
                   width: 160
                   height: 160
-                  effects:
-                    - type: core:tint
-                      params: { color: "#7ee787", amount: 1 }
                   transform:
                     position: [0, 520]
                     scale: [1, 1]
                     rotation: 0
-                children: []
+                children:
+                  - id: bumper-c-halo
+                    type: Sprite2D
+                    name: Bumper C Halo
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 216
+                      height: 216
+                      opacity: 0.55
+                      effects:
+                        - type: core:tint
+                          params: { color: "#ff6cf2", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
+                  - id: bumper-c-core
+                    type: Sprite2D
+                    name: Bumper C Core
+                    properties:
+                      texture: { type: 'texture', url: 'res://sprites/ph-bumper.png' }
+                      width: 160
+                      height: 160
+                      effects:
+                        - type: core:tint
+                          params: { color: "#8ffcff", amount: 1 }
+                      transform:
+                        position: [0, 0]
+                        scale: [1, 1]
+                        rotation: 0
+                    children: []
           - id: paddles
             type: Group2D
             name: Paddles
@@ -235,7 +441,7 @@ root:
                   height: 60
                   effects:
                     - type: core:tint
-                      params: { color: "#f5ae39", amount: 1 }
+                      params: { color: "#ffd23f", amount: 1 }
                   transform:
                     position: [0, -620]
                     scale: [1, 1]
@@ -286,6 +492,9 @@ root:
                   bumperRestitution: 1.3
                   resetDelaySec: 0.7
             children: []
+      # A CanvasLayer2D is drawn after post-processing and is never bloomed —
+      # that is deliberate (HUD text stays crisp). Its glow comes from
+      # Label2D's own canvas-drawn `glowColor`/`glowStrength`.
       - id: hud
         type: CanvasLayer2D
         name: HUD
@@ -313,9 +522,11 @@ root:
             name: Score Label
             properties:
               label: "SCORE 0"
-              labelFontSize: 44
+              labelFontSize: 56
               labelColor: "#ffffff"
               labelAlign: left
+              glowColor: "#2ef2ff"
+              glowStrength: 2
               transform:
                 position: [-340, 880]
                 scale: [1, 1]
@@ -330,9 +541,11 @@ root:
             name: Time Label
             properties:
               label: "0s"
-              labelFontSize: 44
-              labelColor: "#f5ae39"
+              labelFontSize: 46
+              labelColor: "#ffe066"
               labelAlign: center
+              glowColor: "#ffd23f"
+              glowStrength: 1.5
               transform:
                 position: [0, 880]
                 scale: [1, 1]
@@ -351,8 +564,8 @@ root:
               minValue: 0
               maxValue: 3
               value: 3
-              barColor: "#ff4d6d"
-              backBackgroundColor: "#2a3352"
+              barColor: "#ff2d6f"
+              backBackgroundColor: "#1c1245"
               showBorder: false
               transform:
                 position: [340, 885]
@@ -371,10 +584,10 @@ root:
               height: 72
               label: "MENU"
               labelFontSize: 30
-              labelColor: "#ffffff"
-              backgroundColor: "#2a3352"
-              hoverColor: "#3a446b"
-              pressedColor: "#1d2743"
+              labelColor: "#8ffcff"
+              backgroundColor: "#1c1245"
+              hoverColor: "#2a1a63"
+              pressedColor: "#0d0724"
               buttonAction: back-to-menu
               transform:
                 position: [-400, -900]
@@ -403,8 +616,8 @@ root:
                 properties:
                   width: 1080
                   height: 1920
-                  color: "#000000"
-                  opacity: 0.7
+                  color: "#05030f"
+                  opacity: 0.78
                   transform:
                     position: [0, 0]
                     scale: [1, 1]
@@ -419,9 +632,11 @@ root:
                 name: Result Label
                 properties:
                   label: "GAME OVER"
-                  labelFontSize: 88
+                  labelFontSize: 96
                   labelColor: "#ffffff"
                   labelAlign: center
+                  glowColor: "#2ef2ff"
+                  glowStrength: 2.5
                   transform:
                     position: [0, 160]
                     scale: [1, 1]
@@ -439,10 +654,10 @@ root:
                   height: 130
                   label: "RETRY"
                   labelFontSize: 50
-                  labelColor: "#141a2e"
-                  backgroundColor: "#f5ae39"
-                  hoverColor: "#ffc862"
-                  pressedColor: "#d4922a"
+                  labelColor: "#0d0724"
+                  backgroundColor: "#ffd23f"
+                  hoverColor: "#ffe98a"
+                  pressedColor: "#d49a1f"
                   buttonAction: retry
                   transform:
                     position: [0, -60]

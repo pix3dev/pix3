@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
+import * as runtime from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 
 /**
@@ -36,6 +37,15 @@ const REQUIRED_SECTIONS = [
   '## Verify',
 ];
 
+/**
+ * Mirror of `MAX_RECIPE_MD_CHARS` in `AgentChatService`: the agent's system prompt
+ * carries `design/recipe.md` verbatim up to this many characters and then cuts the
+ * REST OFF. The tail is where "## Do not touch" and "## Verify" live, so a recipe
+ * that grows past the limit silently stops shipping its own guardrails — assert the
+ * size here instead of discovering it as a badly-behaved agent turn.
+ */
+const MAX_RECIPE_MD_CHARS = 8_000;
+
 /** Lazily-loadable modules for every template script, keyed by glob path. */
 const SCRIPT_MODULES = import.meta.glob('./*/files/scripts/*.ts') as Record<
   string,
@@ -53,15 +63,50 @@ interface TunableEntry {
 
 interface SceneNode {
   id?: unknown;
+  type?: unknown;
   properties?: Record<string, unknown>;
   components?: Array<{ type?: unknown }>;
   children?: SceneNode[];
 }
 
 interface SceneNodeInfo {
+  /** Scene `type` string (`Sprite2D`, `PostProcess`, …). */
+  type: string;
   properties: Record<string, unknown>;
   componentTypes: string[];
 }
+
+/**
+ * Scene `type` string → the property names that node class's schema declares, built
+ * from the live `@pix3/runtime` exports (the same trick `scene-nodes-dts.ts` uses).
+ * Lets a node-level tunable be checked against a real schema, exactly as a
+ * component-level one already is.
+ */
+const NODE_SCHEMA_PROPERTIES: Map<string, string[]> = (() => {
+  const index = new Map<string, string[]>();
+  for (const value of Object.values(runtime as Record<string, unknown>)) {
+    if (typeof value !== 'function') {
+      continue;
+    }
+    const getSchema = (value as { getPropertySchema?: unknown }).getPropertySchema;
+    if (typeof getSchema !== 'function') {
+      continue;
+    }
+    try {
+      const schema = (getSchema as () => PropertySchema).call(value);
+      const nodeType = schema?.nodeType;
+      if (typeof nodeType === 'string' && nodeType && !index.has(nodeType)) {
+        index.set(
+          nodeType,
+          (schema.properties ?? []).map(property => property.name)
+        );
+      }
+    } catch {
+      // Not every export with that static is a node (and some need a live scene).
+    }
+  }
+  return index;
+})();
 
 function listSceneFiles(dir: string, collected: string[] = []): string[] {
   if (!existsSync(dir)) {
@@ -84,6 +129,7 @@ function collectSceneNodes(templateDir: string): Map<string, SceneNodeInfo> {
   const visit = (node: SceneNode): void => {
     if (typeof node.id === 'string') {
       nodes.set(node.id, {
+        type: typeof node.type === 'string' ? node.type : '',
         properties: node.properties ?? {},
         componentTypes: (node.components ?? [])
           .map(component => component?.type)
@@ -156,6 +202,15 @@ describe('flow recipe contract', () => {
       }
     });
 
+    it(`${templateId}: design/recipe.md fits the agent prompt budget`, () => {
+      const markdown = readFileSync(recipePath, 'utf8');
+      expect(
+        markdown.length,
+        `recipe.md is ${markdown.length} chars; over ${MAX_RECIPE_MD_CHARS} the agent prompt ` +
+          `truncates it and the tail sections ("Do not touch", "Verify") stop shipping`
+      ).toBeLessThanOrEqual(MAX_RECIPE_MD_CHARS);
+    });
+
     it(`${templateId}: every tunable points at a real node`, () => {
       const tunables = parseTunables(readFileSync(recipePath, 'utf8'));
       const nodes = collectSceneNodes(templateDir);
@@ -194,5 +249,47 @@ describe('flow recipe contract', () => {
         ).toContain(entry.property);
       }
     });
+
+    it(`${templateId}: every node-level tunable is declared by its node type`, () => {
+      const tunables = parseTunables(readFileSync(recipePath, 'utf8'));
+      const nodes = collectSceneNodes(templateDir);
+
+      for (const [key, entry] of Object.entries(tunables)) {
+        if (entry.component) {
+          continue;
+        }
+        // A node tunable is written straight into the scene YAML, so the node class
+        // has to own the property — a typo here reaches the field as a scene key
+        // nothing reads, with no warning anywhere.
+        const nodeType = nodes.get(entry.node)?.type ?? '';
+        const declared = NODE_SCHEMA_PROPERTIES.get(nodeType);
+        expect(declared, `tunable "${key}" → unknown node type "${nodeType}"`).toBeTruthy();
+        expect(
+          declared,
+          `tunable "${key}" → ${nodeType}.getPropertySchema() does not declare "${entry.property}"`
+        ).toContain(entry.property);
+      }
+    });
   }
+
+  /**
+   * The bouncer is the recipe whose ready-made look the Flow theme packs drive
+   * (`THEME_TUNABLES` sets `bloomIntensity` for neon/pastel/retro). An intensity
+   * patched onto a node with bloom switched off — or one the renderer never reaches
+   * because the 2D band opted out of post-processing — silently buys nothing.
+   */
+  it('recipe-bouncer-2d: every PostProcess node blooms and affects 2D', () => {
+    const nodes = collectSceneNodes(join(TEMPLATES_ROOT, 'recipe-bouncer-2d'));
+    const postProcess = [...nodes].filter(([, info]) => info.type === 'PostProcess');
+    expect(postProcess.length, 'the recipe ships no PostProcess node').toBeGreaterThan(0);
+
+    for (const [id, info] of postProcess) {
+      expect(info.properties.affect2D, `${id}: affect2D must be true in a 2D scene`).toBe(true);
+      expect(info.properties.bloomEnabled, `${id}: bloomEnabled must be authored true`).toBe(true);
+      expect(
+        Number(info.properties.bloomIntensity),
+        `${id}: bloomIntensity must be authored above 0`
+      ).toBeGreaterThan(0);
+    }
+  });
 });

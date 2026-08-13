@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CanvasTexture, Mesh } from 'three';
+import { CanvasTexture, Mesh, Vector2 } from 'three';
 
 import { Label2D, type Label2DProps } from './Label2D';
 import { reactiveSchemaPropertyNames } from '../../../fw/reactive-schema-properties';
+import type { PropertyDefinition } from '../../../fw/property-schema';
 
 interface LabelInternals {
   labelMesh: Mesh | null;
@@ -30,11 +31,16 @@ describe('Label2D script assignments (reactive schema properties)', () => {
         scale: () => {},
         fillRect: () => {},
         fillText: () => {},
+        strokeText: () => {},
         clearRect: () => {},
         save: () => {},
         restore: () => {},
         measureText: (text: string) => ({ width: text.length * 8 }),
         fillStyle: '',
+        strokeStyle: '',
+        lineWidth: 0,
+        shadowColor: '',
+        shadowBlur: 0,
         font: '',
         textAlign: 'center',
         textBaseline: 'middle',
@@ -89,11 +95,71 @@ describe('Label2D script assignments (reactive schema properties)', () => {
 
   it('installs reactive accessors for the Label2D box fields and leaves label accessors alone', () => {
     const names = reactiveSchemaPropertyNames(createLabel());
-    for (const expected of ['width', 'height', 'labelVAlign', 'typewriterSpeed']) {
+    for (const expected of [
+      'width',
+      'height',
+      'labelVAlign',
+      'typewriterSpeed',
+      'glowColor',
+      'glowStrength',
+      'outlineColor',
+      'outlineWidth',
+    ]) {
       expect(names.has(expected), `${expected} should be reactive`).toBe(true);
     }
     // label/labelColor/... are UIControl2D accessors that already re-render on write.
     expect(names.has('label')).toBe(false);
     expect(names.has('labelColor')).toBe(false);
+  });
+
+  it('exposes glow/outline in the schema, off by default, and clamps the strength', () => {
+    const schema = Label2D.getPropertySchema();
+    const byName = new Map(schema.properties.map(prop => [prop.name, prop]));
+    const definition = (name: string): PropertyDefinition => {
+      const found = byName.get(name);
+      expect(found, `${name} should be in the schema`).toBeDefined();
+      return found as PropertyDefinition;
+    };
+    for (const name of ['glowColor', 'glowStrength', 'outlineColor', 'outlineWidth']) {
+      expect(definition(name).ui?.group).toBe('Label');
+    }
+    expect(definition('glowColor').type).toBe('color');
+    expect(definition('outlineColor').type).toBe('color');
+
+    const label = createLabel();
+    // Defaults are inert, so an existing scene renders exactly as before.
+    expect(label.glowStrength).toBe(0);
+    expect(label.outlineWidth).toBe(0);
+
+    definition('glowStrength').setValue(label, 99);
+    expect(label.glowStrength).toBe(4);
+    definition('outlineWidth').setValue(label, -3);
+    expect(label.outlineWidth).toBe(0);
+  });
+
+  it('grows the label box for glow bleed and keeps the authored hit area', () => {
+    const plain = createLabel({ width: 200, height: 60, labelFontSize: 40 });
+    const glowing = createLabel({
+      width: 200,
+      height: 60,
+      labelFontSize: 40,
+      glowStrength: 3,
+      outlineWidth: 2,
+    });
+
+    const boxOf = (label: Label2D): { boxWidth: number; boxHeight: number; pad: number } =>
+      (label as unknown as { renderState: { boxWidth: number; boxHeight: number; pad: number } })
+        .renderState;
+
+    expect(boxOf(plain).pad).toBe(0);
+    expect(boxOf(glowing).pad).toBeGreaterThan(0);
+    expect(boxOf(glowing).boxWidth).toBe(200 + boxOf(glowing).pad * 2);
+    expect(boxOf(glowing).boxHeight).toBe(60 + boxOf(glowing).pad * 2);
+    // The mesh spans the padded canvas, but the tap target stays the authored box.
+    expect(internalsOf(glowing).labelMesh?.scale.x).toBe(boxOf(glowing).boxWidth);
+    const insideAuthored = new Vector2(99, 0);
+    const insidePadOnly = new Vector2(100 + boxOf(glowing).pad, 0);
+    expect(glowing.isPointInBounds(insideAuthored)).toBe(true);
+    expect(glowing.isPointInBounds(insidePadOnly)).toBe(false);
   });
 });

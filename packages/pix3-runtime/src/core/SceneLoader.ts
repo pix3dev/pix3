@@ -1512,6 +1512,10 @@ export class SceneLoader {
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
           typewriterSpeed: this.asNumber(props.typewriterSpeed, undefined),
+          glowColor: this.asString(props.glowColor),
+          glowStrength: this.asNumber(props.glowStrength, undefined),
+          outlineColor: this.asString(props.outlineColor),
+          outlineWidth: this.asNumber(props.outlineWidth, undefined),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
         });
       }

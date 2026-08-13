@@ -148,6 +148,8 @@ effect. Registered in
 | `core:AnimationPlayer` | Play keyframe clips on this node + descendants (§4) |
 | `core:PointAttachment` | Keep this node on a named frame point of a parent `AnimatedSprite2D` (hand socket, muzzle) every tick, optionally copying the point's angle |
 | `core:PlaySound` | Play a sound when a node signal fires |
+| `core:SfxOnSignal` | Play a **procedural** (asset-free) sound preset when a node signal fires — see §4 "Procedural SFX" |
+| `core:BurstOnSignal` | Spawn a one-shot 2D particle burst at this node when a signal fires (juice) |
 | `core:FreeOnSignal` | `queueFree` this node when a signal fires on it (e.g. `animation-finished`), after an optional delay — one-shot VFX lifecycle |
 | `core:Shake` | Additive positional shake (juice) |
 | `core:PunchScale` | Squash-and-stretch scale punch (juice) |
@@ -206,11 +208,30 @@ scene tree (Godot-like). **Use:** add a `Camera2D`; put HUD under a `CanvasLayer
 Fire-and-forget game feel from scripts (or the matching `core:*` presets):
 - `scene.time.hitstop(ms)`, `scene.time.slowMotion(scale, {durationMs, blendMs})`, `setScale` / `reset` / `scale` / `isFrozen`. Scales gameplay `dt`; render + real-time chrome are unscaled.
 - `scene.juice.shake(target, opts)`, `punchScale(target, opts)`, `popIn(target, opts)`, `flash({color,intensity,durationSec})`. `target` is a node, a node query, or `'camera'` / `'camera2d'`.
+- `scene.juice.burst(target, opts)` — one-shot 2D particle burst. `target` is a node, a node query, or a `{x,y}` 2D world point. Options (all defaulted, all clamped): `count` (14, max 512), `speed` (260 px/s), `spread` (radians, default `2π`), `direction` (radians, default up), `lifeSec` (0.5), `color` / `colors` (palette), `sizePx` (10), `gravityY` (-600), `fadeOut` (true), `additive` (true — the neon look), `zIndex`. Preset form: `core:BurstOnSignal`.
+- `scene.juice.floatText(text, opts)` — floating score/text popup (pops in, rises, fades, frees itself; never pickable). Options: `at` (node / query / `{x,y}`), `color`, `fontSizePx` (28), `fontFamily`, `driftPx` (60 up), `durationSec` (0.8), `glow` (`true` = glow in the text colour, or a colour string), `glowStrength` (1.5), `zIndex`.
+Both spawn a runtime-only 2D node into the anchor's 2D root — no authoring, no
+YAML, nothing to clean up — and tick through `node.tick`, so a hitstop freezes
+them like every other juice effect. Call them **together with the mechanic** they
+punctuate; they are one-liners, not a later polish pass.
 Spec §6.12; demo: [../samples/HelloWorld/demo-05-juice.pix3scene](../samples/HelloWorld/demo-05-juice.pix3scene).
 
 ### Audio (buses, snapshots, one-shots)
 3-bus mixer (`master`/`music`/`sfx`) with named snapshots + auto-muffle under
 slow-mo. **Use from scripts:** `scene.audio.play('res://sfx/hit.ogg', { bus:'sfx', pitchVariation:0.1, volumeVariation:0.1 })`, `setBusVolume`, `applySnapshot`/`resetSnapshot`, `registerSnapshot`. **In the scene:** `AudioPlayer` node or `core:PlaySound` behavior (both take `bus`/`pitchVariation`/`volumeVariation`). node-types-reference "Buses, snapshots & scene.audio".
+
+### Procedural SFX (no assets)
+`scene.audio.sfx(preset, { volume?, pitch? })` synthesizes a one-shot on the `sfx`
+bus — no audio file to find, import, or ship. Presets: `tap`, `score`, `bounce`,
+`explosion`, `powerup`, `win`, `lose`, `laser`, `tick`. `pitch` is a frequency
+multiplier (0.25–4; 2 = an octave up) baked into the render, not a playback-rate
+stretch, so duration is unchanged. Each preset+pitch is rendered into an
+`AudioBuffer` once and cached; with no Web Audio context (headless / tests) every
+call is a silent no-op that never throws. **In the scene:** `core:SfxOnSignal`
+(`{signal, preset, volume, pitch}`). An authored asset always beats the synth —
+use `scene.audio.play()` when the project has the clip; reach for `sfx()` when it
+doesn't (prototypes, jam builds, generated recipes).
+Source: [packages/pix3-runtime/src/core/SfxSynth.ts](../packages/pix3-runtime/src/core/SfxSynth.ts).
 
 ### Shader effects (Construct 3-style, per-node)
 Registry-backed material effects with an `enabled` toggle (zero GPU cost while

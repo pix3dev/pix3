@@ -45,6 +45,9 @@ export class MenuFlow extends Script {
 
   /** Transition into the game scene. */
   startGame(): void {
+    // The press is the user gesture Web Audio waits for, so this is also what
+    // unlocks sound for the run. `sfx` is procedural — no asset to author.
+    this.scene?.audio.sfx('powerup');
     void this.scene?.changeScene(String(this.config.gameScene ?? ''), {
       transition: 'fade',
       durationSec: 0.3,

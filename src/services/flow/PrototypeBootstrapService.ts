@@ -44,10 +44,21 @@ import {
 // The brief (design §5.3)
 // ---------------------------------------------------------------------------
 
+/**
+ * A named look the expander can apply on its own, with no model in the loop.
+ *
+ * The point of naming looks at all is budget: ~70% of what reads as "designed" in a one-shot
+ * generated game is static cosmetics (glow, bloom, a dark ground, a loud accent), and cosmetics
+ * chosen by code cost nothing per project while the same choices made by an agent cost a turn.
+ */
+export type PrototypeTheme = 'neon' | 'pastel' | 'retro' | 'minimal';
+
 export interface PrototypeBriefStyle {
   readonly palette: string[];
   readonly artStyle: string;
   readonly mood: string;
+  /** Named look. Absent (the common case) → {@link defaultThemeForRecipe}. */
+  readonly theme?: PrototypeTheme;
 }
 
 export interface PrototypeBriefEntity {
@@ -89,6 +100,12 @@ export interface PrototypeBrief {
   readonly winLose: { readonly win: string; readonly lose: string };
   /** 3–5 steps; becomes the `design/progress.md` checklist the plan tracker reads. */
   readonly increments: readonly string[];
+  /**
+   * 2–4 spectacle beats of the genre (a multiplier, combo popups, a tilt). They join the same
+   * checklist as late items, so the agent can fold one in whenever it is a one-liner next to the
+   * mechanic it is already building instead of deferring all feel to a final polish pass.
+   */
+  readonly wow?: readonly string[];
   /** Playable-ad recipe only. */
   readonly ctaUrl?: string;
   /** Attachments of the first prompt, already saved as project files (design §5.7). */
@@ -130,6 +147,79 @@ const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
     blurb: 'a playable ad: tap-to-start audio gate, a short loop, then a CTA screen to the store.',
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Style packs (contract §C1)
+// ---------------------------------------------------------------------------
+
+/** Every theme the planner may name, in the order the prompt lists them. */
+export const PROTOTYPE_THEMES: readonly PrototypeTheme[] = ['neon', 'pastel', 'retro', 'minimal'];
+
+/** The look for a recipe whose brief names none. */
+export const DEFAULT_THEME: PrototypeTheme = 'minimal';
+
+/**
+ * Genre → look for a brief that says nothing about style, which is most of them.
+ *
+ * Only the bouncer is opinionated so far: it is the recipe whose scene carries the bloom pass the
+ * neon pack turns up, and a theme naming tunables a recipe does not declare buys nothing.
+ */
+const RECIPE_THEME_DEFAULTS: Readonly<Record<string, PrototypeTheme>> = {
+  'recipe-bouncer-2d': 'neon',
+};
+
+/**
+ * What each look means, expressed **only** as values for tunables recipes declare.
+ *
+ * Going through the tunables pipeline rather than editing scene YAML directly is the whole safety
+ * story: a key the recipe does not declare is reported to the agent in `design/brief.md` and
+ * nothing is guessed at (see `resolveTunables`), so a pack may name a forward-looking key —
+ * `bloomIntensity` exists in the bouncer recipe and nowhere else — without breaking the recipes
+ * that have not caught up.
+ *
+ * Every ground is dark on purpose. When no palette was measured the recipe's placeholder art stays
+ * near-white, so a light "pastel" ground would hide the entire game; the pastel pack is a soft dusk
+ * instead, and pastel accents still arrive through the palette.
+ */
+export const THEME_TUNABLES: Readonly<
+  Record<PrototypeTheme, Readonly<Record<string, number | string | boolean>>>
+> = {
+  neon: { bgColor: '#05030f', boardColor: '#120a33', bloomIntensity: 1.2 },
+  pastel: { bgColor: '#2b2740', boardColor: '#3b3559', bloomIntensity: 0.35 },
+  retro: { bgColor: '#150d20', boardColor: '#241533', bloomIntensity: 0.6 },
+  minimal: { bgColor: '#12141c', boardColor: '#1d212e' },
+};
+
+/** The look a recipe gets when the brief names none. */
+export const defaultThemeForRecipe = (recipeId: string): PrototypeTheme =>
+  RECIPE_THEME_DEFAULTS[recipeId] ?? DEFAULT_THEME;
+
+/** The look actually used: the brief's own pick, else the recipe genre's default. */
+export const effectiveTheme = (brief: PrototypeBrief): PrototypeTheme =>
+  brief.style.theme ?? defaultThemeForRecipe(brief.recipeId);
+
+/**
+ * The tunable values the expander applies: the theme pack **under** whatever the brief asked for.
+ *
+ * Precedence is the point. A key in the brief always wins, because that one came from the user's
+ * idea and the pack is a code-owned default; and a background measured from the user's own style
+ * reference wins too, so the pack's `bgColor` steps aside whenever the palette has one (the palette
+ * background is patched separately in `applyTunables`).
+ */
+export const themedTunables = (
+  brief: PrototypeBrief,
+  theme: PrototypeTheme = effectiveTheme(brief)
+): Record<string, number | string | boolean> => {
+  const paletteOwnsBackground = paletteColorForRole('background', brief.style.palette) !== null;
+  const merged: Record<string, number | string | boolean> = {};
+  for (const [key, value] of Object.entries(THEME_TUNABLES[theme])) {
+    if (key === 'bgColor' && paletteOwnsBackground) {
+      continue;
+    }
+    merged[key] = value;
+  }
+  return { ...merged, ...brief.tunables };
+};
 
 // ---------------------------------------------------------------------------
 // Observable status
@@ -505,7 +595,9 @@ export class PrototypeBootstrapService {
       : new Map<string, RecipeTunable>();
     const placeholders = recipe ? parseRecipePlaceholders(recipe) : [];
 
-    const resolution = resolveTunables(brief.tunables, declared);
+    // The theme pack rides the same rails as the brief's own tunables: declared keys are clamped
+    // and patched, undeclared ones become a sentence for the agent instead of a blind YAML edit.
+    const resolution = resolveTunables(themedTunables(brief), declared);
     await this.applyTunables(resolution, brief, declared, notes);
     await this.tintPlaceholders(placeholders, brief.style.palette, notes);
     await this.writeDesignDocs(brief, prompt, references, resolution, notes);
@@ -679,7 +771,12 @@ export class PrototypeBootstrapService {
     );
     await this.writeFile(FLOW_PROGRESS_PATH, renderProgressMarkdown(brief), notes);
     await this.writeFile(FLOW_DECISIONS_PATH, renderDecisionsMarkdown(), notes);
-    if (brief.style.artStyle || brief.style.mood || brief.style.palette.length > 0) {
+    if (
+      brief.style.artStyle ||
+      brief.style.mood ||
+      brief.style.theme ||
+      brief.style.palette.length > 0
+    ) {
       await this.writeFile('design/style.md', renderStyleMarkdown(brief, references), notes);
     }
   }
@@ -827,19 +924,33 @@ const toImageBlock = (image: ComposerImageAttachment): LlmImageBlock => ({
   data: image.base64,
 });
 
-const PLANNER_SYSTEM_PROMPT = [
+/**
+ * The planner's rules. Exported so the spec can hold the load-bearing ones — that the recipe
+ * already plays, so the first increment is the game's own mechanic and not its controls.
+ */
+export const PLANNER_SYSTEM_PROMPT = [
   'You plan playable game prototypes for the Pix3 editor. You are given a short idea and you return',
   'a compact JSON brief that a deterministic expander turns into a real project.',
   '',
   'Rules:',
   '- Reply with ONE JSON object and nothing else. No prose, no markdown fences.',
   '- Pick `recipeId` from the catalog you are given. Never invent an id.',
-  '- `increments` is 3 to 5 steps, smallest playable slice first (controls and the core loop),',
-  '  polish last. The first step must be provable by playing the game.',
+  '- The recipe ALREADY ships a playable skeleton: menu, game, win/lose, working controls, a score',
+  '  and a HUD. It runs before the first increment starts. So `increments` EXTENDS that skeleton —',
+  '  never write "controls", "core loop", "menu" or "score" as a step; those exist.',
+  '- `increments` is 3 to 5 steps. The FIRST one is the mechanic that makes this game THIS game and',
+  '  nothing else: flippers for a pinball, grid movement plus growth for a snake, brick rows for a',
+  '  breakout, a chasing enemy for a survival game. Then stakes, then escalation, then an art pass.',
+  '  Every step must be provable by playing the game.',
+  '- `wow` is 2 to 4 spectacle beats of the genre — a score multiplier, combo popups, a board tilt,',
+  '  a slow-motion last life. These are the moments that make it feel alive, not the mechanics.',
+  '- `style.theme` is one of neon, pastel, retro, minimal — the look the idea asks for ("neon',
+  '  pinball" is neon, "cozy" is pastel, "8-bit" is retro). Omit it when the idea says nothing.',
   '- `tunables` may only use keys the recipe declares; leave it empty when unsure. Guessing a key',
   '  is worse than omitting it.',
   '- `style.palette` is 3 to 5 `#rrggbb` colours. If a palette is supplied to you, keep it.',
-  '- Keep every string short: `pitch` is one line, entity prompts are one sentence.',
+  '- Keep every string short: `pitch` is one line, entity prompts are one sentence, an increment or',
+  '  a wow item is a phrase. Never use an em dash inside one — the tracker reads it as a note.',
 ].join('\n');
 
 /** The planner's user turn: the idea, the catalog, references, and the exact JSON shape wanted. */
@@ -893,13 +1004,24 @@ export const buildPlannerPrompt = (
         title: 'short project name',
         pitch: 'one line',
         recipeId: RECIPE_CATALOG[1].id,
-        style: { palette: ['#101820', '#f5ae39'], artStyle: 'flat vector', mood: 'playful' },
+        style: {
+          palette: ['#101820', '#f5ae39'],
+          artStyle: 'flat vector',
+          mood: 'playful',
+          theme: 'minimal',
+        },
         entities: [
           { role: 'player', name: 'Hero', assetSpec: { prompt: 'one sentence', sizeHint: 128 } },
         ],
         tunables: {},
         winLose: { win: 'how the player wins', lose: 'how the player loses' },
-        increments: ['controls + core loop', 'hazards', 'win/lose', 'art pass'],
+        increments: [
+          'the trail: the hero leaves segments behind and grows on every pickup',
+          'running into your own trail costs a life',
+          'the field speeds up as the trail gets longer',
+          'art and feel pass',
+        ],
+        wow: ['combo popups on a fast pickup chain', 'a burst and a shake when a life is lost'],
       },
       null,
       2
@@ -1016,6 +1138,16 @@ export const validateBrief = (
     issues.push('The planner returned no usable palette; placeholders keep their neutral colours.');
   }
 
+  // An unknown theme is dropped rather than mapped onto a guess: with the field absent the recipe
+  // genre's own default applies, which is a better look than any theme picked out of a bad word.
+  const requestedTheme = styleValue.theme;
+  const theme = asTheme(requestedTheme);
+  if (!theme && requestedTheme !== undefined && requestedTheme !== null) {
+    issues.push(
+      `Planner asked for an unknown theme \`${asText(requestedTheme) ?? typeof requestedTheme}\`; used the recipe's default look.`
+    );
+  }
+
   const entities: PrototypeBriefEntity[] = [];
   if (Array.isArray(value.entities)) {
     for (const raw of value.entities) {
@@ -1057,6 +1189,11 @@ export const validateBrief = (
   if (increments.length === 0) {
     issues.push('The planner returned no increments; using the default checklist.');
   }
+  // No default for `wow`: spectacle only reads as spectacle when it belongs to the genre, and a
+  // generic "add particles" item on every project is noise in the checklist the user watches.
+  const wow = Array.isArray(value.wow)
+    ? value.wow.map(asText).filter((entry): entry is string => Boolean(entry))
+    : [];
 
   return {
     brief: {
@@ -1067,6 +1204,7 @@ export const validateBrief = (
         palette,
         artStyle: asText(styleValue.artStyle) ?? '',
         mood: asText(styleValue.mood) ?? '',
+        ...(theme ? { theme } : {}),
       },
       entities,
       tunables,
@@ -1075,6 +1213,7 @@ export const validateBrief = (
         lose: asText(winLoseValue.lose) ?? base.winLose.lose,
       },
       increments: increments.length > 0 ? increments : base.increments,
+      ...(wow.length > 0 ? { wow } : {}),
       ...(asText(value.ctaUrl) ? { ctaUrl: asText(value.ctaUrl) as string } : {}),
     },
     issues,
@@ -1094,10 +1233,12 @@ export const fallbackBrief = (prompt: string): PrototypeBrief => ({
   entities: [],
   tunables: {},
   winLose: { win: 'To be decided with the player.', lose: 'To be decided with the player.' },
+  // The recipe skeleton already plays, so even the blind fallback checklist starts at what makes
+  // THIS game itself rather than at controls the project shipped with (contract §C2).
   increments: [
-    'Controls and the core loop',
-    'Hazards or opposition',
-    'Win / lose condition',
+    'The one mechanic this idea needs that the recipe does not have yet',
+    'Opposition or a real stake',
+    'Escalation so a run builds',
     'Art and feel pass',
   ],
 });
@@ -1147,6 +1288,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const asText = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
+/** A theme name the packs actually know, case-folded — models capitalize what they please. */
+const asTheme = (value: unknown): PrototypeTheme | undefined => {
+  const text = asText(value)?.toLowerCase();
+  return PROTOTYPE_THEMES.find(theme => theme === text);
+};
+
 // -- generated documents -----------------------------------------------------
 
 /**
@@ -1180,6 +1327,7 @@ export const renderBriefMarkdown = (
     `- Palette: ${brief.style.palette.length > 0 ? brief.style.palette.join(', ') : '(recipe defaults)'}`,
     `- Art style: ${brief.style.artStyle || '(unspecified)'}`,
     `- Mood: ${brief.style.mood || '(unspecified)'}`,
+    `- Theme: ${effectiveTheme(brief)}${brief.style.theme ? '' : ' (recipe default)'}`,
   ];
 
   if (brief.entities.length > 0) {
@@ -1220,8 +1368,8 @@ export const renderBriefMarkdown = (
       '',
       '## For the agent — asked for, not applied',
       '',
-      'The planner asked for these but the recipe declares no such tuning point, so nothing was',
-      'guessed at. Decide whether each is worth building, and say so.',
+      'These were asked for — by the planner or by the style theme — but the recipe declares no such',
+      'tuning point, so nothing was guessed at. Decide whether each is worth building, and say so.',
       ''
     );
     for (const entry of resolution.unknown) {
@@ -1256,6 +1404,19 @@ export const renderProgressMarkdown = (brief: PrototypeBrief): string => {
   brief.increments.forEach((increment, index) => {
     lines.push(`- [${index === 0 ? '~' : ' '}] ${increment}`);
   });
+  // The spectacle beats are the same kind of item, just later ones: they are unchecked steps in the
+  // one checklist the tracker renders, so the user can see the fun is planned rather than forgotten.
+  if (brief.wow && brief.wow.length > 0) {
+    lines.push(
+      '',
+      'Spectacle beats for the later increments. Fold one in whenever it is a one-liner next to the',
+      'mechanic you are already building — `scene.juice.burst/floatText`, `scene.audio.sfx`, a glow.',
+      ''
+    );
+    for (const beat of brief.wow) {
+      lines.push(`- [ ] ${beat}`);
+    }
+  }
   lines.push('');
   return lines.join('\n');
 };
@@ -1289,6 +1450,7 @@ export const renderStyleMarkdown = (
     `- **Palette:** ${brief.style.palette.length > 0 ? brief.style.palette.join(', ') : '(recipe defaults)'}`,
     `- **Art style:** ${brief.style.artStyle || '(unspecified)'}`,
     `- **Mood:** ${brief.style.mood || '(unspecified)'}`,
+    `- **Theme:** ${effectiveTheme(brief)}${brief.style.theme ? '' : ' (default for this recipe)'} — already applied to the scene; keep new art in this look.`,
     '',
     styleRefs.length > 0
       ? `Derived from ${styleRefs.map(reference => `\`${reference.path}\``).join(', ')} — the palette was measured from the image, not guessed.`

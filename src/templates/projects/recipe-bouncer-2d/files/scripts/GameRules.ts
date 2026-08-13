@@ -177,6 +177,15 @@ export class GameRules extends Script {
         component.enabled = false;
       }
     }
+
+    // The run's last impression: a procedural jingle (no asset needed) and, on a
+    // win, a warm screen flash. Both are one-liners — `scene.audio.sfx` and
+    // `scene.juice.flash`.
+    const scene = this.scene;
+    scene?.audio.sfx(won ? 'win' : 'lose');
+    if (won) {
+      scene?.juice.flash({ color: '#ffe066', intensity: 0.5, durationSec: 0.35 });
+    }
     this.node?.emit(won ? 'game-won' : 'game-lost', this.score);
   }
 

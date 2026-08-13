@@ -587,6 +587,22 @@ export class SceneSaver {
       if (node.height > 0) props.height = node.height;
       if (node.labelVAlign !== 'middle') props.labelVAlign = node.labelVAlign;
       if (node.typewriterSpeed > 0) props.typewriterSpeed = node.typewriterSpeed;
+      // Glow/outline colours only mean something while their amount is non-zero,
+      // so an untouched label still serializes exactly as before.
+      if (node.glowStrength > 0) {
+        props.glowStrength = node.glowStrength;
+        if (node.glowColor !== '#ffffff') props.glowColor = node.glowColor;
+      } else {
+        delete props.glowStrength;
+        delete props.glowColor;
+      }
+      if (node.outlineWidth > 0) {
+        props.outlineWidth = node.outlineWidth;
+        if (node.outlineColor !== '#000000') props.outlineColor = node.outlineColor;
+      } else {
+        delete props.outlineWidth;
+        delete props.outlineColor;
+      }
     } else if (node instanceof Slider2D) {
       this.serializeCommonUIControlProps(node, props);
       props.width = node.width;

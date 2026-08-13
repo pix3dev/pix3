@@ -3,8 +3,10 @@ import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import {
   LABEL_AUTO_SIZE_BLEED,
+  LABEL_GLOW_STRENGTH_LIMIT,
   LABEL_H_ALIGN_VALUES,
   LABEL_V_ALIGN_VALUES,
+  labelDecorationPadding,
   layoutLabelText,
   paintLabelCanvas,
   type LabelLayout,
@@ -24,6 +26,14 @@ export interface Label2DProps extends UIControl2DProps {
   labelVAlign?: LabelVAlign;
   /** Characters per second for the typewriter reveal; 0 disables it. */
   typewriterSpeed?: number;
+  /** Glow colour (CSS string); only visible while `glowStrength` > 0. */
+  glowColor?: string;
+  /** Glow amount 0..4; 0 (default) = no glow, so existing scenes are unchanged. */
+  glowStrength?: number;
+  /** Outline colour (CSS string); only visible while `outlineWidth` > 0. */
+  outlineColor?: string;
+  /** Outline half-width in px; 0 (default) = no outline. */
+  outlineWidth?: number;
 }
 
 interface LabelRenderState {
@@ -33,6 +43,8 @@ interface LabelRenderState {
   boxWidth: number;
   boxHeight: number;
   text: string;
+  /** Logical px of glow/outline bleed baked into the box on each side (0 when off). */
+  pad: number;
 }
 
 /**
@@ -42,12 +54,20 @@ interface LabelRenderState {
  * - `labelAlign` / `labelVAlign` position the text inside the fixed box.
  * - `typewriterSpeed` > 0 reveals the text character by character in play
  *   mode; the node emits `'typewriter-complete'` when the reveal finishes.
+ * - `glowStrength` / `outlineWidth` add a neon glow and/or a contrast outline in
+ *   the canvas render (both off by default). HUD labels under a `CanvasLayer2D`
+ *   are drawn after post-processing and can never bloom, so this is how HUD text
+ *   glows.
  */
 export class Label2D extends UIControl2D {
   width: number;
   height: number;
   labelVAlign: LabelVAlign;
   typewriterSpeed: number;
+  glowColor: string;
+  glowStrength: number;
+  outlineColor: string;
+  outlineWidth: number;
 
   private renderState: LabelRenderState | null = null;
   private typewriterVisible = 0;
@@ -62,6 +82,10 @@ export class Label2D extends UIControl2D {
     this.height = props.height ?? 0;
     this.labelVAlign = props.labelVAlign ?? 'middle';
     this.typewriterSpeed = props.typewriterSpeed ?? 0;
+    this.glowColor = props.glowColor ?? '#ffffff';
+    this.glowStrength = Label2D.clampGlowStrength(props.glowStrength ?? 0);
+    this.outlineColor = props.outlineColor ?? '#000000';
+    this.outlineWidth = Math.max(0, props.outlineWidth ?? 0);
 
     // Re-render with the Label2D-specific fields now that they are set (the
     // base constructor already ran updateLabel with defaults).
@@ -157,7 +181,11 @@ export class Label2D extends UIControl2D {
     const dx = Math.abs(worldPoint.x - this.tmpWorldPos.x);
     const dy = Math.abs(worldPoint.y - this.tmpWorldPos.y);
 
-    return dx <= state.boxWidth / 2 && dy <= state.boxHeight / 2;
+    // The glow/outline bleed grows the canvas, not the authored box — a glowing
+    // label must not become a wider tap target than the same label without glow.
+    return (
+      dx <= (state.boxWidth - state.pad * 2) / 2 && dy <= (state.boxHeight - state.pad * 2) / 2
+    );
   }
 
   override updateLabel(): void {
@@ -189,10 +217,16 @@ export class Label2D extends UIControl2D {
       maxWidth: boxWidthProp > 0 ? boxWidthProp : 0,
     });
 
+    // Glow blur / outline stroke extend past the glyphs, so the canvas (and the
+    // mesh that shows it) grows by the bleed on every side while the text stays
+    // aligned to the authored box. Exactly 0 while both are off.
+    const pad = labelDecorationPadding(fontSize, this.glowStrength ?? 0, this.outlineWidth ?? 0);
     const boxWidth =
-      boxWidthProp > 0 ? boxWidthProp : Math.ceil(layout.textWidth) + LABEL_AUTO_SIZE_BLEED;
+      (boxWidthProp > 0 ? boxWidthProp : Math.ceil(layout.textWidth) + LABEL_AUTO_SIZE_BLEED) +
+      pad * 2;
     const boxHeight =
-      boxHeightProp > 0 ? boxHeightProp : Math.ceil(layout.textHeight) + LABEL_AUTO_SIZE_BLEED;
+      (boxHeightProp > 0 ? boxHeightProp : Math.ceil(layout.textHeight) + LABEL_AUTO_SIZE_BLEED) +
+      pad * 2;
 
     const dprRaw = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
     const dpr = Math.max(1, Math.min(3, dprRaw));
@@ -206,7 +240,7 @@ export class Label2D extends UIControl2D {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const textChanged = this.renderState?.text !== text;
-    this.renderState = { canvas, ctx, layout, boxWidth, boxHeight, text };
+    this.renderState = { canvas, ctx, layout, boxWidth, boxHeight, text, pad };
 
     const typewriterEnabled = (this.typewriterSpeed ?? 0) > 0;
     if (textChanged) {
@@ -276,7 +310,15 @@ export class Label2D extends UIControl2D {
       vAlign: this.labelVAlign ?? 'middle',
       width: state.boxWidth,
       height: state.boxHeight,
+      // The bleed is padding inside the grown canvas, so left/right/top/bottom
+      // aligned text still lands on the authored box's edge.
+      paddingX: state.pad,
+      paddingY: state.pad,
       visibleCharacters: this.typewriterActive ? Math.floor(this.typewriterVisible) : Infinity,
+      glowColor: this.glowColor,
+      glowStrength: this.glowStrength ?? 0,
+      outlineColor: this.outlineColor,
+      outlineWidth: this.outlineWidth ?? 0,
     });
     this.labelTexture.needsUpdate = true;
   }
@@ -372,8 +414,85 @@ export class Label2D extends UIControl2D {
             label.restartTypewriter();
           },
         },
+        {
+          name: 'glowColor',
+          type: 'color',
+          ui: {
+            label: 'Glow Color',
+            group: 'Label',
+            description: 'Colour of the canvas glow; only visible while Glow Strength > 0',
+          },
+          getValue: n => (n as Label2D).glowColor,
+          setValue: (n, v) => {
+            const label = n as Label2D;
+            label.glowColor = String(v);
+            label.updateLabel();
+          },
+        },
+        {
+          name: 'glowStrength',
+          type: 'number',
+          ui: {
+            label: 'Glow Strength',
+            group: 'Label',
+            min: 0,
+            max: LABEL_GLOW_STRENGTH_LIMIT,
+            step: 0.1,
+            precision: 2,
+            description:
+              'Neon glow around the glyphs (canvas shadow); 0 = off. Works on HUD text, which never blooms',
+          },
+          getValue: n => (n as Label2D).glowStrength,
+          setValue: (n, v) => {
+            const label = n as Label2D;
+            label.glowStrength = Label2D.clampGlowStrength(Number(v));
+            label.updateLabel();
+          },
+        },
+        {
+          name: 'outlineColor',
+          type: 'color',
+          ui: {
+            label: 'Outline Color',
+            group: 'Label',
+            description: 'Colour of the outline; only visible while Outline Width > 0',
+          },
+          getValue: n => (n as Label2D).outlineColor,
+          setValue: (n, v) => {
+            const label = n as Label2D;
+            label.outlineColor = String(v);
+            label.updateLabel();
+          },
+        },
+        {
+          name: 'outlineWidth',
+          type: 'number',
+          ui: {
+            label: 'Outline Width',
+            group: 'Label',
+            min: 0,
+            max: 16,
+            step: 0.5,
+            precision: 2,
+            unit: 'px',
+            description: 'Contrast outline drawn under the text; 0 = off',
+          },
+          getValue: n => (n as Label2D).outlineWidth,
+          setValue: (n, v) => {
+            const label = n as Label2D;
+            label.outlineWidth = Math.max(0, Number(v) || 0);
+            label.updateLabel();
+          },
+        },
       ],
       groups: baseSchema.groups,
     };
+  }
+
+  private static clampGlowStrength(value: number): number {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    return Math.min(LABEL_GLOW_STRENGTH_LIMIT, Math.max(0, value));
   }
 }

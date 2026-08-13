@@ -14,6 +14,8 @@ import { FollowBehavior } from './FollowBehavior';
 import { FadeBehavior } from './FadeBehavior';
 import { RadialProgressBehavior } from './RadialProgressBehavior';
 import { PlaySoundBehavior } from './PlaySoundBehavior';
+import { SfxOnSignalBehavior } from './SfxOnSignalBehavior';
+import { BurstOnSignalBehavior } from './BurstOnSignalBehavior';
 import { FreeOnSignalBehavior } from './FreeOnSignalBehavior';
 import { ShakeBehavior } from './ShakeBehavior';
 import { PunchScaleBehavior } from './PunchScaleBehavior';
@@ -109,6 +111,24 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Audio',
     componentClass: PlaySoundBehavior,
     keywords: ['audio', 'sound', 'sfx', 'trigger', 'event'],
+  });
+
+  registry.registerComponent({
+    id: 'core:SfxOnSignal',
+    displayName: 'SFX on Signal',
+    description: 'Play a procedural (asset-free) sound preset when a node signal fires',
+    category: 'Audio',
+    componentClass: SfxOnSignalBehavior,
+    keywords: ['audio', 'sfx', 'sound', 'procedural', 'synth', 'preset', 'signal', 'juice'],
+  });
+
+  registry.registerComponent({
+    id: 'core:BurstOnSignal',
+    displayName: 'Burst on Signal',
+    description: 'Spawn a one-shot 2D particle burst at this node when a signal fires (juice)',
+    category: 'Juice',
+    componentClass: BurstOnSignalBehavior,
+    keywords: ['particles', 'burst', 'juice', 'vfx', 'sparks', 'confetti', 'signal', 'impact'],
   });
 
   registry.registerComponent({
