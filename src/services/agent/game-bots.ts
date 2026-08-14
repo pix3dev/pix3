@@ -839,6 +839,14 @@ export class BotSession {
  * asks for: **why** the run ended, on **which frame**, and on **which channel**.
  * The channel is not decoration — it is the difference between a proven input
  * binding and an exercised code path.
+ *
+ * **The branch order is the contract**, and getting it wrong was a real defect a live
+ * run caught: a `done(false)` from a policy that drove nothing was printed as
+ * `BOT NOTHING DRIVEN` while the outcome stayed `bot-fail`, so the headline and
+ * `outcome.kind` disagreed about the same run. The order below mirrors
+ * `resolveBotOutcome` exactly — a crash, then a FINDING, then idleness, then a pass —
+ * because a *finding* stands whether or not anything was driven ("I could not play" is
+ * a result) while a *pass* does not. Any reordering here re-opens that disagreement.
  */
 export function buildBotVerdict(report: BotReport, newErrors: number): string {
   const where = `frame ${report.frames}`;
@@ -849,19 +857,25 @@ export function buildBotVerdict(report: BotReport, newErrors: number): string {
     report.channel === 'direct-action'
       ? ' Actuated on direct-action, so no input binding is proven by this run.'
       : '';
+  const idle =
+    report.sent === 0
+      ? ` It actuated NOTHING${report.refused > 0 ? ` (all ${report.refused} attempt(s) were refused — the reasons are in \`log\`)` : ''}, so the finding is about a game it did not manage to play.`
+      : '';
 
   if (report.error) {
     return `BOT ERROR ${report.name} ${channel} — the POLICY threw at frame ${report.error.frame}: ${report.error.message}. This is a fault in ${botFilePath(report.name)}, NOT in the game; nothing is claimed about the game here. ${drove} before it died.${errs}`;
   }
+  if (report.done && !report.done.pass) {
+    return `BOT FAIL ${report.name} ${channel} — the policy ended the run at frame ${report.done.frame}: ${report.done.reason}. ${drove} over ${report.frames} tick(s).${idle}${unproven}${errs}`;
+  }
   if (report.sent === 0) {
     const said = report.done
-      ? ` The policy called done(${report.done.pass ? 'pass' : 'fail'}) — "${report.done.reason}" — but it never drove anything, so the claim rests on a game it did not play.`
+      ? ` The policy called done(pass) — "${report.done.reason}" — but it never drove anything, so the claim rests on a game it did not play.`
       : '';
     return `BOT NOTHING DRIVEN ${report.name} ${channel} — ${report.frames} tick(s) ran and the policy actuated NOTHING${report.refused > 0 ? ` (all ${report.refused} attempt(s) were refused)` : ''}.${said}${errs}`;
   }
   if (report.done) {
-    const head = report.done.pass ? 'BOT PASS' : 'BOT FAIL';
-    return `${head} ${report.name} ${channel} — the policy ended the run at frame ${report.done.frame}: ${report.done.reason}. ${drove} over ${report.frames} tick(s).${unproven}${errs}`;
+    return `BOT PASS ${report.name} ${channel} — the policy ended the run at frame ${report.done.frame}: ${report.done.reason}. ${drove} over ${report.frames} tick(s).${unproven}${errs}`;
   }
   return `BOT UNDECIDED ${report.name} ${channel} — the budget ran out at ${where} and the policy never called done(), so IT reached no verdict; whatever ended the run below is the harness's own budget or predicate. ${drove}.${unproven}${errs}`;
 }

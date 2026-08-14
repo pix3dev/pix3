@@ -505,6 +505,27 @@ describe('buildBotVerdict', () => {
     expect(verdict).toContain('design/tests/bots/dodge.ts');
   });
 
+  it('keeps a FINDING a finding even when nothing was driven', () => {
+    // The defect a live run caught: the headline said NOTHING DRIVEN while
+    // `outcome.kind` stayed `bot-fail`, so the two disagreed about one run. A policy
+    // reporting "I could not play" IS a result — the idleness is a clause, not the
+    // headline. This assertion is what keeps the branch order in step with
+    // `resolveBotOutcome`.
+    const verdict = buildBotVerdict(
+      {
+        ...base,
+        sent: 0,
+        refused: 3,
+        done: { pass: false, reason: 'nothing on screen was reachable', frame: 5 },
+      },
+      0
+    );
+    expect(verdict).toContain('BOT FAIL');
+    expect(verdict).not.toContain('BOT NOTHING DRIVEN');
+    expect(verdict).toContain('nothing on screen was reachable');
+    expect(verdict).toContain('actuated NOTHING');
+  });
+
   it('refuses to read as a pass when nothing was driven', () => {
     const verdict = buildBotVerdict(
       {

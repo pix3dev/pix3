@@ -296,6 +296,25 @@ export interface ScriptErrorInfo {
   componentId?: string;
 }
 
+/**
+ * Namespace prefix marking a `componentType` as **test-harness code, not game code**
+ * (§5.3 of `.plans/agent-gameplay-testing.md`: the bot's errors go on their own
+ * channel so "the bot fell over" cannot read as "the game fell over").
+ *
+ * It is load-bearing rather than cosmetic. The editor captures `console.error` into a
+ * ring buffer, and the gameplay harness counts that ring to decide `newErrors` — which
+ * a run may have as its crash net (`fail: [{kind:'newErrors'}]`). Reporting a broken
+ * test policy as an error would therefore end the run as "the GAME threw", with the
+ * predicate checked before the bot's own verdict. A host reporting a `test:`-prefixed
+ * failure must keep it out of the error stream while still showing it to a human.
+ */
+export const TEST_COMPONENT_TYPE_PREFIX = 'test:';
+
+/** Whether this `componentType` belongs to the test harness rather than to the game. */
+export function isTestHarnessComponentType(componentType: string | undefined): boolean {
+  return componentType?.startsWith(TEST_COMPONENT_TYPE_PREFIX) === true;
+}
+
 export type ScriptErrorSink = (error: ScriptErrorInfo) => void;
 
 /**

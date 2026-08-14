@@ -213,9 +213,12 @@ Five things decide whether a policy works:
   axes and calls interactions directly: use it to test logic when the binding is already proven, and
   never to close an input check — the report and the verdict both say it proves nothing.
 - **Read `verdict` first.** `BOT PASS` / `BOT FAIL` carry your own `reason`, the frame and the
-  channel. `BOT ERROR` means the *policy* threw — the fault is in your file, and nothing is claimed
-  about the game. `BOT NOTHING DRIVEN` means no actuator was ever delivered, so the run is not a
-  pass even if the policy claimed one; the refusals in `bot.log` say what could not be reached.
+  channel. `BOT ERROR` means the *policy* threw — the fault is in your file, nothing is claimed about
+  the game, and it is deliberately **not** counted in `newErrors`, so a `fail: [{kind:'newErrors'}]`
+  crash net cannot mistake your typo for a game crash (it is logged as a warning instead).
+  `BOT NOTHING DRIVEN` means no actuator was ever delivered, so the run is not a pass even if the
+  policy claimed one; the refusals in `bot.log` say what could not be reached. A `done(false)` still
+  reads as `BOT FAIL` even when nothing was driven — "I could not play" is a finding.
 - **`done(pass, reason)` is the finding.** Write the reason for a reader who has not seen the run:
   "hero died: lives 0 at the third gap", not "failed". Call it from `tick`, never from `end` — by
   then the run is over and the verdict decided nothing.
@@ -272,6 +275,11 @@ Sensor cost is worth knowing: `nodes`/`nearest` walk the live tree, `raycast` bu
 bounding box per node and is the most expensive call available — reach for it when you need "is
 something in the way", not every tick. And `raycast` tests bounding boxes, not geometry and not
 colliders, which is what makes it mean the same thing in 2D and 3D.
+
+One gap to know about: **a bot's physical tap does not flip a control's `reach` to `reachable`** the
+way a `game_input` tap does, even though it dispatches the same real pointer. So a bot run does not
+accrue the "one physical proof per control" the ladder above is built on — tap the control once with
+`game_input` if you need that proof recorded.
 
 ## Common runtime problems and fixes
 

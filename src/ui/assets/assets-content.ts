@@ -767,8 +767,16 @@ export class AssetsContent extends ComponentBase {
    * because the asset cards are `<button>`s and Space would re-activate the focused one.
    */
   private onSpaceKey(event: KeyboardEvent): void {
-    const target = event.target as HTMLElement | null;
-    if (!target || !this.contains(target)) {
+    // `instanceof HTMLElement`, not a cast: this listener is on `window`, so a key
+    // event dispatched AT the window (which is what synthetic input does — the agent
+    // harness, a trace replay, a bot policy pressing `Key_Space`) arrives with
+    // `event.target === window`. That is truthy but not a `Node`, so the old
+    // `this.contains(target)` threw `Failed to execute 'contains' on 'Node'` and the
+    // throw surfaced as an uncaught runtime error — measured: two entries in the
+    // editor's error ring per synthetic Space, which a gameplay run then counted
+    // against the game.
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !this.contains(target)) {
       return;
     }
     if (target.closest('input, textarea, select, [contenteditable="true"]')) {

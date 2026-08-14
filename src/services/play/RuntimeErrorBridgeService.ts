@@ -1,6 +1,10 @@
 import { injectable, inject } from '@/fw/di';
 import { appState } from '@/state';
-import { registerScriptErrorSink, type ScriptErrorInfo } from '@pix3/runtime';
+import {
+  isTestHarnessComponentType,
+  registerScriptErrorSink,
+  type ScriptErrorInfo,
+} from '@pix3/runtime';
 import { LoggingService } from '@/services/core/LoggingService';
 
 /**
@@ -59,15 +63,36 @@ export class RuntimeErrorBridgeService {
     const where = error.nodeName
       ? ` in "${error.nodeName}"${error.componentType ? ` (${error.componentType})` : ''}`
       : '';
-    const summary = `Script error [${error.phase}]${where}: ${error.message}`;
-
-    this.loggingService.error(summary, {
+    const detail = {
       phase: error.phase,
       nodeName: error.nodeName,
       componentType: error.componentType,
       componentId: error.componentId,
       stack: error.stack,
-    });
+    };
+
+    // A `test:`-prefixed component is the harness, not the game (see
+    // `isTestHarnessComponentType`), and the difference decides two things.
+    //
+    // It is logged as a WARNING rather than an error, which keeps it visible in the
+    // Logs panel and in devtools while keeping it OUT of the captured-error ring —
+    // `installErrorCapture` patches `console.error` only. That ring is what the
+    // gameplay harness counts for `newErrors`, and a run may have `newErrors` as its
+    // crash net, checked BEFORE the bot's own verdict: reported as an error, a broken
+    // test policy would end the run as "the GAME threw" on the frame it died. Measured
+    // live before this branch existed.
+    //
+    // And it raises no Game-tab banner: a banner announcing that the game failed would
+    // be the same lie in the UI.
+    if (isTestHarnessComponentType(error.componentType)) {
+      this.loggingService.warn(`Test harness error [${error.phase}]${where}: ${error.message}`, {
+        ...detail,
+        note: 'This is test-harness code failing, not the game. It is deliberately not counted as a runtime error.',
+      });
+      return;
+    }
+
+    this.loggingService.error(`Script error [${error.phase}]${where}: ${error.message}`, detail);
 
     // Only raise the Game-tab banner while playing — a late error arriving after
     // stop should still be logged, but must not resurrect the banner.
