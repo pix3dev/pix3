@@ -12,10 +12,16 @@ import {
 
 import { Group2D, type Group2DProps } from '../Group2D';
 import { Node2D } from '../../Node2D';
+import type { InputService } from '../../../core/InputService';
 import { OVERLAY_2D_FLAG } from '../../../core/render-order-2d';
 import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import type { PropertySchema } from '../../../fw/property-schema';
+import {
+  readNumberArg,
+  type InteractionDescriptor,
+  type Interactive,
+} from '../../../fw/interactive';
 import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface ScrollContainer2DProps extends Group2DProps {
@@ -38,7 +44,38 @@ export interface ScrollContainer2DProps extends Group2DProps {
 
 type PointerDragMode = 'content' | 'thumb' | null;
 
-export class ScrollContainer2D extends Group2D {
+/**
+ * The pseudo-pointer a semantic scroll interaction (`scrollBy` / `scrollTo` / `fling`) owns while it
+ * runs — same id and same meaning as `UIControl2D.SEMANTIC_POINTER_ID`, declared locally to keep
+ * this module from value-importing `UIControl2D` (which imports this one back, and which the
+ * export-size table would then pin into every build that ships a scroll container).
+ */
+const SEMANTIC_POINTER_ID = -1;
+
+/**
+ * The stand-in for the shared, un-addressed pointer (`isPointerDown` + `pointerPosition`), used
+ * when the addressed pointer map is empty — a mouse (wheel scrolling has no pointer down at all),
+ * and harnesses/tests that drive those two fields directly. Mirrors `UIControl2D`'s.
+ */
+const LEGACY_POINTER_ID = -2;
+
+/** A pointer the container may consider this frame, in input/screen units. */
+interface CandidatePointer {
+  pointerId: number;
+  x: number;
+  y: number;
+  down: boolean;
+}
+
+/** The pointer the drag machine runs on this frame, in 2D world units. */
+interface DrivingPointer {
+  pointerId: number;
+  worldX: number;
+  worldY: number;
+  down: boolean;
+}
+
+export class ScrollContainer2D extends Group2D implements Interactive {
   dragScrollEnabled: boolean;
   wheelScrollEnabled: boolean;
   inertiaEnabled: boolean;
@@ -58,6 +95,12 @@ export class ScrollContainer2D extends Group2D {
   private readonly tmpWorldPos = new Vector3();
   private readonly tmpWorldScale = new Vector3();
   private readonly pointerWorld = new Vector2();
+  private readonly candidateWorld = new Vector2();
+  /**
+   * The pointer this container follows, or null when it follows none.
+   * {@link SEMANTIC_POINTER_ID} while a scripted gesture is running.
+   */
+  private ownedPointerId: number | null = null;
   private readonly clippingPlanes = [
     new Plane(new Vector3(1, 0, 0), 0),
     new Plane(new Vector3(-1, 0, 0), 0),
@@ -215,6 +258,13 @@ export class ScrollContainer2D extends Group2D {
     }
   }
 
+  /**
+   * True while this container is running a drag (content or thumb) — and therefore while every
+   * descendant control is gated off, **for every finger, not just the one doing the scrolling**
+   * (`UIControl2D.isPointerAllowedByAncestorScrollContainers` asks this without naming a pointer).
+   * That is deliberate and matches every native scroller: while a list is being flicked, a second
+   * finger landing on a row inside it must not activate the row.
+   */
   hasActivePointerCapture(): boolean {
     return this.dragMode !== null;
   }
@@ -259,6 +309,141 @@ export class ScrollContainer2D extends Group2D {
     this.applyClippingPlanes();
     this.syncScrollbarVisuals();
     super.tick(dt);
+  }
+
+  /** The synthetic finger a semantic scroll interaction is currently driving, in world units. */
+  private semanticPointer: { x: number; y: number; down: boolean } | null = null;
+
+  /** Frame length the synthetic drag frames are timed with (velocity and inertia read it). */
+  private static readonly SEMANTIC_FRAME_DT = 1 / 60;
+
+  getInteractions(): InteractionDescriptor[] {
+    const offsetArg = {
+      name: 'delta',
+      type: 'number' as const,
+      ui: { label: 'Delta', description: 'Change in scroll offset, in scene units' },
+    };
+    return [
+      { name: 'scrollBy', description: 'Drag the content by an offset', args: [offsetArg] },
+      {
+        name: 'scrollTo',
+        description: 'Drag the content to an absolute scroll offset',
+        args: [
+          {
+            name: 'offset',
+            type: 'number',
+            ui: { label: 'Offset', min: 0, description: 'Target scrollY' },
+          },
+        ],
+      },
+      {
+        name: 'fling',
+        description: 'Flick the content and let inertia carry it',
+        args: [
+          {
+            name: 'velocity',
+            type: 'number',
+            ui: { label: 'Velocity', description: 'Scene units per second at release' },
+          },
+        ],
+      },
+    ];
+  }
+
+  invokeInteraction(name: string, args?: Record<string, unknown>): boolean {
+    switch (name) {
+      case 'scrollBy': {
+        const delta = readNumberArg(args, 'delta');
+        return delta === null ? false : this.dragScrollBy(delta, 0);
+      }
+      case 'scrollTo': {
+        const offset = readNumberArg(args, 'offset');
+        return offset === null ? false : this.dragScrollBy(offset - this.scrollY, 0);
+      }
+      case 'fling': {
+        const velocity = readNumberArg(args, 'velocity');
+        return velocity === null ? false : this.dragScrollBy(0, velocity);
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Perform a real drag gesture: press inside the viewport, cross the drag threshold, travel, and
+   * release — optionally releasing while still moving, which is what makes it a fling.
+   *
+   * The frames are synthesized here rather than latched across real ticks because a gesture with a
+   * beginning and an end is the whole interaction; only the inertia it leaves behind belongs to the
+   * frames that follow.
+   *
+   * Returns false when drag scrolling is switched off — the gesture genuinely cannot be delivered.
+   * A container whose content already fits returns true and simply does not move, exactly like a
+   * finger dragging a short list.
+   */
+  private dragScrollBy(delta: number, releaseVelocity: number): boolean {
+    if (!this.dragScrollEnabled) {
+      return false;
+    }
+
+    const dt = ScrollContainer2D.SEMANTIC_FRAME_DT;
+    this.getWorldPosition(this.tmpWorldPos);
+    const centerX = this.tmpWorldPos.x;
+    let y = this.tmpWorldPos.y;
+    const direction = Math.sign(delta || releaseVelocity || 1);
+
+    // A gesture starts with a press, so start from "no finger down" — otherwise a real finger that
+    // happens to be down right now would swallow the press frame and the drag would never begin.
+    // Taking the pseudo-pointer's ownership with it is the same rule the controls follow: the latch
+    // IS ownership, so a real finger that was driving the list loses it and has to claim again
+    // (which it does on the very next tick, since the gesture below is over by then).
+    this.pointerWasDown = false;
+    this.dragMode = null;
+    this.ownedPointerId = SEMANTIC_POINTER_ID;
+
+    try {
+      // Press. With a zero drag threshold this frame already claims the gesture.
+      this.runSemanticScrollFrame(centerX, y, true, dt);
+      if (this.dragMode !== 'content') {
+        // The frame that crosses the threshold is consumed by the threshold itself — it must not
+        // count towards the requested travel, so it is measured and then left behind.
+        y += direction * (this.dragThreshold + 1);
+        this.runSemanticScrollFrame(centerX, y, true, dt);
+      }
+      // In content mode each frame scrolls by exactly its own pointer delta.
+      if (delta !== 0) {
+        y += delta;
+        this.runSemanticScrollFrame(centerX, y, true, dt);
+      }
+      if (releaseVelocity !== 0) {
+        // Still moving at release: velocity is measured as travel/dt, so hand it the travel that
+        // produces the velocity asked for and let the release frame keep it.
+        y += releaseVelocity * dt;
+        this.runSemanticScrollFrame(centerX, y, true, dt);
+      } else {
+        // A settle frame with no travel zeroes the measured velocity, so a plain scrollBy does not
+        // silently turn into a fling that keeps drifting for another second.
+        this.runSemanticScrollFrame(centerX, y, true, dt);
+      }
+      this.runSemanticScrollFrame(centerX, y, false, dt);
+    } finally {
+      this.semanticPointer = null;
+      this.ownedPointerId = null;
+    }
+
+    return true;
+  }
+
+  /**
+   * One synthetic frame of the scroll machine — the tick body minus advancing children and minus
+   * the clipping planes, which follow the container's own transform and cannot change during a
+   * gesture.
+   */
+  private runSemanticScrollFrame(x: number, y: number, down: boolean, dt: number): void {
+    this.semanticPointer = { x, y, down };
+    this.updatePointerAndScroll(dt);
+    this.applyScrollOffset();
+    this.syncScrollbarVisuals();
   }
 
   static getPropertySchema(): PropertySchema {
@@ -438,23 +623,44 @@ export class ScrollContainer2D extends Group2D {
 
   private updatePointerAndScroll(dt: number): void {
     const input = this.input;
-    if (!input) {
-      this.pointerWasDown = false;
-      return;
+    // A semantic interaction stands in for the finger; everything below is the untouched drag
+    // machine, so a scripted scroll goes through the same threshold, capture, clamp and inertia a
+    // real drag does.
+    const semantic = this.semanticPointer;
+    let isPointerDown: boolean;
+    let pointerId: number;
+    if (semantic) {
+      this.pointerWorld.set(semantic.x, semantic.y);
+      isPointerDown = semantic.down;
+      pointerId = SEMANTIC_POINTER_ID;
+    } else {
+      if (!input) {
+        this.pointerWasDown = false;
+        this.ownedPointerId = null;
+        return;
+      }
+      const driving = this.resolveDrivingPointer(input);
+      if (!driving) {
+        this.pointerWasDown = false;
+        return;
+      }
+      this.pointerWorld.set(driving.worldX, driving.worldY);
+      isPointerDown = driving.down;
+      pointerId = driving.pointerId;
     }
 
-    const pointerWorld = this.getPointerWorldPosition(this.pointerWorld);
-    if (!pointerWorld) {
-      this.pointerWasDown = false;
-      return;
-    }
-
+    const pointerWorld = this.pointerWorld;
     const pointerInBounds = this.isPointInViewportBounds(pointerWorld);
     if (pointerInBounds || this.dragMode !== null) {
-      input.registerHover(this.nodeId);
+      // Attribute the hover to the finger that produced it, so a *different* finger elsewhere is not
+      // reported as "over UI" (that is what lets a floating joystick start next to a scrolling list).
+      // Pseudo-pointers carry no real id and fall back to the aggregate.
+      if (pointerId >= 0) {
+        input?.registerHover(this.nodeId, pointerId);
+      } else {
+        input?.registerHover(this.nodeId);
+      }
     }
-
-    const isPointerDown = input.isPointerDown;
 
     if (!this.pointerWasDown && isPointerDown) {
       this.pointerStartedInside = pointerInBounds;
@@ -469,9 +675,12 @@ export class ScrollContainer2D extends Group2D {
     } else if (this.pointerWasDown && !isPointerDown) {
       this.pointerStartedInside = false;
       this.dragMode = null;
+      // The gesture is over: stop following that pointer, so the container is free to claim the next
+      // one (including a finger that is already down elsewhere on screen).
+      this.ownedPointerId = null;
     }
 
-    if (this.wheelScrollEnabled && pointerInBounds && input.wheelDelta.y !== 0) {
+    if (this.wheelScrollEnabled && input && pointerInBounds && input.wheelDelta.y !== 0) {
       this.scrollY += input.wheelDelta.y * this.wheelSensitivity;
       this.scrollVelocity = 0;
     }
@@ -516,6 +725,122 @@ export class ScrollContainer2D extends Group2D {
     this.lastPointerWorldY = this.pointerWorld.y;
     this.pointerWasDown = isPointerDown;
     this.scrollY = this._scrollY;
+  }
+
+  /**
+   * The pointer this frame's drag machine runs on — the one this container owns.
+   *
+   * - **Claim** — a pointer that is down inside the viewport (thumb included). A press that lands
+   *   outside is not claimed at all, which is the old `pointerStartedInside === false` case: it can
+   *   never scroll the list.
+   * - **Follow** — the owned pointer is followed wherever it goes, out of the viewport included,
+   *   and while it is owned no other finger exists for this container: a second finger landing in
+   *   the list cannot add to the scroll or restart the threshold.
+   * - **Terminal** — `'up'` is a normal release (the velocity it left behind becomes a fling);
+   *   `'cancel'`, or the pointer vanishing with no terminal event at all, drops the velocity first,
+   *   because an interrupted gesture must not fling the list.
+   * - **Nothing owned** — one observer frame with `down` forced false, so wheel scrolling and the
+   *   hover registration still work with no pointer down (the mouse case) without a stray finger
+   *   outside the viewport being able to start a drag.
+   */
+  private resolveDrivingPointer(input: InputService): DrivingPointer | null {
+    const candidates = this.collectCandidatePointers(input);
+
+    const owned = this.ownedPointerId;
+    if (owned !== null) {
+      const current = candidates.find(candidate => candidate.pointerId === owned);
+      if (current) {
+        return this.resolveCandidate(current);
+      }
+      return this.finishOwnedPointer(input, owned);
+    }
+
+    let observed: DrivingPointer | null = null;
+    for (const candidate of candidates) {
+      const resolved = this.resolveCandidate(candidate);
+      if (!resolved) continue;
+      const inBounds = this.isPointInViewportBounds(this.candidateWorld);
+      if (candidate.down && inBounds) {
+        this.ownedPointerId = candidate.pointerId;
+        return resolved;
+      }
+      if (inBounds || observed === null) {
+        observed = { ...resolved, down: false };
+      }
+      if (inBounds) break;
+    }
+    return observed;
+  }
+
+  /**
+   * Every pointer this container may consider this frame, in press order. Falls back to ONE
+   * synthetic pointer at the shared `pointerPosition` when the addressed map is empty — see
+   * {@link LEGACY_POINTER_ID}.
+   */
+  private collectCandidatePointers(input: InputService): CandidatePointer[] {
+    const active = input.getActivePointers();
+    if (active.length > 0) {
+      return active.map(pointer => ({
+        pointerId: pointer.pointerId,
+        x: pointer.x,
+        y: pointer.y,
+        down: true,
+      }));
+    }
+    return [
+      {
+        pointerId: LEGACY_POINTER_ID,
+        x: input.pointerPosition.x,
+        y: input.pointerPosition.y,
+        down: input.isPointerDown,
+      },
+    ];
+  }
+
+  /** Unproject a candidate into world units (also left in {@link candidateWorld} for hit tests). */
+  private resolveCandidate(candidate: CandidatePointer): DrivingPointer | null {
+    const world = this.screenPointToWorld(candidate.x, candidate.y, this.candidateWorld);
+    if (!world) return null;
+    return {
+      pointerId: candidate.pointerId,
+      worldX: world.x,
+      worldY: world.y,
+      down: candidate.down,
+    };
+  }
+
+  /** Close the gesture the way the owned pointer ended (see {@link resolveDrivingPointer}). */
+  private finishOwnedPointer(input: InputService, ownedPointerId: number): DrivingPointer {
+    const terminal = ScrollContainer2D.findTerminalEvent(input, ownedPointerId);
+    if (terminal?.type === 'up') {
+      const world = this.screenPointToWorld(terminal.x, terminal.y, this.candidateWorld);
+      if (world) {
+        return { pointerId: ownedPointerId, worldX: world.x, worldY: world.y, down: false };
+      }
+    } else {
+      this.scrollVelocity = 0;
+    }
+    // No usable terminal coordinates: end the gesture where the pointer was last seen.
+    return {
+      pointerId: ownedPointerId,
+      worldX: this.pointerWorld.x,
+      worldY: this.pointerWorld.y,
+      down: false,
+    };
+  }
+
+  /** The last `'up'` / `'cancel'` this frame carried for the given pointer, if any. */
+  private static findTerminalEvent(
+    input: InputService,
+    pointerId: number
+  ): { type: string; x: number; y: number } | null {
+    const events = input.pointerEvents;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event.pointerId !== pointerId) continue;
+      if (event.type === 'up' || event.type === 'cancel') return event;
+    }
+    return null;
   }
 
   private getScrollableChildren(): Node2D[] {

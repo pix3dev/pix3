@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Vector3 } from 'three';
-import { NodeWatchRecorder, type WatchChildLike, type WatchNodeLike } from './NodeWatchRecorder';
+import {
+  NodeWatchRecorder,
+  type WatchChildLike,
+  type WatchFrameSource,
+  type WatchNodeLike,
+} from './NodeWatchRecorder';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -72,8 +77,44 @@ class FakeNode implements WatchNodeLike {
   }
 }
 
-const recorderFor = (node: WatchNodeLike, queries: string[], intervalMs = 10_000) =>
-  new NodeWatchRecorder(query => (queries.includes(query) ? node : null), queries, intervalMs);
+/**
+ * A `SceneRunner`-shaped frame hook: `tick()` drives one logic tick, exactly as
+ * the runner's per-frame listener dispatch does.
+ */
+class FakeFrameSource implements WatchFrameSource {
+  private readonly listeners = new Set<(sample: { frameNumber: number }) => void>();
+  private frameNumber = 0;
+  subscribed = 0;
+  unsubscribed = 0;
+
+  subscribeFrameStats(listener: (sample: { frameNumber: number }) => void): () => void {
+    this.listeners.add(listener);
+    this.subscribed += 1;
+    return () => {
+      this.listeners.delete(listener);
+      this.unsubscribed += 1;
+    };
+  }
+
+  tick(count = 1): void {
+    for (let i = 0; i < count; i++) {
+      this.frameNumber += 1;
+      for (const listener of this.listeners) listener({ frameNumber: this.frameNumber });
+    }
+  }
+}
+
+/** Timer-driven recorder (no frame source) — the degraded path. */
+const recorderFor = (node: WatchNodeLike, queries: string[], idlePollMs = 10_000) =>
+  new NodeWatchRecorder(query => (queries.includes(query) ? node : null), queries, { idlePollMs });
+
+/** Frame-driven recorder — the normal path against a live runner. */
+const frameRecorderFor = (node: WatchNodeLike, queries: string[], frameSource: FakeFrameSource) =>
+  new NodeWatchRecorder(query => (queries.includes(query) ? node : null), queries, {
+    frameSource,
+    // Long enough that the watchdog never fires during a synchronous test.
+    idlePollMs: 10_000,
+  });
 
 describe('NodeWatchRecorder', () => {
   afterEach(() => vi.useRealTimers());
@@ -197,5 +238,132 @@ describe('NodeWatchRecorder', () => {
     const queries = Array.from({ length: 11 }, (_, i) => `q${i}`);
     const recorder = new NodeWatchRecorder(() => node, queries);
     expect(recorder.droppedWatchCount).toBe(3);
+  });
+
+  describe('frame-driven sampling', () => {
+    it('samples every logic tick, catching a peak that lives for one frame', () => {
+      // The motivating gap: a bullet visible for a single tick. A 100 ms timer
+      // sees it only by luck; the frame hook sees it by construction.
+      const frames = new FakeFrameSource();
+      const bullet = makeChild({ uuid: 'bullet', visible: false });
+      const node = new FakeNode('gun', [bullet]);
+      const recorder = frameRecorderFor(node, ['gun'], frames);
+      recorder.start();
+
+      frames.tick(3);
+      bullet.visible = true;
+      bullet.wx = 900;
+      frames.tick(1); // the ONE tick the shot exists
+      bullet.visible = false;
+      bullet.wx = 0;
+      frames.tick(3);
+      const activity = recorder.stop().get('gun')!;
+
+      expect(recorder.isFrameDriven).toBe(true);
+      expect(recorder.framesObserved).toBe(7);
+      expect(activity.visibleChildPeak).toBe(1);
+      expect(activity.maxChildDistance).toBeGreaterThan(300);
+      expect(activity.active).toBe(true);
+    });
+
+    it('stamps log entries with the frame the change first showed up on', () => {
+      const frames = new FakeFrameSource();
+      const node = new FakeNode('button');
+      node.scale = { x: 1, y: 1, z: 1 };
+      const recorder = frameRecorderFor(node, ['button'], frames);
+      recorder.start();
+
+      frames.tick(4);
+      node.scale = { x: 1.2, y: 1.2, z: 1 };
+      frames.tick(1);
+      node.scale = { x: 1, y: 1, z: 1 };
+      frames.tick(2);
+      const entry = recorder
+        .stop()
+        .get('button')!
+        .log?.find(e => e.kind === 'scale');
+
+      expect(entry?.frame).toBe(5);
+    });
+
+    it('collapses repeats of a kind into one counted entry (log stays readable at 60Hz)', () => {
+      const frames = new FakeFrameSource();
+      const node = new FakeNode('spawner');
+      const recorder = frameRecorderFor(node, ['spawner'], frames);
+      recorder.start();
+
+      for (let i = 0; i < 40; i++) {
+        node.addChild(makeChild({ uuid: `e${i}` }));
+        frames.tick(1);
+      }
+      const activity = recorder.stop().get('spawner')!;
+      const spawnEntries = activity.log!.filter(e => e.kind === 'spawn');
+
+      expect(activity.spawned).toBe(40);
+      expect(spawnEntries).toHaveLength(1);
+      expect(spawnEntries[0].count).toBe(40);
+      expect(activity.log!.length).toBeLessThanOrEqual(10);
+    });
+
+    it('unsubscribes from the frame hook on stop', () => {
+      const frames = new FakeFrameSource();
+      const node = new FakeNode('n');
+      const recorder = frameRecorderFor(node, ['n'], frames);
+      recorder.start();
+      frames.tick(2);
+      recorder.stop();
+      expect(frames.unsubscribed).toBe(1);
+
+      // Ticks after stop must not reach a torn-down recorder.
+      node.wx = 500;
+      frames.tick(5);
+      expect(recorder.framesObserved).toBe(2);
+    });
+
+    it('falls back to the timer when the runner exposes no usable frame hook', async () => {
+      // Degradation, not failure: a host without subscribeFrameStats (or one
+      // whose subscribe throws) still gets the old 100 ms sampling.
+      const node = new FakeNode('fader');
+      node.opacity = 1;
+      const throwingSource = {
+        subscribeFrameStats(): () => void {
+          throw new Error('no frame hook here');
+        },
+      };
+      const recorder = new NodeWatchRecorder(() => node, ['fader'], {
+        frameSource: throwingSource,
+        idlePollMs: 5,
+      });
+      recorder.start();
+      node.opacity = 0.2;
+      await sleep(30);
+      node.opacity = 1;
+      const activity = recorder.stop().get('fader')!;
+
+      expect(recorder.isFrameDriven).toBe(false);
+      expect(recorder.framesObserved).toBe(0);
+      expect(activity.opacityRange!.min).toBeLessThanOrEqual(0.2);
+      expect(activity.active).toBe(true);
+    });
+
+    it('keeps sampling through a window where the runner never ticks (paused)', async () => {
+      // A subscribed but silent runner is the paused case: the watchdog must
+      // still produce samples, or a paused-then-changed node reads as inert.
+      const frames = new FakeFrameSource();
+      const node = new FakeNode('idle');
+      node.scale = { x: 1, y: 1, z: 1 };
+      const recorder = new NodeWatchRecorder(() => node, ['idle'], {
+        frameSource: frames,
+        idlePollMs: 5,
+      });
+      recorder.start();
+      node.scale = { x: 2, y: 2, z: 1 };
+      await sleep(30);
+      node.scale = { x: 1, y: 1, z: 1 };
+      const activity = recorder.stop().get('idle')!;
+
+      expect(recorder.framesObserved).toBe(0);
+      expect(activity.maxScaleDelta).toBeGreaterThan(0.5);
+    });
   });
 });

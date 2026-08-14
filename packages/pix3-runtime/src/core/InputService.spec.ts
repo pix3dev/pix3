@@ -150,3 +150,101 @@ describe('InputService pointer capture (synthetic events)', () => {
     canvas.remove();
   });
 });
+
+describe('InputService observed polls (harness diagnostic)', () => {
+  let input: InputService;
+
+  beforeEach(() => {
+    input = new InputService();
+  });
+
+  it('records nothing until recording is switched on', () => {
+    input.getAxis('Horizontal');
+    input.getButton('Key_KeyA');
+    expect(input.isPollRecording).toBe(false);
+    expect(input.getObservedPolls().observedPolls).toEqual([]);
+  });
+
+  it('collects the names the game polled, deduped and in call order', () => {
+    input.startPollRecording();
+    input.getAxis('Horizontal');
+    input.getButton('Key_KeyA');
+    input.getButton('Key_KeyD');
+    input.getAxis('Horizontal'); // polled every tick — one entry, not one per call
+    expect(input.getObservedPolls().observedPolls).toEqual(['Horizontal', 'Key_KeyA', 'Key_KeyD']);
+  });
+
+  it('records the poll even when the action is unset (that IS the diagnostic)', () => {
+    // The motivating case: the harness pressed ArrowLeft, the game asks about
+    // KeyA. The game's poll returns false — and must still be observed.
+    input.startPollRecording();
+    expect(input.getButton('Key_KeyA')).toBe(false);
+    expect(input.getObservedPolls().observedPolls).toEqual(['Key_KeyA']);
+  });
+
+  it('takes and clears the window while recording stays on', () => {
+    input.startPollRecording();
+    input.getButton('Key_Space');
+    expect(input.takeObservedPolls().observedPolls).toEqual(['Key_Space']);
+    expect(input.isPollRecording).toBe(true);
+    expect(input.getObservedPolls().observedPolls).toEqual([]);
+    input.getAxis('Vertical');
+    expect(input.getObservedPolls().observedPolls).toEqual(['Vertical']);
+  });
+
+  it('stopping recording drops the accumulated names', () => {
+    input.startPollRecording();
+    input.getButton('Key_Space');
+    input.stopPollRecording();
+    expect(input.isPollRecording).toBe(false);
+    expect(input.getObservedPolls().observedPolls).toEqual([]);
+    input.getButton('Key_Space');
+    expect(input.getObservedPolls().observedPolls).toEqual([]);
+  });
+
+  it('restarting a window clears the previous one', () => {
+    input.startPollRecording();
+    input.getButton('Key_KeyA');
+    input.startPollRecording();
+    expect(input.getObservedPolls().observedPolls).toEqual([]);
+  });
+
+  it('reports a lock that was held and released inside the window', () => {
+    // "Nothing polled" under a lock means input was frozen, not that the game
+    // is deaf — the two demand opposite fixes, so the lock is reported too.
+    input.startPollRecording();
+    expect(input.getObservedPolls().lockedDuringWindow).toBe(false);
+    input.lock();
+    input.unlock();
+    const snapshot = input.getObservedPolls();
+    expect(snapshot.locked).toBe(false);
+    expect(snapshot.lockedDuringWindow).toBe(true);
+  });
+
+  it('reports a lock that is held right now', () => {
+    input.lock();
+    input.startPollRecording();
+    const snapshot = input.getObservedPolls();
+    expect(snapshot.locked).toBe(true);
+    expect(snapshot.lockedDuringWindow).toBe(true);
+  });
+
+  it('caps distinct names and flags the truncation', () => {
+    input.startPollRecording();
+    for (let i = 0; i < 80; i++) input.getButton(`Key_Generated${i}`);
+    const snapshot = input.getObservedPolls();
+    expect(snapshot.observedPolls).toHaveLength(64);
+    expect(snapshot.truncated).toBe(true);
+  });
+
+  it('detach ends the window so it cannot leak into the next scene', () => {
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    input.attach(canvas);
+    input.startPollRecording();
+    input.getButton('Key_Space');
+    input.detach();
+    expect(input.isPollRecording).toBe(false);
+    canvas.remove();
+  });
+});

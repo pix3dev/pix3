@@ -364,11 +364,54 @@ on hover). `scene.getPointer2DWorldPosition()` converts the current pointer to
 2D world/design coordinates through the live 2D camera (Godot's
 `get_global_mouse_position()`).
 
+**Multi-touch is addressed, not shared.** Every finger that is down lives in a
+map: `getActivePointers()` (press order, index 0 is the primary one),
+`getPointer(id)`, `pointerDownCount`, `isPointerOverUI(id)`, and a `pointerId` on
+every entry of `pointerEvents` (`'down' | 'move' | 'up' | 'cancel'` — a `'cancel'`
+is a press *taken away*, e.g. a finger dragged off the screen edge, and must never
+count as a completed tap). Anything that follows one contact — a stick, a drag, a
+tap resolver — names its finger and reads only that one; UI controls do this for
+you (each control owns at most one pointer). The shared values are summaries:
+`isPointerDown` means "**any** finger is down", `pointerPosition` and
+`activePointerId` (`@deprecated`) describe the **primary** finger only, and
+`isHoveringUI` is the aggregate over all of them — gating a gesture on it is what
+makes "hold a button with one thumb, drag the stick with the other" impossible, so
+ask `isPointerOverUI(myPointerId)` instead. `Action_Primary` stays one shared
+button raised on the first finger down and dropped by the last one up.
+`scene.getPointer2DWorldPosition(pointerId)` is the addressed form of the world
+conversion (null when that pointer is not down — a tap that went down and up in
+one frame is already gone, so fall back to the no-argument call).
+
 ### Signals (node events)
 `node.connect(name, target, method)` / `disconnect` / `emit(name, ...args)`. The
 decoupled event bus between nodes, scripts, animation event tracks, and juice
 `triggerEvent`s. Always `disconnect` in `onDetach` (the `Script` base auto-drops
 connections where the script is the target).
+
+### Game commands (`scene.commands`) — named intents
+`register(name, handler, meta?)` / `dispatch(name, args?)` / `list()` / `log` /
+`undo()`. The registry of a game's **discrete intents** — "start the game", "open
+the settings", "make a move", "buy an item" — so tooling and tests can drive the
+game without clicking, and every raised intent is journalled with the frame it
+happened on. Names are `kebab-case`, optionally namespaced with dots
+(`settings.toggle-music`); `args` must be JSON-serialisable (anything else is
+refused with the offending path named); a handler that returns `{ undo() }` makes
+the intent reversible through `commands.undo()`. A throwing handler is contained
+the same way a script hook is (journalled, reported, loop unaffected), and
+recursive dispatch is depth-capped.
+
+**Wire a control's signal to `dispatch`, not to the method** —
+`button.connect('pressed', this, () => this.scene?.commands.dispatch('start-game'))`.
+That is what makes one real tap enough to prove the binding, after which every
+scenario raises the intent directly. The registry **lives with the scene**: the
+runner clears it on stop, so the next scene never inherits a dead intent. A
+`GameDebugProvider` publishes it as `actions: () => scene.commands.list().map(c => c.name)`
+rather than keeping a second, hand-maintained list.
+
+**Boundary:** commands express intent, not continuous control. Movement, gestures
+and aiming stay on input axes/controls — "drive left" as a command loses both the
+analog magnitude and the per-frame cadence. Every project template registers its
+flow intents this way (`start-game`, `open-settings`, `restart`, `cta-click`, …).
 
 ### Screen transitions
 `scene.fadeToBlack(sec)` / `fadeFromBlack(sec)` / `switchCameraWithFade(id, out, in)`
@@ -484,7 +527,7 @@ scope (agent HTTP/preview commands) arrives in Phase 2 — see `.plans/asset-lib
 Inside any `Script` subclass:
 
 - `this.node` — the owning `NodeBase` (transform, `visible`, `getComponent`, `addComponent`, `connect`/`emit`, `findById`/`findByName`/`findByPath`, `children`, `parentNode`). `getComponent<T>(type: new (...args) => T): T | null` takes the component **class**, not a string ID — `node.getComponent(CarController)`, importing the class by relative path (`./CarController`). There is no string-based lookup (`getComponent('user:CarController')` fails); `user:*` IDs are for `add_component`/scene YAML only. To fetch by hand: `node.components.find(c => c instanceof CarController)`.
-- `this.scene` — the `SceneService` (all of §4's `scene.*` APIs, plus `getActiveCamera()`, `getActiveCamera2D()`, `findNode(query)`, `getRootNodes()`, `getViewportInfo()`/`onViewportChanged()`/`isPortrait()`, `raycastViewport(nx,ny)`, `getAudioService`/`getAssetLoader`/`getResourceManager`/`getECSService`, plus `network` and `netNodes` for multiplayer). May be `undefined` in some editor previews — guard it.
+- `this.scene` — the `SceneService` (all of §4's `scene.*` APIs, plus `getActiveCamera()`, `getActiveCamera2D()`, `findNode(query)`, `getRootNodes()`, `getViewportInfo()`/`onViewportChanged()`/`isPortrait()`, `raycastViewport(nx,ny)`, `getAudioService`/`getAssetLoader`/`getResourceManager`/`getECSService`, plus `network` and `netNodes` for multiplayer, and `commands` for named game intents). May be `undefined` in some editor previews — guard it.
 - `this.input` — the `InputService` (§4 Input).
 - `this.findNode(query)` — resolve another node by id / name / slash-path, or `null` if absent (`get_node_or_null`).
 - `this.getNode(query)` — same lookup but **throws** if the node is missing (`get_node`). In the in-editor code editor the argument autocompletes to the node names/paths of the open scenes and the return type is the exact node type (`this.getNode('Hero')` → `Sprite2D`), à la Godot's `$Node` / WPF `x:Name`. Any other string resolves to `NodeBase`, so a script reused in a scene that lacks the name still type-checks — the names are hints, never constraints. (Typed names come from the editor augmenting `SceneNodeNames`; it's empty in exported games, where only `getNode<T>(query)` applies.)

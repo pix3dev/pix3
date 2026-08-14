@@ -594,6 +594,87 @@ describe('AgentChatService', () => {
     expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
   });
 
+  it('does not gate when the change was proven with game_run (the strongest proof clears the debt)', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
+      .mockResolvedValueOnce(
+        toolCallResult('game_run', 'c2', {
+          until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        })
+      )
+      .mockResolvedValueOnce(textResult('score rose on frame 47'));
+    const execute = vi.fn(async (name: string) =>
+      name === 'game_run'
+        ? { ok: true, verdict: 'PASS until[0] score +1 (frame 47)', outcome: { kind: 'until' } }
+        : { ok: true }
+    );
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('make scoring work');
+
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+  });
+
+  it('a game_run that was already true at frame 0 proves nothing, so the gate still fires', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
+      .mockResolvedValueOnce(
+        toolCallResult('game_run', 'c2', {
+          until: [{ kind: 'gameState', path: 'score', op: 'gte', value: 0 }],
+        })
+      )
+      .mockResolvedValueOnce(textResult('done'))
+      .mockResolvedValueOnce(textResult('still done'));
+    const execute = vi.fn(async (name: string) =>
+      name === 'game_run'
+        ? {
+            ok: true,
+            verdict: 'PRECONDITION ALREADY MET: until[0] is ALREADY TRUE at frame 0',
+            outcome: { kind: 'precondition-already-met' },
+          }
+        : { ok: true }
+    );
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('make scoring work');
+
+    const gate = service
+      .getState()
+      .messages.find(
+        m => m.role === 'user' && JSON.stringify(m.content).includes('changed game logic')
+      );
+    expect(gate).toBeDefined();
+  });
+
+  it('game_controls does not clear the verify debt: listing what is interactive proves nothing', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('fs_write', 'c1', { path: 'scripts/Car.ts', content: 'x' })
+      )
+      .mockResolvedValueOnce(toolCallResult('game_controls', 'c2', {}))
+      .mockResolvedValueOnce(textResult('the button is there, done'))
+      .mockResolvedValueOnce(textResult('still done'));
+    const execute = vi.fn(async () => ({ ok: true, controls: [{ name: 'PlayButton' }] }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('wire the button');
+
+    const gate = service
+      .getState()
+      .messages.find(
+        m => m.role === 'user' && JSON.stringify(m.content).includes('changed game logic')
+      );
+    expect(gate).toBeDefined();
+  });
+
   it('does not gate a documentation write (design/progress.md is not game logic)', async () => {
     const chat = vi
       .fn()

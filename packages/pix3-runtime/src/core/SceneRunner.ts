@@ -54,6 +54,12 @@ import { DirectionAxesOverlay } from './direction-axes-overlay';
 import { worldToCanvasLogical, worldToCanvasThroughCamera } from './world-to-canvas';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { GameTime } from './GameTime';
+import {
+  DEFAULT_RUNTIME_TIME_CONFIG,
+  resolveRuntimeTimeConfig,
+  type ResolvedRuntimeTimeConfig,
+  type RuntimeTimeConfig,
+} from './runtime-time';
 import { playable } from './PlayableSdk';
 
 /**
@@ -111,6 +117,16 @@ export class SceneRunner {
   private fixedTimeAccumulator = 0;
   private elapsedTime = 0;
   private frameNumber = 0;
+  /** Frame-driver contract (§5.1). Owned here; hosts only forward values in. */
+  private timeConfig: ResolvedRuntimeTimeConfig = { ...DEFAULT_RUNTIME_TIME_CONFIG };
+  /** Ticks executed since the last paint — drives `renderEveryNTicks`. */
+  private ticksSinceRender = 0;
+  /** True for the duration of {@link runOneTick} — reentrancy guard for `stepFrames`. */
+  private inTick = false;
+  /** True while the master bus is silenced because the mode is not `'realtime'`. */
+  private audioSilenced = false;
+  /** Master volume captured when silencing, restored when the mode returns to realtime. */
+  private masterVolumeBeforeSilence = 1;
 
   private scene: Scene;
   private activeCamera: Camera3D | null = null;
@@ -403,8 +419,14 @@ export class SceneRunner {
     this.fixedTimeAccumulator = 0;
     this.elapsedTime = 0;
     this.frameNumber = 0;
+    this.ticksSinceRender = 0;
     this.gameTime.reset();
     this.audioMuffled = false;
+    // The time contract survives stop()/start() (it is a driver setting, like
+    // `setBatching2DEnabled`, not scene state) — but the mixer was reset by
+    // stop(), so re-apply the mute this mode implies to the fresh bus state.
+    this.audioSilenced = false;
+    this.applyTimeModeAudio();
 
     // Localization: create a play-mode instance (isolated from the editor
     // preview), activate it, and subscribe live re-render before the first tick
@@ -432,7 +454,14 @@ export class SceneRunner {
     this.sceneService.handleSceneStarted();
 
     this.clock.start();
-    this.tick();
+    if (this.timeConfig.mode === 'manual') {
+      // No rAF is ever scheduled in manual mode, so paint the loaded scene once
+      // — otherwise a session that arms manual before Play stares at a stale
+      // canvas until the first stepFrames(). Logic is not advanced.
+      this.render();
+    } else {
+      this.tick();
+    }
   }
 
   /**
@@ -527,12 +556,19 @@ export class SceneRunner {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+    // Undo a non-realtime mute here, not in the graph block below: the mode can
+    // be armed with no scene loaded, and then `resetBuses()` never runs.
+    if (this.audioSilenced) {
+      this.audioSilenced = false;
+      this.audioService.setBusVolume('master', this.masterVolumeBeforeSilence, 0.01);
+    }
 
     this.ecsService.endScene();
     this.ecsService.clear();
     this.fixedTimeAccumulator = 0;
     this.elapsedTime = 0;
     this.frameNumber = 0;
+    this.ticksSinceRender = 0;
     this.isPaused = false;
     this.gameTime.reset();
     this.currentFrameProfilerActivities = [];
@@ -578,6 +614,13 @@ export class SceneRunner {
       this.runtimeGraph = null;
     }
 
+    // Commands live with the scene (§5.8.2). Cleared here, AFTER the scripts
+    // above have detached — an `onDetach` may still dispatch — so the next
+    // scene's `commands.list()` never shows an intent whose handler closes over
+    // a graph that is already gone. `runGraph` stops before it starts, which is
+    // what makes a scene change clear them too.
+    this.sceneService.clearCommands();
+
     this.activeCamera2D = null;
     this.overlay2DActive = false;
     this.orthographicCamera.position.set(0, 0, 100);
@@ -608,6 +651,9 @@ export class SceneRunner {
     this.isPaused = false;
     // Consume the time elapsed during pause so the next tick gets a fresh delta.
     this.clock.getDelta();
+    // Pause/resume are orthogonal to the time mode: resuming a manual runner
+    // un-freezes `stepFrames`, it does not tick or start an rAF loop.
+    if (this.timeConfig.mode === 'manual') return;
     this.tick();
   }
 
@@ -756,10 +802,167 @@ export class SceneRunner {
     return false;
   }
 
+  /**
+   * Replace the frame-driver contract (§5.1). Validation runs before any state
+   * is touched, so a rejected config leaves the previous mode intact. Takes
+   * effect from the next tick; the fixed-step accumulator and the
+   * `renderEveryNTicks` counter are reset so a mid-run switch never inherits a
+   * partial step from the mode it left.
+   *
+   * @throws TypeError on an unknown mode, RangeError on `fixedDeltaSec <= 0`.
+   */
+  setTimeMode(config: RuntimeTimeConfig): void {
+    const resolved = resolveRuntimeTimeConfig(config);
+    const previousMode = this.timeConfig.mode;
+    this.timeConfig = resolved;
+    this.fixedTimeAccumulator = 0;
+    this.ticksSinceRender = 0;
+
+    // `Clock.getDelta()` keeps accumulating whether or not anyone asks for it, so
+    // a mode that stops asking (manual) hands the first realtime frame after it a
+    // delta the size of the whole detour. Drain it exactly at the transition.
+    if (resolved.mode === 'realtime' && previousMode !== 'realtime') {
+      this.clock.getDelta();
+    }
+
+    this.applyTimeModeAudio();
+
+    // Re-arm or cancel the loop for the new mode. This is the whole difference
+    // between "the mode switched" and "the game froze": manual must stop the
+    // rAF chain, and leaving manual must start one again.
+    if (resolved.mode === 'manual') {
+      if (this.animationFrameId !== null) {
+        cancelAnimationFrame(this.animationFrameId);
+        this.animationFrameId = null;
+      }
+      return;
+    }
+    this.scheduleNextFrame();
+  }
+
+  /** The active frame-driver contract, fully resolved (a copy — safe to keep). */
+  getTimeMode(): Readonly<ResolvedRuntimeTimeConfig> {
+    return { ...this.timeConfig };
+  }
+
+  /**
+   * Run `count` ticks synchronously. Only meaningful in `'manual'` mode — any
+   * other mode returns 0 with a warning, because the rAF loop is already the
+   * source of ticks and interleaving a manual batch with it would double-step.
+   *
+   * Returns the number of ticks actually executed: a paused runner returns 0, a
+   * call made from inside a tick (a frame listener, a script) returns 0, and a
+   * tick that throws past {@link updateGameLogicSafe} ends the batch early.
+   */
+  stepFrames(count = 1): number {
+    if (this.timeConfig.mode !== 'manual') {
+      console.warn(
+        `[SceneRunner] stepFrames() is only available in 'manual' time mode (current: '${this.timeConfig.mode}').`
+      );
+      return 0;
+    }
+    if (!this.isRunning || this.isPaused) {
+      return 0;
+    }
+    if (this.inTick) {
+      console.warn('[SceneRunner] stepFrames() called from inside a tick — ignored (reentrancy).');
+      return 0;
+    }
+
+    const requested = typeof count === 'number' && Number.isFinite(count) ? Math.floor(count) : 0;
+    let executed = 0;
+    for (let i = 0; i < requested; i += 1) {
+      if (!this.isRunning || this.isPaused) break;
+      try {
+        this.runOneTick(this.timeConfig.fixedDeltaSec);
+      } catch (thrown) {
+        // updateGameLogicSafe already absorbs script/update throws; anything that
+        // reaches here came from the ECS or render pass. Ending the batch keeps
+        // the count honest instead of reporting ticks that never completed.
+        console.error('[SceneRunner] stepFrames aborted by an error during the tick:', thrown);
+        break;
+      }
+      executed += 1;
+      // A script may have switched the mode mid-batch; stepFrames owns manual only.
+      if (this.timeConfig.mode !== 'manual') break;
+    }
+    return executed;
+  }
+
+  /**
+   * Silence / restore the master bus on a time-mode change. Edge-triggered (same
+   * pattern as the slow-mo muffle above): only a state change touches the mixer,
+   * never a per-tick write. The pre-mute volume is remembered rather than assumed
+   * to be 1, so a game that authored its own master level gets it back.
+   */
+  private applyTimeModeAudio(): void {
+    const shouldSilence = this.timeConfig.muteAudio && this.timeConfig.mode !== 'realtime';
+    if (shouldSilence === this.audioSilenced) return;
+    this.audioSilenced = shouldSilence;
+    if (shouldSilence) {
+      this.masterVolumeBeforeSilence = this.audioService.getBusVolume('master');
+      this.audioService.setBusVolume('master', 0, 0.01);
+    } else {
+      this.audioService.setBusVolume('master', this.masterVolumeBeforeSilence, 0.01);
+    }
+  }
+
+  /** Arm the next animation frame unless the runner is stopped, paused, manual, or already armed. */
+  private scheduleNextFrame(): void {
+    if (!this.isRunning || this.isPaused) return;
+    if (this.timeConfig.mode === 'manual') return;
+    if (this.animationFrameId !== null) return;
+    this.animationFrameId = requestAnimationFrame(this.tick);
+  }
+
+  /**
+   * The rAF driver. Decides *how many* ticks this animation frame is worth and
+   * with what dt; {@link runOneTick} is the frame body itself.
+   */
   private tick = (): void => {
+    this.animationFrameId = null;
     if (!this.isRunning || this.isPaused) return;
 
-    const rawDt = this.clock.getDelta();
+    const { mode, ticksPerFrame, fixedDeltaSec } = this.timeConfig;
+    if (mode === 'manual') return; // nothing schedules us; defensive against a late frame
+
+    if (mode === 'realtime') {
+      this.runOneTick(this.clock.getDelta());
+    } else {
+      // Drain the wall clock even though the batch ignores it — see setTimeMode.
+      this.clock.getDelta();
+      for (let i = 0; i < ticksPerFrame; i += 1) {
+        if (!this.isRunning || this.isPaused) break;
+        this.runOneTick(fixedDeltaSec);
+        if (this.timeConfig.mode !== 'fixed') break; // a script switched modes mid-batch
+      }
+    }
+
+    this.scheduleNextFrame();
+  };
+
+  /**
+   * One frame of game time: input, fixed updates, ECS, node/script update, and
+   * (when the `renderEveryNTicks` counter comes due) a paint. `rawDt` is the
+   * delta the driver decided on — wall-clock in realtime, `fixedDeltaSec`
+   * otherwise; {@link GameTime} scales it into the gameplay dt on top.
+   *
+   * Frame listeners are notified on **every** tick, rendered or not: observation
+   * must not thin out under a speed-up, since running faster is exactly when the
+   * observer is needed. A tick that skipped its paint reports `renderMs: 0`
+   * (nothing was submitted), so `totalFrameMs` equals `logicMs` for it and
+   * summing `renderMs` across a batch still gives the batch's real paint cost.
+   */
+  private runOneTick(rawDt: number): void {
+    this.inTick = true;
+    try {
+      this.runFrameBody(rawDt);
+    } finally {
+      this.inTick = false;
+    }
+  }
+
+  private runFrameBody(rawDt: number): void {
     // Advance the time-scale controller on the REAL delta (so hitstop / slow-mo
     // can expire even while the game is frozen), then scale gameplay dt by it.
     // Gameplay (ECS, node ticks, scripts, keyframe clips, fixed-step physics)
@@ -798,9 +1001,19 @@ export class SceneRunner {
     this.updateGameLogicSafe(dt);
     this.flushInstancedNodes();
     const logicMs = performance.now() - logicStart;
-    const renderStart = performance.now();
-    this.render();
-    const renderMs = performance.now() - renderStart;
+
+    // Paint on the tick that closes a `renderEveryNTicks` group — in fixed mode
+    // that resolves to the LAST tick of the batch, i.e. one render per animation
+    // frame no matter how many ticks it carried.
+    this.ticksSinceRender += 1;
+    let renderMs = 0;
+    if (this.ticksSinceRender >= this.timeConfig.renderEveryNTicks) {
+      this.ticksSinceRender = 0;
+      const renderStart = performance.now();
+      this.render();
+      renderMs = performance.now() - renderStart;
+    }
+
     this.notifyFrameListeners({
       // Report the real (unscaled) delta so FPS stays accurate during slow-mo /
       // hitstop; `elapsedTime` accumulates scaled game time.
@@ -814,9 +1027,7 @@ export class SceneRunner {
       profilerActivities: this.getFrameProfilerActivitiesSnapshot(),
       activeAudioPlaybacks: this.getActiveAudioPlaybackSnapshot(),
     });
-
-    this.animationFrameId = requestAnimationFrame(this.tick);
-  };
+  }
 
   subscribeFrameStats(listener: SceneRunnerFrameListener): () => void {
     this.frameListeners.add(listener);
@@ -1390,6 +1601,9 @@ export class SceneRunner {
       },
       getGameTime(): GameTime {
         return runner.gameTime;
+      },
+      getFrameNumber(): number {
+        return runner.frameNumber;
       },
       raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null {
         return runner.raycastViewport(normalizedX, normalizedY);

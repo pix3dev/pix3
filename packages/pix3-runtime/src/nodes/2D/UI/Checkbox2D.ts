@@ -1,7 +1,11 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
-import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
+import { readBooleanArg, type InteractionDescriptor } from '../../../fw/interactive';
+import {
+  assignWithoutSchemaRefresh,
+  installReactiveSchemaProperties,
+} from '../../../fw/reactive-schema-properties';
 
 export interface Checkbox2DProps extends UIControl2DProps {
   size?: number;
@@ -15,6 +19,25 @@ export interface Checkbox2DProps extends UIControl2DProps {
 /**
  * A checkbox/toggle control for 2D UI.
  * Emits virtual button presses and supports toggle callbacks.
+ *
+ * Pointer handling runs through the shared `UIControl2D` funnel, which means: the control emits the
+ * lifecycle signals (`pointerdown`/`pressed`/`pointerup`/`released`/`click`), tracks hover, honours
+ * the ancestor-scroll gate (a scroll drag passing over the box no longer toggles it) and flips on
+ * RELEASE inside the bounds — it used to flip on press-down, which double-fired against a drag.
+ *
+ * ## `click` vs `toggled` (Godot's split, and why it exists)
+ *
+ * - **`click`** is a POINTER signal: "I was clicked". Like every funnel signal it fires at the
+ *   moment the gesture completes, *before* the control reacts to it — so inside a `click` listener
+ *   `checked` still holds the value the box had before the click.
+ * - **`toggled`** is a STATE signal: "my checked state changed", emitted with the new value
+ *   (`checkbox.connect('toggled', this, checked => …)`) once the flip, the repaint and the virtual
+ *   button/axis are all in place. It fires for every spelling of the change — a tap, a semantic
+ *   `toggle`/`setChecked` interaction, `checkbox.checked = x` from a script, an Inspector edit.
+ *
+ * Anything that applies the checkbox's state (mute a bus, show a panel) connects to `toggled` and
+ * reads the payload or the node. Connecting that to `click` and reading `checked` gives the PREVIOUS
+ * state, which reads as inverted behaviour — the trap this split closes.
  */
 export class Checkbox2D extends UIControl2D {
   size: number;
@@ -118,35 +141,107 @@ export class Checkbox2D extends UIControl2D {
     return localX >= -this.size / 2 && localX <= maxX && Math.abs(localY) <= this.size / 2;
   }
 
+  /**
+   * True while the virtual button raised by {@link toggle} still has to be lowered. The pulse is
+   * one FRAME long and released at the top of the next tick — never on a wall clock, so it lands on
+   * the same frame boundary under a paused, stepped or accelerated game loop.
+   */
+  private pendingActionRelease = false;
+
   override tick(dt: number): void {
     super.tick(dt);
-    if (!this.input) return;
 
-    const isDown = this.input.isPointerDown;
-    const pointerWorld = this.getPointerWorldPosition();
-    if (!pointerWorld) return;
+    if (this.pendingActionRelease) {
+      this.pendingActionRelease = false;
+      this.input?.setButton(this.checkmarkAction, false);
+    }
 
-    if (!this.isPressed && isDown && this.isPointInBounds(pointerWorld) && this.enabled) {
-      this.isPressed = true;
-      this.toggle();
-    } else if (this.isPressed && !isDown) {
-      this.isPressed = false;
+    // Hover/press/click all come from the shared UIControl2D funnel: it applies `enabled`, the
+    // ancestor-scroll gate and emits the lifecycle signals. The toggle itself hangs off onClick().
+    this.updatePointerStateFromInput();
+  }
+
+  /**
+   * Flip the checked state. Called by the funnel on a completed click (released inside the bounds,
+   * just AFTER the `click` signal was emitted) and directly by scripts. That order is why `click`
+   * listeners still read the pre-click `checked`, and why anything acting on the state connects to
+   * `toggled` instead.
+   */
+  protected override onClick(): void {
+    this.toggle();
+  }
+
+  override getInteractions(): InteractionDescriptor[] {
+    return [
+      ...super.getInteractions(),
+      { name: 'toggle', description: 'Flip the checkbox by clicking it' },
+      {
+        name: 'setChecked',
+        description: 'Click the checkbox only if that reaches the requested state',
+        args: [
+          {
+            name: 'checked',
+            type: 'boolean',
+            ui: { label: 'Checked', description: 'Desired state after the interaction' },
+          },
+        ],
+      },
+    ];
+  }
+
+  protected override performInteraction(name: string, args?: Record<string, unknown>): boolean {
+    switch (name) {
+      case 'toggle':
+        // A click, not a call to toggle(): the state flip has to arrive through onClick() so the
+        // signals, the skin and the virtual button pulse all happen the way a tap makes them.
+        return this.runSemanticClick();
+      case 'setChecked': {
+        const desired = readBooleanArg(args, 'checked');
+        if (desired === null) return false;
+        // The gates still apply even when nothing has to change — a disabled checkbox accepts no
+        // interaction, including a redundant one.
+        if (!this.canAcceptSemanticPointer()) return false;
+        if (this.checked === desired) return true;
+        return this.runSemanticClick();
+      }
+      default:
+        return super.performInteraction(name, args);
     }
   }
 
   /**
-   * Toggle the checkbox state
+   * Toggle the checkbox state.
+   *
+   * The virtual button/axis is raised BEFORE the state lands, so that by the time `toggled` fires
+   * everything a listener can observe — `checked`, the visuals, the action axis — is already the
+   * new state.
    */
   toggle(): void {
-    this.checked = !this.checked;
-    this.updateCheckboxVisuals();
-    const buttonState = this.checked ? 1 : 0;
+    const next = !this.checked;
     this.input?.setButton(this.checkmarkAction, true);
-    this.input?.setAxis(this.checkmarkAction, buttonState);
-    // Release button after a frame
-    setTimeout(() => {
-      this.input?.setButton(this.checkmarkAction, false);
-    }, 0);
+    this.input?.setAxis(this.checkmarkAction, next ? 1 : 0);
+    // Lowered by the next tick (see pendingActionRelease) rather than by a setTimeout, which fired
+    // on wall-clock time and therefore on an arbitrary frame.
+    this.pendingActionRelease = true;
+    this.applyChecked(next);
+  }
+
+  /**
+   * The one funnel every checked-state change goes through: store, repaint, then emit `toggled`
+   * with the new value. Called by {@link toggle} and by the schema's `setValue` (which is what a
+   * script's `checkbox.checked = x` and an Inspector edit both reach), so a listener can never be
+   * told about a state the node has not adopted yet.
+   *
+   * The field is written through `assignWithoutSchemaRefresh` because the schema `setValue` routes
+   * back here — a plain assignment would run the refresh (and this emit) a second time.
+   */
+  private applyChecked(next: boolean): void {
+    if (this.checked === next) {
+      return;
+    }
+    assignWithoutSchemaRefresh(this, 'checked', next);
+    this.updateCheckboxVisuals();
+    this.emit('toggled', next);
   }
 
   private updateCheckboxVisuals(): void {
@@ -198,12 +293,8 @@ export class Checkbox2D extends UIControl2D {
           ui: { label: 'Checked', group: 'Checkbox' },
           getValue: n => (n as Checkbox2D).checked,
           setValue: (n, v) => {
-            const cb = n as Checkbox2D;
-            const newState = Boolean(v);
-            if (cb.checked !== newState) {
-              cb.checked = newState;
-              cb.updateCheckboxVisuals();
-            }
+            // Same funnel as a tap: repaint plus a `toggled` emit once the new state is in place.
+            (n as Checkbox2D).applyChecked(Boolean(v));
           },
         },
         {

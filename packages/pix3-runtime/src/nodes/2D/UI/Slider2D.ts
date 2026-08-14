@@ -1,6 +1,7 @@
 import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
+import { readNumberArg, type InteractionDescriptor } from '../../../fw/interactive';
 import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
 
 export interface Slider2DProps extends UIControl2DProps {
@@ -19,6 +20,18 @@ export interface Slider2DProps extends UIControl2DProps {
 /**
  * A horizontal slider control for 2D UI.
  * Emits axis values and supports value change callbacks.
+ *
+ * Pointer handling runs through the shared `UIControl2D` funnel, which means: the control emits the
+ * lifecycle signals (`pointerdown`/`pressed`/`pointerup`/`released`/`click`), tracks hover and
+ * honours the ancestor-scroll gate (a scroll drag passing over the track no longer grabs the
+ * handle). The drag itself is unchanged: the press must start inside the track, and it keeps
+ * tracking the pointer outside the bounds until release (see {@link capturesPointer}).
+ *
+ * Unlike `Checkbox2D` / `InventorySlot2D` this control has no state signal, because it has no
+ * activation that flips a state behind the pointer signals: the value is written from
+ * {@link onPointerDrag}, i.e. during the drag, so by the time `released` / `click` are emitted
+ * `value` is already the value the gesture produced. Scripts either read `value` in those listeners
+ * or poll it (`slider.value`); the live value during a drag is `input.getAxis(axisName)`.
  */
 export class Slider2D extends UIControl2D {
   width: number;
@@ -38,7 +51,6 @@ export class Slider2D extends UIControl2D {
   private trackMaterial: MeshBasicMaterial;
   private filledTrackMaterial: MeshBasicMaterial;
   private handleMaterial: MeshBasicMaterial;
-  private isDragging: boolean = false;
   private trackGeometry: PlaneGeometry;
   private filledTrackGeometry: PlaneGeometry;
   private handleGeometry: PlaneGeometry;
@@ -114,26 +126,106 @@ export class Slider2D extends UIControl2D {
 
   override tick(dt: number): void {
     super.tick(dt);
-    if (!this.input) return;
+    // Hover/press/drag all come from the shared UIControl2D funnel: it applies `enabled`, the
+    // ancestor-scroll gate and emits the lifecycle signals. The value tracking hangs off
+    // onPointerDrag(), which fires on the press frame too, so a tap still jumps the handle.
+    this.updatePointerStateFromInput();
+  }
 
-    const isDown = this.input.isPointerDown;
-    const pointerWorld = this.getPointerWorldPosition();
-    if (!pointerWorld) return;
+  /** A slider owns the pointer once grabbed: the drag keeps tracking past the track's edges. */
+  protected override capturesPointer(): boolean {
+    return true;
+  }
 
-    const pointerWorldX = pointerWorld.x;
+  protected override onPointerDrag(pointerWorld: Vector2): void {
+    this.updateSliderFromPointer(pointerWorld.x);
+  }
 
-    if (!this.isPressed && isDown && this.isPointInBounds(pointerWorld) && this.enabled) {
-      this.isDragging = true;
-      this.isPressed = true;
-      this.updateSliderFromPointer(pointerWorldX);
-    } else if (this.isDragging && !isDown) {
-      this.isDragging = false;
-      this.isPressed = false;
+  /** True while the handle is being dragged (the press that owns the pointer). */
+  get isDragging(): boolean {
+    return this.isPressed;
+  }
+
+  override getInteractions(): InteractionDescriptor[] {
+    const valueArg = {
+      name: 'value',
+      type: 'number' as const,
+      ui: { label: 'Value', min: this.minValue, max: this.maxValue },
+    };
+    return [
+      ...super.getInteractions(),
+      {
+        name: 'setValue',
+        description: 'Set the value programmatically (tests the reaction to a value change)',
+        args: [valueArg],
+      },
+      {
+        name: 'dragTo',
+        description: 'Grab the handle and drag it to a value (tests the drag itself)',
+        args: [valueArg],
+      },
+    ];
+  }
+
+  /**
+   * `setValue` and `dragTo` are deliberately two interactions, not one. The first answers "does
+   * anything react to the value changing", the second "does the drag machinery work at all" — a
+   * slider can pass either one while failing the other, and collapsing them loses that half of the
+   * check.
+   */
+  protected override performInteraction(name: string, args?: Record<string, unknown>): boolean {
+    switch (name) {
+      case 'setValue': {
+        const value = readNumberArg(args, 'value');
+        if (value === null) return false;
+        // Not a gesture — but the same gates decide whether the control is accepting anything at
+        // all right now.
+        if (!this.canAcceptSemanticPointer()) return false;
+        this.setValue(value);
+        return true;
+      }
+      case 'dragTo': {
+        const value = readNumberArg(args, 'value');
+        if (value === null) return false;
+        return this.dragHandleTo(value);
+      }
+      default:
+        return super.performInteraction(name, args);
     }
+  }
 
-    if (this.isDragging) {
-      this.updateSliderFromPointer(pointerWorldX);
+  /**
+   * Run a real drag: press on the handle where it currently sits, travel to the target value and
+   * release there. Every frame goes through the pointer funnel, so the value moves only because
+   * {@link onPointerDrag} moved it — the same reason a finger moves it.
+   */
+  private dragHandleTo(targetValue: number): boolean {
+    const clamped = Math.max(this.minValue, Math.min(this.maxValue, targetValue));
+    const point = this.getSemanticPointerPoint();
+    const startX = this.worldXForValue(this.value);
+    const endX = this.worldXForValue(clamped);
+    const midX = (startX + endX) / 2;
+
+    if (!this.runSemanticPointerFrame(point.set(startX, point.y), true, true)) {
+      return false;
     }
+    // An intermediate frame keeps this a drag rather than a teleport: anything watching
+    // onPointerDrag (juice, live previews, a script scrubbing audio) sees motion.
+    if (!this.runSemanticPointerFrame(point.set(midX, point.y), true, true)) {
+      return false;
+    }
+    if (!this.runSemanticPointerFrame(point.set(endX, point.y), true, true)) {
+      return false;
+    }
+    return this.runSemanticPointerFrame(point.set(endX, point.y), false, false);
+  }
+
+  /** World X of a value on this track — the mirror of {@link updateSliderFromPointer}. */
+  private worldXForValue(value: number): number {
+    this.getWorldPosition(this.tmpWorldPos);
+    const range = this.maxValue - this.minValue;
+    const normalized = range === 0 ? 0 : (value - this.minValue) / range;
+    return this.tmpWorldPos.x + (normalized - 0.5) * this.width;
   }
 
   private updateSliderFromPointer(pointerWorldX: number): void {

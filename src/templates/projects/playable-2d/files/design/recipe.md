@@ -16,7 +16,7 @@ build the middle. If the brief needs real mechanics, start from `recipe-arena-2d
 
 | id | what |
 | --- | --- |
-| `ui-root` | scene root; hosts `GameFlow` (the phase driver: intro → playing → ended) |
+| `game-root` | scene root; hosts `GameFlow` (the phase driver: intro → playing → ended) |
 | `background` | full-screen `ColorRect2D` (palette background) |
 | `hero-sprite` | placeholder gameplay object, bobbing on a `core:Sine` |
 | `hud-label` | in-game text line |
@@ -37,9 +37,9 @@ a real win/lose instead of the placeholder timer.
 
 ```yaml
 tunables:
-  autoWinAfterSec: { node: ui-root, component: "user:GameFlow", property: autoWinAfterSec, min: 0, max: 120, default: 15 }
-  introNode: { node: ui-root, component: "user:GameFlow", property: introNode, default: intro-overlay }
-  endNode: { node: ui-root, component: "user:GameFlow", property: endNode, default: end-screen }
+  autoWinAfterSec: { node: game-root, component: "user:GameFlow", property: autoWinAfterSec, min: 0, max: 120, default: 15 }
+  introNode: { node: game-root, component: "user:GameFlow", property: introNode, default: intro-overlay }
+  endNode: { node: game-root, component: "user:GameFlow", property: endNode, default: end-screen }
   ctaUrl: { node: cta-button, component: "user:CtaButton", property: storeUrl, default: "https://play.google.com/store/apps" }
   bgColor: { node: background, property: color, default: "#16213e" }
 ```

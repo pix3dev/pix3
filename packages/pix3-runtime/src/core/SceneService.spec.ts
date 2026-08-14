@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Vector2 } from 'three';
 import { AssetLoader } from './AssetLoader';
 import { AudioService } from './AudioService';
 import { ECSService } from './ECSService';
@@ -352,5 +353,99 @@ describe('SceneService network session installation', () => {
     service.setNetworkService(new NetworkService());
 
     expect(service.netNodes).not.toBe(binder);
+  });
+});
+
+describe('SceneService.getPointer2DWorldPosition', () => {
+  /**
+   * The addressed form (`pointerId`) is what multi-touch needs from a script: with two fingers on
+   * screen the shared `pointerPosition` describes only the oldest one, so a game resolving several
+   * contacts has to name the finger it means. The no-argument call keeps its single-pointer
+   * reading — the primary pointer — so every existing script is untouched.
+   */
+  const attachInput = (input: InputService, size: number): HTMLDivElement => {
+    const element = document.createElement('div');
+    element.setPointerCapture = vi.fn();
+    element.releasePointerCapture = vi.fn();
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: size,
+        height: size,
+        right: size,
+        bottom: size,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+      configurable: true,
+    });
+    input.attach(element);
+    return element;
+  };
+
+  const makeService = (input: InputService): SceneService => {
+    const service = new SceneService();
+    service.setDelegate({
+      getActiveCameraNode: () => null,
+      getActiveCamera2DNode: () => null,
+      getInputService: () => input,
+      getUICamera: () => null,
+      // World = input size, so screen (100,100) is world (0,0) — the fallback mapping.
+      getLogicalCameraSize: () => ({ width: 200, height: 200 }),
+      setActiveCameraNode: () => undefined,
+      findNodeById: () => null,
+      getRootNodes: () => [],
+      getAudioService: () => new AudioService(),
+      getAssetLoader: () => new AssetLoader(new ResourceManager('/'), new AudioService()),
+      getResourceManager: () => new ResourceManager('/'),
+      getECSService: () => null,
+      getGameTime: () => new GameTime(),
+      raycastViewport: () => null,
+      reportFrameProfilerActivities: () => undefined,
+      loadAndStartScene: () => Promise.resolve(),
+    });
+    return service;
+  };
+
+  it('resolves the named finger, while the no-argument call keeps following the primary one', () => {
+    const input = new InputService();
+    const element = attachInput(input, 200);
+    const service = makeService(input);
+
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', { pointerId: 1, clientX: 100, clientY: 100 })
+    );
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', { pointerId: 2, clientX: 150, clientY: 50 })
+    );
+
+    expect(service.getPointer2DWorldPosition()).toMatchObject({ x: 0, y: 0 });
+    expect(service.getPointer2DWorldPosition(1)).toMatchObject({ x: 0, y: 0 });
+    expect(service.getPointer2DWorldPosition(2)).toMatchObject({ x: 50, y: 50 });
+
+    input.detach();
+  });
+
+  it('returns null for a pointer that is not down, and still fills a supplied target', () => {
+    const input = new InputService();
+    const element = attachInput(input, 200);
+    const service = makeService(input);
+
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', { pointerId: 1, clientX: 150, clientY: 50 })
+    );
+
+    // A finger that already lifted has no position of its own — the caller decides what to do
+    // about it (a same-frame tap falls back to the shared position).
+    expect(service.getPointer2DWorldPosition(9)).toBeNull();
+
+    const target = new Vector2();
+    expect(service.getPointer2DWorldPosition(1, target)).toBe(target);
+    expect(target.x).toBe(50);
+    expect(service.getPointer2DWorldPosition(target)).toBe(target);
+
+    input.detach();
   });
 });

@@ -38,6 +38,22 @@ import {
   type GameInputStep,
   type GameInputExpectation,
 } from '@/services/agent/GameInputService';
+import { GameTestService, type GameRunSpec } from '@/services/agent/GameTestService';
+import { COMPARISON_OPS, GAME_ASSERTION_KINDS } from '@/services/agent/game-assertions';
+import {
+  InMemoryTraceStore,
+  TRACE_DIRECTORY,
+  TRACE_FORMAT_VERSION,
+  validateTrace,
+  type TraceEvent,
+  type TraceTolerance,
+} from '@/services/agent/game-traces';
+import { InMemoryRoutineStore, ROUTINE_DIRECTORY } from '@/services/agent/game-routines';
+import {
+  ProjectReportStore,
+  ProjectRoutineStore,
+  ProjectTraceStore,
+} from '@/services/agent/ProjectTraceStore';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import type { CanvasScreenshot } from '@/core/canvas-screenshot';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
@@ -51,7 +67,17 @@ import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
-import { SceneManager, NodeBase, ScriptRegistry, getNodePropertySchema } from '@pix3/runtime';
+import {
+  SceneManager,
+  NodeBase,
+  ScriptRegistry,
+  getNodePropertySchema,
+  resolveRuntimeTimeConfig,
+  MAX_TICKS_PER_FRAME,
+  type ResolvedRuntimeTimeConfig,
+  type RuntimeTimeConfig,
+  type RuntimeTimeMode,
+} from '@pix3/runtime';
 import { Vector2 } from 'three';
 import {
   buildCreateNodeCommand,
@@ -109,6 +135,107 @@ const RUN_COMMAND_ALLOWED_PREFIXES = [
   'viewport.',
   'game.',
 ] as const;
+
+/**
+ * One `game_run` predicate, as the model sees it.
+ *
+ * Deliberately one flat object with a `kind` discriminator rather than a `oneOf`
+ * of one shape per kind: tool-schema support for `oneOf` is uneven across providers, and
+ * the per-kind requirements are enforced by `parseAssertion`, which answers a bad
+ * payload with a sentence naming the missing field. The enums are imported from
+ * `game-assertions` so the schema cannot drift from the parser.
+ */
+const GAME_ASSERTION_SCHEMA: JsonSchema = {
+  type: 'object',
+  description:
+    'A predicate checked every frame. `kind` decides which other fields apply: gameState needs path+op+value, gameStateChanged needs path (+ optional signed `by`), nodeGone needs name, nodeMoved needs name (+ optional axis/min/max), nodeAppeared needs query, nodeProperty needs name+path+op+value, axis needs name+op+value, newErrors takes an optional min, frames needs n, command needs name (+ optional args), signal needs name (+ optional node).',
+  properties: {
+    kind: { type: 'string', enum: [...GAME_ASSERTION_KINDS] },
+    path: {
+      type: 'string',
+      description:
+        "gameState / gameStateChanged: dot path into the game's GameDebugProvider snapshot, e.g. 'score' or 'player.hp'. nodeProperty: dot path into the live node's own properties instead, e.g. 'position.x', 'text', 'enabled', 'opacity'.",
+    },
+    op: {
+      type: 'string',
+      enum: [...COMPARISON_OPS],
+      description:
+        'gameState / nodeProperty / axis: how the read value is compared against `value`. Ordering ops (gt/gte/lt/lte) compare numbers only; "contains" has no meaning for an axis.',
+    },
+    value: {
+      description:
+        'gameState / nodeProperty: the value to compare against (any JSON value). axis: a finite number — prefer a threshold to equality, since a stick lands on 0.6187…, not on 0.6.',
+    },
+    query: {
+      type: 'string',
+      description:
+        "nodeAppeared: a live node name/nodeId OR a node type ('Enemy2D'). Both readings are tried — a name that was absent at frame 0 and is present now, or more live nodes of that type than at frame 0. The type reading is the only one that can see a POOLED spawn, since a recycled node keeps its name.",
+    },
+    axis: {
+      type: 'string',
+      enum: ['x', 'y', 'z'],
+      description:
+        'nodeMoved: measure the SIGNED delta on this world axis instead of the plain distance travelled, which is what makes a direction assertable — {axis:\'x\', max:0} is "moved left". (For the `axis` predicate the axis NAME goes in `name`, not here.)',
+    },
+    by: {
+      type: 'number',
+      description:
+        'gameStateChanged: the SIGNED delta from frame 0 that must be reached — 1 means "grew by at least 1", -2 means "dropped by at least 2". Omit for "changed at all".',
+    },
+    name: {
+      type: 'string',
+      description:
+        "The thing being named, per kind: nodeGone / nodeMoved / nodeProperty — a live node name or nodeId; axis — the input axis as the game knows it ('Horizontal', 'Move_X'); command — the intent as registered ('settings.toggle-music'); signal — the signal a node emits ('toggled', 'pressed', 'died').",
+    },
+    min: {
+      type: 'number',
+      description:
+        'newErrors: how many new runtime errors are needed (an integer >= 1, default 1). nodeMoved: the lower bound on the measurement — the distance travelled, or the signed delta when `axis` is set. A half-unit floor on |delta| always applies, so a direction bound can never be satisfied by standing still.',
+    },
+    max: {
+      type: 'number',
+      description:
+        'nodeMoved: the upper bound on the same measurement — the half that expresses a direction, e.g. {axis:\'x\', max:0} for "moved left". Negative without an `axis` is refused, because a distance is never negative.',
+    },
+    n: {
+      type: 'integer',
+      description:
+        'frames: the frame number to reach (>= 1 — frames(0) is true at the baseline by construction).',
+    },
+    args: {
+      type: 'object',
+      description:
+        'command: fields the dispatched payload must contain, e.g. {slot: 2}. SUBSET match — only the keys you name are compared (each as a whole subtree) and extra keys in the payload are ignored, so you never have to reproduce a payload byte for byte. Omit to match any dispatch of that name.',
+      additionalProperties: true,
+    },
+    node: {
+      type: 'string',
+      description:
+        'signal: live node name or nodeId to listen on. Prefer it — omitting it listens scene-wide, which re-sweeps the live scene every frame for newly spawned emitters (that is the form that catches an enemy that did not exist at frame 0).',
+    },
+  },
+  required: ['kind'],
+  additionalProperties: false,
+};
+
+/** Fields of `game_time` that form the time contract (as opposed to the `step` action). */
+const TIME_CONFIG_KEYS = [
+  'mode',
+  'fixedDeltaSec',
+  'ticksPerFrame',
+  'renderEveryNTicks',
+  'muteAudio',
+] as const;
+
+/** One line describing a resolved time contract, for error messages. */
+function describeTimeMode(config: Readonly<ResolvedRuntimeTimeConfig>): string {
+  const parts = [`mode '${config.mode}'`];
+  if (config.mode !== 'realtime') {
+    parts.push(`fixedDeltaSec ${config.fixedDeltaSec}`);
+    if (config.ticksPerFrame !== 1) parts.push(`ticksPerFrame ${config.ticksPerFrame}`);
+  }
+  return parts.join(', ');
+}
 
 // File extensions treated as text for `fs_read`. Binary files return metadata instead of content.
 const TEXT_EXTENSIONS = new Set([
@@ -217,6 +344,9 @@ export class AgentToolRegistry {
 
   @inject(GameInputService)
   private readonly gameInput!: GameInputService;
+
+  @inject(GameTestService)
+  private readonly gameTest!: GameTestService;
 
   @inject(GamePlaySessionService)
   private readonly playSession!: GamePlaySessionService;
@@ -669,7 +799,7 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_write',
-        description: `Write (create or overwrite) a project text file. Creates parent directories. Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.`,
+        description: `Write (create or overwrite) a project text file. Missing parent directories ARE created, and the ones it had to create come back in \`createdDirectories\` — read that list: it is where a typo in a path segment shows up, since a mistyped folder is created just as happily as the one you meant (fs_delete it and write again under the right path). Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -796,7 +926,7 @@ export class AgentToolRegistry {
       {
         name: 'game_input',
         description:
-          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report their rendered `text` (Label2D/Button2D — check a score/HUD value by reading it, not by screenshotting), `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity. Tapping a node that is off screen is REFUSED with the reason (its own `visible: false`, or `hiddenByAncestor` — an invisible parent hides the whole subtree), instead of dispatching into empty space and looking like dead game logic. If the input navigated the game to ANOTHER SCENE, the result says so via `sceneChanged` {fromRoots,toRoots} and the verdict leads with SCENE CHANGED — the watched nodes died with the old scene, so re-observe against the new one instead of reading their deltas as a dead reaction.",
+          "Send REAL input to the RUNNING game and verify the REACTION in one call (requires play mode — play_start first). Steps: {type:'key',code:'ArrowUp',ms:800} holds a key (KeyboardEvent.code: 'KeyW','ArrowLeft','Space'); {type:'keys',codes:['KeyW','KeyA'],ms:500} holds a chord; {type:'tap',target:'PlayButton'} presses a node (Button2D etc.) by name or nodeId — or tap at coordinates {type:'tap',x:960,y:540} (same space as node position properties); {type:'hover',target:'PlayButton',ms:900} moves the pointer OVER a node without pressing (buttons:0) and holds — the only way to trigger hover states (Button2D hover skin, hover-scale scripts). Hover PERSISTS after the call (the pointer stays where you left it); to verify the return-to-rest, hover away: {type:'hover',x:<empty area>,y:...}. Observed nodes also report their rendered `text` (Label2D/Button2D — check a score/HUD value by reading it, not by screenshotting), `scale`/`opacity`, endpoint `scaleDelta`/`scaled`/`opacityDelta`, and window peaks `activity.maxScaleDelta`/`activity.opacityRange` — a PunchScale/PopIn/fade that returns to rest inside the window is still provable, with zero screenshots. {type:'invoke',target:'MuteButton',interaction:'click'} drives a control BY NAME through its own input funnel — the semantic channel: no coordinates, no projection, no aiming, and it accepts `args` for interactions that take them ({type:'invoke',target:'Volume',interaction:'setValue',args:{value:0.5}}). Get the names from game_controls. When it cannot be delivered the step FAILS with the reason (not interactive / no such interaction / the control is enabled:false / an ancestor scroll container has the pointer). The rule between the two channels, plainly: invoke exercises everything AFTER \"the point is inside the control\" — enabled, the scroll gate, the skin state machine, the signal order, the game logic — but NOT whether a finger can actually hit it, since the pointer is synthesized from the control's own transform. So make the FIRST contact with a control a physical {type:'tap'}, then invoke for the rest. {type:'drag',x,y,to:{x,y},ms}; {type:'wait',ms}. Every step that has a duration also accepts `frames` instead of `ms`, and `frames` wins when both are given — a hold is really counted in game ticks, so `frames:8` is 8 polls of the key regardless of frame rate. READ `verdict` FIRST: it fuses every signal into one line — `moved:false` does NOT mean the game is dead. Pass observe:['Player','Cannonballs'] to watch nodes over the whole window (not just endpoints). Each observed node reports transform motion (`moved`, `alignForward`/`alignRight`: +1 forward along the nose, ~0 = SIDEWAYS, −1 backward) AND `activity` — what it did DURING the window: `spawned`/`removed` children, `visibleChildPeak` (pools recycle ammo by toggling visibility — the count of children in flight, NOT position), `maxChildDistance` (projectiles fly while the spawner stays at 0,0). A spawner/shooter/pool/HUD reacts WITHOUT moving. When a GameDebugProvider is registered, `game.changed` carries the game's own state diff (ammo/score/wave). To assert: expect:{'PlayerCar':'forward'} for movers → observed.PlayerCar.directionOk; expect:{'Cannonballs':'activity'} for spawners/shooters/pools/HUD → passes when anything reacted. Values: forward | backward | sideways | moving | still | activity. Tapping a node that is off screen is REFUSED with the reason (its own `visible: false`, or `hiddenByAncestor` — an invisible parent hides the whole subtree), instead of dispatching into empty space and looking like dead game logic. If the input navigated the game to ANOTHER SCENE, the result says so via `sceneChanged` {fromRoots,toRoots} and the verdict leads with SCENE CHANGED — the watched nodes died with the old scene, so re-observe against the new one instead of reading their deltas as a dead reaction.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -806,10 +936,24 @@ export class AgentToolRegistry {
               items: {
                 type: 'object',
                 properties: {
-                  type: { type: 'string', enum: ['tap', 'key', 'keys', 'drag', 'wait', 'hover'] },
+                  type: {
+                    type: 'string',
+                    enum: ['tap', 'key', 'keys', 'drag', 'wait', 'hover', 'invoke'],
+                  },
                   target: {
                     type: 'string',
-                    description: 'Node name or nodeId to tap/hover/drag from.',
+                    description: 'Node name or nodeId to tap/hover/drag from, or to invoke on.',
+                  },
+                  interaction: {
+                    type: 'string',
+                    description:
+                      "invoke only: the interaction to perform, as named by game_controls ('click', 'toggle', 'setValue', 'scrollBy', 'setStick', 'activate', …).",
+                  },
+                  args: {
+                    type: 'object',
+                    description:
+                      'invoke only: arguments for the interaction, keyed by the argument names game_controls lists (e.g. {value: 0.5}). Omitting one the interaction has no default for is refused with its name.',
+                    additionalProperties: true,
                   },
                   x: { type: 'number' },
                   y: { type: 'number' },
@@ -825,7 +969,16 @@ export class AgentToolRegistry {
                   },
                   code: { type: 'string', description: "KeyboardEvent.code, e.g. 'KeyW'." },
                   codes: { type: 'array', items: { type: 'string' } },
-                  ms: { type: 'number', description: 'Hold/drag/wait/hover duration in ms.' },
+                  ms: {
+                    type: 'number',
+                    description:
+                      'Hold/drag/wait/hover duration in ms. On an invoke step it is dwell AFTER the call (default 0) — the invocation itself is instantaneous, so add ms/frames when you want a latched press or hover to be observed before the next step.',
+                  },
+                  frames: {
+                    type: 'number',
+                    description:
+                      'Duration in GAME FRAMES instead of milliseconds. WINS over ms/holdMs when both are given; omit it and ms behaves exactly as before. Prefer it for anything the game measures per tick — a hold of 8 frames is 8 polls of the key whatever the frame rate or time mode, while "130ms" is 8 polls only if the game happens to run at 60fps.',
+                  },
                   holdMs: {
                     type: 'number',
                     description: 'Tap press duration (default 700 — UI buttons need a real press).',
@@ -869,9 +1022,16 @@ export class AgentToolRegistry {
           }),
       },
       {
+        name: 'game_controls',
+        description:
+          "List everything in the RUNNING game that can be driven BY NAME instead of by coordinate (requires play mode). One call replaces \"read the scene tree, guess which nodes are buttons, guess where they are\": for every interactive node it returns nodeId, name, type, `enabled`, `visible`, a `reach` status and the `interactions` it offers with their arguments (name, type, required, default, allowed values). Two sources are merged — the engine's own controls (Button2D and every UIControl2D: hover/press/release/click; Checkbox2D: toggle/setChecked; Slider2D: setValue/dragTo; ScrollContainer2D: scrollBy/scrollTo/fling; Joystick2D: setStick/releaseStick; InventorySlot2D: activate) and any node whose SCRIPT COMPONENT declares interactions, which is how a clickable game object that is not a UI control becomes addressable (`fromComponent` names the declaring component; you still invoke it by NODE name). The names here are exactly what game_input's {type:'invoke',target,interaction,args} step takes. READ `reach` BEFORE blaming the game when nothing happens: 'hidden' (its own visible is false) and 'hidden-by-ancestor' (an invisible parent hides the whole subtree) mean it draws nothing and no tap can land; 'off-screen' means it projects outside the canvas; 'in-frame-unproven' means it is in frame but no real pointer has landed on it yet this session; 'reachable' means one has; 'unknown' means it could not be projected at all. THE RULE BETWEEN THE TWO CHANNELS, in plain words: a semantic `invoke` exercises everything that happens AFTER \"the point is inside the control\" — `enabled`, the ancestor-scroll gate, the skin state machine, the order of the lifecycle signals, the game logic listening on them — but it does NOT check that a finger could ever hit the control, because it synthesizes the pointer from the control's own transform. So touch a control PHYSICALLY the first time ({type:'tap',target:'…'} — that is what flips its reach to 'reachable') and use invoke for every call after that. What this tool CANNOT tell you: whether a control is COVERED by another one. The engine has no global picking pass — every control polls the pointer independently — so overlap is detected by nobody and a tap where two controls overlap fires both; a status claiming otherwise would be a lie. Reach proof is PERSISTED to design/tests/reachability.json and survives a page reload, but it BURNS when the control's context changes — it moved, got hidden (itself or by an ancestor), scrolled out, or left the frame; the listing then says which of those happened. A window resize or a DPR change does NOT burn it. `journalNote` explains any problem with the journal file itself (missing is silent; corrupt starts a fresh one and says so).",
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        handler: () => this.gameInput.listControls(),
+      },
+      {
         name: 'game_observe',
         description:
-          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, the rendered `text` of label-like nodes (Label2D/Button2D — read the SCORE or HUD value straight off the node instead of screenshotting it), children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With sampleMs (e.g. 1000-2000) it records the window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree). `visible` is the node's OWN flag and is NOT proof it is on screen: when an ancestor is hidden the snapshot carries `hiddenByAncestor` and the `hint` says NOT ON SCREEN — an invisible parent hides the whole subtree, so such a node draws nothing and cannot be tapped no matter what its own properties say. A UI control (Button2D/Checkbox2D/Slider2D/…) also reports `control: { enabled, hovering, pressed }` — READ IT FIRST when a button does nothing: `enabled: false` means the press can never register (the recipe may keep a result-overlay button disabled until its own game-over path enables it), and `hovering` tells you whether the pointer reached the control's bounds at all.",
+          "Live state of nodes in the RUNNING game WITHOUT sending input (requires play mode): transform, scale/opacity, the rendered `text` of label-like nodes (Label2D/Button2D — read the SCORE or HUD value straight off the node instead of screenshotting it), children (childCount/visibleChildCount), and the game's own `game.snapshot` when a GameDebugProvider is registered. Pass nodes:['Player','Enemy'] (names or ids); omit to sample the scene roots. With a window — sampleMs (e.g. 1000-2000), or `frames` for a budget denominated in game ticks, which wins when both are given — it records that window and reports per-node `activity` (motion, spawn/despawn, visible-child bursts, state changes) + `moved`/`alignForward`/`alignRight`, plus a fused `verdict` — e.g. confirm an AI car drives on its own, or measure a self-acting spawner's baseline BEFORE you attribute activity to your input. A `null` snapshot comes with a `hint` (play mode still warming up → retry, vs wrong name/id → check scene_tree). `visible` is the node's OWN flag and is NOT proof it is on screen: when an ancestor is hidden the snapshot carries `hiddenByAncestor` and the `hint` says NOT ON SCREEN — an invisible parent hides the whole subtree, so such a node draws nothing and cannot be tapped no matter what its own properties say. A UI control (Button2D/Checkbox2D/Slider2D/…) also reports `control: { enabled, hovering, pressed }` — READ IT FIRST when a button does nothing: `enabled: false` means the press can never register (the recipe may keep a result-overlay button disabled until its own game-over path enables it), and `hovering` tells you whether the pointer reached the control's bounds at all.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -880,14 +1040,358 @@ export class AgentToolRegistry {
               type: 'number',
               description: 'Optional: wait this long and sample again to detect motion (max 5000).',
             },
+            frames: {
+              type: 'number',
+              description:
+                'Observation window in GAME FRAMES instead of milliseconds. WINS over sampleMs when both are given; omit it and sampleMs behaves exactly as before. Use it when what you are measuring is per-tick (a spawn every 90 frames, a projectile that crosses the screen in 40) — a frame budget stays the same window whether the game runs at 60fps or is being stepped.',
+            },
           },
           additionalProperties: false,
         },
-        handler: args =>
-          this.gameInput.observe(
+        // `frames` is forwarded positionally after `sampleMs`; the cast is what lets this
+        // registration land before GameInputService.observe grows the parameter (the extra
+        // argument is inert until it does). The spec pins the call shape so a divergence
+        // shows up as a failing test rather than a silently dropped budget.
+        handler: args => {
+          const observe = this.gameInput.observe.bind(this.gameInput) as (
+            queries: string[],
+            sampleMs?: number,
+            frames?: number
+          ) => ReturnType<GameInputService['observe']>;
+          return observe(
             Array.isArray(args.nodes) ? (args.nodes as string[]) : [],
-            typeof args.sampleMs === 'number' ? args.sampleMs : 0
-          ),
+            typeof args.sampleMs === 'number' ? args.sampleMs : 0,
+            typeof args.frames === 'number' ? args.frames : undefined
+          );
+        },
+      },
+      {
+        name: 'game_time',
+        description:
+          "Control HOW the RUNNING game's clock advances (requires play mode). Three modes: 'realtime' — one tick per animation frame off the wall clock, the way a player experiences it; the default, and the only mode in which game_input's holds work. 'fixed' — `ticksPerFrame` ticks of exactly `fixedDeltaSec` per animation frame: deterministic and up to 240× wall clock, so half a minute of gameplay can be watched in a couple of seconds. 'manual' — NO animation frame is ever scheduled and the game advances only when you pass `step`; this is frame-by-frame debugging, and the only mode that keeps full speed in a background tab. Pass `step: N` (manual only) to run N ticks. Pass `paused: true|false` to hold the game on the current frame or let it run again — a paused game advances for nobody, `step` included, and this is how you RELEASE the pause game_run leaves on its outcome frame. READ `ticksExecuted` FIRST: it is how many ticks ACTUALLY ran, and a 0 there means the game is paused or stopped — not that the game did nothing. `time` in the reply is the RESOLVED contract rather than what you asked for (`ticksPerFrame` is clamped to 1.." +
+          MAX_TICKS_PER_FRAME +
+          ", `renderEveryNTicks` defaults to `ticksPerFrame` in 'fixed'), so read it back instead of assuming; `notes` names anything that got clamped. The config REPLACES the previous one whole — an omitted field returns to its default rather than keeping the current value — so `mode` is required whenever you change anything. `muteAudio` (default true) silences the master bus outside 'realtime', where audio timing is meaningless anyway. What this tool does NOT do: it sends no input and asserts nothing. To judge what the game DOES over a frame budget use game_run (it drives its own manual loop and restores the mode itself, so you do not need game_time for it); to send input use game_input, in 'realtime'. Anything other than 'realtime' leaves the game unplayable by a human until you set it back — 'manual' in particular looks exactly like a hang.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['realtime', 'fixed', 'manual'],
+              description:
+                'Required whenever you change the contract (the config is replaced whole, never merged). Omit the whole config to only read the current one back, or to only `step`.',
+            },
+            fixedDeltaSec: {
+              type: 'number',
+              description:
+                "Tick length in 'fixed'/'manual' (default 1/60). Must be > 0 — a zero or negative step is not a slower game, it is a frozen or time-reversed one, and is refused.",
+            },
+            ticksPerFrame: {
+              type: 'number',
+              description: `Ticks per animation frame in 'fixed' — the speed-up. Clamped to 1..${MAX_TICKS_PER_FRAME}.`,
+            },
+            renderEveryNTicks: {
+              type: 'number',
+              description:
+                "Paint once every N ticks. Defaults to `ticksPerFrame` in 'fixed' (one paint per batch, which is the point of a speed-up) and to 1 elsewhere.",
+            },
+            muteAudio: {
+              type: 'boolean',
+              description: "Silence the master bus outside 'realtime'. Default true.",
+            },
+            step: {
+              type: 'integer',
+              description:
+                "Run this many ticks synchronously. Only in 'manual' — send {mode:'manual', step:N} to switch and step in one call.",
+            },
+            paused: {
+              type: 'boolean',
+              description:
+                'Hold the game paused (true) or let it run again (false). A paused game ignores `step` and every clock mode — nothing advances at all. This is how you RELEASE the pause game_run leaves on its outcome frame: {paused: false}. Independent of `mode`, and it survives the editor losing focus.',
+            },
+          },
+          additionalProperties: false,
+        },
+        handler: args => this.gameTime(args),
+      },
+      {
+        name: 'game_run',
+        description:
+          "Run the RUNNING game forward frame by frame until a condition holds, and report WHICH one and on WHICH FRAME (requires play mode). This is how you judge gameplay over time: game_run owns the clock (it steps the game itself in manual time mode), so every predicate is checked on EVERY frame — an event is caught in the frame it happens instead of in a sample that straddles it — and the run stops the moment something decides, so a win in the second second does not cost fifteen. READ `verdict` FIRST: one line carrying PASS / FAIL / TIMEOUT / PRECONDITION ALREADY MET, which predicate decided, the frame, and the evidence; `outcome` {kind, channel, index, frame, gameTimeMs} is the same thing as data. `until` (REQUIRED) is what you are waiting for — OR over the list, the first to hold ends the run as a PASS. `fail` ends it as a FAIL. Both are also evaluated at frame 0: a predicate that is ALREADY TRUE before the run ends it with PRECONDITION ALREADY MET and proves nothing — assert the change (gameStateChanged) rather than a value that was already there. If a `fail` and an `until` land on the same frame, `fail` wins, because a PASS that coincides with a crash is exactly the false green this tool exists to prevent. Predicates: {kind:'gameStateChanged', path:'score', by:1} — a scalar in the game's own GameDebugProvider snapshot moved by at least that SIGNED delta from frame 0; the workhorse. {kind:'gameState', path:'lives', op:'lte', value:0} — absolute comparison. {kind:'nodeGone', name:'Player'} — a live node left the scene. {kind:'nodeMoved', name:'Player', axis:'x', max:0} — the node is displaced from where it stood at FRAME 0 (not from the previous frame, so a jitter never satisfies it); with `axis` the delta is signed, which is how you assert a DIRECTION, and a half-unit floor on the movement means standing still can never pass. {kind:'nodeAppeared', query:'Enemy2D'} — a spawn, read two ways at once: a name that was absent at frame 0 and is present now, or MORE LIVE NODES OF THAT TYPE than at frame 0 — and the type reading is the only one a POOLED spawn can satisfy, since a recycled enemy keeps its name. {kind:'nodeProperty', name:'ScoreLabel', path:'text', op:'contains', value:'10'} — a dot path into the live node's OWN properties (position.x, text, enabled, opacity): the readable evidence left when a game registers no debug provider, and the only honest way to assert engine state a game would never export. {kind:'axis', name:'Horizontal', op:'lt', value:-0.4} — the INPUT axis itself, read before any game logic touches it; assert it next to nodeMoved and 'the stick does not move the hero' splits into its two halves (the gesture never reached the control vs. the game never reads the axis) instead of shrugging. {kind:'newErrors'} — a script threw. {kind:'frames', n:300} — a plain budget; use it as the only `until` when you just want to run a while and then look at the report. {kind:'command', name:'shop.buy', args:{slot:2}} — that intent was dispatched through scene.commands during the run AND its handler ran; `args` is a subset match, and a dispatch that was refused, threw, or hit no registered handler is reported with which of those it was. {kind:'signal', name:'toggled', node:'MusicCheckbox'} — that node emitted the signal during the run; drop `node` to listen scene-wide, including on nodes spawned mid-run. The last two are how you prove a control is WIRED, and which one applies depends on the control: a button's handler dispatches an intent, so one tap plus `command` proves that wire once and every later scenario can dispatch instead of tapping. A stateful control (checkbox, inventory slot) is the other direction — the command flips the control and the effect hangs off its `toggled` signal — so `command` there proves nothing or proves a cycle; assert `signal`, which also cannot be satisfied by a tap that bounced off a disabled control. Both are windowed to the run, and input has to be sent with game_input BEFORE the call (see below), so that tap lands outside the window: `command` says exactly that ('it WAS dispatched N× before the run started') instead of reading as silence, while `signal` had no listener open yet and never heard it. `watch` adds node names whose appearance/disappearance shows up in `timeline`. Budgets: `maxFrames` (default 600 ≈ 10 s of game, cap 3600) and `maxWallMs` (default 20000) — a TIMEOUT reports, per unmet `until`, how close it got. AFTERWARDS: the game is left PAUSED on the outcome frame (`pauseOnOutcome`, default true) so you can inspect it with game_observe, and it STAYS paused — through focus changes and further observation — until you release it with game_time {paused: false}, send input (game_input resumes it, since input needs a running game), or play_restart. `time.leftPaused` in the report is read back from the runner, so it states what actually held rather than what was asked for. The time mode is ALWAYS restored, including on error paths. What game_run CANNOT do: it does not send input. A spec carrying `input` is refused, because in manual time no tick passes between a keydown and its keyup, so the game would never poll the key and every input-driven assertion would fail for a reason that has nothing to do with the game — send the input with game_input (which runs in realtime), THEN call game_run with only `until`/`fail` to judge what follows. That refusal is about THIS tool only: game_trace {mode:'record'} runs the same loop with the same predicates AND drives input, because its `feed` is denominated in FRAMES and delivered in the gap between two ticks rather than paced by a wall-clock timer. So when the thing you are judging needs input during the run, record a trace instead of splitting it into game_input + game_run — and you get a file you can replay after your next change. It also cannot see what the game does not expose: `gameState`/`gameStateChanged` need a registered GameDebugProvider and `command` needs the scene to expose a command registry; without either, the report says which is missing rather than reporting a plain false — fall back to nodeProperty (a HUD label's text, a button's enabled flag), nodeMoved, nodeAppeared, nodeGone, newErrors, frames or signal, none of which need the game to expose anything. TWO MODES SIT ON TOP OF THE SAME LOOP. `monkey` presses things AT RANDOM from a seeded stream and judges the game by invariants instead of by understanding it: it cannot tell you the game is fun or even winnable, but it finds a crash and a state the game cannot leave, which is the zero test worth running before any hand-written scenario. `monkey.seed` is REQUIRED — a finding that cannot be re-run is an anecdote, and the harness refuses to invent a seed nobody wrote down. It presses only what the scene actually offers (the controls game_controls lists, the intents the scene registers, the `Key_*`/`Action_*` names you pass in `monkey.actions`), so a run is never a tap into empty space that looks like it tested something. AN EMPTY INVENTORY IS NOT A PASS: if nothing was ever pressable, the outcome is `monkey-empty` and the verdict reads NOTHING TESTED even when an `until` fired, because 'the budget elapsed and no invariant broke' is exactly what a clean monkey run looks like. `monkey.log` says what it pressed and on which frame, and `monkey.lastActions` repeats the final presses — with the seed, that is the reproduction. `control` is the NEGATIVE CONTROL, and it exists because ANY pointer press raises `Action_Primary` in the runtime: a game reading that as 'shoot' shoots when you tap ANYWHERE, so 'I tapped the FIRE button and the gun fired' is passed by a completely dead button. The evidence is the pair — the same gesture, away from the control, must produce NOTHING. Pass {tap:{nx,ny}} (fractions of the canvas box) and after a PASSing run the game is put back to its starting state — the game's own reset(seed) when it exposes one, otherwise a scene restart, and `control.isolation.method` NAMES which, because a restart keeps whatever a script held in module state — and the gesture runs again with the same frame budget. THE VERDICT IS THREE-VALUED and `inconclusive` DOES NOT MEAN PASSED: it means the control could not be run meaningfully (nothing to isolate with, a precondition that did not come back, something the main run consumed for good, a shorter budget than the effect needed) and the binding remains unproven — `control.note` says which. A PASSing run whose assertions name an on-screen control and that carries no `control` block is marked WEAK on the verdict line for exactly that reason. ONE MORE SHAPE, and it replaces everything above when you have it: `routine` runs a STORED SCENARIO — `game_run {routine:'buy-item', args:{slot:2}}` — from design/tests/routines/<name>.json, which holds the steps AND the expectations somebody already got right. The routines that apply to the active scene are listed in your context; running one is one tool call instead of a `game_input` script plus a spec re-typed from memory, and it is the cheapest correct way to reach a known game state. Its steps are the game_input vocabulary (tap/key/keys/drag/hover/wait/invoke) plus {type:'command', name} for a registered intent, its `expect` is the SAME predicate objects as `until` but ANDed and judged once after the last step (so `frames`/`until` budgets do not apply), and the report reads `verdict` first: ROUTINE PASS / ROUTINE FAIL / ROUTINE MACRO (a routine with no `expect` asserts NOTHING — it is a macro, and the verdict says so instead of reading as a pass). Before anything executes, the routine's `uses` are checked against the running scene: a node that was renamed or removed answers ROUTINE STALE with the node's name and runs nothing, so you fix a name instead of debugging a scenario that failed halfway through. `routine` is mutually exclusive with `until`. EVERY run also writes its FULL protocol to design/tests/reports/<NNNN-subject-verdict-fNNN>.json and returns it as `artifact` {path, bytes, contains}: the undeduped timeline this reply caps at 20 entries, every observed node/property/axis delta (this reply carries none), the complete monkey log, and the outcome-frame state slice with the full baseline→outcome diff. It survives compaction, so when this reply is not enough read the FILE with fs_read {offset, limit} in slices rather than whole — it is pretty-printed for exactly that. The directory keeps the newest 20 reports and `artifact.pruned` names the ones this write deleted; with no project open `artifact.written` is false and its `reason` says the protocol was lost.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            until: {
+              type: 'array',
+              description:
+                'Predicates whose arrival ends the run successfully (OR). At least one is required; use {kind:"frames", n:300} if you only want to run for a while.',
+              items: GAME_ASSERTION_SCHEMA,
+            },
+            fail: {
+              type: 'array',
+              description:
+                'Predicates whose arrival ends the run as a failure (OR). Wins over `until` on the same frame.',
+              items: GAME_ASSERTION_SCHEMA,
+            },
+            watch: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Extra node names/ids whose appearance/disappearance is reported in the timeline. Max 8 tracked (names used by the predicates are added automatically).',
+            },
+            maxFrames: {
+              type: 'integer',
+              description: 'Frame budget (default 600, cap 3600). A run that hits it is a TIMEOUT.',
+            },
+            maxWallMs: {
+              type: 'integer',
+              description:
+                'Wall-clock guard in ms (default 20000, cap 60000). The loop is CPU-bound, so this is the real runaway stop.',
+            },
+            fixedDeltaSec: {
+              type: 'number',
+              description: 'Tick length during the run (default 1/60). Must be > 0.',
+            },
+            pauseOnOutcome: {
+              type: 'boolean',
+              description:
+                'Leave the game paused on the outcome frame so it can be inspected. Default true.',
+            },
+            monkey: {
+              type: 'object',
+              description:
+                'Turn the run into a MONKEY run: random input from a seeded stream, judged by invariants instead of by an understanding of the game. It finds the two failures that need no understanding — a crash, and a state the game cannot leave. `seed` is REQUIRED (a finding nobody can re-run is an anecdote). What it presses comes only from what the scene actually offers: the interactive controls game_controls lists, the intents the scene registers, and the input actions you name in `actions` — never invented coordinates. AN EMPTY INVENTORY IS NOT A PASS: if nothing was ever pressable the outcome is `monkey-empty` and the verdict reads NOTHING TESTED, whatever `until` did. Read `monkey.log` (what it pressed, per frame) and `monkey.lastActions` (the presses right before it ended) — that is the reproduction, together with the seed.',
+              properties: {
+                seed: {
+                  type: 'integer',
+                  description:
+                    'REQUIRED, non-negative. The whole decision stream comes from it, so the same seed against the same game replays the same presses — pick any number and put it in the bug report.',
+                },
+                actions: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    "Input action names the monkey may press on top of what the game declares: 'Key_ArrowLeft', 'Key_Space', 'Action_Primary'. A Key_* name is delivered as a REAL key event (the player's path); any other name is set on the input service directly, which exercises the game logic but proves nothing about a binding.",
+                },
+                everyFrames: {
+                  type: 'integer',
+                  description:
+                    'Frames between two decisions (default 12, a quarter-second at 1/60).',
+                },
+                holdFrames: {
+                  type: 'integer',
+                  description:
+                    'Frames an input action is held for (default 8) — long enough that a per-tick poll cannot miss it.',
+                },
+                maxActions: {
+                  type: 'integer',
+                  description: 'Hard cap on presses in one run (default 200).',
+                },
+                invariants: {
+                  type: 'object',
+                  description:
+                    'What ends the run as a failure. Defaults: a new runtime error (the crash detector), a non-finite transform, and a watched node further than 10000 units from the origin (a blow-up, not a playfield edge); plus a score that never drops, when the game exposes one. Turn one off WITH A REASON rather than learning to ignore the report: {scorePath: false} for a counter that legitimately falls, {boundsRadius: false} for a game that teleports far. {stallFrames: 120} adds the stuck detector — nothing changed for that many frames while the monkey kept pressing — and is off by default because a menu is legitimately still.',
+                  properties: {
+                    newErrors: { type: 'boolean' },
+                    finiteTransforms: { type: 'boolean' },
+                    boundsRadius: {
+                      description: 'Number of units, or false to disable.',
+                    },
+                    scorePath: {
+                      description:
+                        "Snapshot path of a score that must never drop, or false to disable. Defaults to 'score' when the provider has one.",
+                    },
+                    stallFrames: { type: 'integer' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+              required: ['seed'],
+              additionalProperties: false,
+            },
+            control: {
+              type: 'object',
+              description:
+                "The NEGATIVE CONTROL for a claim about an on-screen control (§5.4.4): the same gesture, aimed AWAY from it. Needed because ANY pointer press raises `Action_Primary` in the runtime, so a game that reads it as 'shoot' shoots when you tap anywhere — 'I tapped FIRE and it fired' passes with a completely dead button. Only the pair is evidence. After a PASSing main run the game is put back to its starting state (the game's own reset(seed) when it has one, otherwise a scene restart — the report NAMES which, they are not equivalent) and the gesture is run again with the same budget. THE RESULT IS THREE-VALUED and `inconclusive` IS NOT 'passed': it means the control could not be run meaningfully (no isolation, a precondition that did not come back, something the main run consumed, a shorter budget) and the binding is still unproven. Read `control.verdict` + `control.note`. Without this block a PASSing run whose assertions name an on-screen control is marked WEAK on the verdict line, for exactly this reason.",
+              properties: {
+                tap: {
+                  type: 'object',
+                  description:
+                    'REQUIRED. Where the negative gesture lands: nx/ny in 0..1 OF THE CANVAS BOX (not client pixels, not world coordinates). Pick a point no control occupies — game_controls lists what is on screen; a "negative" gesture that quietly lands on another button reports the effect as unbound when it is not.',
+                  properties: {
+                    nx: { type: 'number' },
+                    ny: { type: 'number' },
+                  },
+                  required: ['nx', 'ny'],
+                  additionalProperties: false,
+                },
+                holdFrames: {
+                  type: 'integer',
+                  description:
+                    'Frames the pointer stays down (default 40) — a real press, since a one-frame blip would not have operated a control either. The effect is still looked for over the whole frame budget, so an asynchronous reaction is not missed.',
+                },
+                seed: {
+                  type: 'integer',
+                  description:
+                    "Seed handed to the game's reset(), so the control run replays the same randomness as the main run.",
+                },
+              },
+              required: ['tap'],
+              additionalProperties: false,
+            },
+            routine: {
+              type: 'string',
+              description:
+                'Run a STORED ROUTINE instead of a predicate spec: the name of a design/tests/routines/<name>.json in this project. One tool call replays a whole scenario (open the shop, buy, close) with its own assertions, so a repeated scenario costs one call instead of fifteen re-typed input steps. The routines available in the active scene are listed in your context under "Routines"; this is the ONLY argument they need, plus `args`. Mutually exclusive with `until` — a routine carries its own steps and expectations.',
+            },
+            args: {
+              type: 'object',
+              description:
+                "Arguments for the routine's declared params, e.g. {slot: 2}. Every declared param is required and type-checked, and an undeclared one is refused rather than ignored (a typo'd parameter name would otherwise look like a routine that ran with defaults).",
+            },
+          },
+          additionalProperties: false,
+        },
+        // Thin pass-through: `parseSpec` owns the payload's shape, and `args` is forwarded
+        // untouched so a spec that carries `input` reaches the service's explanation instead
+        // of being silently dropped here.
+        handler: async args => {
+          // Re-checked on every call, before either branch: a project can be opened
+          // or closed between two runs, and the branch that writes the protocol is
+          // the run itself, not this handler.
+          this.ensureProtocolStore();
+          if (args.routine !== undefined) {
+            return this.gameRoutine(args);
+          }
+          const parsed = GameTestService.parseSpec(args);
+          if ('error' in parsed) return { ok: false, error: parsed.error };
+          return this.gameTest.run(parsed.spec);
+        },
+      },
+      {
+        name: 'game_trace',
+        description:
+          "Record the RUNNING game's input as a replayable trace, replay a stored one, or list what is stored (requires play mode). `mode` picks which. WHAT THIS IS FOR: record a trace BEFORE you change something, replay it AFTER, and see whether the outcome moved — a regression check between two increments of your own work. WHAT IT IS NOT: a determinism proof. REPLAY IS DIAGNOSTIC. The replay compares the OUTCOME (which predicate fired, on which frame) and the metrics, never frame-for-frame identity, and there are two comparison modes it tells you apart out loud. A recording during which the game never touched Math.random / Date.now / performance.now / a timer is CLEAN and is compared STRICTLY (equality). A recording that did touch them is stamped `nondeterministic` in the file, and then ONLY thresholds are checked (default: the outcome frame within 25% or 6 frames, numeric game-state scalars within 25% or 1) — `replay.strict` is false and `replay.verdict` says in words that an identical run was never promised, so a green replay of a marked trace can never be read as proof the run repeated. NEW RUNTIME ERRORS ARE NEVER FORGIVEN in either mode: more errors than the recording had is a divergence whatever the determinism looked like. Read `replay.verdict` first (REPLAY MATCH / REPLAY DIVERGED, with the mode in brackets), then `replay.diffs` (per-metric recorded→replayed, `within` says whether it passed, `soft:true` means reported but not counted), then `replay.notes` — that is where environment drift lands (a different tick length, a different scene, a resized canvas, a different runtime version, a game-state field that vanished from the debug provider). MODE record: `name` is required and becomes design/tests/<name>.trace.json in the project; the ordinary game_run spec (`until` required, plus `fail`/`watch`/`maxFrames`/…) drives and ends the run exactly as game_run does. `feed` is the input to record and replay: frame-denominated events, {frame, kind:'key', phase:'down'|'up', code:'ArrowLeft'} or {frame, kind:'pointer', phase:'down'|'move'|'up', nx, ny}. FRAMES, NOT MILLISECONDS — an event stamped frame N is delivered in the gap right before frame N runs, so 'hold left for 8 frames' means exactly that. This is the input path game_run does NOT have (it still refuses `input`, because a wall-clock hold delivers keydown and keyup with zero ticks in between in manual time); use it here instead. Pointer coordinates are nx/ny in 0..1 OF THE CANVAS BOX, not client pixels, so a moved or resized viewport does not send the replay somewhere else. `seed` records the RNG seed you started the game with, when you know it; without one (and without a `seed` scalar in the game's GameDebugProvider snapshot) the trace says so, since a replay then cannot start from the same random stream even in principle. Without `feed` the recording captures whatever else drives the game meanwhile. The reply carries `tracePath`, the stored `trace` (its `env` envelope, `events`, `outcome`, `metrics`, and `determinism` evidence) and the ordinary run report. MODE replay: `name` is the trace (bare name or full path). It replays the recorded events frame by frame and compares; the recorded tick length and frame count are reused unless you pass your own `until`/`fixedDeltaSec`, and `tolerance` overrides the thresholds. MODE list: the traces stored in this project. STORAGE: with a project open the traces are real files under design/tests/ and survive a reload; with no project open they live in memory for this editor session only.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['record', 'replay', 'list'],
+              description:
+                "Required. 'record' captures a run, 'replay' re-runs a stored trace and compares, 'list' enumerates them.",
+            },
+            name: {
+              type: 'string',
+              description:
+                'Trace name (record: required, becomes design/tests/<name>.trace.json; replay: required, bare name or full path). Ignored by list.',
+            },
+            feed: {
+              type: 'array',
+              description:
+                'record only. Frame-denominated input to drive and record. Each event is delivered in the gap immediately before its `frame` runs — this is the input delivery game_run cannot do. Omit to record whatever else is driving the game.',
+              items: {
+                type: 'object',
+                properties: {
+                  frame: {
+                    type: 'integer',
+                    description:
+                      'The frame this event is delivered before. >= 1 (frame 1 is the first stepped frame).',
+                  },
+                  kind: { type: 'string', enum: ['key', 'pointer'] },
+                  phase: {
+                    type: 'string',
+                    enum: ['down', 'move', 'up'],
+                    description: "'down'/'up' for keys; 'down'/'move'/'up' for pointers.",
+                  },
+                  code: {
+                    type: 'string',
+                    description:
+                      "kind:'key' — a KeyboardEvent.code such as 'ArrowLeft', 'Space', 'KeyW'.",
+                  },
+                  nx: {
+                    type: 'number',
+                    description:
+                      "kind:'pointer' — X in 0..1 of the canvas box (NOT client pixels).",
+                  },
+                  ny: {
+                    type: 'number',
+                    description: "kind:'pointer' — Y in 0..1 of the canvas box.",
+                  },
+                  pointerId: {
+                    type: 'integer',
+                    description: 'Optional pointer id for multi-touch.',
+                  },
+                },
+                required: ['frame', 'kind', 'phase'],
+                additionalProperties: false,
+              },
+            },
+            seed: {
+              type: 'number',
+              description:
+                'record only. The RNG seed the game was started with, if you know it. Recorded in the envelope so a replay can say whether it started from the same random stream.',
+            },
+            until: {
+              type: 'array',
+              description:
+                'Predicates that end the run successfully (OR). Required for record; optional for replay, where the recorded frame count is the default budget.',
+              items: GAME_ASSERTION_SCHEMA,
+            },
+            fail: {
+              type: 'array',
+              description:
+                'Predicates that end the run as a failure (OR). Wins over `until` on the same frame.',
+              items: GAME_ASSERTION_SCHEMA,
+            },
+            watch: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Extra node names/ids reported in the timeline. Max 8 tracked.',
+            },
+            maxFrames: {
+              type: 'integer',
+              description: 'Frame budget (default 600, cap 3600). A run that hits it is a TIMEOUT.',
+            },
+            maxWallMs: { type: 'integer', description: 'Wall-clock guard in ms (default 20000).' },
+            fixedDeltaSec: {
+              type: 'number',
+              description:
+                "Tick length (default 1/60). On replay it defaults to the trace's own tick length — changing it makes frame counts incomparable and the verdict says so.",
+            },
+            pauseOnOutcome: {
+              type: 'boolean',
+              description:
+                'Leave the game paused on the outcome frame so it can be inspected. Default true.',
+            },
+            tolerance: {
+              type: 'object',
+              description:
+                'replay only. Overrides the comparison thresholds. Ignored where the comparison is strict (a clean trace with no environment drift is compared by equality).',
+              properties: {
+                framePct: {
+                  type: 'number',
+                  description: 'Relative slack on the outcome frame. Default 0.25.',
+                },
+                frameAbs: {
+                  type: 'number',
+                  description: 'Absolute slack on the outcome frame, in frames. Default 6.',
+                },
+                valuePct: {
+                  type: 'number',
+                  description: 'Relative slack on a numeric game-state scalar. Default 0.25.',
+                },
+                valueAbs: {
+                  type: 'number',
+                  description: 'Absolute slack on a numeric game-state scalar. Default 1.',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          required: ['mode'],
+          additionalProperties: false,
+        },
+        handler: args => this.gameTrace(args),
       },
       {
         name: 'read_logs',
@@ -1944,7 +2448,15 @@ export class AgentToolRegistry {
     content: string,
     options: { overwrite: boolean; reason: string } = { overwrite: false, reason: '' }
   ): Promise<
-    | { ok: true; path: string; reloadedScene?: string; forcedOverwrite?: true; reason?: string }
+    | {
+        ok: true;
+        path: string;
+        reloadedScene?: string;
+        forcedOverwrite?: true;
+        reason?: string;
+        createdDirectories?: string[];
+        note?: string;
+      }
     | { ok: false; error: string; path: string; existingChars: number }
   > {
     const safe = this.safePath(path);
@@ -1971,6 +2483,7 @@ export class AgentToolRegistry {
         error: `Refused: overwrite:true on ${safe} also needs a \`reason\` describing why the whole file must be replaced instead of edited with str_replace.`,
       };
     }
+    const createdDirectories = existing === null ? await this.ensureParentDirectories(safe) : [];
     // ProjectStorageService.writeTextFile bumps appState.project.fileRefreshSignal internally, so
     // open code tabs / the asset browser pick the change up — no direct appState mutation here.
     await this.storage.writeTextFile(safe, content);
@@ -1980,7 +2493,56 @@ export class AgentToolRegistry {
       path: safe,
       ...(reloadedScene ? { reloadedScene } : {}),
       ...(isLargeRewrite ? { forcedOverwrite: true as const, reason: options.reason } : {}),
+      ...(createdDirectories.length
+        ? {
+            createdDirectories,
+            note: `Created ${createdDirectories.length === 1 ? 'a new directory' : 'new directories'} on the way to this file: ${createdDirectories.join(', ')}. Nothing else in the project uses ${createdDirectories.length === 1 ? 'it' : 'them'} yet, so if a segment there is a typo, fs_delete it and write again under the right path.`,
+          }
+        : {}),
     };
+  }
+
+  /**
+   * Create the parent directories a write needs, and REPORT the ones it created.
+   *
+   * `writeTextFile` resolves the parent directory rather than creating it, so a
+   * project that never grew a `design/tests/routines/` answered every attempt to
+   * store the first routine with "Unable to resolve directory" — and there is no
+   * make-a-directory tool for an agent to reach for. Creating parents silently is
+   * the obvious fix and the wrong one: a typo in a path segment would then produce a
+   * plausible-looking directory nobody asked for, and the write would succeed, so
+   * nothing would ever say the file is not where the author meant it to be.
+   *
+   * So: create them, and hand the list back. The names appear in the tool result and
+   * a mistyped segment is visible in the answer rather than buried in the tree.
+   *
+   * The probe walks UPWARDS from the parent and stops at the first level that is
+   * there, so the ordinary write into an existing folder costs exactly one probe and
+   * only a genuinely new tree costs one per level. The creation is a single
+   * `createDirectory` on the full parent path — it walks the segments itself and is
+   * idempotent, so a race with another writer cannot fail here. Existence is probed
+   * with `listDirectory` because that is the only question `ProjectStorageService`
+   * answers for all three backends (local FS, OPFS, cloud); a probe that throws for
+   * any other reason is treated as "missing", and if that was wrong the real failure
+   * surfaces from the write, where it names the file the caller actually asked for.
+   */
+  private async ensureParentDirectories(filePath: string): Promise<string[]> {
+    const segments = filePath.split('/').slice(0, -1);
+    if (segments.length === 0) return [];
+    const missing: string[] = [];
+    for (let depth = segments.length; depth > 0; depth -= 1) {
+      const prefix = segments.slice(0, depth).join('/');
+      try {
+        await this.storage.listDirectory(prefix);
+        break;
+      } catch {
+        // Not there (or not readable) — it and everything under it has to be created.
+        missing.unshift(prefix);
+      }
+    }
+    if (missing.length === 0) return [];
+    await this.storage.createDirectory(segments.join('/'));
+    return missing;
   }
 
   /**
@@ -2837,6 +3399,354 @@ export class AgentToolRegistry {
     return { isPlaying: appState.ui.isPlaying, playModeStatus: appState.ui.playModeStatus };
   }
 
+  /**
+   * `game_time` — read or replace the live runner's frame-driver contract, and
+   * optionally step it.
+   *
+   * Three things here are load-bearing rather than incidental:
+   *
+   * 1. **The runner comes from {@link GamePlaySessionService.getActiveRuntime},**
+   *    the same path `GameInputService` takes, so this tool sees exactly the
+   *    runtime the game is being played in (tab host or popout) and reports "not
+   *    attached yet" instead of acting on a stale one.
+   * 2. **The config is validated before it is applied.**
+   *    `resolveRuntimeTimeConfig` is pure and throws (`TypeError` on an unknown
+   *    mode, `RangeError` on a non-positive `fixedDeltaSec`), so calling it first
+   *    turns a thrown validator into a sentence the agent can act on and
+   *    guarantees the runner is never left half-changed by a rejected call. The
+   *    same applies to the `step`/mode pairing, which is checked before the write.
+   * 3. **The reply echoes `getTimeMode()`, not the request** — resolved and
+   *    clamped values — because "you asked for ×1000 and got ×240" is the kind of
+   *    thing an agent otherwise discovers as an unexplained timing mystery.
+   */
+  private gameTime(args: Record<string, unknown>): {
+    ok: boolean;
+    error?: string;
+    time?: Readonly<ResolvedRuntimeTimeConfig>;
+    ticksExecuted?: number;
+    paused?: boolean;
+    running?: boolean;
+    notes?: string[];
+  } {
+    if (!appState.ui.isPlaying) {
+      return {
+        ok: false,
+        error:
+          'The game is not running — game_time drives the LIVE runtime clock. Call play_start first.',
+      };
+    }
+    const runtime = this.playSession.getActiveRuntime();
+    if (!runtime) {
+      return {
+        ok: false,
+        error: 'Play mode is starting but the runtime is not attached yet; retry in a moment.',
+      };
+    }
+    const { runner } = runtime;
+    const current = runner.getTimeMode();
+    const notes: string[] = [];
+
+    const wantsConfig = TIME_CONFIG_KEYS.some(key => args[key] !== undefined);
+    if (wantsConfig && args.mode === undefined) {
+      return {
+        ok: false,
+        error: `game_time replaces the whole time contract rather than merging into it, so \`mode\` is required whenever you change anything — an omitted field falls back to its default, not to the current value. Re-send with the mode included, e.g. {mode: 'fixed', ticksPerFrame: 4}. The clock is unchanged (${describeTimeMode(current)}).`,
+        time: current,
+      };
+    }
+
+    const step = args.step;
+    if (step !== undefined && (typeof step !== 'number' || !Number.isInteger(step) || step < 1)) {
+      return {
+        ok: false,
+        error: '`step` must be an integer >= 1 — the number of ticks to run.',
+        time: current,
+      };
+    }
+
+    // Validate (pure, throws) before writing anything to the runner.
+    let resolved: ResolvedRuntimeTimeConfig | null = null;
+    if (wantsConfig) {
+      const requested: RuntimeTimeConfig = {
+        mode: args.mode as RuntimeTimeMode,
+        ...(typeof args.fixedDeltaSec === 'number' ? { fixedDeltaSec: args.fixedDeltaSec } : {}),
+        ...(typeof args.ticksPerFrame === 'number' ? { ticksPerFrame: args.ticksPerFrame } : {}),
+        ...(typeof args.renderEveryNTicks === 'number'
+          ? { renderEveryNTicks: args.renderEveryNTicks }
+          : {}),
+        ...(typeof args.muteAudio === 'boolean' ? { muteAudio: args.muteAudio } : {}),
+      };
+      try {
+        resolved = resolveRuntimeTimeConfig(requested);
+      } catch (err) {
+        return {
+          ok: false,
+          error: `game_time could not apply that time contract: ${
+            err instanceof Error ? err.message : String(err)
+          } The clock was left unchanged (${describeTimeMode(current)}).`,
+          time: current,
+        };
+      }
+      if (
+        typeof args.ticksPerFrame === 'number' &&
+        Math.round(args.ticksPerFrame) !== resolved.ticksPerFrame
+      ) {
+        notes.push(
+          `ticksPerFrame ${args.ticksPerFrame} was clamped to ${resolved.ticksPerFrame} (allowed 1..${MAX_TICKS_PER_FRAME}).`
+        );
+      }
+      if (
+        typeof args.renderEveryNTicks === 'number' &&
+        Math.round(args.renderEveryNTicks) !== resolved.renderEveryNTicks
+      ) {
+        notes.push(
+          `renderEveryNTicks ${args.renderEveryNTicks} was clamped to ${resolved.renderEveryNTicks} (minimum 1).`
+        );
+      }
+    }
+
+    // `stepFrames` is a no-op outside 'manual' (the rAF loop is already producing
+    // ticks). Refusing here, before the config write, keeps a rejected call from
+    // leaving the clock in a mode the caller did not get to use.
+    const effectiveMode: RuntimeTimeMode = resolved?.mode ?? current.mode;
+    if (step !== undefined && effectiveMode !== 'manual') {
+      const where =
+        resolved === null
+          ? `the game is currently in '${effectiveMode}'`
+          : `this call asks for '${effectiveMode}'`;
+      return {
+        ok: false,
+        error: `\`step\` only advances the game in 'manual' mode (${where}) — in the other modes the animation-frame loop is already producing ticks and a manual batch on top of it would double-step. Send {mode: 'manual', step: N} to step, then {mode: 'realtime'} to hand the game back.`,
+        time: current,
+      };
+    }
+
+    if (resolved) {
+      runner.setTimeMode(resolved);
+    }
+
+    // Pause/resume goes through the host, not the runner: the editor re-applies
+    // its own pause decision on every focus event, so a pause set behind its back
+    // lasts until the next one. Applied before `step` so {paused: false, step: N}
+    // reads as one intent.
+    if (typeof args.paused === 'boolean') {
+      this.playSession.setPauseRequested(args.paused);
+      notes.push(
+        args.paused
+          ? 'The game is now paused and stays paused until you resume it (game_time {paused: false}), send input, or restart.'
+          : 'The game was resumed.'
+      );
+    }
+
+    let ticksExecuted: number | undefined;
+    if (typeof step === 'number') {
+      ticksExecuted = runner.stepFrames(step);
+      if (ticksExecuted < step) {
+        if (runner.paused) {
+          notes.push(
+            `Only ${ticksExecuted}/${step} ticks ran: the game is PAUSED, and a paused runner ignores stepFrames. Resume it first with game_time {paused: false} — game_run leaves the game paused on its outcome frame on purpose, and the pause is held until something asks for the opposite.`
+          );
+        } else if (!runner.running) {
+          notes.push(`Only ${ticksExecuted}/${step} ticks ran: no scene is running.`);
+        } else {
+          notes.push(
+            `Only ${ticksExecuted}/${step} ticks ran — the batch ended early, which is what happens when a tick throws. Check read_errors.`
+          );
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      time: runner.getTimeMode(),
+      ...(ticksExecuted !== undefined ? { ticksExecuted } : {}),
+      paused: runner.paused,
+      running: runner.running,
+      ...(notes.length ? { notes } : {}),
+    };
+  }
+
+  /**
+   * `game_trace` — one tool, three modes over one subject (a stored trace).
+   *
+   * Three separate tools would have made the agent choose a name before it knows
+   * which half of the round trip it is in; the modes share the run spec, the
+   * name, and the storage, so they share a tool.
+   *
+   * The handler stays a pass-through: `GameTestService.parseSpec` owns the run
+   * spec's shape (the same parse `game_run` uses, so a spec that means one thing
+   * there cannot mean another here) and `validateTrace` owns the feed's, which is
+   * why the feed goes through it rather than through a second, drifting copy of
+   * the same rules.
+   */
+  private async gameTrace(args: Record<string, unknown>): Promise<unknown> {
+    const mode = args.mode;
+    if (mode !== 'record' && mode !== 'replay' && mode !== 'list') {
+      return {
+        ok: false,
+        error: "game_trace needs `mode`: 'record', 'replay' or 'list'.",
+      };
+    }
+    this.ensureTraceStore();
+
+    if (mode === 'list') {
+      try {
+        const traces = await this.gameTest.getTraceStore().list();
+        return {
+          ok: true,
+          traces,
+          ...(traces.length
+            ? {}
+            : {
+                note: `No traces stored yet. Record one with game_trace {mode:'record', name:'…', until:[…]} — it lands in ${TRACE_DIRECTORY}/.`,
+              }),
+        };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    const name = typeof args.name === 'string' ? args.name.trim() : '';
+    if (!name) {
+      return {
+        ok: false,
+        error: `game_trace ${mode} needs \`name\` — the trace to ${mode === 'record' ? 'write' : 'replay'} (a bare name like "snake-eats", or the full ${TRACE_DIRECTORY}/<name>.trace.json path).`,
+      };
+    }
+
+    if (mode === 'record') {
+      const parsed = GameTestService.parseSpec(args);
+      if ('error' in parsed) return { ok: false, error: parsed.error };
+      const feed = parseTraceFeedArg(args.feed);
+      if ('error' in feed) return { ok: false, error: feed.error };
+      return this.gameTest.recordTrace(parsed.spec, {
+        name,
+        ...(typeof args.seed === 'number' ? { seed: args.seed } : {}),
+        ...(feed.events ? { feed: feed.events } : {}),
+      });
+    }
+
+    // replay — the run spec is optional here: without `until` the trace's own
+    // frame count is the budget and its assertions are not re-imposed, which is
+    // what makes "replay it and tell me if the outcome moved" a one-argument call.
+    const hasSpec = args.until !== undefined;
+    let spec: GameRunSpec | undefined;
+    if (hasSpec) {
+      const parsed = GameTestService.parseSpec(args);
+      if ('error' in parsed) return { ok: false, error: parsed.error };
+      spec = parsed.spec;
+    }
+    const tolerance = parseToleranceArg(args.tolerance);
+    if ('error' in tolerance) return { ok: false, error: tolerance.error };
+    return this.gameTest.replayTrace(
+      name,
+      spec,
+      tolerance.tolerance ? { tolerance: tolerance.tolerance } : undefined
+    );
+  }
+
+  /**
+   * `game_run {routine}` — execute a stored routine (§5.7).
+   *
+   * It refuses a call that also carries a predicate spec rather than quietly
+   * preferring one: `until` and `routine` are two different experiments (a routine
+   * brings its own steps *and* its own expectations), and silently dropping half of
+   * what was asked for is how a session ends up believing it asserted something it
+   * did not.
+   */
+  private async gameRoutine(args: Record<string, unknown>): Promise<unknown> {
+    const name = typeof args.routine === 'string' ? args.routine.trim() : '';
+    if (!name) {
+      return {
+        ok: false,
+        error: `game_run \`routine\` must be the name of a stored routine, e.g. {routine: 'buy-item'} for ${ROUTINE_DIRECTORY}/buy-item.json.`,
+      };
+    }
+    const conflicting = ['until', 'fail', 'watch', 'monkey', 'control', 'input'].filter(
+      key => args[key] !== undefined
+    );
+    if (conflicting.length > 0) {
+      return {
+        ok: false,
+        error: `game_run cannot combine \`routine\` with ${conflicting.map(key => `\`${key}\``).join(', ')}: a routine carries its own steps and its own \`expect\` list. Run the routine on its own, then judge whatever else you need with a second call.`,
+      };
+    }
+    const routineArgs =
+      typeof args.args === 'object' && args.args !== null && !Array.isArray(args.args)
+        ? (args.args as Record<string, unknown>)
+        : {};
+    this.ensureRoutineStore();
+    return this.gameTest.runRoutine(name, routineArgs);
+  }
+
+  /**
+   * Point the trace store at the open project's files, or leave it in memory.
+   *
+   * Done here rather than in `GameTestService` because the file backend needs
+   * `ProjectStorageService`, and the service deliberately does not depend on it —
+   * the store is a seam it accepts, not a service it resolves. Re-checked on
+   * every trace call because a project can be opened or closed between two of
+   * them.
+   *
+   * It only ever replaces a store it recognises as one of its own two, so a
+   * backend somebody else installed through `setTraceStore` (a spec's fake, a
+   * future cloud store) survives untouched.
+   */
+  private ensureTraceStore(): void {
+    const current = this.gameTest.getTraceStore();
+    const projectOpen = appState.project.status === 'ready';
+    if (projectOpen) {
+      if (current instanceof InMemoryTraceStore) {
+        this.gameTest.setTraceStore(new ProjectTraceStore(this.storage));
+      }
+      return;
+    }
+    // No project: a file store would write nowhere. Fall back rather than fail —
+    // a record → replay round trip inside this session still works, and the tool
+    // description says the traces do not survive a reload.
+    if (current instanceof ProjectTraceStore) {
+      this.gameTest.setTraceStore(new InMemoryTraceStore());
+    }
+  }
+
+  /**
+   * The same swap for the routine library. Separate from {@link ensureTraceStore}
+   * only because the two stores are independent seams; the rule is identical, down
+   * to never replacing a backend somebody else installed.
+   */
+  private ensureRoutineStore(): void {
+    const current = this.gameTest.getRoutineStore();
+    if (appState.project.status === 'ready') {
+      if (current instanceof InMemoryRoutineStore) {
+        this.gameTest.setRoutineStore(new ProjectRoutineStore(this.storage));
+      }
+      return;
+    }
+    if (current instanceof ProjectRoutineStore) {
+      this.gameTest.setRoutineStore(new InMemoryRoutineStore());
+    }
+  }
+
+  /**
+   * The same swap for the run-protocol reports, with one difference that matters:
+   * the fallback is `null`, not an in-memory store. A protocol the agent is told to
+   * `fs_read` and cannot read is worse than an admitted absence, so with no project
+   * open the run reports that the full protocol was lost instead of pointing at a
+   * file nobody can open.
+   */
+  private ensureProtocolStore(): void {
+    const current = this.gameTest.getProtocolStore();
+    if (appState.project.status === 'ready') {
+      if (current === null) {
+        this.gameTest.setProtocolStore(new ProjectReportStore(this.storage));
+      }
+      return;
+    }
+    if (current instanceof ProjectReportStore) {
+      this.gameTest.setProtocolStore(null);
+    }
+  }
+
   private readLogs(
     since?: number
   ): Array<{ level: string; message: string; timestamp: number; source?: string }> {
@@ -2860,6 +3770,62 @@ export class AgentToolRegistry {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Validate a `game_trace` feed.
+ *
+ * The per-event rules (a frame >= 1, the key/pointer shapes, unknown fields
+ * dropped) already exist in `validateTrace`, so the feed is wrapped in the
+ * minimal trace shape that validator accepts and handed to it. A second
+ * hand-written copy of those rules here would be one refactor away from
+ * disagreeing with the file format about what a valid event is — and the failure
+ * would look like the game ignoring input.
+ */
+function parseTraceFeedArg(raw: unknown): { events?: TraceEvent[] } | { error: string } {
+  if (raw === undefined || raw === null) return {};
+  if (!Array.isArray(raw)) {
+    return {
+      error:
+        "`feed` must be an array of frame-denominated events, e.g. [{frame:1, kind:'key', phase:'down', code:'ArrowLeft'}, {frame:9, kind:'key', phase:'up', code:'ArrowLeft'}].",
+    };
+  }
+  if (raw.length === 0) return {};
+  const parsed = validateTrace({
+    formatVersion: TRACE_FORMAT_VERSION,
+    events: raw,
+    // Not part of a feed; stubs only so the shared validator reaches the event
+    // checks, which are the reason this goes through it at all.
+    env: {},
+    outcome: {},
+  });
+  if ('error' in parsed) {
+    return { error: `game_trace \`feed\`: ${parsed.error.replace(/^events\[/, 'item [')}` };
+  }
+  return { events: parsed.trace.events };
+}
+
+/** Validate the optional `tolerance` override of a replay. */
+function parseToleranceArg(
+  raw: unknown
+): { tolerance?: Partial<TraceTolerance> } | { error: string } {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      error: '`tolerance` must be an object: {framePct?, frameAbs?, valuePct?, valueAbs?}.',
+    };
+  }
+  const record = raw as Record<string, unknown>;
+  const tolerance: Partial<TraceTolerance> = {};
+  for (const key of ['framePct', 'frameAbs', 'valuePct', 'valueAbs'] as const) {
+    const value = record[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return { error: `\`tolerance.${key}\` must be a number >= 0.` };
+    }
+    tolerance[key] = value;
+  }
+  return Object.keys(tolerance).length ? { tolerance } : {};
+}
 
 const isCommandAllowed = (commandId: string): boolean =>
   RUN_COMMAND_ALLOWED_PREFIXES.some(prefix => commandId.startsWith(prefix));

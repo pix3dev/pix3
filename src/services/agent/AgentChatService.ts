@@ -9,6 +9,12 @@ import { ProjectStorageService } from '@/services/project/ProjectStorageService'
 import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
+import {
+  buildRoutineIndexLines,
+  ROUTINE_DIRECTORY,
+  type GameRoutine,
+} from '@/services/agent/game-routines';
+import { ProjectRoutineStore } from '@/services/agent/ProjectTraceStore';
 import { BRIDGE_TOKEN_SECRET_ID } from '@/services/llm/BridgeProviders';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import {
@@ -250,16 +256,51 @@ const hasVisualReason = (input: unknown): boolean => {
 const visualToolRefusal = (toolName: string): string =>
   JSON.stringify({
     ok: false,
-    error: `${toolName} is unavailable right now: you changed game logic and have not proven it in the running game yet. A picture cannot show that a score went up, a timer ticked or a hitbox fired — drive the game with game_input and read the delta with game_observe. If the thing you need to check really is visual (art, layout, colour, overlap), call it again with visualReason explaining that.`,
+    error: `${toolName} is unavailable right now: you changed game logic and have not proven it in the running game yet. A picture cannot show that a score went up, a timer ticked or a hitbox fired — run the game against an explicit condition with game_run, drive it with game_input, and read the delta with game_observe. If the thing you need to check really is visual (art, layout, colour, overlap), call it again with visualReason explaining that.`,
   });
+
+/**
+ * Tools whose successful call is evidence that the agent actually engaged the RUNNING game, and so
+ * discharges the turn's verify debt (see {@link isGameLogicMutation}).
+ *
+ * `game_run` earns its place by being the strongest of the three: it checks an explicit success
+ * condition on every frame and reports which predicate decided and on which frame. Before it
+ * existed the debt could only be cleared by `game_input`/`game_observe`, so an agent that proved its
+ * increment the better way was still refused screenshots and told it had "never run the game" — the
+ * harness punishing exactly the behaviour it wants.
+ *
+ * Deliberately NOT here: `game_controls` (a listing of what is interactive — it observes no
+ * behaviour at all) and `game_time` (a clock knob). Letting either close the gate would hand the
+ * agent a one-call way to declare an increment verified without ever watching the game do
+ * anything, which is the substitution the gate exists to prevent.
+ */
+const GAME_PROOF_TOOLS = new Set(['game_input', 'game_observe', 'game_run']);
+
+/**
+ * Whether this tool result counts as proof that the game was run, clearing the verify debt.
+ *
+ * The one exception to "ok means proven" is `game_run`'s PRECONDITION ALREADY MET outcome, which
+ * says so about itself: the predicate held at frame 0, the run never started and nothing was
+ * proven. That is `ok: true` (the call itself worked), so a bare ok-check would treat the emptiest
+ * possible run as the strongest proof available.
+ */
+const clearsGameVerifyDebt = (toolName: string, resultText: string): boolean => {
+  if (!GAME_PROOF_TOOLS.has(toolName)) return false;
+  if (!/"ok"\s*:\s*true/.test(resultText)) return false;
+  return !/"kind"\s*:\s*"precondition-already-met"/.test(resultText);
+};
 
 /**
  * Tools that change project or engine state, so an earlier identical result stops being evidence of
  * a loop. Used to reset the loop-breaker's memory — without it, an agent that edited a script,
  * recompiled and re-ran `play_start {scene, reload:true}` (exactly what that tool documents) got
  * scolded for a "repeat" and escalated to the stuck directive on its third legitimate restart.
- * Deliberately excludes the play and observation tools: their own repeats are what the breaker
- * exists to catch.
+ * Deliberately excludes the play and observation tools — `play_start`, `game_input`, `game_observe`
+ * and `game_run` — even though they do move the LIVE game: their own repeats are what the breaker
+ * exists to catch. `game_run` needs no exemption anyway, because its report carries the wall-clock
+ * metrics of the run it just made, so two runs of the same spec are practically never
+ * byte-identical; and on the rare occasion they are, that IS treading water — same spec, same
+ * verdict, same evidence — while a run with a changed predicate is already a different signature.
  */
 const STATE_CHANGING_TOOLS = new Set([
   'set_property',
@@ -868,7 +909,7 @@ export class AgentChatService {
       viaBridge: provider.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID,
     };
     // Flow raises the floor on the iteration cap: a turn there has to reach a PROVEN playable
-    // increment (build → compile → play → game_input → report), and a cap tuned for one-off Studio
+    // increment (build → compile → play → game_run/game_input → report), and a cap tuned for Studio
     // edits force-stops it right after play_start — measured in the eval, where every capped turn
     // ended with the errors never read.
     const preferences = this.settings.getPreferences();
@@ -900,6 +941,9 @@ export class AgentChatService {
     // Script inventory shares AGENTS.md's cadence: once per turn, so the agent always knows the
     // project's game-logic files exist (the scene outline names only nodes, never the .ts files).
     const scriptInventory = await this.loadScriptInventory();
+    // The routine index rides the same once-per-turn cadence: it is a handful of lines, and it is
+    // what makes a stored scenario reachable in one tool call instead of re-derived from scratch.
+    const routineIndex = await this.loadRoutineIndex();
     // The ask_advisor rule is only worth prompt space when an advisor is actually usable.
     const advisorAvailable = await this.isAdvisorAvailable();
     // Text-only models can't consume image blocks. We KEEP images in history (so the chat UI shows
@@ -930,7 +974,8 @@ export class AgentChatService {
     const contextWindow = model?.capabilities.contextWindow;
     // Verify-gate: cheap models edit a script and declare victory on `compile_scripts ok` without
     // ever running the game (a real session flipped a car's steering blind 4× and regressed). Track
-    // whether game logic changed this turn with no game_input/game_observe proof since; nudge once.
+    // whether game logic changed this turn with no game_run/game_input/game_observe proof since;
+    // nudge once.
     let unverifiedGameMutation = false;
     // In Studio this is a NUDGE (one push, then the user is right there to judge the result). Flow
     // has no such judge — the turn's whole promise is "playable and proven" — so there it becomes a
@@ -940,7 +985,13 @@ export class AgentChatService {
     let gameVerifyNudges = 0;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
-      const system = this.buildSystemPrompt(agentsMd, advisorAvailable, scriptInventory, recipeMd);
+      const system = this.buildSystemPrompt(
+        agentsMd,
+        advisorAvailable,
+        scriptInventory,
+        recipeMd,
+        routineIndex
+      );
       const outboundMessages = modelSupportsImages
         ? this.state.messages
         : stripImagesForModel(this.state.messages);
@@ -1063,7 +1114,7 @@ export class AgentChatService {
               {
                 type: 'text',
                 text:
-                  "[Pix3] You changed game logic (a script or scene) this turn but never ran the game to prove it. Before finishing: play_start, then game_input/game_observe on the affected node(s). Check the DIRECTION of motion (expect:{Node:'forward'} → directionOk, or alignForward/delta), not just that it compiles or that `moved` is true — a car driving sideways still reports moved:true." +
+                  "[Pix3] You changed game logic (a script or scene) this turn but never ran the game to prove it. Before finishing: play_start, then either game_run with an `until` that states what success IS (e.g. {kind:'gameStateChanged', path:'score', by:1}), or game_input/game_observe on the affected node(s). Check the DIRECTION of motion (expect:{Node:'forward'} → directionOk, or alignForward/delta), not just that it compiles or that `moved` is true — a car driving sideways still reports moved:true." +
                   (isLastAttempt
                     ? ' This is the last reminder: if you genuinely cannot prove it, end your reply with what you tried, what you observed, and what you think is wrong — never with "Done!".'
                     : ` Attempt ${gameVerifyNudges} of ${verifyAttemptLimit}.`),
@@ -1153,13 +1204,11 @@ export class AgentChatService {
           forcedOverwrites += 1;
         }
         // A game-logic change is a script/scene write or a component edit; a design/progress .md
-        // write or an asset op is not. A successful game_input/game_observe clears the debt.
+        // write or an asset op is not. A successful game_run/game_input/game_observe clears the
+        // debt (see GAME_PROOF_TOOLS for why game_controls/game_time do not).
         if (isGameLogicMutation(call.name, call.input)) {
           unverifiedGameMutation = true;
-        } else if (
-          (call.name === 'game_input' || call.name === 'game_observe') &&
-          /"ok"\s*:\s*true/.test(resultText)
-        ) {
+        } else if (clearsGameVerifyDebt(call.name, resultText)) {
           unverifiedGameMutation = false;
         } else if (call.name === 'ask_user') {
           askedQuestion = parseAskUser(call.input);
@@ -1570,7 +1619,8 @@ export class AgentChatService {
       await this.loadAgentsMd(),
       await this.isAdvisorAvailable(),
       await this.loadScriptInventory(),
-      await this.loadRecipeMd()
+      await this.loadRecipeMd(),
+      await this.loadRoutineIndex()
     ).text;
   }
 
@@ -1593,7 +1643,8 @@ export class AgentChatService {
     agentsMd: string | null,
     advisorAvailable = false,
     scripts: readonly ScriptInventoryEntry[] = [],
-    recipeMd: string | null = null
+    recipeMd: string | null = null,
+    routines: readonly GameRoutine[] = []
   ): { text: string; stableChars: number } {
     const soul = resolveSoul(this.settings.getPreferences());
 
@@ -1706,6 +1757,20 @@ export class AgentChatService {
       }
     }
 
+    // The routine index (§5.7.2 of `.plans/agent-gameplay-testing.md`). Three fields per
+    // routine — name, params, one-line description — filtered to the active scene and capped.
+    // The BODY of a routine never appears here: that is the entire economy of the mechanism
+    // (one line against fifteen input steps re-typed in every iteration), and it sits in the
+    // live "Project context" block rather than the cached prefix precisely because the filter
+    // depends on which scene is active.
+    const routineLines = buildRoutineIndexLines(routines, { activeScene: activePath });
+    if (routineLines.length > 0) {
+      lines.push(
+        `- Routines (${ROUTINE_DIRECTORY}) — stored scenarios for THIS scene. Run one with game_run {routine:'<name>', args:{…}}: one call replays its steps and judges its own expectations, so prefer it over re-typing a game_input script. A [MACRO] routine asserts nothing — it only reaches a state:`
+      );
+      lines.push(...routineLines);
+    }
+
     const selectedIds = appState.selection.nodeIds;
     if (selectedIds.length > 0) {
       const graph = this.sceneManager.getActiveSceneGraph();
@@ -1762,6 +1827,23 @@ export class AgentChatService {
       lines.push(`  … (+${truncatedNodes} more nodes — use scene_tree)`);
     }
     return lines;
+  }
+
+  /**
+   * The project's routine library, for the index in the prompt (§5.7.2).
+   *
+   * Best-effort and once per user turn, exactly like {@link loadScriptInventory}: no project, no
+   * `design/tests/routines/`, or an unparseable file all mean "fewer index lines", never a failed
+   * turn. Unparseable routines are dropped rather than reported here — the place that must complain
+   * about a broken routine is `game_run`, which is about to execute it.
+   */
+  private async loadRoutineIndex(): Promise<GameRoutine[]> {
+    try {
+      const { routines } = await new ProjectRoutineStore(this.storage).loadAll();
+      return routines;
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -1937,7 +2019,7 @@ const COMPACT_SYSTEM_PROMPT =
 
 /** The compaction request itself — asks for exactly the four things a successor needs. */
 const COMPACT_REQUEST_PROMPT =
-  "[Pix3] Context is nearly full, so this conversation is about to be compacted. Write a compact handoff for the next instance of yourself, in four short sections: (1) DONE — what you changed, with file/node names; (2) PROVEN — what you actually verified and how (game_input/read_errors results), and what is still unverified; (3) NEXT — the single next step and how to verify it; (4) DECISIONS — choices already made (including the user's answers) that must not be revisited. Facts only, no narrative. Do not call any tools.";
+  "[Pix3] Context is nearly full, so this conversation is about to be compacted. Write a compact handoff for the next instance of yourself, in four short sections: (1) DONE — what you changed, with file/node names; (2) PROVEN — what you actually verified and how (game_run verdicts, game_input/read_errors results), and what is still unverified; (3) NEXT — the single next step and how to verify it; (4) DECISIONS — choices already made (including the user's answers) that must not be revisited. Facts only, no narrative. Do not call any tools.";
 
 /**
  * Read an `ask_user` call's arguments defensively — the question text is user-visible UI, so a

@@ -163,14 +163,8 @@ export class Label2D extends UIControl2D {
       }
     }
 
-    if (!this.input) return;
-
-    const isDown = this.input.isPointerDown;
-    const pointerWorld = this.getPointerWorldPosition();
-    if (!pointerWorld) return;
-
     // Still update pointer state for hover registry/blocking joystick
-    this.updatePointerState(pointerWorld.x, pointerWorld.y, isDown);
+    this.updatePointerStateFromInput();
   }
 
   override isPointInBounds(worldPoint: Vector2): boolean {

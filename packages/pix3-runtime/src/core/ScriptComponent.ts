@@ -5,6 +5,7 @@
  * This system follows the PropertySchema pattern for dynamic parameter configuration.
  */
 
+import type { InteractionDescriptor } from '../fw/interactive';
 import type { PropertySchema } from '../fw/property-schema';
 import type { NodeBase } from '../nodes/NodeBase';
 import type { AssetLoader } from './AssetLoader';
@@ -119,6 +120,31 @@ export interface ScriptComponent {
    * Called when detaching to allow re-initialization on next attach.
    */
   resetStartedState?(): void;
+
+  /**
+   * The semantic interactions this component offers on its node — the third source of
+   * interactions, after the engine controls and the game-level debug provider. Declaring them is
+   * what makes a clickable game object that is NOT a `UIControl2D` (a tappable enemy, a card, a
+   * hotspot) addressable by name: `game_controls` lists it and a `game_input`
+   * `{type:'invoke'}` step drives it.
+   *
+   * Both members are optional and the pair is the whole contract ({@link Interactive}), so a
+   * component opts in by simply implementing them — nothing to register, nothing to import.
+   *
+   * The rule the engine controls follow applies here too, and it is the only thing that keeps this
+   * layer honest: **do not emit the signal or assign the field the gesture would have changed**.
+   * Route the invocation through whatever path a real pointer/tick drives (the node's own handler,
+   * the component's state machine), so a broken path fails the invocation instead of a shortcut
+   * reporting success on a game that no player could operate.
+   */
+  getInteractions?(): InteractionDescriptor[];
+
+  /**
+   * Perform one of {@link getInteractions}. Return `false` — never throw — for an unknown name, a
+   * missing/unusable argument, or a refusal (the component is disabled, the game state forbids it).
+   * `true` means it was delivered, not that the game reacted.
+   */
+  invokeInteraction?(name: string, args?: Record<string, unknown>): boolean;
 
   /**
    * Access to the Input System.

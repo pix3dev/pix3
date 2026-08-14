@@ -179,13 +179,7 @@ export class Button2D
   override tick(dt: number): void {
     super.tick(dt);
     this.effectStack.tick(dt);
-    if (!this.input) return;
-
-    const isDown = this.input.isPointerDown;
-    const pointerWorld = this.getPointerWorldPosition();
-    if (!pointerWorld) return;
-
-    this.updatePointerState(pointerWorld.x, pointerWorld.y, isDown);
+    this.updatePointerStateFromInput();
   }
 
   protected override onPress(isPressed: boolean): void {

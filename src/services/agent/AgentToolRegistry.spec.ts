@@ -1,8 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeBase } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
-import { AgentToolRegistry } from './AgentToolRegistry';
+import { AgentToolRegistry, type JsonSchema } from './AgentToolRegistry';
+import { GameTestService } from './GameTestService';
+import { GAME_ASSERTION_KINDS } from './game-assertions';
+import {
+  InMemoryTraceStore,
+  TRACE_FORMAT_VERSION,
+  type GameInputTrace,
+  type TraceStore,
+} from './game-traces';
+import { ProjectReportStore, ProjectTraceStore } from './ProjectTraceStore';
+import type { RunProtocolStore } from './game-run-protocol';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
@@ -26,6 +36,24 @@ const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegist
 
 /** A sceneManager stub with an active graph, for tools gated by ensureActiveScene(). */
 const activeSceneManager = () => ({ getActiveSceneGraph: () => ({ nodeMap: new Map() }) });
+
+/** A minimal valid trace, for the store-backed `game_trace` cases. */
+const makeStoredTrace = (name: string): GameInputTrace => ({
+  formatVersion: TRACE_FORMAT_VERSION,
+  name,
+  recordedAt: '2026-01-01T00:00:00.000Z',
+  env: {
+    seed: null,
+    fixedDeltaSec: 1 / 60,
+    ticksPerFrame: 1,
+    runtimeVersion: '1.0.0',
+    viewport: { width: 800, height: 600 },
+    sceneId: 'main',
+  },
+  events: [],
+  outcome: { kind: 'until', channel: 'until', index: 0, frame: 5, gameTimeMs: 83 },
+  metrics: { frames: 5, gameTimeMs: 83, newErrors: 0 },
+});
 
 const makeNode = (over: Record<string, unknown> = {}): NodeBase => {
   const node = Object.create(NodeBase.prototype) as Record<string, unknown>;
@@ -84,7 +112,11 @@ describe('AgentToolRegistry', () => {
         'play_restart',
         'play_status',
         'game_input',
+        'game_controls',
         'game_observe',
+        'game_time',
+        'game_run',
+        'game_trace',
         'read_logs',
         'read_errors',
         'viewport_screenshot',
@@ -702,6 +734,77 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(true);
       expect(result.forcedOverwrite).toBeUndefined();
       expect(storage.files.get('scripts/Brand.ts')).toHaveLength(9000);
+    });
+
+    /**
+     * A storage whose directories have to exist — `listDirectory` throws for anything
+     * not in `dirs`, the way every real backend does. `makeStorage` above answers every
+     * directory with an empty listing, which is why the parent-creation cases need
+     * their own fake.
+     */
+    const makeStrictStorage = (dirs: string[] = []) => {
+      const known = new Set(dirs);
+      const files = new Map<string, string>();
+      return {
+        files,
+        created: [] as string[],
+        writeTextFile: vi.fn(async (path: string, content: string) => {
+          const parent = path.split('/').slice(0, -1).join('/');
+          if (parent && !known.has(parent))
+            throw new Error(`Unable to resolve directory: ${parent}`);
+          files.set(path, content);
+        }),
+        readTextFile: vi.fn(async () => {
+          throw new Error('not found');
+        }),
+        listDirectory: vi.fn(async (dir: string) => {
+          if (!known.has(dir)) throw new Error(`Unable to resolve directory: ${dir}`);
+          return [];
+        }),
+        createDirectory: vi.fn(async function (this: { created: string[] }, path: string) {
+          const segments = path.split('/');
+          for (let i = 1; i <= segments.length; i += 1) known.add(segments.slice(0, i).join('/'));
+          this.created.push(path);
+        }),
+      };
+    };
+
+    it('fs_write creates the missing parent directories and NAMES the ones it created', async () => {
+      // The case that blocked an agent from storing its first routine: no
+      // design/tests/routines/ in the project and no tool to make one.
+      const storage = makeStrictStorage(['design']);
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'design/tests/routines/menu-play.json',
+        content: '{}',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      // Only the levels that were genuinely absent — `design` existed and is not claimed.
+      expect(result.createdDirectories).toEqual(['design/tests', 'design/tests/routines']);
+      // Said in words too: silent parent creation turns a typo into a plausible folder,
+      // so the answer has to carry the names a reader can check.
+      expect(String(result.note)).toContain('design/tests/routines');
+      expect(storage.created).toEqual(['design/tests/routines']);
+      expect(storage.files.get('design/tests/routines/menu-play.json')).toBe('{}');
+    });
+
+    it('fs_write claims no directory when the parent is already there', async () => {
+      const storage = makeStrictStorage(['scripts']);
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'scripts/Spin.ts',
+        content: 'code',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.createdDirectories).toBeUndefined();
+      expect(result.note).toBeUndefined();
+      expect(storage.createDirectory).not.toHaveBeenCalled();
+      // One probe, not one per level: the ordinary write must not pay for the fix.
+      expect(storage.listDirectory).toHaveBeenCalledTimes(1);
     });
 
     it('fs_write REFUSES to overwrite a large existing file and points at str_replace', async () => {
@@ -1345,11 +1448,212 @@ describe('AgentToolRegistry', () => {
       });
     });
 
+    it('game_input passes a frame-denominated step through verbatim', async () => {
+      const run = vi.fn(async () => ({ ok: true, stepsRun: 1 }));
+      const registry = buildRegistry({ gameInput: { run } });
+      await registry.execute('game_input', {
+        steps: [{ type: 'key', code: 'ArrowLeft', frames: 8 }],
+      });
+      expect(run).toHaveBeenCalledWith([{ type: 'key', code: 'ArrowLeft', frames: 8 }], {
+        observe: undefined,
+        settleMs: undefined,
+        expect: undefined,
+      });
+    });
+
     it('game_observe forwards node queries and the sample window', async () => {
       const observe = vi.fn(async () => ({ ok: true }));
       const registry = buildRegistry({ gameInput: { observe } });
       await registry.execute('game_observe', { nodes: ['AICar'], sampleMs: 1000 });
-      expect(observe).toHaveBeenCalledWith(['AICar'], 1000);
+      expect(observe).toHaveBeenCalledWith(['AICar'], 1000, undefined);
+    });
+
+    // The frame budget is passed positionally after `sampleMs`. Pinning the call
+    // shape here is deliberate: the schema advertises `frames` to the model, so a
+    // GameInputService that grew a different parameter shape must fail loudly
+    // rather than quietly ignore a budget the agent believes it set.
+    it('game_observe forwards a frame budget alongside sampleMs', async () => {
+      const observe = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({ gameInput: { observe } });
+      await registry.execute('game_observe', { nodes: ['Player'], frames: 90 });
+      expect(observe).toHaveBeenCalledWith(['Player'], 0, 90);
+    });
+
+    it('game_controls lists the live interactive nodes', async () => {
+      const listControls = vi.fn(() => ({ ok: true, controls: [] }));
+      const registry = buildRegistry({ gameInput: { listControls } });
+      await expect(registry.execute('game_controls')).resolves.toEqual({ ok: true, controls: [] });
+      expect(listControls).toHaveBeenCalledTimes(1);
+    });
+
+    // The semantic step carries two fields no other step has; a schema that dropped them would
+    // leave the model writing invocations the handler silently turns into no-ops.
+    it('game_input forwards an invoke step whole, interaction and args included', async () => {
+      const run = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({ gameInput: { run } });
+      const step = {
+        type: 'invoke',
+        target: 'Volume',
+        interaction: 'setValue',
+        args: { value: 0.5 },
+      };
+      await registry.execute('game_input', { steps: [step] });
+      expect(run).toHaveBeenCalledWith([step], {
+        observe: undefined,
+        settleMs: undefined,
+        expect: undefined,
+      });
+      const schema = registry.list().find(tool => tool.name === 'game_input')!.inputSchema;
+      const stepSchema = (
+        schema.properties as { steps: { items: { properties: Record<string, unknown> } } }
+      ).steps.items.properties;
+      expect((stepSchema.type as { enum: string[] }).enum).toContain('invoke');
+      expect(stepSchema.interaction).toBeDefined();
+      expect(stepSchema.args).toBeDefined();
+    });
+  });
+
+  describe('game_trace tool', () => {
+    /** A GameTestService stand-in that also owns a swappable trace store. */
+    const makeGameTest = (store: TraceStore = new InMemoryTraceStore()) => {
+      let current = store;
+      return {
+        recordTrace: vi.fn(async () => ({ ok: true, tracePath: 'design/tests/x.trace.json' })),
+        replayTrace: vi.fn(async () => ({ ok: true, replay: { verdict: 'REPLAY MATCH' } })),
+        getTraceStore: () => current,
+        setTraceStore: vi.fn((next: TraceStore) => {
+          current = next;
+        }),
+      };
+    };
+
+    const withProject = (status: 'ready' | 'idle') => {
+      appState.project.status = status;
+    };
+
+    afterEach(() => {
+      appState.project.status = 'idle';
+    });
+
+    it('record forwards the run spec, name, seed and frame-denominated feed unaltered', async () => {
+      const gameTest = makeGameTest();
+      const registry = buildRegistry({ gameTest });
+      await registry.execute('game_trace', {
+        mode: 'record',
+        name: 'snake-eats',
+        seed: 42,
+        until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        maxFrames: 120,
+        feed: [
+          { frame: 1, kind: 'key', phase: 'down', code: 'ArrowLeft' },
+          { frame: 9, kind: 'key', phase: 'up', code: 'ArrowLeft' },
+        ],
+      });
+      expect(gameTest.recordTrace).toHaveBeenCalledTimes(1);
+      const [spec, options] = gameTest.recordTrace.mock.calls[0] as unknown as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+      expect(spec.until).toEqual([{ kind: 'gameStateChanged', path: 'score', by: 1 }]);
+      expect(spec.maxFrames).toBe(120);
+      expect(options).toEqual({
+        name: 'snake-eats',
+        seed: 42,
+        feed: [
+          { frame: 1, kind: 'key', phase: 'down', code: 'ArrowLeft' },
+          { frame: 9, kind: 'key', phase: 'up', code: 'ArrowLeft' },
+        ],
+      });
+    });
+
+    it('replay forwards the trace name and tolerance, with no spec when none was asked for', async () => {
+      const gameTest = makeGameTest();
+      const registry = buildRegistry({ gameTest });
+      await registry.execute('game_trace', {
+        mode: 'replay',
+        name: 'snake-eats',
+        tolerance: { framePct: 0.1 },
+      });
+      expect(gameTest.replayTrace).toHaveBeenCalledWith('snake-eats', undefined, {
+        tolerance: { framePct: 0.1 },
+      });
+    });
+
+    it('replay passes an explicit spec through when the caller supplied one', async () => {
+      const gameTest = makeGameTest();
+      const registry = buildRegistry({ gameTest });
+      await registry.execute('game_trace', {
+        mode: 'replay',
+        name: 'snake-eats',
+        until: [{ kind: 'frames', n: 30 }],
+      });
+      const [name, spec] = gameTest.replayTrace.mock.calls[0] as unknown as [
+        string,
+        { until: unknown[] },
+      ];
+      expect(name).toBe('snake-eats');
+      expect(spec.until).toEqual([{ kind: 'frames', n: 30 }]);
+    });
+
+    it('list enumerates the stored traces', async () => {
+      const store = new InMemoryTraceStore();
+      await store.save('design/tests/a.trace.json', makeStoredTrace('a'));
+      const registry = buildRegistry({ gameTest: makeGameTest(store) });
+      await expect(registry.execute('game_trace', { mode: 'list' })).resolves.toEqual({
+        ok: true,
+        traces: ['design/tests/a.trace.json'],
+      });
+    });
+
+    it('rejects a malformed feed event before the game is touched', async () => {
+      const gameTest = makeGameTest();
+      const registry = buildRegistry({ gameTest });
+      const result = (await registry.execute('game_trace', {
+        mode: 'record',
+        name: 'bad',
+        until: [{ kind: 'frames', n: 10 }],
+        feed: [{ frame: 0, kind: 'key', phase: 'down', code: 'KeyA' }],
+      })) as { ok: boolean; error?: string };
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/`frame` must be a number >= 1/);
+      expect(gameTest.recordTrace).not.toHaveBeenCalled();
+    });
+
+    it('requires a mode and a name', async () => {
+      const registry = buildRegistry({ gameTest: makeGameTest() });
+      await expect(registry.execute('game_trace', {})).resolves.toMatchObject({ ok: false });
+      await expect(registry.execute('game_trace', { mode: 'replay' })).resolves.toMatchObject({
+        ok: false,
+      });
+    });
+
+    // The point of the file backend: with a project open the traces are files;
+    // with none open the service keeps its in-memory default rather than writing
+    // into nowhere.
+    it('installs the project-file store only while a project is open', async () => {
+      const gameTest = makeGameTest();
+      const registry = buildRegistry({ gameTest, storage: { listDirectory: async () => [] } });
+      withProject('ready');
+      await registry.execute('game_trace', { mode: 'list' });
+      expect(gameTest.getTraceStore()).toBeInstanceOf(ProjectTraceStore);
+
+      withProject('idle');
+      await registry.execute('game_trace', { mode: 'list' });
+      expect(gameTest.getTraceStore()).toBeInstanceOf(InMemoryTraceStore);
+    });
+
+    it('leaves a store somebody else installed alone', async () => {
+      const custom: TraceStore = {
+        save: async () => {},
+        load: async () => null,
+        list: async () => ['design/tests/custom.trace.json'],
+      };
+      const gameTest = makeGameTest(custom);
+      const registry = buildRegistry({ gameTest, storage: { listDirectory: async () => [] } });
+      withProject('ready');
+      await registry.execute('game_trace', { mode: 'list' });
+      expect(gameTest.setTraceStore).not.toHaveBeenCalled();
+      expect(gameTest.getTraceStore()).toBe(custom);
     });
   });
 
@@ -1645,6 +1949,491 @@ describe('AgentToolRegistry', () => {
     };
     expect(result.ok).toBe(true);
     expect(result.typeCheck).toBe('unavailable');
+  });
+
+  /**
+   * The gameplay-testing tools. What is worth pinning here is only the tool
+   * layer: that the runner is reached through GamePlaySessionService, that the
+   * runtime's *throwing* config validator reaches the agent as a sentence, and
+   * that a spec is forwarded whole. The loop itself is GameTestService's spec.
+   */
+  describe('game_time', () => {
+    interface FakeRunner {
+      paused: boolean;
+      running: boolean;
+      getTimeMode: () => Record<string, unknown>;
+      setTimeMode: ReturnType<typeof vi.fn>;
+      stepFrames: ReturnType<typeof vi.fn>;
+    }
+
+    const makeRunner = (over: Partial<FakeRunner> = {}): FakeRunner => {
+      let config: Record<string, unknown> = {
+        mode: 'realtime',
+        fixedDeltaSec: 1 / 60,
+        ticksPerFrame: 1,
+        renderEveryNTicks: 1,
+        muteAudio: true,
+      };
+      const runner: FakeRunner = {
+        paused: false,
+        running: true,
+        getTimeMode: () => ({ ...config }),
+        setTimeMode: vi.fn((next: Record<string, unknown>) => {
+          config = { ...next };
+        }),
+        stepFrames: vi.fn((count: number) => (runner.paused || !runner.running ? 0 : (count ?? 1))),
+        ...over,
+      };
+      return runner;
+    };
+
+    const registryFor = (runner: FakeRunner) =>
+      buildRegistry({
+        playSession: {
+          getActiveRuntime: () => ({ runner, canvas: {}, windowRef: {} }),
+        },
+      });
+
+    beforeEach(() => {
+      appState.ui.isPlaying = true;
+    });
+
+    afterEach(() => {
+      appState.ui.isPlaying = false;
+    });
+
+    it('returns the RESOLVED config, not the requested one, and names what was clamped', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', {
+        mode: 'fixed',
+        ticksPerFrame: 1000,
+      })) as { ok: boolean; time?: Record<string, unknown>; notes?: string[] };
+
+      expect(result.ok).toBe(true);
+      // 1000 is above MAX_TICKS_PER_FRAME, and renderEveryNTicks defaults to
+      // ticksPerFrame in 'fixed' — neither is what the caller typed.
+      expect(result.time).toMatchObject({
+        mode: 'fixed',
+        ticksPerFrame: 240,
+        renderEveryNTicks: 240,
+      });
+      expect(result.notes?.join(' ')).toMatch(/ticksPerFrame 1000 was clamped to 240/);
+    });
+
+    it('reports how many ticks ACTUALLY ran', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', {
+        mode: 'manual',
+        step: 12,
+      })) as { ok: boolean; ticksExecuted?: number; time?: Record<string, unknown> };
+
+      expect(runner.stepFrames).toHaveBeenCalledWith(12);
+      expect(result.ticksExecuted).toBe(12);
+      expect(result.time).toMatchObject({ mode: 'manual' });
+    });
+
+    it('explains a short step batch instead of reporting a bare 0', async () => {
+      const runner = makeRunner({ paused: true });
+      const result = (await registryFor(runner).execute('game_time', {
+        mode: 'manual',
+        step: 5,
+      })) as { ok: boolean; ticksExecuted?: number; paused?: boolean; notes?: string[] };
+
+      expect(result.ticksExecuted).toBe(0);
+      expect(result.paused).toBe(true);
+      expect(result.notes?.join(' ')).toMatch(/0\/5 ticks ran.*PAUSED/);
+    });
+
+    it('turns the validator throw into a readable error and leaves the clock alone', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', { mode: 'turbo' })) as {
+        ok: boolean;
+        error?: string;
+        time?: Record<string, unknown>;
+      };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/realtime.*fixed.*manual/);
+      expect(result.error).toMatch(/left unchanged/);
+      expect(runner.setTimeMode).not.toHaveBeenCalled();
+      expect(result.time).toMatchObject({ mode: 'realtime' });
+    });
+
+    it('rejects a non-positive fixedDeltaSec without touching the runner', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', {
+        mode: 'fixed',
+        fixedDeltaSec: 0,
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/fixedDeltaSec must be a finite number > 0/);
+      expect(runner.setTimeMode).not.toHaveBeenCalled();
+    });
+
+    it('requires `mode` when any other config field is sent (the config replaces, never merges)', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', { ticksPerFrame: 4 })) as {
+        ok: boolean;
+        error?: string;
+      };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/`mode` is required/);
+      expect(runner.setTimeMode).not.toHaveBeenCalled();
+    });
+
+    it('refuses `step` outside manual BEFORE writing the config', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time', {
+        mode: 'fixed',
+        step: 3,
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/only advances the game in 'manual'/);
+      expect(runner.setTimeMode).not.toHaveBeenCalled();
+      expect(runner.stepFrames).not.toHaveBeenCalled();
+    });
+
+    it('reads the current contract back when given nothing', async () => {
+      const runner = makeRunner();
+      const result = (await registryFor(runner).execute('game_time')) as {
+        ok: boolean;
+        time?: Record<string, unknown>;
+      };
+
+      expect(result.ok).toBe(true);
+      expect(result.time).toMatchObject({ mode: 'realtime' });
+      expect(runner.setTimeMode).not.toHaveBeenCalled();
+    });
+
+    it('says the game is not running rather than acting on nothing', async () => {
+      appState.ui.isPlaying = false;
+      const result = (await registryFor(makeRunner()).execute('game_time', {
+        mode: 'manual',
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/not running.*play_start/);
+    });
+  });
+
+  describe('game_run', () => {
+    /**
+     * A GameTestService stand-in for the `game_run` handler.
+     *
+     * The handler installs the report backend before either branch runs
+     * (`ensureProtocolStore`), so a fake with only `run` is not a lighter fake — it
+     * is one the handler cannot drive at all. The two accessors mirror the service
+     * exactly, `null` default included: the fallback with no project open is the
+     * absence of a store, not an in-memory one, because a protocol the agent is
+     * told to `fs_read` and cannot read is worse than an admitted loss.
+     */
+    const makeRunGameTest = <T>(run: T) => {
+      let protocolStore: RunProtocolStore | null = null;
+      return {
+        run,
+        getProtocolStore: () => protocolStore,
+        setProtocolStore: vi.fn((next: RunProtocolStore | null) => {
+          protocolStore = next;
+        }),
+      };
+    };
+
+    it('forwards the parsed spec to GameTestService and returns its report', async () => {
+      const report = { ok: true, verdict: 'PASS until[0] score by +1 (frame 12)' };
+      const gameTest = makeRunGameTest(vi.fn(async () => report));
+      const registry = buildRegistry({ gameTest });
+
+      const result = await registry.execute('game_run', {
+        until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        fail: [{ kind: 'newErrors' }],
+        watch: ['Player'],
+        maxFrames: 300,
+      });
+
+      expect(result).toBe(report);
+      expect(gameTest.run).toHaveBeenCalledWith({
+        until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        fail: [{ kind: 'newErrors' }],
+        watch: ['Player'],
+        maxFrames: 300,
+      });
+    });
+
+    it('forwards command `args` and signal `node` unchanged', async () => {
+      // The predicates have understood both fields for a while; the schema had not
+      // declared them, so a model could only ever send the degenerate forms. These
+      // two assertions are what keeps the schema and the parser in step.
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      const registry = buildRegistry({ gameTest });
+
+      await registry.execute('game_run', {
+        until: [
+          { kind: 'command', name: 'shop.buy', args: { slot: 2, item: { id: 'axe' } } },
+          { kind: 'signal', name: 'toggled', node: 'MusicCheckbox' },
+        ],
+      });
+
+      expect(gameTest.run).toHaveBeenCalledWith({
+        until: [
+          { kind: 'command', name: 'shop.buy', args: { slot: 2, item: { id: 'axe' } } },
+          { kind: 'signal', name: 'toggled', node: 'MusicCheckbox' },
+        ],
+        fail: [],
+      });
+    });
+
+    it('declares every predicate field it accepts, and nothing else', async () => {
+      const registry = buildRegistry();
+      const schema = registry.list().find(tool => tool.name === 'game_run')!.inputSchema;
+      const predicate = (schema.properties as { until: { items: JsonSchema } }).until.items;
+
+      expect(Object.keys(predicate.properties as Record<string, unknown>).sort()).toEqual([
+        'args',
+        'axis',
+        'by',
+        'kind',
+        'max',
+        'min',
+        'n',
+        'name',
+        'node',
+        'op',
+        'path',
+        'query',
+        'value',
+      ]);
+      expect((predicate.properties as { kind: { enum: string[] } }).kind.enum).toEqual([
+        ...GAME_ASSERTION_KINDS,
+      ]);
+      // The escape hatch stays shut: an invented field is a typo far more often than
+      // it is a feature, and a model that gets one accepted silently never learns.
+      expect(predicate.additionalProperties).toBe(false);
+    });
+
+    /**
+     * The other half of "declares every field": with `additionalProperties: false`
+     * AND a sanitizer that drops undeclared keys, a field the schema forgets is not a
+     * cosmetic omission — the value never reaches the parser, so the predicate answers
+     * "needs a name or a node type" about a payload that had one. That is exactly how
+     * `nodeAppeared.query`, `nodeMoved.axis` and `nodeMoved.max` were unreachable.
+     */
+    it('declares the canonical field of every predicate kind, so none is unreachable', async () => {
+      const canonical: Record<string, string[]> = {
+        gameState: ['path', 'op', 'value'],
+        gameStateChanged: ['path', 'by'],
+        nodeGone: ['name'],
+        nodeMoved: ['name', 'axis', 'min', 'max'],
+        nodeAppeared: ['query'],
+        nodeProperty: ['name', 'path', 'op', 'value'],
+        axis: ['name', 'op', 'value'],
+        newErrors: ['min'],
+        frames: ['n'],
+        command: ['name', 'args'],
+        signal: ['name', 'node'],
+      };
+      // A new kind with no entry here fails this test rather than shipping fieldless.
+      expect(Object.keys(canonical).sort()).toEqual([...GAME_ASSERTION_KINDS].sort());
+
+      const registry = buildRegistry();
+      const schema = registry.list().find(tool => tool.name === 'game_run')!.inputSchema;
+      const predicate = (schema.properties as { until: { items: JsonSchema } }).until.items;
+      const declared = Object.keys(predicate.properties as Record<string, unknown>);
+      for (const [kind, fields] of Object.entries(canonical)) {
+        for (const field of fields) {
+          expect(declared, `${kind} needs "${field}" declared`).toContain(field);
+        }
+      }
+    });
+
+    it('passes the fields of the four scene-reading predicates through to the service', async () => {
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      const registry = buildRegistry({ gameTest });
+
+      await registry.execute('game_run', {
+        until: [
+          { kind: 'nodeAppeared', query: 'Enemy2D' },
+          { kind: 'nodeMoved', name: 'Player', axis: 'x', max: 0, min: -20 },
+          { kind: 'nodeProperty', name: 'ScoreLabel', path: 'text', op: 'contains', value: '10' },
+          { kind: 'axis', name: 'Horizontal', op: 'lt', value: -0.4 },
+        ],
+      });
+
+      expect(gameTest.run).toHaveBeenCalledWith({
+        until: [
+          { kind: 'nodeAppeared', query: 'Enemy2D' },
+          { kind: 'nodeMoved', name: 'Player', axis: 'x', min: -20, max: 0 },
+          { kind: 'nodeProperty', name: 'ScoreLabel', path: 'text', op: 'contains', value: '10' },
+          { kind: 'axis', name: 'Horizontal', op: 'lt', value: -0.4 },
+        ],
+        fail: [],
+      });
+    });
+
+    it('drops a field no predicate declares instead of passing it to the service', async () => {
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      const registry = buildRegistry({ gameTest });
+
+      await registry.execute('game_run', {
+        until: [{ kind: 'command', name: 'shop.buy', payload: { slot: 2 } }],
+      });
+
+      expect(gameTest.run).toHaveBeenCalledWith({
+        until: [{ kind: 'command', name: 'shop.buy' }],
+        fail: [],
+      });
+    });
+
+    it('answers a malformed predicate with the position and the missing field', async () => {
+      const gameTest = makeRunGameTest(vi.fn());
+      const registry = buildRegistry({ gameTest });
+
+      const result = (await registry.execute('game_run', {
+        until: [{ kind: 'gameState', path: 'score' }],
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/until\[0\].*needs "op"/);
+      expect(gameTest.run).not.toHaveBeenCalled();
+    });
+
+    it('forwards `input` so the service can refuse it with the manual-time explanation', async () => {
+      // The refusal is the service's, but the wiring is this file's: a registry
+      // that dropped `input` here would silently run a spec the caller believes
+      // drives the game.
+      const gameTest = new GameTestService();
+      Object.defineProperty(gameTest, 'playSession', {
+        value: { getActiveRuntime: () => ({ runner: {}, canvas: {}, windowRef: {} }) },
+        configurable: true,
+      });
+      appState.ui.isPlaying = true;
+      try {
+        const result = (await buildRegistry({ gameTest }).execute('game_run', {
+          until: [{ kind: 'frames', n: 10 }],
+          input: [{ type: 'key', code: 'ArrowLeft', frames: 8 }],
+        })) as { ok: boolean; error?: string };
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/does not drive input/);
+        expect(result.error).toMatch(/game_input/);
+      } finally {
+        appState.ui.isPlaying = false;
+      }
+    });
+
+    it('forwards a monkey block and a control gesture, normalized', async () => {
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      const registry = buildRegistry({ gameTest });
+
+      await registry.execute('game_run', {
+        until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        monkey: { seed: 42, actions: ['Key_Space'] },
+        control: { tap: { nx: 0.02, ny: 0.02 } },
+      });
+
+      expect(gameTest.run).toHaveBeenCalledWith({
+        until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+        fail: [],
+        monkey: {
+          seed: 42,
+          actions: ['Key_Space'],
+          everyFrames: 12,
+          holdFrames: 8,
+          maxActions: 200,
+          invariants: {},
+        },
+        control: { tap: { nx: 0.02, ny: 0.02 }, holdFrames: 40 },
+      });
+    });
+
+    it('installs the project report backend per call, and falls back to NO store', async () => {
+      // Per call, not once at startup: a project can be opened or closed between two
+      // runs, and the branch that writes the protocol is the run, not the handler.
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      const registry = buildRegistry({ gameTest, storage: { listDirectory: async () => [] } });
+      const run = () => registry.execute('game_run', { until: [{ kind: 'frames', n: 1 }] });
+
+      try {
+        appState.project.status = 'ready';
+        await run();
+        expect(gameTest.getProtocolStore()).toBeInstanceOf(ProjectReportStore);
+      } finally {
+        appState.project.status = 'idle';
+      }
+      // And back to `null` — NOT to an in-memory store, unlike the trace and routine
+      // seams. A reply that points at design/tests/reports/ when nothing can be
+      // written there sends the agent to read a file that does not exist; the run
+      // says the protocol was lost instead.
+      await run();
+      expect(gameTest.getProtocolStore()).toBeNull();
+    });
+
+    it('refuses a monkey run with no seed before the game is touched', async () => {
+      const gameTest = makeRunGameTest(vi.fn());
+      const registry = buildRegistry({ gameTest });
+
+      const result = (await registry.execute('game_run', {
+        until: [{ kind: 'frames', n: 10 }],
+        monkey: { everyFrames: 6 },
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/monkey\.seed/);
+      expect(gameTest.run).not.toHaveBeenCalled();
+    });
+
+    it('declares the two modes, and states the three things a caller must not misread', async () => {
+      const registry = buildRegistry();
+      const tool = registry.list().find(entry => entry.name === 'game_run')!;
+      const properties = tool.inputSchema.properties as Record<string, JsonSchema>;
+
+      // Structural: the two blocks exist and each requires the field without which
+      // it means nothing.
+      expect(properties.monkey.required).toEqual(['seed']);
+      expect(properties.control.required).toEqual(['tap']);
+
+      // And in words, because the schema alone does not carry the reasons. These
+      // three are the ones a wrong reading turns into a false green.
+      expect(properties.monkey.description).toMatch(/`?seed`? is REQUIRED/i);
+      expect(tool.description).toMatch(/EMPTY INVENTORY IS NOT A PASS/i);
+      expect(tool.description).toMatch(/inconclusive.*DOES NOT MEAN PASSED/i);
+    });
+
+    it('tells the caller where the full protocol lands and how to read it', async () => {
+      // All three facts, because each one wrong is a different waste: not knowing the
+      // file exists loses the evidence, not knowing to slice it burns the context the
+      // file was written to save, and not knowing about rotation loses an old finding.
+      const tool = buildRegistry()
+        .list()
+        .find(entry => entry.name === 'game_run')!;
+      expect(tool.description).toContain('design/tests/reports');
+      expect(tool.description).toMatch(/fs_read \{offset, limit\}/);
+      expect(tool.description).toMatch(/newest 20 reports/);
+      expect(tool.description).toMatch(/artifact\.written` is false/);
+    });
+
+    it('leaves a report store somebody else installed alone', async () => {
+      // Same rule as the trace and routine seams: only a store this method recognises
+      // as its own is ever replaced, so a spec's fake (or a future cloud store)
+      // survives a project being opened underneath it.
+      const custom: RunProtocolStore = {
+        list: async () => [],
+        save: async () => {},
+        delete: async () => {},
+      };
+      const gameTest = makeRunGameTest(vi.fn(async () => ({ ok: true })));
+      gameTest.setProtocolStore(custom);
+      const registry = buildRegistry({ gameTest, storage: { listDirectory: async () => [] } });
+      try {
+        appState.project.status = 'ready';
+        await registry.execute('game_run', { until: [{ kind: 'frames', n: 1 }] });
+        expect(gameTest.getProtocolStore()).toBe(custom);
+      } finally {
+        appState.project.status = 'idle';
+      }
+    });
   });
 
   it('read_errors returns the captured ring buffer', async () => {

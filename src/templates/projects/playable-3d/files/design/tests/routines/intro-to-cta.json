@@ -1,0 +1,32 @@
+{
+  "name": "intro-to-cta",
+  "description": "Tap through the intro gate, end the run by intent, and press the CTA on the end screen.",
+  "note": "Run it with game_run {routine:'intro-to-cta'}. Steps are the game_input vocabulary (tap/key/keys/drag/hover/wait/invoke) plus {type:'command', name} for an intent the scene registered; `expect` holds the ordinary game_run predicates, ANDed and judged once after the last step. A step's `why` and this `note` are documentation — the runner ignores both — but they are why the routine also reads as a checklist. Note what is NOT here: no step calls a component method directly. Ending the run goes through the `finish` command, because a routine that called the handler would prove the handler works while skipping every wire between the player and it. GameFlow rides the 2D overlay layer (hud-root), above the 3D game-root.",
+  "scope": "scenes/main.pix3scene",
+  "params": {},
+  "uses": ["game-root", "hud-root", "intro-overlay", "end-screen", "cta-button", "hero-box"],
+  "steps": [
+    {
+      "type": "tap",
+      "target": "intro-overlay",
+      "why": "The tap gate is the gesture under test: it hides the overlay and unlocks browser audio, so it is driven as a real tap rather than by dispatching start-game."
+    },
+    {
+      "type": "command",
+      "name": "finish",
+      "why": "Reveal the end screen by intent instead of waiting out autoWinAfterSec — the timer is a placeholder every real playable replaces, and 15 s of wall clock in every run is a budget nobody gets back."
+    },
+    {
+      "type": "tap",
+      "target": "cta-button",
+      "holdMs": 700,
+      "why": "Button2D needs a real press; this proves the button is on screen and hittable, not just present in the tree."
+    }
+  ],
+  "expect": [
+    { "kind": "gameState", "path": "phase", "op": "eq", "value": "ended" },
+    { "kind": "gameState", "path": "introVisible", "op": "eq", "value": false },
+    { "kind": "gameState", "path": "endVisible", "op": "eq", "value": true },
+    { "kind": "gameState", "path": "gameEnded", "op": "eq", "value": true }
+  ]
+}

@@ -28,10 +28,51 @@ export interface GameDebugProvider {
   version?: number;
   /** One-shot high-level overview: counts, aggregate state. */
   snapshot?(): GameDebugSnapshot;
+  /**
+   * The named intents this game understands — its discovery surface for agents
+   * and test routines.
+   *
+   * A game with a command registry must answer this **from the registry**
+   * (`scene.commands.list().map(command => command.name)`) instead of keeping a
+   * second, hand-maintained list that drifts. It is a method rather than the
+   * `string[]` field the plan sketched (§5.5) for exactly one reason: providers
+   * are registered from `onStart`, and commands keep arriving from other
+   * scripts' `onStart` after that, so a value captured at registration time is
+   * wrong by the first frame.
+   */
+  actions?(): string[];
   /** Named, parameterised read queries, e.g. `inspect('droppables')`. */
   inspect?(query: string, args?: unknown): unknown;
   /** Named imperative actions for reproduction/repair, e.g. `action('wakeAll')`. */
   action?(name: string, args?: unknown): unknown;
+  /**
+   * Put the game back to what *it* considers the start, optionally seeding its
+   * randomness so two runs are comparable.
+   *
+   * The engine can restart the scene, and that restores the scene *graph* — but
+   * everything a script kept outside it survives untouched: module-level state, a
+   * cached level index, an accumulated score, a lazily built pool. So a
+   * scene-restart is only an approximation of "the start", and tooling that uses
+   * it has to label it as such. This hook is the exact version, because only the
+   * game knows what its own beginning means.
+   *
+   * Two obligations, both load-bearing:
+   *
+   * - **The harness awaits this** before the first frame of the window it is
+   *   isolating. A `reset` that returns a promise nobody waits on hands the next
+   *   run a game that is still tearing down, and every frame of that window then
+   *   measures the wrong state — isolation in name only.
+   * - **Do not imply more than you restore.** An implementation with no seeded
+   *   RNG may accept `seed` and ignore it; that still gives the same *starting
+   *   state*, but not the same *sequence*, so anything order-dependent stays
+   *   incomparable across runs. Say which of the two the game provides rather
+   *   than letting a caller assume determinism it never had.
+   *
+   * The first consumer is the negative control of the gameplay harness: the
+   * control gesture has to run from the same state as the gesture under test, or
+   * its verdict is `inconclusive` rather than "the control passed".
+   */
+  reset?(seed?: number): void | Promise<void>;
 }
 
 /**
@@ -227,9 +268,18 @@ export function isDirectionAxesEnabled(): boolean {
 /**
  * The lifecycle stage a script error was thrown from. `scene-start` covers
  * failures while cloning/loading the scene before any script ran; `tick` covers
- * an error escaping the per-frame update outside a single component.
+ * an error escaping the per-frame update outside a single component; `command`
+ * covers a handler thrown from `scene.commands.dispatch()`, which is a script
+ * failure that happens to be reached through a named intent rather than a hook.
  */
-export type ScriptErrorPhase = 'attach' | 'start' | 'update' | 'detach' | 'scene-start' | 'tick';
+export type ScriptErrorPhase =
+  | 'attach'
+  | 'start'
+  | 'update'
+  | 'detach'
+  | 'scene-start'
+  | 'tick'
+  | 'command';
 
 /**
  * A runtime script/lifecycle failure, in an editor-agnostic shape. The runtime

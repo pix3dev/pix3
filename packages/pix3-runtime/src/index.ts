@@ -9,6 +9,7 @@ export * from './core/SceneLoader';
 export * from './core/SceneSaver';
 export * from './core/SceneManager';
 export * from './core/SceneRunner';
+export * from './core/runtime-time';
 export * from './core/RuntimeRenderer';
 export * from './core/PostProcessingPipeline';
 export * from './core/InputService';
@@ -19,6 +20,7 @@ export * from './core/animated-sprite-layout';
 export * from './core/ecs';
 export * from './core/ECSService';
 export * from './core/GameTime';
+export * from './core/GameCommands';
 export * from './core/JuiceApi';
 export * from './core/juice-transients';
 export * from './core/AudioApi';
@@ -128,6 +130,7 @@ export * from './shader-effects';
 export * from './fw/property-schema';
 export * from './fw/property-schema-utils';
 export * from './fw/reactive-schema-properties';
+export * from './fw/interactive';
 
 // Decorators
 export { property, state } from 'lit/decorators.js';

@@ -93,6 +93,18 @@ export class GamePlaySessionService {
   private networkService?: NetworkService;
   private focusCleanup?: () => void;
   private focusPauseSuppressed = false;
+  /**
+   * A pause the *host* asked for (automation's `pauseOnOutcome`, a future Pause
+   * button) as opposed to one the focus rule applied. It has to be a separate
+   * flag because {@link handleFocusPause} re-evaluates the whole pause decision
+   * on every focus/visibility event and on every suppression toggle, and its
+   * "should not pause" branch calls `resume()` — so a bare `runner.pause()` from
+   * outside lasts exactly until the next such event. That is not hypothetical:
+   * `game_run` pauses on its outcome frame and then drops its focus-pause
+   * suppression in the same `finally`, which used to un-pause the game
+   * milliseconds later while the report still claimed it was paused.
+   */
+  private hostPauseRequested = false;
   /** True between a failed launch and the next one, so its banner is not cleared by its own stop. */
   private startFailed = false;
   private syncPromise: Promise<void> = Promise.resolve();
@@ -276,6 +288,28 @@ export class GamePlaySessionService {
     this.handleFocusPause();
   }
 
+  /**
+   * Hold the running game paused (or release it) on the host's behalf. Unlike a
+   * direct `runner.pause()` this survives focus/visibility changes and
+   * suppression toggles — it is one of the two inputs the pause decision is made
+   * from — so a caller that pauses the game to inspect a frame keeps it paused
+   * until it (or the user) asks for the opposite. Idempotent.
+   */
+  setPauseRequested(paused: boolean): void {
+    this.hostPauseRequested = paused;
+    this.handleFocusPause();
+  }
+
+  /** True while a host-requested pause is being held. */
+  get pauseRequested(): boolean {
+    return this.hostPauseRequested;
+  }
+
+  /** True when a scene is loaded and its runner is currently halted. */
+  get runnerPaused(): boolean {
+    return this.runner?.paused ?? false;
+  }
+
   private queueSync(): void {
     this.syncPromise = this.syncPromise
       .then(() => this.syncRuntimeToUiState())
@@ -446,6 +480,10 @@ export class GamePlaySessionService {
   private detachRuntime(): void {
     this.focusCleanup?.();
     this.focusCleanup = undefined;
+    // A host-requested pause belongs to the runner that is going away: a stop, a
+    // restart or a host swap must not hand the next scene a game that starts
+    // frozen for a reason nothing on screen explains.
+    this.hostPauseRequested = false;
     this.profilerSessionService.endSession();
     // Keep atlasing strictly play-mode-scoped: edit-mode texture loads on the
     // shared AssetLoader must always get raw standalone textures.
@@ -514,8 +552,11 @@ export class GamePlaySessionService {
 
     const documentRef = host.windowRef.document;
     const isVisible = isDocumentActive(documentRef);
+    // Two independent reasons to be paused; either one holds the game. The host
+    // request comes first so a requested pause is not lifted by a focus event.
     const shouldPause =
-      appState.ui.pauseRenderingOnUnfocus && !isVisible && !this.focusPauseSuppressed;
+      this.hostPauseRequested ||
+      (appState.ui.pauseRenderingOnUnfocus && !isVisible && !this.focusPauseSuppressed);
     if (shouldPause) {
       this.runner.pause();
     } else {

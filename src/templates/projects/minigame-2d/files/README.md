@@ -27,6 +27,11 @@ Scenes switch at runtime with a fade transition:
 ## Project structure
 
 - `design/` — game design document and reference images
+- `design/tests/` — agent-testing material: `routines/*.json` (named, replayable
+  step + assertion scripts) and `reachability.json` (the journal of on-screen
+  controls physically proven reachable). Routines are executed by the gameplay
+  test harness, which is still in development — the format and location are
+  fixed now so a routine written today keeps working.
 - `scenes/` — scene files; `main.pix3scene` (game) is the startup scene,
   `menu.pix3scene` is the build entry point
 - `sprites/` — images and textures

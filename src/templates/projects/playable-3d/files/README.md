@@ -8,10 +8,17 @@ A Pix3 project created from the **Playable 3D** template — a portrait playable
 - **Gameplay placeholder** — replace the demo box and ground in `main.pix3scene` with your game.
 - **End screen with CTA** (`end-screen`) — the PLAY NOW button calls the engine Playable SDK (`playable.openStore`); set your store URL in the `user:CtaButton` component config on `cta-button`.
 - `GameFlow` shows the end screen automatically after `autoWinAfterSec` seconds — replace that with your real win/lose condition.
+- **Readable state** — `GameFlow` publishes a `registerGameDebug` snapshot (phase, timer, overlay visibility, session end), so tooling reads the run's state instead of judging it from a screenshot. Add your own fields as you add state.
+- **Intent-first handlers** — every reaction to the player is a named method (`GameFlow.start/finish/restart`, `CtaButton.ctaClick/openStore`) that the event handler merely calls; keep that shape and the game stays drivable by intent.
+- **Canonical roots** — `game-root` holds the 3D scene, `hud-root` the 2D overlay layer (intro gate, HUD, end screen); routines and assertions address them by those ids.
 
 ## Project structure
 
 - `design/` — game design document and reference images
+- `design/tests/` — agent-testing material: `routines/*.json` (named step +
+  assertion scripts, written on the highest channel the game offers) and
+  `reachability.json` (controls proven reachable on a live run). The harness
+  that runs them is still in development; format and location are fixed now.
 - `scenes/` — scene files; `main.pix3scene` is the startup scene
 - `sprites/` — images and textures
 - `scripts/` — game scripts (`export class X extends Script`, used as `user:X`)

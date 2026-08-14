@@ -280,7 +280,7 @@ A horizontal slider control for selecting numeric values. Useful for volume cont
 **Usage Notes:**
 - Drag the handle to change values
 - Value is clamped between min and max
-- Emits value change events during interaction
+- Emits the pointer lifecycle signals (`pointerdown`/`pressed`/`pointerup`/`released`/`click`) but **no** state signal: the value is written during the drag, so by the time `released`/`click` fire, `value` is already the value the gesture produced. Read `slider.value` there, or track the live value through `input.getAxis(axisName)`.
 
 ---
 
@@ -294,16 +294,19 @@ A virtual analog stick control for touch or mouse input. Commonly used for chara
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `width` | number | 120 | Base diameter in pixels |
-| `height` | number | 120 | Base diameter in pixels |
-| `knobSize` | number | 50 | Knob diameter in pixels |
-| `baseColor` | color | #333333 | Base circle color |
-| `knobColor` | color | #666666 | Knob color |
-| `maxDistance` | number | 40 | Maximum knob travel |
+| `enabled` | boolean | true | When false the stick accepts no input and drops any drag in progress |
+| `radius` | number | 50 | Base radius; also the handle's travel limit |
+| `floating` | boolean | false | Hidden until a touch summons it under the finger, then fades out on release |
+| `axisHorizontal` | string | Horizontal | Virtual axis written with the X deflection (-1..1) |
+| `axisVertical` | string | Vertical | Virtual axis written with the Y deflection (-1..1) |
 
 **Usage Notes:**
-- Returns normalized X/Y values (-1 to 1)
-- Center position returns (0, 0)
+- Writes normalized X/Y values (-1 to 1) into the two named axes; centred is (0, 0)
+- Captures the finger that started the drag and follows only that one, so a second thumb can press
+  buttons (or drive a second stick) without disturbing it. A `pointercancel` — a finger dragged off
+  the edge of the screen — returns the axes to zero, it never leaves them pushed
+- A floating stick starts on a **new** touch that is not over UI, asked per finger: a button held by
+  another thumb no longer blocks it
 - Ideal for mobile/touch interfaces
 
 ---
@@ -324,9 +327,33 @@ A toggle checkbox control for boolean settings.
 | `uncheckedColor` | color | #333333 | Unchecked border |
 | `checkedColor` | color | #4a9eff | Checked fill color |
 
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `pointerdown` / `pressed` | — | A press landed inside the box |
+| `pointerup` / `released` | — | The press ended |
+| `click` | — | Released inside the box — a completed *gesture*, emitted **before** the box flips |
+| `toggled` | `(checked)` | The checked state **changed**, emitted **after** the flip, the repaint and the virtual action are in place |
+
+`click` and `toggled` are deliberately separate, as in Godot (`pressed` vs `toggled`):
+`click` says "the user clicked me" and runs while `checked` still holds its
+pre-click value, so a handler that applies `checked` from `click` applies the
+*previous* state (inverted behaviour). Connect anything that *acts on the state*
+to `toggled` and read the payload or the node:
+
+```ts
+musicToggle.connect('toggled', this, checked => scene.audio.setBusVolume('music', checked ? 1 : 0));
+```
+
+`toggled` fires for every spelling of the change — a tap, the `toggle` /
+`setChecked` interactions, `checkbox.checked = x` from a script, an Inspector
+edit — and never fires when the assigned value equals the current one.
+
 **Usage Notes:**
 - Toggle between checked/unchecked states
-- Emits state change events
+- The hit area spans the box plus its label, so clicking the text toggles too
+- `checkmarkAction` pulses a virtual button for one frame and latches an axis (1/0) with the state
 
 ---
 
@@ -370,6 +397,19 @@ A specialized slot control for inventory systems. Supports drag-and-drop for ite
 | `borderColor` | color | #444444 | Border color |
 | `highlightColor` | color | #4a9eff | Selection highlight |
 | `itemCount` | number | 0 | Number of items in slot |
+
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `pointerdown` / `pressed` / `pointerup` / `released` | — | Pointer lifecycle, same as every UI control |
+| `click` | — | Released inside the slot, emitted **before** the selection flips |
+| `toggled` | `(selected)` | The selection **changed**, emitted **after** the highlight and the virtual action are in place |
+
+Same split as `Checkbox2D`: read `selected` from a `toggled` listener, not from a
+`click` one (which still sees the pre-click value). A slot inside a
+`ScrollContainer2D` refuses the click entirely while the list is being flicked,
+so neither signal fires for a scroll drag.
 
 **Usage Notes:**
 - Can hold one item at a time
@@ -876,7 +916,7 @@ filter).
 | SpotLightNode | color, intensity, distance, angle, penumbra |
 | Button2D | width, height, backgroundColor, buttonAction |
 | Slider2D | width, minValue, maxValue, value |
-| Joystick2D | width, height, maxDistance |
+| Joystick2D | enabled, radius, floating, axisHorizontal, axisVertical |
 | Checkbox2D | width, checked |
 | Bar2D | width, value, maxValue |
 | InventorySlot2D | width, itemCount |

@@ -21,10 +21,20 @@ import { componentToDTO, type Json } from '@/core/agent-introspection';
  *
  * Decoupled from the runtime by design: it takes a resolver + a structural node
  * view, so it unit-tests against plain fakes and never imports SceneRunner.
+ *
+ * **Sampling is frame-driven** (plan §5.1). The recorder subscribes to the
+ * runner's per-tick frame hook and samples every tick, because the old 100 ms
+ * timer was blind to anything shorter than ~6 frames (a bullet that lives 80 ms
+ * could miss every sample) and would have become useless under the time
+ * contract's speed-up — at ×10 a 100 ms timer is one sample per 60 ticks.
+ * Reading ≤8 transforms per tick is cheap; what the caps protect is the *output*
+ * size, and those are unchanged. A timer survives only as a watchdog for the
+ * windows where no tick arrives (runner absent, paused, or a host that exposes
+ * no frame hook) — see {@link NodeWatchRecorder.start}.
  */
 
-/** Default poll cadence while watching a running game. */
-const WATCH_POLL_MS = 100;
+/** Watchdog cadence used when no frame tick arrives (paused / no runner). */
+const IDLE_POLL_MS = 100;
 const MAX_WATCH_NODES = 8;
 const MAX_TRACKED_CHILDREN = 32;
 const MAX_LOG_ENTRIES = 10;
@@ -36,11 +46,27 @@ const SCALE_EPS = 0.01;
 /** Opacity change that counts as a fade (matches GameInputService; duplicated by design). */
 const OPACITY_EPS = 0.05;
 
+export type WatchLogKind = 'spawn' | 'despawn' | 'show' | 'hide' | 'state' | 'scale' | 'fade';
+
+/**
+ * One aggregated changelog line. Entries are deduped **by kind**: the first
+ * occurrence keeps the stamps and the note, every later one bumps `count`. That
+ * is what makes the log frequency-independent — sampling every tick instead of
+ * every 100 ms multiplies raw events by ~6, and a plain append-until-capped log
+ * would degrade into ten entries from the first 150 ms of the window.
+ */
 export interface WatchLogEntry {
-  /** ms since the watch window started. */
+  /** ms since the watch window started (first occurrence). */
   at: number;
-  kind: 'spawn' | 'despawn' | 'show' | 'hide' | 'state' | 'scale' | 'fade';
+  /**
+   * Ticks since the window started (first occurrence). Present only when the
+   * window was frame-driven — the stamp the plan's timeline is denominated in.
+   */
+  frame?: number;
+  kind: WatchLogKind;
   note: string;
+  /** Occurrences of this kind during the window; omitted when it happened once. */
+  count?: number;
 }
 
 /** What a watched node did over the window (see {@link NodeWatchRecorder}). */
@@ -97,6 +123,30 @@ export interface WatchNodeLike {
 /** Resolves a watch query (node name or id) to a live node, or null if absent. */
 export type WatchResolver = (query: string) => WatchNodeLike | null;
 
+/** The per-tick sample the recorder needs; `SceneRunnerFrameSample` satisfies it. */
+export interface WatchFrameSample {
+  readonly frameNumber: number;
+}
+
+/**
+ * Anything that reports the end of each logic tick. `SceneRunner` satisfies it
+ * structurally — the recorder deliberately does not import it, so it keeps
+ * unit-testing against fakes.
+ */
+export interface WatchFrameSource {
+  subscribeFrameStats(listener: (sample: WatchFrameSample) => void): () => void;
+}
+
+export interface NodeWatchOptions {
+  /**
+   * The running runner. Given one, the window samples once per logic tick;
+   * without one (or if subscribing throws), it degrades to the watchdog timer.
+   */
+  frameSource?: WatchFrameSource | null;
+  /** Watchdog cadence in ms, used only for ticks that never arrive. */
+  idlePollMs?: number;
+}
+
 type Vec3 = { x: number; y: number; z: number };
 
 interface Tracked {
@@ -126,6 +176,8 @@ interface Tracked {
   hasEvents: boolean;
   startState: Map<string, Json>;
   log: WatchLogEntry[];
+  /** kind -> its entry in `log`, so a repeat bumps a counter instead of appending. */
+  logByKind: Map<WatchLogKind, WatchLogEntry>;
   onAdded?: (event: unknown) => void;
   onRemoved?: (event: unknown) => void;
 }
@@ -166,22 +218,28 @@ function flattenState(node: WatchNodeLike): Map<string, Json> {
 
 export class NodeWatchRecorder {
   private readonly tracked: Tracked[] = [];
+  private readonly frameSource: WatchFrameSource | null;
+  private readonly idlePollMs: number;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private unsubscribeFrames: (() => void) | null = null;
+  private frameDriven = false;
   private startedAt = 0;
+  /** Ticks sampled so far — also the frame stamp written into log entries. */
+  private framesSampled = 0;
+  /** `framesSampled` at the previous watchdog fire, to detect a runner that is not ticking. */
+  private framesAtLastWatchdog = -1;
+  private readonly scratch = new Vector3();
   /** Number of queries dropped because more than {@link MAX_WATCH_NODES} were requested. */
   readonly droppedWatchCount: number;
 
-  constructor(
-    resolve: WatchResolver,
-    queries: readonly string[],
-    private readonly intervalMs: number = WATCH_POLL_MS
-  ) {
+  constructor(resolve: WatchResolver, queries: readonly string[], options: NodeWatchOptions = {}) {
+    this.frameSource = options.frameSource ?? null;
+    this.idlePollMs = options.idlePollMs ?? IDLE_POLL_MS;
     const capped = queries.slice(0, MAX_WATCH_NODES);
     this.droppedWatchCount = Math.max(0, queries.length - capped.length);
-    const scratch = new Vector3();
     for (const query of capped) {
       const node = resolve(query);
-      if (node) this.track(query, node, scratch);
+      if (node) this.track(query, node, this.scratch);
     }
   }
 
@@ -190,13 +248,44 @@ export class NodeWatchRecorder {
     return this.tracked.length > 0;
   }
 
-  /** Begin capture: attach lifecycle listeners, take the baseline sample, start polling. */
+  /**
+   * True when this window was driven by the runner's frame hook. Sticky on
+   * purpose — it must read the same after {@link stop} (which unsubscribes) as
+   * during the window, or the final sample's log entries would lose their frame
+   * stamps and the caller would misreport how the window was measured.
+   */
+  get isFrameDriven(): boolean {
+    return this.frameDriven;
+  }
+
+  /** Logic ticks observed during the window (0 when nothing ticked). */
+  get framesObserved(): number {
+    return this.framesSampled;
+  }
+
+  /**
+   * Begin capture: attach lifecycle listeners, take the baseline sample, then
+   * arm both drivers.
+   *
+   * The frame hook is the real sampler — one sample per logic tick. The timer
+   * behind it is a watchdog, not a second sampler: it fires every
+   * {@link IDLE_POLL_MS} and samples **only if no tick happened since it last
+   * fired**. That single mechanism covers every degradation in one place — no
+   * runner, a host with no `subscribeFrameStats`, a subscription that throws, a
+   * paused runner, a runner that is resumed halfway through the window — and it
+   * costs nothing while ticks are flowing.
+   */
   start(): void {
     if (!this.isWatching) return;
     this.startedAt = Date.now();
     for (const t of this.tracked) this.attach(t);
     this.sample();
-    this.intervalHandle = setInterval(() => this.sample(), this.intervalMs);
+    this.subscribeToFrames();
+    this.framesAtLastWatchdog = this.framesSampled;
+    this.intervalHandle = setInterval(() => {
+      if (this.framesSampled === this.framesAtLastWatchdog) this.sample();
+      this.framesAtLastWatchdog = this.framesSampled;
+    }, this.idlePollMs);
   }
 
   /** End capture: take a final sample, detach listeners, return per-query activity. */
@@ -205,11 +294,41 @@ export class NodeWatchRecorder {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
     }
+    if (this.unsubscribeFrames) {
+      try {
+        this.unsubscribeFrames();
+      } catch {
+        // A host that fails to unsubscribe must not sink the whole observation.
+      }
+      this.unsubscribeFrames = null;
+    }
     this.sample();
     for (const t of this.tracked) this.detach(t);
     const out = new Map<string, NodeActivity>();
     for (const t of this.tracked) out.set(t.query, this.finish(t));
     return out;
+  }
+
+  /** Attach to the runner's per-tick hook; stays timer-driven if that is impossible. */
+  private subscribeToFrames(): void {
+    const source = this.frameSource;
+    if (!source || typeof source.subscribeFrameStats !== 'function') return;
+    try {
+      this.unsubscribeFrames = source.subscribeFrameStats(() => {
+        // Never throw into the runner's frame dispatch: one bad read here would
+        // take out every other frame listener (and the profiler with them).
+        try {
+          this.framesSampled += 1;
+          this.sample();
+        } catch {
+          // Ignore — a sample lost is a sample lost, the window continues.
+        }
+      });
+      this.frameDriven = true;
+    } catch {
+      this.unsubscribeFrames = null;
+      this.frameDriven = false;
+    }
   }
 
   private track(query: string, node: WatchNodeLike, scratch: Vector3): void {
@@ -240,6 +359,7 @@ export class NodeWatchRecorder {
       hasEvents: typeof node.addEventListener === 'function',
       startState: flattenState(node),
       log: [],
+      logByKind: new Map(),
     };
     for (let i = 0; i < children.length && i < MAX_TRACKED_CHILDREN; i++) {
       const key = childKey(children[i], i);
@@ -251,7 +371,7 @@ export class NodeWatchRecorder {
 
   private attach(t: Tracked): void {
     if (!t.hasEvents || !t.node.addEventListener) return;
-    const scratch = new Vector3();
+    const scratch = this.scratch;
     t.onAdded = (event: unknown) => {
       t.spawned += 1;
       const child = (event as { child?: WatchChildLike }).child;
@@ -276,8 +396,9 @@ export class NodeWatchRecorder {
     if (t.onRemoved) t.node.removeEventListener('childremoved', t.onRemoved);
   }
 
+  /** One pass over every tracked node. Runs per logic tick — allocation-free by design. */
   private sample(): void {
-    const scratch = new Vector3();
+    const scratch = this.scratch;
     for (const t of this.tracked) {
       const children = t.node.children ?? [];
 
@@ -357,9 +478,28 @@ export class NodeWatchRecorder {
     }
   }
 
-  private pushLog(t: Tracked, kind: WatchLogEntry['kind'], note: string): void {
+  /**
+   * Record one change. Repeats of a kind bump a counter on the existing entry
+   * rather than appending: at tick cadence a spawner fires dozens of times a
+   * second, and an append-only log would spend its whole cap on the first
+   * fraction of the window. The stamps therefore mark the FIRST occurrence —
+   * "when did this start, and how often" — which is what the verdict needs.
+   */
+  private pushLog(t: Tracked, kind: WatchLogKind, note: string): void {
+    const existing = t.logByKind.get(kind);
+    if (existing) {
+      existing.count = (existing.count ?? 1) + 1;
+      return;
+    }
     if (t.log.length >= MAX_LOG_ENTRIES) return;
-    t.log.push({ at: Math.max(0, Date.now() - this.startedAt), kind, note });
+    const entry: WatchLogEntry = {
+      at: Math.max(0, Date.now() - this.startedAt),
+      ...(this.isFrameDriven ? { frame: this.framesSampled } : {}),
+      kind,
+      note,
+    };
+    t.log.push(entry);
+    t.logByKind.set(kind, entry);
   }
 
   private finish(t: Tracked): NodeActivity {

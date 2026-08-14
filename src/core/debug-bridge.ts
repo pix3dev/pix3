@@ -624,10 +624,15 @@ export interface Pix3DebugBridge {
     info(): {
       name: string;
       version: number | null;
-      has: { snapshot: boolean; inspect: boolean; action: boolean };
+      has: { snapshot: boolean; inspect: boolean; action: boolean; actions: boolean };
     } | null;
     /** Game's high-level overview, or null. */
     snapshot(): Json | null;
+    /**
+     * The named intents the game understands — its `scene.commands` registry when
+     * it has one. Empty array when the provider publishes none.
+     */
+    actions(): string[];
     /** Run a named game query, e.g. inspect('droppables'). Null if unsupported. */
     inspect(query: string, args?: unknown): Json | null;
     /** Run a named game action, e.g. action('wakeAll'). Null if unsupported. */
@@ -1077,8 +1082,14 @@ function createBridge(): Pix3DebugBridge {
             snapshot: !!provider.snapshot,
             inspect: !!provider.inspect,
             action: !!provider.action,
+            actions: !!provider.actions,
           },
         };
+      },
+      actions() {
+        const provider = getGameDebug();
+        const names = provider?.actions?.() ?? [];
+        return Array.isArray(names) ? names.filter(name => typeof name === 'string') : [];
       },
       snapshot() {
         const provider = getGameDebug();

@@ -282,7 +282,39 @@ export class Node2D extends NodeBase {
     this.hasAuthoredLayoutSize = true;
   }
 
+  /**
+   * The world position of the **primary** pointer (the oldest one still down; with nothing down,
+   * the last hover position), or null without an input service.
+   *
+   * Deliberately left primary-derived when the rest of the engine switched to addressed pointers:
+   * it has **no caller inside this repository** and exists purely as compatibility for user scripts
+   * and consumer projects written against the single-pointer engine, where "the pointer" was
+   * unambiguous. Nothing that has to follow *its own* finger may use it — resolve that finger's
+   * coordinates with {@link screenPointToWorld} (see `UIControl2D`'s pointer ownership), or ask
+   * `scene.getPointer2DWorldPosition(pointerId)` from a script.
+   */
   protected getPointerWorldPosition(target: Vector2 = this.tmpPointerWorld): Vector2 | null {
+    const input = this.input;
+    if (!input) {
+      return null;
+    }
+    return this.screenPointToWorld(input.pointerPosition.x, input.pointerPosition.y, target);
+  }
+
+  /**
+   * Convert a point in **input/screen units** (the units of `InputService.pointerPosition` and of
+   * every `PointerSnapshot`) into 2D world units, through the same projection
+   * {@link getPointerWorldPosition} uses. Returns null without an input service, whose `width` /
+   * `height` define the screen rect.
+   *
+   * This exists because multi-touch made "the pointer position" ambiguous: a control owning finger
+   * #2 has to unproject #2's coordinates, not whatever the shared primary position happens to hold.
+   */
+  protected screenPointToWorld(
+    screenX: number,
+    screenY: number,
+    target: Vector2 = this.tmpPointerWorld
+  ): Vector2 | null {
     const input = this.input;
     if (!input) {
       return null;
@@ -303,8 +335,8 @@ export class Node2D extends NodeBase {
     // their hit-tests would drift by the camera pan. Skip the uiCamera branch.
     const uiCamera = this.scene?.getUICamera();
     if (uiCamera && !this.isInOverlayBand()) {
-      const ndcX = (input.pointerPosition.x / inputWidth) * 2 - 1;
-      const ndcY = -((input.pointerPosition.y / inputHeight) * 2 - 1);
+      const ndcX = (screenX / inputWidth) * 2 - 1;
+      const ndcY = -((screenY / inputHeight) * 2 - 1);
       Node2D.scratchUnproject.set(ndcX, ndcY, 0).unproject(uiCamera);
       target.set(Node2D.scratchUnproject.x, Node2D.scratchUnproject.y);
       return target;
@@ -321,8 +353,8 @@ export class Node2D extends NodeBase {
         : inputHeight;
 
     target.set(
-      (input.pointerPosition.x / inputWidth) * worldWidth - worldWidth / 2,
-      worldHeight / 2 - (input.pointerPosition.y / inputHeight) * worldHeight
+      (screenX / inputWidth) * worldWidth - worldWidth / 2,
+      worldHeight / 2 - (screenY / inputHeight) * worldHeight
     );
     return target;
   }

@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CanvasTexture, Color, Mesh, MeshBasicMaterial, PlaneGeometry } from 'three';
+import { CanvasTexture, Color, Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 
 import { InventorySlot2D, type InventorySlot2DProps } from './InventorySlot2D';
+import { Group2D } from '../Group2D';
+import { ScrollContainer2D } from './ScrollContainer2D';
+import { InputService } from '../../../core/InputService';
 import { reactiveSchemaPropertyNames } from '../../../fw/reactive-schema-properties';
 
 interface SlotInternals {
@@ -134,5 +137,168 @@ describe('InventorySlot2D script assignments (reactive schema properties)', () =
     ]) {
       expect(names.has(expected), `${expected} should be reactive`).toBe(true);
     }
+  });
+});
+
+describe('InventorySlot2D pointer funnel (UIControl2D.updatePointerState)', () => {
+  /** Every lifecycle signal the shared UIControl2D funnel emits, in the order it emits them. */
+  const FUNNEL_SIGNALS = ['pointerdown', 'pressed', 'pointerup', 'released', 'click'] as const;
+
+  function recordSignals(slot: InventorySlot2D): string[] {
+    const seen: string[] = [];
+    const listener = {};
+    for (const name of FUNNEL_SIGNALS) {
+      slot.connect(name, listener, () => seen.push(name));
+    }
+    return seen;
+  }
+
+  // Input 200x200 and no scene → the logical camera equals the input size, so screen (100,100) maps
+  // to world (0,0) — the slot centre — and screen (10,10) lands far outside a 60x60 slot.
+  function createInteractive(overrides: Partial<InventorySlot2DProps> = {}): {
+    slot: InventorySlot2D;
+    input: InputService;
+    signals: string[];
+  } {
+    const slot = createSlot(overrides);
+    const input = new InputService();
+    input.width = 200;
+    input.height = 200;
+    slot.input = input;
+    return { slot, input, signals: recordSignals(slot) };
+  }
+
+  it('activates on release inside the bounds and emits the lifecycle signals', () => {
+    // Before the funnel the slot polled the pointer itself: it selected on press-down and emitted
+    // nothing, so a shop script had no signal to connect to.
+    const { slot, input, signals } = createInteractive({ selectedAction: 'PickSlot' });
+
+    input.pointerPosition.set(100, 100);
+    input.isPointerDown = true;
+    slot.tick(1 / 60);
+
+    expect(slot.selected).toBe(false);
+    expect(signals).toEqual(['pointerdown', 'pressed']);
+
+    input.isPointerDown = false;
+    slot.tick(1 / 60);
+
+    expect(slot.selected).toBe(true);
+    expect(input.getButton('PickSlot')).toBe(true);
+    expect(signals).toEqual(['pointerdown', 'pressed', 'pointerup', 'released', 'click']);
+  });
+
+  it('shows a click listener the OLD selection and a toggled listener the NEW one', () => {
+    // Same split as Checkbox2D: `click` is the pointer signal (emitted before onClick() selects),
+    // `toggled` is the state signal (emitted after, with the new value).
+    const { slot, input } = createInteractive({ selectedAction: 'PickSlot' });
+    const order: string[] = [];
+    const clickSaw: boolean[] = [];
+    const toggledSaw: boolean[] = [];
+    const payloads: unknown[] = [];
+    const listener = {};
+    slot.connect('click', listener, () => {
+      order.push('click');
+      clickSaw.push(slot.selected);
+    });
+    slot.connect('toggled', listener, (...args: unknown[]) => {
+      order.push('toggled');
+      toggledSaw.push(slot.selected);
+      payloads.push(args[0]);
+    });
+
+    input.pointerPosition.set(100, 100);
+    input.isPointerDown = true;
+    slot.tick(1 / 60);
+    input.isPointerDown = false;
+    slot.tick(1 / 60);
+
+    expect(order).toEqual(['click', 'toggled']);
+    expect(clickSaw).toEqual([false]);
+    expect(toggledSaw).toEqual([true]);
+    expect(payloads).toEqual([true]);
+  });
+
+  it('emits toggled with false when a second click deselects', () => {
+    const { slot, input } = createInteractive();
+    const payloads: unknown[] = [];
+    slot.connect('toggled', {}, (...args: unknown[]) => payloads.push(args[0]));
+
+    input.pointerPosition.set(100, 100);
+    for (const down of [true, false, true, false]) {
+      input.isPointerDown = down;
+      slot.tick(1 / 60);
+    }
+
+    expect(payloads).toEqual([true, false]);
+    expect(slot.selected).toBe(false);
+  });
+
+  it('does not activate when the pointer is released outside the bounds', () => {
+    const { slot, input, signals } = createInteractive();
+
+    input.pointerPosition.set(100, 100);
+    input.isPointerDown = true;
+    slot.tick(1 / 60);
+
+    input.pointerPosition.set(10, 10);
+    slot.tick(1 / 60);
+    input.isPointerDown = false;
+    slot.tick(1 / 60);
+
+    expect(slot.selected).toBe(false);
+    expect(signals).toEqual(['pointerdown', 'pressed']);
+  });
+
+  it('ignores the pointer entirely while disabled', () => {
+    const { slot, input, signals } = createInteractive();
+    slot.enabled = false;
+
+    input.pointerPosition.set(100, 100);
+    input.isPointerDown = true;
+    slot.tick(1 / 60);
+    input.isPointerDown = false;
+    slot.tick(1 / 60);
+
+    expect(slot.selected).toBe(false);
+    expect(signals).toEqual([]);
+  });
+
+  it('is not activated by a scroll drag that passes over it', () => {
+    // Slots live in scrolling inventories, which is exactly where press-down activation misfired:
+    // flicking the list selected whatever was under the finger.
+    const container = new ScrollContainer2D({ id: 'bag', name: 'Bag', width: 120, height: 120 });
+    const content = new Group2D({
+      id: 'bag-content',
+      name: 'Bag Content',
+      width: 120,
+      height: 320,
+      position: new Vector2(0, 0),
+    });
+    // Big enough that a 30px drag stays inside the hit area — otherwise leaving the bounds, not
+    // the scroll gate, would be what cancels the press.
+    const slot = createSlot({ width: 100, height: 100 });
+    const signals = recordSignals(slot);
+    content.adoptChild(slot);
+    container.adoptChild(content);
+    const input = new InputService();
+    input.width = 200;
+    input.height = 200;
+    container.input = input;
+
+    input.pointerPosition.set(100, 100);
+    input.isPointerDown = true;
+    container.tick(1 / 60);
+    expect(signals).toEqual(['pointerdown', 'pressed']);
+
+    input.pointerPosition.set(100, 130);
+    container.tick(1 / 60);
+    expect(container.hasActivePointerCapture()).toBe(true);
+
+    input.isPointerDown = false;
+    container.tick(1 / 60);
+
+    expect(slot.selected).toBe(false);
+    expect(signals).not.toContain('click');
   });
 });

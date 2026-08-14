@@ -7,6 +7,7 @@ import { Collision2DService } from './Collision2DService';
 import { NetworkService } from '../net/NetworkService';
 import { NetworkNodeBinder } from './NetworkNodeBinder';
 import { GameTime } from './GameTime';
+import { GameCommandRegistry } from './GameCommands';
 import { JuiceApi } from './JuiceApi';
 import { AudioApi } from './AudioApi';
 import { CutsceneApi } from './CutsceneApi';
@@ -65,6 +66,12 @@ export interface SceneServiceDelegate {
   getResourceManager(): ResourceManager;
   getECSService(): ECSService | null;
   getGameTime(): GameTime;
+  /**
+   * The runner's current frame number, used to stamp the command journal
+   * ({@link SceneService.commands}). Optional so a delegate stub in a test can
+   * skip it; the registry then stamps `0`.
+   */
+  getFrameNumber?(): number;
   raycastViewport(normalizedX: number, normalizedY: number): SceneRaycastHit | null;
   reportFrameProfilerActivities(activities: readonly FrameProfilerActivity[]): void;
   /**
@@ -138,6 +145,8 @@ export class SceneService {
   private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
   private collision2dService: Collision2DService | null = null;
+  /** Scene-scoped named intents; see {@link commands}. Cleared by the runner on stop. */
+  private commandRegistry: GameCommandRegistry | null = null;
   /**
    * The multiplayer session. Owned by the SceneRunner **host** (see plan decision D5), installed via
    * {@link setNetworkService}, and deliberately not tied to the scene: it must survive `changeScene`.
@@ -201,6 +210,7 @@ export class SceneService {
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
     this.collision2dService = null;
+    this.commandRegistry?.clear();
     // Scene state, unlike the session below: its bindings point at nodes that are going away.
     this.networkNodeBinder?.dispose();
     this.networkNodeBinder = null;
@@ -300,6 +310,33 @@ export class SceneService {
    * scripts hit-test via `this.scene.collision2d.overlapCircle(x, y, r, 'enemy')`,
    * `overlapPoint`, `overlapRect`, or `raycast(x1, y1, x2, y2, group?)`.
    */
+  /**
+   * Named game intents — `this.scene.commands.register('start-game', …)` and
+   * `this.scene.commands.dispatch('start-game')`. Wire a button's handler to
+   * `dispatch` rather than to the method directly: the intent then shows up in
+   * `commands.log` with its frame stamp, which is what lets a test prove the
+   * binding once and drive the game by intent afterwards.
+   *
+   * Scene state, like {@link collision2d} and unlike {@link network}: the runner
+   * clears it on stop, so the next scene starts with an empty `list()`.
+   */
+  get commands(): GameCommandRegistry {
+    if (!this.commandRegistry) {
+      this.commandRegistry = new GameCommandRegistry(() => this.delegate?.getFrameNumber?.() ?? 0);
+    }
+    return this.commandRegistry;
+  }
+
+  /**
+   * Drop every registered command and its journal. Called by
+   * `SceneRunner.stop()` after scripts have detached (so an `onDetach` can still
+   * dispatch), and deliberately not lazy — a scene that never used commands
+   * should not get a registry just because it stopped.
+   */
+  clearCommands(): void {
+    this.commandRegistry?.clear();
+  }
+
   get collision2d(): Collision2DService {
     if (!this.collision2dService) {
       this.collision2dService = new Collision2DService();
@@ -372,10 +409,39 @@ export class SceneService {
    * world/design coordinates (origin center, Y up), or `null` when no scene is
    * running. Unprojects through the live 2D camera, so it stays correct while a
    * `Camera2D` pans/zooms. Godot's `get_global_mouse_position()` equivalent.
+   *
+   * Reads the **primary** pointer (the oldest one still down; with nothing down,
+   * the last hover position) — the single-pointer reading this has always had.
    */
-  getPointer2DWorldPosition(target: Vector2 = new Vector2()): Vector2 | null {
+  getPointer2DWorldPosition(target?: Vector2): Vector2 | null;
+  /**
+   * The same conversion for **one specific finger**, by `pointerId` — the
+   * addressed form multi-touch needs: with two fingers on screen the shared
+   * position only ever describes one of them, so a game that resolves several
+   * contacts (a tapper, a twin-stick) must name the one it means. Returns `null`
+   * when that pointer is not down right now; ids come from
+   * `input.pointerEvents[].pointerId` / `input.getActivePointers()`.
+   *
+   * Note a pointer that went down **and up inside the same frame** is already
+   * out of the map by the time scripts run, so a tap resolved from a `'down'`
+   * frame event should fall back to the un-addressed call.
+   */
+  getPointer2DWorldPosition(pointerId: number, target?: Vector2): Vector2 | null;
+  getPointer2DWorldPosition(
+    targetOrPointerId?: Vector2 | number,
+    maybeTarget?: Vector2
+  ): Vector2 | null {
+    const pointerId = typeof targetOrPointerId === 'number' ? targetOrPointerId : null;
+    const target =
+      (typeof targetOrPointerId === 'number' ? maybeTarget : targetOrPointerId) ?? new Vector2();
+
     const input = this.delegate?.getInputService();
     if (!input) {
+      return null;
+    }
+    // Addressed call: that finger's own coordinates, or nothing if it is not down.
+    const source = pointerId === null ? input.pointerPosition : input.getPointer(pointerId);
+    if (!source) {
       return null;
     }
     const inputWidth = Math.max(1, input.width);
@@ -383,8 +449,8 @@ export class SceneService {
 
     const uiCamera = this.delegate?.getUICamera();
     if (uiCamera) {
-      const ndcX = (input.pointerPosition.x / inputWidth) * 2 - 1;
-      const ndcY = -((input.pointerPosition.y / inputHeight) * 2 - 1);
+      const ndcX = (source.x / inputWidth) * 2 - 1;
+      const ndcY = -((source.y / inputHeight) * 2 - 1);
       this.scratchPointerUnproject.set(ndcX, ndcY, 0).unproject(uiCamera);
       target.set(this.scratchPointerUnproject.x, this.scratchPointerUnproject.y);
       return target;
@@ -398,8 +464,8 @@ export class SceneService {
         ? logical.height
         : inputHeight;
     target.set(
-      (input.pointerPosition.x / inputWidth) * worldWidth - worldWidth / 2,
-      worldHeight / 2 - (input.pointerPosition.y / inputHeight) * worldHeight
+      (source.x / inputWidth) * worldWidth - worldWidth / 2,
+      worldHeight / 2 - (source.y / inputHeight) * worldHeight
     );
     return target;
   }

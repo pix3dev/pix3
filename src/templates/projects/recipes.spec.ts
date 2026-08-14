@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 
 import * as runtime from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
+import { parseRoutine } from '@/services/agent/game-routines';
 
 /**
  * Contract drift guard for the Flow "recipe" templates (`.plans/flow-recipes-contract.md`).
@@ -292,4 +293,139 @@ describe('flow recipe contract', () => {
       ).toBeGreaterThan(0);
     }
   });
+});
+
+/**
+ * Testability contract for every template that ships a game (`.plans/agent-gameplay-testing.md`,
+ * phase 0).
+ *
+ * The agent copies whatever the template started it with: a template whose state is legible
+ * (`GameDebugProvider`), whose roots are named the same everywhere (`game-root`), and whose
+ * `design/tests/` folder already has the shape, produces testable games without a word in the
+ * prompt. Drift here is invisible in the field — it shows up as an agent verifying by screenshot
+ * because there was no snapshot to read.
+ *
+ * `empty-*` is deliberately exempt: being bare is the point of those templates.
+ */
+const EMPTY_TEMPLATE_PREFIX = 'empty-';
+
+/** Every shipped template that carries a game (i.e. all but `empty-*`). */
+const GAMEPLAY_TEMPLATES = readdirSync(TEMPLATES_ROOT)
+  .filter(entry => statSync(join(TEMPLATES_ROOT, entry)).isDirectory())
+  .filter(entry => !entry.startsWith(EMPTY_TEMPLATE_PREFIX))
+  .sort();
+
+/** The root id routines and assertions are written against, in every template. */
+const CANONICAL_GAME_ROOT_ID = 'game-root';
+
+/** Fields a routine header must carry (`.plans/agent-gameplay-testing.md` §5.7.1). */
+const REQUIRED_ROUTINE_FIELDS = ['name', 'description', 'scope', 'uses', 'steps'] as const;
+
+function listScriptSources(templateDir: string): string[] {
+  const scriptsDir = join(templateDir, 'files', 'scripts');
+  if (!existsSync(scriptsDir)) {
+    return [];
+  }
+  return readdirSync(scriptsDir)
+    .filter(entry => entry.endsWith('.ts'))
+    .map(entry => readFileSync(join(scriptsDir, entry), 'utf8'));
+}
+
+describe('template testability contract', () => {
+  it('there is at least one gameplay template to check', () => {
+    expect(GAMEPLAY_TEMPLATES.length).toBeGreaterThan(0);
+  });
+
+  for (const templateId of GAMEPLAY_TEMPLATES) {
+    const templateDir = join(TEMPLATES_ROOT, templateId);
+
+    it(`${templateId}: registers a GameDebugProvider`, () => {
+      const sources = listScriptSources(templateDir);
+      expect(
+        sources.length,
+        `${templateId} ships no scripts to register a provider from`
+      ).toBeGreaterThan(0);
+      // Without a provider every gameplay check degrades to a screenshot: `game.changed`
+      // is the only state-level proof `game_input`/`game_observe` can carry.
+      expect(
+        sources.some(source => source.includes('registerGameDebug')),
+        `${templateId}: no files/scripts/*.ts calls registerGameDebug({ name, snapshot })`
+      ).toBe(true);
+    });
+
+    it(`${templateId}: uses the canonical "${CANONICAL_GAME_ROOT_ID}" root id`, () => {
+      const nodes = collectSceneNodes(templateDir);
+      expect(nodes.size, `${templateId} ships no scene nodes`).toBeGreaterThan(0);
+      // Portable routines/assertions address roots by a fixed id rather than per-template names.
+      expect(
+        [...nodes.keys()],
+        `${templateId}: no scene declares a node with id "${CANONICAL_GAME_ROOT_ID}"`
+      ).toContain(CANONICAL_GAME_ROOT_ID);
+    });
+
+    it(`${templateId}: design/tests, when present, matches the fixed format`, () => {
+      const testsDir = join(templateDir, 'files', 'design', 'tests');
+      if (!existsSync(testsDir)) {
+        // The skeleton is not required of every template yet — but when it ships it is a
+        // contract the (in-progress) harness reads, so the shape is asserted here.
+        return;
+      }
+
+      const reachabilityPath = join(testsDir, 'reachability.json');
+      expect(existsSync(reachabilityPath), `${reachabilityPath} is missing`).toBe(true);
+      const reachability = JSON.parse(readFileSync(reachabilityPath, 'utf8')) as {
+        version?: unknown;
+        proven?: unknown;
+      };
+      expect(reachability.version, `${reachabilityPath}: no "version"`).toBeDefined();
+      expect(
+        Array.isArray(reachability.proven),
+        `${reachabilityPath}: "proven" must be an array (empty in a fresh template)`
+      ).toBe(true);
+
+      const routinesDir = join(testsDir, 'routines');
+      expect(existsSync(routinesDir), `${routinesDir} is missing`).toBe(true);
+      const routineFiles = readdirSync(routinesDir).filter(entry => entry.endsWith('.json'));
+      expect(
+        routineFiles.length,
+        `${routinesDir}: ships no example routine, so the format is documented nowhere`
+      ).toBeGreaterThan(0);
+
+      for (const fileName of routineFiles) {
+        const routinePath = join(routinesDir, fileName);
+        const text = readFileSync(routinePath, 'utf8');
+        const routine = JSON.parse(text) as Record<string, unknown>;
+        for (const field of REQUIRED_ROUTINE_FIELDS) {
+          expect(routine[field], `${routinePath}: missing "${field}"`).toBeDefined();
+        }
+        expect(Array.isArray(routine.uses), `${routinePath}: "uses" must be an array`).toBe(true);
+        expect(Array.isArray(routine.steps), `${routinePath}: "steps" must be an array`).toBe(true);
+
+        // And the whole file goes through the ACTUAL loader. A template is what the agent
+        // copies from, so an example the harness cannot execute teaches a format the tools
+        // do not speak — which is precisely how two shipped examples drifted into two
+        // different dialects while nothing but a field-name check guarded them.
+        const parsed = parseRoutine(routine);
+        expect(
+          'error' in parsed ? `${routinePath}: ${parsed.error}` : null,
+          `${routinePath} does not load with parseRoutine`
+        ).toBeNull();
+
+        // Every intent a command step dispatches must be registered by one of the
+        // template's own scripts — a routine that dispatches a name nobody registered
+        // fails at run time with "no registered handler took it".
+        if ('routine' in parsed) {
+          const sources = listScriptSources(templateDir).join('\n');
+          for (const step of parsed.routine.steps) {
+            if (step.type !== 'command') continue;
+            expect(
+              sources.includes(`register('${step.name}'`) ||
+                sources.includes(`register(\n        '${step.name}'`),
+              `${routinePath}: dispatches "${step.name}", which no files/scripts/*.ts registers`
+            ).toBe(true);
+          }
+        }
+      }
+    });
+  }
 });

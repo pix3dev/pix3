@@ -1,0 +1,44 @@
+{
+  "name": "mute-music",
+  "description": "From the menu: open the settings window, switch music off, close it again.",
+  "note": "Run it with game_run {routine:'mute-music'}. Steps are the game_input vocabulary plus {type:'command'} for a registered intent; `expect` holds the ordinary game_run predicates, ANDed and judged once after the last step. Only a STEP takes a `why` — an assertion is exactly the predicate object game_run takes, with no extra fields. The `toggled` expectation is the load-bearing one here: the box ships checked, so \"it is off now\" would also be true of a box nothing ever reached, while `toggled` fires only on a real state change and cannot be satisfied by a tap that bounced off a disabled control.",
+  "scope": "scenes/menu.pix3scene",
+  "params": {},
+  "uses": ["menu-root", "settings-button", "settings-window", "music-toggle", "close-button"],
+  "steps": [
+    {
+      "type": "command",
+      "name": "open-settings",
+      "why": "The highest channel available: the SETTINGS button dispatches this intent, so the routine keeps working after any relayout of the menu — and the dispatch is journalled with the frame it happened on."
+    },
+    {
+      "type": "invoke",
+      "target": "music-toggle",
+      "interaction": "setChecked",
+      "args": { "checked": false },
+      "why": "The scene's `settings.toggle-music` command FLIPS the box, so it cannot express \"off\" from an unknown state; setChecked can. It still goes through the control's own funnel, so the checkmark, the audio bus and the `toggled` signal all land exactly as they would on a tap."
+    },
+    {
+      "type": "command",
+      "name": "close-settings",
+      "why": "The CLOSE button's intent — same reason as opening."
+    }
+  ],
+  "expect": [
+    { "kind": "signal", "name": "toggled", "node": "music-toggle" },
+    {
+      "kind": "nodeProperty",
+      "name": "music-toggle",
+      "path": "checked",
+      "op": "eq",
+      "value": false
+    },
+    {
+      "kind": "nodeProperty",
+      "name": "settings-window",
+      "path": "visible",
+      "op": "eq",
+      "value": false
+    }
+  ]
+}

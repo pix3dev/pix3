@@ -102,14 +102,48 @@ export class TouchRules extends Script {
     };
   }
 
+  /**
+   * Every finger that landed this frame resolves on its own.
+   *
+   * Both halves of that are addressed on purpose. The UI gate asks whether **this** finger is over
+   * a control, not whether *any* control is hovered — the aggregate meant a thumb parked on a HUD
+   * button silently swallowed taps made with the other hand. And the contact point comes from the
+   * finger that produced the event, not from the shared pointer position, which under multi-touch
+   * describes only the oldest finger.
+   */
   onUpdate(): void {
-    const scene = this.scene;
-    const owner = this.node;
-    const tapped = this.input?.pointerEvents.some(event => event.type === 'down') ?? false;
-    if (!scene || !owner || !tapped || this.input?.isHoveringUI) {
+    const input = this.input;
+    if (!this.scene || !this.node || !input) {
       return;
     }
-    const pointer = scene.getPointer2DWorldPosition();
+    for (const event of input.pointerEvents) {
+      if (event.type !== 'down') {
+        continue;
+      }
+      // With nothing in the addressed map — a harness driving the game by assigning input fields —
+      // there is no per-pointer hover to read, so the aggregate is all there is.
+      const overUI =
+        input.pointerDownCount > 0 ? input.isPointerOverUI(event.pointerId) : input.isHoveringUI;
+      if (overUI) {
+        continue;
+      }
+      this.resolveTap(event.pointerId);
+    }
+  }
+
+  /**
+   * Resolve one contact: the topmost rule match wins, and a tap that hits nothing may be punished.
+   */
+  private resolveTap(pointerId: number): void {
+    const scene = this.scene;
+    const owner = this.node;
+    if (!scene || !owner) {
+      return;
+    }
+    // A tap that went down and up inside one frame is already out of the pointer map by the time
+    // scripts run, so the addressed lookup misses; the shared position still holds where it landed.
+    const pointer =
+      scene.getPointer2DWorldPosition(pointerId) ?? scene.getPointer2DWorldPosition();
     if (!pointer) {
       return;
     }

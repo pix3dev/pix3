@@ -492,7 +492,7 @@ const toolCategory = (name: string): ToolCategory => {
     return 'edit-scene';
   }
   if (
-    /^(play_start|play_stop|game_input|game_observe|analyze_image|read_errors|check_scripts|compile_scripts|run_command)$/.test(
+    /^(play_start|play_stop|game_input|game_observe|game_run|game_controls|game_time|analyze_image|read_errors|check_scripts|compile_scripts|run_command)$/.test(
       name
     )
   ) {

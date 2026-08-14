@@ -11,16 +11,36 @@
  *   `time`    — play until the timer ends, then win if `targetScore` was reached.
  *   `survive` — stay alive until the timer ends; reaching it is the win.
  * In every mode, running out of lives loses.
+ *
+ * The end-screen buttons dispatch the commands `restart` and `return-to-menu`
+ * (`scene.commands`) instead of calling their methods: a test replays the end
+ * flow without hunting for buttons, the run's intents are journalled with the
+ * frame they happened on, and one real tap proves each binding once.
+ *
+ * It also publishes the run's state through `registerGameDebug`: this script
+ * owns everything a test needs to read (score, lives, clock, outcome), so tools
+ * and agents can assert on values instead of guessing from pixels. Add your own
+ * state to `snapshot()` as you extend the rules — keep every value JSON-safe.
  */
-import { Button2D, Label2D, Script, type PropertySchema } from '@pix3/runtime';
+import { Button2D, Label2D, Script, registerGameDebug, type PropertySchema } from '@pix3/runtime';
 
 type WinMode = 'score' | 'time' | 'survive';
+
+/** Snapshot numbers are read by humans and diffed by tools — keep them short. */
+function roundHundredths(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 export class GameRules extends Script {
   private score = 0;
   private lives = 3;
   private elapsed = 0;
   private over = false;
+  private won = false;
+  private disposeDebug: (() => void) | null = null;
+  private disposeCommands: (() => void)[] = [];
+  /** Components `finish()` switched off, so `resetRun()` revives exactly those. */
+  private frozen: { enabled: boolean }[] = [];
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -98,6 +118,41 @@ export class GameRules extends Script {
 
   onStart(): void {
     this.lives = Math.max(1, Number(this.config.startingLives) || 1);
+    const commands = this.scene?.commands;
+    this.disposeCommands = [
+      commands?.register('restart', () => this.restart(), {
+        description: 'Reload the game scene for a fresh run.',
+      }),
+      commands?.register('return-to-menu', () => this.toMenu(), {
+        description: 'Leave the run and transition back to the menu scene.',
+      }),
+    ].filter((dispose): dispose is () => void => dispose !== undefined);
+
+    this.disposeDebug = registerGameDebug({
+      name: 'recipe-arena-2d',
+      version: 1,
+      // The registry IS the action list — never a second, hand-kept copy.
+      actions: () => this.scene?.commands.list().map(command => command.name) ?? [],
+      // What "the start" means for a run, so a test can put the game back without
+      // reloading the scene — a reload restores the scene graph but not what a
+      // script parked outside it, which is why tooling has to label the two
+      // differently. `seed` is accepted and ignored here: the recipe's spawners
+      // draw from `Math.random`, so this restores the same starting STATE, not the
+      // same SEQUENCE. Wire it to a seeded RNG if you need replayable runs.
+      reset: () => this.resetRun(),
+      snapshot: () => ({
+        scene: 'game',
+        phase: this.over ? (this.won ? 'won' : 'lost') : 'playing',
+        score: this.score,
+        lives: this.lives,
+        winMode: String(this.config.winMode ?? 'score'),
+        targetScore: Math.max(1, Number(this.config.targetScore) || 1),
+        elapsedSec: roundHundredths(this.elapsed),
+        // null when the mode has no clock at all.
+        timeLeftSec: this.timeLeftSec(),
+      }),
+    });
+
     const owner = this.node;
     owner?.connect('touch-scored', this, (...args: unknown[]) => this.addScore(Number(args[0]) || 0));
     owner?.connect('touch-damaged', this, (...args: unknown[]) => this.takeDamage(Number(args[0]) || 0));
@@ -106,8 +161,16 @@ export class GameRules extends Script {
     owner?.connect('hud-ready', this, () => this.broadcast());
 
     this.setNodeVisible(String(this.config.resultNode ?? ''), false);
-    this.bindButton(String(this.config.retryButton ?? ''), () => this.restart(), false);
-    this.bindButton(String(this.config.menuButton ?? ''), () => this.toMenu(), true);
+    this.bindButton(
+      String(this.config.retryButton ?? ''),
+      () => this.scene?.commands.dispatch('restart'),
+      false
+    );
+    this.bindButton(
+      String(this.config.menuButton ?? ''),
+      () => this.scene?.commands.dispatch('return-to-menu'),
+      true
+    );
     this.broadcast();
   }
 
@@ -138,6 +201,26 @@ export class GameRules extends Script {
     }
   }
 
+  onDetach(): void {
+    // Clearing is safe in any order: the disposer only clears the global when it
+    // still holds *this* provider, so a scene that already registered its own wins.
+    this.disposeDebug?.();
+    this.disposeDebug = null;
+    // The scene's registry is cleared on stop anyway; this covers the other
+    // case — this script being detached while the scene keeps running.
+    for (const dispose of this.disposeCommands) {
+      dispose();
+    }
+    this.disposeCommands = [];
+    super.onDetach();
+  }
+
+  /** Seconds left on the clock, or `null` when this run has no time limit. */
+  private timeLeftSec(): number | null {
+    const limit = Math.max(0, Number(this.config.timeLimitSec) || 0);
+    return limit > 0 ? roundHundredths(Math.max(0, limit - this.elapsed)) : null;
+  }
+
   private addScore(amount: number): void {
     if (this.over) return;
     this.score += amount;
@@ -162,6 +245,7 @@ export class GameRules extends Script {
   finish(won: boolean): void {
     if (this.over) return;
     this.over = true;
+    this.won = won;
 
     const label = this.findNode(String(this.config.resultLabel ?? ''));
     if (label instanceof Label2D) {
@@ -174,7 +258,11 @@ export class GameRules extends Script {
       const node = this.findNode(id.trim());
       if (!node) continue;
       for (const component of node.components) {
+        // Only remember what WE switched off: reviving everything on reset would
+        // silently enable a component the scene author had left disabled.
+        if (!component.enabled) continue;
         component.enabled = false;
+        this.frozen.push(component);
       }
     }
     this.node?.emit(won ? 'game-won' : 'game-lost', this.score);
@@ -186,6 +274,52 @@ export class GameRules extends Script {
 
   private toMenu(): void {
     void this.scene?.changeScene(String(this.config.menuScene ?? ''), { transition: 'fade' });
+  }
+
+  /**
+   * Back to the state `onStart` left behind: score, lives, clock and outcome, the
+   * result overlay hidden, the freeze `finish()` applied lifted, and anything a
+   * spawner still has on the field despawned. Those leftovers are state too — a
+   * run that begins amid the previous run's targets did not begin from the start.
+   *
+   * Public because it is useful on its own (an in-run "try again" that skips the
+   * scene reload); the debug provider's `reset` is this method.
+   */
+  resetRun(): void {
+    for (const component of this.frozen) {
+      component.enabled = true;
+    }
+    this.frozen = [];
+    this.clearSpawned();
+
+    this.score = 0;
+    this.lives = Math.max(1, Number(this.config.startingLives) || 1);
+    this.elapsed = 0;
+    this.over = false;
+    this.won = false;
+
+    this.setNodeVisible(String(this.config.resultNode ?? ''), false);
+    this.setButtonEnabled(String(this.config.retryButton ?? ''), false);
+    this.broadcast();
+  }
+
+  /**
+   * Ask every component on a `freezeNodes` node that owns spawned instances to
+   * drop them. Duck-typed instead of importing `Spawner`: the freeze list is
+   * whatever the scene author wrote there, and a project may put its own spawner
+   * in it — one that also happens to offer `clear()`.
+   */
+  private clearSpawned(): void {
+    for (const id of String(this.config.freezeNodes ?? '').split(',')) {
+      const node = this.findNode(id.trim());
+      if (!node) continue;
+      for (const component of node.components) {
+        const clear = (component as { clear?: unknown }).clear;
+        if (typeof clear === 'function') {
+          (clear as () => void).call(component);
+        }
+      }
+    }
   }
 
   private bindButton(query: string, handler: () => void, enabled: boolean): void {

@@ -72,10 +72,15 @@ signal to the mechanic:
   and read scale/opacity peaks (`scaleDelta`/`activity.maxScaleDelta`/`activity.opacityRange`) — a
   separate screenshot always shows the resting state.
 Tap UI buttons by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long
-press — don't shorten `holdMs`). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
+press — don't shorten `holdMs`); after that first physical tap, drive the control with an
+`invoke` step (see the verify-and-fix skill). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
 For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to read baseline
-`activity` before attributing anything to your input. A gameplay increment is DONE only when
-`game_input`/`game_observe` confirms it, not when the code compiles.
+`activity` before attributing anything to your input.
+**Anything that plays out over time — a wave clearing, a death, the score climbing — is decided by
+`game_run` with an explicit success condition (`until:[{kind:'gameStateChanged',path:'score',by:1}]`),
+not by watching and judging.** It sends no input: `game_input` first, in realtime, then `game_run`
+to judge what follows. A gameplay increment is DONE only when a run confirms it, not when the code
+compiles.
 
 ## 4. How to make changes (use tools, not hand-edited files)
 

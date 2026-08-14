@@ -6,9 +6,9 @@ metadata:
   author: Pix3 Template
   description: Empty 2D starter scene
 root:
-  - id: ui-root
+  - id: game-root
     type: Group2D
-    name: UI Root
+    name: Game Root
     properties:
       width: 1920
       height: 1080

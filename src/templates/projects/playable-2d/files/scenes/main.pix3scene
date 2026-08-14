@@ -6,9 +6,9 @@ metadata:
   author: Pix3 Template
   description: Playable 2D blank with intro overlay and CTA end screen
 root:
-  - id: ui-root
+  - id: game-root
     type: Group2D
-    name: UI Root
+    name: Game Root
     properties:
       width: 1080
       height: 1920
