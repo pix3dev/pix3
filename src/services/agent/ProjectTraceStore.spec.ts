@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  ProjectBotStore,
   ProjectReportStore,
   ProjectRoutineStore,
   ProjectTraceStore,
   type TraceProjectStorage,
 } from './ProjectTraceStore';
+import { BOT_DIRECTORY } from './game-bots';
 import { REPORT_DIRECTORY } from './game-run-protocol';
 import { ROUTINE_DIRECTORY } from './game-routines';
 import {
@@ -252,5 +254,71 @@ describe('ProjectReportStore', () => {
     await expect(store.delete('0001-run-pass-f5.json')).rejects.toThrow(
       /Could not delete .*denied permission/
     );
+  });
+});
+
+describe('ProjectBotStore', () => {
+  const source = 'export default { tick(bot) { bot.log("hi"); } };';
+
+  it('loads a policy by bare name and hands back its text unparsed', async () => {
+    const storage = makeStorage({ [`${BOT_DIRECTORY}/dodge.ts`]: source });
+    const store = new ProjectBotStore(storage as unknown as TraceProjectStorage);
+
+    await expect(store.load('dodge')).resolves.toEqual({
+      name: 'dodge',
+      path: `${BOT_DIRECTORY}/dodge.ts`,
+      source,
+    });
+  });
+
+  it('reads a missing policy as null, so the caller can list what exists instead', async () => {
+    const store = new ProjectBotStore(makeStorage() as unknown as TraceProjectStorage);
+    await expect(store.load('nope')).resolves.toBeNull();
+  });
+
+  it('reports a real read failure rather than pretending the policy is absent', async () => {
+    const storage = makeStorage({ [`${BOT_DIRECTORY}/dodge.ts`]: source });
+    storage.readTextFile.mockRejectedValueOnce(
+      Object.assign(new Error('The user denied permission'), { code: 'permission-denied' })
+    );
+    const store = new ProjectBotStore(storage as unknown as TraceProjectStorage);
+    await expect(store.load('dodge')).rejects.toThrow(/Could not read policy .*denied permission/);
+  });
+
+  it('never offers the generated declarations as a runnable policy', async () => {
+    // The host writes pix3-test-bot.d.ts into this very folder. Listed as a policy it
+    // would eventually be a name somebody tries — and it compiles to nothing.
+    const storage = makeStorage({
+      [`${BOT_DIRECTORY}/dodge.ts`]: source,
+      [`${BOT_DIRECTORY}/pix3-test-bot.d.ts`]: 'declare interface Pix3TestBot {}',
+      [`${BOT_DIRECTORY}/notes.md`]: '# not a policy',
+    });
+    storage.directories.add(BOT_DIRECTORY);
+    const store = new ProjectBotStore(storage as unknown as TraceProjectStorage);
+
+    await expect(store.list()).resolves.toEqual([
+      { name: 'dodge', path: `${BOT_DIRECTORY}/dodge.ts`, source },
+    ]);
+  });
+
+  it('reads a project with no bots directory as an empty library', async () => {
+    const store = new ProjectBotStore(makeStorage() as unknown as TraceProjectStorage);
+    await expect(store.list()).resolves.toEqual([]);
+  });
+
+  it('leaves one unreadable sibling out of the listing instead of failing it', async () => {
+    const storage = makeStorage({
+      [`${BOT_DIRECTORY}/dodge.ts`]: source,
+      [`${BOT_DIRECTORY}/broken.ts`]: source,
+    });
+    storage.directories.add(BOT_DIRECTORY);
+    storage.readTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('broken.ts')) throw new Error('EIO');
+      return storage.files[path];
+    });
+    const store = new ProjectBotStore(storage as unknown as TraceProjectStorage);
+
+    const listed = await store.list();
+    expect(listed.map(entry => entry.name)).toEqual(['dodge']);
   });
 });

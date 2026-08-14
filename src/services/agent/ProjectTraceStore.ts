@@ -1,4 +1,12 @@
 import {
+  BOT_DIRECTORY,
+  BOT_FILE_SUFFIX,
+  botFilePath,
+  botNameFromPath,
+  type BotStore,
+  type StoredBot,
+} from '@/services/agent/game-bots';
+import {
   parseRoutineText,
   ROUTINE_DIRECTORY,
   ROUTINE_FILE_SUFFIX,
@@ -234,6 +242,69 @@ export class ProjectReportStore implements RunProtocolStore {
       if (isNotFound(error)) return;
       throw new Error(`Could not delete ${reportFilePath(name)}: ${describeError(error)}`);
     }
+  }
+}
+
+/**
+ * The same file backend for bot policies (`design/tests/bots/<name>.ts`, §5.3).
+ *
+ * Fourth store in this file, and the one that reads the least: a policy is
+ * TypeScript, so this store hands back **text** and never parses. Only the compiler
+ * can say whether a policy is valid, and a parser here would be a second, worse
+ * opinion about a file the compiler already judges — the same reasoning that keeps
+ * {@link ProjectReportStore} from parsing what it writes.
+ *
+ * The one filtering rule is `.d.ts`: the host writes the authoring declarations into
+ * this very folder, and a listing that offered `pix3-test-bot.d` as a runnable policy
+ * would be a name the model would eventually try.
+ */
+export class ProjectBotStore implements BotStore {
+  constructor(private readonly storage: TraceProjectStorage) {}
+
+  async load(name: string): Promise<StoredBot | null> {
+    const path = botFilePath(name);
+    let source: string;
+    try {
+      source = await this.storage.readTextFile(path);
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw new Error(`Could not read policy "${path}": ${describeError(error)}`);
+    }
+    return { name: botNameFromPath(path), path, source };
+  }
+
+  async list(): Promise<StoredBot[]> {
+    let entries;
+    try {
+      entries = await this.storage.listDirectory(BOT_DIRECTORY);
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw new Error(`Could not list ${BOT_DIRECTORY}: ${describeError(error)}`);
+    }
+    const paths = entries
+      .filter(entry => {
+        if (entry.kind !== 'file') return false;
+        const lower = entry.name.toLowerCase();
+        return lower.endsWith(BOT_FILE_SUFFIX) && !lower.endsWith('.d.ts');
+      })
+      .map(entry => entry.path || `${BOT_DIRECTORY}/${entry.name}`)
+      .sort();
+
+    const bots: StoredBot[] = [];
+    for (const path of paths) {
+      try {
+        bots.push({
+          name: botNameFromPath(path),
+          path,
+          source: await this.storage.readTextFile(path),
+        });
+      } catch {
+        // A file that cannot be read is left out of the listing rather than
+        // failing it: the policy the caller asked for is loaded by `load()`, whose
+        // own error names it, and one unreadable sibling must not hide the rest.
+      }
+    }
+    return bots;
   }
 }
 

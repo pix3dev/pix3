@@ -112,6 +112,24 @@ export interface ProtocolMonkeyAction {
   note?: string;
 }
 
+/**
+ * A bot run's policy log as the file carries it.
+ *
+ * Fed by the caller *after* the run rather than frame by frame like the monkey's
+ * presses, because a policy's log is one document produced once — the session owns
+ * it, caps it for the reply, and hands the whole thing over here. Streaming it would
+ * mean two accumulators for one list.
+ */
+export interface ProtocolBotLog {
+  name: string;
+  /** `physical-input` or `direct-action` — the claim the run is allowed to support. */
+  channel: string;
+  frames: number;
+  sent: number;
+  refused: number;
+  log: Array<{ frame: number; kind: string; message: string }>;
+}
+
 export interface ProtocolSection {
   /** `main` is the run itself; `control` is the negative-control run (§5.4.4). */
   label: 'main' | 'control';
@@ -120,6 +138,14 @@ export interface ProtocolSection {
   /** Every change of every reading the run collected. The reply carries none of these. */
   observed: ProtocolObservedDelta[];
   monkey?: { seed: number | null; actions: ProtocolMonkeyAction[] };
+  /**
+   * A bot run's policy log, **uncapped by the reply's head+tail window**.
+   *
+   * This is the one place the policy's full reasoning trace survives. The reply keeps
+   * the first 20 and last 40 lines, and for a policy that logs its decision every
+   * frame the dropped middle is exactly where a late failure was decided.
+   */
+  bot?: ProtocolBotLog;
   /** The state slice at the outcome frame, with the FULL baseline→outcome diff. */
   outcomeState?: {
     frame: number;
@@ -229,6 +255,7 @@ export class RunProtocolRecorder implements RunProtocolSink {
   private previousTypeCounts = new Map<string, number>();
   private previousAxes = new Map<string, number>();
   private outcomeState: ProtocolSection['outcomeState'];
+  private bot: ProtocolBotLog | undefined;
 
   constructor(
     private readonly label: 'main' | 'control',
@@ -357,6 +384,24 @@ export class RunProtocolRecorder implements RunProtocolSink {
     this.append(this.monkeyActions, 'monkey actions', entry.frame, entry);
   }
 
+  /**
+   * Adopt a bot run's complete policy log.
+   *
+   * Deliberately NOT part of {@link RunProtocolSink}: the loop never sees it. The
+   * session that owns the log hands it over once the run is finished, which is also
+   * the only moment the log is complete — the policy's `end` hook can still add to
+   * it after the last frame.
+   */
+  botLog(entry: ProtocolBotLog): void {
+    const kept = entry.log.slice(0, MAX_PROTOCOL_ENTRIES);
+    if (kept.length < entry.log.length) {
+      this.truncated.push(
+        `The bot log hit its ${MAX_PROTOCOL_ENTRIES}-entry cap; ${entry.log.length - kept.length} later line(s) are not recorded (the other arrays are complete).`
+      );
+    }
+    this.bot = { ...entry, log: kept };
+  }
+
   outcome(input: {
     frame: number;
     provider: string | null;
@@ -403,6 +448,7 @@ export class RunProtocolRecorder implements RunProtocolSink {
       ...(this.monkeySeed !== null || this.monkeyActions.length > 0
         ? { monkey: { seed: this.monkeySeed, actions: this.monkeyActions } }
         : {}),
+      ...(this.bot ? { bot: this.bot } : {}),
       ...(this.outcomeState ? { outcomeState: this.outcomeState } : {}),
       ...(this.truncated.length ? { truncated: this.truncated } : {}),
     };
@@ -482,6 +528,10 @@ export function buildRunProtocolDocument(input: {
     outline.push(
       `sections[${index}] "${section.label}" — ${section.timeline.length} timeline event(s), ${section.observed.length} observed delta(s)${
         section.monkey ? `, ${section.monkey.actions.length} monkey action(s)` : ''
+      }${
+        section.bot
+          ? `, the FULL policy log of bot "${section.bot.name}" [${section.bot.channel}] (${section.bot.log.length} line(s); the reply keeps only a head and a tail)`
+          : ''
       }${section.outcomeState ? ', outcome-frame state slice with the full diff' : ''}${
         section.truncated ? ', TRUNCATED (see section.truncated)' : ''
       }.`

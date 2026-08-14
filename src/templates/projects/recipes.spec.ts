@@ -418,9 +418,16 @@ describe('template testability contract', () => {
           const sources = listScriptSources(templateDir).join('\n');
           for (const step of parsed.routine.steps) {
             if (step.type !== 'command') continue;
+            // Whitespace-agnostic on purpose. Matching the two literal spellings a
+            // formatter happens to produce made this guard fail on a Windows checkout
+            // and pass in CI: a multi-line `register(` reads as `register(\r\n        '`
+            // there, and the LF spelling never matched. A guard whose red depends on
+            // the checkout's line endings teaches everyone to ignore it.
+            const registered = new RegExp(
+              `register\\(\\s*'${step.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`
+            );
             expect(
-              sources.includes(`register('${step.name}'`) ||
-                sources.includes(`register(\n        '${step.name}'`),
+              registered.test(sources),
               `${routinePath}: dispatches "${step.name}", which no files/scripts/*.ts registers`
             ).toBe(true);
           }

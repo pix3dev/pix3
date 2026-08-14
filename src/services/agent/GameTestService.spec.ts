@@ -24,6 +24,7 @@ import {
   type NormalizedMonkeySpec,
 } from './game-monkey';
 import { DEFAULT_CONTROL_HOLD_FRAMES } from './game-control';
+import type { BotReport } from './game-bots';
 import { RunProtocolRecorder, type RunProtocolStore } from './game-run-protocol';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import type { LiveControlEntry, LiveNodeSnapshot } from './GameInputService';
@@ -2093,5 +2094,250 @@ describe('GameTestService.run — the artifact pointer', () => {
     // would claim evidence was destroyed when none was ever collected.
     expect(result.ok).toBe(false);
     expect(result.artifact).toBeUndefined();
+  });
+});
+
+/**
+ * The loop's half of a bot run (§5.3, phase 8).
+ *
+ * The policy itself is spec'd in `game-bots.spec.ts` against a fake world; what is
+ * checked here is the *loop's* four responsibilities towards it: whose verdict wins on
+ * a frame where several could, that a crashed policy is never reported as a failed
+ * game, that a policy which drove nothing cannot produce a pass, and that the session
+ * is torn down before the game is handed back.
+ */
+describe('runGameTestLoop — bot runs', () => {
+  interface FakeBot {
+    finished: boolean;
+    outcome: { pass: boolean; reason: string; frame: number } | null;
+    crash: { message: string; stack?: string; frame: number } | null;
+    report(): BotReport;
+    dispose(): void;
+    disposed: number;
+  }
+
+  function makeBot(
+    over: {
+      sent?: number;
+      refused?: number;
+      channel?: 'physical-input' | 'direct-action';
+    } = {}
+  ): FakeBot {
+    const state: FakeBot = {
+      finished: false,
+      outcome: null,
+      crash: null,
+      disposed: 0,
+      report: () => ({
+        name: 'dodge',
+        channel: over.channel ?? 'physical-input',
+        frames: 10,
+        sent: over.sent ?? 5,
+        refused: over.refused ?? 0,
+        ...(state.outcome ? { done: state.outcome } : {}),
+        ...(state.crash ? { error: state.crash } : {}),
+        log: [],
+        notes: [],
+      }),
+      dispose: () => {
+        state.disposed += 1;
+      },
+    };
+    return state;
+  }
+
+  it('ends the run on the policy own pass, and the verdict is the policy sentence', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot();
+    runner.onTick = frame => {
+      if (frame === 3) {
+        bot.finished = true;
+        bot.outcome = { pass: true, reason: 'reached the exit', frame: 3 };
+      }
+    };
+
+    const result = await runGameTestLoop(
+      makeDeps(runner, { bot }),
+      makeSpec({ until: [{ kind: 'frames', n: 500 }], maxFrames: 500 })
+    );
+
+    expect(result.outcome?.kind).toBe('bot-pass');
+    expect(result.outcome?.frame).toBe(3);
+    expect(result.verdict).toContain('BOT PASS dodge [physical-input]');
+    expect(result.verdict).toContain('reached the exit');
+    expect(result.bot?.done?.reason).toBe('reached the exit');
+  });
+
+  it('reports a policy crash as bot-error, never as a game failure', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot();
+    runner.onTick = frame => {
+      if (frame === 2) {
+        bot.finished = true;
+        bot.crash = { message: 'TypeError: hero is undefined', frame: 2 };
+      }
+    };
+
+    const result = await runGameTestLoop(makeDeps(runner, { bot }), makeSpec());
+
+    expect(result.outcome?.kind).toBe('bot-error');
+    expect(result.verdict).toContain('BOT ERROR');
+    expect(result.verdict).toContain('NOT in the game');
+  });
+
+  it('prefers a crash over a verdict the same policy also reached', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot();
+    runner.onTick = () => {
+      bot.finished = true;
+      bot.outcome = { pass: true, reason: 'claimed a win', frame: 1 };
+      bot.crash = { message: 'Error: threw while deciding', frame: 1 };
+    };
+
+    const result = await runGameTestLoop(makeDeps(runner, { bot }), makeSpec());
+
+    expect(result.outcome?.kind).toBe('bot-error');
+  });
+
+  it('lets a fail predicate win over the policy on the same frame', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot();
+    let errors = 0;
+    runner.onTick = frame => {
+      if (frame === 2) {
+        errors = 1;
+        bot.finished = true;
+        bot.outcome = { pass: true, reason: 'claimed a win', frame: 2 };
+      }
+    };
+
+    const result = await runGameTestLoop(
+      makeDeps(runner, { bot, errorCount: () => errors }),
+      makeSpec({ fail: [{ kind: 'newErrors' }] })
+    );
+
+    // An explicit predicate the caller wrote for THIS run outranks a stored policy's
+    // opinion — a PASS that coincided with a crash is the false green to prevent.
+    expect(result.outcome?.kind).toBe('fail');
+    // The policy is still reported, as context rather than as the headline.
+    expect(result.bot?.name).toBe('dodge');
+  });
+
+  it('refuses to call a run a pass when the policy drove nothing', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot({ sent: 0, refused: 4 });
+    runner.onTick = frame => {
+      if (frame === 2) {
+        bot.finished = true;
+        bot.outcome = { pass: true, reason: 'looked fine to me', frame: 2 };
+      }
+    };
+
+    const result = await runGameTestLoop(makeDeps(runner, { bot }), makeSpec());
+
+    expect(result.outcome?.kind).toBe('bot-idle');
+    expect(result.verdict).toContain('BOT NOTHING DRIVEN');
+    expect(result.outcome?.detail).toContain('did not play');
+  });
+
+  it('rewrites a plain until-PASS of an idle policy too', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot({ sent: 0 });
+
+    const result = await runGameTestLoop(
+      makeDeps(runner, { bot }),
+      makeSpec({ until: [{ kind: 'frames', n: 3 }] })
+    );
+
+    expect(result.outcome?.kind).toBe('bot-idle');
+    expect(result.outcome?.detail).toContain('nothing the policy did caused it');
+  });
+
+  it('leaves a bot-driven FAIL alone even when the policy drove nothing', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot({ sent: 0 });
+    runner.onTick = frame => {
+      if (frame === 2) {
+        bot.finished = true;
+        bot.outcome = { pass: false, reason: 'nothing on screen was reachable', frame: 2 };
+      }
+    };
+
+    const result = await runGameTestLoop(makeDeps(runner, { bot }), makeSpec());
+
+    // A policy reporting that it could not play IS a finding, so the finding channel is
+    // left exactly as it is — the same rule the monkey's `monkey-empty` follows.
+    expect(result.outcome?.kind).toBe('bot-fail');
+  });
+
+  it('disposes the session before the game is handed back, exactly once', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot();
+
+    await runGameTestLoop(
+      makeDeps(runner, { bot }),
+      makeSpec({ until: [{ kind: 'frames', n: 2 }] })
+    );
+
+    expect(bot.disposed).toBe(1);
+  });
+
+  it('disposes the session even when the run ends on an error path', async () => {
+    const runner = makeRunner({ startMode: 'manual', stopAfter: 1 });
+    const bot = makeBot();
+
+    const result = await runGameTestLoop(
+      makeDeps(runner, { bot }),
+      makeSpec({ until: [{ kind: 'frames', n: 50 }] })
+    );
+
+    expect(result.outcome?.kind).toBe('error');
+    expect(bot.disposed).toBe(1);
+  });
+
+  it('names the direct-action caveat on a run the policy did not decide', async () => {
+    const runner = makeRunner({ startMode: 'manual' });
+    const bot = makeBot({ channel: 'direct-action' });
+
+    const result = await runGameTestLoop(
+      makeDeps(runner, { bot }),
+      makeSpec({ until: [{ kind: 'frames', n: 2 }] })
+    );
+
+    expect(result.outcome?.kind).toBe('until');
+    expect(result.verdict).toContain('no input binding is proven');
+  });
+});
+
+describe('validateSpec — bot runs', () => {
+  it('fills `until` with the frame budget so it is never written twice', () => {
+    const validated = validateSpec({
+      until: [],
+      bot: { name: 'dodge', channel: 'physical-input' },
+      maxFrames: 900,
+    });
+    expect('spec' in validated).toBe(true);
+    if ('spec' in validated) {
+      expect(validated.spec.until).toEqual([{ kind: 'frames', n: 900 }]);
+      expect(validated.spec.maxFrames).toBe(900);
+    }
+  });
+
+  it('keeps an explicit `until` as the caller wrote it', () => {
+    const validated = validateSpec({
+      until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }],
+      bot: { name: 'dodge', channel: 'physical-input' },
+    });
+    expect('spec' in validated && validated.spec.until).toHaveLength(1);
+    expect('spec' in validated && validated.spec.until[0].kind).toBe('gameStateChanged');
+  });
+
+  it('refuses a run driven by both a policy and a monkey', () => {
+    const validated = validateSpec({
+      until: [{ kind: 'frames', n: 10 }],
+      bot: { name: 'dodge', channel: 'physical-input' },
+      monkey: { seed: 1 } as NormalizedMonkeySpec,
+    });
+    expect('error' in validated && validated.error).toContain('cannot combine `bot` with `monkey`');
   });
 });

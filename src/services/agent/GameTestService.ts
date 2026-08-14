@@ -5,6 +5,7 @@ import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import {
   getGameDebug,
   isInteractive,
+  reportScriptError,
   DEFAULT_FIXED_DELTA_SEC,
   NodeBase,
   type Interactive,
@@ -106,6 +107,26 @@ import {
   type NegativeControlSpec,
 } from '@/services/agent/game-control';
 import { GameInputService, type LiveNodeSnapshot } from '@/services/agent/GameInputService';
+import { GameBotHost } from '@/services/agent/GameBotHost';
+import {
+  BotSession,
+  buildBotVerdict,
+  type BotActuatorChannel,
+  type BotReport,
+  type BotStore,
+  type BotWorld,
+  type NormalizedBotSpec,
+  parseBotSpec,
+} from '@/services/agent/game-bots';
+import {
+  BOT_POINTER_ID,
+  collectBotNodeViews,
+  nearestBotNode,
+  PhysicalAxisDriver,
+  projectToCanvasFraction,
+  raycastBotNodes,
+  type BotSceneHandle,
+} from '@/services/agent/game-bot-world';
 import { Vector3 } from 'three';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 
@@ -244,6 +265,12 @@ export interface GameRunSpec {
    * after the main run, from an isolated state, with the same budget.
    */
   control?: NegativeControlSpec;
+  /**
+   * Turn the run into a bot run: a stored policy plays the game while the loop
+   * watches (§5.3, `game-bots.ts`). The policy's own `done()` ends the run, and the
+   * `until`/`fail` predicates stay in force as the budget and the crash net.
+   */
+  bot?: NormalizedBotSpec;
 }
 
 export type GameRunOutcomeKind =
@@ -258,7 +285,22 @@ export type GameRunOutcomeKind =
    * clean 600-frame monkey run looks like — and a reader who sees PASS will not
    * ask whether anything was pressed (rule 3 of the monkey module).
    */
-  | 'monkey-empty';
+  | 'monkey-empty'
+  /** A policy called `done(true, …)`: the run ended on the bot's own verdict. */
+  | 'bot-pass'
+  /** A policy called `done(false, …)` — the finding this layer exists to produce. */
+  | 'bot-fail'
+  /**
+   * The POLICY threw. Its own kind, and never `fail`: "the game failed" read off a
+   * typo in a test file is the worst thing this layer could produce, so the outcome
+   * itself — not a note on it — has to say which of the two broke.
+   */
+  | 'bot-error'
+  /**
+   * A bot run in which no actuator was ever delivered. The `monkey-empty` rule
+   * applied to a written policy: a game nobody played is not a game that passed.
+   */
+  | 'bot-idle';
 
 /**
  * How an outcome is spelled in a report's FILE NAME (`0009-run-timeout-f600.json`).
@@ -274,6 +316,10 @@ const REPORT_VERDICT_SLUGS: Record<GameRunOutcomeKind, string> = {
   error: 'error',
   'precondition-already-met': 'precondition',
   'monkey-empty': 'nothing-tested',
+  'bot-pass': 'bot-pass',
+  'bot-fail': 'bot-fail',
+  'bot-error': 'bot-error',
+  'bot-idle': 'nothing-driven',
 };
 
 export interface GameRunOutcome {
@@ -348,6 +394,12 @@ export interface GameRunResult {
   notes?: string[];
   /** What the monkey pressed, and with which seed (monkey runs only). */
   monkey?: MonkeyReport;
+  /**
+   * What the policy did, and on which actuator channel (bot runs only). Read
+   * `channel` before believing anything about input: a `direct-action` run proves
+   * game logic and no binding at all.
+   */
+  bot?: BotReport;
   /** Whether the negative control proved the binding — three-valued (§5.4.4). */
   control?: NegativeControlReport;
   /**
@@ -465,6 +517,28 @@ export interface MonkeyWorld {
   releaseAll: () => void;
 }
 
+/**
+ * What the frame loop needs from a bot session — deliberately read-only plus a
+ * teardown.
+ *
+ * Structural rather than the `BotSession` class so the loop's spec can express "the
+ * policy finishes on frame 12" in four lines, and so the loop cannot reach for
+ * anything else: it must not be able to tick, actuate, or inspect the policy. The
+ * ticking belongs to the runner and the decisions to the policy; the loop only reads
+ * the verdict and hands the game back.
+ */
+export interface BotRunHooks {
+  /** True once the policy reached a verdict or threw. */
+  readonly finished: boolean;
+  /** The policy's own verdict, or null while it has none. */
+  readonly outcome: { pass: boolean; reason: string; frame: number } | null;
+  /** The policy's crash, kept apart from {@link outcome} — see `bot-error`. */
+  readonly crash: { message: string; stack?: string; frame: number } | null;
+  report(): BotReport;
+  /** Run the policy's `end` hook and release everything it still holds. */
+  dispose(): void;
+}
+
 /** Everything the loop needs from the world, injected so the loop is testable. */
 export interface GameRunLoopDeps {
   runner: TestableRunner;
@@ -542,6 +616,13 @@ export interface GameRunLoopDeps {
    */
   monkey?: MonkeyWorld;
   /**
+   * The live bot session, when a policy is playing. The loop **does not tick it** —
+   * the runner does, through its own per-tick hook, which is what lets the same
+   * session play in realtime and under manual stepping alike. All the loop does is
+   * ask each frame whether the policy has finished, and let go of it at the end.
+   */
+  bot?: BotRunHooks;
+  /**
    * Hand the run's frame-0 record out. The negative control needs BOTH runs'
    * baselines to compare preconditions, and a baseline is a live `Map`/`Set`
    * record — not something the JSON report can carry — so it leaves through this
@@ -573,6 +654,14 @@ export class GameTestService {
    */
   @inject(GameInputService)
   private readonly gameInput!: GameInputService;
+
+  /**
+   * Compiles the stored policies. Borrowed rather than absorbed for the same reason
+   * `gameInput` is: turning a `.ts` file into a callable object is a compiler
+   * concern, and this service's business is the frame loop.
+   */
+  @inject(GameBotHost)
+  private readonly botHost!: GameBotHost;
 
   /**
    * Default storage is in-memory: a record → replay round trip inside one editor
@@ -628,6 +717,32 @@ export class GameTestService {
     }
     const normalized = validation.spec;
 
+    // The policy is loaded and compiled BEFORE the clock is touched. A compile error
+    // is the most common failure of a bot run, and paying for it with a time-mode
+    // switch, a resume and a pause would leave the game in a state nobody asked for
+    // over a typo.
+    let bot: BotSession | null = null;
+    if (normalized.bot) {
+      const loaded = await this.botHost.load(normalized.bot.name);
+      if ('error' in loaded) return { ok: false, error: loaded.error };
+      bot = new BotSession(
+        loaded.name,
+        loaded.policy,
+        this.buildBotWorld(runtime, normalized.bot.channel),
+        // The policy's own error channel. `componentType: 'test:bot'` is what keeps
+        // "the bot fell over" from reading as "the game fell over" in the Logs panel,
+        // which is the same separation `bot-error` makes in the verdict.
+        error =>
+          reportScriptError({
+            phase: 'update',
+            componentType: 'test:bot',
+            componentId: loaded.name,
+            message: `bot "${loaded.name}": ${error.message}`,
+            ...(error.stack ? { stack: error.stack } : {}),
+          })
+      );
+    }
+
     const startedAt = new Date().toISOString();
     // ONE recorder for the whole experiment, created here rather than inside
     // `runSession`: a recorder per session would give the negative control its own
@@ -635,19 +750,43 @@ export class GameTestService {
     const recorders = [new RunProtocolRecorder('main', normalized.monkey?.seed ?? null)];
 
     let mainBaseline: AssertionBaseline | null = null;
-    const main = await this.runSession(runtime.runner, deps =>
-      runGameTestLoop(
-        {
-          ...deps,
-          protocol: recorders[0],
-          onBaseline: baseline => {
-            mainBaseline = baseline;
+    // The runner ticks the policy, not the loop — through the same per-tick hook the
+    // watch recorder uses. That is what makes one session work under manual stepping
+    // and in realtime alike, and it is why the subscription is owned here (for the
+    // length of the call) rather than by the loop.
+    const detachBot = bot ? runtime.runner.subscribeFrameStats(() => bot?.tick()) : null;
+    let main: GameRunResult;
+    try {
+      main = await this.runSession(runtime.runner, deps =>
+        runGameTestLoop(
+          {
+            ...deps,
+            protocol: recorders[0],
+            onBaseline: baseline => {
+              mainBaseline = baseline;
+            },
+            ...(normalized.monkey ? { monkey: this.buildMonkeyWorld(runtime) } : {}),
+            ...(bot ? { bot } : {}),
           },
-          ...(normalized.monkey ? { monkey: this.buildMonkeyWorld(runtime) } : {}),
-        },
-        normalized
-      )
-    );
+          normalized
+        )
+      );
+    } finally {
+      // Unsubscribe before anything else can tick: a policy still attached while the
+      // negative control restarts the scene would play the control run too.
+      detachBot?.();
+    }
+    if (bot) {
+      const report = bot.report();
+      recorders[0].botLog({
+        name: report.name,
+        channel: report.channel,
+        frames: report.frames,
+        sent: report.sent,
+        refused: report.refused,
+        log: bot.fullLog().map(entry => ({ ...entry })),
+      });
+    }
     const judged = await this.judgeWithNegativeControl(main, normalized, mainBaseline, recorders);
     // `ok: false` gets no artifact and no `written: false` note: nothing ran, so
     // there is no protocol to have lost, and a pointer to a file that would only
@@ -658,7 +797,7 @@ export class GameTestService {
       this.protocolStore,
       buildRunProtocolDocument({
         kind: 'game_run',
-        subject: normalized.monkey ? 'monkey' : 'run',
+        subject: runSubject(normalized),
         startedAt,
         editorVersion: CURRENT_EDITOR_VERSION.version,
         sceneId: appState.scenes.activeSceneId,
@@ -667,7 +806,7 @@ export class GameTestService {
         notes: recorders.flatMap(recorder => [...recorder.notes()]),
       }),
       {
-        subject: normalized.monkey ? 'monkey' : 'run',
+        subject: runSubject(normalized),
         verdict: REPORT_VERDICT_SLUGS[judged.outcome.kind],
         frame: judged.outcome.frame,
       }
@@ -700,8 +839,13 @@ export class GameTestService {
 
     if (!spec.control) {
       // Nothing to run: decide only whether the result must be read as WEAK.
+      // A `direct-action` policy is exempt for the monkey's reason: it synthesizes no
+      // pointer press at all, so there is no "tapped somewhere else" the marker could
+      // be warning about. A `physical-input` policy is NOT exempt — it presses real
+      // fingers, which is exactly when `Action_Primary` can fake a working button.
+      const drivenWithoutPointer = Boolean(spec.monkey) || spec.bot?.channel === 'direct-action';
       const usedScreenControl =
-        passed && !spec.monkey && (await this.assertsAboutScreenControl(spec));
+        passed && !drivenWithoutPointer && (await this.assertsAboutScreenControl(spec));
       return markControlStrength(main, { usedScreenControl, judgement: null, passed });
     }
     if (!passed) {
@@ -729,9 +873,12 @@ export class GameTestService {
     if (runtime) {
       const controlSpec: NormalizedRunSpec = { ...spec };
       // The control run performs ONE gesture and nothing else: a monkey pressing
-      // random things through it would be a different experiment.
+      // random things through it — or a policy playing on — would be a different
+      // experiment, and the control's whole meaning is that nothing else touched the
+      // game while it ran.
       delete controlSpec.monkey;
       delete controlSpec.control;
+      delete controlSpec.bot;
       const feeder = makeTraceFeeder(
         controlGestureEvents(control),
         new DomTraceInputSink(runtime.canvas, runtime.windowRef)
@@ -861,6 +1008,156 @@ export class GameTestService {
   }
 
   /**
+   * The world a policy senses and actuates through (§5.3).
+   *
+   * Composed here, next to the monkey's world and the routine's, because the
+   * *editor-side* readers a bot shares with them live here — `resolveLiveInput`,
+   * `findInteractionOwner`, `readGameState`, `keyCodeOf`. The geometry (node views,
+   * ray-versus-box, the joystick deflection) is in `game-bot-world.ts` instead, for
+   * one reason: it is the part a spec can hold to account without a browser, and it is
+   * the part where being subtly wrong produces a policy that "does not work" with
+   * nothing in the report to point at.
+   *
+   * The channel decides the actuators and nothing else: both channels sense
+   * identically, because what a policy can *see* is not what a run proves.
+   */
+  private buildBotWorld(
+    runtime: { runner: SceneRunner; canvas: HTMLCanvasElement; windowRef: Window },
+    channel: BotActuatorChannel
+  ): BotWorld {
+    const { runner } = runtime;
+    const sink = new DomTraceInputSink(runtime.canvas, runtime.windowRef);
+    const scene = runner as unknown as BotSceneHandle;
+    const sticks = new PhysicalAxisDriver(scene, runtime.canvas, sink);
+    /** Keys/buttons the world put down, so `releaseAll` can be exhaustive. */
+    const heldKeys = new Set<string>();
+    const heldButtons = new Set<string>();
+    const openTaps = new Map<string, { nx: number; ny: number }>();
+
+    return {
+      channel,
+
+      findNodes: (query, max) => collectBotNodeViews(scene, query, max),
+      nearestOfType: (type, from) => nearestBotNode(scene, type, from),
+      raycast: (from, dir) => raycastBotNodes(scene, from, dir),
+      gameState: () => readGameState()?.snapshot ?? null,
+
+      pressAction: action => {
+        const code = keyCodeOf(action) ?? keyCodeOf(`Key_${action}`);
+        if (channel === 'physical-input') {
+          if (!code) {
+            // `Action_Primary` is the honest exception: it is raised by ANY pointer
+            // press, so the physical gesture for it is a press somewhere — and a
+            // press "somewhere" is the false-positive machine the negative control
+            // exists to catch. Refusing it by name is better than synthesizing a tap
+            // into empty space and letting the run claim the button works.
+            return `"${action}" is not a key, so there is no keystroke that raises it. On \`physical-input\` a named action has to come from a control the player can touch: tap("${action}") if it is a node, or press a key the game binds. (\`Action_Primary\` in particular is raised by a press ANYWHERE, so pressing it directly would prove nothing about any button.)`;
+          }
+          sink.key('down', code);
+          heldKeys.add(code);
+          return null;
+        }
+        const input = resolveLiveInput(runner);
+        if (!input) {
+          return `no live InputService could be reached to set "${action}" directly (is the scene still running?).`;
+        }
+        const name =
+          action.startsWith('Key_') || action.startsWith('Action_') ? action : `Key_${action}`;
+        input.setButton(name, true);
+        heldButtons.add(name);
+        return null;
+      },
+
+      releaseAction: action => {
+        const code = keyCodeOf(action) ?? keyCodeOf(`Key_${action}`);
+        if (channel === 'physical-input') {
+          if (!code) return null;
+          sink.key('up', code);
+          heldKeys.delete(code);
+          return null;
+        }
+        const input = resolveLiveInput(runner);
+        if (!input) return null;
+        const name =
+          action.startsWith('Key_') || action.startsWith('Action_') ? action : `Key_${action}`;
+        input.setButton(name, false);
+        heldButtons.delete(name);
+        return null;
+      },
+
+      tapDown: target => {
+        const node = runner.getLiveNodeById(target) ?? runner.findLiveNodeByName(target);
+        if (!node) {
+          return `no live node named or with id "${target}" in the running scene.`;
+        }
+        if (!node.visible) {
+          return `"${target}" has visible:false, so it is not on screen and cannot be tapped. Show it first (or fix whatever should have).`;
+        }
+        if (channel === 'direct-action') {
+          const owner = findInteractionOwner(node, 'click');
+          if (!owner) {
+            return `"${target}" declares no "click" interaction, so the direct channel has nothing to call. game_controls lists what each node offers; on \`physical-input\` this same call would be a real pointer press instead.`;
+          }
+          return owner.invokeInteraction('click')
+            ? null
+            : `"${target}" refused "click" — the control is disabled, or an ancestor scroll container holds the pointer.`;
+        }
+        const backing = runner.projectNodeToCanvas(node);
+        if (!backing) {
+          return `"${target}" could not be projected to the canvas (no camera, or a zero-sized canvas).`;
+        }
+        const at = toCanvasFraction(runtime.canvas, backing);
+        if (!at) return 'the game canvas has no size yet.';
+        openTaps.set(target, at);
+        sink.pointer('down', at.nx, at.ny, BOT_POINTER_ID);
+        return null;
+      },
+
+      tapUp: target => {
+        const at = openTaps.get(target);
+        if (!at) return;
+        openTaps.delete(target);
+        if (channel === 'physical-input') sink.pointer('up', at.nx, at.ny, BOT_POINTER_ID);
+      },
+
+      setAxisValue: (name, value) => {
+        if (channel === 'physical-input') return sticks.steer(name, value);
+        const input = resolveLiveInput(runner) as {
+          setAxis?: (n: string, v: number) => void;
+        } | null;
+        if (typeof input?.setAxis !== 'function') {
+          return `no live InputService could be reached to set axis "${name}" directly.`;
+        }
+        input.setAxis(name, value);
+        return null;
+      },
+
+      pointAt: point => {
+        const at = projectToCanvasFraction(scene, runtime.canvas, point.x, point.y);
+        if (!at) {
+          return `the world point (${point.x}, ${point.y}) could not be projected to the canvas.`;
+        }
+        // A move, not a press: this is aim/hover. A policy that wants a press says
+        // `tap`, and keeping the two apart is what lets a hover-gated control (a
+        // floating joystick, a tooltip) be exercised at all.
+        sink.pointer('move', at.nx, at.ny, BOT_POINTER_ID);
+        return null;
+      },
+
+      releaseAll: () => {
+        for (const code of heldKeys) sink.key('up', code);
+        heldKeys.clear();
+        const input = resolveLiveInput(runner);
+        for (const name of heldButtons) input?.setButton(name, false);
+        heldButtons.clear();
+        for (const [, at] of openTaps) sink.pointer('up', at.nx, at.ny, BOT_POINTER_ID);
+        openTaps.clear();
+        sticks.releaseAll();
+      },
+    };
+  }
+
+  /**
    * Record a run's input as a frame-denominated trace (§5.2 "Трассы").
    *
    * Two things happen alongside the ordinary loop: every input event the game
@@ -977,6 +1274,19 @@ export class GameTestService {
 
   getRoutineStore(): RoutineStore {
     return this.routineStore;
+  }
+
+  /**
+   * Swap in the project-file policy store — same seam, same reason as the two above.
+   * Delegated to the host rather than held here: the host is what reads a policy, and
+   * two owners of one store is how a run ends up compiling last project's file.
+   */
+  setBotStore(store: BotStore): void {
+    this.botHost.setStore(store);
+  }
+
+  getBotStore(): BotStore {
+    return this.botHost.getStore();
   }
 
   /** Swap in the project-file report store — same seam, same reason as the two above. */
@@ -1287,6 +1597,12 @@ export class GameTestService {
       if ('error' in parsed) return { error: parsed.error };
       control = parsed.spec;
     }
+    let bot: NormalizedBotSpec | undefined;
+    if (record.bot !== undefined) {
+      const parsed = parseBotSpec(record.bot);
+      if ('error' in parsed) return { error: parsed.error };
+      bot = parsed.spec;
+    }
     return {
       spec: {
         until: until.assertions,
@@ -1294,6 +1610,7 @@ export class GameTestService {
         ...(watch?.length ? { watch } : {}),
         ...(monkey ? { monkey } : {}),
         ...(control ? { control } : {}),
+        ...(bot ? { bot } : {}),
         ...(typeof record.maxFrames === 'number' ? { maxFrames: record.maxFrames } : {}),
         ...(typeof record.fixedDeltaSec === 'number'
           ? { fixedDeltaSec: record.fixedDeltaSec }
@@ -1521,6 +1838,18 @@ function keyCodeOf(action: string): string | null {
   return rest;
 }
 
+/** Backing-store pixels to canvas-box fractions, or null when the canvas has no size. */
+function toCanvasFraction(
+  canvas: HTMLCanvasElement,
+  backing: { x: number; y: number }
+): { nx: number; ny: number } | null {
+  const rect = canvas.getBoundingClientRect();
+  const width = canvas.width > 0 ? canvas.width : rect.width;
+  const height = canvas.height > 0 ? canvas.height : rect.height;
+  if (!(width > 0) || !(height > 0)) return null;
+  return { nx: backing.x / width, ny: backing.y / height };
+}
+
 /** A release that throws must not take the rest of the holds (or the run) with it. */
 function release(hold: { release: () => void }): void {
   try {
@@ -1563,13 +1892,28 @@ function controlGestureEvents(control: NegativeControlSpec): TraceEvent[] {
   ];
 }
 
+/** The outcome kinds `game-control.ts` judges; everything else is `error` to it. */
+const CONTROL_OUTCOME_KINDS = new Set<GameRunOutcomeKind>([
+  'until',
+  'fail',
+  'timeout',
+  'error',
+  'precondition-already-met',
+]);
+
 /** Translate the loop's outcome into the vocabulary the judgement speaks. */
 function toControlOutcome(outcome: GameRunOutcome | undefined): ControlRunOutcome | null {
   if (!outcome) return null;
   return {
-    // `monkey-empty` cannot occur here (the control run never carries a monkey);
-    // mapping it to `error` keeps the judgement's three-valued promise if it ever does.
-    kind: outcome.kind === 'monkey-empty' ? 'error' : outcome.kind,
+    // The driven-mode kinds cannot occur here: a control run carries neither a monkey
+    // nor a policy (both are deleted from its spec, because the control's meaning is
+    // that nothing else touched the game). Mapping them to `error` rather than
+    // widening the judgement's vocabulary keeps its three-valued promise if one ever
+    // does arrive — an unrecognised kind must read as "could not decide", never as a
+    // control that passed.
+    kind: CONTROL_OUTCOME_KINDS.has(outcome.kind)
+      ? (outcome.kind as ControlRunOutcome['kind'])
+      : 'error',
     frame: outcome.frame,
     ...(outcome.index !== undefined ? { index: outcome.index } : {}),
     ...(outcome.detail ? { detail: outcome.detail } : {}),
@@ -2036,9 +2380,25 @@ export interface NormalizedRunSpec {
   pauseOnOutcome: boolean;
   monkey?: NormalizedMonkeySpec;
   control?: NegativeControlSpec;
+  bot?: NormalizedBotSpec;
 }
 
 export function validateSpec(spec: GameRunSpec): { spec: NormalizedRunSpec } | { error: string } {
+  // A bot run supplies its own terminator — the policy's `done()` — so `until`
+  // becomes the budget rather than the experiment, and the frame budget is already
+  // spelled `maxFrames`. Filling it in here instead of demanding it from the caller
+  // keeps the two from being written twice with different numbers, which is the one
+  // way a run can end for a reason nobody chose.
+  if (spec.bot && (!Array.isArray(spec.until) || spec.until.length === 0)) {
+    const budget = clampInt(spec.maxFrames, DEFAULT_MAX_FRAMES, 1, MAX_MAX_FRAMES);
+    spec = { ...spec, until: [{ kind: 'frames', n: budget }] };
+  }
+  if (spec.bot && spec.monkey) {
+    return {
+      error:
+        'game_run cannot combine `bot` with `monkey`: one is a written policy and the other is random input, and a run driven by both could not attribute a single finding to either. Run them separately — the monkey first, as the zero test, then the policy.',
+    };
+  }
   if (!Array.isArray(spec.until) || spec.until.length === 0) {
     return {
       error:
@@ -2072,6 +2432,7 @@ export function validateSpec(spec: GameRunSpec): { spec: NormalizedRunSpec } | {
       pauseOnOutcome: spec.pauseOnOutcome !== false,
       ...(spec.monkey ? { monkey: spec.monkey } : {}),
       ...(spec.control ? { control: spec.control } : {}),
+      ...(spec.bot ? { bot: spec.bot } : {}),
     },
   };
 }
@@ -2141,6 +2502,9 @@ export async function runGameTestLoop(
     // paused on the outcome frame: a key left down would be part of the state the
     // caller then inspects, and would keep driving the game the moment it resumes.
     deps.monkey?.releaseAll();
+    // Same rule for the policy, and it also runs its `end` hook here — so a policy
+    // that logs a summary gets to log it whatever ended the run, including a crash.
+    deps.bot?.dispose();
     // Close the signal window FIRST. Restoring the time mode below can put the
     // game back into realtime, and an emission after the run's last frame that
     // still landed in a record would silently widen the window the report claims
@@ -2175,11 +2539,17 @@ export async function runGameTestLoop(
     restoredMode: previousMode.mode,
     leftPaused,
   };
-  const outcome = resolveMonkeyOutcome(core.outcome, core.monkey);
+  // Read AFTER the teardown above, so a summary the policy logs from its `end` hook
+  // is in the report. `done()` cannot arrive that late — the session refuses a
+  // verdict once teardown has begun, because a verdict after the outcome could not
+  // have decided it, and a report whose `done` disagreed with `outcome.kind` would be
+  // exactly the lie this whole layer is built to avoid.
+  const botReport = deps.bot?.report();
+  const outcome = resolveBotOutcome(resolveMonkeyOutcome(core.outcome, core.monkey), botReport);
 
   return {
     ok: true,
-    verdict: buildVerdict(outcome, spec, core.unmetNotes, newErrors.length),
+    verdict: composeVerdict(outcome, spec, core.unmetNotes, newErrors.length, botReport),
     outcome,
     metrics: {
       frames: outcome.frame,
@@ -2199,7 +2569,115 @@ export async function runGameTestLoop(
     },
     ...(core.notes.length ? { notes: core.notes } : {}),
     ...(core.monkey ? { monkey: core.monkey } : {}),
+    ...(botReport ? { bot: botReport } : {}),
   };
+}
+
+/**
+ * The slug that names the report file. It answers "which run was this" from an
+ * `fs_list` alone, so a bot run says which policy played rather than just `run` —
+ * three reports of three policies against the same scene are otherwise
+ * indistinguishable until each is opened.
+ */
+function runSubject(spec: NormalizedRunSpec): string {
+  if (spec.bot) return `bot-${spec.bot.name}`;
+  return spec.monkey ? 'monkey' : 'run';
+}
+
+/**
+ * Has the policy ended the run, and how?
+ *
+ * A crash is checked before a verdict: a policy that threw *after* calling `done`
+ * still reached a verdict, but a policy that threw *while* deciding has produced an
+ * unfinished thought, and reporting the throw is the only honest reading of it.
+ *
+ * The frame is deliberately NOT taken from the bot's own counter. The counter starts
+ * when the session attaches and the outcome's frame is the loop's — they normally
+ * agree, and when they do not (a tick between attach and the first loop frame) the
+ * `gameTimeMs` of the outcome has to be derived from the same frame it reports. The
+ * policy's own frame stays in the report, where the two can be compared.
+ */
+function readBotEnd(
+  hooks: BotRunHooks | undefined
+): Pick<GameRunOutcome, 'kind' | 'assertion' | 'detail'> | null {
+  if (!hooks?.finished) return null;
+  const crash = hooks.crash;
+  if (crash) {
+    return {
+      kind: 'bot-error',
+      assertion: 'bot policy threw',
+      detail: `the policy threw at its own frame ${crash.frame}: ${crash.message}. This is a fault in the POLICY, not in the game — nothing about the game is claimed by this run`,
+    };
+  }
+  const verdict = hooks.outcome;
+  if (!verdict) return null;
+  return {
+    kind: verdict.pass ? 'bot-pass' : 'bot-fail',
+    assertion: `bot done(${verdict.pass ? 'pass' : 'fail'})`,
+    detail: `the policy ended the run at its own frame ${verdict.frame}: ${verdict.reason}`,
+  };
+}
+
+/**
+ * The `monkey-empty` rule, applied to a written policy: a bot that delivered no
+ * actuator at all played no game, so a positive outcome cannot stand as one.
+ *
+ * The *finding* channels are left exactly as they are, same as for the monkey — a
+ * crash, a tripped `fail` predicate or the policy's own `done(false)` is worth
+ * reporting whoever caused it. What is rewritten is the PASS and the TIMEOUT, because
+ * those two are precisely what an untouched game produces, and neither says whether a
+ * single button was pressed. A `done(true)` from a policy that drove nothing is the
+ * most dangerous of the three: it is a claim, in words, about a game it never played.
+ */
+function resolveBotOutcome(outcome: GameRunOutcome, bot: BotReport | undefined): GameRunOutcome {
+  if (!bot || bot.sent > 0) return outcome;
+  if (outcome.kind !== 'until' && outcome.kind !== 'timeout' && outcome.kind !== 'bot-pass') {
+    return outcome;
+  }
+  const claimed =
+    outcome.kind === 'bot-pass' && bot.done
+      ? ` The policy did call done(pass) — "${bot.done.reason}" — but it never drove anything, so the claim rests on a game it did not play.`
+      : outcome.kind === 'until'
+        ? ` The run did end on until[${outcome.index}] ${outcome.assertion} at frame ${outcome.frame} (${outcome.detail}) — but nothing the policy did caused it, because the policy did nothing.`
+        : '';
+  return {
+    kind: 'bot-idle',
+    frame: outcome.frame,
+    gameTimeMs: outcome.gameTimeMs,
+    detail: `the policy "${bot.name}" actuated NOTHING over ${bot.frames} tick(s)${
+      bot.refused > 0
+        ? ` (all ${bot.refused} attempt(s) were refused — the reasons are in \`bot.log\`)`
+        : ''
+    }.${claimed}`,
+  };
+}
+
+/**
+ * One verdict line, and the bot's own sentence wins whenever the bot decided.
+ *
+ * Two shapes rather than a concatenation of both: when the policy ended the run its
+ * verdict IS the finding (with the reason, the frame and the channel the criterion
+ * asks for), and when something else ended it the policy is context — a clause, not a
+ * competing headline. Two full verdicts in one line would leave the reader deciding
+ * which of them to believe.
+ */
+function composeVerdict(
+  outcome: GameRunOutcome,
+  spec: NormalizedRunSpec,
+  unmetNotes: string[],
+  newErrorCount: number,
+  bot: BotReport | undefined
+): string {
+  if (bot && outcome.kind.startsWith('bot-')) {
+    return buildBotVerdict(bot, newErrorCount);
+  }
+  const base = buildVerdict(outcome, spec, unmetNotes, newErrorCount);
+  if (!bot) return base;
+  const unproven =
+    bot.channel === 'direct-action'
+      ? ' Actuated on direct-action, so no input binding is proven by this run.'
+      : '';
+  return `${base} The policy "${bot.name}" [${bot.channel}] drove ${bot.sent} action(s) over ${bot.frames} tick(s) and never reached a verdict of its own.${unproven}`;
 }
 
 /**
@@ -2588,6 +3066,15 @@ async function drive(
         assertion: `monkey invariant: ${violation.kind}`,
         detail: violation.detail,
       });
+    }
+    // The policy's own verdict sits here for the same reason the monkey's invariants
+    // do, one rung further in: after `fail`, because a crash predicate the caller
+    // wrote for THIS run is stronger evidence than a stored policy's opinion; before
+    // `until`, because a policy that has just declared the hero dead must not be
+    // overruled by a predicate that happened to hold on the same frame.
+    const botEnd = readBotEnd(deps.bot);
+    if (botEnd) {
+      return finish({ ...botEnd, frame, gameTimeMs: current.gameTimeMs });
     }
     const passed = firstMetAssertion(spec.until, current, baseline);
     if (passed) {

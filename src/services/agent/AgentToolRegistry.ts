@@ -49,7 +49,10 @@ import {
   type TraceTolerance,
 } from '@/services/agent/game-traces';
 import { InMemoryRoutineStore, ROUTINE_DIRECTORY } from '@/services/agent/game-routines';
+import { InMemoryBotStore } from '@/services/agent/game-bots';
+import { GameBotHost } from '@/services/agent/GameBotHost';
 import {
+  ProjectBotStore,
   ProjectReportStore,
   ProjectRoutineStore,
   ProjectTraceStore,
@@ -347,6 +350,14 @@ export class AgentToolRegistry {
 
   @inject(GameTestService)
   private readonly gameTest!: GameTestService;
+
+  /**
+   * Held only to point the policy declarations at the open project — the runs
+   * themselves reach the host through {@link gameTest}, which is the single owner of
+   * a bot session's lifetime.
+   */
+  @inject(GameBotHost)
+  private readonly botHost!: GameBotHost;
 
   @inject(GamePlaySessionService)
   private readonly playSession!: GamePlaySessionService;
@@ -1238,6 +1249,26 @@ export class AgentToolRegistry {
               required: ['tap'],
               additionalProperties: false,
             },
+            bot: {
+              type: 'object',
+              description:
+                "Turn the run into a BOT run: a stored POLICY plays the game while the loop watches. This is the layer for gameplay whose decisions arrive faster than a tool call — surviving a runner, dodging, chasing, playing a level to its end. The policy is a file, design/tests/bots/<name>.ts, exporting {name, tick(bot)}; it is ticked once per logic tick and it ends the run itself with bot.done(pass, reason). Its API is ~10 methods: sensors nodes(query) / nearest(type, from) / raycast(from, dir) / gameState(), actuators press(action, frames?) / release(action) / tap(target) / axis(name, value) / moveTo(point), and the protocol log(event) / done(pass, reason). THE TIMING CONTRACT, which decides whether a policy works at all: tick() runs AFTER the game's own tick and every actuator lands on the NEXT tick — observe frame N, act for frame N+1, the same one-frame lag a human has. `channel` picks the actuator rung and DEFAULTS to 'physical-input', which drives synthesized pointer and key events, i.e. the whole player path; 'direct-action' sets axes and interactions directly, which exercises game LOGIC and proves NOTHING about a binding — a run on it CANNOT close an input check, and both the report and the verdict line say so. Read `verdict` first (BOT PASS / BOT FAIL / BOT ERROR / BOT NOTHING DRIVEN, with the reason, the frame and the channel), then `bot` {channel, frames, sent, refused, done, log}. Three report rules worth knowing before you read one: a refused actuator is never silent and never fatal — it becomes a log line naming what could not be reached, so a misspelled node reads as a refusal rather than as a game that ignores input; A BOT THAT DROVE NOTHING IS NOT A PASS (outcome `bot-idle`, same rule as monkey-empty), including when the policy claimed one; and a policy that THREW ends the run as `bot-error`, never as a game failure, with the fault named against the policy file. `until`/`fail` stay in force as the budget and the crash net — `until` defaults to the frame budget when you omit it, so pass `maxFrames` rather than writing the budget twice. Mutually exclusive with `monkey` (one is a written policy, the other is random input; a run driven by both could attribute a finding to neither). The FULL policy log — every line, not the head+tail this reply keeps — is in the run's artifact file.",
+              properties: {
+                name: {
+                  type: 'string',
+                  description:
+                    'REQUIRED. The policy to run: the bare file name of a design/tests/bots/<name>.ts in this project. A name that does not exist is answered with the list of the ones that do.',
+                },
+                channel: {
+                  type: 'string',
+                  enum: ['physical-input', 'direct-action'],
+                  description:
+                    "Which actuator rung the policy drives on. 'physical-input' (default) synthesizes real pointer/key events — the only setting under which the run proves an input binding, and the one where axis(name, value) deflects the live on-screen joystick that writes the axis (refusing, by name, when no control does). 'direct-action' writes axes and calls interactions directly: use it to test game logic when the binding is already proven, and never to close an input check.",
+                },
+              },
+              required: ['name'],
+              additionalProperties: false,
+            },
             routine: {
               type: 'string',
               description:
@@ -1261,6 +1292,11 @@ export class AgentToolRegistry {
           this.ensureProtocolStore();
           if (args.routine !== undefined) {
             return this.gameRoutine(args);
+          }
+          // Same re-check for the policy library, and only when one is asked for: a
+          // plain predicate run must not pay a store swap it never reads.
+          if (args.bot !== undefined) {
+            this.ensureBotStore();
           }
           const parsed = GameTestService.parseSpec(args);
           if ('error' in parsed) return { ok: false, error: parsed.error };
@@ -3725,6 +3761,31 @@ export class AgentToolRegistry {
     if (current instanceof ProjectRoutineStore) {
       this.gameTest.setRoutineStore(new InMemoryRoutineStore());
     }
+  }
+
+  /**
+   * The same swap for the bot policies, plus the one thing they need that the other
+   * two do not: somewhere to write the authoring declarations.
+   *
+   * A policy is TypeScript that a human and a model both read in an editor, so the
+   * host drops `design/tests/bots/pix3-test-bot.d.ts` next to it on the first
+   * successful compile — and it can only do that while a project is open, which is
+   * why the writer is cleared alongside the store rather than kept pointing at a
+   * project that closed.
+   */
+  private ensureBotStore(): void {
+    const current = this.gameTest.getBotStore();
+    if (appState.project.status === 'ready') {
+      if (current instanceof InMemoryBotStore) {
+        this.gameTest.setBotStore(new ProjectBotStore(this.storage));
+      }
+      this.botHost.setDeclarationWriter(this.storage);
+      return;
+    }
+    if (current instanceof ProjectBotStore) {
+      this.gameTest.setBotStore(new InMemoryBotStore());
+    }
+    this.botHost.setDeclarationWriter(null);
   }
 
   /**

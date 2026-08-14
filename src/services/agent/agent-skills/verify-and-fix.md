@@ -97,7 +97,7 @@ Three things that bite:
 - **Reach proof is session memory, not truth.** It survives the control moving, being re-laid-out,
   or the viewport changing, so a `reachable` earned before a layout change can be a lie. Re-tap
   physically after you move a control or rebuild the screen it lives on.
-- **Match the predicate to the widget** once `game_run`'s `command`/`signal` predicates land: a
+- **Match the predicate to the widget** with `game_run`'s `command`/`signal` predicates: a
   **button's** binding is proven by `command(…)` — its handler dispatches one — while a **state
   control's** (checkbox, inventory slot) is proven by `signal('toggled')`, because there the
   command flips the control and the effect hangs off the control's own signal.
@@ -153,18 +153,125 @@ The templates register it in `GameFlow` / `GameRules`. **When you add a mechanic
 the snapshot** — state the provider doesn't mention is state nothing can verify, and the check
 falls back to screenshots that prove nothing.
 
-## design/tests/ — routines and the reachability journal
+## design/tests/ — what the harness keeps in the project
 
-- `routines/<name>.json` — one replayable scenario: `name`, `description` (a single line, it goes
-  into the agent's index), `scope` (scene or tag), optional `params`, `uses` (the node ids it
-  touches), `steps`, `expect`. A routine with no `expect` is a macro, not a test.
-- `reachability.json` — the on-disk journal of proven controls. Nothing writes it yet (today's
-  reach proof lives in the session, reported by `game_controls`), so never hand-write entries.
+Everything here survives context compaction and is reviewed like code. That is the point: a
+scenario you got right once should never be re-derived.
 
-The format and the location are fixed; the harness that executes routines is still being built.
-Until it lands, drive the game with `game_input` as in "The loop", and keep `uses` honest — a
-routine naming a node that no longer exists is stale, and that is a regression report, not a
-harness glitch.
+- `routines/<name>.json` — one replayable scenario, run with `game_run {routine:'<name>', args}`:
+  `name`, `description` (a single line — it is the ONLY part that reaches your context), `scope`
+  (scene or tag), optional `params`, `uses` (the nodes it touches), `steps`, `expect`. Steps are the
+  `game_input` vocabulary plus `{type:'command', name}`; `expect` is the same predicate objects as
+  `until`, ANDed and judged once after the last step. **A routine with no `expect` is a macro, not a
+  test**, and the verdict says so. Keep `uses` honest: a renamed node answers `ROUTINE STALE` with
+  the name before anything runs, which is a one-line diagnosis instead of a scenario that failed
+  halfway through.
+- `bots/<name>.ts` — a policy that plays the game; see below.
+- `<name>.trace.json` — a recorded input trace (`game_trace`), replayed to compare outcomes between
+  two increments of your own work.
+- `reports/NNNN-*.json` — the full protocol of each run. Slice it with `fs_read {offset, limit}`;
+  the reply is a summary of it.
+- `reachability.json` — the journal of controls proven reachable by a real physical tap. Written by
+  the harness; never hand-write entries, and expect a proof to burn when the control moves.
+
+## Bot policies: when the decisions come faster than a tool call
+
+A routine replays a fixed script. A **policy** decides every tick — which is what gameplay like
+surviving a runner, dodging, or chasing needs, and what a tool call per decision cannot deliver.
+
+Write `design/tests/bots/<name>.ts` and run it with
+`game_run {bot: {name: '<name>'}, maxFrames: 1800}`:
+
+```ts
+export default {
+  name: 'survive-30s',
+  tick(bot) {
+    const hero = bot.nodes('Hero')[0];
+    if (!hero) return bot.done(false, 'the hero left the scene');
+    const rock = bot.nearest('Rock2D', hero.worldPosition);
+    bot.axis('Horizontal', rock && rock.node.worldPosition.x > hero.worldPosition.x ? -1 : 1);
+    if (bot.frame >= 1800) bot.done(true, 'survived 30s at 60fps');
+  },
+};
+```
+
+The API is ~10 methods: sensors `nodes(query)` / `nearest(type, from)` / `raycast(from, dir)` /
+`gameState()`, actuators `press(action, frames?)` / `release(action)` / `tap(target)` /
+`axis(name, value)` / `moveTo(point)`, protocol `log(event)` / `done(pass, reason)`, plus
+`bot.frame`. On the first successful compile the editor writes `pix3-test-bot.d.ts` next to your
+policy, so `bot.` completes in the code view.
+
+Five things decide whether a policy works:
+
+- **Observe frame N, act for frame N+1.** `tick` runs after the game's tick and every actuator lands
+  on the next one. A policy that expects its own press to be visible in the same tick reads as a game
+  that ignores input.
+- **`channel` defaults to `physical-input`** — real pointer and key events, the whole player path,
+  and the only setting under which the run proves an input binding. `axis()` there deflects the live
+  on-screen joystick that writes the axis, and **refuses by name** when no control does (the runtime
+  has no keyboard-to-axis binding: a key raises `Key_<code>` as a *button*). `direct-action` sets
+  axes and calls interactions directly: use it to test logic when the binding is already proven, and
+  never to close an input check — the report and the verdict both say it proves nothing.
+- **Read `verdict` first.** `BOT PASS` / `BOT FAIL` carry your own `reason`, the frame and the
+  channel. `BOT ERROR` means the *policy* threw — the fault is in your file, and nothing is claimed
+  about the game. `BOT NOTHING DRIVEN` means no actuator was ever delivered, so the run is not a
+  pass even if the policy claimed one; the refusals in `bot.log` say what could not be reached.
+- **`done(pass, reason)` is the finding.** Write the reason for a reader who has not seen the run:
+  "hero died: lives 0 at the third gap", not "failed". Call it from `tick`, never from `end` — by
+  then the run is over and the verdict decided nothing.
+- **`until`/`fail` still apply** as the budget and the crash net. Omit `until` and it becomes
+  `maxFrames`; add `fail: [{kind:'newErrors'}]` and a script throwing beats any verdict the policy
+  reaches on that frame.
+
+Three canonical policies to copy instead of inventing:
+
+```ts
+// chase — close the distance to the nearest target.
+export default {
+  name: 'chase',
+  tick(bot) {
+    const me = bot.nodes('Hero')[0];
+    const target = me && bot.nearest('Coin2D', me.worldPosition);
+    if (!me || !target) return;
+    bot.axis('Horizontal', Math.sign(target.node.worldPosition.x - me.worldPosition.x));
+    bot.axis('Vertical', Math.sign(target.node.worldPosition.y - me.worldPosition.y));
+    if (target.distance < 8) bot.log(`reached ${target.node.name} at frame ${bot.frame}`);
+  },
+};
+```
+
+```ts
+// avoid — steer away from whatever is closest, and report a hit as the finding.
+export default {
+  name: 'avoid',
+  tick(bot) {
+    const me = bot.nodes('Hero')[0];
+    if (!me) return bot.done(false, `the hero is gone at frame ${bot.frame}`);
+    const threat = bot.nearest('Rock2D', me.worldPosition);
+    if (!threat) return bot.axis('Horizontal', 0);
+    if (threat.distance < 6) return bot.done(false, `hit ${threat.node.name} at frame ${bot.frame}`);
+    bot.axis('Horizontal', -Math.sign(threat.node.worldPosition.x - me.worldPosition.x));
+  },
+};
+```
+
+```ts
+// pressWhen — hold an action while a condition holds. The shape for "jump over the gap".
+export default {
+  name: 'press-when',
+  tick(bot) {
+    const state = bot.gameState();
+    const shouldHold = Boolean(state && state.onGround === false ? false : state?.gapAhead);
+    if (shouldHold) bot.press('Key_Space', 6);
+    else bot.release('Key_Space');
+  },
+};
+```
+
+Sensor cost is worth knowing: `nodes`/`nearest` walk the live tree, `raycast` builds a world-space
+bounding box per node and is the most expensive call available — reach for it when you need "is
+something in the way", not every tick. And `raycast` tests bounding boxes, not geometry and not
+colliders, which is what makes it mean the same thing in 2D and 3D.
 
 ## Common runtime problems and fixes
 
