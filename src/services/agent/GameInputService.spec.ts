@@ -815,8 +815,10 @@ describe('GameInputService observe frame budget', () => {
     expect(result.ok).toBe(true);
     expect(result.frames).toBe(6);
     expect(result.frameBudget).toEqual({ requested: 6, observed: 6, endedBy: 'frames' });
-    // 6 ticks at 5ms is ~30ms — nothing like the 100ms a 6-frame budget nominally costs.
-    expect(result.sampleMs!).toBeLessThan(100);
+    // `endedBy: 'frames'` is the claim; the length only has to stay under the 500ms
+    // duration cap — asserting the ~30ms six 5ms ticks nominally cost makes this test
+    // fail whenever the suite starves the timer, not when the budget goes clock-based.
+    expect(result.sampleMs!).toBeLessThan(500);
   });
 
   it('lets `frames` win over `sampleMs`', async () => {

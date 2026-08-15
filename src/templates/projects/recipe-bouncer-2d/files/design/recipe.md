@@ -10,9 +10,9 @@ Physics lives in the project: `BallBody` runs the swept solver
 **live world transforms** — a rotated flipper works for free. No rigidbody engine,
 no `core:Hitbox2D`, never import rapier.
 
-The look: a `PostProcess` (bloom + vignette) over deliberately bright accents, a
-tinted gradient sprite behind the board, `Label2D` glow on the HUD (drawn after
-post — HUD glows on canvas, never blooms).
+The look: a `PostProcess` (bloom + vignette) over bright accents, a tinted
+gradient sprite behind the board, `Label2D` glow on the HUD (drawn after post —
+it glows on canvas, never blooms).
 
 ## Node map
 
@@ -87,21 +87,19 @@ tunables:
 `component` present → `set_component_property`, absent → `set_property`. Current
 values live in the scene; each script's schema owns its range and clamps on write.
 Bloom lifts only what is *already* bright — brighten the colour or lower
-`bloomThreshold` (0.58) rather than raising intensity.
+`bloomThreshold` (0.58), don't raise intensity.
 
 ## Extension points
 
 - **Pinball flippers.** Two oriented boxes under `paddles` (`flipper-left`,
   `flipper-right`) pivoted at their inner ends; swap `PaddleController` for a
   flipper script: hold `Key_ArrowLeft`/`Key_ArrowRight` → lerp `rotation.z` from
-  −25° to +35° in ~0.06 s, release → lerp back. The solver re-reads world
-  transforms — it bounces off the rotated face.
+  −25° to +35° in ~0.06 s, release → lerp back.
 - **Juice is one-liners — add it WITH the mechanic, never as a later pass.**
   `scene.audio.sfx('score')`, `scene.juice.burst({x, y})`,
   `floatText('+100', { at: node })`, `punchScale`/`shake`/`flash`,
   `scene.time.hitstop(50)`, `core:BurstOnSignal`/`core:SfxOnSignal` — `TouchRules`
-  calls them on contact; copy the line next to your mechanic, in board space
-  (HUD anchors never bloom).
+  calls them on contact; copy the line next to your mechanic, in board space.
 - **More bumpers.** Duplicate a `bumpers` child (radius = width/2 × world scale);
   punch, particles and score already fire through `ball-hit`.
 - **A plunger.** Raise `launchSpeed` / `launchAngleDeg` and call `BallBody.launch()`
