@@ -85,10 +85,26 @@ export class GameViewTab extends ComponentBase {
   private disposeSubscription?: () => void;
   private disposePreviewSubscription?: () => void;
   private disposeOnlineSubscription?: () => void;
+  private disposeWorkspaceSubscription?: () => void;
+  private lastWorkspaceMode = appState.ui.workspaceMode;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.startResizeObserver();
+    // Studio's panels now stay mounted while Flow is on screen, and Flow registers its own stage as
+    // the play host — releasing it (and detaching the runtime) when it unmounts. Nothing would put
+    // the running game back on this tab, so re-claim the host whenever Studio comes back.
+    this.lastWorkspaceMode = appState.ui.workspaceMode;
+    this.disposeWorkspaceSubscription = subscribe(appState.ui, () => {
+      const mode = appState.ui.workspaceMode;
+      if (mode === this.lastWorkspaceMode) {
+        return;
+      }
+      this.lastWorkspaceMode = mode;
+      if (mode === 'studio') {
+        this.claimPlayHost();
+      }
+    });
     this.disposePreviewSubscription = this.previewHostService.subscribe(state => {
       this.isRemotePreviewActive = state.status !== 'idle';
     });
@@ -108,18 +124,26 @@ export class GameViewTab extends ComponentBase {
     this.disposePreviewSubscription = undefined;
     this.disposeOnlineSubscription?.();
     this.disposeOnlineSubscription = undefined;
+    this.disposeWorkspaceSubscription?.();
+    this.disposeWorkspaceSubscription = undefined;
+  }
+
+  /** Make this tab the play host. Idempotent — re-registering the same mount is a no-op resync. */
+  private claimPlayHost(): void {
+    if (!this.gameContainer) {
+      return;
+    }
+    this.gamePlaySessionService.registerTabHost(this.gameContainer, window, isRunning => {
+      this.isRunning = isRunning;
+      this.requestUpdate();
+    });
   }
 
   protected firstUpdated(): void {
     this.viewportContainer = this.shadowRoot?.querySelector('.viewport-container') as HTMLElement;
     this.gameContainer = this.shadowRoot?.querySelector('.game-host') as HTMLElement;
 
-    if (this.gameContainer) {
-      this.gamePlaySessionService.registerTabHost(this.gameContainer, window, isRunning => {
-        this.isRunning = isRunning;
-        this.requestUpdate();
-      });
-    }
+    this.claimPlayHost();
 
     if (this.viewportContainer) {
       this.resizeObserver?.observe(this.viewportContainer);

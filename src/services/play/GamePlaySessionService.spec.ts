@@ -22,8 +22,10 @@ interface FakeRunner {
   paused: boolean;
   pauses: number;
   resumes: number;
+  stopped: boolean;
   pause(): void;
   resume(): void;
+  stop(): void;
 }
 
 function makeRunner(): FakeRunner {
@@ -31,6 +33,7 @@ function makeRunner(): FakeRunner {
     paused: false,
     pauses: 0,
     resumes: 0,
+    stopped: false,
     pause() {
       this.paused = true;
       this.pauses += 1;
@@ -38,6 +41,9 @@ function makeRunner(): FakeRunner {
     resume() {
       this.paused = false;
       this.resumes += 1;
+    },
+    stop() {
+      this.stopped = true;
     },
   };
 }
@@ -141,5 +147,51 @@ describe('GamePlaySessionService — pause decision', () => {
 
     service.setPauseRequested(false);
     expect(runner.paused).toBe(true);
+  });
+});
+
+/**
+ * The Studio Game tab and the Flow stage both register as the *same* host kind, so a mode switch
+ * hands the runtime from one mount to another without `syncRuntimeToUiState` seeing a kind change
+ * — it would leave the running game attached to the element that is going away, and Studio would
+ * come back to a black Game tab. Registering a different mount has to detach like a tab ⇄ popout
+ * swap does; registering the same mount again (a resync) must not disturb the running game.
+ */
+describe('GamePlaySessionService — tab host swap', () => {
+  function makeHostSwapSession(): { service: GamePlaySessionService; runner: FakeRunner } {
+    const runner = makeRunner();
+    const service = new GamePlaySessionService();
+    const internals = service as unknown as Record<string, unknown>;
+    // Bypass DI-dependent wiring: this decision is made before any of it runs.
+    internals.initialized = true;
+    internals.queueSync = () => {};
+    // `@inject` installs getter-only properties on the prototype; shadow them on the instance.
+    Object.defineProperty(service, 'profilerSessionService', { value: { endSession: () => {} } });
+    Object.defineProperty(service, 'assetLoader', { value: { setAtlasResolver: () => {} } });
+    internals.runner = runner;
+    internals.activeHostKind = 'tab';
+    return { service, runner };
+  }
+
+  const mountA = {} as HTMLElement;
+  const mountB = {} as HTMLElement;
+
+  it('detaches the runtime when a different mount claims the tab host', () => {
+    const { service, runner } = makeHostSwapSession();
+    service.registerTabHost(mountA, window);
+    expect(runner.stopped).toBe(false);
+
+    service.registerTabHost(mountB, window);
+    expect(runner.stopped).toBe(true);
+    expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBeNull();
+  });
+
+  it('leaves the runtime alone when the same mount re-registers', () => {
+    const { service, runner } = makeHostSwapSession();
+    service.registerTabHost(mountA, window);
+    service.registerTabHost(mountA, window);
+
+    expect(runner.stopped).toBe(false);
+    expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBe('tab');
   });
 });

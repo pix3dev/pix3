@@ -306,6 +306,15 @@ export class LayoutManagerService {
     await this.loadDefaultLayout();
   }
 
+  /**
+   * Re-measure the layout against its container. Needed after the host was `display: none`
+   * (the shell hides Studio rather than unmounting it while Flow is on screen): Golden Layout's
+   * ResizeObserver saw a 0×0 container and would otherwise keep those sizes on the way back.
+   */
+  refreshSize(): void {
+    this.layout?.updateRootSize(true);
+  }
+
   async resetLayout(): Promise<void> {
     if (!this.layout) {
       return;

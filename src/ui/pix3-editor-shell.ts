@@ -277,6 +277,13 @@ export class Pix3EditorShell extends ComponentBase {
   @state()
   private workspaceMode: WorkspaceMode = appState.ui.workspaceMode;
 
+  /**
+   * True once Golden Layout has taken ownership of `.layout-host`. From that point the Studio
+   * branch stays in the DOM even while Flow is on screen — see `render()`.
+   */
+  @state()
+  private studioLayoutMounted = false;
+
   @state()
   private routerStatus = appState.router.status;
 
@@ -1024,6 +1031,9 @@ export class Pix3EditorShell extends ComponentBase {
       return;
     }
     if (this.layoutInitStarted) {
+      // Returning from Flow. The layout kept its DOM but was measured at zero size while hidden,
+      // so re-measure now that it is back on screen.
+      this.layoutManager.refreshSize();
       return;
     }
     // The host only exists after the Studio branch of render() has run.
@@ -1033,6 +1043,7 @@ export class Pix3EditorShell extends ComponentBase {
       return;
     }
     this.layoutInitStarted = true;
+    this.studioLayoutMounted = true;
     await this.layoutManager.initialize(host);
     this.shellReady = true;
     this.requestUpdate();
@@ -1078,15 +1089,20 @@ export class Pix3EditorShell extends ComponentBase {
     // dialog host below, so Download HTML, project settings and the auth modal work identically
     // in both shells.
     const isFlow = this.workspaceMode === 'flow';
+    // Studio is lazy but, once built, permanent: Golden Layout owns the DOM inside `.layout-host`,
+    // so letting the template swap tear that host out would strand the layout in a detached tree —
+    // and `ensureStudioLayout()` only builds once, so coming back from Flow would land on an empty
+    // workspace. Keep the branch mounted from then on and let CSS hide it while Flow is on screen.
+    const showStudio = !isFlow || this.studioLayoutMounted;
     return html`
       <div
         class="editor-shell"
         data-workspace=${this.workspaceMode}
         data-ready=${this.shellReady ? 'true' : 'false'}
       >
-        ${isFlow
-          ? html`<pix3-flow-shell></pix3-flow-shell>`
-          : html`
+        ${isFlow ? html`<pix3-flow-shell></pix3-flow-shell>` : html``}
+        ${showStudio
+          ? html`
               <div class="toolbar-layer">
                 ${this.renderToolbar()} ${this.renderProjectNameLabel()}
                 ${this.renderAccountPopover()}
@@ -1095,7 +1111,8 @@ export class Pix3EditorShell extends ComponentBase {
                 <div class="layout-host" role="application" aria-busy=${!this.isLayoutReady}></div>
               </div>
               <pix3-status-bar></pix3-status-bar>
-            `}
+            `
+          : html``}
         ${this.renderWorkspaceOverlay()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}

@@ -185,6 +185,12 @@ export class GamePlaySessionService {
     setRunningState?: (isRunning: boolean) => void
   ): void {
     this.initialize();
+    // A tab-to-tab hand-off (Studio's Game tab ⇄ the Flow stage) keeps `activeHostKind === 'tab'`,
+    // so `syncRuntimeToUiState` would see nothing worth restarting and leave the running game
+    // attached to the mount that is going away. Force the same detach a tab ⇄ popout swap gets.
+    if (this.tabHost && this.tabHost.mount !== mount && this.activeHostKind === 'tab') {
+      this.detachRuntime();
+    }
     this.tabHost = {
       kind: 'tab',
       mount,

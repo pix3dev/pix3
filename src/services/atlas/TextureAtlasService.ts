@@ -33,6 +33,21 @@ const SCENE_EXTENSIONS = ['.pix3scene', '.pix3prefab'] as const;
 const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
 /** Directory name segments never packed even if referenced (reference art, build output). */
 const EXCLUDED_DIR_SEGMENTS = new Set(['design', 'references', 'reference', '.pix3', '.atlas']);
+/**
+ * Directories the pre-launch sweep never descends into. These can hold tens of
+ * thousands of files (a linked consumer project's `node_modules` alone is ~9.4k),
+ * and `listDirectory` stats every file it returns — so walking them cost several
+ * seconds of every single play-mode launch to find nothing. None of them can ever
+ * contain a scene, prefab, project script or sprite the atlas packs.
+ */
+const SWEEP_SKIPPED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.yalc',
+  '.vite',
+  '.cache',
+  'coverage',
+]);
 /** Minimum path depth for a directory-prefix include (avoids broad roots like textures/). */
 const MIN_DIR_PREFIX_SEGMENTS = 4;
 
@@ -348,7 +363,7 @@ export class TextureAtlasService {
     for (const entry of entries) {
       if (entry.kind === 'file') {
         out.set(entry.path, entry.size ?? null);
-      } else if (entry.kind === 'directory') {
+      } else if (entry.kind === 'directory' && !SWEEP_SKIPPED_DIRS.has(entry.name)) {
         await this.collectAllFiles(entry.path, out);
       }
     }
