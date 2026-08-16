@@ -877,7 +877,7 @@ export class AssetTree extends ComponentBase {
 
   private toggleNode(node: Node): void {
     if (node.expanded) this.collapseNode(node);
-    else this.expandNode(node);
+    else void this.expandNode(node);
   }
 
   private clearRenameTimer(): void {
@@ -1871,7 +1871,7 @@ export class AssetTree extends ComponentBase {
     this.selectedPath = newPath;
     this.requestUpdate();
 
-    this.updateComplete.then(() => {
+    void this.updateComplete.then(() => {
       const input = this.renderRoot.querySelector('.node-edit') as HTMLInputElement | null;
       if (input) {
         input.focus();
@@ -1929,11 +1929,11 @@ export class AssetTree extends ComponentBase {
   private onEditKeyDown(e: KeyboardEvent, node: Node) {
     if (e.key === 'Escape') {
       e.stopPropagation();
-      this.cancelCreateFolder(node);
+      void this.cancelCreateFolder(node);
     } else if (e.key === 'Enter') {
       e.preventDefault(); // Prevent any default form submission or other behavior
       e.stopPropagation();
-      this.commitCreateFolder(node);
+      void this.commitCreateFolder(node);
     }
   }
 

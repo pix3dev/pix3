@@ -106,7 +106,7 @@ async function handleTemplRequest(url: URL): Promise<Response> {
 }
 
 self.addEventListener('install', () => {
-  self.skipWaiting();
+  void self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {

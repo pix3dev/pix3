@@ -538,7 +538,7 @@ export class Pix3FlowShell extends ComponentBase {
     this.planOpen = !this.planOpen;
     persistPlanOpen(this.planOpen);
     // The stage column just changed width; re-letterbox it rather than wait for the observer.
-    this.updateComplete.then(() => {
+    void this.updateComplete.then(() => {
       this.setChatWidth(this.chatWidth);
       this.fitStage();
     });

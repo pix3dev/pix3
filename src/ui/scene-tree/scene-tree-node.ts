@@ -208,7 +208,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
           }}
           @keydown=${(event: KeyboardEvent) => {
             if (event.key === 'Enter' || event.key === ' ') {
-              this.onSelectNode(event);
+              void this.onSelectNode(event);
               event.preventDefault();
             }
           }}

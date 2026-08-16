@@ -202,11 +202,13 @@ describe('CreateSprite2DOperation', () => {
     expect(parent.children[0]?.nodeId).toBe(createdNodeId);
     expect(parent.children[1]?.nodeId).toBe(existingChild.nodeId);
 
-    result.commit?.undo();
+    // Awaited: the closures are async, so asserting without waiting only passed because their
+    // bodies happen to mutate before the first suspension point.
+    await result.commit?.undo();
     expect(parent.children).toHaveLength(1);
     expect(parent.children[0]?.nodeId).toBe(existingChild.nodeId);
 
-    result.commit?.redo();
+    await result.commit?.redo();
     expect(parent.children).toHaveLength(2);
     expect(parent.children[0]?.nodeId).toBe(createdNodeId);
     expect(parent.children[1]?.nodeId).toBe(existingChild.nodeId);
