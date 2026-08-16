@@ -77,6 +77,40 @@ export class AssetLoader {
     this.textureLoader = new TextureLoader();
   }
 
+  /**
+   * De-duplicates concurrent loads of `key`, clearing the entry once `promise` settles.
+   *
+   * The clean-up is attached with `then(clear, clear)` — a chain that *handles* rejection — rather
+   * than `promise.finally(clear)`. `.finally` returns a new promise that re-raises whatever the
+   * original rejected with, and nothing here was holding that promise, so every failed asset load
+   * produced an `unhandledrejection` on top of the error the caller already handled. The editor and
+   * the player both listen for that event and surface it as a runtime error, so a single missing
+   * texture reported itself twice, the second time with no useful context. It is also why a spec
+   * that parsed a `res://` texture without seeding the cache could make Vitest exit non-zero with
+   * every test passing.
+   *
+   * Same reasoning as the `try/finally` inside {@link loadSpineAsset}'s body — a rejection must only
+   * ever be observed by the caller's own `await`. This form additionally works for a promise built
+   * elsewhere (the atlas view), and refuses to evict a newer entry that has already replaced this
+   * one.
+   */
+  private trackInFlight<T>(
+    inFlight: Map<string, Promise<T>>,
+    key: string,
+    promise: Promise<T>
+  ): Promise<T> {
+    inFlight.set(key, promise);
+
+    const clear = (): void => {
+      if (inFlight.get(key) === promise) {
+        inFlight.delete(key);
+      }
+    };
+    void promise.then(clear, clear);
+
+    return promise;
+  }
+
   getResourceManager(): ResourceManager {
     return this.resources;
   }
@@ -235,12 +269,7 @@ export class AssetLoader {
       }
     })();
 
-    this.audioLoadInFlight.set(resourcePath, loadPromise);
-    loadPromise.finally(() => {
-      this.audioLoadInFlight.delete(resourcePath);
-    });
-
-    return loadPromise;
+    return this.trackInFlight(this.audioLoadInFlight, resourcePath, loadPromise);
   }
 
   /**
@@ -266,12 +295,11 @@ export class AssetLoader {
     if (options?.atlas !== false && this.atlasResolver) {
       const frame = this.atlasResolver.resolve(resourcePath);
       if (frame) {
-        const viewPromise = this.buildAtlasView(resourcePath, frame);
-        this.textureLoadInFlight.set(resourcePath, viewPromise);
-        viewPromise.finally(() => {
-          this.textureLoadInFlight.delete(resourcePath);
-        });
-        return viewPromise;
+        return this.trackInFlight(
+          this.textureLoadInFlight,
+          resourcePath,
+          this.buildAtlasView(resourcePath, frame)
+        );
       }
     }
 
@@ -318,12 +346,7 @@ export class AssetLoader {
       });
     })();
 
-    this.textureLoadInFlight.set(resourcePath, loadPromise);
-    loadPromise.finally(() => {
-      this.textureLoadInFlight.delete(resourcePath);
-    });
-
-    return loadPromise;
+    return this.trackInFlight(this.textureLoadInFlight, resourcePath, loadPromise);
   }
 
   /**
@@ -373,12 +396,7 @@ export class AssetLoader {
       return resource;
     })();
 
-    this.animationResourceLoadInFlight.set(resourcePath, loadPromise);
-    loadPromise.finally(() => {
-      this.animationResourceLoadInFlight.delete(resourcePath);
-    });
-
-    return loadPromise;
+    return this.trackInFlight(this.animationResourceLoadInFlight, resourcePath, loadPromise);
   }
 
   /**

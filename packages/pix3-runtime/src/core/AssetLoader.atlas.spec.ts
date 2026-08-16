@@ -6,8 +6,9 @@ import { baseRegionOf, atlasSizeOf, type AtlasResolver } from './atlas-frame-map
 
 /**
  * These tests exercise only the resolver-HIT path, which never touches the file
- * loader (the sheet is pre-seeded), so they avoid the unhandled-rejection leak
- * that a real loadTexture miss would cause in happy-dom.
+ * loader (the sheet is pre-seeded). That used to be a workaround as much as a
+ * scope: a real loadTexture miss leaked an unhandled rejection. It no longer
+ * does — see `AssetLoader.inflight.spec.ts`, which asserts exactly that.
  */
 function makeLoader(): AssetLoader {
   return new AssetLoader({} as unknown as ResourceManager);
