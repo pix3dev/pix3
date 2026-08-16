@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { config } from '../../config.js';
 import { attachOptionalAuth, type AuthenticatedRequest } from '../auth/auth-middleware.js';
 import { mayActAsUser } from '../auth/origin-trust.js';
+import { createRateLimiter } from '../rate-limit.js';
 import {
   createFabricRoom,
   createGuestIdentity,
@@ -39,39 +40,17 @@ const MAX_ALLOWED_KINDS = 512;
 
 roomsRouter.use(attachOptionalAuth);
 
-/** Sliding-window room-creation budget per client IP. Joins are not bucketed — room caps bound them. */
-const createBuckets = new Map<string, number[]>();
-
-function rateLimitCreate(req: Request): boolean {
-  const limit = config.ROOMS_CREATE_PER_MINUTE;
-  if (limit <= 0) {
-    return true;
-  }
-
-  const key = req.ip ?? 'unknown';
-  const now = Date.now();
-  const windowStart = now - 60_000;
-  const hits = (createBuckets.get(key) ?? []).filter(at => at > windowStart);
-
-  if (hits.length >= limit) {
-    createBuckets.set(key, hits);
-    return false;
-  }
-
-  hits.push(now);
-  createBuckets.set(key, hits);
-
-  // The map would otherwise grow one entry per IP forever; drop everything idle for a window.
-  if (createBuckets.size > 4096) {
-    for (const [ip, timestamps] of createBuckets) {
-      if (timestamps.every(at => at <= windowStart)) {
-        createBuckets.delete(ip);
-      }
-    }
-  }
-
-  return true;
-}
+/**
+ * Sliding-window room-creation budget per client IP. Joins are not bucketed — room caps bound them.
+ *
+ * This bucket was the original; `core/rate-limit.ts` is it, generalised, once auth and preview
+ * needed the same thing. Used through `consume` rather than as middleware so the order is preserved:
+ * an unconfigured deployment answers 503 without spending anyone's budget.
+ */
+const createRoomLimiter = createRateLimiter({
+  limit: config.ROOMS_CREATE_PER_MINUTE,
+  windowMs: 60_000,
+});
 
 /** Creates (or re-attaches to) a room and mints its host token. */
 roomsRouter.post('/', async (req: AuthenticatedRequest, res: Response) => {
@@ -83,7 +62,9 @@ roomsRouter.post('/', async (req: AuthenticatedRequest, res: Response) => {
     return;
   }
 
-  if (!rateLimitCreate(req)) {
+  const clientKey = req.ip ?? 'unknown';
+  if (!createRoomLimiter.consume(clientKey)) {
+    res.setHeader('Retry-After', Math.ceil(createRoomLimiter.retryAfterMs(clientKey) / 1000));
     res.status(429).json({
       error: 'rate_limited',
       message: 'Too many rooms created from this address; wait a minute.',
