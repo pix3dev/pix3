@@ -7,7 +7,7 @@ import type {
 } from '@/core/Operation';
 import { SceneManager } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { syncViewportTransform } from './sync-viewport-transform';
 
 export interface Transform2DState {
   position?: { x: number; y: number };
@@ -67,13 +67,7 @@ export class Transform2DCompleteOperation implements Operation<OperationInvokeRe
       if (descriptor) descriptor.isDirty = true;
     }
 
-    try {
-      const vr = container.getService<ViewportRendererService>(
-        container.getOrCreateToken(ViewportRendererService)
-      );
-      vr.updateNodeTransform(node);
-      // eslint-disable-next-line no-empty
-    } catch {}
+    syncViewportTransform(container, node);
 
     return {
       didMutate: true,
@@ -87,13 +81,7 @@ export class Transform2DCompleteOperation implements Operation<OperationInvokeRe
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
         redo: async () => {
           this.applyState(node, currentState);
@@ -102,13 +90,7 @@ export class Transform2DCompleteOperation implements Operation<OperationInvokeRe
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
       },
     };

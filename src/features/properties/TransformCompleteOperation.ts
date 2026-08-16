@@ -7,7 +7,7 @@ import type {
 } from '@/core/Operation';
 import { Node3D } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { syncViewportTransform } from './sync-viewport-transform';
 
 export interface TransformState {
   position?: { x: number; y: number; z: number };
@@ -67,13 +67,7 @@ export class TransformCompleteOperation implements Operation<OperationInvokeResu
       if (descriptor) descriptor.isDirty = true;
     }
 
-    try {
-      const vr = container.getService<ViewportRendererService>(
-        container.getOrCreateToken(ViewportRendererService)
-      );
-      vr.updateNodeTransform(node);
-      // eslint-disable-next-line no-empty
-    } catch {}
+    syncViewportTransform(container, node);
 
     return {
       didMutate: true,
@@ -87,13 +81,7 @@ export class TransformCompleteOperation implements Operation<OperationInvokeResu
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
         redo: async () => {
           this.applyState(node, currentState);
@@ -102,13 +90,7 @@ export class TransformCompleteOperation implements Operation<OperationInvokeResu
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
       },
     };

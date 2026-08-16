@@ -10,7 +10,7 @@ import { Camera3D } from '@pix3/runtime';
 import { DirectionalLightNode } from '@pix3/runtime';
 import { SpotLightNode } from '@pix3/runtime';
 import { SceneManager } from '@pix3/runtime';
-import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { syncViewportTransform } from './sync-viewport-transform';
 
 export interface TargetTransformParams {
   nodeId: string;
@@ -65,13 +65,7 @@ export class TargetTransformOperation implements Operation<OperationInvokeResult
       if (descriptor) descriptor.isDirty = true;
     }
 
-    try {
-      const vr = container.getService<ViewportRendererService>(
-        container.getOrCreateToken(ViewportRendererService)
-      );
-      vr.updateNodeTransform(node);
-      // eslint-disable-next-line no-empty
-    } catch {}
+    syncViewportTransform(container, node);
 
     return {
       didMutate: true,
@@ -85,13 +79,7 @@ export class TargetTransformOperation implements Operation<OperationInvokeResult
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
         redo: async () => {
           this.applyTargetTransform(node, currentPos);
@@ -100,13 +88,7 @@ export class TargetTransformOperation implements Operation<OperationInvokeResult
             const descriptor = state.scenes.descriptors[activeSceneId];
             if (descriptor) descriptor.isDirty = true;
           }
-          try {
-            const vr = container.getService<ViewportRendererService>(
-              container.getOrCreateToken(ViewportRendererService)
-            );
-            vr.updateNodeTransform(node);
-            // eslint-disable-next-line no-empty
-          } catch {}
+          syncViewportTransform(container, node);
         },
       },
     };

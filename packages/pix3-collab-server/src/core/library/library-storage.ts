@@ -1,5 +1,6 @@
 import path from 'path';
 import { config } from '../../config.js';
+import { resolveContainedPath } from '../storage/contained-path.js';
 
 /**
  * On-disk layout for library bundles, shared by the private sync router and the public
@@ -16,12 +17,10 @@ export function getItemDir(itemId: string): string {
  *
  * The directory itself is rejected: `''`, `'.'` and `'a/..'` all resolve to it, and every
  * caller treats the result as a *file* (writeFileSync / sendFile), so returning it would
- * turn a malformed manifest into an EISDIR 500 instead of a clean 400.
+ * turn a malformed manifest into an EISDIR 500 instead of a clean 400. That is
+ * {@link resolveContainedPath}'s default, which this now delegates to — the rule lives in
+ * one place so a future fix reaches every caller.
  */
 export function resolveSafePath(itemDir: string, relativePath: string): string | null {
-  const resolved = path.resolve(itemDir, relativePath);
-  if (!resolved.startsWith(itemDir + path.sep)) {
-    return null;
-  }
-  return resolved;
+  return resolveContainedPath(itemDir, relativePath);
 }

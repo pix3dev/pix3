@@ -19,7 +19,9 @@ vi.mock('../auth/auth-middleware.js', () => ({
 const libraryService = {
   listOwnerLibraryItems: vi.fn(() => []),
   getOwnerLibraryItem: vi.fn(() => undefined as unknown),
-  upsertLibraryItem: vi.fn(),
+  // `null` = no row yet, which is the create case every upload starts from.
+  getLibraryItemOwnerId: vi.fn((): string | null => null),
+  upsertLibraryItem: vi.fn(() => true),
   softDeleteLibraryItem: vi.fn(() => true),
 };
 
@@ -59,6 +61,8 @@ describe('libraryRouter', () => {
     server = null;
     vi.clearAllMocks();
     libraryService.getOwnerLibraryItem.mockReturnValue(undefined);
+    libraryService.getLibraryItemOwnerId.mockReturnValue(null);
+    libraryService.upsertLibraryItem.mockReturnValue(true);
     libraryService.softDeleteLibraryItem.mockReturnValue(true);
     if (createdItemId) {
       fs.rmSync(itemDir(createdItemId), { recursive: true, force: true });
@@ -165,5 +169,103 @@ describe('libraryRouter', () => {
 
     expect(res.status).toBe(200);
     expect(libraryService.softDeleteLibraryItem).toHaveBeenCalledWith('owner-1', itemId, 999);
+  });
+
+  /**
+   * Both routes are addressed by a client-chosen id and both do destructive filesystem work.
+   * The mocked `requireAuth` signs everyone in as `owner-1`, so "another user's item" is any id
+   * the service reports a different owner for.
+   */
+  describe('another user’s item', () => {
+    it('refuses an upload without touching the existing bundle', async () => {
+      const itemId = (createdItemId = `lib-${randomUUID()}`);
+      // Stand in for the victim's already-synced bundle.
+      fs.mkdirSync(itemDir(itemId), { recursive: true });
+      fs.writeFileSync(path.join(itemDir(itemId), 'victim.json'), '{"mine":true}');
+      libraryService.getLibraryItemOwnerId.mockReturnValue('owner-2');
+
+      server = await startServer();
+      const port = (server.address() as AddressInfo).port;
+
+      const form = new FormData();
+      form.append('manifest', JSON.stringify({ id: itemId, updatedAt: 9, files: ['item.json'] }));
+      form.append('paths', JSON.stringify(['item.json']));
+      form.append('files', new Blob(['{"pwned":true}']), 'item.json');
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/library/items/${itemId}`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(res.status).toBe(404);
+      expect(libraryService.upsertLibraryItem).not.toHaveBeenCalled();
+      // The point of the fix: the wipe happens before the DB write, so a late check is no check.
+      expect(fs.readFileSync(path.join(itemDir(itemId), 'victim.json'), 'utf-8')).toBe(
+        '{"mine":true}'
+      );
+      expect(fs.existsSync(path.join(itemDir(itemId), 'item.json'))).toBe(false);
+    });
+
+    it('refuses a delete without removing the bundle files', async () => {
+      const itemId = (createdItemId = `lib-${randomUUID()}`);
+      fs.mkdirSync(itemDir(itemId), { recursive: true });
+      fs.writeFileSync(path.join(itemDir(itemId), 'victim.json'), '{"mine":true}');
+      // Owner-scoped tombstone matches no row for this caller.
+      libraryService.softDeleteLibraryItem.mockReturnValue(false);
+
+      server = await startServer();
+      const port = (server.address() as AddressInfo).port;
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/library/items/${itemId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deletedAt: 999 }),
+      });
+
+      expect(res.status).toBe(404);
+      expect(fs.existsSync(path.join(itemDir(itemId), 'victim.json'))).toBe(true);
+    });
+
+    it('still allows creating an id nobody owns', async () => {
+      // The check must not turn every first upload into a 404.
+      const itemId = (createdItemId = `lib-${randomUUID()}`);
+      libraryService.getLibraryItemOwnerId.mockReturnValue(null);
+
+      server = await startServer();
+      const port = (server.address() as AddressInfo).port;
+
+      const form = new FormData();
+      form.append('manifest', JSON.stringify({ id: itemId, updatedAt: 1, files: ['item.json'] }));
+      form.append('paths', JSON.stringify(['item.json']));
+      form.append('files', new Blob(['{"ok":1}']), 'item.json');
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/library/items/${itemId}`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(res.status).toBe(201);
+    });
+
+    it('allows the owner to replace their own item', async () => {
+      const itemId = (createdItemId = `lib-${randomUUID()}`);
+      libraryService.getLibraryItemOwnerId.mockReturnValue('owner-1');
+
+      server = await startServer();
+      const port = (server.address() as AddressInfo).port;
+
+      const form = new FormData();
+      form.append('manifest', JSON.stringify({ id: itemId, updatedAt: 2, files: ['item.json'] }));
+      form.append('paths', JSON.stringify(['item.json']));
+      form.append('files', new Blob(['{"ok":2}']), 'item.json');
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/library/items/${itemId}`, {
+        method: 'POST',
+        body: form,
+      });
+
+      expect(res.status).toBe(201);
+      expect(libraryService.upsertLibraryItem).toHaveBeenCalled();
+    });
   });
 });

@@ -1,12 +1,25 @@
 import { Router, type Request, type Response } from 'express';
 import { WebSocket } from 'ws';
 import { config } from '../../config.js';
+import { rateLimit } from '../rate-limit.js';
 import { previewSessionService, type PreviewRole, type PreviewSession } from './preview-service.js';
 
 export const previewRouter = Router();
 
 const COMMAND_ACK_TIMEOUT_MS = 15_000;
 const SCREENSHOT_TIMEOUT_MS = 15_000;
+
+/**
+ * Session creation is unauthenticated by design — an editor with a local project has no account to
+ * present — so the only bound available is per-address. Each session it allocates is held for
+ * `PREVIEW_SESSION_TTL_MS` (six hours, sliding), which is what made a bare loop a memory-exhaustion
+ * primitive. Ten a minute is far above what starting a preview costs a real user.
+ */
+const createSessionByIp = rateLimit({
+  limit: 10,
+  windowMs: 60_000,
+  message: 'Too many preview sessions created from this address; wait a minute.',
+});
 
 /** Actions the agent HTTP API accepts and where each one is routed. */
 const HOST_COMMANDS = new Set(['reload-from-disk']);
@@ -34,7 +47,7 @@ function sessionStatusPayload(session: PreviewSession): Record<string, unknown> 
  * Anonymous preview sessions for local projects: no account required, access
  * is gated purely by the per-role tokens returned once at creation time.
  */
-previewRouter.post('/sessions', (req: Request, res: Response) => {
+previewRouter.post('/sessions', createSessionByIp, (req: Request, res: Response) => {
   const session = previewSessionService.createSession();
 
   res.status(201).json({

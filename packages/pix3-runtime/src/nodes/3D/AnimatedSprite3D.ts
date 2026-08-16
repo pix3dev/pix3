@@ -96,10 +96,14 @@ export class AnimatedSprite3D extends Node3D {
   private updateTexture(): void {
     const tex = this.loadedTextures[this._currentFrame];
     if (tex) {
+      // three r152 renamed `encoding` to `colorSpace`; both spellings are written through a
+      // structural view rather than a cast, so neither branch needs `any` and a typo in either
+      // property name is a compile error.
+      const colorSpaceView = tex as unknown as { colorSpace?: string; encoding?: number };
       if ('colorSpace' in tex) {
-        (tex as any).colorSpace = 'srgb';
+        colorSpaceView.colorSpace = 'srgb';
       } else if ('encoding' in tex) {
-        (tex as any).encoding = 3001;
+        colorSpaceView.encoding = 3001; // Legacy sRGBEncoding.
       }
       this.material.map = tex;
       this.material.color.set('#ffffff');

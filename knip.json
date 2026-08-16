@@ -4,6 +4,7 @@
   "entry": [
     "src/player/player-main.ts",
     "src/services/bg-removal/bg-removal.worker.ts",
-    "packages/pix3-runtime/src/index.ts"
+    "packages/pix3-runtime/src/index.ts",
+    "src/sw.ts"
   ]
 }

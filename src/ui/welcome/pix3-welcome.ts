@@ -163,7 +163,7 @@ export class Pix3Welcome extends ComponentBase {
   private projectError: string | null = appState.project.errorMessage;
 
   protected firstUpdated(): void {
-    Promise.resolve().then(() => {
+    void Promise.resolve().then(() => {
       this.loadRecents();
       this.loadCloudProjects();
     });

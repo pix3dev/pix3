@@ -794,7 +794,7 @@ export class ViewportRendererService {
           this.transformSession.updateTargetTransformFromControl();
         });
         this.transformControls.addEventListener('mouseUp', () => {
-          this.transformSession.handleTransformCompleted();
+          void this.transformSession.handleTransformCompleted();
         });
 
         // TransformControls is a control object, not a Three.js object,
@@ -1036,7 +1036,7 @@ export class ViewportRendererService {
     });
 
     this.transformControls.addEventListener('mouseUp', () => {
-      this.transformSession.handleTransformCompleted();
+      void this.transformSession.handleTransformCompleted();
     });
 
     if (attachedObject) {

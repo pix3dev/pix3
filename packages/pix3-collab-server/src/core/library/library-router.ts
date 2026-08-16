@@ -4,6 +4,7 @@ import path from 'path';
 import multer from 'multer';
 import { requireAuth, AuthenticatedRequest } from '../auth/auth-middleware.js';
 import {
+  getLibraryItemOwnerId,
   getOwnerLibraryItem,
   listOwnerLibraryItems,
   softDeleteLibraryItem,
@@ -11,7 +12,25 @@ import {
 } from './library-service.js';
 import { getItemDir, resolveSafePath } from './library-storage.js';
 
+/**
+ * The personal Asset Library sync surface.
+ *
+ * Every route here is addressed by a **client-chosen** item id, so "is this mine?" is the first
+ * question each one has to answer — before any filesystem work, because the bundle write wipes the
+ * item directory and there is no undoing that on a 403. An id that belongs to nobody is a create
+ * and is allowed; an id that belongs to someone else is refused, whatever its visibility.
+ */
 export const libraryRouter = Router();
+
+/**
+ * Whether `userId` may write to `itemId`, or the status to answer with.
+ *
+ * A foreign item answers 404, not 403: the caller is not entitled to learn that the id exists.
+ */
+function resolveWriteAccess(userId: string, itemId: string): 'allowed' | 404 {
+  const ownerId = getLibraryItemOwnerId(itemId);
+  return ownerId === null || ownerId === userId ? 'allowed' : 404;
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -63,6 +82,13 @@ libraryRouter.post(
   upload.array('files'),
   (req: AuthenticatedRequest, res: Response) => {
     const itemId = req.params.id;
+
+    // Before anything touches the disk: the write below wipes the item directory outright, so an
+    // ownership check placed after it would already have destroyed the victim's bundle.
+    if (resolveWriteAccess(req.user!.id, itemId) === 404) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
 
     let manifest: { id?: string; updatedAt?: number; files?: string[] };
     let paths: string[];
@@ -118,7 +144,13 @@ libraryRouter.delete('/items/:id', requireAuth, (req: AuthenticatedRequest, res:
   const deletedAtRaw = Number((req.body as { deletedAt?: unknown })?.deletedAt);
   const deletedAt = Number.isFinite(deletedAtRaw) && deletedAtRaw > 0 ? deletedAtRaw : Date.now();
 
-  softDeleteLibraryItem(req.user!.id, itemId, deletedAt);
+  // The tombstone is owner-scoped and says so in its return value. Discarding it and deleting the
+  // directory anyway is what let any signed-in user erase any bundle — store items included.
+  if (!softDeleteLibraryItem(req.user!.id, itemId, deletedAt)) {
+    res.status(404).json({ error: 'Item not found' });
+    return;
+  }
+
   fs.rmSync(getItemDir(itemId), { recursive: true, force: true });
 
   res.json({ ok: true, deletedAt });

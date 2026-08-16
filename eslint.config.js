@@ -21,6 +21,21 @@ const typescriptRules = {
   '@typescript-eslint/explicit-function-return-type': 'off',
   '@typescript-eslint/explicit-module-boundary-types': 'off',
 
+  // Type-aware promise rules. Both blocks already set `parserOptions.project`, so the type
+  // information these need was being computed on every lint run and then not used for anything.
+  //
+  // `no-floating-promises` is the one that earns its keep: a promise nobody holds is an error that
+  // vanishes, and in this app it does not even vanish quietly — the editor and the player both
+  // surface `unhandledrejection`, so a dropped rejection reports itself as a phantom runtime error
+  // with no context. Marking a deliberate fire-and-forget with `void` is the whole cost.
+  //
+  // `checksVoidReturn: false` on `no-misused-promises`: an `async` handler passed to
+  // `addEventListener` or a Lit `@click` is the normal idiom here, and flagging it would produce
+  // hundreds of findings about a pattern that is fine.
+  '@typescript-eslint/no-floating-promises': 'error',
+  '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
+  '@typescript-eslint/await-thenable': 'error',
+
   // A tree walk that seeds its cursor with `this` is the idiom throughout the node classes
   // (`getNodeByPath`, ancestor lookups), and a closure that captures the instance needs a name.
   // Neither is the bug this rule exists to catch, so name the ones we mean rather than

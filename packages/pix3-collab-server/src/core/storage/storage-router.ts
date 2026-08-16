@@ -7,6 +7,7 @@ import { attachOptionalAuth, requireAuth, AuthenticatedRequest } from '../auth/a
 import { resolveProjectAccess } from '../projects/projects-service.js';
 import { touchProject } from '../projects/projects-service.js';
 import { buildManifest } from './manifest.js';
+import { resolveContainedPath } from './contained-path.js';
 
 export const storageRouter = Router();
 
@@ -19,13 +20,12 @@ function getProjectDir(projectId: string): string {
   return path.resolve(config.PROJECTS_STORAGE_DIR, projectId);
 }
 
+/**
+ * Prevent path traversal. `allowRoot` because the directory routes legitimately address the project
+ * directory itself; the shared rule is in `contained-path.ts`.
+ */
 function resolveSafePath(projectDir: string, filePath: string): string | null {
-  const resolved = path.resolve(projectDir, filePath);
-  // Prevent path traversal
-  if (!resolved.startsWith(projectDir + path.sep) && resolved !== projectDir) {
-    return null;
-  }
-  return resolved;
+  return resolveContainedPath(projectDir, filePath, { allowRoot: true });
 }
 
 function checkAccess(req: AuthenticatedRequest, res: Response, write: boolean): boolean {
@@ -111,18 +111,18 @@ storageRouter.post(
       return;
     }
 
-    // Support both multipart upload and raw body
-    let content: Buffer;
-    if (req.file) {
-      content = req.file.buffer;
-    } else if (req.body && Buffer.isBuffer(req.body)) {
-      content = req.body;
-    } else if (typeof req.body === 'string') {
-      content = Buffer.from(req.body, 'utf-8');
-    } else {
-      res.status(400).json({ error: 'No file content provided. Use multipart or raw body.' });
+    // Multipart only. The route used to advertise a raw-body fallback, but the server mounts
+    // `express.json()` and no `express.raw()`, so `req.body` is never a Buffer or a string here —
+    // those branches could not be reached, and the 400 they fell through to blamed the client for
+    // a shape the server had no parser for. `ApiClient.uploadFile` has always sent multipart.
+    if (!req.file) {
+      res
+        .status(400)
+        .json({ error: 'No file content provided. Send the file as multipart/form-data.' });
       return;
     }
+
+    const content = req.file.buffer;
 
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content);

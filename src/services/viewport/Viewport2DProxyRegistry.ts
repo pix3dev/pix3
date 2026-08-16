@@ -1820,7 +1820,7 @@ export class Viewport2DProxyRegistry {
 
     const textureLoader = new THREE.TextureLoader();
 
-    (async () => {
+    void (async () => {
       try {
         const blob = await this.deps.readBlob(texturePath);
         const blobUrl = URL.createObjectURL(blob);

@@ -36,6 +36,8 @@ export interface Sprite2DProps extends Omit<Node2DProps, 'type'> {
   height?: number;
   color?: string;
   anchor?: SpriteAnchor2D | [number, number];
+  /** Cached width/height ratio of the source image; recomputed on load when absent. */
+  textureAspectRatio?: number | null;
   aspectRatioLocked?: boolean;
   /** Registry-backed shader effects attached to this sprite's material. */
   effects?: ShaderEffectEntry[];
@@ -106,8 +108,8 @@ export class Sprite2D extends Node2D implements InstancePropertySchemaProvider, 
     this.textureKey = props.textureKey ?? '';
     this.width = props.width;
     this.height = props.height;
-    this.textureAspectRatio = (props as any).textureAspectRatio ?? null;
-    this.aspectRatioLocked = (props as any).aspectRatioLocked ?? false;
+    this.textureAspectRatio = props.textureAspectRatio ?? null;
+    this.aspectRatioLocked = props.aspectRatioLocked ?? false;
     this.originalWidth = null;
     this.originalHeight = null;
     this.anchor = Sprite2D.normalizeAnchor(props.anchor);

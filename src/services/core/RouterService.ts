@@ -21,7 +21,7 @@ export class RouterService {
     // Listen to hash changes (for our query params in hash routing)
     const handleHashChange = () => {
       if (this.isUpdatingUrl) return;
-      this.handleUrlChange();
+      void this.handleUrlChange();
     };
 
     window.addEventListener('hashchange', handleHashChange);
@@ -37,7 +37,7 @@ export class RouterService {
     this.disposeSubscriptions = () => unsubs.forEach(fn => fn());
 
     // Perform initial URL parse
-    this.handleUrlChange();
+    void this.handleUrlChange();
   }
 
   dispose(): void {

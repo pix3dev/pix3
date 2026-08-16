@@ -1261,7 +1261,7 @@ export class InspectorPropertyRenderers {
               e: CustomEvent<{ width: number; height: number; aspectRatioLocked: boolean }>
             ) => {
               const { width, height, aspectRatioLocked } = e.detail;
-              this.host.applySpriteSizeChange(width, height, aspectRatioLocked);
+              void this.host.applySpriteSizeChange(width, height, aspectRatioLocked);
             }}
             @reset-size=${() => this.handleSizeReset()}
           ></pix3-size-editor>

@@ -92,6 +92,17 @@ export class ServiceContainer {
     return token;
   }
 
+  /**
+   * Whether `token` has a registration.
+   *
+   * For the genuinely optional dependency — a service that exists in the editor but not in a
+   * headless or unit-test container. Callers were writing `try { getService(…) } catch {}` for that,
+   * which also swallows every error the service itself throws once it *is* registered.
+   */
+  hasService(token: symbol): boolean {
+    return this.services.has(token);
+  }
+
   // Get service instance
   getService<T = unknown>(token: symbol): T {
     const descriptor = this.services.get(token) as ServiceDescriptor<T> | undefined;

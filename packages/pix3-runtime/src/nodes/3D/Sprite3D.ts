@@ -115,10 +115,6 @@ export class Sprite3D extends Node3D {
       };
       const { width: w, height: h } = getNaturalTextureSize(img);
 
-      console.log(
-        `[Sprite3D] Texture loaded: ${w}x${h} for node "${this.name}" (natural=${img.naturalWidth}x${img.naturalHeight})`
-      );
-
       if (w && h) {
         this.textureAspectRatio = w / h;
         this.originalWidth = w;

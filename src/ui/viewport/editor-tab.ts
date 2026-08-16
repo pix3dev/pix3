@@ -780,7 +780,7 @@ export class EditorTabComponent extends ComponentBase {
 
   private toggleNavigationMode(): void {
     const command = toggleNavigationMode();
-    this.commandDispatcher.execute(command);
+    void this.commandDispatcher.execute(command);
   }
 
   private zoomIn(): void {
@@ -1215,7 +1215,7 @@ export class EditorTabComponent extends ComponentBase {
 
     const has2DTransform = this.viewportRenderer.has2DTransform?.();
     if (has2DTransform) {
-      this.viewportRenderer.complete2DTransform?.();
+      void this.viewportRenderer.complete2DTransform?.();
       this.pointerDownPos = undefined;
       this.pointerDownTime = undefined;
       this.isDragging = false;
