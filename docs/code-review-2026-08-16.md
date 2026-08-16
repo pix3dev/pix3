@@ -3,6 +3,9 @@
 Full-codebase review of the Pix3 editor, `@pix3/runtime` and `@pix3/collab-server`, run against
 `main` @ `3a6f223`.
 
+**Status: closed.** All findings fixed on `fix/code-review-2026-08-16` except three deferred by
+agreement (see §3). Start at §4 for what changed and §5 for what to check before deploying.
+
 > **Doc-policy note.** `AGENTS.md` rule 8 forbids new feature `.md` files; this report was requested
 > explicitly. It is a one-off audit record, not a feature doc — if it should live in `.plans/`
 > instead, `git mv` it there once the fixes land.
@@ -253,38 +256,26 @@ Lit event handlers quiet), fix or `void`-mark the 22 sites.
 
 ---
 
-## 3. Proposed fix plan
+## 3. Fix plan (as agreed, 2026-08-16)
 
 Ordered by the task's rule (security → correctness → architecture → quality). One commit per group,
-`type-check` + `lint` + `test` green after each.
+`type-check` + `lint` + `test` green after each. All ten shipped; see §4.
 
-| # | Commit | Contents | Risk |
-|---|---|---|---|
-| 1 | `fix(collab-server): fail fast on a default JWT secret` | H3. Startup guard + spec. | none — config only |
-| 2 | `fix(collab-server): contain CRDT scene and script writes to the project directory` | C1. Shared path-containment helper + spec feeding `../`, absolute and drive-absolute paths. | low |
-| 3 | `fix(collab-server): scope library item writes and deletes to their owner` | H1, H2. Ownership check before disk work; owner-filtered upsert; spec. | low |
-| 4 | `fix(collab-server): throttle auth and preview-session creation` | H4, M2, M1 (dummy-hash compare). Shared sliding-window bucket lifted out of `rooms-router`. | low |
-| 5 | `fix(collab-server): validate registration input` | M5, plus the `email` case-sensitivity mismatch. | low |
-| 6 | `fix(runtime): stop AssetLoader raising unhandled rejections on failed loads` | M3 + spec. Should also quiet the known Vitest exit-code oddity. | low |
-| 7 | `refactor(properties): share the viewport-transform sync and stop swallowing its errors` | M4. | low |
-| 8 | `chore(lint): enable type-aware promise rules` | M7 + the 22 sites. Do this **after** 6–7 so the fixes are not lost in the noise. | medium — touches 20 files |
-| 9 | `fix(collab-server): align share-token create/revoke roles` | M6. **Behavioural change** — confirm before I do it. | needs a decision |
-| 10 | `chore: quality sweep` | L1, L2, L3, L6, L7. | low |
+Two decisions taken before starting:
 
-**Deliberately not doing** unless you ask: L4 (untangling cycles is a wide refactor for no concrete
-defect), L8 (permitted by the current rule), and the knip "unused export" list (false positives from
-`@customElement`).
+- **#1 hard-fails** in production rather than warning. The operational risk is stated with it: a
+  deployment currently running on the default secret will not start after this, so the env preflight
+  in §5 has to run before the rollout.
+- **#9 is owner-only for both create and revoke**, with the silent invalidation of an
+  already-distributed link removed at the same time.
 
-**Needs your decision before I touch it:**
+**Deliberately not done**: L4 (untangling 41 import cycles is a wide refactor for no concrete
+defect), L8 (permitted by the current gateway-scope rule), and the knip "unused export" list (false
+positives from `@customElement`).
 
-- **#9** changes who can mint a share link. Owner-only for both verbs is my recommendation, but it
-  can break an existing workflow.
-- Whether **#1** should hard-fail or only warn loudly. Hard-fail is correct, but it will take down a
-  running deployment that is currently on the default secret — so it wants a coordinated env-var
-  check first.
-- Nothing in this list touches the `@pix3/runtime` public API or the scene format. Fix 6 is internal
-  to `AssetLoader`; fix 2 changes only where the *server* puts bytes, not the YAML or the
-  `Y.Map('scene')` shape.
+Nothing here touched the `@pix3/runtime` public API or the scene format: fix 6 is internal to
+`AssetLoader`, and fix 2 changed only where the *server* puts bytes, not the YAML or the
+`Y.Map('scene')` shape.
 
 ---
 
@@ -309,4 +300,100 @@ src/features/scene/CreateSprite2DOperation.spec.ts:205, 209
 
 ## 4. What was fixed
 
-_(filled in during stage 2)_
+Branch `fix/code-review-2026-08-16`, nine commits. Every finding from CRITICAL down to LOW is
+closed except the three listed as deferred in §3.
+
+| Commit | Findings | What changed |
+|---|---|---|
+| `8e92bed` | H3 | `core/config-preflight.ts`: in `NODE_ENV=production` the process exits 1 when `JWT_SECRET` is unset, still the default, or under 32 bytes. `ROOMS_JWT_SECRET` checked when overridden. Development fallback untouched. |
+| `3c99b37` | C1 | `core/storage/contained-path.ts` — one containment rule, now used by all three callers. CRDT persistence extracted to `sync/document-files.ts` (which is what made it testable). Escaping paths are skipped and logged, never rewritten. Also fixed `npm run type-check`, which never covered this package. |
+| `628fabc` | H1, H2 | Ownership gate before any filesystem work on `POST /api/library/items/:id`; `DELETE` now honours the owner-scoped tombstone's verdict. `upsertLibraryItem` carries `WHERE owner_id = excluded.owner_id` and returns whether it applied. |
+| `d374d0a` | H4, M1, M2, M5, L5 | `core/rate-limit.ts` generalised from the rooms bucket, applied to login (per IP *and* per email), register, and preview-session creation; 429s carry `Retry-After`. Login's unknown-account branch burns an equivalent bcrypt comparison. Registration input validated; emails stored and looked up lowercased. First spec for this surface. |
+| `43d350f` | M3 | `AssetLoader` in-flight cleanup goes through `then(clear, clear)` instead of a detached `.finally`, so a failed load rejects once — into the caller — instead of also firing `unhandledrejection`. |
+| `9e21aa1` | M4 | `ServiceContainer.hasService` + `syncViewportTransform`, replacing nine copies of a `catch {}` that discarded real renderer failures including inside undo/redo. |
+| `f4817c8` | M7 | `no-floating-promises` / `no-misused-promises` / `await-thenable` enabled; all 18 sites marked `void`, and one spec that asserted without awaiting an async undo/redo fixed. |
+| `0d21b68` | M6 | Share link is owner-only to create *and* revoke, and idempotent — the existing token comes back unless `rotate: true` is passed. First spec for this router. |
+| `d77810c` | L1, L2, L3, L6, L7 | Last four `any`s removed; dead raw-body upload branch deleted; `/files/*` URLs encoded per segment; 15 per-asset / per-node `console.log`s removed from the runtime; `src/sw.ts` declared as a knip entry. |
+
+### Verification
+
+Every fix was checked against the bug it claims to fix by **reinstating the old code and confirming
+the new tests fail** — a test that passes both ways is not evidence:
+
+| Fix | Tests failing against the pre-fix code |
+|---|---|
+| C1 | 6 of 12 (the 6 legitimate round-trip cases keep passing) |
+| H1, H2 | 4 |
+| H4, M1, M5 | 14 of 23 |
+| M3 | 3 of 4 |
+| M6 | 4 of 11 |
+
+Two things that check turned up, which a passing suite had hidden:
+
+- The first HTTP-level timing assertion for M1 **passed against the vulnerable code** — at a test
+  salt-round, request overhead swamps the bcrypt difference. It was replaced by a unit assertion in
+  `password.spec.ts` at the production cost, which does fail an early-returning implementation.
+- Four operation specs stubbed `ServiceContainer` by hand and relied on `getService` *throwing*.
+  They compiled and passed only because the `catch {}` in M4 turned that into success.
+
+Final state: `type-check` 0 errors (now including `pix3-collab-server`, which it did not before),
+`lint` 0 errors **0 warnings** (was 4), `test` 309 files / 3451 tests passing (was 300 / 3358 — 51
+new tests), `build` clean, `knip` reports no unused files.
+
+---
+
+## 5. Before deploying
+
+**The JWT preflight will stop a server that is currently on the default secret.** Check the
+environment on the host *before* restarting the service:
+
+```bash
+# Must be >= 32 bytes and not 'change-me-in-production'.
+awk -F= '/^JWT_SECRET=/{printf "JWT_SECRET: %d bytes -> %s\n", length($2), $2}' shared/.env
+# Only checked when set explicitly; unset, it is JWT_SECRET.
+awk -F= '/^ROOMS_JWT_SECRET=/{printf "ROOMS_JWT_SECRET: %d bytes\n", length($2)}' shared/.env
+```
+
+If either is wrong, the server prints the exact variable and requirement and exits 1 — it does not
+start half-working. Same note is now in `packages/pix3-collab-server/README.md`.
+
+Two other behavioural changes worth announcing rather than discovering:
+
+- **An editor can no longer create a share link.** The editor UI already gated this on
+  `role === 'owner'`, so no shipped client loses a working control — but an API consumer doing it
+  directly now gets 403.
+- **Posting to `/share` twice no longer rotates the token.** Anything that relied on that for
+  rotation must pass `{ rotate: true }`.
+
+---
+
+## 6. Recommendations
+
+**Enabled here — keep them on.** `no-floating-promises` earned its keep immediately (it found M3),
+and it is cheap now that typed linting is already paid for.
+
+**Worth turning on next**, in rough order of value against noise:
+
+| Rule | Why here specifically |
+|---|---|
+| `@typescript-eslint/no-unnecessary-condition` | Would have flagged the unreachable raw-body branches in L1. |
+| `@typescript-eslint/require-await` | Several `async` operation closures never await; harmless but it masks the ones that should. |
+| `no-empty` (currently disabled per-site with comments) | Nine of those disables were M4. With that gone, the rule is close to clean — worth turning on so the next one has to be argued for. |
+| `@typescript-eslint/no-unsafe-argument` and friends | Only after the `unknown`-heavy property-schema `getValue`/`setValue` closures get a typed helper; today it would be hundreds of findings on a deliberate pattern. |
+
+**Structural, not lint:**
+
+1. **`npm run type-check` now covers `pix3-collab-server`** — it did not before, so server type
+   errors were invisible to CI and to `npm run build`. Worth confirming CI runs the same script.
+2. **The rate limiter is in-process.** Budgets are per-instance, which is honest for one node and
+   wrong the day there are two. If the deployment ever scales out, this needs a shared store — the
+   interface (`consume` / `retryAfterMs`) is already the right shape for it.
+3. **Container stubs in specs are hand-rolled 28 times** and each one is a partial fake. A single
+   `makeTestContainer()` helper would have made the M4 breakage a one-line fix instead of four, and
+   would stop the next optional-dependency lookup from silently taking the "not registered" path.
+4. **Consider a `catch`-shape rule of thumb**: a bare `catch {}` is only correct when the *only*
+   thing in the `try` is the operation allowed to fail. Every instance found here wrapped more than
+   that. The fix is usually to ask the question directly (`hasService`) rather than to catch.
+5. **`packages/pix3-collab-server/data/*.sqlite` is tracked in git.** Running the server locally
+   dirties the working tree with WAL and shm files. Not a defect, but it makes `git status` unusable
+   as a "did I leave something behind?" check — worth `.gitignore`-ing and removing from the index.
