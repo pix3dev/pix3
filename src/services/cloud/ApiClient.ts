@@ -115,6 +115,22 @@ function readIssues(body: unknown): ApiStoreValidationIssue[] | undefined {
   );
 }
 
+/**
+ * Encode a project- or bundle-relative path for a `/files/*` URL.
+ *
+ * Per segment, so the `/` separators the wildcard route depends on survive while everything else is
+ * escaped. Interpolating the raw path — which the project file routes did, while `projectId` right
+ * beside them was encoded — truncates at the first `?` or `#` in a filename and lets the URL parser
+ * collapse a `..` segment before the request is even sent.
+ */
+function encodeResourcePath(resourcePath: string): string {
+  return resourcePath
+    .split('/')
+    .filter(Boolean)
+    .map(segment => encodeURIComponent(segment))
+    .join('/');
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const fullUrl = `${BASE_URL}${path}`;
   const res = await fetch(fullUrl, {
@@ -277,7 +293,7 @@ export async function downloadFile(
   shareToken?: string
 ): Promise<Response> {
   const res = await fetch(
-    `${BASE_URL}/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`,
+    `${BASE_URL}/api/projects/${encodeURIComponent(projectId)}/files/${encodeResourcePath(filePath)}`,
     {
       credentials: 'include',
       headers: buildShareTokenHeaders(undefined, shareToken),
@@ -304,7 +320,7 @@ export async function uploadFile(
   formData.append('file', blob, filePath.split('/').pop() ?? 'file');
 
   const res = await fetch(
-    `${BASE_URL}/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`,
+    `${BASE_URL}/api/projects/${encodeURIComponent(projectId)}/files/${encodeResourcePath(filePath)}`,
     {
       method: 'POST',
       credentials: 'include',
@@ -322,9 +338,12 @@ export async function uploadFile(
 }
 
 export async function deleteFile(projectId: string, filePath: string): Promise<{ ok: boolean }> {
-  return request(`/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`, {
-    method: 'DELETE',
-  });
+  return request(
+    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeResourcePath(filePath)}`,
+    {
+      method: 'DELETE',
+    }
+  );
 }
 
 export async function createDirectory(
@@ -361,7 +380,7 @@ export function getLibraryIndex(): Promise<{ items: LibraryIndexEntry[] }> {
 
 export async function downloadLibraryFile(itemId: string, filePath: string): Promise<Response> {
   const res = await fetch(
-    `${BASE_URL}/api/library/items/${encodeURIComponent(itemId)}/files/${filePath}`,
+    `${BASE_URL}/api/library/items/${encodeURIComponent(itemId)}/files/${encodeResourcePath(filePath)}`,
     { credentials: 'include' }
   );
   if (!res.ok) {
@@ -479,12 +498,7 @@ export interface ApiStoreItemMetaPatch {
  * this URL (`<img src>`, plain `fetch`) with no cookie and no manifest round-trip.
  */
 export function storeFileUrl(itemId: string, bundlePath: string): string {
-  const encodedPath = bundlePath
-    .split('/')
-    .filter(Boolean)
-    .map(segment => encodeURIComponent(segment))
-    .join('/');
-  return `${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}/files/${encodedPath}`;
+  return `${BASE_URL}/api/library/store/items/${encodeURIComponent(itemId)}/files/${encodeResourcePath(bundlePath)}`;
 }
 
 /**

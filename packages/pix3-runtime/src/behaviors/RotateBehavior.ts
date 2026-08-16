@@ -55,12 +55,7 @@ export class RotateBehavior extends Script {
   }
 
   onAttach(): void {
-    console.log(`[RotateBehavior] Attached to node "${this.node?.name}" (${this.node?.nodeId})`);
     this.setRotationSpeed(this.getRotationSpeed());
-  }
-
-  onStart(): void {
-    console.log(`[RotateBehavior] Starting on node "${this.node?.name}"`);
   }
 
   onUpdate(dt: number): void {
@@ -69,10 +64,6 @@ export class RotateBehavior extends Script {
     }
 
     this.node.rotation.y += this.rotationSpeed * dt;
-  }
-
-  onDetach(): void {
-    console.log(`[RotateBehavior] Detached from node "${this.node?.name}"`);
   }
 
   private getRotationSpeed(): number {

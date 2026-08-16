@@ -131,16 +131,6 @@ export class SimpleMoveBehavior extends Script {
     };
   }
 
-  onAttach(): void {
-    console.log(
-      `[SimpleMoveBehavior] Attached to node "${this.node?.name}" (${this.node?.nodeId})`
-    );
-  }
-
-  onStart(): void {
-    console.log(`[SimpleMoveBehavior] Starting on node "${this.node?.name}"`);
-  }
-
   onUpdate(dt: number): void {
     if (!this.input || !this.node) return;
 
@@ -162,10 +152,6 @@ export class SimpleMoveBehavior extends Script {
     } else {
       this.node.position.z += deltaVertical;
     }
-  }
-
-  onDetach(): void {
-    console.log(`[SimpleMoveBehavior] Detached from node "${this.node?.name}"`);
   }
 
   private getSpeed(): number {

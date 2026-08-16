@@ -1,5 +1,4 @@
 import { Script } from '../core/ScriptComponent';
-import { NodeBase } from '../nodes/NodeBase';
 import type { PropertySchema } from '../fw/property-schema';
 
 type SineAxis = 'x' | 'y' | 'z';
@@ -102,18 +101,11 @@ export class SineBehavior extends Script {
     };
   }
 
-  onAttach(node: NodeBase): void {
-    console.log(`[SineOscillator] Attached to node: ${node.name} (${node.nodeId})`);
-  }
-
   onStart(): void {
     if (this.node) {
       this.initialPositionX = this.node.position.x;
       this.initialPositionY = this.node.position.y;
       this.initialPositionZ = this.node.position.z;
-      console.log(
-        `[SineOscillator] Initialized base position: (${this.initialPositionX}, ${this.initialPositionY}, ${this.initialPositionZ})`
-      );
     }
   }
 
@@ -135,10 +127,6 @@ export class SineBehavior extends Script {
     } else {
       this.node.position.z += offset;
     }
-  }
-
-  onDetach(): void {
-    console.log(`[SineOscillator] Detached from node: ${this.node?.name}`);
   }
 
   private getAmplitude(): number {

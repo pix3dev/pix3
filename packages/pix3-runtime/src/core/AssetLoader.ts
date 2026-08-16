@@ -216,8 +216,6 @@ export class AssetLoader {
       return inFlight;
     }
 
-    console.log(`[AssetLoader] Loading audio: ${resourcePath}`);
-
     const loadPromise = (async (): Promise<AudioBuffer> => {
       try {
         let arrayBuffer: ArrayBuffer;
@@ -256,7 +254,6 @@ export class AssetLoader {
 
         const audioBuffer = await audioService.decodeAudioData(arrayBuffer);
 
-        console.log(`[AssetLoader] Successfully loaded audio: ${resourcePath}`);
         this.audioMetadataCache.set(resourcePath, {
           resourcePath,
           sizeBytes: Math.max(0, Math.round(sizeBytes || arrayBuffer.byteLength)),
@@ -303,8 +300,6 @@ export class AssetLoader {
       }
     }
 
-    console.log(`[AssetLoader] Loading texture: ${resourcePath}`);
-
     const loadPromise = (async (): Promise<Texture> => {
       let url: string;
       let isObjectURL = false;
@@ -314,7 +309,6 @@ export class AssetLoader {
           const blob = await this.resources.readBlob(resourcePath);
           url = URL.createObjectURL(blob);
           isObjectURL = true;
-          console.log(`[AssetLoader] Created ObjectURL for ${resourcePath}`);
         } catch (err) {
           console.error(`[AssetLoader] Failed to read blob for ${resourcePath}:`, err);
           throw err;
@@ -327,7 +321,6 @@ export class AssetLoader {
         this.textureLoader.load(
           url,
           texture => {
-            console.log(`[AssetLoader] Successfully loaded texture: ${resourcePath}`);
             if (isObjectURL) {
               URL.revokeObjectURL(url);
             }
