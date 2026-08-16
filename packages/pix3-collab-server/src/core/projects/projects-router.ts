@@ -193,14 +193,29 @@ projectsRouter.delete(
   }
 );
 
-// POST /api/projects/:id/share — generate share token
+/**
+ * POST /api/projects/:id/share — the project's share link.
+ *
+ * **Owner-only, like the revoke below.** It used to accept `editor` too, so an editor could publish
+ * a world-readable link to a project whose owner had no way to see it had been created — an
+ * asymmetry with no reason behind it, since only the owner could take it back. The editor UI has
+ * always gated this control on `role === 'owner'`, so the two now agree.
+ *
+ * Idempotent: returns the existing token unless `rotate: true` is passed. See `ensureShareToken`.
+ */
 projectsRouter.post(
   '/:id/share',
   requireAuth,
-  requireProjectAccess('owner', 'editor'),
+  requireProjectAccess('owner'),
   (req: AuthenticatedRequest, res: Response) => {
-    const token = projectsService.generateShareToken(req.params.id);
-    res.json({ share_token: token });
+    const rotate = (req.body as { rotate?: unknown } | undefined)?.rotate === true;
+    const result = projectsService.ensureShareToken(req.params.id, rotate);
+    if (!result) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    res.json({ share_token: result.token, outcome: result.outcome });
   }
 );
 

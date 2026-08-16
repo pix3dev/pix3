@@ -148,11 +148,41 @@ export function deleteProject(projectId: string): void {
   }
 }
 
-export function generateShareToken(projectId: string): string {
-  const db = getDb();
+/** What {@link ensureShareToken} did, so the router can say so and a caller can tell them apart. */
+export interface ShareTokenResult {
+  token: string;
+  outcome: 'created' | 'existing' | 'rotated';
+}
+
+function mintShareToken(projectId: string): string {
   const token = crypto.randomBytes(24).toString('base64url');
-  db.prepare('UPDATE projects SET share_token = ? WHERE id = ?').run(token, projectId);
+  getDb().prepare('UPDATE projects SET share_token = ? WHERE id = ?').run(token, projectId);
   return token;
+}
+
+/**
+ * The project's share token, minting one only if there is none.
+ *
+ * Idempotent on purpose. This used to overwrite unconditionally, so opening the share dialog and
+ * picking "link" a second time silently invalidated every link already sent out — with a 200 and a
+ * fresh token that looked exactly like the first one. Rotation is still available, but it now has
+ * to be asked for (`rotate: true`), which is the difference between an accident and a decision.
+ */
+export function ensureShareToken(projectId: string, rotate = false): ShareTokenResult | null {
+  const project = getProject(projectId);
+  if (!project) {
+    return null;
+  }
+
+  if (rotate) {
+    return { token: mintShareToken(projectId), outcome: 'rotated' };
+  }
+
+  if (project.share_token) {
+    return { token: project.share_token, outcome: 'existing' };
+  }
+
+  return { token: mintShareToken(projectId), outcome: 'created' };
 }
 
 export function revokeShareToken(projectId: string): void {
