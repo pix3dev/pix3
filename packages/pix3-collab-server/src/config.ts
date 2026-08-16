@@ -6,6 +6,8 @@ export const config = {
   // Per-user personal Asset Library bundles: LIBRARY_STORAGE_DIR/<itemId>/<bundle-relative>.
   // Ownership/visibility live in the `library_items` table; the directory only holds blobs.
   LIBRARY_STORAGE_DIR: process.env.LIBRARY_STORAGE_DIR || './data/library',
+  // Development-only fallback. `core/config-preflight.ts` refuses to start when NODE_ENV is
+  // production and this is still the default (or shorter than 32 bytes) — keep the two in sync.
   JWT_SECRET: process.env.JWT_SECRET || 'change-me-in-production',
   PASSWORD_SALT_ROUNDS: parseInt(process.env.PASSWORD_SALT_ROUNDS || '10', 10),
   // Origins allowed to act as the signed-in user (comma-separated): they may read cookie-authenticated

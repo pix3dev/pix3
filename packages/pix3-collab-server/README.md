@@ -58,9 +58,17 @@ packages/pix3-collab-server/
 - `DB_PATH`: Путь к основной SQLite БД (по умолчанию `./data/core.sqlite`)
 - `HOCUSPOCUS_DB_PATH`: Путь к SQLite БД для CRDT-состояния (по умолчанию `./data/crdt.sqlite`)
 - `PROJECTS_STORAGE_DIR`: Путь к директории с проектами и ассетами (по умолчанию `./data/projects`)
-- `JWT_SECRET`: Секретный ключ для JWT-токенов
+- `JWT_SECRET`: Секретный ключ для JWT-токенов. **В `NODE_ENV=production` сервер отказывается стартовать**, если он не задан, равен дев-дефолту `change-me-in-production` или короче 32 байт (`src/core/config-preflight.ts`). Дефолт для локальной разработки сохранён: без `.env` `npm run dev` работает как раньше
 - `PASSWORD_SALT_ROUNDS`: Число раундов bcrypt (по умолчанию `10`)
 - И другие параметры (см. `src/config.ts`)
+
+> **Env-preflight перед выкаткой.** Тот же гейт проверяет `ROOMS_JWT_SECRET`, но только если он задан явно — незаданный он равен `JWT_SECRET`, который уже проверен. Быстрая проверка на хосте до рестарта сервиса:
+>
+> ```bash
+> # >= 32, и не 'change-me-in-production'
+> awk -F= '/^JWT_SECRET=/{printf "JWT_SECRET: %d bytes -> %s\n", length($2), $2}' shared/.env
+> awk -F= '/^ROOMS_JWT_SECRET=/{printf "ROOMS_JWT_SECRET: %d bytes\n", length($2)}' shared/.env
+> ```
 
 Пример `.env`:
 
