@@ -31,6 +31,11 @@ const {
   appendAudit,
   upsertCategory,
   upsertPublicItem,
+  getLibraryItemOwnerId,
+  getOwnerLibraryItem,
+  listOwnerLibraryItems,
+  softDeleteLibraryItem,
+  upsertLibraryItem,
 } = await import('./library-service.js');
 
 let dbPath: string | null = null;
@@ -267,5 +272,88 @@ describe('library-service store queries', () => {
       ['ghost', null],
       ['u1', 'a'],
     ]);
+  });
+
+  /**
+   * The private-library ownership rules, against real SQL.
+   *
+   * The router refuses a foreign id before reaching any of this, so these are the second lock —
+   * and the reason they are worth asserting is that the first lock is one `if` away from being
+   * deleted by someone who assumes the statement is already scoped.
+   */
+  describe('private library ownership', () => {
+    beforeEach(() => {
+      testDb!
+        .prepare(
+          `INSERT INTO users (id, email, username, password_hash) VALUES ('u2', 'd@e.f', 'd', 'x')`
+        )
+        .run();
+    });
+
+    it('creates an item and reports its owner', () => {
+      expect(getLibraryItemOwnerId('kit')).toBeNull();
+
+      expect(upsertLibraryItem('u1', 'kit', { id: 'kit', name: 'Kit' }, 100)).toBe(true);
+
+      expect(getLibraryItemOwnerId('kit')).toBe('u1');
+      expect(listOwnerLibraryItems('u1').map(entry => entry.id)).toEqual(['kit']);
+      expect(listOwnerLibraryItems('u2')).toEqual([]);
+    });
+
+    it('lets the owner replace their own item — the common re-sync path', () => {
+      upsertLibraryItem('u1', 'kit', { id: 'kit', name: 'Kit' }, 100);
+
+      expect(upsertLibraryItem('u1', 'kit', { id: 'kit', name: 'Kit v2' }, 200)).toBe(true);
+
+      const entry = listOwnerLibraryItems('u1')[0];
+      expect(entry?.updatedAt).toBe(200);
+      expect((entry?.manifest as { name: string }).name).toBe('Kit v2');
+    });
+
+    it('refuses to let another user overwrite the row', () => {
+      upsertLibraryItem('u1', 'kit', { id: 'kit', name: 'Kit' }, 100);
+
+      expect(upsertLibraryItem('u2', 'kit', { id: 'kit', name: 'Stolen' }, 999)).toBe(false);
+
+      expect(getLibraryItemOwnerId('kit')).toBe('u1');
+      const entry = listOwnerLibraryItems('u1')[0];
+      expect(entry?.updatedAt).toBe(100);
+      expect((entry?.manifest as { name: string }).name).toBe('Kit');
+    });
+
+    it('refuses to let a plain user take a public store item private', () => {
+      upsertPublicItem('u1', 'store-kit', { id: 'store-kit' }, 1, {
+        status: 'published',
+        categoryPath: null,
+        featured: false,
+        publishedAt: 1,
+      });
+
+      expect(upsertLibraryItem('u2', 'store-kit', { id: 'store-kit' }, 999)).toBe(false);
+
+      expect(getPublicItem('store-kit')?.status).toBe('published');
+    });
+
+    it('tombstones only for the owner', () => {
+      upsertLibraryItem('u1', 'kit', { id: 'kit' }, 100);
+
+      expect(softDeleteLibraryItem('u2', 'kit', 500)).toBe(false);
+      expect(getOwnerLibraryItem('u1', 'kit')?.deleted).toBe(0);
+
+      expect(softDeleteLibraryItem('u1', 'kit', 500)).toBe(true);
+      expect(getOwnerLibraryItem('u1', 'kit')?.deleted).toBe(1);
+    });
+
+    it('reports false for a tombstone on an id that does not exist', () => {
+      expect(softDeleteLibraryItem('u1', 'never-existed', 1)).toBe(false);
+    });
+
+    it('clears the tombstone when the owner re-uploads', () => {
+      upsertLibraryItem('u1', 'kit', { id: 'kit' }, 100);
+      softDeleteLibraryItem('u1', 'kit', 200);
+
+      expect(upsertLibraryItem('u1', 'kit', { id: 'kit' }, 300)).toBe(true);
+      expect(getOwnerLibraryItem('u1', 'kit')?.deleted).toBe(0);
+    });
   });
 });

@@ -59,8 +59,29 @@ export function getOwnerLibraryItem(ownerId: string, id: string): LibraryItemRow
 }
 
 /**
+ * Who owns `id`, across every visibility, or `null` when no row exists.
+ *
+ * Deliberately *not* owner-scoped: this answers "may this caller write here?", and the two answers
+ * it has to separate are "nobody owns it, so creating it is fine" and "someone else owns it". An
+ * owner-filtered lookup collapses both into `undefined`, which is exactly how an upload could land
+ * on another user's item — including a curated Asset Store one, whose owner is an admin.
+ */
+export function getLibraryItemOwnerId(id: string): string | null {
+  const row = getDb().prepare('SELECT owner_id FROM library_items WHERE id = ?').get(id) as
+    | { owner_id: string }
+    | undefined;
+  return row?.owner_id ?? null;
+}
+
+/**
  * Create or replace an item (clears any tombstone). `updatedAt` is the client-supplied
  * authoritative timestamp used for last-write-wins on the next sync.
+ *
+ * The `WHERE owner_id = excluded.owner_id` on the conflict path is a backstop, not the gate: the
+ * router refuses a foreign id before any of this runs. It is here because the row this statement
+ * targets is named by a client-supplied id, and a second lock on that door costs one clause.
+ * A mismatch updates nothing and raises nothing — {@link upsertLibraryItem} returns whether the row
+ * is now the caller's so a caller that skipped the gate still cannot mistake silence for success.
  */
 export function upsertLibraryItem(
   ownerId: string,
@@ -68,8 +89,8 @@ export function upsertLibraryItem(
   manifest: unknown,
   updatedAt: number,
   visibility: LibraryItemVisibility = 'private'
-): void {
-  getDb()
+): boolean {
+  const result = getDb()
     .prepare(
       `INSERT INTO library_items (id, owner_id, visibility, manifest, updated_at, deleted)
        VALUES (?, ?, ?, ?, ?, 0)
@@ -77,9 +98,11 @@ export function upsertLibraryItem(
          visibility = excluded.visibility,
          manifest = excluded.manifest,
          updated_at = excluded.updated_at,
-         deleted = 0`
+         deleted = 0
+       WHERE library_items.owner_id = excluded.owner_id`
     )
     .run(id, ownerId, visibility, JSON.stringify(manifest), updatedAt);
+  return result.changes > 0;
 }
 
 /** Tombstone an item: keep the row (for propagation) but drop its manifest and mark deleted. */
