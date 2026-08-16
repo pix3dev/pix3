@@ -26,11 +26,18 @@ export const DEFAULT_JWT_SECRET = 'change-me-in-production';
  */
 export const MIN_SECRET_BYTES = 32;
 
-/** The environment slice the check reads. Passed in so it can be tested without touching `process`. */
+/**
+ * The environment slice the check reads. Passed in so it can be tested without touching `process`.
+ *
+ * The index signature is what makes `process.env` (a bare `{[k: string]: string | undefined}`)
+ * assignable: without it TypeScript's weak-type check rejects the real caller, since `ProcessEnv`
+ * declares none of the three names literally.
+ */
 export interface PreflightEnv {
   readonly NODE_ENV?: string | undefined;
   readonly JWT_SECRET?: string | undefined;
   readonly ROOMS_JWT_SECRET?: string | undefined;
+  readonly [key: string]: string | undefined;
 }
 
 /** Raised when production configuration is unsafe. Carries every problem, not just the first. */

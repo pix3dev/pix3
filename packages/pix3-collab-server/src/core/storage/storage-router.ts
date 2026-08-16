@@ -7,6 +7,7 @@ import { attachOptionalAuth, requireAuth, AuthenticatedRequest } from '../auth/a
 import { resolveProjectAccess } from '../projects/projects-service.js';
 import { touchProject } from '../projects/projects-service.js';
 import { buildManifest } from './manifest.js';
+import { resolveContainedPath } from './contained-path.js';
 
 export const storageRouter = Router();
 
@@ -19,13 +20,12 @@ function getProjectDir(projectId: string): string {
   return path.resolve(config.PROJECTS_STORAGE_DIR, projectId);
 }
 
+/**
+ * Prevent path traversal. `allowRoot` because the directory routes legitimately address the project
+ * directory itself; the shared rule is in `contained-path.ts`.
+ */
 function resolveSafePath(projectDir: string, filePath: string): string | null {
-  const resolved = path.resolve(projectDir, filePath);
-  // Prevent path traversal
-  if (!resolved.startsWith(projectDir + path.sep) && resolved !== projectDir) {
-    return null;
-  }
-  return resolved;
+  return resolveContainedPath(projectDir, filePath, { allowRoot: true });
 }
 
 function checkAccess(req: AuthenticatedRequest, res: Response, write: boolean): boolean {

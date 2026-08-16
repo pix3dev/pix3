@@ -9,6 +9,12 @@ import * as Y from 'yjs';
 import { config } from '../config.js';
 import { verifyToken } from '../core/auth/auth-middleware.js';
 import { getProjectByShareToken, getUserRole } from '../core/projects/projects-service.js';
+import { resolveContainedPath } from '../core/storage/contained-path.js';
+import {
+  loadScenesFromDisk,
+  loadScriptsFromDisk,
+  persistDocumentToDisk,
+} from './document-files.js';
 
 const CRDT_DOCUMENTS_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS documents (
@@ -59,76 +65,38 @@ export function createHocuspocusServer(): CollaborationServer {
     async onLoadDocument({ document, documentName }) {
       loadStoredDocumentState(crdtDb, documentName, document);
 
-      const projectId = documentName.replace(/^project:/, '');
-      const projectDir = path.resolve(config.PROJECTS_STORAGE_DIR, projectId);
+      const projectDir = resolveProjectDir(documentName);
       const scriptsMap = document.getMap('scripts');
 
       // If the CRDT document already has data, skip loading from files.
       const scenesMap = document.getMap<Y.Map<unknown>>('scenes');
-      if (scenesMap.size > 0 || scriptsMap.size > 0) {
+      if (projectDir === null || scenesMap.size > 0 || scriptsMap.size > 0) {
         return;
       }
 
-      for (const scenePath of listFilesRecursive(projectDir, '.pix3scene')) {
-        const relativePath = path.relative(projectDir, scenePath).split(path.sep).join('/');
-        const sceneId = deriveSceneId(relativePath);
-        const sceneMap = new Y.Map<unknown>();
-        const content = fs.readFileSync(scenePath, 'utf-8');
-        sceneMap.set('filePath', `res://${relativePath}`);
-        sceneMap.set('snapshot', content);
-        scenesMap.set(sceneId, sceneMap);
-      }
-
-      // Load scripts
-      const scriptsDir = path.join(projectDir, 'scripts');
-      if (fs.existsSync(scriptsDir)) {
-        loadScriptsRecursive(scriptsDir, scriptsDir, scriptsMap);
-      }
+      loadScenesFromDisk(projectDir, scenesMap);
+      loadScriptsFromDisk(path.resolve(projectDir, 'scripts'), scriptsMap);
     },
 
     async onStoreDocument({ documentName, document }) {
-      const projectId = documentName.replace(/^project:/, '');
-      const projectDir = path.resolve(config.PROJECTS_STORAGE_DIR, projectId);
-      fs.mkdirSync(projectDir, { recursive: true });
-
-      const sceneFilePaths = new Set<string>();
-      const scenesMap = document.getMap<Y.Map<unknown>>('scenes');
-      for (const [sceneId, value] of scenesMap.entries()) {
-        if (!(value instanceof Y.Map)) {
-          continue;
-        }
-
-        const filePathValue = value.get('filePath');
-        const snapshotValue = value.get('snapshot');
-        if (typeof snapshotValue !== 'string') {
-          continue;
-        }
-
-        const relativePath = normalizeStoredScenePath(
-          typeof filePathValue === 'string' && filePathValue.trim()
-            ? filePathValue
-            : `${sceneId}.pix3scene`
+      const projectDir = resolveProjectDir(documentName);
+      if (projectDir === null) {
+        // `onAuthenticate` requires a project row for this id, so this is unreachable through a
+        // normal connection — it is the backstop for the day something else opens a document.
+        console.error(
+          `[pix3-collab] Refusing to persist ${documentName}: it does not name a project directory`
         );
-        const fullPath = path.resolve(projectDir, relativePath);
-        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        fs.writeFileSync(fullPath, snapshotValue, 'utf-8');
-        sceneFilePaths.add(fullPath);
+        return;
       }
-      reconcileFiles(projectDir, sceneFilePaths, '.pix3scene');
 
-      // Save scripts
-      const scriptsMap = document.getMap('scripts');
-      const scriptsDir = path.join(projectDir, 'scripts');
-      const scriptFilePaths = new Set<string>();
-      for (const [scriptPath, value] of scriptsMap.entries()) {
-        if (value instanceof Y.Text) {
-          const fullPath = path.join(scriptsDir, scriptPath);
-          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-          fs.writeFileSync(fullPath, value.toString(), 'utf-8');
-          scriptFilePaths.add(fullPath);
-        }
+      // Scene `filePath`s and script map keys are authored by whoever last edited the document, so
+      // the write path contains them rather than trusting them; see `document-files.ts`.
+      const { rejected } = persistDocumentToDisk(projectDir, document);
+      for (const entry of rejected) {
+        console.warn(
+          `[pix3-collab] Refused ${entry.kind} path escaping ${documentName}: ${entry.requestedPath}`
+        );
       }
-      reconcileFiles(scriptsDir, scriptFilePaths, '.ts');
 
       storeStoredDocumentState(crdtDb, documentName, document);
 
@@ -192,80 +160,16 @@ export function createHocuspocusServer(): CollaborationServer {
   };
 }
 
-function loadScriptsRecursive(
-  rootDir: string,
-  currentDir: string,
-  scriptsMap: Y.Map<unknown>
-): void {
-  const items = fs.readdirSync(currentDir, { withFileTypes: true });
-  for (const item of items) {
-    const fullPath = path.join(currentDir, item.name);
-    if (item.isDirectory()) {
-      loadScriptsRecursive(rootDir, fullPath, scriptsMap);
-    } else if (item.isFile() && item.name.endsWith('.ts')) {
-      const relativePath = path.relative(rootDir, fullPath).split(path.sep).join('/');
-      const content = fs.readFileSync(fullPath, 'utf-8');
-      const yText = new Y.Text(content);
-      scriptsMap.set(relativePath, yText);
-    }
-  }
-}
-
-function normalizeStoredScenePath(filePath: string): string {
-  const normalized = filePath.replace(/^res:\/\//i, '').replace(/^\/+/, '');
-  return normalized.endsWith('.pix3scene') ? normalized : `${normalized}.pix3scene`;
-}
-
-function deriveSceneId(resourcePath: string): string {
-  const withoutExtension = resourcePath.replace(/\.[^./]+$/i, '');
-  const normalized = withoutExtension
-    .replace(/[^a-z0-9]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return normalized || 'scene';
-}
-
-function listFilesRecursive(rootDir: string, extension: string): string[] {
-  if (!fs.existsSync(rootDir)) {
-    return [];
-  }
-
-  const result: string[] = [];
-  const visit = (currentDir: string): void => {
-    const items = fs.readdirSync(currentDir, { withFileTypes: true });
-    for (const item of items) {
-      const fullPath = path.join(currentDir, item.name);
-      if (item.isDirectory()) {
-        visit(fullPath);
-      } else if (item.isFile() && item.name.endsWith(extension)) {
-        result.push(fullPath);
-      }
-    }
-  };
-
-  visit(rootDir);
-  return result;
-}
-
-function reconcileFiles(rootDir: string, desiredPaths: Set<string>, extension: string): void {
-  for (const existingPath of listFilesRecursive(rootDir, extension)) {
-    if (!desiredPaths.has(existingPath)) {
-      fs.rmSync(existingPath, { force: true });
-      pruneEmptyDirectories(path.dirname(existingPath), rootDir);
-    }
-  }
-}
-
-function pruneEmptyDirectories(startDir: string, stopDir: string): void {
-  let currentDir = startDir;
-  while (currentDir.startsWith(stopDir) && currentDir !== stopDir) {
-    const contents = fs.readdirSync(currentDir);
-    if (contents.length > 0) {
-      return;
-    }
-    fs.rmdirSync(currentDir);
-    currentDir = path.dirname(currentDir);
-  }
+/**
+ * The storage directory a document name addresses, or `null` when it does not address one.
+ *
+ * `onAuthenticate` already requires a `project_members` row for the derived id, so a traversing name
+ * cannot reach here through a connection. This is the second lock on the same door: the id is a path
+ * segment, and a path segment that came off the wire gets contained like any other.
+ */
+function resolveProjectDir(documentName: string): string | null {
+  const projectId = documentName.replace(/^project:/, '');
+  return resolveContainedPath(path.resolve(config.PROJECTS_STORAGE_DIR), projectId);
 }
 
 function openCrdtDb(): Database.Database {
