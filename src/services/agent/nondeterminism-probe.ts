@@ -1,6 +1,6 @@
 /**
  * Honesty mechanism for recorded input traces (§5.2 of
- * `.plans/agent-gameplay-testing.md`).
+ * `.plans/done/agent-gameplay-testing.md`).
  *
  * A trace replay is **diagnostic, not deterministic**: the game is free to call
  * `Math.random`, read the wall clock, or schedule its own timers, and a fixed

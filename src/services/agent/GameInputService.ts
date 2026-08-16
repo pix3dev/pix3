@@ -1491,6 +1491,28 @@ export class GameInputService {
   }
 
   /**
+   * Credit the journal for a physical press driven OUTSIDE this service — a bot policy's own
+   * pointer (`GameTestService.buildBotWorld`).
+   *
+   * A bot tap is the same gesture as a `game_input` tap: a real pointer at the projected node,
+   * witnessed by the control's own bounds check. Without this entry point a run in which the policy
+   * provably pressed a button still left that control `in-frame-unproven`, so the "one physical
+   * proof per control" invariant never accumulated from bot runs. Pair it with
+   * {@link flushReachJournal} once the run is over — proofs are written per run, not per tap.
+   */
+  noteExternalPhysicalReach(
+    runtime: { runner: SceneRunner; canvas: HTMLCanvasElement },
+    target: string | undefined
+  ): void {
+    this.notePhysicalReach(runtime, target);
+  }
+
+  /** Persist proofs recorded through {@link noteExternalPhysicalReach}. No-op when none are pending. */
+  async flushReachJournal(): Promise<void> {
+    await this.flushJournal();
+  }
+
+  /**
    * Record that a physical step reached its target. For a UI control the control itself is the
    * witness — `hovering`/`pressed` are set by its own bounds check against the real pointer — so a
    * tap that projected onto empty space is NOT recorded. A node with no control state (a script

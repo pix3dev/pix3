@@ -19,6 +19,7 @@ export interface RuntimeRendererStatsSnapshot {
 export class RuntimeRenderer {
   private renderer: WebGLRenderer;
   private canvas: HTMLCanvasElement;
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(options: RuntimeRendererOptions = {}) {
     this.canvas = document.createElement('canvas');
@@ -63,15 +64,22 @@ export class RuntimeRenderer {
     this.attach(container);
   }
 
+  /**
+   * Mount the canvas into `container`. Re-entrant on purpose: calling it again with a different
+   * element MOVES the live canvas (and with it the WebGL context, so the running game survives the
+   * move) instead of leaving a second, orphaned observer behind. The editor uses that to hand a
+   * running game between the Studio Game tab and the Vibe stage without restarting it.
+   */
   attach(container: HTMLElement): void {
+    this.resizeObserver?.disconnect();
     container.appendChild(this.canvas);
     this.resize();
 
     // Auto-resize observer
-    const resizeObserver = new ResizeObserver(() => {
+    this.resizeObserver = new ResizeObserver(() => {
       this.resize();
     });
-    resizeObserver.observe(container);
+    this.resizeObserver.observe(container);
   }
 
   resize(): void {
@@ -118,6 +126,8 @@ export class RuntimeRenderer {
   }
 
   dispose(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.renderer.dispose();
     this.canvas.remove();
   }

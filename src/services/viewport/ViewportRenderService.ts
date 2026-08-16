@@ -833,10 +833,9 @@ export class ViewportRendererService {
   }
 
   private handleFocusPause(): void {
-    if (this.shouldPauseForWindowFocus()) {
-      if (!this.isPaused && this.animationId) {
-        cancelAnimationFrame(this.animationId);
-        this.animationId = undefined;
+    if (this.shouldSuspendRendering()) {
+      if (!this.isPaused) {
+        this.parkRenderLoop();
       }
       this.cancelPanMomentum();
     } else {
@@ -1854,7 +1853,48 @@ export class ViewportRendererService {
    */
   requestRender(): void {
     this.renderRequested = true;
-    if (this.animationId === undefined) {
+    if (this.animationId === undefined && !this.isWorkspaceHidden()) {
+      this.renderFrame();
+    }
+  }
+
+  /**
+   * True while the Studio workspace is off screen — i.e. Vibe is on. Golden Layout cannot survive
+   * having its host re-created, so Studio keeps its whole DOM (viewport included) and is merely
+   * `display:none`. Nothing else would stop this service from painting a canvas nobody can see, at
+   * the cost of frames the game on the Vibe stage wants.
+   *
+   * Painting is suppressed rather than deferred: the dirty flag survives, so the frame lands the
+   * moment Studio comes back, and explicit captures (`captureScreenshot`) call `renderFrame`
+   * directly, so agent screenshots keep working from either workspace.
+   */
+  private isWorkspaceHidden(): boolean {
+    return appState.ui.workspaceMode === 'flow';
+  }
+
+  /** Every reason to stop painting: the workspace is hidden, or the window lost focus. */
+  private shouldSuspendRendering(): boolean {
+    return this.isWorkspaceHidden() || this.shouldPauseForWindowFocus();
+  }
+
+  /**
+   * Stop the on-demand loop, painting one last frame first if the viewport was marked dirty while
+   * the loop was still running.
+   *
+   * That flush is the whole point. Once parked, `requestRender` paints synchronously — but a frame
+   * requested *just before* parking had no such fallback and was simply dropped. Opening docked
+   * DevTools does exactly that in one gesture: the panel resizes (which reallocates, and therefore
+   * blanks, the drawing buffer and marks the viewport dirty) and focus moves into DevTools before
+   * the next animation frame, so the viewport went black and stayed black until the user clicked it.
+   */
+  private parkRenderLoop(): void {
+    if (this.animationId !== undefined) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = undefined;
+    }
+    // …but not when the reason we are parking is that nobody can see the canvas (Vibe): the dirty
+    // flag simply waits for Studio to come back.
+    if (this.renderRequested && !this.isWorkspaceHidden()) {
       this.renderFrame();
     }
   }
@@ -4384,13 +4424,8 @@ export class ViewportRendererService {
 
   private startRenderLoop(): void {
     const render = () => {
-      if (this.isPaused) {
-        this.animationId = undefined;
-        return;
-      }
-
-      if (this.shouldPauseForWindowFocus()) {
-        this.animationId = undefined;
+      if (this.isPaused || this.shouldSuspendRendering()) {
+        this.parkRenderLoop();
         return;
       }
 

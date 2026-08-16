@@ -1487,3 +1487,156 @@ describe('ViewportRendererService', () => {
     expect(component.tickSpy).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The dropped frame behind "opening DevTools blanks the viewport".
+ *
+ * Docking DevTools does two things in one gesture: the panel resizes (which reallocates — and so
+ * blanks — the drawing buffer and marks the viewport dirty) and focus moves out of the page. If the
+ * blur lands before the next animation frame, the loop used to park and simply drop the pending
+ * frame, leaving a black viewport until the user clicked it to bring focus back.
+ */
+describe('ViewportRendererService — parking the on-demand loop', () => {
+  afterEach(() => {
+    resetAppState();
+  });
+
+  function makeService(): {
+    service: ViewportRendererService;
+    renderFrame: ReturnType<typeof vi.fn>;
+  } {
+    resetAppState();
+    appState.ui.pauseRenderingOnUnfocus = true;
+    appState.collaboration.accessMode = 'local';
+
+    const service = new ViewportRendererService();
+    const renderFrame = vi.fn();
+    Object.defineProperty(service, 'renderFrame', { value: renderFrame, configurable: true });
+    Object.defineProperty(service, 'cancelPanMomentum', { value: () => {}, configurable: true });
+    return { service, renderFrame };
+  }
+
+  it('paints the pending frame when focus loss parks the loop', () => {
+    const { service, renderFrame } = makeService();
+    const internals = service as unknown as {
+      isPaused: boolean;
+      isWindowFocused: boolean;
+      animationId?: number;
+      renderRequested: boolean;
+      handleFocusPause(): void;
+    };
+    internals.isPaused = false;
+    internals.animationId = 1;
+    // What a resize does: mark dirty and wait for the loop to come round.
+    internals.renderRequested = true;
+
+    internals.isWindowFocused = false;
+    internals.handleFocusPause();
+
+    expect(renderFrame).toHaveBeenCalledTimes(1);
+    expect(internals.animationId).toBeUndefined();
+  });
+
+  it('does not paint on focus loss when nothing is dirty', () => {
+    const { service, renderFrame } = makeService();
+    const internals = service as unknown as {
+      isPaused: boolean;
+      isWindowFocused: boolean;
+      animationId?: number;
+      renderRequested: boolean;
+      handleFocusPause(): void;
+    };
+    internals.isPaused = false;
+    internals.animationId = 1;
+    internals.renderRequested = false;
+
+    internals.isWindowFocused = false;
+    internals.handleFocusPause();
+
+    expect(renderFrame).not.toHaveBeenCalled();
+    expect(internals.animationId).toBeUndefined();
+  });
+});
+
+/**
+ * Vibe puts the whole Studio workspace — the editor viewport included — behind `display:none`, so
+ * anything painted there is stolen from the game on the Vibe stage.
+ */
+describe('ViewportRendererService — hidden workspace', () => {
+  afterEach(() => {
+    resetAppState();
+  });
+
+  function makeService(): {
+    service: ViewportRendererService;
+    renderFrame: ReturnType<typeof vi.fn>;
+    internals: {
+      isPaused: boolean;
+      isWindowFocused: boolean;
+      animationId?: number;
+      renderRequested: boolean;
+      handleFocusPause(): void;
+    };
+  } {
+    resetAppState();
+    appState.ui.pauseRenderingOnUnfocus = true;
+    appState.collaboration.accessMode = 'local';
+
+    const service = new ViewportRendererService();
+    const renderFrame = vi.fn();
+    Object.defineProperty(service, 'renderFrame', { value: renderFrame, configurable: true });
+    Object.defineProperty(service, 'cancelPanMomentum', { value: () => {}, configurable: true });
+    return {
+      service,
+      renderFrame,
+      internals: service as unknown as {
+        isPaused: boolean;
+        isWindowFocused: boolean;
+        animationId?: number;
+        renderRequested: boolean;
+        handleFocusPause(): void;
+      },
+    };
+  }
+
+  it('marks dirty without painting while Vibe is on screen', () => {
+    const { service, renderFrame, internals } = makeService();
+    internals.isPaused = false;
+    internals.isWindowFocused = true;
+    internals.animationId = undefined;
+    appState.ui.workspaceMode = 'flow';
+
+    service.requestRender();
+
+    expect(renderFrame).not.toHaveBeenCalled();
+    expect(internals.renderRequested).toBe(true);
+  });
+
+  it('parks the loop when the workspace goes away, and keeps the frame pending', () => {
+    const { renderFrame, internals } = makeService();
+    internals.isPaused = false;
+    internals.isWindowFocused = true;
+    internals.animationId = 1;
+    internals.renderRequested = true;
+    appState.ui.workspaceMode = 'flow';
+
+    internals.handleFocusPause();
+
+    expect(internals.animationId).toBeUndefined();
+    // Not flushed: nobody can see it. The dirty flag waits for Studio to come back.
+    expect(renderFrame).not.toHaveBeenCalled();
+    expect(internals.renderRequested).toBe(true);
+  });
+
+  it('still paints on demand once Studio is back', () => {
+    const { service, renderFrame, internals } = makeService();
+    internals.isPaused = false;
+    internals.isWindowFocused = true;
+    internals.animationId = undefined;
+    appState.ui.workspaceMode = 'studio';
+
+    service.requestRender();
+
+    expect(renderFrame).toHaveBeenCalledTimes(1);
+  });
+});

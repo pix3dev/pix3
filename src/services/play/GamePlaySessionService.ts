@@ -108,6 +108,17 @@ export class GamePlaySessionService {
   /** True between a failed launch and the next one, so its banner is not cleared by its own stop. */
   private startFailed = false;
   private syncPromise: Promise<void> = Promise.resolve();
+  /**
+   * Bumped by every {@link detachRuntime}. A launch awaits a texture atlas and a scene clone, and
+   * anything that tears the session down in that window makes the launch stale — see
+   * {@link abandonStaleStart}.
+   */
+  private startGeneration = 0;
+  /**
+   * Pending "the tab host went away" teardown. Deferred by a turn because a Studio ⇄ Vibe swap
+   * unmounts one stage and mounts the other in *either* order; see {@link unregisterTabHost}.
+   */
+  private pendingTabHostRelease: ReturnType<typeof setTimeout> | null = null;
   private readonly onPopoutAspectChange = (event: Event): void => {
     const target = event.target as HTMLSelectElement;
     const aspectRatio = target.value;
@@ -147,6 +158,7 @@ export class GamePlaySessionService {
   dispose(): void {
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
+    this.cancelPendingTabHostRelease();
     this.detachRuntime();
     this.networkService?.dispose();
     this.networkService = undefined;
@@ -185,18 +197,29 @@ export class GamePlaySessionService {
     setRunningState?: (isRunning: boolean) => void
   ): void {
     this.initialize();
-    // A tab-to-tab hand-off (Studio's Game tab ⇄ the Flow stage) keeps `activeHostKind === 'tab'`,
-    // so `syncRuntimeToUiState` would see nothing worth restarting and leave the running game
-    // attached to the mount that is going away. Force the same detach a tab ⇄ popout swap gets.
-    if (this.tabHost && this.tabHost.mount !== mount && this.activeHostKind === 'tab') {
+    const previous = this.tabHost;
+    // The outgoing stage may already have released the seat (see `unregisterTabHost`); claiming it
+    // here cancels that pending teardown so the live game can be handed over instead of killed.
+    this.cancelPendingTabHostRelease();
+    this.tabHost = { kind: 'tab', mount, windowRef, setRunningState };
+
+    if (previous?.mount === mount) {
+      // The same mount re-registering (a re-render, a resync): nothing moves.
+      this.queueSync();
+      return;
+    }
+
+    if (this.handOffLiveGame(previous)) {
+      return;
+    }
+
+    // No hand-off possible, but a runtime is still attached to the mount that is going away (a
+    // popout owns it, or the two stages live in different documents): detach it the way a
+    // tab ⇄ popout swap does, since `syncRuntimeToUiState` sees `activeHostKind === 'tab'` either
+    // way and would otherwise leave the game on an orphaned mount.
+    if (this.activeHostKind === 'tab' && (this.runner || this.renderer)) {
       this.detachRuntime();
     }
-    this.tabHost = {
-      kind: 'tab',
-      mount,
-      windowRef,
-      setRunningState,
-    };
     this.queueSync();
   }
 
@@ -207,10 +230,59 @@ export class GamePlaySessionService {
 
     const wasActive = this.activeHostKind === 'tab';
     this.tabHost = undefined;
-    if (wasActive) {
-      this.detachRuntime();
+    if (!wasActive) {
+      this.queueSync();
+      return;
     }
-    this.queueSync();
+
+    // Give the incoming stage a turn to claim the seat before tearing the game down. A Studio ⇄ Vibe
+    // switch is a component swap, and the unmount can land before *or* after the new mount: stopping
+    // the runtime synchronously here would kill (and then have to restart) a session that is about
+    // to be handed over, which is exactly what threw away the player's progress.
+    this.cancelPendingTabHostRelease();
+    this.pendingTabHostRelease = setTimeout(() => {
+      this.pendingTabHostRelease = null;
+      if (this.tabHost) {
+        return;
+      }
+      this.detachRuntime();
+      this.queueSync();
+    }, 0);
+  }
+
+  /**
+   * Move a live tab-hosted game to the newly registered mount instead of restarting it.
+   *
+   * Studio's Game tab and the Vibe stage are two seats for one session, so re-parenting the canvas
+   * (which carries the WebGL context, the running scene graph, the score and the audio with it) is
+   * what makes the mode switch feel like a camera move rather than a reset. Only same-document moves
+   * qualify — a canvas cannot take its GL context into the popout window.
+   *
+   * @returns true when the game was handed over and no restart is needed.
+   */
+  private handOffLiveGame(previous: RegisteredGameHost | undefined): boolean {
+    const host = this.tabHost;
+    if (!host || !this.runner || !this.renderer || this.activeHostKind !== 'tab') {
+      return false;
+    }
+    const canvas = this.renderer.domElement;
+    if (canvas.ownerDocument !== host.mount.ownerDocument) {
+      return false;
+    }
+
+    // The seat changed hands: the old stage must stop claiming a game it no longer shows.
+    previous?.setRunningState?.(false);
+    this.renderer.attach(host.mount);
+    this.updateHostRunningState(this.runner.running);
+    this.handleFocusPause();
+    return true;
+  }
+
+  private cancelPendingTabHostRelease(): void {
+    if (this.pendingTabHostRelease !== null) {
+      clearTimeout(this.pendingTabHostRelease);
+      this.pendingTabHostRelease = null;
+    }
   }
 
   isPopoutOpen(): boolean {
@@ -239,7 +311,7 @@ export class GamePlaySessionService {
 
   async restart(): Promise<void> {
     this.initialize();
-    await this.restartRuntime();
+    await this.enqueue(() => this.restartRuntime());
   }
 
   /**
@@ -317,11 +389,28 @@ export class GamePlaySessionService {
   }
 
   private queueSync(): void {
-    this.syncPromise = this.syncPromise
-      .then(() => this.syncRuntimeToUiState())
-      .catch(error => {
-        console.error('[GamePlaySessionService] Failed to sync runtime state', error);
-      });
+    void this.enqueue(() => this.syncRuntimeToUiState()).catch(error => {
+      console.error('[GamePlaySessionService] Failed to sync runtime state', error);
+    });
+  }
+
+  /**
+   * Run `task` after every play-session task queued before it. EVERY launch goes through here —
+   * a restart used to bypass the queue, so the Vibe stage's own "restart the game I just mounted"
+   * could interleave with the launch its host registration had already queued. Two launches in
+   * flight at once means two runtimes: the loser is dropped from `this.runner` without ever being
+   * stopped, and keeps ticking (audio included) behind the visible game.
+   *
+   * The chain itself never rejects — one failed launch must not skip everything queued after it —
+   * while the returned promise still carries the real outcome to the caller.
+   */
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.syncPromise.then(task);
+    this.syncPromise = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private async syncRuntimeToUiState(): Promise<void> {
@@ -397,6 +486,7 @@ export class GamePlaySessionService {
 
   private async startRuntime(host: RegisteredGameHost): Promise<void> {
     this.detachRuntime();
+    const generation = this.startGeneration;
     this.activeHostKind = host.kind;
     this.updateHostRunningState(false);
     this.startFailed = false;
@@ -456,6 +546,9 @@ export class GamePlaySessionService {
     // resolver from a prior run so the path is byte-identical to pre-atlas.
     if (isAtlas2DEnabled()) {
       await this.textureAtlasService.prepareForPlay(this.assetLoader);
+      if (this.abandonStaleStart(generation, renderer, runner)) {
+        return;
+      }
     } else {
       this.assetLoader.setAtlasResolver(null);
     }
@@ -472,9 +565,15 @@ export class GamePlaySessionService {
 
     try {
       await runner.startScene(activeSceneId);
+      if (this.abandonStaleStart(generation, renderer, runner)) {
+        return;
+      }
       this.updateHostRunningState(true);
       this.handleFocusPause();
     } catch (error) {
+      if (this.abandonStaleStart(generation, renderer, runner)) {
+        return;
+      }
       this.profilerSessionService.endSession();
       this.updateHostRunningState(false);
       const detail = error instanceof Error ? error.message : String(error);
@@ -483,7 +582,36 @@ export class GamePlaySessionService {
     }
   }
 
+  /**
+   * True when this launch was superseded (by another launch, a stop, or a host release) while it was
+   * awaiting — in which case the runtime it built is torn down right here.
+   *
+   * It cannot be left to `detachRuntime`: that only knows about `this.runner`, which by then points
+   * at the newer session. An abandoned runner still holds an attached InputService and (once its
+   * `startScene` resolves) its own rAF loop, so what the user gets is a second, invisible game
+   * playing sounds behind the one on screen.
+   */
+  private abandonStaleStart(
+    generation: number,
+    renderer: RuntimeRenderer,
+    runner: SceneRunner
+  ): boolean {
+    if (generation === this.startGeneration) {
+      return false;
+    }
+    runner.stop();
+    renderer.dispose();
+    if (this.runner === runner) {
+      this.runner = undefined;
+    }
+    if (this.renderer === renderer) {
+      this.renderer = undefined;
+    }
+    return true;
+  }
+
   private detachRuntime(): void {
+    this.startGeneration += 1;
     this.focusCleanup?.();
     this.focusCleanup = undefined;
     // A host-requested pause belongs to the runner that is going away: a stop, a

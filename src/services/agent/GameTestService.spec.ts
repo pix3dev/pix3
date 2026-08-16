@@ -24,7 +24,7 @@ import {
   type NormalizedMonkeySpec,
 } from './game-monkey';
 import { DEFAULT_CONTROL_HOLD_FRAMES } from './game-control';
-import type { BotReport } from './game-bots';
+import type { BotReport, BotWorld } from './game-bots';
 import { RunProtocolRecorder, type RunProtocolStore } from './game-run-protocol';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import type { LiveControlEntry, LiveNodeSnapshot } from './GameInputService';
@@ -2339,5 +2339,96 @@ describe('validateSpec — bot runs', () => {
       monkey: { seed: 1 } as NormalizedMonkeySpec,
     });
     expect('error' in validated && validated.error).toContain('cannot combine `bot` with `monkey`');
+  });
+});
+
+/**
+ * The bot's physical taps have to pay into the reachability journal, exactly like a `game_input`
+ * tap does. Before this, a run in which the policy provably pressed a button still left the control
+ * `reach: in-frame-unproven` — the "one physical proof per control" invariant simply never
+ * accumulated from bot runs, so the harness kept asking for a proof it had already produced.
+ */
+describe('GameTestService — bot taps feed the reachability journal', () => {
+  interface ReachSpy {
+    world: BotWorld;
+    noted: string[];
+    flushes: number;
+  }
+
+  function buildWorld(channel: 'physical-input' | 'direct-action'): ReachSpy {
+    const service = new GameTestService();
+    const noted: string[] = [];
+    const spy: ReachSpy = { world: null as unknown as BotWorld, noted, flushes: 0 };
+
+    const node = {
+      name: 'Play Button',
+      nodeId: 'play-button',
+      visible: true,
+      invokeInteraction: () => true,
+    } as unknown as NodeBase;
+    const runner = {
+      getLiveNodeById: () => null,
+      findLiveNodeByName: (name: string) => (name === 'Play Button' ? node : null),
+      getLiveRootNodes: () => [],
+      projectNodeToCanvas: () => ({ x: 40, y: 30 }),
+      projectWorldPointToCanvas: () => ({ x: 40, y: 30 }),
+    };
+    const canvas = document.createElement('canvas');
+    Object.defineProperty(canvas, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 80, height: 60 }),
+    });
+    Object.defineProperty(canvas, 'clientWidth', { value: 80 });
+    Object.defineProperty(canvas, 'clientHeight', { value: 60 });
+
+    Object.defineProperty(service, 'gameInput', {
+      value: {
+        noteExternalPhysicalReach: (_runtime: unknown, target: string) => noted.push(target),
+        flushReachJournal: async () => {
+          spy.flushes += 1;
+        },
+      },
+      configurable: true,
+    });
+
+    spy.world = (
+      service as unknown as {
+        buildBotWorld(
+          runtime: { runner: unknown; canvas: HTMLCanvasElement; windowRef: Window },
+          channel: 'physical-input' | 'direct-action'
+        ): BotWorld;
+      }
+    ).buildBotWorld({ runner, canvas, windowRef: globalThis.window as Window }, channel);
+    return spy;
+  }
+
+  it('credits the journal when a physical tap is released', () => {
+    const spy = buildWorld('physical-input');
+
+    expect(spy.world.tapDown('Play Button')).toBeNull();
+    expect(spy.noted).toEqual([]);
+    spy.world.tapUp('Play Button');
+
+    expect(spy.noted).toEqual(['Play Button']);
+  });
+
+  it('credits a tap the policy left open, released by the teardown', () => {
+    const spy = buildWorld('physical-input');
+
+    expect(spy.world.tapDown('Play Button')).toBeNull();
+    spy.world.releaseAll();
+
+    expect(spy.noted).toEqual(['Play Button']);
+  });
+
+  it('never credits the direct channel — it touches no pixels', () => {
+    const spy = buildWorld('direct-action');
+
+    // Whether the interaction is found or refused is beside the point here: either way the direct
+    // channel synthesizes no pointer, so it can never earn a *physical* proof.
+    spy.world.tapDown('Play Button');
+    spy.world.tapUp('Play Button');
+    spy.world.releaseAll();
+
+    expect(spy.noted).toEqual([]);
   });
 });

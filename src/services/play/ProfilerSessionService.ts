@@ -1,4 +1,7 @@
+import { subscribe } from 'valtio/vanilla';
+
 import { injectable } from '@/fw/di';
+import { appState } from '@/state';
 import type {
   ActiveAudioPlaybackSnapshot,
   FrameProfilerActivity,
@@ -131,6 +134,12 @@ export class ProfilerSessionService {
   private readonly audioFiles = new Map<string, AudioFileSessionEntry>();
   private previousFrameImpactOrder: string[] = [];
   private disposeRunnerSubscription?: () => void;
+  /**
+   * The runner this session is bound to, kept so the per-frame subscription can be dropped and
+   * re-taken as the Profiler goes off and back on screen (see {@link applyFrameSubscription}).
+   */
+  private boundRunner: SceneRunner | null = null;
+  private disposeWorkspaceSubscription?: () => void;
   private runtimeRenderer: RuntimeRenderer | null = null;
   private state: ProfilerSessionSnapshot = this.createIdleSnapshot();
   private notifyThrottleTimer: number | null = null;
@@ -220,16 +229,42 @@ export class ProfilerSessionService {
         hostKind,
       },
     };
-    this.disposeRunnerSubscription?.();
-    this.disposeRunnerSubscription = runner.subscribeFrameStats(sample => {
+    this.boundRunner = runner;
+    this.applyFrameSubscription();
+    this.disposeWorkspaceSubscription ??= subscribe(appState.ui, () =>
+      this.applyFrameSubscription()
+    );
+    this.notify();
+  }
+
+  /**
+   * Take (or drop) the runner's per-frame stats subscription depending on whether anything can show
+   * them. In Vibe the whole Studio workspace — Profiler panel included — is still in the DOM but
+   * hidden, so without this the game pays for a full frame sample (activity copies, audio snapshot,
+   * renderer stats) plus a 10 Hz rebuild of a panel nobody can see. Re-taking it on the way back
+   * restarts the history graphs, which is the honest thing to show: nothing was measured meanwhile.
+   */
+  private applyFrameSubscription(): void {
+    const shouldObserve = this.boundRunner !== null && appState.ui.workspaceMode !== 'flow';
+    if (shouldObserve === Boolean(this.disposeRunnerSubscription)) {
+      return;
+    }
+    if (!shouldObserve) {
+      this.disposeRunnerSubscription?.();
+      this.disposeRunnerSubscription = undefined;
+      return;
+    }
+    this.disposeRunnerSubscription = this.boundRunner?.subscribeFrameStats(sample => {
       this.handleFrameSample(sample);
     });
-    this.notify();
   }
 
   endSession(): void {
     this.disposeRunnerSubscription?.();
     this.disposeRunnerSubscription = undefined;
+    this.disposeWorkspaceSubscription?.();
+    this.disposeWorkspaceSubscription = undefined;
+    this.boundRunner = null;
     this.runtimeRenderer = null;
     this.frameTimesMs.length = 0;
     this.fpsHistory.length = 0;

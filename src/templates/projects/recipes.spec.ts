@@ -8,7 +8,7 @@ import type { PropertySchema } from '@pix3/runtime';
 import { parseRoutine } from '@/services/agent/game-routines';
 
 /**
- * Contract drift guard for the Flow "recipe" templates (`.plans/flow-recipes-contract.md`).
+ * Contract drift guard for the Flow "recipe" templates (`.plans/done/flow-recipes-contract.md`).
  *
  * `design/recipe.md` is a machine-read contract: the Flow expander patches the
  * scene YAML through it, and agents grep it. Every entry in its `tunables:`
@@ -296,7 +296,7 @@ describe('flow recipe contract', () => {
 });
 
 /**
- * Testability contract for every template that ships a game (`.plans/agent-gameplay-testing.md`,
+ * Testability contract for every template that ships a game (`.plans/done/agent-gameplay-testing.md`,
  * phase 0).
  *
  * The agent copies whatever the template started it with: a template whose state is legible
@@ -318,7 +318,7 @@ const GAMEPLAY_TEMPLATES = readdirSync(TEMPLATES_ROOT)
 /** The root id routines and assertions are written against, in every template. */
 const CANONICAL_GAME_ROOT_ID = 'game-root';
 
-/** Fields a routine header must carry (`.plans/agent-gameplay-testing.md` §5.7.1). */
+/** Fields a routine header must carry (`.plans/done/agent-gameplay-testing.md` §5.7.1). */
 const REQUIRED_ROUTINE_FIELDS = ['name', 'description', 'scope', 'uses', 'steps'] as const;
 
 function listScriptSources(templateDir: string): string[] {

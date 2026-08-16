@@ -8,7 +8,7 @@ import { TRACE_DIRECTORY } from '@/services/agent/game-traces';
 
 /**
  * The gameplay-testing harness must not be able to reach a shipped game (§5.3 of
- * `.plans/agent-gameplay-testing.md`, phase 8).
+ * `.plans/done/agent-gameplay-testing.md`, phase 8).
  *
  * The plan asked for "a spec proving there is no test code in the production bundle,
  * modelled on `strippable-runtime-modules.spec.ts`" — i.e. one that **recomputes the
@@ -102,7 +102,7 @@ describe('no test harness in a production bundle', () => {
     // The runtime is what a playable ships. A harness symbol reachable from it is a
     // harness symbol in the shipped game — which is the leak this whole check exists
     // for, and it cannot be argued away by "that module gets tree-shaken": the
-    // measured floor of `.plans/playable-export-size.md` is that tree-shaking does not
+    // measured floor of `.plans/done/playable-export-size.md` is that tree-shaking does not
     // reach anything a kept module value-imports.
     expect(
       offenders,

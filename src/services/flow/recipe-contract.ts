@@ -2,7 +2,7 @@ import { parse, parseDocument, isSeq, isMap } from 'yaml';
 
 /**
  * The machine-readable half of a Flow recipe: the `design/recipe.md` contract
- * (`.plans/flow-recipes-contract.md` §4) plus the scene surgery the expander performs against it.
+ * (`.plans/done/flow-recipes-contract.md` §4) plus the scene surgery the expander performs against it.
  *
  * Everything here is pure text/YAML work with no DI and no I/O, for two reasons. It runs **before
  * the project's first scene is ever loaded** — patching the copied files on disk rather than

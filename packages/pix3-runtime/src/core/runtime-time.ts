@@ -1,5 +1,5 @@
 /**
- * Runtime time contract (§5.1 of `.plans/agent-gameplay-testing.md`).
+ * Runtime time contract (§5.1 of `.plans/done/agent-gameplay-testing.md`).
  *
  * Describes *how the frame driver produces ticks* — wall-clock, a fixed virtual
  * step, or nothing at all until someone asks. It is deliberately separate from

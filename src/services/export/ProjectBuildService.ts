@@ -86,7 +86,7 @@ export interface RuntimeProjectBuildModel {
    * project's own scripts. The playable export asks this set whether a runtime
    * module can be stripped from the bundle, so it is deliberately a *superset*
    * of what is really used: a false positive costs kilobytes, a false negative
-   * would ship a broken game. See `.plans/playable-export-size.md` §2 Р4.
+   * would ship a broken game. See `.plans/done/playable-export-size.md` §2 Р4.
    */
   readonly mentionedNames: ReadonlySet<string>;
   readonly warnings: readonly string[];

@@ -1,5 +1,5 @@
 /**
- * Monkey mode for `game_run` (§5.2 of `.plans/agent-gameplay-testing.md`).
+ * Monkey mode for `game_run` (§5.2 of `.plans/done/agent-gameplay-testing.md`).
  *
  * Random input under the harness's control, judged by invariants instead of by
  * an understanding of the game. It is the **zero test** for Flow's verify gate:

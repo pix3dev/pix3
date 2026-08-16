@@ -298,7 +298,7 @@ export interface ScriptErrorInfo {
 
 /**
  * Namespace prefix marking a `componentType` as **test-harness code, not game code**
- * (§5.3 of `.plans/agent-gameplay-testing.md`: the bot's errors go on their own
+ * (§5.3 of `.plans/done/agent-gameplay-testing.md`: the bot's errors go on their own
  * channel so "the bot fell over" cannot read as "the game fell over").
  *
  * It is load-bearing rather than cosmetic. The editor captures `console.error` into a

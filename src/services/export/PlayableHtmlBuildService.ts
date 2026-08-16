@@ -363,7 +363,7 @@ export class PlayableHtmlBuildService {
    * What the project actually uses, from the build model's mention index — the one
    * place that decides every conditional part of the bundle. Deliberately
    * over-inclusive: a false positive costs kilobytes, a false negative ships a
-   * broken game. See `.plans/playable-export-size.md` §2 Р4.
+   * broken game. See `.plans/done/playable-export-size.md` §2 Р4.
    */
   private resolveRuntimeUsage(model: RuntimeProjectBuildModel): RuntimeUsage {
     const mentions = (name: string): boolean => model.mentionedNames.has(name);

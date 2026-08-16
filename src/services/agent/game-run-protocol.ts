@@ -7,7 +7,7 @@ import type { RoutineWorld } from '@/services/agent/game-routines';
 /**
  * The FULL protocol of one `game_run`, written to a project file, so the tool
  * reply can stay compact and only point at it (§6 rule 3 of
- * `.plans/agent-gameplay-testing.md`: "survives compaction, does not burn
+ * `.plans/done/agent-gameplay-testing.md`: "survives compaction, does not burn
  * context" — the same argument `design/source/` makes for the GDD).
  *
  * The reply a run returns is a *summary* by construction: the timeline is deduped

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState } from '@/state';
 import { GamePlaySessionService } from './GamePlaySessionService';
@@ -23,6 +23,7 @@ interface FakeRunner {
   pauses: number;
   resumes: number;
   stopped: boolean;
+  running: boolean;
   pause(): void;
   resume(): void;
   stop(): void;
@@ -34,6 +35,7 @@ function makeRunner(): FakeRunner {
     pauses: 0,
     resumes: 0,
     stopped: false,
+    running: true,
     pause() {
       this.paused = true;
       this.pauses += 1;
@@ -44,6 +46,7 @@ function makeRunner(): FakeRunner {
     },
     stop() {
       this.stopped = true;
+      this.running = false;
     },
   };
 }
@@ -151,14 +154,24 @@ describe('GamePlaySessionService — pause decision', () => {
 });
 
 /**
- * The Studio Game tab and the Flow stage both register as the *same* host kind, so a mode switch
- * hands the runtime from one mount to another without `syncRuntimeToUiState` seeing a kind change
- * — it would leave the running game attached to the element that is going away, and Studio would
- * come back to a black Game tab. Registering a different mount has to detach like a tab ⇄ popout
- * swap does; registering the same mount again (a resync) must not disturb the running game.
+ * The seat swap between Studio's Game tab and the Vibe stage.
+ *
+ * Both register as the same host kind, so `syncRuntimeToUiState` sees no kind change and would
+ * happily leave the running game attached to the element that is going away. The contract here:
+ * a same-document swap MOVES the live session (canvas, WebGL context, score, audio) to the new
+ * mount; a swap that cannot be moved detaches; and because the two stages can mount/unmount in
+ * either order, releasing the seat is deferred by a turn so an incoming stage can still claim it.
  */
 describe('GamePlaySessionService — tab host swap', () => {
-  function makeHostSwapSession(): { service: GamePlaySessionService; runner: FakeRunner } {
+  interface HostSwapSession {
+    service: GamePlaySessionService;
+    runner: FakeRunner;
+    canvas: HTMLCanvasElement;
+    /** Every mount the canvas was (re-)parented into, in order. */
+    attaches: HTMLElement[];
+  }
+
+  function makeHostSwapSession(canvasDocument: Document = document): HostSwapSession {
     const runner = makeRunner();
     const service = new GamePlaySessionService();
     const internals = service as unknown as Record<string, unknown>;
@@ -168,30 +181,138 @@ describe('GamePlaySessionService — tab host swap', () => {
     // `@inject` installs getter-only properties on the prototype; shadow them on the instance.
     Object.defineProperty(service, 'profilerSessionService', { value: { endSession: () => {} } });
     Object.defineProperty(service, 'assetLoader', { value: { setAtlasResolver: () => {} } });
+
+    const canvas = canvasDocument.createElement('canvas');
+    const attaches: HTMLElement[] = [];
+    internals.renderer = {
+      domElement: canvas,
+      attach: (container: HTMLElement) => {
+        attaches.push(container);
+      },
+      dispose: () => {},
+    };
     internals.runner = runner;
     internals.activeHostKind = 'tab';
-    return { service, runner };
+    return { service, runner, canvas, attaches };
   }
 
-  const mountA = {} as HTMLElement;
-  const mountB = {} as HTMLElement;
+  const fakeWindow = {
+    document: { visibilityState: 'visible', hasFocus: () => true } as unknown as Document,
+  } as unknown as Window;
 
-  it('detaches the runtime when a different mount claims the tab host', () => {
-    const { service, runner } = makeHostSwapSession();
-    service.registerTabHost(mountA, window);
+  let mountA: HTMLElement;
+  let mountB: HTMLElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mountA = document.createElement('div');
+    mountB = document.createElement('div');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('moves the live game to the new mount instead of restarting it', () => {
+    const { service, runner, attaches } = makeHostSwapSession();
+    service.registerTabHost(mountA, fakeWindow);
+    service.registerTabHost(mountB, fakeWindow);
+
+    expect(runner.stopped).toBe(false);
+    expect(attaches).toEqual([mountA, mountB]);
+    expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBe('tab');
+  });
+
+  it('keeps the game when the outgoing stage unmounts before the incoming one mounts', () => {
+    const { service, runner, attaches } = makeHostSwapSession();
+    service.registerTabHost(mountA, fakeWindow);
+
+    // The order a Lit component swap can produce: old stage gone, new stage not mounted yet.
+    service.unregisterTabHost(mountA);
     expect(runner.stopped).toBe(false);
 
-    service.registerTabHost(mountB, window);
+    service.registerTabHost(mountB, fakeWindow);
+    vi.advanceTimersByTime(10);
+
+    expect(runner.stopped).toBe(false);
+    expect(attaches.at(-1)).toBe(mountB);
+  });
+
+  it('stops the game when nothing claims the seat', () => {
+    const { service, runner } = makeHostSwapSession();
+    service.registerTabHost(mountA, fakeWindow);
+
+    service.unregisterTabHost(mountA);
+    vi.advanceTimersByTime(10);
+
+    expect(runner.stopped).toBe(true);
+    expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBeNull();
+  });
+
+  it('detaches instead of moving when the canvas would have to cross documents', () => {
+    // What a popout-owned runtime looks like: its canvas belongs to another document, and a WebGL
+    // context cannot be carried across one.
+    const otherDocument = document.implementation.createHTMLDocument('popout');
+    const { service, runner } = makeHostSwapSession(otherDocument);
+    service.registerTabHost(mountA, fakeWindow);
+
+    service.registerTabHost(mountB, fakeWindow);
+
     expect(runner.stopped).toBe(true);
     expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBeNull();
   });
 
   it('leaves the runtime alone when the same mount re-registers', () => {
-    const { service, runner } = makeHostSwapSession();
-    service.registerTabHost(mountA, window);
-    service.registerTabHost(mountA, window);
+    const { service, runner, attaches } = makeHostSwapSession();
+    service.registerTabHost(mountA, fakeWindow);
+    service.registerTabHost(mountA, fakeWindow);
 
     expect(runner.stopped).toBe(false);
+    expect(attaches).toEqual([mountA]);
     expect((service as unknown as { activeHostKind: string | null }).activeHostKind).toBe('tab');
+  });
+});
+
+/**
+ * Every launch has to go through one queue. The Vibe stage registers its host (which queues a
+ * launch) and then asks for a restart of its own; when those two ran concurrently, the loser was
+ * dropped from `this.runner` without ever being stopped and kept ticking — a second, invisible game
+ * playing sounds behind the visible one.
+ */
+describe('GamePlaySessionService — launch serialization', () => {
+  it('runs queued launches one after another, never overlapping', async () => {
+    const service = new GamePlaySessionService();
+    const internals = service as unknown as Record<string, unknown>;
+    internals.initialized = true;
+
+    let inFlight = 0;
+    let overlapped = false;
+    const order: string[] = [];
+    const task = (label: string) => async () => {
+      inFlight += 1;
+      if (inFlight > 1) overlapped = true;
+      await Promise.resolve();
+      order.push(label);
+      inFlight -= 1;
+    };
+
+    const enqueue = (service as unknown as { enqueue<T>(t: () => Promise<T>): Promise<T> }).enqueue;
+    const first = enqueue.call(service, task('first'));
+    const second = enqueue.call(service, task('second'));
+    await Promise.all([first, second]);
+
+    expect(overlapped).toBe(false);
+    expect(order).toEqual(['first', 'second']);
+  });
+
+  it('keeps draining the queue after a launch fails, and still reports the failure', async () => {
+    const service = new GamePlaySessionService();
+    const enqueue = (service as unknown as { enqueue<T>(t: () => Promise<T>): Promise<T> }).enqueue;
+
+    const failing = enqueue.call(service, async () => {
+      throw new Error('boom');
+    });
+    await expect(failing).rejects.toThrow('boom');
+    await expect(enqueue.call(service, async () => 'ok')).resolves.toBe('ok');
   });
 });

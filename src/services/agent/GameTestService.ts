@@ -132,7 +132,7 @@ import { CURRENT_EDITOR_VERSION } from '@/version';
 
 /**
  * `game_run` — drive the running game frame by frame and stop on the first
- * outcome (§5.2 of `.plans/agent-gameplay-testing.md`). Phase 2: the vertical
+ * outcome (§5.2 of `.plans/done/agent-gameplay-testing.md`). Phase 2: the vertical
  * slice. The point is the *loop* — baseline, per-frame predicates, early exit,
  * pause on outcome, report — not a full predicate vocabulary (that is phase 6).
  *
@@ -775,6 +775,9 @@ export class GameTestService {
       // Unsubscribe before anything else can tick: a policy still attached while the
       // negative control restarts the scene would play the control run too.
       detachBot?.();
+      // One write per run, the same granularity `game_input` uses: a policy can press twenty
+      // controls, and each press happens inside the frame loop the run is judged by.
+      if (bot) await this.gameInput.flushReachJournal();
     }
     if (bot) {
       const report = bot.report();
@@ -1034,6 +1037,17 @@ export class GameTestService {
     const heldButtons = new Set<string>();
     const openTaps = new Map<string, { nx: number; ny: number }>();
 
+    /**
+     * Credit the reachability journal for a tap this policy drove, at the same moment a
+     * `game_input` tap does it: while the finger is still down, so the control has already ticked
+     * and its own bounds check is the witness. Only the physical channel earns it — `direct-action`
+     * calls the interaction and touches no pixels, which is precisely what it does not prove.
+     */
+    const noteTapReach = (target: string): void => {
+      if (channel !== 'physical-input') return;
+      this.gameInput.noteExternalPhysicalReach(runtime, target);
+    };
+
     return {
       channel,
 
@@ -1117,6 +1131,7 @@ export class GameTestService {
         const at = openTaps.get(target);
         if (!at) return;
         openTaps.delete(target);
+        noteTapReach(target);
         if (channel === 'physical-input') sink.pointer('up', at.nx, at.ny, BOT_POINTER_ID);
       },
 
@@ -1150,7 +1165,10 @@ export class GameTestService {
         const input = resolveLiveInput(runner);
         for (const name of heldButtons) input?.setButton(name, false);
         heldButtons.clear();
-        for (const [, at] of openTaps) sink.pointer('up', at.nx, at.ny, BOT_POINTER_ID);
+        for (const [target, at] of openTaps) {
+          noteTapReach(target);
+          sink.pointer('up', at.nx, at.ny, BOT_POINTER_ID);
+        }
         openTaps.clear();
         sticks.releaseAll();
       },

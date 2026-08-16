@@ -277,6 +277,8 @@ export class SceneRunner {
       return;
     }
 
+    const epoch = this.stopEpoch;
+
     // CLONE: Serialize and parse to create an isolated runtime graph. Done
     // BEFORE stopping (runGraph stops) so a clone failure never kills a running
     // scene — matters for changeScene(), harmless for the initial start.
@@ -292,6 +294,10 @@ export class SceneRunner {
       throw err;
     }
 
+    if (this.abandonIfStopped(epoch, clone)) {
+      return;
+    }
+
     await this.runGraph(clone);
   }
 
@@ -304,10 +310,33 @@ export class SceneRunner {
    * if the file is missing or the YAML is invalid.
    */
   async loadAndStartScene(path: string): Promise<void> {
+    const epoch = this.stopEpoch;
     const filePath = normalizeScenePath(path);
     const text = await this.resourceManager.readText(`res://${filePath}`);
     const graph = await this.sceneManager.parseScene(text, { filePath });
+    if (this.abandonIfStopped(epoch, graph)) {
+      return;
+    }
     await this.runGraph(graph);
+  }
+
+  /**
+   * True when a {@link stop} landed while this start was still loading its graph — in which case the
+   * freshly parsed graph is thrown away here instead of being run.
+   *
+   * Without this a stop is silently undone by the very start it interrupted: both entry points await
+   * a clone before `runGraph` can install it, and `runGraph` unconditionally puts the runner back on
+   * the rAF loop. In the editor that left an invisible second game ticking (scripts, physics and
+   * audio included) behind the visible one whenever a host swap restarted play mid-load.
+   */
+  private abandonIfStopped(epoch: number, graph: import('./SceneManager').SceneGraph): boolean {
+    if (this.stopEpoch === epoch) {
+      return false;
+    }
+    for (const rootNode of graph.rootNodes) {
+      rootNode.dispose();
+    }
+    return true;
   }
 
   /** Monotonic id source for runtime-spawned prefab instances. */
@@ -521,7 +550,14 @@ export class SceneRunner {
 
   private isPaused: boolean = false;
 
+  /**
+   * Bumped by every {@link stop}, so a start that is still awaiting its graph can tell that its
+   * session was ended underneath it (see {@link abandonIfStopped}).
+   */
+  private stopEpoch = 0;
+
   stop(): void {
+    this.stopEpoch += 1;
     this.isRunning = false;
     // Tear down any active cutscene FIRST — while the graph is still live — so
     // its player.stop() targets real nodes and its rAF handles, letterbox DOM,
@@ -1012,6 +1048,13 @@ export class SceneRunner {
       const renderStart = performance.now();
       this.render();
       renderMs = performance.now() - renderStart;
+    }
+
+    // Assembling the sample is not free — it copies the activity list, snapshots active audio
+    // playbacks and reads renderer stats — so it is skipped entirely when nobody is listening
+    // (a player build, or an editor whose Profiler is off screen).
+    if (this.frameListeners.size === 0) {
+      return;
     }
 
     this.notifyFrameListeners({

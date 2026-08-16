@@ -4,7 +4,7 @@ import { SceneLoader, type ParseSceneOptions } from './SceneLoader';
 // node class it imports for serialization — into any bundle that constructs a
 // SceneManager. Exported players never save, so they pass no saver and the whole
 // serializer (plus `yaml.stringify`) tree-shakes away. See
-// `.plans/playable-export-size.md` §2 Р5.
+// `.plans/done/playable-export-size.md` §2 Р5.
 import type { SceneSaver } from './SceneSaver';
 import { Node2D } from '../nodes/Node2D';
 

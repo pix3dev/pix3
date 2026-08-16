@@ -62,7 +62,7 @@ describe('SceneManager without a SceneSaver', () => {
     // The exported player constructs it this way on purpose: no saver means the
     // serializer — and every node class it imports for serialization, plus
     // `yaml.stringify` — stays out of the bundle. See
-    // `.plans/playable-export-size.md`.
+    // `.plans/done/playable-export-size.md`.
     const manager = new SceneManager({} as SceneLoader);
     const graph = makeGraph('root');
 

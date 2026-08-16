@@ -104,6 +104,7 @@ export class Pix3StatusBar extends ComponentBase {
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.isPlaying = appState.ui.isPlaying;
+      this.syncPerformanceProbe();
     });
 
     this.disposeUpdateCheckSubscription = this.updateCheckService.subscribe(state => {
@@ -125,14 +126,34 @@ export class Pix3StatusBar extends ComponentBase {
       this.diagnostics = summary;
     });
 
-    this.disposePerformanceSubscription = this.tabPerformanceService.subscribe(sample => {
-      this.perfSample = sample;
-    });
+    this.syncPerformanceProbe();
 
     // Initialize state
     this.projectName = appState.project.projectName;
     this.isPlaying = appState.ui.isPlaying;
     this.diagnostics = this.diagnosticsService.getLastSummary();
+  }
+
+  /**
+   * Hold the CPU/GPU probe only while this bar is actually on screen.
+   *
+   * In Vibe the whole Studio branch stays mounted and is hidden with `display:none`, so without this
+   * the status bar keeps re-rendering twice a second — and, because the probe stops as soon as its
+   * last subscriber leaves, dropping the subscription also stops the 500 ms timer behind it.
+   */
+  private syncPerformanceProbe(): void {
+    const shouldProbe = appState.ui.workspaceMode !== 'flow';
+    if (shouldProbe === Boolean(this.disposePerformanceSubscription)) {
+      return;
+    }
+    if (!shouldProbe) {
+      this.disposePerformanceSubscription?.();
+      this.disposePerformanceSubscription = undefined;
+      return;
+    }
+    this.disposePerformanceSubscription = this.tabPerformanceService.subscribe(sample => {
+      this.perfSample = sample;
+    });
   }
 
   disconnectedCallback() {

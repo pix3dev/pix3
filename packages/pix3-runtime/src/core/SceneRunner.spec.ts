@@ -791,3 +791,55 @@ describe('SceneRunner live-node name lookup', () => {
     runner.stop();
   });
 });
+
+/**
+ * A stop that lands while a start is still building its graph must stay stopped.
+ *
+ * Both entry points await a clone before `runGraph` can install it, and `runGraph` unconditionally
+ * puts the runner back on the rAF loop — so a stop inside that window used to be undone by the very
+ * start it interrupted. In the editor that is what a Studio <-> Vibe swap did: the superseded launch
+ * resurrected itself and kept ticking (scripts, physics and audio) behind the visible game.
+ */
+describe('SceneRunner start/stop race', () => {
+  function createRunner(parseScene: () => Promise<SceneGraph>): SceneRunner {
+    const sceneManager = {
+      getSceneGraph: () => createGraph(new Camera3D({ id: 'src-cam', name: 'Camera' })),
+      serializeScene: () => 'version: 1.0.0',
+      parseScene,
+    } as unknown as SceneManager;
+
+    return new SceneRunner(
+      sceneManager,
+      createRendererStub(300, 150),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService()),
+      { width: 1920, height: 1080 }
+    );
+  }
+
+  it('abandons a scene whose clone finished after the runner was stopped', async () => {
+    let resolveClone!: (graph: SceneGraph) => void;
+    const runner = createRunner(() => new Promise<SceneGraph>(resolve => (resolveClone = resolve)));
+
+    const started = runner.startScene('scene-a');
+    runner.stop();
+
+    const cloneRoot = new Camera3D({ id: 'clone-cam', name: 'Camera' });
+    const disposeSpy = vi.spyOn(cloneRoot, 'dispose');
+    resolveClone(createGraph(cloneRoot));
+    await started;
+
+    expect(runner.running).toBe(false);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('still starts normally when nothing interrupts the clone', async () => {
+    const cloneRoot = new Camera3D({ id: 'clone-cam', name: 'Camera' });
+    const runner = createRunner(async () => createGraph(cloneRoot));
+
+    await runner.startScene('scene-a');
+
+    expect(runner.running).toBe(true);
+    runner.stop();
+  });
+});

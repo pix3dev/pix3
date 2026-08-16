@@ -11,7 +11,7 @@ import {
   resolveTunables,
 } from './recipe-contract';
 
-/** A `design/recipe.md` in the shape the contract fixes (`.plans/flow-recipes-contract.md` §4). */
+/** A `design/recipe.md` in the shape the contract fixes (`.plans/done/flow-recipes-contract.md` §4). */
 const RECIPE_MD = `# Recipe: recipe-arena-2d
 
 ## What this is

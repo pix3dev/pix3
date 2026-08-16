@@ -1,6 +1,6 @@
 /**
  * Routines — the local skill library the agent keeps for itself (§5.7 of
- * `.plans/agent-gameplay-testing.md`).
+ * `.plans/done/agent-gameplay-testing.md`).
  *
  * A routine is a named, parameterised sequence of steps plus the post-conditions
  * that must hold once they have run, stored as `design/tests/routines/<name>.json`

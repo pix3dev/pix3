@@ -121,7 +121,7 @@ The single-file HTML export is mostly **code**, not assets (measured: 1.22 MiB o
 - **A player must not construct `SceneSaver`.** It value-imports every node class for serialization, so having it in the bundle pins all of them; `SceneManager` takes it optionally and the runtime entry boots via `SceneRunner.loadAndStartScene` (`startScene` clones the graph by serializing to YAML and re-parsing it, which a player does not need).
 - **Optional heavy libraries are wired through a generated `virtual:runtime-*` module** (spine, postprocessing, network) with a **static** import inside it — a dynamic import would become a chunk a single-file HTML can never fetch, and a bare specifier left unaliased is silently externalised into an unresolvable import. That last one was a real shipped bug for `postprocessing`.
 
-Full measurements and the deferred work: `.plans/playable-export-size.md`.
+Full measurements and the deferred work: `.plans/done/playable-export-size.md`.
 
 ### Editor viewport renders on demand (non-obvious)
 

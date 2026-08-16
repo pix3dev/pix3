@@ -1,7 +1,7 @@
 /**
  * The live half of a bot's contract: what a policy can *see* of the running scene,
  * and the one actuator whose geometry is not a single event — the physical joystick
- * deflection (§5.3 / §5.4.2 of `.plans/agent-gameplay-testing.md`).
+ * deflection (§5.3 / §5.4.2 of `.plans/done/agent-gameplay-testing.md`).
  *
  * Split out of `GameTestService` for one reason: this is the part of a bot run that a
  * spec can hold to account without a browser. The rest of the world (a key press, a

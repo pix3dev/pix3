@@ -1757,7 +1757,7 @@ export class AgentChatService {
       }
     }
 
-    // The routine index (§5.7.2 of `.plans/agent-gameplay-testing.md`). Three fields per
+    // The routine index (§5.7.2 of `.plans/done/agent-gameplay-testing.md`). Three fields per
     // routine — name, params, one-line description — filtered to the active scene and capped.
     // The BODY of a routine never appears here: that is the entire economy of the mechanism
     // (one line against fifteen input steps re-typed in every iteration), and it sits in the

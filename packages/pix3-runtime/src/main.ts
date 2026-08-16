@@ -50,7 +50,7 @@ async function bootstrap(): Promise<void> {
   const sceneLoader = new SceneLoader(assetLoader, scriptRegistry, resourceManager);
   // No SceneSaver: a player never writes scenes back out. Passing one would pin
   // the serializer — and through it every node class and `yaml.stringify` — into
-  // the bundle. See `.plans/playable-export-size.md`.
+  // the bundle. See `.plans/done/playable-export-size.md`.
   const sceneManager = new SceneManager(sceneLoader);
 
   const scenePath = activeScenePath || scenePaths[0];

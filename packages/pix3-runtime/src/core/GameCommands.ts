@@ -1,6 +1,6 @@
 /**
  * Game commands — named intents a game exposes so tooling can drive it without
- * clicking (§5.8 of `.plans/agent-gameplay-testing.md`).
+ * clicking (§5.8 of `.plans/done/agent-gameplay-testing.md`).
  *
  * For menu-, turn- and puzzle-shaped games the testable unit is the *intent*
  * ("open the settings", "make a move", "buy an item"), not a pixel and not even

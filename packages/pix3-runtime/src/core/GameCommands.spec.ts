@@ -12,7 +12,7 @@ import type { SceneGraph, SceneManager } from './SceneManager';
 import { Camera3D } from '../nodes/3D/Camera3D';
 
 /**
- * The command layer's contract (§5.8.2 of `.plans/agent-gameplay-testing.md`).
+ * The command layer's contract (§5.8.2 of `.plans/done/agent-gameplay-testing.md`).
  * Each block below is one clause of it: names, argument serialisability, the
  * error boundary, the recursion cap, the journal's caps and frame stamps, undo,
  * and the lifetime tie to the scene.

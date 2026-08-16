@@ -7,7 +7,7 @@ import type {
 
 /**
  * Input traces: record a run's input in **frames**, replay it frame by frame,
- * and compare the two runs honestly (§5.2 of `.plans/agent-gameplay-testing.md`,
+ * and compare the two runs honestly (§5.2 of `.plans/done/agent-gameplay-testing.md`,
  * phase 6).
  *
  * Three decisions shape everything in this file.

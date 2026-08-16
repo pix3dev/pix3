@@ -5,7 +5,7 @@
  * Why a stub and not a runtime refactor: the export already owns the bundler's
  * alias map, so "leave this out" costs one alias and changes no `@pix3/runtime`
  * API — which matters because the package is consumed by external projects. See
- * `.plans/playable-export-size.md` §2 Р3/Р4.
+ * `.plans/done/playable-export-size.md` §2 Р3/Р4.
  *
  * The table is only safe because of two invariants, both enforced by
  * `strippable-runtime-modules.spec.ts` against the real import graph on disk:

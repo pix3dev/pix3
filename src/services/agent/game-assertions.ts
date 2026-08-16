@@ -1,5 +1,5 @@
 /**
- * Predicates for `game_run` (§5.2 of `.plans/agent-gameplay-testing.md`).
+ * Predicates for `game_run` (§5.2 of `.plans/done/agent-gameplay-testing.md`).
  *
  * Everything here is a **pure function of two data records** — the frame being
  * judged and the frame-0 baseline. No runtime, no DI, no clock, no scene graph.

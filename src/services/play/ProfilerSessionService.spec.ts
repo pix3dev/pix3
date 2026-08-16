@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProfilerSessionService } from '@/services/play/ProfilerSessionService';
+import { appState } from '@/state';
 import type { RuntimeRendererStatsSnapshot, SceneRunnerFrameSample } from '@pix3/runtime';
 
 describe('ProfilerSessionService', () => {
@@ -526,3 +527,74 @@ function createAudioPlayback(
     bitrateKbps: overrides.bitrateKbps ?? null,
   };
 }
+
+/**
+ * The Profiler is part of Studio, and Studio stays mounted (hidden) while Vibe is on screen — so
+ * without an explicit release the game keeps paying for a per-frame sample, and a 10 Hz rebuild,
+ * for a panel nobody can see.
+ */
+describe('ProfilerSessionService — off-screen workspace', () => {
+  function makeRunner(): {
+    runner: import('@pix3/runtime').SceneRunner;
+    isSubscribed: () => boolean;
+  } {
+    let subscribed = false;
+    const runner = {
+      subscribeFrameStats() {
+        subscribed = true;
+        return () => {
+          subscribed = false;
+        };
+      },
+    } as unknown as import('@pix3/runtime').SceneRunner;
+    return { runner, isSubscribed: () => subscribed };
+  }
+
+  const renderer = {
+    getStatsSnapshot: () => ({
+      calls: 0,
+      triangles: 0,
+      points: 0,
+      lines: 0,
+      geometries: 0,
+      textures: 0,
+    }),
+  } as unknown as import('@pix3/runtime').RuntimeRenderer;
+
+  afterEach(() => {
+    appState.ui.workspaceMode = 'studio';
+  });
+
+  it('drops the per-frame subscription while Vibe is on screen and takes it back in Studio', async () => {
+    const service = new ProfilerSessionService();
+    const { runner, isSubscribed } = makeRunner();
+
+    appState.ui.workspaceMode = 'studio';
+    service.beginSession('tab');
+    service.bindRuntime(runner, renderer, 'tab');
+    expect(isSubscribed()).toBe(true);
+
+    appState.ui.workspaceMode = 'flow';
+    await Promise.resolve();
+    expect(isSubscribed()).toBe(false);
+
+    appState.ui.workspaceMode = 'studio';
+    await Promise.resolve();
+    expect(isSubscribed()).toBe(true);
+
+    service.endSession();
+    expect(isSubscribed()).toBe(false);
+  });
+
+  it('does not subscribe at all when bound while Vibe is on screen', () => {
+    const service = new ProfilerSessionService();
+    const { runner, isSubscribed } = makeRunner();
+
+    appState.ui.workspaceMode = 'flow';
+    service.beginSession('tab');
+    service.bindRuntime(runner, renderer, 'tab');
+
+    expect(isSubscribed()).toBe(false);
+    service.endSession();
+  });
+});

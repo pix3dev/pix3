@@ -15,7 +15,7 @@ import { PlayableHtmlBuildService } from '@/services/export/PlayableHtmlBuildSer
 /**
  * Covers everything the size work added: gzip self-extraction, JSON scenes with the
  * `yaml` shim, the conditional glTF / postprocessing aliases, and stubbing runtime
- * modules the project never mentions. See `.plans/playable-export-size.md`.
+ * modules the project never mentions. See `.plans/done/playable-export-size.md`.
  */
 
 const BUNDLE_CODE = 'console.log("playable bundle");';

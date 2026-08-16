@@ -1,5 +1,5 @@
 /**
- * Bot policies — the fourth actuation layer of `.plans/agent-gameplay-testing.md`
+ * Bot policies — the fourth actuation layer of `.plans/done/agent-gameplay-testing.md`
  * (§5.3, phase 8): a short program, stored in the project, that *plays* the game
  * while the harness watches.
  *

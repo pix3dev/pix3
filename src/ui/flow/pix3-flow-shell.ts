@@ -119,6 +119,13 @@ export class Pix3FlowShell extends ComponentBase {
    * sitting on a black stage.
    */
   private autoStartedProjectId: string | null = null;
+  /**
+   * A game that was already running when this shell was created — i.e. the user switched over from
+   * Studio mid-play. The session is handed to this stage live (the canvas is re-parented, see
+   * `GamePlaySessionService.handOffLiveGame`), so the auto-start below must adopt it instead of
+   * restarting: a restart here threw away the score, the level and the wave the user was watching.
+   */
+  private readonly adoptedRunningSession = appState.ui.isPlaying;
   /** True while the last agent turn touched the game, so the stage is restarted when it settles. */
   private stageDirty = false;
 
@@ -238,7 +245,12 @@ export class Pix3FlowShell extends ComponentBase {
     await this.refreshPlan();
     this.fitStage();
     if (projectId && this.autoStartedProjectId !== projectId) {
+      const isFirstObservation = this.autoStartedProjectId === null;
       this.autoStartedProjectId = projectId;
+      if (isFirstObservation && this.adoptedRunningSession && appState.ui.isPlaying) {
+        // The stage is already alive: it came over from Studio with the mode switch.
+        return;
+      }
       // The stage is alive from the first frame the user sees — they poke their game while the
       // agent is still working on the first increment (design §3.2). Starting also loads the
       // project's main scene, which in Flow nothing else does (there are no tabs to open it).

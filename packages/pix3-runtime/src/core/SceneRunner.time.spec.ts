@@ -18,7 +18,7 @@ import {
 } from './runtime-time';
 
 /**
- * Frame-driver contract (§5.1 of `.plans/agent-gameplay-testing.md`). Every row
+ * Frame-driver contract (§5.1 of `.plans/done/agent-gameplay-testing.md`). Every row
  * of the invariant table in that section has a test here; the mode-switch /
  * loop-rearm cases are the ones that decide whether a speed-up looks like a
  * working game or a frozen one, so they are covered from both directions.
