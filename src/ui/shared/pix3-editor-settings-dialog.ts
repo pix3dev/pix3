@@ -326,7 +326,7 @@ export class EditorSettingsDialog extends ComponentBase {
   private visionStatus: string | null = null;
 
   @state()
-  private bgEngine: BgRemovalEngine = 'imgly';
+  private bgEngine: BgRemovalEngine = 'u2net';
 
   @state()
   private bgQuality: BgRemovalQuality = 'balanced';
@@ -1697,14 +1697,27 @@ export class EditorSettingsDialog extends ComponentBase {
         <label class="select-row">
           <span>Background removal engine</span>
           <select @change=${this.onBgEngineChange}>
-            <option value="imgly" ?selected=${this.bgEngine === 'imgly'}>
-              imgly · ISNet (reliable)
+            <option value="u2net" ?selected=${this.bgEngine === 'u2net'}>
+              U²-Net (Apache-2.0, runs on CPU)
             </option>
             <option value="birefnet" ?selected=${this.bgEngine === 'birefnet'}>
-              BiRefNet (MIT, heavier)
+              BiRefNet (MIT, needs WebGPU)
             </option>
           </select>
         </label>
+        ${this.bgEngine === 'u2net'
+          ? html`<label class="select-row">
+              <span>U²-Net quality</span>
+              <select @change=${this.onBgQualityChange}>
+                <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
+                  Balanced · u2netp (4.7 MB)
+                </option>
+                <option value="max" ?selected=${this.bgQuality === 'max'}>
+                  Max · u2net (176 MB)
+                </option>
+              </select>
+            </label>`
+          : null}
         ${this.bgEngine === 'birefnet'
           ? html`<label class="select-row">
               <span>BiRefNet quality</span>
@@ -1724,9 +1737,9 @@ export class EditorSettingsDialog extends ComponentBase {
         </label>
         <div class="hint">
           Runs on-device (no API key).
-          ${this.bgEngine === 'imgly'
-            ? 'imgly uses the ISNet model (AGPL-3.0 — commercial use needs an IMG.LY license). Runs on CPU or WebGPU.'
-            : 'BiRefNet is MIT-licensed (commercial-safe) and higher quality, but its model runs at a fixed 1024² and REQUIRES a WebGPU browser (Chrome/Edge). Without WebGPU use imgly.'}
+          ${this.bgEngine === 'u2net'
+            ? 'U²-Net is Apache-2.0 for both code and weights and runs on the CPU, so it works without WebGPU. It mattes at 320², so edges are softer than BiRefNet’s.'
+            : 'BiRefNet is MIT-licensed and higher quality, but its model runs at a fixed 1024² and REQUIRES a WebGPU browser. Note that WebGPU is blocklisted on Qualcomm Adreno (Snapdragon X / Windows-on-ARM) — use U²-Net there.'}
         </div>
       </div>
     `;

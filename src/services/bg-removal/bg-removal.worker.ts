@@ -3,11 +3,18 @@
 // competing with the editor's memory — this is what avoids the main-thread OOM). Both engine
 // libraries are dynamically imported so they split into their own chunks and only load when used.
 //
-//   • imgly    — @imgly/background-removal (ISNet, ONNX/WASM, WebGPU when available). Lighter and
-//                production-proven; AGPL-3.0.
-//   • birefnet — @huggingface/transformers + BiRefNet ONNX (MIT). Higher quality ceiling, heavier.
+//   • u2net    — onnxruntime-web + U²-Net ONNX (Apache-2.0 code AND weights). The default, and the
+//                only one that runs on the CPU — which matters because WebGPU is blocklisted on
+//                Qualcomm Adreno (Windows-on-ARM), where the other engine cannot run at all.
+//   • birefnet — @huggingface/transformers + BiRefNet ONNX (MIT). Higher quality ceiling, heavier,
+//                and its static 1024² input means it REQUIRES WebGPU.
+//
+// There used to be a third, @imgly/background-removal. It was dropped rather than licensed: AGPL-3.0
+// obliges disclosure of the combined work's source, which is incompatible with selling licences for
+// this editor, and unlike Spine that licence offers no per-user path out.
 
 import type { BgRemovalRequest, BgRemovalResponse } from './types';
+import { runU2Net } from './u2net';
 
 // Type the worker global locally rather than pulling in the "webworker" lib (which clashes with
 // the project's "dom" lib on `self` / `postMessage`).
@@ -51,41 +58,27 @@ const BIREFNET_MODELS = {
 // can only run at 1024² — that OOMs the 32-bit WASM heap. It therefore needs WebGPU (GPU memory).
 const BIREFNET_NEEDS_WEBGPU_MESSAGE =
   'BiRefNet needs a WebGPU-capable browser (Chrome/Edge). On this device, switch the ' +
-  'background-removal engine to "imgly" in Editor Settings — it runs on the CPU.';
+  'background-removal engine to "U²-Net" in Editor Settings — it runs on the CPU.';
 
 let birefnetCache: { modelId: string; pipe: BiRefNetPipeline } | null = null;
 
-async function runImgly(req: BgRemovalRequest): Promise<Blob> {
-  const { removeBackground } = await import('@imgly/background-removal');
-  const progress = (key: string, current: number, total: number): void => {
-    post({
-      id: req.id,
-      type: 'progress',
-      // Asset fetches report under "fetch:*" keys. On the first run those are real downloads; on
-      // later runs the same fetch is served from Cache Storage, so we label it "loading".
-      phase: key.startsWith('fetch') ? (req.installed ? 'loading' : 'downloading') : 'running',
-      progress: total > 0 ? current / total : null,
-    });
-  };
-  const run = (device: 'cpu' | 'gpu'): Promise<Blob> =>
-    removeBackground(req.blob, {
-      ...(req.imglyPublicPath ? { publicPath: req.imglyPublicPath } : {}),
-      device,
-      model: 'isnet_fp16',
-      output: { format: 'image/png' },
-      progress,
-    });
-
-  const useGpu = await hasUsableWebGpu();
-  try {
-    return await run(useGpu ? 'gpu' : 'cpu');
-  } catch (error) {
-    // If the GPU path fails despite an adapter, fall back to CPU (which works everywhere).
-    if (useGpu) {
-      return run('cpu');
-    }
-    throw error;
-  }
+function runLocalU2Net(req: BgRemovalRequest): Promise<Blob> {
+  return runU2Net({
+    blob: req.blob,
+    tier: req.quality,
+    ...(req.u2netModelUrl ? { modelUrl: req.u2netModelUrl } : {}),
+    ...(req.u2netWasmPath ? { wasmPath: req.u2netWasmPath } : {}),
+    onProgress: (phase, progress) => {
+      post({
+        id: req.id,
+        // A cached model still reports "downloading" fractions from the HTTP cache; relabel it so
+        // the UI matches the other engines.
+        phase: phase === 'downloading' && req.installed ? 'loading' : phase,
+        type: 'progress',
+        progress,
+      });
+    },
+  });
 }
 
 async function runBiRefNet(req: BgRemovalRequest): Promise<Blob> {
@@ -95,7 +88,7 @@ async function runBiRefNet(req: BgRemovalRequest): Promise<Blob> {
   }
   // The model's static 1024² input can't fit the WASM heap — require a USABLE WebGPU adapter up
   // front rather than letting it OOM or fail on a blocklisted GPU. (We do NOT silently fall back to
-  // imgly: the user picked BiRefNet for its MIT licence, and imgly is AGPL.)
+  // U²-Net: an explicit engine pick should not silently become a different model.)
   if (!(await hasUsableWebGpu())) {
     throw new Error(BIREFNET_NEEDS_WEBGPU_MESSAGE);
   }
@@ -206,7 +199,7 @@ async function fillHolesInBlob(blob: Blob): Promise<Blob> {
 
 ctx.onmessage = (event: MessageEvent<BgRemovalRequest>) => {
   const req = event.data;
-  const run = req.engine === 'imgly' ? runImgly(req) : runBiRefNet(req);
+  const run = req.engine === 'u2net' ? runLocalU2Net(req) : runBiRefNet(req);
   run
     .then(async blob => (req.fillHoles ? fillHolesInBlob(blob) : blob))
     .then(blob => post({ id: req.id, type: 'done', blob }))

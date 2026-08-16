@@ -1,7 +1,7 @@
 /** Which local background-removal engine to run. */
-export type BgRemovalEngine = 'imgly' | 'birefnet';
+export type BgRemovalEngine = 'u2net' | 'birefnet';
 
-/** BiRefNet model tier (imgly ignores this). */
+/** Model tier — both engines ship a light and a full variant. */
 export type BgRemovalQuality = 'balanced' | 'max';
 
 export interface BgRemovalProgress {
@@ -25,10 +25,12 @@ export interface BgRemovalRequest {
    * see-through, while leaving the outer background and soft edges untouched.
    */
   fillHoles: boolean;
-  /** Optional self-host base for imgly assets. */
-  imglyPublicPath?: string;
   /** Optional self-host host for BiRefNet (transformers.js env.remoteHost). */
   birefnetModelHost?: string;
+  /** Optional self-host URL for the U²-Net ONNX file (overrides the tier default). */
+  u2netModelUrl?: string;
+  /** Optional self-host base for the onnxruntime-web `.wasm` binaries. */
+  u2netWasmPath?: string;
 }
 
 export type BgRemovalResponse =

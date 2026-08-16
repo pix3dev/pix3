@@ -19,7 +19,7 @@ export interface AiImagePreferences {
    * the full 1K/2K generation. `0` = keep the original size. Downscale-only (never upscales).
    */
   defaultSaveMaxSize: number;
-  /** Local background-removal engine + BiRefNet quality tier. */
+  /** Local background-removal engine + model tier (used by u2net and birefnet). */
   bgRemovalEngine: BgRemovalEngine;
   bgRemovalQuality: BgRemovalQuality;
   /** Fill enclosed transparent holes in the cutout (recovers wrongly-removed object interiors). */
@@ -150,7 +150,7 @@ export class AiImageSettingsService {
       defaultQuality: '',
       transparentBackground: false,
       defaultSaveMaxSize: 0,
-      bgRemovalEngine: 'imgly',
+      bgRemovalEngine: 'u2net',
       bgRemovalQuality: 'balanced',
       bgFillHoles: true,
     };
@@ -198,8 +198,10 @@ export class AiImageSettingsService {
           parsed.defaultSaveMaxSize >= 0
             ? Math.round(parsed.defaultSaveMaxSize)
             : defaults.defaultSaveMaxSize,
+        // A persisted 'imgly' (the removed AGPL engine) is not in this list, so it falls through to
+        // the default — which is the intended migration for anyone who had it selected.
         bgRemovalEngine:
-          parsed.bgRemovalEngine === 'imgly' || parsed.bgRemovalEngine === 'birefnet'
+          parsed.bgRemovalEngine === 'u2net' || parsed.bgRemovalEngine === 'birefnet'
             ? parsed.bgRemovalEngine
             : defaults.bgRemovalEngine,
         bgRemovalQuality:

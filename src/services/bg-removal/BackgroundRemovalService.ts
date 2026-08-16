@@ -17,7 +17,10 @@ export type {
 // Lab "Magic Studio" pipeline (a large source is the difference between a clean run and an OOM).
 const REMOVE_BG_MAX_INPUT = 2560;
 
-const INSTALLED_KEY = (engine: BgRemovalEngine): string => `pix3.bgRemoval.installed:${engine}`;
+// Keyed by tier as well as engine: u2net's two tiers are 4.6 MB and ~176 MB, so treating them as
+// one "installed" flag would label a first-time 176 MB fetch as a cache read.
+const INSTALLED_KEY = (engine: BgRemovalEngine, quality: BgRemovalQuality): string =>
+  `pix3.bgRemoval.installed:${engine}:${quality}`;
 
 export interface RemoveBackgroundOptions {
   engine?: BgRemovalEngine;
@@ -30,33 +33,46 @@ export interface RemoveBackgroundOptions {
 /**
  * Local (in-browser) background removal. Inference runs in a dedicated Web Worker — off the main
  * thread and in its own heap, which is what keeps the (heavy) model from OOMing the editor. Two
- * engines are supported: `imgly` (@imgly/background-removal, ISNet — light, reliable, AGPL) and
- * `birefnet` (transformers.js + BiRefNet — higher quality ceiling, heavier, MIT). Models are NOT
- * bundled; they download on first use and are cached by the browser.
+ * engines are supported:
+ *
+ *   • `u2net`    — onnxruntime-web + U²-Net (Apache-2.0 code and weights). The default, and the
+ *                  only one that runs without WebGPU.
+ *   • `birefnet` — transformers.js + BiRefNet (MIT). Highest quality ceiling, but its static 1024²
+ *                  input OOMs the WASM heap, so it requires WebGPU.
+ *
+ * Models are NOT bundled; they download on first use and are cached by the browser.
  */
 @injectable()
 export class BackgroundRemovalService {
   private worker: Worker | null = null;
   private seq = 0;
-  private imglyPublicPath: string | null = null;
   private birefnetModelHost: string | null = null;
+  private u2netModelUrl: string | null = null;
+  private u2netWasmPath: string | null = null;
 
   static isSupported(): boolean {
     return typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined';
   }
 
   /** Self-host model/asset hosts (optional; defaults to each library's CDN / the HF hub). */
-  configure(options: { imglyPublicPath?: string; birefnetModelHost?: string }): void {
-    if (options.imglyPublicPath !== undefined) {
-      this.imglyPublicPath = options.imglyPublicPath;
-    }
+  configure(options: {
+    birefnetModelHost?: string;
+    u2netModelUrl?: string;
+    u2netWasmPath?: string;
+  }): void {
     if (options.birefnetModelHost !== undefined) {
       this.birefnetModelHost = options.birefnetModelHost;
+    }
+    if (options.u2netModelUrl !== undefined) {
+      this.u2netModelUrl = options.u2netModelUrl;
+    }
+    if (options.u2netWasmPath !== undefined) {
+      this.u2netWasmPath = options.u2netWasmPath;
     }
   }
 
   async removeBackground(input: Blob, options?: RemoveBackgroundOptions): Promise<Blob> {
-    const engine: BgRemovalEngine = options?.engine ?? 'imgly';
+    const engine: BgRemovalEngine = options?.engine ?? 'u2net';
     const quality: BgRemovalQuality = options?.quality ?? 'balanced';
     const capped = await capImage(input, REMOVE_BG_MAX_INPUT);
     const worker = this.ensureWorker();
@@ -67,14 +83,13 @@ export class BackgroundRemovalService {
       engine,
       quality,
       blob: capped,
-      installed: isInstalled(engine),
+      installed: isInstalled(engine, quality),
       fillHoles: options?.fillHoles ?? true,
-      ...(engine === 'imgly' && this.imglyPublicPath
-        ? { imglyPublicPath: this.imglyPublicPath }
-        : {}),
       ...(engine === 'birefnet' && this.birefnetModelHost
         ? { birefnetModelHost: this.birefnetModelHost }
         : {}),
+      ...(engine === 'u2net' && this.u2netModelUrl ? { u2netModelUrl: this.u2netModelUrl } : {}),
+      ...(engine === 'u2net' && this.u2netWasmPath ? { u2netWasmPath: this.u2netWasmPath } : {}),
     };
 
     return new Promise<Blob>((resolve, reject) => {
@@ -93,7 +108,7 @@ export class BackgroundRemovalService {
         }
         cleanup();
         if (msg.type === 'done') {
-          markInstalled(engine);
+          markInstalled(engine, quality);
           resolve(msg.blob);
         } else {
           reject(new Error(friendlyError(msg.message, engine)));
@@ -159,17 +174,17 @@ async function capImage(blob: Blob, max: number): Promise<Blob> {
   });
 }
 
-const isInstalled = (engine: BgRemovalEngine): boolean => {
+const isInstalled = (engine: BgRemovalEngine, quality: BgRemovalQuality): boolean => {
   try {
-    return localStorage.getItem(INSTALLED_KEY(engine)) === '1';
+    return localStorage.getItem(INSTALLED_KEY(engine, quality)) === '1';
   } catch {
     return false;
   }
 };
 
-const markInstalled = (engine: BgRemovalEngine): void => {
+const markInstalled = (engine: BgRemovalEngine, quality: BgRemovalQuality): void => {
   try {
-    localStorage.setItem(INSTALLED_KEY(engine), '1');
+    localStorage.setItem(INSTALLED_KEY(engine, quality), '1');
   } catch {
     // ignore
   }
@@ -181,9 +196,9 @@ const isOutOfMemory = (message: string): boolean =>
 const friendlyError = (message: string, engine: BgRemovalEngine): string => {
   if (isOutOfMemory(message)) {
     return engine === 'birefnet'
-      ? 'Ran out of memory running BiRefNet. Switch to the "imgly" engine in Editor Settings, ' +
+      ? 'Ran out of memory running BiRefNet. Switch to the "U²-Net" engine in Editor Settings, ' +
           'use the "Balanced" quality, or try a smaller image / a WebGPU browser.'
-      : 'Ran out of memory. Try a smaller image or a browser with WebGPU (Chrome/Edge).';
+      : 'Ran out of memory. Try a smaller image, or the "Balanced" quality in Editor Settings.';
   }
   return message;
 };

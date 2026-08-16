@@ -49,7 +49,7 @@ function createPreferences() {
     defaultQuality: '',
     transparentBackground: false,
     defaultSaveMaxSize: 0,
-    bgRemovalEngine: 'imgly' as const,
+    bgRemovalEngine: 'u2net' as const,
     bgRemovalQuality: 'balanced' as const,
     bgFillHoles: true,
   };

@@ -1,0 +1,54 @@
+Pix3 Collab Server — Commercial Licence
+Copyright 2026 __COPYRIGHT_HOLDER_TBD__. All rights reserved.
+
+This software (the "Software") is the commercial component of Pix3. It is NOT
+covered by the Apache-2.0 licence that applies to the Pix3 editor and the Pix3
+runtime; those grant you no rights whatsoever in this directory.
+
+1. GRANT
+
+   Subject to the terms below, you are granted a non-exclusive,
+   non-transferable, revocable licence to use, run and modify the Software
+   solely for:
+
+     (a) evaluation, development and testing; and
+     (b) internal non-production use.
+
+   Any other use — in particular running the Software in production, providing
+   it to third parties, or offering it as a hosted or managed service — requires
+   a separate written commercial agreement with the Licensor.
+
+2. RESTRICTIONS
+
+   You may not:
+     (a) distribute, sublicense, sell or rent the Software, in source or binary
+         form, except as expressly permitted by a commercial agreement;
+     (b) remove or obscure any copyright, trademark or licence notice;
+     (c) circumvent or disable any licence key, seat limit or usage metering.
+
+3. CONTRIBUTIONS
+
+   Contributions to this directory are accepted only under the agreement
+   described in CONTRIBUTING.md, which assigns the Licensor the rights needed to
+   licence them commercially.
+
+4. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+5. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+To enquire about a commercial licence, contact: __CONTACT_EMAIL_TBD__
+
+NOTE: this text has not been reviewed by a lawyer. It states the intended
+commercial boundary clearly enough to work with, but have counsel review it
+before it is relied on in a signed deal.

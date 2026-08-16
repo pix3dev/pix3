@@ -40,5 +40,6 @@
     "@esotericsoftware/spine-threejs": {
       "optional": true
     }
-  }
+  },
+  "license": "Apache-2.0"
 }

@@ -7,7 +7,7 @@
     "node": ">=24.15.0 <25"
   },
   "scripts": {
-    "prebuild": "node scripts/update-version.mjs",
+    "prebuild": "node scripts/check-copyright.mjs && node scripts/update-version.mjs",
     "version:sync": "node scripts/update-version.mjs --sync-only",
     "dev": "vite",
     "dev:prod": "vite --mode prod-backend",
@@ -22,20 +22,21 @@
     "test": "vitest run",
     "type-check": "tsc --noEmit && tsc --noEmit -p packages/pix3-collab-server",
     "knip": "knip",
-    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/esbuild-wasm/esbuild.wasm', 'public/esbuild.wasm')\""
+    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/esbuild-wasm/esbuild.wasm', 'public/esbuild.wasm')\"",
+    "licenses:report": "node scripts/licenses-report.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d": "^0.19.3",
     "@esotericsoftware/spine-threejs": "~4.3.13",
     "@hocuspocus/provider": "^2.15.0",
     "@huggingface/transformers": "^4.2.0",
-    "@imgly/background-removal": "^1.7.0",
     "esbuild-wasm": "^0.24.0",
     "feather-icons": "^4.29.2",
     "golden-layout": "^2.6.0",
     "jszip": "^3.10.1",
     "lit": "^3.3.1",
     "monaco-editor": "^0.55.1",
+    "onnxruntime-web": "^1.27.0",
     "postprocessing": "^6.39.2",
     "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
@@ -72,5 +73,6 @@
   "overrides": {},
   "workspaces": [
     "packages/pix3-collab-server"
-  ]
+  ],
+  "license": "Apache-2.0"
 }

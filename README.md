@@ -320,7 +320,26 @@ Example: `background: rgba(var(--pix3-accent-rgb), 0.8);`
 
 ## License
 
-[Add your license information here]
+Pix3 is **open core** — the editor and the runtime are open source, the
+collaboration server is commercial.
+
+| Component | License |
+|---|---|
+| Pix3 editor (`src/`) | [Apache-2.0](LICENSE) |
+| `@pix3/runtime` (`packages/pix3-runtime/`) | [Apache-2.0](packages/pix3-runtime/LICENSE) |
+| `@pix3/collab-server` (`packages/pix3-collab-server/`) | [Commercial](packages/pix3-collab-server/LICENSE) — free for evaluation and internal non-production use |
+| `@pix3/agent-bridge` (`tools/pix3-agent-bridge/`) | MIT |
+
+Games you build with Pix3 are yours. `@pix3/runtime` ships inside your exported
+game under Apache-2.0, which imposes no obligation on the game itself.
+
+Third-party components are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Two of them need attention before you ship: **Spine** requires every user of your
+product to hold their own Spine Editor license, and **model weights** for
+background removal are fetched at runtime under their own terms.
+
+Contributions require a CLA — see [CONTRIBUTING.md](CONTRIBUTING.md) for what it
+does and why an open-core project needs one.
 
 ---
 

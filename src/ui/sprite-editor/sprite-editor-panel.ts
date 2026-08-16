@@ -343,7 +343,7 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
   @state() private boundImagePath: string | null = null;
   @state() private current: CurrentImage | null = null;
   @state() private bgBusy = false;
-  @state() private bgEngine: BgRemovalEngine = 'imgly';
+  @state() private bgEngine: BgRemovalEngine = 'u2net';
   @state() private bgQuality: BgRemovalQuality = 'balanced';
   @state() private bgFillHoles = true;
   @state() private bgProgress: BgRemovalProgress | null = null;
