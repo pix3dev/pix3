@@ -58,6 +58,10 @@ const createOperationContext = (rootNodes: NodeBase[]) => {
 
   const container = {
     getOrCreateToken: <T>(token: T): T => token,
+    // Mirrors the tokens `getService` below answers for; an optional-dependency lookup
+    // (`syncViewportTransform`) asks this rather than probing with a try/catch.
+    hasService: (token: unknown): boolean =>
+      token === SceneManager || token === ViewportRendererService,
     getService: <T>(token: unknown): T => {
       if (token === SceneManager) {
         return sceneManagerMock as T;
