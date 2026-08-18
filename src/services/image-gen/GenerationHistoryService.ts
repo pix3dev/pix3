@@ -16,6 +16,12 @@ export interface GenerationRecord {
   height?: number;
   /** Small thumbnails of the reference images used, if any. */
   referenceThumbs?: Blob[];
+  /**
+   * The vector source this raster was baked from (`svg-llm` generations). Stored alongside the PNG
+   * so a past generation can be edited as code or re-baked at another size without another model
+   * call — the raster is the artifact, but the source is the master.
+   */
+  svgSource?: string;
 }
 
 /**

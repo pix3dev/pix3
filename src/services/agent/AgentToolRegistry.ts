@@ -1531,11 +1531,25 @@ export class AgentToolRegistry {
       {
         name: 'generate_asset',
         description:
-          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
+          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For schematic, placeholder or UI graphics (icons, buttons, bars, arrows, flat props, blockout art) prefer providerId 'svg-llm': it draws with the agent's own LLM as SVG and bakes it locally, so you get the EXACT width×height you ask for, real transparency with no background-removal pass, and it costs a text completion instead of a metered image. Use a raster model (the default) for painterly, textured or photographic art. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
         inputSchema: {
           type: 'object',
           properties: {
             prompt: { type: 'string' },
+            providerId: {
+              type: 'string',
+              description:
+                "Override the configured image provider for this call. 'svg-llm' = vector art via the agent's LLM (exact size, real alpha, fast and cheap — best for placeholder/UI/schematic graphics). Omit to use the user's configured provider.",
+            },
+            width: {
+              type: 'integer',
+              description:
+                "Exact output width in px. Honoured only by providers that can deliver it (providerId 'svg-llm'); raster models ignore it and answer with their own aspect-ratio grid.",
+            },
+            height: {
+              type: 'integer',
+              description: 'Exact output height in px (see width). Defaults to width when omitted.',
+            },
             name: {
               type: 'string',
               description:
@@ -3102,12 +3116,19 @@ export class AgentToolRegistry {
   }
 
   private async generateAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const status = await this.assetGen.status();
+    const providerId =
+      typeof args.providerId === 'string' && args.providerId.trim()
+        ? args.providerId.trim()
+        : undefined;
+    // Status for the provider that will actually run: for a provider with no key of its own
+    // (svg-llm) `keyConfigured` reports whether an LLM lane is reachable, not whether a key exists.
+    const status = await this.assetGen.status(providerId);
     if (!status.keyConfigured) {
       return {
         ok: false,
-        error:
-          'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
+        error: providerId
+          ? `The "${providerId}" image provider is not ready. For "svg-llm", the user must configure an LLM in Settings → AI Agent; for the others, an image API key in Settings → AI Providers.`
+          : 'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
       };
     }
 
@@ -3122,7 +3143,18 @@ export class AgentToolRegistry {
     const maxSize = typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined;
     const preset = resolvePreset(args.postProcess, transparent ? 'sprite' : 'texture');
 
-    const generated = await this.assetGen.generate({ prompt, references, transparent });
+    // Exact size is a request, not a promise: providers that cannot honour it ignore both fields.
+    const width = typeof args.width === 'number' ? Math.floor(args.width) : undefined;
+    const height = typeof args.height === 'number' ? Math.floor(args.height) : width;
+
+    const generated = await this.assetGen.generate({
+      prompt,
+      references,
+      transparent,
+      providerId,
+      width,
+      height,
+    });
     // The generation plus every intermediate handle the pipeline creates must be freed.
     const handleIds = new Set<string>([generated.id]);
     try {
@@ -3139,6 +3171,9 @@ export class AgentToolRegistry {
         saved,
         preset,
         original: { width: generated.width, height: generated.height },
+        // Vector output is already a clean cutout at the exact size asked for, so the post-process
+        // pass skipped background removal — say so, or "no bg-removal ran" reads as a failure.
+        ...(generated.svgSource ? { vector: true } : {}),
         transparency,
         note: transparencyNote(preset, transparency),
         ...(await this.previewImages(oriented)),

@@ -133,6 +133,13 @@ the background (`queue_asset` when it exists, otherwise as a late increment) and
 the game with placeholders until then. The chat must never sit for 40 seconds waiting on an
 image.
 
+**When you do generate placeholder art, reach for `generate_asset` with
+`providerId: 'svg-llm'` first.** It authors SVG with your own model and bakes it locally, so
+it answers in seconds at the exact `width`/`height` you ask for, with real transparency and no
+background-removal pass — which is what makes it safe to slip into a Flow turn at all. Icons,
+buttons, bars, arrows and flat props belong there. Save the metered raster models for the one
+or two pieces that genuinely want painterly art, and do that as its own increment.
+
 **Juice is cheap — spend it as you go.** `scene.juice.burst(target)`,
 `scene.juice.floatText('+100', { at: target })`, `scene.audio.sfx('score')` and `Label2D`'s
 `glowColor`/`glowStrength` are one-liners with no assets and no setup. Add the sound, the burst

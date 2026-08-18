@@ -24,6 +24,12 @@ export interface ReferenceImage {
 export interface GeneratedImage {
   readonly mimeType: string;
   readonly data: string;
+  /**
+   * The vector source this raster was baked from, when the provider authored one (`svg-llm`). Kept
+   * as a first-class artifact: it makes edits deterministic ("thicken the outline" is a source edit,
+   * not a re-roll) and lets the same asset be re-baked at another size without another model call.
+   */
+  readonly svgSource?: string;
 }
 
 export interface GenerateImageParams {
@@ -43,6 +49,19 @@ export interface GenerateImageParams {
   readonly outputMimeType?: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Number of images to request. Providers may clamp to their `maxCount`. */
   readonly count?: number;
+  /**
+   * Exact output size in pixels. Only honoured by providers whose selected model advertises
+   * {@link ImageModelCapabilities.supportsExactSize} — a raster model returns whatever its aspect
+   * ratio / size tier produces, so asking it for 96×32 would be a promise we cannot keep.
+   */
+  readonly width?: number;
+  readonly height?: number;
+  /**
+   * The current vector source of the asset being edited. Providers that author SVG (`svg-llm`) treat
+   * its presence as "edit this source" instead of "author a new sprite", which turns a tweak into a
+   * deterministic source edit rather than a fresh roll.
+   */
+  readonly svgSource?: string;
   readonly signal?: AbortSignal;
 }
 
@@ -65,6 +84,12 @@ export interface ImageModelCapabilities {
   readonly maxCount: number;
   /** True when the model can emit a transparent alpha channel directly (skips local bg-removal). */
   readonly supportsTransparency: boolean;
+  /**
+   * True when the model honours {@link GenerateImageParams.width}/`height` exactly. Vector-authoring
+   * providers can (the raster is baked locally at whatever size was asked for); raster models cannot,
+   * so the UI shows W×H inputs only for the former and the aspect-ratio/size tier pickers otherwise.
+   */
+  readonly supportsExactSize: boolean;
   /** True when direct browser calls are blocked by CORS and a same-origin proxy is required. */
   readonly requiresProxy: boolean;
 }
@@ -110,8 +135,19 @@ export interface ImageGenProvider {
   readonly apiKeySecretId: string;
   /** Where a user obtains an API key (shown in settings). */
   readonly apiKeyHelpUrl?: string;
+  /**
+   * Whether this provider needs an API key of its own. Defaults to `true`. A provider that borrows
+   * another stack's credentials (`svg-llm` runs on the agent's LLM) sets it to `false`: callers skip
+   * the key check and the UI drops the key prompt — it would ask for a key nothing ever reads.
+   */
+  readonly requiresApiKey?: boolean;
   getModel(modelId: string): ProviderModel | undefined;
   generate(params: GenerateImageParams, ctx: RequestContext): Promise<ImageGenResult>;
+  /**
+   * Whether the provider can generate right now, for providers with {@link requiresApiKey} `false`
+   * (where "is a key stored?" is the wrong question). Optional; absent means "always available".
+   */
+  isAvailable?(): Promise<boolean>;
 }
 
 export type ImageGenErrorKind =
