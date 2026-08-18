@@ -4,6 +4,9 @@ import { ServiceContainer } from '@/fw/di';
 import { DialogService } from '@/services/editor/DialogService';
 import { LoggingService } from '@/services/core/LoggingService';
 import { UpdateCheckService, type UpdateCheckState } from '@/services/editor/UpdateCheckService';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { appState, resetAppState } from '@/state';
 
 type TestStatusBarElement = HTMLElement & { updateComplete: Promise<unknown> };
@@ -155,5 +158,82 @@ describe('Pix3StatusBar', () => {
       })
     );
     expect(replaceSpy).toHaveBeenCalledWith(expect.stringContaining('pix3_refresh='));
+  });
+
+  it('reports both agent lanes and opens Agent settings when one is clicked', async () => {
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(UpdateCheckService),
+      UpdateCheckServiceStub,
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(LoggingService), LoggingService, 'singleton');
+    container.addService(
+      container.getOrCreateToken(BridgeConnectionService),
+      class {
+        subscribe = () => () => undefined;
+        isAvailable = () => true;
+        getEntries = () => [{ id: 'openai', label: 'OpenAI', kind: 'openai' as const }];
+      },
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(AgentSettingsService),
+      class {
+        subscribe = (listener: (prefs: unknown) => void) => {
+          listener({});
+          return () => undefined;
+        };
+        // No Gemini key stored: the two lanes must be able to disagree.
+        hasApiKey = async () => false;
+      },
+      'singleton'
+    );
+    const showSettings = vi.fn(async () => undefined);
+    container.addService(
+      container.getOrCreateToken(EditorSettingsService),
+      class {
+        showSettings = showSettings;
+      },
+      'singleton'
+    );
+
+    const statusBar = document.createElement('pix3-status-bar') as TestStatusBarElement;
+    document.body.appendChild(statusBar);
+    await statusBar.updateComplete;
+    await Promise.resolve();
+    await statusBar.updateComplete;
+
+    const lanes = [...statusBar.querySelectorAll('.status-lane')] as HTMLButtonElement[];
+    expect(lanes).toHaveLength(2);
+    expect(lanes[0].textContent).toContain('Bridge');
+    expect(lanes[0].classList.contains('is-on')).toBe(true);
+    expect(lanes[1].textContent).toContain('Gemini');
+    expect(lanes[1].classList.contains('is-off')).toBe(true);
+
+    lanes[1].click();
+    expect(showSettings).toHaveBeenCalledWith('agent');
+  });
+
+  it('drops the perf readout in Vibe, where the panels it measures are hidden', async () => {
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(UpdateCheckService),
+      UpdateCheckServiceStub,
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(LoggingService), LoggingService, 'singleton');
+
+    appState.ui.workspaceMode = 'flow';
+
+    const statusBar = document.createElement('pix3-status-bar') as TestStatusBarElement;
+    document.body.appendChild(statusBar);
+    await statusBar.updateComplete;
+
+    expect(statusBar.querySelector('.status-perf')).toBeNull();
+    // The bar itself still reports — it is shared by both shells.
+    expect(statusBar.textContent).toContain('v0.0.1 (build 7)');
   });
 });

@@ -6,6 +6,8 @@ export * from './core/ScriptRegistry';
 export * from './core/ScriptComponent';
 export * from './core/ProjectManifest';
 export * from './core/SceneLoader';
+export * from './core/node-type-registry';
+export * from './core/renderability-lint';
 export * from './core/SceneSaver';
 export * from './core/SceneManager';
 export * from './core/SceneRunner';

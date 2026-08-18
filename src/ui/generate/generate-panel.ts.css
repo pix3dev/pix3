@@ -183,6 +183,55 @@ pix3-generate-panel .gp-spacer {
   flex: 1 1 auto;
 }
 
+/* Exact output size (providers with supportsExactSize) ------------------- */
+pix3-generate-panel .gp-size-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+pix3-generate-panel .gp-size-input {
+  width: 4.5rem;
+  box-sizing: border-box;
+}
+
+pix3-generate-panel .gp-size-times {
+  color: var(--fg-3);
+  font-size: 0.8rem;
+}
+
+pix3-generate-panel .gp-size-lock,
+pix3-generate-panel .gp-size-preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+pix3-generate-panel .gp-size-lock:hover,
+pix3-generate-panel .gp-size-preset:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-size-lock.is-locked,
+pix3-generate-panel .gp-size-preset.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* References ------------------------------------------------------------- */
 pix3-generate-panel .gp-references {
   display: flex;
@@ -308,7 +357,8 @@ pix3-generate-panel .gp-key-button.is-connected {
 }
 
 pix3-generate-panel .gp-model-select {
-  max-width: 12rem;
+  /* Wide enough that the price tag appended to the label stays visible when collapsed. */
+  max-width: 15rem;
   font-size: 0.82rem;
   padding: 0.35rem 0.4rem;
 }
@@ -449,6 +499,65 @@ pix3-generate-panel .gp-result-meta {
   flex-direction: column;
   gap: 0.2rem;
   min-width: 0;
+}
+
+pix3-generate-panel .gp-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-1);
+  color: var(--accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+/* Vector source viewer --------------------------------------------------- */
+pix3-generate-panel .gp-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+pix3-generate-panel .gp-source-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+pix3-generate-panel .gp-source-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+pix3-generate-panel .gp-source-toggle:hover {
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-source-code {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 pix3-generate-panel .gp-result-name {

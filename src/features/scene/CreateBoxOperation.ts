@@ -1,10 +1,13 @@
 import { CreateNodeOperationBase } from '@/core/CreateNodeOperationBase';
-import { GeometryMesh, type SceneGraph } from '@pix3/runtime';
+import { defaultMaterialTypeForProject } from '@/core/material-defaults';
+import { GeometryMesh, type GeometryMaterialType, type SceneGraph } from '@pix3/runtime';
 
 export interface CreateBoxOperationParams {
   boxName?: string;
   size?: [number, number, number];
   color?: string;
+  /** Overrides the project's platform default (see {@link defaultMaterialTypeForProject}). */
+  materialType?: GeometryMaterialType;
 }
 
 export class CreateBoxOperation extends CreateNodeOperationBase<CreateBoxOperationParams> {
@@ -37,7 +40,7 @@ export class CreateBoxOperation extends CreateNodeOperationBase<CreateBoxOperati
       name: boxName,
       geometry: 'box',
       size,
-      material: { color },
+      material: { color, type: params.materialType ?? defaultMaterialTypeForProject() },
     });
     return node as SceneGraph['rootNodes'][0];
   }

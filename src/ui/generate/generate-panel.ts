@@ -2,7 +2,13 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { appState } from '@/state';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
-import { ImageGenError, type AspectRatio } from '@/services/image-gen/ImageGenTypes';
+import {
+  ImageGenError,
+  modelPickerLabel,
+  type AspectRatio,
+} from '@/services/image-gen/ImageGenTypes';
+import { DEFAULT_SVG_SPRITE_SIZE } from '@/services/image-gen/SvgLlmImageProvider';
+import { MAX_SPRITE_SIZE, MIN_SPRITE_SIZE, clampSpriteSize } from '@/services/image-gen/svg-render';
 import {
   GenerationHistoryService,
   type GenerationRecord,
@@ -41,6 +47,8 @@ interface PendingResult {
   prompt: string;
   width?: number;
   height?: number;
+  /** Vector source, for results a vector provider authored — shown, copyable, and re-sent on edit. */
+  svgSource?: string;
 }
 
 /**
@@ -91,6 +99,14 @@ export class GeneratePanel extends ComponentBase {
   @state() private imageSize = '1K';
   @state() private quality = '';
   @state() private transparentBackground = false;
+  /** Exact output size, used instead of aspect/size for providers that honour one. */
+  @state() private outputWidth = DEFAULT_SVG_SPRITE_SIZE;
+  @state() private outputHeight = DEFAULT_SVG_SPRITE_SIZE;
+  @state() private lockRatio = true;
+  /**
+   * "Ready to generate", not literally "a key is stored" — a provider that borrows the agent's LLM
+   * credentials (`requiresApiKey: false`) reports readiness instead, and never shows a key prompt.
+   */
   @state() private keyConfigured = false;
   @state() private references: ReferenceItem[] = [];
   @state() private generating = false;
@@ -107,6 +123,10 @@ export class GeneratePanel extends ComponentBase {
   @state() private saveName = '';
   @state() private saveMessage: string | null = null;
   @state() private saveError: string | null = null;
+  @state() private sourceViewerOpen = false;
+  @state() private sourceCopied = false;
+  /** Whether the next Generate edits the current result's SVG source instead of drawing afresh. */
+  @state() private editSource = false;
 
   private readonly ownedUrls = new Set<string>();
   private readonly historyUrls = new Map<string, string>();
@@ -201,9 +221,12 @@ export class GeneratePanel extends ComponentBase {
     this.modelId = this.aiSettings.getSelectedModelId(this.providerId) ?? '';
     const model = provider?.getModel(this.modelId);
     this.aspectRatio = prefs.defaultAspectRatio;
-    this.imageSize = model?.capabilities.imageSizes.includes(prefs.defaultImageSize)
+    const sizes = model?.capabilities.imageSizes ?? [];
+    // Prefer the stored size, then 1K, and only then the first advertised size — a model whose
+    // cheapest tier leads the list (Gemini's '512px') must not silently become the default.
+    this.imageSize = sizes.includes(prefs.defaultImageSize)
       ? prefs.defaultImageSize
-      : (model?.capabilities.imageSizes[0] ?? '1K');
+      : (sizes.find(size => size === '1K') ?? sizes[0] ?? '1K');
     const qualities = model?.capabilities.qualities ?? [];
     this.quality =
       prefs.defaultQuality && qualities.includes(prefs.defaultQuality)
@@ -211,16 +234,36 @@ export class GeneratePanel extends ComponentBase {
         : (qualities.find(q => q === 'medium') ?? qualities[0] ?? '');
     this.transparentBackground =
       Boolean(model?.capabilities.supportsTransparency) && prefs.transparentBackground;
+    this.outputWidth = clampSpriteSize(prefs.defaultExactWidth, DEFAULT_SVG_SPRITE_SIZE);
+    this.outputHeight = clampSpriteSize(prefs.defaultExactHeight, DEFAULT_SVG_SPRITE_SIZE);
     void this.refreshKeyStatus();
   }
 
+  /** True when the selected provider owns an API key (raster providers) rather than borrowing one. */
+  private get keyRequired(): boolean {
+    return this.providers.get(this.providerId)?.requiresApiKey !== false;
+  }
+
+  /** True when the selected model takes exact pixel dimensions instead of an aspect ratio. */
+  private get exactSize(): boolean {
+    return Boolean(
+      this.providers.get(this.providerId)?.getModel(this.modelId)?.capabilities.supportsExactSize
+    );
+  }
+
   private async refreshKeyStatus(): Promise<void> {
-    if (!this.providerId) {
+    const provider = this.providers.get(this.providerId);
+    if (!provider) {
       this.keyConfigured = false;
       return;
     }
     try {
-      this.keyConfigured = await this.aiSettings.hasApiKey(this.providerId);
+      // For a provider with no key of its own, "is a key stored?" is the wrong question — it would
+      // answer no forever and gate off a lane the user already configured in Agent settings.
+      this.keyConfigured =
+        provider.requiresApiKey === false
+          ? ((await provider.isAvailable?.()) ?? true)
+          : await this.aiSettings.hasApiKey(this.providerId);
     } catch {
       this.keyConfigured = false;
     }
@@ -296,8 +339,8 @@ export class GeneratePanel extends ComponentBase {
       >
         ${this.renderHead()}
         <div class="gp-body">
-          ${this.renderReferences(maxReferences)} ${this.renderPromptBar()} ${this.renderResult()}
-          ${this.renderHistory()}
+          ${this.renderReferences(maxReferences)} ${this.renderSizeRow()} ${this.renderPromptBar()}
+          ${this.renderResult()} ${this.renderHistory()}
         </div>
         ${this.isDragActive
           ? html`<div class="gp-drop-overlay">Drop image to add as reference</div>`
@@ -372,6 +415,71 @@ export class GeneratePanel extends ComponentBase {
     `;
   }
 
+  /**
+   * Exact W×H, for providers that can actually deliver it. It sits in the panel body rather than
+   * behind the settings popover because it is the *point* of such a provider — "96×32 and I get
+   * 96×32" is the reason to pick it over a raster model, and a control nobody finds is a promise
+   * nobody collects.
+   */
+  private renderSizeRow() {
+    if (!this.exactSize) {
+      return null;
+    }
+    return html`
+      <div class="gp-size-row">
+        <span class="gp-field-label">Size</span>
+        <input
+          class="gp-size-input"
+          type="number"
+          min=${MIN_SPRITE_SIZE}
+          max=${MAX_SPRITE_SIZE}
+          step="1"
+          aria-label="Output width in pixels"
+          .value=${String(this.outputWidth)}
+          @change=${this.onWidthChange}
+        />
+        <span class="gp-size-times">×</span>
+        <input
+          class="gp-size-input"
+          type="number"
+          min=${MIN_SPRITE_SIZE}
+          max=${MAX_SPRITE_SIZE}
+          step="1"
+          aria-label="Output height in pixels"
+          .value=${String(this.outputHeight)}
+          @change=${this.onHeightChange}
+        />
+        <button
+          class="gp-size-lock ${this.lockRatio ? 'is-locked' : ''}"
+          type="button"
+          title=${this.lockRatio
+            ? 'Square: height follows width'
+            : 'Width and height are independent'}
+          aria-label="Lock output aspect ratio"
+          aria-pressed=${this.lockRatio ? 'true' : 'false'}
+          @click=${this.onToggleLockRatio}
+        >
+          ${this.icons.getIcon(this.lockRatio ? 'lock' : 'unlock', 12)}
+        </button>
+        <div class="gp-spacer"></div>
+        ${SIZE_PRESETS.map(
+          preset => html`
+            <button
+              class="gp-size-preset ${this.outputWidth === preset && this.outputHeight === preset
+                ? 'is-active'
+                : ''}"
+              type="button"
+              title=${`${preset}×${preset}`}
+              @click=${() => this.applySizePreset(preset)}
+            >
+              ${preset}
+            </button>
+          `
+        )}
+      </div>
+    `;
+  }
+
   private renderPromptBar() {
     const provider = this.providers.get(this.providerId);
     const model = provider?.getModel(this.modelId);
@@ -396,13 +504,17 @@ export class GeneratePanel extends ComponentBase {
             <div class="gp-key-wrap">
               <button
                 class="gp-key-button ${this.keyConfigured ? 'is-connected' : ''}"
-                title=${this.keyConfigured
-                  ? 'API key connected — quick settings'
-                  : 'Connect API key & quick settings'}
-                aria-label="API key and quick settings"
+                title=${!this.keyRequired
+                  ? 'Quick settings — this provider uses the agent’s LLM, no key needed'
+                  : this.keyConfigured
+                    ? 'API key connected — quick settings'
+                    : 'Connect API key & quick settings'}
+                aria-label=${this.keyRequired
+                  ? 'API key and quick settings'
+                  : 'Quick generation settings'}
                 @click=${this.toggleApiKeyPopover}
               >
-                ${this.icons.getIcon('key', IconSize.SMALL)}
+                ${this.icons.getIcon(this.keyRequired ? 'key' : 'sliders', IconSize.SMALL)}
               </button>
               ${this.apiKeyPopoverOpen ? this.renderKeyPopover(provider) : null}
             </div>
@@ -410,7 +522,7 @@ export class GeneratePanel extends ComponentBase {
               ${models.map(
                 item =>
                   html`<option value=${item.id} ?selected=${item.id === this.modelId}>
-                    ${item.label}
+                    ${modelPickerLabel(item)}
                   </option>`
               )}
             </select>
@@ -425,6 +537,77 @@ export class GeneratePanel extends ComponentBase {
             </button>
           </div>
         </div>
+      </div>
+    `;
+  }
+
+  /** The API-key block, for providers that own a key. */
+  private renderKeyRows(helpUrl: string | undefined) {
+    return html`
+      <div class="gp-key-status-row">
+        <span class="gp-field-label">API key</span>
+        <span class="gp-key-status ${this.keyConfigured ? 'is-set' : 'is-unset'}">
+          ${this.keyConfigured ? 'Connected' : 'Not set'}
+        </span>
+      </div>
+      <div class="gp-key-row">
+        <input
+          type="password"
+          autocomplete="off"
+          aria-label="API key"
+          placeholder=${this.keyConfigured ? '•••••••• stored' : 'Paste API key'}
+          .value=${this.apiKeyInput}
+          @input=${this.onApiKeyInput}
+          @keydown=${this.onKeyInputKeyDown}
+        />
+        <button
+          class="gp-key-save"
+          ?disabled=${!this.apiKeyInput.trim() || this.apiKeyBusy}
+          @click=${this.onSaveApiKey}
+        >
+          Save
+        </button>
+        ${this.keyConfigured
+          ? html`<button
+              class="gp-key-clear"
+              ?disabled=${this.apiKeyBusy}
+              @click=${this.onClearApiKey}
+            >
+              Clear
+            </button>`
+          : null}
+      </div>
+      <div class="gp-popover-hint">
+        ${this.apiKeyMessage
+          ? this.apiKeyMessage
+          : html`Stored encrypted in this
+            browser.${helpUrl
+              ? html` <a href=${helpUrl} target="_blank" rel="noreferrer">Get a key</a>.`
+              : ''}`}
+      </div>
+    `;
+  }
+
+  /**
+   * For a provider with no key of its own (`svg-llm` draws with the agent's model). Asking for a key
+   * here would be a nag for something nothing reads; what the user needs instead is the one hint the
+   * chat already gives when no model is reachable.
+   */
+  private renderBorrowedCredentialRow() {
+    return html`
+      <div class="gp-key-status-row">
+        <span class="gp-field-label">Model access</span>
+        <span class="gp-key-status ${this.keyConfigured ? 'is-set' : 'is-unset'}">
+          ${this.keyConfigured ? 'Agent LLM ready' : 'No LLM configured'}
+        </span>
+      </div>
+      <div class="gp-popover-hint">
+        ${this.keyConfigured
+          ? html`Draws with the Agent chat’s model — no separate key.`
+          : html`Configure a provider in Agent settings first.`}
+        <button class="gp-link-button" @click=${this.openAgentSettings}>
+          Open Agent settings…
+        </button>
       </div>
     `;
   }
@@ -449,60 +632,22 @@ export class GeneratePanel extends ComponentBase {
           </select>
         </label>
 
-        <div class="gp-key-status-row">
-          <span class="gp-field-label">API key</span>
-          <span class="gp-key-status ${this.keyConfigured ? 'is-set' : 'is-unset'}">
-            ${this.keyConfigured ? 'Connected' : 'Not set'}
-          </span>
-        </div>
-        <div class="gp-key-row">
-          <input
-            type="password"
-            autocomplete="off"
-            aria-label="API key"
-            placeholder=${this.keyConfigured ? '•••••••• stored' : 'Paste API key'}
-            .value=${this.apiKeyInput}
-            @input=${this.onApiKeyInput}
-            @keydown=${this.onKeyInputKeyDown}
-          />
-          <button
-            class="gp-key-save"
-            ?disabled=${!this.apiKeyInput.trim() || this.apiKeyBusy}
-            @click=${this.onSaveApiKey}
-          >
-            Save
-          </button>
-          ${this.keyConfigured
-            ? html`<button
-                class="gp-key-clear"
-                ?disabled=${this.apiKeyBusy}
-                @click=${this.onClearApiKey}
-              >
-                Clear
-              </button>`
-            : null}
-        </div>
-        <div class="gp-popover-hint">
-          ${this.apiKeyMessage
-            ? this.apiKeyMessage
-            : html`Stored encrypted in this
-              browser.${helpUrl
-                ? html` <a href=${helpUrl} target="_blank" rel="noreferrer">Get a key</a>.`
-                : ''}`}
-        </div>
+        ${this.keyRequired ? this.renderKeyRows(helpUrl) : this.renderBorrowedCredentialRow()}
 
         <div class="gp-field-row">
-          <label class="gp-field">
-            <span class="gp-field-label">Aspect</span>
-            <select @change=${this.onAspectChange}>
-              ${(caps?.aspectRatios ?? ['Auto']).map(
-                ratio =>
-                  html`<option value=${ratio} ?selected=${ratio === this.aspectRatio}>
-                    ${ratio}
-                  </option>`
-              )}
-            </select>
-          </label>
+          ${caps?.supportsExactSize
+            ? null
+            : html`<label class="gp-field">
+                <span class="gp-field-label">Aspect</span>
+                <select @change=${this.onAspectChange}>
+                  ${(caps?.aspectRatios ?? ['Auto']).map(
+                    ratio =>
+                      html`<option value=${ratio} ?selected=${ratio === this.aspectRatio}>
+                        ${ratio}
+                      </option>`
+                  )}
+                </select>
+              </label>`}
           ${caps && caps.imageSizes.length > 0
             ? html`<label class="gp-field">
                 <span class="gp-field-label">Size</span>
@@ -559,12 +704,22 @@ export class GeneratePanel extends ComponentBase {
         <div class="gp-result-row">
           <img class="gp-result-thumb" src=${result.objectUrl} alt="Generated image" />
           <div class="gp-result-meta">
-            <span class="gp-field-label">Result</span>
+            <span class="gp-field-label">
+              Result
+              ${result.svgSource
+                ? html`<span
+                    class="gp-badge"
+                    title="Baked from vector source — real alpha, exact size"
+                    >SVG</span
+                  >`
+                : null}
+            </span>
             <span class="gp-hint">
               ${result.width && result.height ? `${result.width}×${result.height}` : 'Ready'}
             </span>
           </div>
         </div>
+        ${this.renderSourceViewer(result)}
         <input
           class="gp-result-name"
           type="text"
@@ -596,6 +751,47 @@ export class GeneratePanel extends ComponentBase {
         ${this.saveMessage ? html`<div class="gp-success">${this.saveMessage}</div>` : null}
         ${this.saveError ? html`<div class="gp-error">${this.saveError}</div>` : null}
         ${projectReady ? null : html`<div class="gp-hint">Open a project to save into it.</div>`}
+      </div>
+    `;
+  }
+
+  /**
+   * The vector source behind a baked result, read-only with a copy button. It earns its place
+   * because this asset *is* code: seeing it is how a user learns the sprite can be edited by asking
+   * for a change instead of re-rolling, and copying it is the escape hatch into a real vector editor.
+   */
+  private renderSourceViewer(result: PendingResult) {
+    const source = result.svgSource;
+    if (!source) {
+      return null;
+    }
+    return html`
+      <div class="gp-source">
+        <label class="gp-toggle-field">
+          <input type="checkbox" .checked=${this.editSource} @change=${this.onEditSourceChange} />
+          <span>Edit this SVG on the next Generate (instead of drawing a new one)</span>
+        </label>
+        <div class="gp-source-head">
+          <button
+            class="gp-source-toggle"
+            type="button"
+            aria-expanded=${this.sourceViewerOpen ? 'true' : 'false'}
+            @click=${this.onToggleSourceViewer}
+          >
+            ${this.icons.getIcon(this.sourceViewerOpen ? 'chevron-down' : 'chevron-right', 12)}
+            <span>SVG source (${source.length} chars)</span>
+          </button>
+          <button
+            class="gp-link-button"
+            type="button"
+            @click=${() => void this.onCopySource(source)}
+          >
+            ${this.sourceCopied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        ${this.sourceViewerOpen
+          ? html`<pre class="gp-source-code" tabindex="0">${source}</pre>`
+          : null}
       </div>
     `;
   }
@@ -682,6 +878,57 @@ export class GeneratePanel extends ComponentBase {
     void this.editorSettings.showSettings('images');
   };
 
+  /** Where the credentials for a borrowed-LLM provider actually live. */
+  private openAgentSettings = (): void => {
+    this.apiKeyPopoverOpen = false;
+    void this.editorSettings.showSettings('agent').then(() => this.refreshKeyStatus());
+  };
+
+  private onWidthChange(event: Event): void {
+    const value = clampSpriteSize(
+      Number((event.target as HTMLInputElement).value),
+      this.outputWidth
+    );
+    this.outputWidth = value;
+    if (this.lockRatio) {
+      this.outputHeight = value;
+    }
+    this.persistOutputSize();
+  }
+
+  private onHeightChange(event: Event): void {
+    const value = clampSpriteSize(
+      Number((event.target as HTMLInputElement).value),
+      this.outputHeight
+    );
+    this.outputHeight = value;
+    if (this.lockRatio) {
+      this.outputWidth = value;
+    }
+    this.persistOutputSize();
+  }
+
+  private onToggleLockRatio(): void {
+    this.lockRatio = !this.lockRatio;
+    if (this.lockRatio && this.outputHeight !== this.outputWidth) {
+      this.outputHeight = this.outputWidth;
+      this.persistOutputSize();
+    }
+  }
+
+  private applySizePreset(size: number): void {
+    this.outputWidth = size;
+    this.outputHeight = size;
+    this.persistOutputSize();
+  }
+
+  private persistOutputSize(): void {
+    this.aiSettings.updatePreferences({
+      defaultExactWidth: this.outputWidth,
+      defaultExactHeight: this.outputHeight,
+    });
+  }
+
   private onProviderChange(event: Event): void {
     const providerId = (event.target as HTMLSelectElement).value;
     this.providerId = providerId;
@@ -762,6 +1009,26 @@ export class GeneratePanel extends ComponentBase {
   private onTransparentChange(event: Event): void {
     this.transparentBackground = (event.target as HTMLInputElement).checked;
     this.aiSettings.updatePreferences({ transparentBackground: this.transparentBackground });
+  }
+
+  private onToggleSourceViewer(): void {
+    this.sourceViewerOpen = !this.sourceViewerOpen;
+  }
+
+  private onEditSourceChange(event: Event): void {
+    this.editSource = (event.target as HTMLInputElement).checked;
+  }
+
+  private async onCopySource(source: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(source);
+      this.sourceCopied = true;
+      window.setTimeout(() => {
+        this.sourceCopied = false;
+      }, 1500);
+    } catch (error) {
+      this.saveError = `Could not copy the SVG source: ${describeError(error)}`;
+    }
   }
 
   private onSaveNameInput(event: Event): void {
@@ -885,8 +1152,11 @@ export class GeneratePanel extends ComponentBase {
     this.abortController = new AbortController();
 
     try {
-      const apiKey = await this.aiSettings.getApiKey(this.providerId);
-      if (!apiKey) {
+      // A provider that borrows the agent's LLM credentials has no key here; asking for one would
+      // block a lane that is already configured in Agent settings.
+      const keyRequired = provider.requiresApiKey !== false;
+      const apiKey = keyRequired ? await this.aiSettings.getApiKey(this.providerId) : '';
+      if (keyRequired && !apiKey) {
         this.keyConfigured = false;
         this.generateError = 'No API key configured for this provider.';
         return;
@@ -911,9 +1181,20 @@ export class GeneratePanel extends ComponentBase {
           quality: caps.qualities?.includes(this.quality) ? this.quality : undefined,
           background:
             caps.supportsTransparency && this.transparentBackground ? 'transparent' : undefined,
+          ...(caps.supportsExactSize
+            ? {
+                width: this.outputWidth,
+                height: this.outputHeight,
+                // With "Edit this SVG" armed, the next Generate is a source edit rather than a
+                // fresh draw: "make the outline thicker" keeps everything it did not ask to
+                // change, which a re-roll cannot promise. Opt-in, because a new prompt typed over
+                // an old result is much more often a new sprite than an edit of that one.
+                svgSource: this.editSource ? this.result?.svgSource : undefined,
+              }
+            : {}),
           signal: this.abortController.signal,
         },
-        { apiKey, modelId: this.modelId }
+        { apiKey: apiKey ?? '', modelId: this.modelId }
       );
 
       const image = result.images[0];
@@ -932,6 +1213,7 @@ export class GeneratePanel extends ComponentBase {
         prompt: this.prompt.trim(),
         width: size?.width,
         height: size?.height,
+        svgSource: image.svgSource,
       });
 
       await this.history.add({
@@ -944,6 +1226,7 @@ export class GeneratePanel extends ComponentBase {
         blob,
         width: size?.width,
         height: size?.height,
+        svgSource: image.svgSource,
       });
     } catch (error) {
       this.generateError = describeError(error);
@@ -1123,6 +1406,7 @@ export class GeneratePanel extends ComponentBase {
       prompt: record.prompt,
       width: record.width,
       height: record.height,
+      svgSource: record.svgSource,
     });
   }
 
@@ -1189,6 +1473,10 @@ export class GeneratePanel extends ComponentBase {
     if (previous && previous.objectUrl !== next?.objectUrl) {
       this.revokeUrl(previous.objectUrl);
     }
+    // Source-bound UI belongs to whichever result is on screen; a new one starts fresh.
+    this.sourceViewerOpen = false;
+    this.sourceCopied = false;
+    this.editSource = false;
     if (!next) {
       this.saveMessage = null;
       this.saveError = null;
@@ -1220,6 +1508,9 @@ export class GeneratePanel extends ComponentBase {
 }
 
 // -- module-level utilities --------------------------------------------------
+
+/** One-click sizes for exact-size providers — the powers of two game sprites actually ship at. */
+const SIZE_PRESETS: readonly number[] = [64, 128, 256, 512];
 
 const hasFiles = (dataTransfer: DataTransfer): boolean =>
   Array.from(dataTransfer.types ?? []).includes('Files');

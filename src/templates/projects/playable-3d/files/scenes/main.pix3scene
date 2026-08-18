@@ -57,7 +57,7 @@ root:
           geometry: box
           size: [12, 0.2, 12]
           material:
-            type: standard
+            type: lambert
             color: "#2a2a3e"
           transform:
             position: [0, -0.1, 0]
@@ -71,7 +71,7 @@ root:
           geometry: box
           size: [1, 1, 1]
           material:
-            type: standard
+            type: lambert
             color: "#ffcf33"
           transform:
             position: [0, 0.5, 0]

@@ -60,6 +60,8 @@ interface AssetImage {
   source: AssetImageSource;
   prompt?: string;
   createdAt: number;
+  /** Vector source this raster was baked from (`svg-llm`), carried so edits stay deterministic. */
+  svgSource?: string;
 }
 
 /** JSON-safe view of an {@link AssetImage} (never carries the raw blob). */
@@ -72,6 +74,13 @@ export interface AssetImageMeta {
   source: AssetImageSource;
   prompt?: string;
   createdAt: number;
+  /**
+   * The vector source, for handles a vector provider produced. Present on the handle rather than
+   * only in history because it is what makes the edit loop deterministic: the next generation sends
+   * this text back to the model instead of re-rolling from the prompt. Multi-KB — read it when you
+   * mean to edit or re-bake, not as routine metadata.
+   */
+  svgSource?: string;
 }
 
 export interface AssetGenReference {
@@ -92,6 +101,17 @@ export interface AssetGenGenerateOptions {
   /** Request a transparent background from providers that support alpha (e.g. OpenAI GPT Image). */
   transparent?: boolean;
   background?: Background;
+  /**
+   * Exact output size in px. Honoured only by providers whose model advertises `supportsExactSize`
+   * (the SVG provider); raster models ignore it and answer with their own aspect-ratio grid.
+   */
+  width?: number;
+  height?: number;
+  /**
+   * Current vector source to EDIT rather than redraw. Pass the `svgSource` of an existing handle to
+   * turn "make the outline thicker" into a source edit instead of a fresh roll.
+   */
+  svgSource?: string;
   /** Override the configured provider/model for this one call. */
   providerId?: string;
   modelId?: string;
@@ -189,6 +209,8 @@ export interface AssetGenStatus {
     maxReferenceImages: number;
     supportsReferenceImages: boolean;
     supportsTransparency: boolean;
+    /** When true the provider honours exact `width`/`height`; aspect ratio / size tiers are moot. */
+    supportsExactSize: boolean;
   } | null;
 }
 
@@ -231,10 +253,15 @@ export class AssetGenService {
     const modelId = this.aiSettings.getSelectedModelId(resolvedProviderId) ?? '';
     const model = provider?.getModel(modelId);
     const caps = model?.capabilities;
+    // "Ready to generate", not literally "a key is stored": a provider that borrows another stack's
+    // credentials (svg-llm → the agent's LLM) would report a permanent false and gate itself off.
     let keyConfigured = false;
-    if (resolvedProviderId) {
+    if (provider) {
       try {
-        keyConfigured = await this.aiSettings.hasApiKey(resolvedProviderId);
+        keyConfigured =
+          provider.requiresApiKey === false
+            ? ((await provider.isAvailable?.()) ?? true)
+            : await this.aiSettings.hasApiKey(resolvedProviderId);
       } catch {
         keyConfigured = false;
       }
@@ -256,6 +283,7 @@ export class AssetGenService {
             maxReferenceImages: caps.maxReferenceImages,
             supportsReferenceImages: caps.supportsReferenceImages,
             supportsTransparency: caps.supportsTransparency,
+            supportsExactSize: caps.supportsExactSize,
           }
         : null,
     };
@@ -280,8 +308,11 @@ export class AssetGenService {
       throw new ImageGenError('unknown', `Unknown model "${modelId}" for provider ${providerId}.`);
     }
 
-    const apiKey = await this.aiSettings.getApiKey(providerId);
-    if (!apiKey) {
+    // A provider that runs on another stack's credentials (svg-llm → the agent's LLM) has no key of
+    // its own; asking for one would block a lane that is already configured elsewhere.
+    const keyRequired = provider.requiresApiKey !== false;
+    const apiKey = keyRequired ? await this.aiSettings.getApiKey(providerId) : '';
+    if (keyRequired && !apiKey) {
       throw new ImageGenError(
         'missing-key',
         `No API key configured for "${providerId}". Set one in Editor Settings → AI (the human must enter it once).`
@@ -314,8 +345,11 @@ export class AssetGenService {
             ? options.quality
             : undefined,
         background,
+        ...(caps.supportsExactSize
+          ? { width: options.width, height: options.height, svgSource: options.svgSource }
+          : {}),
       },
-      { apiKey, modelId }
+      { apiKey: apiKey ?? '', modelId }
     );
 
     const image = result.images[0];
@@ -324,7 +358,7 @@ export class AssetGenService {
     }
 
     const blob = base64ToBlob(image.data, image.mimeType);
-    const stored = await this.store(blob, image.mimeType, 'generated', prompt);
+    const stored = await this.store(blob, image.mimeType, 'generated', prompt, image.svgSource);
 
     // Mirror the panel: cache generations in history so they survive a reload / show in the panel.
     try {
@@ -338,6 +372,7 @@ export class AssetGenService {
         blob,
         width: stored.width,
         height: stored.height,
+        svgSource: image.svgSource,
       });
     } catch {
       // history is a convenience cache; never fail a generation because it couldn't persist
@@ -472,12 +507,17 @@ export class AssetGenService {
     try {
       if (preset === 'sprite' || preset === 'icon') {
         try {
-          const bg = await this.removeBackground(currentId, {
-            engine: options.bgEngine,
-            quality: options.bgQuality,
-          });
-          intermediates.push(bg.id);
-          currentId = bg.id;
+          // Vector output (and any provider that returned real alpha) is already cut out. Running
+          // ISNet over it can only damage it — the matting model re-segments clean edges and eats
+          // thin details — so the cutout pass is skipped and only trim/downscale run.
+          if (!(await this.hasRealAlpha(currentId))) {
+            const bg = await this.removeBackground(currentId, {
+              engine: options.bgEngine,
+              quality: options.bgQuality,
+            });
+            intermediates.push(bg.id);
+            currentId = bg.id;
+          }
           const trimmed = await this.trim(currentId, {
             padding: 2,
             alphaThreshold: 8,
@@ -599,7 +639,13 @@ export class AssetGenService {
     if (!record) {
       throw new Error(`No history record: ${recordId}`);
     }
-    const stored = await this.store(record.blob, record.mimeType, 'history', record.prompt);
+    const stored = await this.store(
+      record.blob,
+      record.mimeType,
+      'history',
+      record.prompt,
+      record.svgSource
+    );
     return this.toMeta(stored);
   }
 
@@ -648,6 +694,27 @@ export class AssetGenService {
 
   // -- internals -------------------------------------------------------------
 
+  /**
+   * Whether a handle already carries a genuine cutout, so background removal would be destructive
+   * rather than useful. A handle with a kept vector source is one by construction; anything else is
+   * measured — {@link imageAlphaStats} reads the alpha channel, the only reliable way to know
+   * (a vision model sees transparency flattened onto white). Measured false on a decode failure,
+   * which keeps the previous behaviour wherever there is no canvas.
+   */
+  private async hasRealAlpha(id: string): Promise<boolean> {
+    const image = this.require(id);
+    if (image.svgSource) {
+      return true;
+    }
+    try {
+      const stats = await imageAlphaStats(image.blob);
+      // A hairline of anti-aliased edge pixels is not a cutout; a real one leaves a wide margin.
+      return stats.hasAlpha && stats.transparentFraction >= 0.02;
+    } catch {
+      return false;
+    }
+  }
+
   private require(id: string): AssetImage {
     const image = this.images.get(id);
     if (!image) {
@@ -660,7 +727,8 @@ export class AssetGenService {
     blob: Blob,
     mimeType: string,
     source: AssetImageSource,
-    prompt?: string
+    prompt?: string,
+    svgSource?: string
   ): Promise<AssetImage> {
     const size = (await readBlobSize(blob)) ?? { width: 0, height: 0 };
     const image: AssetImage = {
@@ -672,6 +740,7 @@ export class AssetGenService {
       source,
       prompt,
       createdAt: Date.now(),
+      svgSource,
     };
     this.images.set(image.id, image);
     return image;
@@ -687,6 +756,7 @@ export class AssetGenService {
       source: image.source,
       prompt: image.prompt,
       createdAt: image.createdAt,
+      svgSource: image.svgSource,
     };
   }
 

@@ -36,11 +36,75 @@ export class GeminiImageProvider implements ImageGenProvider {
   readonly apiKeySecretId = 'ai-provider:gemini:api-key';
   readonly apiKeyHelpUrl = 'https://aistudio.google.com/apikey';
 
+  /**
+   * Gemini's image models, newest first. Prices are the **output price per generated image** from
+   * the official pricing page (snapshot 2026-08-18) — that is the figure that actually varies
+   * between these models; the per-model text/image *input* prices are $0.50/$0.25/$2.00/$0.30 per
+   * 1M tokens respectively, which a sprite-sized prompt never makes material.
+   *
+   * The 3.x ids are the GA names (no `-preview` suffix); a stored preview id no longer resolves and
+   * `AiImageSettingsService.getSelectedModelId` falls back to the first entry here, which is why
+   * Nano Banana 2 leads the list.
+   *
+   * @see https://ai.google.dev/gemini-api/docs/pricing
+   */
   readonly models: readonly ProviderModel[] = [
     {
+      id: 'gemini-3.1-flash-image',
+      label: 'Nano Banana 2 (3.1 Flash)',
+      price: '$0.0672/img',
+      description: 'Versatile default — 512px to 4K, sharp, fast.',
+      capabilities: {
+        supportsReferenceImages: true,
+        // 10 object + 4 character-consistency + 3 style references; our UI does not distinguish
+        // the roles, so this is the flat total the API accepts.
+        maxReferenceImages: 14,
+        aspectRatios: ASPECTS,
+        // '512px' is the literal the API expects for the 0.5K tier (lowercase 'k' is rejected).
+        imageSizes: ['512px', '1K', '2K', '4K'],
+        maxCount: 1,
+        supportsTransparency: false,
+        supportsExactSize: false,
+        requiresProxy: false,
+      },
+    },
+    {
+      id: 'gemini-3.1-flash-lite-image',
+      label: 'Nano Banana 2 Lite (3.1 Flash Lite)',
+      price: '$0.0336/img',
+      description: 'Cheapest lane — 1K only. Good for drafts and bulk passes.',
+      capabilities: {
+        supportsReferenceImages: true,
+        maxReferenceImages: 14,
+        aspectRatios: ASPECTS,
+        imageSizes: ['1K'],
+        maxCount: 1,
+        supportsTransparency: false,
+        supportsExactSize: false,
+        requiresProxy: false,
+      },
+    },
+    {
+      id: 'gemini-3-pro-image',
+      label: 'Nano Banana Pro (3 Pro)',
+      price: '$0.134/img',
+      description: 'Highest fidelity and prompt adherence, slower and 2x the price.',
+      capabilities: {
+        supportsReferenceImages: true,
+        maxReferenceImages: 11,
+        aspectRatios: ASPECTS,
+        imageSizes: ['1K', '2K', '4K'],
+        maxCount: 1,
+        supportsTransparency: false,
+        supportsExactSize: false,
+        requiresProxy: false,
+      },
+    },
+    {
       id: 'gemini-2.5-flash-image',
-      label: 'Nano Banana (2.5 Flash)',
-      description: 'Fast, reliable default.',
+      label: 'Nano Banana (2.5 Flash, legacy)',
+      price: '$0.039/img',
+      description: 'Superseded by Nano Banana 2 Lite, which is cheaper and newer.',
       capabilities: {
         supportsReferenceImages: true,
         maxReferenceImages: 6,
@@ -48,34 +112,7 @@ export class GeminiImageProvider implements ImageGenProvider {
         imageSizes: ['1K', '2K'],
         maxCount: 1,
         supportsTransparency: false,
-        requiresProxy: false,
-      },
-    },
-    {
-      id: 'gemini-3.1-flash-image-preview',
-      label: 'Nano Banana 2 (Flash) — 3.1',
-      description: 'Newest, sharper. 512–4K.',
-      capabilities: {
-        supportsReferenceImages: true,
-        maxReferenceImages: 6,
-        aspectRatios: ASPECTS,
-        imageSizes: ['512', '1K', '2K', '4K'],
-        maxCount: 1,
-        supportsTransparency: false,
-        requiresProxy: false,
-      },
-    },
-    {
-      id: 'gemini-3-pro-image-preview',
-      label: 'Nano Banana Pro — 3 Pro',
-      description: 'Higher fidelity, slower.',
-      capabilities: {
-        supportsReferenceImages: true,
-        maxReferenceImages: 6,
-        aspectRatios: ASPECTS,
-        imageSizes: ['1K', '2K', '4K'],
-        maxCount: 1,
-        supportsTransparency: false,
+        supportsExactSize: false,
         requiresProxy: false,
       },
     },

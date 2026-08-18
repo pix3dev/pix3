@@ -25,17 +25,18 @@ const PNG_MIME = 'image/png';
 const PIXEL_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
-function createModel() {
+function createModel(exactSize = false) {
   return {
     id: 'fake-model',
     label: 'Fake Model',
     capabilities: {
-      aspectRatios: ['Auto', '1:1'],
-      imageSizes: ['1K'],
+      aspectRatios: exactSize ? [] : ['Auto', '1:1'],
+      imageSizes: exactSize ? [] : ['1K'],
       qualities: [],
       supportsReferenceImages: true,
       maxReferenceImages: 6,
-      supportsTransparency: false,
+      supportsTransparency: exactSize,
+      supportsExactSize: exactSize,
     },
   };
 }
@@ -48,6 +49,8 @@ function createPreferences() {
     defaultImageSize: '1K',
     defaultQuality: '',
     transparentBackground: false,
+    defaultExactWidth: 128,
+    defaultExactHeight: 128,
     defaultSaveMaxSize: 0,
     bgRemovalEngine: 'u2net' as const,
     bgRemovalQuality: 'balanced' as const,
@@ -65,15 +68,33 @@ interface PanelStubs {
   targets: ImageEditTargetService;
 }
 
-function createPanel(records: GenerationRecord[] = []): {
+/**
+ * `vector: true` stands in for the `svg-llm` provider: it owns no API key (it borrows the agent's
+ * LLM), takes exact W×H instead of an aspect ratio, and returns the SVG source next to the PNG.
+ */
+interface PanelOptions {
+  vector?: boolean;
+}
+
+function createPanel(
+  records: GenerationRecord[] = [],
+  options: PanelOptions = {}
+): {
   panel: GeneratePanel;
   stubs: PanelStubs;
 } {
   const panel = new GeneratePanel();
-  const model = createModel();
+  const vector = options.vector === true;
+  const model = createModel(vector);
   const preferences = createPreferences();
   const generate = vi.fn().mockResolvedValue({
-    images: [{ data: PIXEL_B64, mimeType: PNG_MIME }],
+    images: [
+      {
+        data: PIXEL_B64,
+        mimeType: PNG_MIME,
+        ...(vector ? { svgSource: '<svg viewBox="0 0 128 128"><rect /></svg>' } : {}),
+      },
+    ],
   });
   const provider = {
     id: 'fake',
@@ -83,6 +104,7 @@ function createPanel(records: GenerationRecord[] = []): {
     apiKeySecretId: 'fake-key',
     apiKeyHelpUrl: undefined,
     generate,
+    ...(vector ? { requiresApiKey: false, isAvailable: async () => true } : {}),
   };
   const historyAdd = vi.fn().mockResolvedValue(undefined);
   const historyList = vi.fn().mockResolvedValue(records);
@@ -498,5 +520,151 @@ describe('GeneratePanel', () => {
     });
     expect(before).toBeTruthy();
     expect(urls.get('rec-1')).not.toBe(before);
+  });
+});
+
+/**
+ * A provider that authors vectors (`svg-llm`) changes three things in this panel: exact W×H replaces
+ * the aspect-ratio lottery, there is no key to nag for, and the SVG source comes back as a
+ * first-class artifact that the next Generate can edit instead of re-rolling.
+ */
+/**
+ * {@link generate} waits for `history.add`, which is already satisfied on a second run — so a test
+ * that generates twice must reset the marker or it races ahead of the first delivery.
+ */
+async function generateAgain(
+  panel: GeneratePanel,
+  prompt: string,
+  stubs: PanelStubs
+): Promise<void> {
+  stubs.historyAdd.mockClear();
+  await generate(panel, prompt, stubs);
+}
+
+describe('GeneratePanel with an exact-size, keyless provider', () => {
+  beforeEach(() => {
+    resetAppState();
+    appState.project.status = 'ready';
+    stubImageDecoding();
+  });
+
+  afterEach(() => {
+    resetAppState();
+    document.body.innerHTML = '';
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('shows W×H inputs with presets instead of the aspect-ratio control', async () => {
+    const { panel } = createPanel([], { vector: true });
+    await mount(panel);
+
+    const inputs = panel.querySelectorAll<HTMLInputElement>('.gp-size-input');
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0].value).toBe('128');
+    expect(inputs[1].value).toBe('128');
+    expect(panel.querySelectorAll('.gp-size-preset').length).toBeGreaterThan(0);
+
+    // The aspect picker lives in the quick-settings popover and must be gone there too.
+    panel.querySelector<HTMLButtonElement>('.gp-key-button')?.click();
+    await panel.updateComplete;
+    const popover = panel.querySelector('.gp-key-popover');
+    expect(popover).not.toBeNull();
+    expect(popover?.textContent).not.toContain('Aspect');
+  });
+
+  it('hides the W×H row for a raster provider', async () => {
+    const { panel } = createPanel();
+    await mount(panel);
+    expect(panel.querySelector('.gp-size-input')).toBeNull();
+  });
+
+  it('sends the requested exact size to the provider', async () => {
+    const { panel, stubs } = createPanel([], { vector: true });
+    await mount(panel);
+
+    const [widthInput] = panel.querySelectorAll<HTMLInputElement>('.gp-size-input');
+    widthInput.value = '96';
+    widthInput.dispatchEvent(new Event('change'));
+    await panel.updateComplete;
+
+    await generate(panel, 'a coin', stubs);
+    expect(stubs.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 96, height: 96 }),
+      expect.anything()
+    );
+  });
+
+  it('keeps width and height independent once the ratio lock is released', async () => {
+    const { panel } = createPanel([], { vector: true });
+    await mount(panel);
+
+    panel.querySelector<HTMLButtonElement>('.gp-size-lock')?.click();
+    await panel.updateComplete;
+
+    const [widthInput, heightInput] = panel.querySelectorAll<HTMLInputElement>('.gp-size-input');
+    widthInput.value = '96';
+    widthInput.dispatchEvent(new Event('change'));
+    await panel.updateComplete;
+    expect(heightInput.value).toBe('128');
+  });
+
+  it('never asks for an API key and still enables Generate', async () => {
+    const { panel } = createPanel([], { vector: true });
+    await mount(panel);
+
+    panel.querySelector<HTMLButtonElement>('.gp-key-button')?.click();
+    await panel.updateComplete;
+    const popover = panel.querySelector('.gp-key-popover');
+    expect(popover?.querySelector('input[type="password"]')).toBeNull();
+    expect(popover?.textContent).toContain('Agent LLM ready');
+
+    const textarea = panel.querySelector<HTMLTextAreaElement>('.gp-prompt');
+    textarea!.value = 'a coin';
+    textarea!.dispatchEvent(new Event('input'));
+    await panel.updateComplete;
+    expect(panel.querySelector<HTMLButtonElement>('.gp-generate-button')?.disabled).toBe(false);
+  });
+
+  it('badges the result as SVG, stores the source in history, and shows it on demand', async () => {
+    const { panel, stubs } = createPanel([], { vector: true });
+    await mount(panel);
+    await generate(panel, 'a coin', stubs);
+
+    expect(panel.querySelector('.gp-badge')?.textContent).toContain('SVG');
+    expect(stubs.historyAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ svgSource: expect.stringContaining('<svg') })
+    );
+
+    // The source is collapsed by default — it is a power-user affordance, not the headline.
+    expect(panel.querySelector('.gp-source-code')).toBeNull();
+    panel.querySelector<HTMLButtonElement>('.gp-source-toggle')?.click();
+    await panel.updateComplete;
+    expect(panel.querySelector('.gp-source-code')?.textContent).toContain('<svg');
+  });
+
+  it('re-sends the source only when the user arms "Edit this SVG"', async () => {
+    const { panel, stubs } = createPanel([], { vector: true });
+    await mount(panel);
+    await generate(panel, 'a coin', stubs);
+
+    // A new prompt over an old result is a new sprite by default.
+    await generateAgain(panel, 'a gem', stubs);
+    expect(stubs.generate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ svgSource: undefined }),
+      expect.anything()
+    );
+
+    const toggle = panel.querySelector<HTMLInputElement>('.gp-source .gp-toggle-field input');
+    expect(toggle).not.toBeNull();
+    toggle!.click();
+    await panel.updateComplete;
+    expect((panel as unknown as { editSource: boolean }).editSource).toBe(true);
+
+    await generateAgain(panel, 'thicker outline', stubs);
+    expect(stubs.generate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ svgSource: expect.stringContaining('<svg') }),
+      expect.anything()
+    );
   });
 });

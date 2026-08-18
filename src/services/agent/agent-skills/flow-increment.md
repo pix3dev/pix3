@@ -19,6 +19,10 @@ menu → game → win/lose, controls, score. It runs right now.
   checklist; `design/decisions.md` records forks that are already settled — **read it before
   asking anything, so you never ask twice.**
 - Then `scene_tree` once. That is enough exploration to start. Do not survey the project.
+- **If `design/brief.md` notes that the request was downgraded** — a 3D ask served by a 2D
+  recipe, a genre substituted for the nearest one — say so in your first message, plainly, in
+  the user's language. Presenting the substitute as if it were the ask is how a request for a
+  3D puzzle becomes isometric sprites that nobody wanted.
 
 **Extend the recipe, do not rebuild it.** Adding an entity type, a rule, a spawner or a HUD
 element is a few additive calls at an extension point the recipe declares. Rewriting
@@ -128,6 +132,13 @@ Placeholders are already in place and already tinted to the brief's palette. Gen
 the background (`queue_asset` when it exists, otherwise as a late increment) and keep playing
 the game with placeholders until then. The chat must never sit for 40 seconds waiting on an
 image.
+
+**When you do generate placeholder art, reach for `generate_asset` with
+`providerId: 'svg-llm'` first.** It authors SVG with your own model and bakes it locally, so
+it answers in seconds at the exact `width`/`height` you ask for, with real transparency and no
+background-removal pass — which is what makes it safe to slip into a Flow turn at all. Icons,
+buttons, bars, arrows and flat props belong there. Save the metered raster models for the one
+or two pieces that genuinely want painterly art, and do that as its own increment.
 
 **Juice is cheap — spend it as you go.** `scene.juice.burst(target)`,
 `scene.juice.floatText('+100', { at: target })`, `scene.audio.sfx('score')` and `Label2D`'s

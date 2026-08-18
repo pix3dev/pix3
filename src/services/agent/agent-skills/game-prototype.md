@@ -140,6 +140,23 @@ Do not block gameplay on art. Use `ColorRect2D` (2D) or a `GeometryMesh` with a 
 colour (3D) as placeholders until the mechanic works, then replace them with generated
 sprites via the `asset-generation` skill. List every placeholder you leave in your summary.
 
+**A 3D scene needs a light and a camera or it renders black.** Before any lit mesh
+(`GeometryMesh`, `MeshInstance3D`) means anything on screen, `create_node` a
+`HemisphereLightNode` (add a `DirectionalLightNode` for shading) and a `Camera3D`. The editor
+viewport adds its own fallback lights, so the black screen only shows up in play mode — check
+`sceneIssues` in `scene_tree`/`game_observe` instead of a screenshot. Mobile is the default
+target: keep materials cheap and leave PBR-style shine for when the user asks for a
+high-end desktop look.
+
+**For the first pass of art, use `generate_asset` with `providerId: 'svg-llm'`.** It draws
+with your own model as SVG and bakes it locally, which buys three things a raster model
+cannot: the exact `width`/`height` you ask for (a 96×32 health bar is 96×32, no crop pass),
+real transparency with no background-removal step, and the cost of a text completion. That
+makes it the right tool for icons, buttons, bars, arrows, flat props and blockout art — most
+of what a prototype needs. Upgrade the pieces that want painterly or textured art (hero
+sprites, backgrounds, key illustrations) to a raster model afterwards, when the game plays.
+
+
 ## 6. Finish
 
 Update `design/progress.md` one last time (checkboxes + remaining work), then summarize:

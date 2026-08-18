@@ -17,6 +17,7 @@ import { DirectionalLightNode } from '../nodes/3D/DirectionalLightNode';
 import { PointLightNode } from '../nodes/3D/PointLightNode';
 import { SpotLightNode } from '../nodes/3D/SpotLightNode';
 import { AmbientLightNode } from '../nodes/3D/AmbientLightNode';
+import { resolveSceneNodeType } from './node-type-registry';
 import { HemisphereLightNode } from '../nodes/3D/HemisphereLightNode';
 import { Sprite3D } from '../nodes/3D/Sprite3D';
 import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
@@ -1017,7 +1018,10 @@ export class SceneLoader {
       metadata: definition.metadata ?? {},
     };
 
-    switch (definition.type) {
+    // Resolve read-compat spellings (`DirectionalLight` → `DirectionalLightNode`, `sprite2d` →
+    // `Sprite2D`) before dispatching; an unresolvable type keeps its authored spelling so the
+    // `default` arm below can preserve it on the inert node and the lint can name it back.
+    switch (resolveSceneNodeType(definition.type) ?? definition.type) {
       case 'ColorRect2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
@@ -1655,6 +1659,7 @@ export class SceneLoader {
         const material = this.asRecord(propsRec.material);
         const materialColor = this.asString(material?.color) ?? '#4e8df5';
         const materialConfig: {
+          type?: string;
           color: string;
           roughness?: number;
           metalness?: number;
@@ -1665,6 +1670,10 @@ export class SceneLoader {
         } = {
           color: materialColor,
         };
+        const materialType = this.asString(material?.type);
+        if (materialType) {
+          materialConfig.type = materialType;
+        }
         if (typeof material?.roughness === 'number') {
           materialConfig.roughness = material.roughness;
         }

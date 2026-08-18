@@ -17,6 +17,10 @@ import {
   type TabPerformanceSample,
 } from '@/services/editor/TabPerformanceService';
 import { LayoutManagerService } from '@/core/LayoutManager';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { IconService, IconSize } from '@/services/editor/IconService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
@@ -28,6 +32,12 @@ interface StatusMessage {
   type: 'info' | 'success' | 'warning' | 'error';
   timestamp: number;
 }
+
+/**
+ * The provider whose key the editor holds itself. Everything else metered runs through the local
+ * bridge, so these two indicators together answer "can the agent talk to a model at all?".
+ */
+const GEMINI_PROVIDER_ID = 'gemini';
 
 @customElement('pix3-status-bar')
 export class Pix3StatusBar extends ComponentBase {
@@ -54,6 +64,18 @@ export class Pix3StatusBar extends ComponentBase {
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
 
+  @inject(BridgeConnectionService)
+  private readonly bridge!: BridgeConnectionService;
+
+  @inject(AgentSettingsService)
+  private readonly agentSettings!: AgentSettingsService;
+
+  @inject(EditorSettingsService)
+  private readonly editorSettingsService!: EditorSettingsService;
+
+  @inject(IconService)
+  private readonly icons!: IconService;
+
   @state()
   private currentMessage: StatusMessage | null = null;
 
@@ -68,6 +90,19 @@ export class Pix3StatusBar extends ComponentBase {
 
   @state()
   private isPlaying = false;
+
+  /** Vibe (`flow`) hides the panels the perf probe measures — see {@link syncPerformanceProbe}. */
+  @state()
+  private isFlow = appState.ui.workspaceMode === 'flow';
+
+  @state()
+  private bridgeAvailable = false;
+
+  @state()
+  private bridgeProviderCount = 0;
+
+  @state()
+  private geminiKeyPresent = false;
 
   @state()
   private diagnostics: ScriptDiagnosticsSummary | null = null;
@@ -89,6 +124,8 @@ export class Pix3StatusBar extends ComponentBase {
   private disposeUpdateCheckSubscription?: () => void;
   private disposeDiagnosticsSubscription?: () => void;
   private disposePerformanceSubscription?: () => void;
+  private disposeBridgeSubscription?: () => void;
+  private disposeAgentSettingsSubscription?: () => void;
 
   connectedCallback() {
     super.connectedCallback();
@@ -104,8 +141,19 @@ export class Pix3StatusBar extends ComponentBase {
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.isPlaying = appState.ui.isPlaying;
+      this.isFlow = appState.ui.workspaceMode === 'flow';
       this.syncPerformanceProbe();
     });
+
+    // Both agent lanes at a glance: the local bridge (every metered provider) and the one key the
+    // browser holds itself (Gemini). A probe result can arrive long after startup, so subscribe.
+    this.disposeBridgeSubscription = this.bridge.subscribe(() => {
+      this.syncBridgeState();
+    });
+    this.disposeAgentSettingsSubscription = this.agentSettings.subscribe(() => {
+      void this.refreshGeminiKey();
+    });
+    this.syncBridgeState();
 
     this.disposeUpdateCheckSubscription = this.updateCheckService.subscribe(state => {
       this.updateState = state;
@@ -141,6 +189,21 @@ export class Pix3StatusBar extends ComponentBase {
    * the status bar keeps re-rendering twice a second — and, because the probe stops as soon as its
    * last subscriber leaves, dropping the subscription also stops the 500 ms timer behind it.
    */
+  private syncBridgeState(): void {
+    this.bridgeAvailable = this.bridge.isAvailable();
+    this.bridgeProviderCount = this.bridge.getEntries().length;
+    void this.refreshGeminiKey();
+  }
+
+  private async refreshGeminiKey(): Promise<void> {
+    try {
+      this.geminiKeyPresent = await this.agentSettings.hasApiKey(GEMINI_PROVIDER_ID);
+    } catch {
+      // Secret storage unavailable (locked / non-DOM test env) — report "no key" rather than throw.
+      this.geminiKeyPresent = false;
+    }
+  }
+
   private syncPerformanceProbe(): void {
     const shouldProbe = appState.ui.workspaceMode !== 'flow';
     if (shouldProbe === Boolean(this.disposePerformanceSubscription)) {
@@ -163,6 +226,8 @@ export class Pix3StatusBar extends ComponentBase {
     this.disposeUpdateCheckSubscription?.();
     this.disposeDiagnosticsSubscription?.();
     this.disposePerformanceSubscription?.();
+    this.disposeBridgeSubscription?.();
+    this.disposeAgentSettingsSubscription?.();
     if (this.messageTimeout !== null) {
       window.clearTimeout(this.messageTimeout);
     }
@@ -220,8 +285,8 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
-          ${this.renderPerformance()} ${this.renderDiagnostics()}
-          ${this.projectName ? this.renderBundleSize() : html``}
+          ${this.renderAgentLanes()} ${this.isFlow ? html`` : this.renderPerformance()}
+          ${this.renderDiagnostics()} ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`
@@ -230,6 +295,53 @@ export class Pix3StatusBar extends ComponentBase {
       </div>
     `;
   }
+
+  /**
+   * The two ways the agent can reach a model, side by side: the local Pix3AgentBridge (which owns
+   * every metered provider's key) and the Gemini key this browser stores itself. Both are one click
+   * from the place they are configured — a dead bridge or a missing key is otherwise only
+   * discoverable by sending a prompt and reading the failure.
+   */
+  private renderAgentLanes() {
+    const bridgeTitle = this.bridgeAvailable
+      ? `Pix3AgentBridge connected — ${this.bridgeProviderCount} provider${
+          this.bridgeProviderCount === 1 ? '' : 's'
+        } available.\nKeys stay on your machine.\nClick to open Agent settings.`
+      : 'Pix3AgentBridge not reachable — metered providers (OpenAI, Anthropic, Claude Code) are ' +
+        'unavailable.\nStart it with `npx @pix3/agent-bridge`, then open its pairing link.\n' +
+        'Click to open Agent settings.';
+    const keyTitle = this.geminiKeyPresent
+      ? 'Gemini API key configured in this browser.\nClick to open Agent settings.'
+      : 'No Gemini API key stored in this browser.\nWithout it (and without the bridge) the agent ' +
+        'and the asset generator cannot run.\nClick to open Agent settings.';
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-lane ${this.bridgeAvailable ? 'is-on' : 'is-off'}"
+        title=${bridgeTitle}
+        @click=${this.onAgentLaneClick}
+      >
+        ${this.icons.getIcon('link', IconSize.SMALL)}
+        <span class="status-lane-label">Bridge</span>
+        <span class="status-lane-dot"></span>
+      </button>
+      <button
+        type="button"
+        class="status-indicator status-lane ${this.geminiKeyPresent ? 'is-on' : 'is-off'}"
+        title=${keyTitle}
+        @click=${this.onAgentLaneClick}
+      >
+        ${this.icons.getIcon('key', IconSize.SMALL)}
+        <span class="status-lane-label">Gemini</span>
+        <span class="status-lane-dot"></span>
+      </button>
+    `;
+  }
+
+  private onAgentLaneClick = (): void => {
+    void this.editorSettingsService.showSettings('agent');
+  };
 
   private renderDiagnostics() {
     const summary = this.diagnostics;

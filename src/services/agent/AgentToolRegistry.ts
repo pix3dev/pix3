@@ -73,6 +73,7 @@ import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateCompone
 import {
   SceneManager,
   NodeBase,
+  collectRenderabilityIssues,
   ScriptRegistry,
   getNodePropertySchema,
   resolveRuntimeTimeConfig,
@@ -81,7 +82,8 @@ import {
   type RuntimeTimeConfig,
   type RuntimeTimeMode,
 } from '@pix3/runtime';
-import { Vector2 } from 'three';
+import { renderabilityNote } from '@/services/agent/renderability-note';
+import { Vector2, Vector3 } from 'three';
 import {
   buildCreateNodeCommand,
   CREATABLE_NODE_TYPES,
@@ -583,6 +585,12 @@ export class AgentToolRegistry {
               type: 'object',
               description: "2D position {x,y} in the parent's space.",
               properties: { x: { type: 'number' }, y: { type: 'number' } },
+            },
+            position3: {
+              type: 'object',
+              description:
+                'World position {x,y,z} for 3D types (lights, meshes). Use this instead of `position` for anything 3D.',
+              properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
             },
             texturePath: {
               type: 'string',
@@ -1523,11 +1531,25 @@ export class AgentToolRegistry {
       {
         name: 'generate_asset',
         description:
-          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
+          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For schematic, placeholder or UI graphics (icons, buttons, bars, arrows, flat props, blockout art) prefer providerId 'svg-llm': it draws with the agent's own LLM as SVG and bakes it locally, so you get the EXACT width×height you ask for, real transparency with no background-removal pass, and it costs a text completion instead of a metered image. Use a raster model (the default) for painterly, textured or photographic art. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
         inputSchema: {
           type: 'object',
           properties: {
             prompt: { type: 'string' },
+            providerId: {
+              type: 'string',
+              description:
+                "Override the configured image provider for this call. 'svg-llm' = vector art via the agent's LLM (exact size, real alpha, fast and cheap — best for placeholder/UI/schematic graphics). Omit to use the user's configured provider.",
+            },
+            width: {
+              type: 'integer',
+              description:
+                "Exact output width in px. Honoured only by providers that can deliver it (providerId 'svg-llm'); raster models ignore it and answer with their own aspect-ratio grid.",
+            },
+            height: {
+              type: 'integer',
+              description: 'Exact output height in px (see width). Defaults to width when omitted.',
+            },
             name: {
               type: 'string',
               description:
@@ -1825,7 +1847,13 @@ export class AgentToolRegistry {
       properties: null,
       children: roots.map(root => nodeToDTO(root, maxDepth - 1)),
     };
-    return { ...tree, sceneVersion: graph.version, ...this.playingElsewhereNote(roots) };
+    return {
+      ...tree,
+      sceneVersion: graph.version,
+      ...this.playingElsewhereNote(roots),
+      // Authoring surface: performance advice belongs here, where it can be acted on.
+      ...renderabilityNote(roots, { includeAdvice: true }),
+    };
   }
 
   /**
@@ -1960,6 +1988,7 @@ export class AgentToolRegistry {
       name: typeof args.name === 'string' ? args.name : undefined,
       parentNodeId: typeof args.parentId === 'string' ? args.parentId : undefined,
       position: parseVector2(args.position),
+      position3: parseVector3(args.position3),
       width: typeof args.width === 'number' ? args.width : undefined,
       height: typeof args.height === 'number' ? args.height : undefined,
       texturePath: typeof args.texturePath === 'string' ? args.texturePath : undefined,
@@ -2897,6 +2926,30 @@ export class AgentToolRegistry {
     };
   }
 
+  /**
+   * Warn when an editor screenshot is lit by lights the running game does not have.
+   *
+   * The editor adds fallback lights to any scene that declares none, so a 3D scene with no light of
+   * its own photographs beautifully and runs black. A picture that cannot be told apart from a
+   * working one is worse than no picture, so it ships with its own disclaimer.
+   */
+  private editorLightingNote(): { editorFallbackLighting?: true; lightingWarning?: string } {
+    if (!this.viewportRenderer.isUsingEditorFallbackLighting()) {
+      return {};
+    }
+    const roots = (this.sceneManager.getActiveSceneGraph()?.rootNodes ?? []).filter(
+      (node): node is NodeBase => node instanceof NodeBase
+    );
+    if (!collectRenderabilityIssues(roots).some(issue => issue.code === 'lit-material-no-light')) {
+      return {};
+    }
+    return {
+      editorFallbackLighting: true,
+      lightingWarning:
+        'This image is lit by EDITOR-ONLY fallback lights. The scene declares no light of its own, so the RUNNING game draws these meshes black. Add a light, and verify with play_start + game_observe (sceneIssues) rather than with this picture.',
+    };
+  }
+
   private viewportScreenshot(args: Record<string, unknown>): Record<string, unknown> {
     const maxSize = asInt(args.maxSize, 1024);
     const source = asCaptureSource(args.source);
@@ -2928,6 +2981,7 @@ export class AgentToolRegistry {
     return {
       ok: true,
       view,
+      ...(view === 'editor' ? this.editorLightingNote() : {}),
       width: shot.width,
       height: shot.height,
       mimeType: shot.mimeType,
@@ -3001,6 +3055,7 @@ export class AgentToolRegistry {
     return {
       ok: true,
       view: 'editor',
+      ...this.editorLightingNote(),
       framed: frame,
       ...(opts.nodeId ? { framedNodeId: opts.nodeId, framedNodeName: framedNode?.name } : {}),
       width: result.width,
@@ -3061,12 +3116,19 @@ export class AgentToolRegistry {
   }
 
   private async generateAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const status = await this.assetGen.status();
+    const providerId =
+      typeof args.providerId === 'string' && args.providerId.trim()
+        ? args.providerId.trim()
+        : undefined;
+    // Status for the provider that will actually run: for a provider with no key of its own
+    // (svg-llm) `keyConfigured` reports whether an LLM lane is reachable, not whether a key exists.
+    const status = await this.assetGen.status(providerId);
     if (!status.keyConfigured) {
       return {
         ok: false,
-        error:
-          'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
+        error: providerId
+          ? `The "${providerId}" image provider is not ready. For "svg-llm", the user must configure an LLM in Settings → AI Agent; for the others, an image API key in Settings → AI Providers.`
+          : 'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
       };
     }
 
@@ -3081,7 +3143,18 @@ export class AgentToolRegistry {
     const maxSize = typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined;
     const preset = resolvePreset(args.postProcess, transparent ? 'sprite' : 'texture');
 
-    const generated = await this.assetGen.generate({ prompt, references, transparent });
+    // Exact size is a request, not a promise: providers that cannot honour it ignore both fields.
+    const width = typeof args.width === 'number' ? Math.floor(args.width) : undefined;
+    const height = typeof args.height === 'number' ? Math.floor(args.height) : width;
+
+    const generated = await this.assetGen.generate({
+      prompt,
+      references,
+      transparent,
+      providerId,
+      width,
+      height,
+    });
     // The generation plus every intermediate handle the pipeline creates must be freed.
     const handleIds = new Set<string>([generated.id]);
     try {
@@ -3098,6 +3171,9 @@ export class AgentToolRegistry {
         saved,
         preset,
         original: { width: generated.width, height: generated.height },
+        // Vector output is already a clean cutout at the exact size asked for, so the post-process
+        // pass skipped background removal — say so, or "no bg-removal ran" reads as a failure.
+        ...(generated.svgSource ? { vector: true } : {}),
         transparency,
         note: transparencyNote(preset, transparency),
         ...(await this.previewImages(oriented)),
@@ -3979,6 +4055,24 @@ const asInt = (value: unknown, fallback: number): number => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
+};
+
+/** Same as {@link parseVector2} for 3D types — `{x,y,z}` or `[x,y,z]`. */
+const parseVector3 = (value: unknown): Vector3 | undefined => {
+  if (
+    Array.isArray(value) &&
+    value.length >= 3 &&
+    value.slice(0, 3).every(entry => typeof entry === 'number')
+  ) {
+    return new Vector3(value[0] as number, value[1] as number, value[2] as number);
+  }
+  if (value && typeof value === 'object') {
+    const v = value as { x?: unknown; y?: unknown; z?: unknown };
+    if (typeof v.x === 'number' && typeof v.y === 'number' && typeof v.z === 'number') {
+      return new Vector3(v.x, v.y, v.z);
+    }
+  }
+  return undefined;
 };
 
 /** Parse an agent-supplied 2D position ({x,y} object or [x,y] array) into a Vector2, or undefined. */

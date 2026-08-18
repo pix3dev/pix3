@@ -8,6 +8,7 @@ import { OperationService } from '@/services/core/OperationService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
+import { modelPickerLabel } from '@/services/image-gen/ImageGenTypes';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import {
   SOUL_PRESETS,
@@ -1474,7 +1475,7 @@ export class EditorSettingsDialog extends ComponentBase {
             ${models.map(
               model =>
                 html`<option value=${model.id} ?selected=${model.id === this.aiModelId}>
-                  ${model.label}
+                  ${modelPickerLabel(model)}
                 </option>`
             )}
           </select>
@@ -1484,6 +1485,40 @@ export class EditorSettingsDialog extends ComponentBase {
           : null}
       </div>
 
+      ${provider?.requiresApiKey === false
+        ? html`<div class="settings-field">
+            <span class="key-label">API Key</span>
+            <div class="hint">
+              This provider has no key of its own — it draws with the model the Agent chat is set
+              to. Configure that in the AI Agent tab.
+            </div>
+          </div>`
+        : this.renderImageKeyField(helpUrl)}
+
+      <div class="settings-field">
+        <label class="select-row">
+          <span>Default save size (downscale)</span>
+          <select @change=${this.onDefaultSaveSizeChange}>
+            <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
+            <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
+            <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
+            <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
+            <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
+            <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
+          </select>
+        </label>
+        <div class="hint">
+          Downscales the longest edge when saving a generated image into the project (never
+          upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
+          the Sprite Editor.
+        </div>
+      </div>
+    `;
+  }
+
+  /** API-key entry for an image provider that owns one. */
+  private renderImageKeyField(helpUrl: string | undefined) {
+    return html`
       <div class="settings-field">
         <span class="key-label">
           API Key
@@ -1526,25 +1561,6 @@ export class EditorSettingsDialog extends ComponentBase {
                 : ''}.
               Stored encrypted in this browser only — never synced, and only sent to the selected
               provider.`}
-        </div>
-      </div>
-
-      <div class="settings-field">
-        <label class="select-row">
-          <span>Default save size (downscale)</span>
-          <select @change=${this.onDefaultSaveSizeChange}>
-            <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
-            <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
-            <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
-            <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
-            <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
-            <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
-          </select>
-        </label>
-        <div class="hint">
-          Downscales the longest edge when saving a generated image into the project (never
-          upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
-          the Sprite Editor.
         </div>
       </div>
     `;

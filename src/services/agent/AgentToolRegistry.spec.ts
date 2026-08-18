@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NodeBase } from '@pix3/runtime';
+import { AmbientLightNode, GeometryMesh, NodeBase } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
 import { AgentToolRegistry, type JsonSchema } from './AgentToolRegistry';
@@ -29,7 +29,13 @@ interface CommandMeta {
 const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegistry => {
   const registry = new AgentToolRegistry();
   for (const [key, value] of Object.entries(overrides)) {
-    Object.defineProperty(registry, key, { value, configurable: true });
+    // Screenshot results carry a fallback-lighting disclaimer, so every viewportRenderer double
+    // needs that method; default it to "the scene lights itself" unless a case says otherwise.
+    const stub =
+      key === 'viewportRenderer' && value && typeof value === 'object'
+        ? { isUsingEditorFallbackLighting: () => false, ...(value as object) }
+        : value;
+    Object.defineProperty(registry, key, { value: stub, configurable: true });
   }
   return registry;
 };
@@ -156,6 +162,52 @@ describe('AgentToolRegistry', () => {
       expect(captureScreenshot).toHaveBeenCalledWith({ maxSize: 640 });
       expect(result.ok).toBe(true);
       expect(result.__images).toEqual([{ mimeType: 'image/jpeg', data: 'QUJD' }]);
+    });
+
+    it('admits when the picture is lit by editor-only fallback lights', async () => {
+      // The incident's second half: an unlit 3D scene photographs fine in the editor because the
+      // viewport lights it itself, so a screenshot "proved" a game that ran black.
+      const cube = new GeometryMesh({ id: 'cube', name: 'Cube', geometry: 'box', size: [1, 1, 1] });
+      const registry = buildRegistry({
+        viewportRenderer: {
+          captureScreenshot: () => ({
+            dataBase64: 'QUJD',
+            mimeType: 'image/jpeg',
+            width: 64,
+            height: 64,
+          }),
+          isUsingEditorFallbackLighting: () => true,
+        },
+        sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map(), rootNodes: [cube] }) },
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(result.editorFallbackLighting).toBe(true);
+      expect(String(result.lightingWarning)).toMatch(/EDITOR-ONLY/);
+    });
+
+    it('stays quiet about lighting when the scene lights itself', async () => {
+      const cube = new GeometryMesh({ id: 'cube', name: 'Cube', geometry: 'box', size: [1, 1, 1] });
+      const light = new AmbientLightNode({ id: 'amb', name: 'Ambient' });
+      const registry = buildRegistry({
+        viewportRenderer: {
+          captureScreenshot: () => ({
+            dataBase64: 'QUJD',
+            mimeType: 'image/jpeg',
+            width: 64,
+            height: 64,
+          }),
+          isUsingEditorFallbackLighting: () => false,
+        },
+        sceneManager: {
+          getActiveSceneGraph: () => ({ nodeMap: new Map(), rootNodes: [cube, light] }),
+        },
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(result.editorFallbackLighting).toBeUndefined();
     });
 
     it('reports a friendly error when the viewport is not initialized', async () => {

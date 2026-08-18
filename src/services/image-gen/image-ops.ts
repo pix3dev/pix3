@@ -337,6 +337,38 @@ export async function sliceImageBlob(
   }
 }
 
+/**
+ * Bounding box of everything in `pixels` more opaque than `alphaThreshold`, or null when nothing is.
+ * Shared by the trim bake ({@link trimImageBlob}) and the Sprite Editor's crop tool, which opens its
+ * selection on these bounds — the same pixels the trim would keep, so "crop" and "trim" cannot
+ * disagree about where the content ends.
+ *
+ * `alphaThreshold` is inclusive-empty: a pixel counts as content only when `alpha > threshold`, so 0
+ * trims only fully transparent pixels.
+ */
+export const opaqueBounds = (pixels: ImagePixels, alphaThreshold = 0): CropRectPixels | null => {
+  const { width, height, data } = pixels;
+  const threshold = clamp(Math.round(alphaThreshold), 0, 255);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] > threshold) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) {
+    return null;
+  }
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+};
+
 export interface TrimOptions extends EncodeOptions {
   /** Transparent padding (px) kept around the opaque content on every side. Default 2. */
   padding?: number;
@@ -387,33 +419,11 @@ export async function trimImageBlob(blob: Blob, options: TrimOptions = {}): Prom
     }
     scanCtx.drawImage(bitmap, 0, 0);
     const { data } = scanCtx.getImageData(0, 0, sw, sh);
-    const threshold = clamp(Math.round(options.alphaThreshold ?? 0), 0, 255);
 
-    let minX = sw;
-    let minY = sh;
-    let maxX = -1;
-    let maxY = -1;
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        if (data[(y * sw + x) * 4 + 3] > threshold) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    if (maxX < minX || maxY < minY) {
+    const bounds = opaqueBounds({ width: sw, height: sh, data }, options.alphaThreshold ?? 0);
+    if (!bounds) {
       return { blob, width: sw, height: sh, empty: true, bounds: null };
     }
-
-    const bounds: CropRectPixels = {
-      x: minX,
-      y: minY,
-      width: maxX - minX + 1,
-      height: maxY - minY + 1,
-    };
     const padding = Math.max(0, Math.round(options.padding ?? 2));
     const outW = options.square
       ? Math.max(bounds.width, bounds.height) + padding * 2

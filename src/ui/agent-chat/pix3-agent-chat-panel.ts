@@ -63,14 +63,67 @@ const DIFF_LINE_CAP = 24;
 /** Max selected nodes shown as individual context chips; the rest collapse into a "+N" chip. */
 const CONTEXT_SELECTION_CAP = 6;
 
+/**
+ * Assistant replies past either of these render clamped, with an Expand link. A long reply is
+ * usually a plan or a report the user skims once — left full-height it buries the tool steps and
+ * the newer turns above/below it.
+ */
+const LONG_TEXT_CHARS = 700;
+const LONG_TEXT_LINES = 12;
+
+export const isLongText = (text: string): boolean =>
+  text.length > LONG_TEXT_CHARS || countLines(text) > LONG_TEXT_LINES;
+
+const countLines = (text: string): number => text.split('\n').length;
+
+/**
+ * Prefix every harness-authored nudge carries (loop-breakers, iteration-budget reminders, the
+ * compaction handoff). They are addressed to the model, not the user, and ride in the wire history
+ * as `user` text — so without this they render as the user's own message, in the accent bubble,
+ * shouting over the conversation they are only annotating.
+ */
+const NUDGE_PREFIX = '[Pix3]';
+
+/** Short heading for a nudge, so the collapsed line still says what the harness intervened about. */
+const NUDGE_LABELS: readonly { readonly match: RegExp; readonly label: string }[] = [
+  { match: /repeated an identical/i, label: 'Cycle detected — correction' },
+  { match: /run out of tool iterations/i, label: 'Iteration cap reached' },
+  { match: /tool iterations? left before/i, label: 'Iteration budget — wrap up' },
+  { match: /you are stuck/i, label: 'Stuck — change approach' },
+  { match: /never ran the game/i, label: 'Unverified change — verify first' },
+  { match: /cut off by the output-token limit/i, label: 'Reply truncated — continue' },
+  { match: /empty reply/i, label: 'Empty reply — correction' },
+  { match: /context is (filling|nearly full)/i, label: 'Context pressure — land the work' },
+  { match: /was compacted to free context/i, label: 'Context compacted — handoff' },
+];
+
+export const nudgeLabel = (text: string): string => {
+  for (const { match, label } of NUDGE_LABELS) {
+    if (match.test(text)) return label;
+  }
+  return 'Harness note';
+};
+
+export const isNudgeText = (role: 'user' | 'assistant', text: string): boolean =>
+  role === 'user' && text.trimStart().startsWith(NUDGE_PREFIX);
+
 /** A file staged in the composer before it is sent (pasted, dropped, or picked). */
 type ComposerAttachment =
   | { id: string; kind: 'image'; name: string; mimeType: string; base64: string }
   | { id: string; kind: 'text'; name: string; content: string };
 
 /** One rendered chat entry, derived from the wire history (tool calls paired with their results). */
-type DisplayItem =
-  | { kind: 'text'; role: 'user' | 'assistant'; text: string; origin?: AgentTurnOrigin }
+export type DisplayItem =
+  | {
+      kind: 'text';
+      /** Stable within a conversation (message + block index) — keys the expand/collapse state. */
+      key: string;
+      role: 'user' | 'assistant';
+      text: string;
+      origin?: AgentTurnOrigin;
+    }
+  /** A `[Pix3]` harness nudge: shown collapsed to its heading, never as a user message. */
+  | { kind: 'notice'; key: string; label: string; text: string }
   | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'tool'; call: LlmToolUseBlock; result: LlmToolResultBlock | null }
   | { kind: 'metrics'; metric: AgentTurnMetric }
@@ -78,7 +131,7 @@ type DisplayItem =
   | { kind: 'divider' };
 
 /** Pair every tool-use block with its result and flatten the history into renderable items. */
-const toDisplayItems = (
+export const toDisplayItems = (
   messages: readonly LlmMessage[],
   turnMetrics: Readonly<Record<number, AgentTurnMetric>>,
   showMetrics: boolean,
@@ -107,12 +160,23 @@ const toDisplayItems = (
     // Attribution belongs to the assistant MESSAGE (one provider round-trip), so only its first
     // text block carries it — a reply split across several blocks shows one badge, not a column.
     let originPending = turnMetrics[index]?.origin;
-    for (const block of blocks) {
+    blocks.forEach((block, blockIndex) => {
+      const key = `${index}-${blockIndex}`;
       if (block.type === 'text' && block.text.trim()) {
+        if (isNudgeText(message.role, block.text)) {
+          items.push({
+            kind: 'notice',
+            key,
+            label: nudgeLabel(block.text),
+            text: block.text.trimStart().slice(NUDGE_PREFIX.length).trim(),
+          });
+          return;
+        }
         const origin = message.role === 'assistant' ? originPending : undefined;
         originPending = undefined;
         items.push({
           kind: 'text',
+          key,
           role: message.role,
           text: block.text,
           ...(origin && { origin }),
@@ -129,7 +193,7 @@ const toDisplayItems = (
         });
       }
       // tool-result blocks render attached to their call.
-    }
+    });
     const metric = turnMetrics[index];
     if (showMetrics && message.role === 'assistant' && metric) {
       items.push({ kind: 'metrics', metric });
@@ -300,7 +364,9 @@ const extractUserPrompts = (messages: readonly LlmMessage[]): string[] => {
       .map(block => block.text)
       .join('\n')
       .trim();
-    if (text) prompts.push(text);
+    // A harness nudge is not something the user typed — ArrowUp must never recall it. Most carry
+    // tool results (already skipped above); the compaction handoff does not.
+    if (text && !isNudgeText('user', text)) prompts.push(text);
   }
   return prompts;
 };
@@ -446,6 +512,7 @@ type ToolEntry = { call: LlmToolUseBlock; result: LlmToolResultBlock | null };
 type RenderRow =
   | {
       kind: 'text';
+      key: string;
       role: 'user' | 'assistant';
       text: string;
       /** Provider/model that produced this reply, when it is known (assistant rows only). */
@@ -453,6 +520,7 @@ type RenderRow =
       firstAssistant: boolean;
       lastAssistant: boolean;
     }
+  | { kind: 'notice'; key: string; label: string; text: string }
   | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'metrics'; metric: AgentTurnMetric }
   | { kind: 'divider' }
@@ -643,6 +711,13 @@ export class AgentChatPanel extends ComponentBase {
   @state() private toggledGroups = new Set<string>();
 
   /**
+   * Rows the user has expanded by hand: long assistant replies (clamped by default) and `[Pix3]`
+   * harness notes (collapsed to their heading by default). Keyed by {@link DisplayItem} key, so a
+   * compaction that renumbers the history simply forgets the toggles rather than mis-applying them.
+   */
+  @state() private expandedRows = new Set<string>();
+
+  /**
    * Live editor context the agent is given on every turn (via its system prompt) — surfaced here so
    * the user can *see* what "the button" / "this scene" resolves to. Reflects the active scene and
    * the current selection; updated reactively from {@link appState}.
@@ -661,6 +736,13 @@ export class AgentChatPanel extends ComponentBase {
   private readonly messagesRef = createRef<HTMLDivElement>();
   private readonly fileInputRef = createRef<HTMLInputElement>();
   private shouldStickToBottom = true;
+  /**
+   * Conversation whose tail we have already pinned. A change means the session was restored or
+   * switched, and a restored thread must open on its newest message — not at the top of a history
+   * that can be hundreds of turns long.
+   */
+  private pinnedConversationId: string | null = null;
+  private messagesResizeObserver?: ResizeObserver;
   /** Index into the derived prompt history while cycling with ArrowUp/Down (-1 = not navigating). */
   private historyIndex = -1;
   /** Monotonic counter for unique attachment ids within this component instance. */
@@ -734,6 +816,9 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeSceneContextSub = undefined;
     this.disposeSelectionContextSub?.();
     this.disposeSelectionContextSub = undefined;
+    this.messagesResizeObserver?.disconnect();
+    this.messagesResizeObserver = undefined;
+    this.messagesRef.value?.removeEventListener('load', this.handleContentLoad, true);
     this.closeModelPicker();
     this.closeReasoningPicker();
     super.disconnectedCallback();
@@ -751,11 +836,51 @@ export class AgentChatPanel extends ComponentBase {
     this.reasoningEffort = this.settings.getReasoningEffort(this.providerId, this.modelId);
   }
 
+  protected firstUpdated(): void {
+    const container = this.messagesRef.value;
+    if (!container) {
+      return;
+    }
+    // Two cases the `updated()` hook alone cannot cover, both of which strand a restored session
+    // part-way up its own history:
+    //  * the panel is a Golden-Layout tab — while it sits behind Inspector/Profiler it has no box,
+    //    so assigning `scrollTop` there is a no-op and nothing re-runs when it is fronted;
+    //  * tool screenshots decode after their row is laid out, growing the thread below the fold.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.messagesResizeObserver = new ResizeObserver(() => this.pinToBottomIfSticky());
+      this.messagesResizeObserver.observe(container);
+    }
+    container.addEventListener('load', this.handleContentLoad, true); // `load` does not bubble.
+    this.pinToBottomIfSticky();
+  }
+
   protected updated(): void {
     const container = this.messagesRef.value;
-    if (container && this.shouldStickToBottom) {
+    if (!container) {
+      return;
+    }
+    const conversationId = this.chatState?.activeConversationId ?? null;
+    if (conversationId !== this.pinnedConversationId) {
+      // Restored or switched thread: always open at the newest message, whatever the user's last
+      // scroll position in the previous one was.
+      this.pinnedConversationId = conversationId;
+      this.shouldStickToBottom = true;
+    }
+    if (this.shouldStickToBottom) {
       container.scrollTop = container.scrollHeight;
     }
+  }
+
+  private readonly handleContentLoad = (): void => {
+    this.pinToBottomIfSticky();
+  };
+
+  private pinToBottomIfSticky(): void {
+    const container = this.messagesRef.value;
+    if (!container || !this.shouldStickToBottom) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
   }
 
   render() {
@@ -817,12 +942,15 @@ export class AgentChatPanel extends ComponentBase {
       if (item.kind === 'text') {
         rows.push({
           kind: 'text',
+          key: item.key,
           role: item.role,
           text: item.text,
           ...(item.origin && { origin: item.origin }),
           firstAssistant: false,
           lastAssistant: false,
         });
+      } else if (item.kind === 'notice') {
+        rows.push({ kind: 'notice', key: item.key, label: item.label, text: item.text });
       } else if (item.kind === 'image') {
         rows.push({ kind: 'image', role: item.role, mimeType: item.mimeType, data: item.data });
       } else if (item.kind === 'divider') {
@@ -908,6 +1036,9 @@ export class AgentChatPanel extends ComponentBase {
         </div>
       `;
     }
+    if (row.kind === 'notice') {
+      return this.renderNotice(row);
+    }
     if (row.kind === 'divider') {
       // The service replaced the history here; without a marker the thread looks like it lost turns.
       return html`<div
@@ -921,18 +1052,30 @@ export class AgentChatPanel extends ComponentBase {
   }
 
   private renderTextRow(row: Extract<RenderRow, { kind: 'text' }>, running: boolean) {
+    // Pasted specs and stack traces make user turns as long as replies — clamp both the same way.
     if (row.role === 'user') {
+      const longPrompt = isLongText(row.text);
+      const promptExpanded = !longPrompt || this.expandedRows.has(row.key);
       return html`<div class="agent-message is-user">
-        <div class="agent-message-text">${row.text}</div>
+        <div class="agent-message-text ${longPrompt && !promptExpanded ? 'is-clamped' : ''}">
+          ${row.text}
+        </div>
+        ${longPrompt ? this.renderExpandLink(row.key, promptExpanded, row.text) : null}
       </div>`;
     }
     // Last settled assistant reply gets a hover Copy / Retry toolbar.
     const showActions = row.lastAssistant && !running;
+    // Long replies open clamped; the head of the answer is visible, the rest is one click away.
+    const long = isLongText(row.text);
+    const expanded = !long || this.expandedRows.has(row.key);
     return html`
       <div class="agent-left-row">
         ${this.renderReplyAvatar(row)}
         <div class="agent-message is-assistant">
-          <div class="agent-message-md">${renderMarkdownLite(row.text)}</div>
+          <div class="agent-message-md ${long && !expanded ? 'is-clamped' : ''}">
+            ${renderMarkdownLite(row.text)}
+          </div>
+          ${long ? this.renderExpandLink(row.key, expanded, row.text) : null}
           ${showActions
             ? html`<div class="agent-msg-actions">
                 <button
@@ -958,6 +1101,58 @@ export class AgentChatPanel extends ComponentBase {
         </div>
       </div>
     `;
+  }
+
+  /** The Expand/Collapse affordance under a clamped message (user prompt or assistant reply). */
+  private renderExpandLink(key: string, expanded: boolean, text: string) {
+    return html`<button
+      type="button"
+      class="agent-expand-link"
+      aria-expanded=${String(expanded)}
+      @click=${() => this.toggleRowExpanded(key)}
+    >
+      ${expanded ? 'Collapse' : `Expand · ${countLines(text)} lines`}
+    </button>`;
+  }
+
+  /**
+   * A harness nudge (loop-breaker, iteration budget, compaction handoff). It is machine-to-machine
+   * traffic the user may want to audit but never has to act on, so it renders as one muted line —
+   * a heading saying what was corrected — and only unfolds on demand.
+   */
+  private renderNotice(row: Extract<RenderRow, { kind: 'notice' }>) {
+    const expanded = this.expandedRows.has(row.key);
+    return html`
+      <div class="agent-notice ${expanded ? 'is-open' : ''}">
+        <button
+          type="button"
+          class="agent-notice-head"
+          aria-expanded=${String(expanded)}
+          title=${expanded ? 'Hide the harness note' : row.text}
+          @click=${() => this.toggleRowExpanded(row.key)}
+        >
+          ${this.icons.getIcon(expanded ? 'chevron-down' : 'chevron-right', IconSize.SMALL)}
+          <span class="agent-notice-label">${row.label}</span>
+        </button>
+        ${expanded ? html`<div class="agent-notice-body">${row.text}</div>` : null}
+      </div>
+    `;
+  }
+
+  /**
+   * Flip one collapsible row (a clamped reply or a harness note). Unsticks the view first: growing
+   * a row the user just opened while the transcript is pinned to the bottom would scroll the thing
+   * they clicked out of sight.
+   */
+  private toggleRowExpanded(key: string): void {
+    const next = new Set(this.expandedRows);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+      this.shouldStickToBottom = false;
+    }
+    this.expandedRows = next;
   }
 
   /**

@@ -7,6 +7,24 @@ How to generate game art with `generate_asset` that looks good **and matches the
 then wire it onto nodes. The tool already post-processes images (background removal, trim,
 downscale) — your job is a good prompt, the right preset, and applying the result.
 
+## 0. Pick the lane: vector or raster
+
+Two kinds of provider sit behind `generate_asset`, and picking wrong costs either money or a
+usable result.
+
+- **`providerId: 'svg-llm'` — vector, drawn by your own model.** It writes SVG and the editor
+  bakes it to a PNG locally. You get the **exact** `width`/`height` you ask for, real
+  transparency (no background-removal pass to go wrong), an answer in seconds, and the price of
+  a text completion. Use it for icons, buttons, bars, meters, arrows, frames, flat props,
+  schematic art and every blockout/placeholder. Pass `width` and `height` — that is the whole
+  point of this lane; a UI element sized to its slot needs no trim and no downscale.
+- **The default (raster) providers** — a metered image model. Use them when the art wants
+  painterly rendering, texture, lighting or photographic detail: hero sprites, backgrounds, key
+  illustrations. They do not honour `width`/`height`; you get their aspect-ratio grid.
+
+Prototype rule of thumb: everything vector first, then upgrade the two or three pieces that
+actually carry the game's look.
+
 ## 1. Extract style tokens once, reuse them everywhere
 
 Before generating anything, get the game's visual style as a reusable phrase:

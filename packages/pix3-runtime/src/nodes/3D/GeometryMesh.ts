@@ -7,6 +7,8 @@ import {
   TorusGeometry,
   Mesh,
   MeshStandardMaterial,
+  MeshLambertMaterial,
+  MeshBasicMaterial,
   Color,
   SRGBColorSpace,
   BufferGeometry,
@@ -24,6 +26,54 @@ import {
   type ShaderEffectEntry,
   type ShaderEffectHost,
 } from '../../shader-effects/ShaderEffectStack';
+
+/**
+ * Material families a GeometryMesh can wear, cheapest last.
+ *
+ * The default is `standard` (PBR) and stays that way: every scene and every consumer project
+ * authored before this existed is a standard mesh, and re-materialling them on read would change
+ * how shipped games look. New content picks: mobile creation paths author `lambert`, and a user who
+ * asks for a high-end look gets `standard`.
+ *
+ * - `standard` — PBR. Roughness/metalness/IBL. The most expensive per pixel.
+ * - `lambert` — diffuse-only lighting. Keeps the shape readable (a cube still reads as a cube)
+ *   at a fraction of the cost. The right default for a phone.
+ * - `basic` — unlit flat colour. Cheapest, and the only family that cannot render black for want
+ *   of a light.
+ */
+/**
+ * The slice of a material every GeometryMesh family shares: a colour, an albedo map and an AO map.
+ * `MeshStandardMaterial`, `MeshLambertMaterial` and `MeshBasicMaterial` all carry these, so texture
+ * and colour edits must not be gated on the mesh being PBR — only roughness/metalness are.
+ */
+type MappedMaterial = Material & {
+  color: Color;
+  map?: Texture | null;
+  aoMap?: Texture | null;
+  aoMapIntensity?: number;
+};
+
+export const GEOMETRY_MATERIAL_TYPES = ['standard', 'lambert', 'basic'] as const;
+export type GeometryMaterialType = (typeof GEOMETRY_MATERIAL_TYPES)[number];
+
+export const DEFAULT_GEOMETRY_MATERIAL_TYPE: GeometryMaterialType = 'standard';
+
+const asMaterialType = (value: unknown): GeometryMaterialType =>
+  typeof value === 'string' && (GEOMETRY_MATERIAL_TYPES as readonly string[]).includes(value)
+    ? (value as GeometryMaterialType)
+    : DEFAULT_GEOMETRY_MATERIAL_TYPE;
+
+/**
+ * Which shader-effect family a material type belongs to.
+ *
+ * `lambert` maps to `standard` rather than getting a family of its own: the four anchors the effect
+ * composer injects at (`uv_vertex`, `color_fragment`, `emissivemap_fragment`, `opaque_fragment`)
+ * all exist in three's meshlambert shader, so standard-targeted effects compile there. Giving
+ * lambert no effects at all would mean picking the mobile material silently disables a project's
+ * shader effects — a worse failure than the one this whole change is about.
+ */
+const effectTargetFor = (type: GeometryMaterialType): 'standard' | 'basic' =>
+  type === 'basic' ? 'basic' : 'standard';
 
 /** Supported primitive kinds. `size` is interpreted per-shape (see buildGeometry). */
 export const GEOMETRY_KINDS = ['box', 'sphere', 'plane', 'cylinder', 'cone', 'torus'] as const;
@@ -46,8 +96,12 @@ export interface GeometryMeshProps extends Omit<Node3DProps, 'type'> {
   geometry?: string;
   size?: [number, number, number];
   material?: {
+    /** Material family (see {@link GEOMETRY_MATERIAL_TYPES}). Defaults to `standard`. */
+    type?: string;
     color?: string;
+    /** `standard` only. */
     roughness?: number;
+    /** `standard` only. */
     metalness?: number;
     /** res:// path of a baked ambient-occlusion map (see the AO baker). */
     aoMap?: string;
@@ -84,11 +138,15 @@ export class GeometryMesh
   /** res:// path of the albedo map, kept for serialization (the Texture itself
    * is loaded async by the loader / editor viewport sync). */
   private _mapSrc = '';
-  /** Registry-backed shader effects attached to the mesh material (standard). */
-  private readonly effectStack = new ShaderEffectStack({
-    nodeType: 'GeometryMesh',
-    target: 'standard',
-  });
+  /** Authored material family; decides what is built and what round-trips. */
+  private _materialType: GeometryMaterialType;
+  /**
+   * Registry-backed shader effects attached to the mesh material.
+   *
+   * Built in the constructor rather than as a field initializer because its target family depends
+   * on the authored material type, which is only known once props are in hand.
+   */
+  private readonly effectStack: ShaderEffectStack;
 
   constructor(props: GeometryMeshProps) {
     super(props, 'GeometryMesh');
@@ -105,10 +163,20 @@ export class GeometryMesh
     const roughness = typeof mat.roughness === 'number' ? mat.roughness : 0.35;
     const metalness = typeof mat.metalness === 'number' ? mat.metalness : 0.25;
 
-    const material = new MeshStandardMaterial({ color, roughness, metalness });
+    this._materialType = asMaterialType(mat.type);
+    this.effectStack = new ShaderEffectStack({
+      nodeType: 'GeometryMesh',
+      target: effectTargetFor(this._materialType),
+    });
+
+    const material = GeometryMesh.buildMaterial(this._materialType, {
+      color,
+      roughness,
+      metalness,
+    });
     this._aoMapIntensity =
       typeof mat.aoMapIntensity === 'number' ? clamp01Number(mat.aoMapIntensity) : 1;
-    material.aoMapIntensity = this._aoMapIntensity;
+    (material as Material & { aoMapIntensity?: number }).aoMapIntensity = this._aoMapIntensity;
 
     // Wire the effect composer before first render; effects attached below set
     // their defines pre-compile so the first program is the right variant.
@@ -180,6 +248,89 @@ export class GeometryMesh
     }
   }
 
+  /**
+   * Build the three.js material for a family. `roughness`/`metalness` exist only on `standard`;
+   * the other two ignore them, and {@link serializeConfig} stops writing them so a round-trip does
+   * not resurrect PBR values on a mesh that has no use for them.
+   */
+  private static buildMaterial(
+    type: GeometryMaterialType,
+    opts: { color: Color; roughness: number; metalness: number }
+  ): Material {
+    switch (type) {
+      case 'basic':
+        return new MeshBasicMaterial({ color: opts.color });
+      case 'lambert':
+        return new MeshLambertMaterial({ color: opts.color });
+      case 'standard':
+      default:
+        return new MeshStandardMaterial({
+          color: opts.color,
+          roughness: opts.roughness,
+          metalness: opts.metalness,
+        });
+    }
+  }
+
+  /** The authored material family. */
+  get materialType(): GeometryMaterialType {
+    return this._materialType;
+  }
+
+  /**
+   * Swap the material family in place, carrying over everything the new family can hold.
+   *
+   * Colour and the albedo map survive every family; roughness/metalness only exist on `standard`
+   * and are re-defaulted when coming back to it; the AO map survives because all three families
+   * support `aoMap`. Attached shader effects are re-installed onto the new material, and the ones
+   * whose GLSL does not target the new family are dropped with a warning rather than left attached
+   * and silently dead.
+   */
+  set materialType(value: GeometryMaterialType) {
+    const next = asMaterialType(value);
+    if (next === this._materialType) {
+      return;
+    }
+    const previous = this._material;
+    const previousColor = this._colorMaterial?.color.clone() ?? new Color('#4e8df5');
+    const previousMap = this._colorMaterial?.map ?? null;
+    const std = this._stdMaterial;
+    const material = GeometryMesh.buildMaterial(next, {
+      color: previousColor,
+      roughness: std?.roughness ?? 0.35,
+      metalness: std?.metalness ?? 0.25,
+    });
+    this._materialType = next;
+    this.effectStack.retarget(effectTargetFor(next));
+    if (previous) {
+      this.effectStack.uninstall(previous);
+    }
+    this.installEffectComposer(material);
+
+    const withMaps = material as Material & { map?: Texture | null; aoMap?: Texture | null };
+    if (previousMap) {
+      withMaps.map = previousMap;
+    }
+    const previousAo = std?.aoMap ?? null;
+    if (previousAo) {
+      withMaps.aoMap = previousAo;
+      (material as Material & { aoMapIntensity?: number }).aoMapIntensity = this._aoSuppressed
+        ? 0
+        : this._aoMapIntensity;
+    }
+
+    const mesh = this._mesh;
+    if (mesh) {
+      mesh.material = material;
+    }
+    this._material = material;
+    material.needsUpdate = true;
+    try {
+      (previous as unknown as { dispose?: () => void })?.dispose?.();
+      // eslint-disable-next-line no-empty
+    } catch {}
+  }
+
   /** Swap the child mesh's geometry to match the current kind + size. */
   private rebuildGeometry(): void {
     const next = GeometryMesh.buildGeometry(this._geometryKind, this._size);
@@ -191,7 +342,7 @@ export class GeometryMesh
     this._geometry = next;
     // The lightmap UV set lives on the geometry, so a rebuilt shape needs it
     // regenerated when an AO map is in use.
-    if (this._stdMaterial?.aoMap) {
+    if (this._colorMaterial?.aoMap) {
       GeometryMesh.applyLightmapUV(this._geometryKind, next);
     }
     try {
@@ -220,7 +371,7 @@ export class GeometryMesh
    * a mesh with no AO pays no extra attribute cost.
    */
   setAOMap(texture: Texture | null): void {
-    const mat = this._stdMaterial;
+    const mat = this._colorMaterial;
     if (!mat) {
       return;
     }
@@ -239,7 +390,7 @@ export class GeometryMesh
   }
   set aoMapIntensity(value: number) {
     this._aoMapIntensity = clamp01Number(value);
-    const mat = this._stdMaterial;
+    const mat = this._colorMaterial;
     if (mat && !this._aoSuppressed) {
       mat.aoMapIntensity = this._aoMapIntensity;
     }
@@ -252,7 +403,7 @@ export class GeometryMesh
    */
   setAOSuppressed(suppressed: boolean): void {
     this._aoSuppressed = suppressed;
-    const mat = this._stdMaterial;
+    const mat = this._colorMaterial;
     if (mat) {
       mat.aoMapIntensity = suppressed ? 0 : this._aoMapIntensity;
     }
@@ -272,7 +423,7 @@ export class GeometryMesh
    * separately in `_mapSrc` for serialization.
    */
   setMap(texture: Texture | null): void {
-    const mat = this._stdMaterial;
+    const mat = this._colorMaterial;
     if (!mat) {
       return;
     }
@@ -314,7 +465,7 @@ export class GeometryMesh
    * versions + injects the live attached-effect set (`onBeforeCompile` +
    * `customProgramCacheKey`) and syncs the `PIX3_FX_*` defines onto it.
    */
-  private installEffectComposer(material: MeshStandardMaterial): void {
+  private installEffectComposer(material: Material): void {
     this.effectStack.install(material);
   }
 
@@ -434,12 +585,17 @@ export class GeometryMesh
    * transform is serialized separately by the generic Node3D path.
    */
   serializeConfig(): Record<string, unknown> {
-    const mat = this._stdMaterial;
-    const material: Record<string, unknown> = { type: 'standard' };
-    if (mat) {
-      material.color = '#' + mat.color.clone().convertLinearToSRGB().getHexString();
-      material.roughness = mat.roughness;
-      material.metalness = mat.metalness;
+    const colorMat = this._colorMaterial;
+    const material: Record<string, unknown> = { type: this._materialType };
+    if (colorMat) {
+      material.color = '#' + colorMat.color.clone().convertLinearToSRGB().getHexString();
+    }
+    // Roughness/metalness are meaningless off `standard`; writing them anyway would resurrect PBR
+    // values the moment someone switched the material back, which is not what they authored.
+    const std = this._stdMaterial;
+    if (std) {
+      material.roughness = std.roughness;
+      material.metalness = std.metalness;
     }
     if (this._aoMapSrc) {
       material.aoMap = this._aoMapSrc;
@@ -460,6 +616,15 @@ export class GeometryMesh
 
   private get _mesh(): Mesh | undefined {
     return (this.children as unknown as Mesh[]).find(c => c instanceof Mesh);
+  }
+
+  /**
+   * The material as "something with a colour and a map" — true of all three families.
+   * Colour edits must keep working when the mesh is not PBR, which `_stdMaterial` cannot express.
+   */
+  private get _colorMaterial(): MappedMaterial | undefined {
+    const mat = this._mesh?.material;
+    return mat && !Array.isArray(mat) && 'color' in mat ? (mat as MappedMaterial) : undefined;
   }
 
   private get _stdMaterial(): MeshStandardMaterial | undefined {
@@ -497,19 +662,42 @@ export class GeometryMesh
             (n as GeometryMesh).size = [Number(vec?.x), Number(vec?.y), Number(vec?.z)];
           },
         }),
+        defineProperty('materialType', 'enum', {
+          ui: {
+            label: 'Material',
+            description:
+              'standard = PBR (desktop look), lambert = diffuse-only (the mobile default), basic = unlit (needs no light at all)',
+            group: 'Material',
+            options: [...GEOMETRY_MATERIAL_TYPES],
+          },
+          getValue: (n: unknown) => (n as GeometryMesh).materialType,
+          setValue: (n: unknown, v: unknown) => {
+            (n as GeometryMesh).materialType = String(v) as GeometryMaterialType;
+          },
+        }),
         defineProperty('color', 'color', {
           ui: { label: 'Color', group: 'Material' },
           getValue: (n: unknown) => {
-            const mat = (n as GeometryMesh)._stdMaterial;
+            const mat = (n as GeometryMesh)._colorMaterial;
             return mat ? '#' + mat.color.clone().convertLinearToSRGB().getHexString() : '#4e8df5';
           },
           setValue: (n: unknown, v: unknown) => {
-            const mat = (n as GeometryMesh)._stdMaterial;
+            const mat = (n as GeometryMesh)._colorMaterial;
             if (mat) mat.color.set(String(v)).convertSRGBToLinear();
           },
         }),
         defineProperty('roughness', 'number', {
-          ui: { label: 'Roughness', group: 'Material', step: 0.01, precision: 2, min: 0, max: 1 },
+          ui: {
+            label: 'Roughness',
+            group: 'Material',
+            step: 0.01,
+            precision: 2,
+            min: 0,
+            max: 1,
+            // Only `standard` has these; greyed out rather than hidden so the reason a value does
+            // nothing is visible next to the material picker that caused it.
+            readOnly: t => !(t as GeometryMesh)._stdMaterial,
+          },
           getValue: (n: unknown) => (n as GeometryMesh)._stdMaterial?.roughness ?? 0.35,
           setValue: (n: unknown, v: unknown) => {
             const mat = (n as GeometryMesh)._stdMaterial;
@@ -517,7 +705,15 @@ export class GeometryMesh
           },
         }),
         defineProperty('metalness', 'number', {
-          ui: { label: 'Metalness', group: 'Material', step: 0.01, precision: 2, min: 0, max: 1 },
+          ui: {
+            label: 'Metalness',
+            group: 'Material',
+            step: 0.01,
+            precision: 2,
+            min: 0,
+            max: 1,
+            readOnly: t => !(t as GeometryMesh)._stdMaterial,
+          },
           getValue: (n: unknown) => (n as GeometryMesh)._stdMaterial?.metalness ?? 0.25,
           setValue: (n: unknown, v: unknown) => {
             const mat = (n as GeometryMesh)._stdMaterial;
@@ -534,7 +730,7 @@ export class GeometryMesh
             step: 0.01,
             precision: 2,
             slider: true,
-            readOnly: t => !(t as GeometryMesh)._stdMaterial?.aoMap,
+            readOnly: t => !(t as GeometryMesh)._colorMaterial?.aoMap,
           },
           getValue: (n: unknown) => (n as GeometryMesh).aoMapIntensity,
           setValue: (n: unknown, v: unknown) => {

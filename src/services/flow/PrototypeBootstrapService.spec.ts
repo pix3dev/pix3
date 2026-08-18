@@ -16,6 +16,7 @@ import {
   validateBrief,
   DEFAULT_THEME,
   FALLBACK_RECIPE_ID,
+  FALLBACK_3D_RECIPE_ID,
   PLANNER_SYSTEM_PROMPT,
   THEME_TUNABLES,
   type PrototypeBrief,
@@ -93,12 +94,53 @@ describe('validateBrief', () => {
 
   it('falls back to the arena recipe when the planner invents an id', () => {
     const { brief, issues } = validateBrief(
-      { ...wellFormed, recipeId: 'recipe-metroidvania-3d' },
+      { ...wellFormed, recipeId: 'recipe-metroidvania-2d' },
       'a bubble tapper'
     );
 
     expect(brief.recipeId).toBe(FALLBACK_RECIPE_ID);
-    expect(issues.join(' ')).toContain('recipe-metroidvania-3d');
+    expect(issues.join(' ')).toContain('recipe-metroidvania-2d');
+  });
+
+  it('keeps an invented 3D recipe in 3D instead of falling back to a 2D one', () => {
+    // The incident: "3D puzzle" was answered with the 2D arena recipe, so the agent built the game
+    // out of isometric sprites. An invented id that says 3d IS the planner reporting the dimension.
+    const { brief, issues } = validateBrief(
+      { ...wellFormed, recipeId: 'recipe-voxel-puzzle-3d' },
+      'a 3d puzzle where you carve voxels off a cube'
+    );
+
+    expect(brief.recipeId).toBe(FALLBACK_3D_RECIPE_ID);
+    expect(issues.join(' ')).toContain('recipe-voxel-puzzle-3d');
+  });
+
+  it('says nothing to the user while a 3D ask can be served in 3D', () => {
+    // The notice is for the case the 3D recipe is missing; with one installed there is nothing to
+    // apologise for. (The downgrade path itself is covered by the renderFirstTurnMessage test.)
+    const { userNotices } = validateBrief(
+      { ...wellFormed, recipeId: 'recipe-voxel-puzzle-3d' },
+      'a 3d puzzle where you carve voxels off a cube'
+    );
+
+    expect(userNotices).toEqual([]);
+  });
+
+  it('stays quiet about dimensionality when the invented recipe is 2D', () => {
+    const { userNotices } = validateBrief(
+      { ...wellFormed, recipeId: 'recipe-match3-2d' },
+      'a match three'
+    );
+
+    expect(userNotices).toEqual([]);
+  });
+
+  it('carries the notice into the first message the agent gets', () => {
+    const message = renderFirstTurnMessage(fallbackBrief('a 3d puzzle'), 'a 3d puzzle', '', [
+      'The idea reads as 3D but every recipe is 2D.',
+    ]);
+
+    expect(message).toContain('TELL THE USER FIRST:');
+    expect(message).toContain('The idea reads as 3D but every recipe is 2D.');
   });
 
   it('falls back when the recipe id is missing entirely', () => {

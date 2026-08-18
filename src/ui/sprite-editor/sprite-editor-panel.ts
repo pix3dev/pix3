@@ -94,6 +94,7 @@ import './sprite-clips-rail';
 import {
   applyCropDrag,
   clampToImage,
+  contentCropRect,
   cropRectToPixels,
   describeCropRect,
   initialCropRect,
@@ -117,6 +118,7 @@ import {
 import {
   chromaKeyImage,
   flipImageBlob,
+  opaqueBounds,
   readBlobSize,
   readImagePixels,
   resizeImageBlob,
@@ -153,6 +155,13 @@ const CROP_HANDLES: ReadonlyArray<{ pos: string; edges: string }> = [
 ];
 
 /** Place mode has corner handles only — they scale, they never stretch (§9.11.1). */
+/**
+ * Alpha (0..255) at or below which a pixel is "empty" when fitting a fresh crop frame to content.
+ * Not 0: background removal and AI generations leave a near-transparent halo, and a frame snapped
+ * around that halo is indistinguishable from one that never fitted anything.
+ */
+const CROP_CONTENT_ALPHA_THRESHOLD = 8;
+
 const PLACE_HANDLES: readonly string[] = ['nw', 'ne', 'se', 'sw'];
 
 /** Multiplier a plain wheel notch applies to the placed image's size. */
@@ -283,6 +292,203 @@ interface VideoImportReport {
   skipped: number;
   failed: number;
 }
+
+/*
+ * Module-level helpers live ABOVE the component on purpose. `@customElement` runs as soon as the
+ * class body is evaluated, and `customElements.define` synchronously upgrades any matching element
+ * already in the DOM — which is exactly the case here, because Golden Layout creates
+ * `<pix3-sprite-editor-panel>` first and only then awaits this module's lazy import. The upgrade
+ * runs `connectedCallback` mid-evaluation, so a helper declared after the class is still in its
+ * temporal dead zone: it threw "Cannot access 'isAnimationResourcePath' before initialization"
+ * and left the panel half-initialized.
+ */
+
+const readImageSize = (objectUrl: string): Promise<{ width: number; height: number } | null> =>
+  new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => resolve(null);
+    image.src = objectUrl;
+  });
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const slugify = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+
+/**
+ * Whether a tab's resource is an animation *document*. The tab type is the real
+ * signal; this is the fallback for the synthetic/detached cases (and it keeps the
+ * shell honest if a `.pix3anim` ever arrives on a differently-typed tab).
+ */
+const isAnimationResourcePath = (resourceId: string): boolean =>
+  /\.pix3anim$/i.test(resourceId.split('?')[0]);
+
+const normalizeRelativePath = (path: string): string =>
+  path
+    .trim()
+    .replace(/^res:\/\//, '')
+    .replace(/\\+/g, '/')
+    .replace(/^\/+/, '');
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
+
+const extForMime = (mimeType: string): string =>
+  mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
+
+const stripImageExt = (path: string): string => path.replace(IMAGE_EXT_RE, '');
+
+/** Append a mime-derived extension only when the path doesn't already carry an image extension. */
+const ensureImageExt = (path: string, mimeType: string): string => {
+  if (!path) {
+    return path;
+  }
+  return IMAGE_EXT_RE.test(path) ? path : `${path}.${extForMime(mimeType)}`;
+};
+
+/** Force a specific extension (used for background-removed output, which must stay PNG). */
+const setImageExt = (path: string, ext: string): string => `${stripImageExt(path)}.${ext}`;
+
+const deriveSaveName = (prompt: string, boundPath: string | null, mimeType: string): string => {
+  const base = slugify(prompt) || 'generated';
+  if (boundPath) {
+    const relative = normalizeRelativePath(boundPath);
+    const slashIndex = relative.lastIndexOf('/');
+    const folder = slashIndex >= 0 ? relative.slice(0, slashIndex) : '';
+    return ensureImageExt(folder ? `${folder}/${base}` : base, mimeType);
+  }
+  // Images live under the project-root `sprites/` folder (flat project layout); the
+  // `generated/` bucket keeps AI output out of the hand-curated sprites.
+  return ensureImageExt(`sprites/generated/${base}`, mimeType);
+};
+
+const deriveNodeName = (path: string): string => {
+  const fileName = path.split('/').pop() ?? 'Sprite2D';
+  const dotIndex = fileName.lastIndexOf('.');
+  const base = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+  return base || 'Sprite2D';
+};
+
+const describeError = (error: unknown): string => {
+  if (error instanceof ImageGenError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'Unknown error';
+};
+
+/**
+ * §9.12.1 step 6 — say what happened. A clip of UV-window frames trims *nothing*,
+ * and silence there reads as a broken button, so the skips are always spelled out.
+ */
+const describeTrimReport = (report: TrimClipReport, clipName: string): string => {
+  const parts: string[] = [];
+  if (report.trimmed > 0) {
+    parts.push(`Trimmed ${report.trimmed} frame${report.trimmed === 1 ? '' : 's'} of ${clipName}`);
+  } else {
+    parts.push(`Nothing to trim in ${clipName}`);
+  }
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.4 — say what a bulk op did. Same rule as the trim's report: a clip of
+ * UV-window frames processes *nothing*, and silence there reads as a dead button,
+ * so the skips are always spelled out.
+ */
+const describeBulkReport = (report: BulkFrameReport, subject: string): string => {
+  const parts: string[] = [
+    report.processed > 0
+      ? `${subject} — ${report.processed} frame${report.processed === 1 ? '' : 's'}`
+      : `${subject} — nothing to do`,
+  ];
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.5 — say what the current fps/range add up to, including *why* a range is
+ * refused. Every status the plan can return names something the user can change,
+ * so none of them is allowed to read as "the button is broken".
+ */
+const describeVideoPlan = (plan: VideoFramePlan): string => {
+  switch (plan.status) {
+    case 'ok':
+      return `${plan.times.length} frame${plan.times.length === 1 ? '' : 's'} from ${formatVideoTime(
+        plan.inSeconds
+      )} to ${formatVideoTime(plan.outSeconds)}.`;
+    case 'too-many':
+      return `That range asks for ${plan.requested} frames; the cap is ${plan.maxFrames}. Narrow the range or lower the frame rate.`;
+    case 'no-duration':
+      return 'This video reports no usable duration.';
+    default:
+      return 'This range is shorter than one frame — widen it or raise the frame rate.';
+  }
+};
+
+/**
+ * §9.12.5 — say what the import did, in the same three buckets the trim and the
+ * bulk ops report. A video whose tail decodes to nothing imports fewer frames than
+ * it grabbed, and that has to be visible rather than looking like a short clip.
+ */
+const describeVideoImportReport = (report: VideoImportReport, clipName: string): string => {
+  const parts: string[] = [
+    report.imported > 0
+      ? `Imported ${report.imported} frame${report.imported === 1 ? '' : 's'} into ${clipName}`
+      : `Nothing imported into ${clipName}`,
+  ];
+  if (report.skipped > 0) {
+    parts.push(`${report.skipped} skipped`);
+  }
+  if (report.failed > 0) {
+    parts.push(`${report.failed} failed`);
+  }
+  return `${parts.join(', ')}.`;
+};
+
+/**
+ * §9.12.2 — state the outcome of a trace. Every non-`traced` status has a cause
+ * the user can act on, so none of them may be silent.
+ */
+const describeAutoPolygonReport = (report: AutoPolygonReport, tolerance: number): string => {
+  switch (report.status) {
+    case 'traced':
+      return `Traced ${report.vertexCount} vertices at ${tolerance.toFixed(1)} px — Apply to keep them.`;
+    case 'empty':
+      return 'This frame has no opaque pixels to trace.';
+    case 'unreadable':
+      return 'Could not read this frame’s pixels.';
+    case 'stale':
+      return 'The selection moved while tracing — nothing was applied. Try again.';
+    default:
+      return 'Select a frame with its own texture file to trace a polygon.';
+  }
+};
 
 @customElement('pix3-sprite-editor-panel')
 export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget {
@@ -3452,6 +3658,11 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.cropDrag = null;
   }
 
+  /**
+   * Open the selection on the image's content. Decoding is async, so the rect appears a frame or two
+   * after the mode does — deliberately: seeding the centred box first and snapping it to the content
+   * afterwards would move handles under a pointer already reaching for them.
+   */
   private initCropRect(): void {
     if (this.cropRect || !this.cropMode) {
       return;
@@ -3460,7 +3671,37 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     if (!size) {
       return;
     }
-    this.cropRect = initialCropRect(size);
+    const blob = this.current?.blob;
+    if (!blob) {
+      this.cropRect = initialCropRect(size);
+      return;
+    }
+    void this.initCropRectFromContent(blob, size);
+  }
+
+  /**
+   * Seed the crop selection with the bounding box of the opaque pixels — the frame a user drawing it
+   * by hand would aim for, and the same box the trim bake would keep.
+   */
+  private async initCropRectFromContent(blob: Blob, size: ImageSize): Promise<void> {
+    let bounds: ReturnType<typeof opaqueBounds> = null;
+    try {
+      const pixels = await readImagePixels(blob);
+      if (pixels) {
+        bounds = opaqueBounds(pixels, CROP_CONTENT_ALPHA_THRESHOLD);
+      }
+    } catch (error) {
+      console.warn(
+        '[SpriteEditor] Could not read the image to fit the crop frame to content',
+        error
+      );
+    }
+    // The decode is slow enough to be outrun: Cancel, a frame switch, or the user simply dragging
+    // their own rect must all win over this result rather than be overwritten by it.
+    if (!this.cropMode || this.cropRect || this.current?.blob !== blob) {
+      return;
+    }
+    this.cropRect = contentCropRect(bounds, size);
   }
 
   private beginCropDrag(event: PointerEvent, mode: 'move' | 'resize', edges: string): void {
@@ -4257,195 +4498,6 @@ export class SpriteEditorPanel extends ComponentBase implements ImageEditTarget 
     this.ownedUrls.clear();
   }
 }
-
-// -- module-level utilities --------------------------------------------------
-
-const readImageSize = (objectUrl: string): Promise<{ width: number; height: number } | null> =>
-  new Promise(resolve => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = () => resolve(null);
-    image.src = objectUrl;
-  });
-
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const slugify = (text: string): string =>
-  text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-
-/**
- * Whether a tab's resource is an animation *document*. The tab type is the real
- * signal; this is the fallback for the synthetic/detached cases (and it keeps the
- * shell honest if a `.pix3anim` ever arrives on a differently-typed tab).
- */
-const isAnimationResourcePath = (resourceId: string): boolean =>
-  /\.pix3anim$/i.test(resourceId.split('?')[0]);
-
-const normalizeRelativePath = (path: string): string =>
-  path
-    .trim()
-    .replace(/^res:\/\//, '')
-    .replace(/\\+/g, '/')
-    .replace(/^\/+/, '');
-
-const IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
-
-const extForMime = (mimeType: string): string =>
-  mimeType === 'image/jpeg' ? 'jpg' : mimeType === 'image/webp' ? 'webp' : 'png';
-
-const stripImageExt = (path: string): string => path.replace(IMAGE_EXT_RE, '');
-
-/** Append a mime-derived extension only when the path doesn't already carry an image extension. */
-const ensureImageExt = (path: string, mimeType: string): string => {
-  if (!path) {
-    return path;
-  }
-  return IMAGE_EXT_RE.test(path) ? path : `${path}.${extForMime(mimeType)}`;
-};
-
-/** Force a specific extension (used for background-removed output, which must stay PNG). */
-const setImageExt = (path: string, ext: string): string => `${stripImageExt(path)}.${ext}`;
-
-const deriveSaveName = (prompt: string, boundPath: string | null, mimeType: string): string => {
-  const base = slugify(prompt) || 'generated';
-  if (boundPath) {
-    const relative = normalizeRelativePath(boundPath);
-    const slashIndex = relative.lastIndexOf('/');
-    const folder = slashIndex >= 0 ? relative.slice(0, slashIndex) : '';
-    return ensureImageExt(folder ? `${folder}/${base}` : base, mimeType);
-  }
-  // Images live under the project-root `sprites/` folder (flat project layout); the
-  // `generated/` bucket keeps AI output out of the hand-curated sprites.
-  return ensureImageExt(`sprites/generated/${base}`, mimeType);
-};
-
-const deriveNodeName = (path: string): string => {
-  const fileName = path.split('/').pop() ?? 'Sprite2D';
-  const dotIndex = fileName.lastIndexOf('.');
-  const base = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
-  return base || 'Sprite2D';
-};
-
-const describeError = (error: unknown): string => {
-  if (error instanceof ImageGenError) {
-    return error.message;
-  }
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return 'Unknown error';
-};
-
-/**
- * §9.12.1 step 6 — say what happened. A clip of UV-window frames trims *nothing*,
- * and silence there reads as a broken button, so the skips are always spelled out.
- */
-const describeTrimReport = (report: TrimClipReport, clipName: string): string => {
-  const parts: string[] = [];
-  if (report.trimmed > 0) {
-    parts.push(`Trimmed ${report.trimmed} frame${report.trimmed === 1 ? '' : 's'} of ${clipName}`);
-  } else {
-    parts.push(`Nothing to trim in ${clipName}`);
-  }
-  if (report.skipped > 0) {
-    parts.push(`${report.skipped} skipped`);
-  }
-  if (report.failed > 0) {
-    parts.push(`${report.failed} failed`);
-  }
-  return `${parts.join(', ')}.`;
-};
-
-/**
- * §9.12.4 — say what a bulk op did. Same rule as the trim's report: a clip of
- * UV-window frames processes *nothing*, and silence there reads as a dead button,
- * so the skips are always spelled out.
- */
-const describeBulkReport = (report: BulkFrameReport, subject: string): string => {
-  const parts: string[] = [
-    report.processed > 0
-      ? `${subject} — ${report.processed} frame${report.processed === 1 ? '' : 's'}`
-      : `${subject} — nothing to do`,
-  ];
-  if (report.skipped > 0) {
-    parts.push(`${report.skipped} skipped`);
-  }
-  if (report.failed > 0) {
-    parts.push(`${report.failed} failed`);
-  }
-  return `${parts.join(', ')}.`;
-};
-
-/**
- * §9.12.5 — say what the current fps/range add up to, including *why* a range is
- * refused. Every status the plan can return names something the user can change,
- * so none of them is allowed to read as "the button is broken".
- */
-const describeVideoPlan = (plan: VideoFramePlan): string => {
-  switch (plan.status) {
-    case 'ok':
-      return `${plan.times.length} frame${plan.times.length === 1 ? '' : 's'} from ${formatVideoTime(
-        plan.inSeconds
-      )} to ${formatVideoTime(plan.outSeconds)}.`;
-    case 'too-many':
-      return `That range asks for ${plan.requested} frames; the cap is ${plan.maxFrames}. Narrow the range or lower the frame rate.`;
-    case 'no-duration':
-      return 'This video reports no usable duration.';
-    default:
-      return 'This range is shorter than one frame — widen it or raise the frame rate.';
-  }
-};
-
-/**
- * §9.12.5 — say what the import did, in the same three buckets the trim and the
- * bulk ops report. A video whose tail decodes to nothing imports fewer frames than
- * it grabbed, and that has to be visible rather than looking like a short clip.
- */
-const describeVideoImportReport = (report: VideoImportReport, clipName: string): string => {
-  const parts: string[] = [
-    report.imported > 0
-      ? `Imported ${report.imported} frame${report.imported === 1 ? '' : 's'} into ${clipName}`
-      : `Nothing imported into ${clipName}`,
-  ];
-  if (report.skipped > 0) {
-    parts.push(`${report.skipped} skipped`);
-  }
-  if (report.failed > 0) {
-    parts.push(`${report.failed} failed`);
-  }
-  return `${parts.join(', ')}.`;
-};
-
-/**
- * §9.12.2 — state the outcome of a trace. Every non-`traced` status has a cause
- * the user can act on, so none of them may be silent.
- */
-const describeAutoPolygonReport = (report: AutoPolygonReport, tolerance: number): string => {
-  switch (report.status) {
-    case 'traced':
-      return `Traced ${report.vertexCount} vertices at ${tolerance.toFixed(1)} px — Apply to keep them.`;
-    case 'empty':
-      return 'This frame has no opaque pixels to trace.';
-    case 'unreadable':
-      return 'Could not read this frame’s pixels.';
-    case 'stale':
-      return 'The selection moved while tracing — nothing was applied. Try again.';
-    default:
-      return 'Select a frame with its own texture file to trace a polygon.';
-  }
-};
 
 declare global {
   interface HTMLElementTagNameMap {

@@ -77,6 +77,34 @@ export const initialCropRect = (size: ImageSize, inset = DEFAULT_CROP_INSET): Cr
 };
 
 /**
+ * Where a crop session opens: the bounding box of the image's opaque pixels, expressed in image
+ * pixels. `bounds` comes from `opaqueBounds` (image-ops) and is passed as null when the image could
+ * not be decoded or is fully transparent.
+ *
+ * Falls back to {@link initialCropRect} in the two cases where content bounds say nothing useful:
+ * nothing opaque at all, and content that already fills the canvas (an opaque sheet, or a halo the
+ * threshold did not catch) — a selection sitting exactly on the border has no handles to grab and
+ * would crop nothing, so the centred box is the more useful starting point there.
+ */
+export const contentCropRect = (
+  bounds: { x: number; y: number; width: number; height: number } | null,
+  size: ImageSize,
+  inset = DEFAULT_CROP_INSET
+): CropRect => {
+  if (!bounds || bounds.width < MIN_CROP_SIZE || bounds.height < MIN_CROP_SIZE) {
+    return initialCropRect(size, inset);
+  }
+  const x = clamp(bounds.x, 0, size.width);
+  const y = clamp(bounds.y, 0, size.height);
+  const w = clamp(bounds.width, MIN_CROP_SIZE, size.width - x);
+  const h = clamp(bounds.height, MIN_CROP_SIZE, size.height - y);
+  if (x <= 0 && y <= 0 && w >= size.width && h >= size.height) {
+    return initialCropRect(size, inset);
+  }
+  return { x, y, w, h };
+};
+
+/**
  * Advance a crop drag to `point` (image pixels, unclamped — pass exactly what
  * `toStageCoords` returned). Draw and resize clamp the pointer to the image;
  * move keeps the raw delta so the rect slides predictably once the cursor has

@@ -283,6 +283,12 @@ accrue the "one physical proof per control" the ladder above is built on — tap
 
 ## Common runtime problems and fixes
 
+- **A black or empty 3D scene** — read `sceneIssues` in the `scene_tree` / `game_observe` result
+  before anything else. `lit-material-no-light` means the meshes have no light and draw black;
+  `no-camera-3d` means nothing 3D is drawn at all; `inert-nodes` means a node's `type` is not a
+  real node type (it loaded as a placeholder that does nothing — the message names the correct
+  spelling). Never settle this with a viewport screenshot: the editor lights the scene with
+  fallback lights the running game does not have, and says so via `editorFallbackLighting`.
 - **"Cannot read properties of undefined (reading 'scene'/'input')"** — a script used
   `this.scene` / `this.input` before the scene was ready, or in an editor preview. Guard with
   `if (!this.scene) return;` at the top of `onUpdate`.
