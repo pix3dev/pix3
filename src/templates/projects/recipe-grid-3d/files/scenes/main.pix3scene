@@ -1,0 +1,234 @@
+# Pix3 Scene File (YAML)
+# Grid 3D — the carving board. The cubes are NOT authored here: GridBoard builds
+# them under `board-anchor` at start, so the board size is a tunable, not a
+# hand-edited tree. Everything else (camera, lights, HUD, end screen) is authored.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Tap-to-carve 3D grid with a hidden core
+root:
+  - id: game-root
+    type: Node3D
+    name: Game Root
+    properties:
+      transform:
+        position: [0, 0, 0]
+        rotationEuler: [0, 0, 0]
+        scale: [1, 1, 1]
+    components:
+      - id: grid-board
+        type: user:GridBoard
+        enabled: true
+        config:
+          boardAnchor: board-anchor
+          sizeX: 4
+          sizeY: 4
+          sizeZ: 4
+          cellSize: 0.9
+          spacing: 1
+          coreCount: 6
+          cellColor: "#3ee6c1"
+          coreColor: "#ff6b6b"
+          revealCores: false
+      - id: grid-rules
+        type: user:GridRules
+        enabled: true
+        config:
+          startingLives: 3
+          timeLimitSec: 0
+          resultNode: result-overlay
+          resultLabel: result-label
+          retryButton: retry-button
+          menuButton: menu-button
+    children:
+      - id: main-camera
+        type: Camera3D
+        name: Main Camera
+        properties:
+          projection: perspective
+          fov: 50
+          near: 0.1
+          far: 200
+          transform:
+            position: [6, 6, 8]
+            rotationEuler: [-27, 33, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: key-light
+        type: DirectionalLightNode
+        name: Key Light
+        properties:
+          intensity: 1.1
+          color: "#ffffff"
+          transform:
+            position: [6, 9, 4]
+            rotationEuler: [-50, 30, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: fill-light
+        type: HemisphereLightNode
+        name: Fill Light
+        properties:
+          skyColor: "#cfe8ff"
+          groundColor: "#2a2f3d"
+          intensity: 0.7
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+      - id: board-anchor
+        type: Node3D
+        name: Board Anchor
+        properties:
+          transform:
+            position: [0, 0, 0]
+            rotationEuler: [0, 0, 0]
+            scale: [1, 1, 1]
+        children: []
+
+  - id: hud-root
+    type: Group2D
+    name: HUD Root
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: score-hud
+        type: user:ScoreHud
+        enabled: true
+        config:
+          sourceNode: game-root
+          scoreLabel: score-label
+          scoreFormat: "CLEARED {value}"
+          timeLabel: ""
+          livesBar: lives-bar
+    children:
+      - id: score-label
+        type: Label2D
+        name: Score Label
+        properties:
+          label: "CLEARED 0"
+          labelFontSize: 48
+          labelColor: "#f2f2f2"
+          labelAlign: center
+          transform:
+            position: [0, 820]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: top
+        children: []
+      - id: lives-bar
+        type: Bar2D
+        name: Lives Bar
+        properties:
+          width: 360
+          height: 26
+          value: 3
+          maxValue: 3
+          fillColor: "#ff6b6b"
+          backgroundColor: "#1b1f2a"
+          transform:
+            position: [0, 740]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: top
+        children: []
+      - id: result-overlay
+        type: Group2D
+        name: Result Overlay
+        properties:
+          width: 1080
+          height: 1920
+          initiallyVisible: false
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children:
+          - id: result-dim
+            type: ColorRect2D
+            name: Result Dim
+            properties:
+              width: 1080
+              height: 1920
+              color: "#0b0e14"
+              opacity: 0.78
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children: []
+          - id: result-label
+            type: Label2D
+            name: Result Label
+            properties:
+              label: "SHAPE REVEALED"
+              labelFontSize: 76
+              labelColor: "#3ee6c1"
+              labelAlign: center
+              transform:
+                position: [0, 220]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: retry-button
+            type: Button2D
+            name: Retry Button
+            properties:
+              width: 420
+              height: 130
+              label: "RETRY"
+              labelFontSize: 52
+              labelColor: "#0b0e14"
+              backgroundColor: "#3ee6c1"
+              hoverColor: "#63f0d3"
+              pressedColor: "#2bbfa0"
+              transform:
+                position: [0, -60]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []
+          - id: menu-button
+            type: Button2D
+            name: Menu Button
+            properties:
+              width: 420
+              height: 110
+              label: "MENU"
+              labelFontSize: 44
+              labelColor: "#f2f2f2"
+              backgroundColor: "#1b1f2a"
+              hoverColor: "#2a3040"
+              pressedColor: "#141821"
+              transform:
+                position: [0, -220]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: center
+            children: []

@@ -92,6 +92,12 @@ export interface PrototypeBrief {
   readonly pitch: string;
   /** Recipe id from the catalog (`recipe-*`). */
   readonly recipeId: string;
+  /**
+   * Render target, when the idea asks for one. Absent means "take the recipe's own" — which is
+   * mobile for every recipe that ships. Only an explicit request for a high-end/desktop look sets
+   * `desktop`, and that is what buys PBR materials (see `defaultMaterialTypeForProject`).
+   */
+  readonly targetPlatform?: 'mobile' | 'desktop';
   /** Style tokens for EVERY later generation — palette comes from a reference when there is one. */
   readonly style: PrototypeBriefStyle;
   readonly entities: readonly PrototypeBriefEntity[];
@@ -124,7 +130,20 @@ export const FALLBACK_RECIPE_ID = 'recipe-arena-2d';
  */
 const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
   'recipe-playable-ad': 'playable-2d',
+  'recipe-scene-3d': 'playable-3d',
 };
+
+/**
+ * The recipe a 3D idea falls back to. Kept as a named constant because the fallback below has to
+ * reach for it: a 3D idea answered with a 2D recipe is not a degraded version of the ask, it is a
+ * different game.
+ *
+ * The grid recipe rather than the generic 3D stage, because the stage is a *blank* — it hands the
+ * agent a camera, two lights and a placeholder to replace, while the grid hands it a game that
+ * already plays. When the planner could not name what it wanted, the one that plays is the better
+ * guess.
+ */
+export const FALLBACK_3D_RECIPE_ID = 'recipe-grid-3d';
 
 const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
@@ -145,6 +164,16 @@ const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: 'recipe-playable-ad',
     blurb: 'a playable ad: tap-to-start audio gate, a short loop, then a CTA screen to the store.',
+  },
+  {
+    id: FALLBACK_3D_RECIPE_ID,
+    blurb:
+      'a solid block of cubes in 3D that you carve by tapping; some cubes are core and cost a life. Voxel carving, 3D minesweeper, layer puzzles, tap-to-mine, "chip away to reveal the shape".',
+  },
+  {
+    id: 'recipe-scene-3d',
+    blurb:
+      'a bare 3D stage: perspective camera, lights and solid geometry on a ground plane under a 2D UI layer, with a tap-to-start gate and a CTA end screen. Pick it for a 3D idea that is NOT a grid of things to tap — anything else three-dimensional starts here. Faking 3D with 2D sprites is not the same game.',
   },
 ];
 
@@ -253,6 +282,11 @@ export interface PrototypeBootstrapResult {
   readonly templateId: string;
   /** Everything that degraded on the way: bad planner output, unknown tunables, missing recipe. */
   readonly notes: readonly string[];
+  /**
+   * The subset of the above the USER has to hear about, not just `design/brief.md` — currently a
+   * dimensionality downgrade. Carried into the agent's first turn as an instruction to say it.
+   */
+  readonly userNotices: readonly string[];
 }
 
 const IDLE_STATUS: PrototypeBootstrapStatus = {
@@ -355,7 +389,7 @@ export class PrototypeBootstrapService {
       // The palette is quantized from the user's own style reference rather than asked for as hex
       // codes: free, instant and exact where a model is none of those (design §5.7).
       const palette = await this.paletteFromReferences(attachments);
-      const { brief, issues } = await this.plan(request, attachments, palette);
+      const { brief, issues, userNotices } = await this.plan(request, attachments, palette);
       notes.push(...issues);
 
       this.setStatus({
@@ -377,12 +411,12 @@ export class PrototypeBootstrapService {
       if (request.startAgentTurn !== false) {
         // Deliberately not awaited: the first increment is a full agent run, and the hero's job is
         // done the moment the project is open and playable.
-        void this.startFirstTurn(brief, request.prompt).catch(error => {
+        void this.startFirstTurn(brief, request.prompt, userNotices).catch(error => {
           console.error('[PrototypeBootstrapService] First agent turn failed to start:', error);
         });
       }
 
-      return { brief, templateId, notes };
+      return { brief, templateId, notes, userNotices };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.setStatus({
@@ -417,7 +451,7 @@ export class PrototypeBootstrapService {
     request: PrototypeBootstrapRequest,
     attachments: readonly ComposerAttachment[],
     palette: string[]
-  ): Promise<{ brief: PrototypeBrief; issues: string[] }> {
+  ): Promise<{ brief: PrototypeBrief; issues: string[]; userNotices: string[] }> {
     const issues: string[] = [];
     const fallback = (): PrototypeBrief =>
       applyPlannerOverrides(fallbackBrief(request.prompt), request, palette, attachments);
@@ -429,7 +463,7 @@ export class PrototypeBootstrapService {
       issues.push(
         'No LLM provider is configured, so the brief was derived from your prompt alone. Add an API key in agent settings for a planned brief.'
       );
-      return { brief: fallback(), issues };
+      return { brief: fallback(), issues, userNotices: [] };
     }
 
     const images = attachments.filter(isImageAttachment);
@@ -465,13 +499,13 @@ export class PrototypeBootstrapService {
       issues.push(
         `The planner call failed (${error instanceof Error ? error.message : String(error)}); started from the fallback recipe.`
       );
-      return { brief: fallback(), issues };
+      return { brief: fallback(), issues, userNotices: [] };
     }
 
     const parsed = extractJsonObject(raw);
     if (!parsed) {
       issues.push('The planner did not return usable JSON; started from the fallback recipe.');
-      return { brief: fallback(), issues };
+      return { brief: fallback(), issues, userNotices: [] };
     }
 
     const validated = validateBrief(parsed, request.prompt);
@@ -479,6 +513,7 @@ export class PrototypeBootstrapService {
     return {
       brief: applyPlannerOverrides(validated.brief, request, palette, attachments),
       issues,
+      userNotices: validated.userNotices,
     };
   }
 
@@ -788,14 +823,18 @@ export class PrototypeBootstrapService {
    * reliability win in the plan (design §5.4): the same task a long polluted thread circled on is
    * solved without hints when it starts from a compact brief.
    */
-  async startFirstTurn(brief: PrototypeBrief, prompt: string): Promise<void> {
+  async startFirstTurn(
+    brief: PrototypeBrief,
+    prompt: string,
+    userNotices: readonly string[] = []
+  ): Promise<void> {
     // The system prompt carries a scene outline, and the Flow shell opens the scene as it starts the
     // stage — a turn sent a beat too early would start the agent on an empty outline and it would
     // spend its first tool calls re-discovering a project that was about to load anyway.
     await this.waitForActiveScene();
     await this.agentChat.newConversation();
     await this.agentChat.send(
-      renderFirstTurnMessage(brief, prompt, await buildProjectMap(this.storage))
+      renderFirstTurnMessage(brief, prompt, await buildProjectMap(this.storage), userNotices)
     );
   }
 
@@ -839,7 +878,10 @@ export class PrototypeBootstrapService {
   private buildManifest(brief: PrototypeBrief, templateId: string): ProjectManifest {
     const template = this.templates.getTemplate(templateId);
     const manifest = createDefaultProjectManifest();
-    const targetPlatform = template?.targetPlatform ?? manifest.targetPlatform;
+    // The brief wins over the template: the planner sets `desktop` only when the user explicitly
+    // asked for a high-end look, and that choice is what unlocks PBR materials for new geometry.
+    const targetPlatform =
+      brief.targetPlatform ?? template?.targetPlatform ?? manifest.targetPlatform;
     return {
       ...manifest,
       viewportBaseSize: {
@@ -949,6 +991,9 @@ export const PLANNER_SYSTEM_PROMPT = [
   '- `tunables` may only use keys the recipe declares; leave it empty when unsure. Guessing a key',
   '  is worse than omitting it.',
   '- `style.palette` is 3 to 5 `#rrggbb` colours. If a palette is supplied to you, keep it.',
+  '- `targetPlatform` is "mobile" unless the user explicitly asked for a desktop / high-end /',
+  '  "make it beautiful" look. It is a performance budget, not a taste: "desktop" buys PBR',
+  '  materials and heavier effects, which cost every phone that runs the game. Omit it when unsure.',
   '- Keep every string short: `pitch` is one line, entity prompts are one sentence, an increment or',
   '  a wow item is a phrase. Never use an em dash inside one — the tracker reads it as a note.',
 ].join('\n');
@@ -1004,6 +1049,7 @@ export const buildPlannerPrompt = (
         title: 'short project name',
         pitch: 'one line',
         recipeId: RECIPE_CATALOG[1].id,
+        targetPlatform: 'mobile',
         style: {
           palette: ['#101820', '#f5ae39'],
           artStyle: 'flat vector',
@@ -1112,8 +1158,9 @@ export const extractJsonObject = (raw: string): Record<string, unknown> | null =
 export const validateBrief = (
   value: Record<string, unknown>,
   prompt: string
-): { brief: PrototypeBrief; issues: string[] } => {
+): { brief: PrototypeBrief; issues: string[]; userNotices: string[] } => {
   const issues: string[] = [];
+  const userNotices: string[] = [];
   const base = fallbackBrief(prompt);
 
   const title = asText(value.title) ?? base.title;
@@ -1125,7 +1172,32 @@ export const validateBrief = (
     recipeId = FALLBACK_RECIPE_ID;
   } else if (!RECIPE_CATALOG.some(recipe => recipe.id === recipeId)) {
     issues.push(`Planner asked for an unknown recipe \`${recipeId}\`.`);
-    recipeId = FALLBACK_RECIPE_ID;
+    // Dimensionality is the one substitution the user notices instantly and blames on the agent:
+    // asked for a 3D puzzle, handed 2D sprites pretending to be one. An invented id that says "3d"
+    // is the planner telling us the idea was three-dimensional, so honour that rather than the
+    // generic fallback — and if there is no 3D recipe installed, say so out loud instead of
+    // shipping the substitute silently.
+    const wants3D = /3d/i.test(recipeId);
+    const has3DRecipe = RECIPE_CATALOG.some(recipe => recipe.id === FALLBACK_3D_RECIPE_ID);
+    if (wants3D && has3DRecipe) {
+      recipeId = FALLBACK_3D_RECIPE_ID;
+    } else {
+      if (wants3D) {
+        userNotices.push(
+          `The idea reads as 3D (the planner reached for \`${recipeId}\`), but no 3D recipe is installed, so the project started from a 2D one. Say this to the user in your FIRST message, before the plan, and offer the fork: build the 3D scene by hand (GeometryMesh + lights + Camera3D — slower, but genuinely 3D) or keep the 2D take. Never present the 2D substitute as if it were what they asked for.`
+        );
+      }
+      recipeId = FALLBACK_RECIPE_ID;
+    }
+  }
+
+  const requestedPlatform = asText(value.targetPlatform)?.toLowerCase();
+  const targetPlatform =
+    requestedPlatform === 'desktop' || requestedPlatform === 'mobile'
+      ? (requestedPlatform as 'mobile' | 'desktop')
+      : undefined;
+  if (requestedPlatform && !targetPlatform) {
+    issues.push(`Planner asked for an unknown targetPlatform \`${requestedPlatform}\`.`);
   }
 
   const styleValue = isRecord(value.style) ? value.style : {};
@@ -1214,9 +1286,11 @@ export const validateBrief = (
       },
       increments: increments.length > 0 ? increments : base.increments,
       ...(wow.length > 0 ? { wow } : {}),
+      ...(targetPlatform ? { targetPlatform } : {}),
       ...(asText(value.ctaUrl) ? { ctaUrl: asText(value.ctaUrl) as string } : {}),
     },
     issues,
+    userNotices,
   };
 };
 
@@ -1469,7 +1543,8 @@ export const renderStyleMarkdown = (
 export const renderFirstTurnMessage = (
   brief: PrototypeBrief,
   prompt: string,
-  projectMap = ''
+  projectMap = '',
+  userNotices: readonly string[] = []
 ): string => {
   const lines: string[] = [
     `New prototype: **${brief.title}** — ${brief.pitch}`,
@@ -1496,6 +1571,9 @@ export const renderFirstTurnMessage = (
     'Then update `design/progress.md` and reply with one short summary plus 2–3 concrete options',
     'for what to do next.'
   );
+  if (userNotices.length > 0) {
+    lines.push('', 'TELL THE USER FIRST:', ...userNotices.map(notice => `- ${notice}`));
+  }
   if (projectMap) {
     lines.push('', '---', '', projectMap);
   }

@@ -8,6 +8,7 @@ import { OperationService } from '@/services/core/OperationService';
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
+import { modelPickerLabel } from '@/services/image-gen/ImageGenTypes';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import {
   SOUL_PRESETS,
@@ -1474,7 +1475,7 @@ export class EditorSettingsDialog extends ComponentBase {
             ${models.map(
               model =>
                 html`<option value=${model.id} ?selected=${model.id === this.aiModelId}>
-                  ${model.label}
+                  ${modelPickerLabel(model)}
                 </option>`
             )}
           </select>

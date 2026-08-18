@@ -73,6 +73,7 @@ import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateCompone
 import {
   SceneManager,
   NodeBase,
+  collectRenderabilityIssues,
   ScriptRegistry,
   getNodePropertySchema,
   resolveRuntimeTimeConfig,
@@ -81,7 +82,8 @@ import {
   type RuntimeTimeConfig,
   type RuntimeTimeMode,
 } from '@pix3/runtime';
-import { Vector2 } from 'three';
+import { renderabilityNote } from '@/services/agent/renderability-note';
+import { Vector2, Vector3 } from 'three';
 import {
   buildCreateNodeCommand,
   CREATABLE_NODE_TYPES,
@@ -583,6 +585,12 @@ export class AgentToolRegistry {
               type: 'object',
               description: "2D position {x,y} in the parent's space.",
               properties: { x: { type: 'number' }, y: { type: 'number' } },
+            },
+            position3: {
+              type: 'object',
+              description:
+                'World position {x,y,z} for 3D types (lights, meshes). Use this instead of `position` for anything 3D.',
+              properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
             },
             texturePath: {
               type: 'string',
@@ -1825,7 +1833,13 @@ export class AgentToolRegistry {
       properties: null,
       children: roots.map(root => nodeToDTO(root, maxDepth - 1)),
     };
-    return { ...tree, sceneVersion: graph.version, ...this.playingElsewhereNote(roots) };
+    return {
+      ...tree,
+      sceneVersion: graph.version,
+      ...this.playingElsewhereNote(roots),
+      // Authoring surface: performance advice belongs here, where it can be acted on.
+      ...renderabilityNote(roots, { includeAdvice: true }),
+    };
   }
 
   /**
@@ -1960,6 +1974,7 @@ export class AgentToolRegistry {
       name: typeof args.name === 'string' ? args.name : undefined,
       parentNodeId: typeof args.parentId === 'string' ? args.parentId : undefined,
       position: parseVector2(args.position),
+      position3: parseVector3(args.position3),
       width: typeof args.width === 'number' ? args.width : undefined,
       height: typeof args.height === 'number' ? args.height : undefined,
       texturePath: typeof args.texturePath === 'string' ? args.texturePath : undefined,
@@ -2897,6 +2912,30 @@ export class AgentToolRegistry {
     };
   }
 
+  /**
+   * Warn when an editor screenshot is lit by lights the running game does not have.
+   *
+   * The editor adds fallback lights to any scene that declares none, so a 3D scene with no light of
+   * its own photographs beautifully and runs black. A picture that cannot be told apart from a
+   * working one is worse than no picture, so it ships with its own disclaimer.
+   */
+  private editorLightingNote(): { editorFallbackLighting?: true; lightingWarning?: string } {
+    if (!this.viewportRenderer.isUsingEditorFallbackLighting()) {
+      return {};
+    }
+    const roots = (this.sceneManager.getActiveSceneGraph()?.rootNodes ?? []).filter(
+      (node): node is NodeBase => node instanceof NodeBase
+    );
+    if (!collectRenderabilityIssues(roots).some(issue => issue.code === 'lit-material-no-light')) {
+      return {};
+    }
+    return {
+      editorFallbackLighting: true,
+      lightingWarning:
+        'This image is lit by EDITOR-ONLY fallback lights. The scene declares no light of its own, so the RUNNING game draws these meshes black. Add a light, and verify with play_start + game_observe (sceneIssues) rather than with this picture.',
+    };
+  }
+
   private viewportScreenshot(args: Record<string, unknown>): Record<string, unknown> {
     const maxSize = asInt(args.maxSize, 1024);
     const source = asCaptureSource(args.source);
@@ -2928,6 +2967,7 @@ export class AgentToolRegistry {
     return {
       ok: true,
       view,
+      ...(view === 'editor' ? this.editorLightingNote() : {}),
       width: shot.width,
       height: shot.height,
       mimeType: shot.mimeType,
@@ -3001,6 +3041,7 @@ export class AgentToolRegistry {
     return {
       ok: true,
       view: 'editor',
+      ...this.editorLightingNote(),
       framed: frame,
       ...(opts.nodeId ? { framedNodeId: opts.nodeId, framedNodeName: framedNode?.name } : {}),
       width: result.width,
@@ -3979,6 +4020,24 @@ const asInt = (value: unknown, fallback: number): number => {
     if (Number.isFinite(parsed)) return parsed;
   }
   return fallback;
+};
+
+/** Same as {@link parseVector2} for 3D types — `{x,y,z}` or `[x,y,z]`. */
+const parseVector3 = (value: unknown): Vector3 | undefined => {
+  if (
+    Array.isArray(value) &&
+    value.length >= 3 &&
+    value.slice(0, 3).every(entry => typeof entry === 'number')
+  ) {
+    return new Vector3(value[0] as number, value[1] as number, value[2] as number);
+  }
+  if (value && typeof value === 'object') {
+    const v = value as { x?: unknown; y?: unknown; z?: unknown };
+    if (typeof v.x === 'number' && typeof v.y === 'number' && typeof v.z === 'number') {
+      return new Vector3(v.x, v.y, v.z);
+    }
+  }
+  return undefined;
 };
 
 /** Parse an agent-supplied 2D position ({x,y} object or [x,y] array) into a Vector2, or undefined. */

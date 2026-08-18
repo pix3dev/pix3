@@ -64,7 +64,7 @@ export function isShaderEffectHost(node: unknown): node is ShaderEffectHost {
 
 export class ShaderEffectStack {
   private readonly nodeType: string;
-  private readonly target: ShaderEffectTarget;
+  private target: ShaderEffectTarget;
   private readonly onAttachmentsChanged?: () => void;
 
   /** Ordered list of attached shader effects (one per type in v1). */
@@ -87,6 +87,34 @@ export class ShaderEffectStack {
   /** The material family this stack drives (the editor picker filters by it). */
   get materialTarget(): ShaderEffectTarget {
     return this.target;
+  }
+
+  /**
+   * Point the stack at a different material family (its host swapped its material type).
+   *
+   * Effects whose GLSL does not declare the new target are detached and named in a warning: an
+   * effect left attached to a material it cannot compile against is a feature that silently stops
+   * working, which is exactly the class of failure this file's neighbours are here to end.
+   */
+  retarget(next: ShaderEffectTarget): void {
+    if (next === this.target) {
+      return;
+    }
+    this.target = next;
+    const unsupported = this.effects.filter(effect => {
+      const info = getShaderEffectType(effect.type);
+      return info ? !effectSupportsTarget(info, next) : true;
+    });
+    for (const effect of unsupported) {
+      this.detach(effect.type);
+    }
+    if (unsupported.length > 0) {
+      console.warn(
+        `[ShaderEffectStack] Dropped ${unsupported
+          .map(effect => `"${effect.type}"`)
+          .join(', ')} — no GLSL for the "${next}" material.`
+      );
+    }
   }
 
   /**

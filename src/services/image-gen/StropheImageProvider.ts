@@ -31,13 +31,14 @@ const ASPECTS: readonly AspectRatio[] = ['Auto', '1:1', '3:4', '4:3', '16:9', '9
  * synchronous list the settings picker renders immediately, while the catalog is an async fetch. The
  * cost of that trade-off is drift: prices/ratios below are a snapshot (verified 2026-08-11), so the
  * generate path never trusts them — it re-reads the family schema and validates every parameter
- * against it. Credit prices live in the description because they are what a user actually chooses on.
+ * against it. Credit prices live in `price` because they are what a user actually chooses on.
  */
 const MODELS: readonly ProviderModel[] = [
   {
     id: 'flux',
     label: 'FLUX.1 (schnell)',
-    description: '1 credit — cheapest draft lane, ~7 s. No reference images.',
+    price: '1 cr',
+    description: 'Cheapest draft lane, ~7 s. No reference images.',
     capabilities: {
       supportsReferenceImages: false,
       maxReferenceImages: 0,
@@ -52,7 +53,8 @@ const MODELS: readonly ProviderModel[] = [
   {
     id: 'gpt-image-2',
     label: 'GPT Image 2',
-    description: '4 credits (6 when editing) — quality tiers, up to 4 reference images.',
+    price: '4 cr',
+    description: '6 credits when editing. Quality tiers, up to 4 reference images.',
     capabilities: {
       supportsReferenceImages: true,
       maxReferenceImages: 4,
@@ -67,7 +69,8 @@ const MODELS: readonly ProviderModel[] = [
   {
     id: 'flux-2-max',
     label: 'FLUX.2 Max',
-    description: '11 credits — 1K/2K, up to 3 reference images.',
+    price: '11 cr',
+    description: '1K/2K, up to 3 reference images.',
     capabilities: {
       supportsReferenceImages: true,
       maxReferenceImages: 3,
@@ -82,7 +85,8 @@ const MODELS: readonly ProviderModel[] = [
   {
     id: 'seedream-v5',
     label: 'Seedream 5.0',
-    description: '8 credits — 2K/3K, up to 10 reference images.',
+    price: '8 cr',
+    description: '2K/3K, up to 10 reference images.',
     capabilities: {
       supportsReferenceImages: true,
       maxReferenceImages: 10,
@@ -97,7 +101,8 @@ const MODELS: readonly ProviderModel[] = [
   {
     id: 'nano-banana-pro',
     label: 'Nano Banana Pro',
-    description: '23 credits — 2k/4k, strongest prompt adherence, up to 10 references.',
+    price: '23 cr',
+    description: '2k/4k, strongest prompt adherence, up to 10 references.',
     capabilities: {
       supportsReferenceImages: true,
       maxReferenceImages: 10,
@@ -112,7 +117,8 @@ const MODELS: readonly ProviderModel[] = [
   {
     id: 'recraft-v4',
     label: 'Recraft v4.1',
-    description: '8 credits — clean vector-ish game art, ~15 s. No reference images.',
+    price: '8 cr',
+    description: 'Clean vector-ish game art, ~15 s. No reference images.',
     capabilities: {
       supportsReferenceImages: false,
       maxReferenceImages: 0,

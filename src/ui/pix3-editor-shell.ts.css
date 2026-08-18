@@ -28,9 +28,9 @@ pix3-editor-shell {
   color: var(--fg-0);
 }
 
-/* Flow brings its own header and stage; the shell is just a full-bleed host for it. */
+/* Flow brings its own header and stage; the shell adds only the shared status bar below it. */
 .editor-shell[data-workspace='flow'] {
-  grid-template-rows: 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   block-size: 100vh;
   block-size: 100dvh;
   overflow: hidden;
@@ -39,8 +39,7 @@ pix3-editor-shell {
 /* Once Studio has been on screen its branch stays mounted, because Golden Layout cannot survive
    having its host element re-created (it would come back as an empty workspace). Flow hides it. */
 .editor-shell[data-workspace='flow'] > .toolbar-layer,
-.editor-shell[data-workspace='flow'] > .workspace,
-.editor-shell[data-workspace='flow'] > pix3-status-bar {
+.editor-shell[data-workspace='flow'] > .workspace {
   display: none;
 }
 

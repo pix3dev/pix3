@@ -113,6 +113,7 @@ describe('bundled project templates', () => {
       'playable-3d',
       'recipe-arena-2d',
       'recipe-bouncer-2d',
+      'recipe-grid-3d',
       'recipe-tapper-2d',
     ]);
   });

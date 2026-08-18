@@ -2,7 +2,11 @@ import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { appState } from '@/state';
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
-import { ImageGenError, type AspectRatio } from '@/services/image-gen/ImageGenTypes';
+import {
+  ImageGenError,
+  modelPickerLabel,
+  type AspectRatio,
+} from '@/services/image-gen/ImageGenTypes';
 import {
   GenerationHistoryService,
   type GenerationRecord,
@@ -201,9 +205,12 @@ export class GeneratePanel extends ComponentBase {
     this.modelId = this.aiSettings.getSelectedModelId(this.providerId) ?? '';
     const model = provider?.getModel(this.modelId);
     this.aspectRatio = prefs.defaultAspectRatio;
-    this.imageSize = model?.capabilities.imageSizes.includes(prefs.defaultImageSize)
+    const sizes = model?.capabilities.imageSizes ?? [];
+    // Prefer the stored size, then 1K, and only then the first advertised size — a model whose
+    // cheapest tier leads the list (Gemini's '512px') must not silently become the default.
+    this.imageSize = sizes.includes(prefs.defaultImageSize)
       ? prefs.defaultImageSize
-      : (model?.capabilities.imageSizes[0] ?? '1K');
+      : (sizes.find(size => size === '1K') ?? sizes[0] ?? '1K');
     const qualities = model?.capabilities.qualities ?? [];
     this.quality =
       prefs.defaultQuality && qualities.includes(prefs.defaultQuality)
@@ -410,7 +417,7 @@ export class GeneratePanel extends ComponentBase {
               ${models.map(
                 item =>
                   html`<option value=${item.id} ?selected=${item.id === this.modelId}>
-                    ${item.label}
+                    ${modelPickerLabel(item)}
                   </option>`
               )}
             </select>

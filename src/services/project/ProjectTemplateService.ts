@@ -106,6 +106,15 @@ export interface ProjectTemplate {
   readonly coverUrl: string | null;
   readonly order: number;
   /**
+   * Flow recipe id this template serves, when the two names differ.
+   *
+   * Most recipes are their own template (`recipe-arena-2d`), but two are shipped templates promoted
+   * into the catalog — `playable-2d` serves `recipe-playable-ad`, `playable-3d` serves
+   * `recipe-scene-3d`. Without this the recipe is invisible to anything that identifies recipes by
+   * an `id` prefix, which is how the 3D recipe ended up missing from the welcome screen's cards.
+   */
+  readonly recipeId?: string;
+  /**
    * Project-relative path (no `res://`) of the scene a build / "Start Game"
    * boots into — becomes the manifest's `defaultExportScenePath`. Undefined
    * falls back to `main.pix3scene`. Used by templates whose entry scene (e.g. a
@@ -232,6 +241,7 @@ export class ProjectTemplateService {
       const directories = Array.isArray(meta.directories)
         ? meta.directories.filter((dir): dir is string => typeof dir === 'string' && dir.length > 0)
         : [];
+      const recipeIdRaw = typeof meta.recipeId === 'string' ? meta.recipeId.trim() : '';
       const entrySceneRaw = typeof meta.entryScene === 'string' ? meta.entryScene.trim() : '';
       const entryScenePath = entrySceneRaw ? entrySceneRaw.replace(/^res:\/\//i, '') : undefined;
 
@@ -250,6 +260,7 @@ export class ProjectTemplateService {
           height: asPositiveInt(viewport.height, DEFAULT_VIEWPORT_BASE_HEIGHT),
         },
         coverUrl: coversByTemplate.get(id) ?? null,
+        ...(recipeIdRaw ? { recipeId: recipeIdRaw } : {}),
         order: asPositiveInt(meta.order, 1000),
         entryScenePath,
         directories,

@@ -12,6 +12,7 @@ import {
   type ObservedPollsSnapshot,
   type SceneRunner,
 } from '@pix3/runtime';
+import { renderabilityNote, type RenderabilityNote } from '@/services/agent/renderability-note';
 import {
   NodeWatchRecorder,
   type NodeActivity,
@@ -412,6 +413,12 @@ export interface GameObserveResult {
   hint?: string;
   /** The running game's own debug snapshot (+ diff when sampled), when a provider is registered. */
   game?: GameStateDelta;
+  /**
+   * Renderability problems in the LIVE scene (no light on lit meshes, no 3D camera, inert nodes).
+   * Absent when there are none. Read this before concluding anything from a black or empty screen:
+   * it is the only channel that tells them apart from a game that is merely paused.
+   */
+  sceneIssues?: RenderabilityNote['sceneIssues'];
   /** What the game polled during a sampled window (see {@link GameInputObservation}). */
   input?: GameInputObservation;
   /**
@@ -978,6 +985,7 @@ export class GameInputService {
         nodes: Object.fromEntries(first),
         ...(game ? { game } : {}),
         ...(hint ? { hint } : {}),
+        ...renderabilityNote(runtime.runner.getLiveRootNodes()),
       };
     }
 
@@ -1045,6 +1053,7 @@ export class GameInputService {
         ok: true,
         nodes: Object.fromEntries(first),
         movement,
+        ...renderabilityNote(runtime.runner.getLiveRootNodes()),
         sampleMs: budget ? Math.round(budget.elapsedMs) : clampedMs,
         ...(budget
           ? {

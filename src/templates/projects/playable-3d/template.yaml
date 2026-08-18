@@ -1,6 +1,8 @@
 id: playable-3d
 title: Playable 3D
 description: Portrait 3D playable-ad blank — tap-to-start intro (unlocks audio), gameplay placeholder, end screen with a store CTA button.
+# Flow recipe this template serves (see design/recipe.md).
+recipeId: recipe-scene-3d
 projectType: 3d
 targetPlatform: mobile
 viewport: { width: 1080, height: 1920 }

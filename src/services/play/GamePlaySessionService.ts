@@ -3,6 +3,7 @@ import { subscribe } from 'valtio/vanilla';
 import {
   AssetLoader,
   AudioService,
+  collectRenderabilityIssues,
   NetworkService,
   RuntimeRenderer,
   SceneManager,
@@ -570,6 +571,14 @@ export class GamePlaySessionService {
       }
       this.updateHostRunningState(true);
       this.handleFocusPause();
+      // The scene is live: check whether it can actually draw anything. A 3D scene with lit
+      // materials and no light starts perfectly and renders black, so the only moment this is
+      // catchable is right here, against the running graph.
+      this.runtimeErrorBridge.reportSceneIssues(
+        collectRenderabilityIssues(runner.getLiveRootNodes(), {
+          targetPlatform: appState.project.manifest?.targetPlatform,
+        })
+      );
     } catch (error) {
       if (this.abandonStaleStart(generation, renderer, runner)) {
         return;

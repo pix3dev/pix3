@@ -5,6 +5,7 @@ import {
   colorLuminance,
   extractPalette,
   hexToRgb,
+  opaqueBounds,
   quantizePixels,
   readImagePixels,
   rgbToHex,
@@ -483,5 +484,53 @@ describe('extractPalette / tintImage over a stubbed canvas', () => {
 
     expect(result.blob).toBe(source);
     expect([...buffer]).toEqual([255, 255, 255, 255]);
+  });
+});
+
+describe('opaqueBounds', () => {
+  /** A `width`x`height` transparent image with one opaque rect painted into it. */
+  const withRect = (
+    width: number,
+    height: number,
+    rect: { x: number; y: number; w: number; h: number },
+    alpha = 255
+  ): ImagePixels => {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = rect.y; y < rect.y + rect.h; y++) {
+      for (let x = rect.x; x < rect.x + rect.w; x++) {
+        data[(y * width + x) * 4 + 3] = alpha;
+      }
+    }
+    return { width, height, data };
+  };
+
+  it('returns the bounding box of the opaque pixels, inclusive of the last row/column', () => {
+    expect(opaqueBounds(withRect(16, 10, { x: 3, y: 2, w: 5, h: 4 }))).toEqual({
+      x: 3,
+      y: 2,
+      width: 5,
+      height: 4,
+    });
+  });
+
+  it('returns null when nothing is opaque', () => {
+    expect(opaqueBounds({ width: 4, height: 4, data: new Uint8ClampedArray(64) })).toBeNull();
+  });
+
+  it('treats alpha at or below the threshold as empty', () => {
+    const haloed = withRect(8, 8, { x: 0, y: 0, w: 8, h: 8 }, 6);
+    // The halo counts as content at threshold 0 and disappears at 8 — which is why the crop tool
+    // opens with a threshold rather than at 0.
+    expect(opaqueBounds(haloed, 0)).toEqual({ x: 0, y: 0, width: 8, height: 8 });
+    expect(opaqueBounds(haloed, 8)).toBeNull();
+  });
+
+  it('finds a single opaque pixel', () => {
+    expect(opaqueBounds(withRect(5, 5, { x: 4, y: 0, w: 1, h: 1 }))).toEqual({
+      x: 4,
+      y: 0,
+      width: 1,
+      height: 1,
+    });
   });
 });

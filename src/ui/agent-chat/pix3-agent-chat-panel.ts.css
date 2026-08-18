@@ -2046,3 +2046,91 @@ pix3-agent-chat-panel .agent-compact-divider::after {
   height: 1px;
   background: var(--line-1);
 }
+
+/* ── Clamped long replies ────────────────────────────────────────────────── */
+
+/* Long replies open clamped: the head of the answer stays readable and fades out, so the thread
+   above and below it is still scannable. The fade is a mask, not an overlay — the bubble background
+   changes with the theme and a hardcoded gradient would band against it. */
+pix3-agent-chat-panel .agent-message-md.is-clamped,
+pix3-agent-chat-panel .agent-message-text.is-clamped {
+  max-height: 11rem;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
+}
+
+pix3-agent-chat-panel .agent-expand-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.35rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-expand-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Harness notes (`[Pix3]` nudges) ────────────────────────────────────── */
+
+/* Machine-to-machine traffic: auditable, never shouting. Deliberately quieter than both bubbles —
+   no accent fill, no border box, just a muted line the eye can skip. */
+pix3-agent-chat-panel .agent-notice {
+  margin: 0.1rem 0 0.1rem 34px;
+  color: var(--fg-3);
+}
+
+pix3-agent-chat-panel .agent-notice-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.2rem;
+  border: none;
+  border-radius: var(--radius-1);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.7rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-agent-chat-panel .agent-notice-head:hover {
+  color: var(--fg-1);
+  background: var(--bg-2);
+}
+
+pix3-agent-chat-panel .agent-notice-head svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  opacity: 0.7;
+}
+
+pix3-agent-chat-panel .agent-notice-body {
+  margin: 0.15rem 0 0.35rem 1.1rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--line-1);
+  color: var(--fg-2);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Inside the accent user bubble the accent link would sit on its own tint — borrow the bubble's own
+   foreground instead. */
+pix3-agent-chat-panel .agent-message.is-user .agent-expand-link {
+  color: var(--fg-0);
+  opacity: 0.7;
+}
+
+pix3-agent-chat-panel .agent-message.is-user .agent-expand-link:hover {
+  opacity: 1;
+}

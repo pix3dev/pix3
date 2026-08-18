@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
 import * as runtime from '@pix3/runtime';
+import { normalizeNodeTypeName } from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 import { parseRoutine } from '@/services/agent/game-routines';
 
@@ -23,10 +24,21 @@ const TEMPLATES_ROOT = resolve(process.cwd(), 'src/templates/projects');
 /** Templates that ship a `design/recipe.md` and are therefore part of the catalog. */
 const CATALOG_TEMPLATES = [
   'playable-2d',
+  'playable-3d',
   'recipe-arena-2d',
   'recipe-bouncer-2d',
+  'recipe-grid-3d',
   'recipe-tapper-2d',
 ];
+
+/**
+ * Schema properties for a scene `type:`, tolerating the `*Node` suffix the light nodes carry on
+ * disk but not in their schemas.
+ */
+const schemaPropertiesFor = (nodeType: string): string[] | undefined => {
+  const key = normalizeNodeTypeName(nodeType);
+  return NODE_SCHEMA_PROPERTIES.get(key) ?? NODE_SCHEMA_PROPERTIES.get(key.replace(/node$/, ''));
+};
 
 const REQUIRED_SECTIONS = [
   '## What this is',
@@ -96,9 +108,13 @@ const NODE_SCHEMA_PROPERTIES: Map<string, string[]> = (() => {
     try {
       const schema = (getSchema as () => PropertySchema).call(value);
       const nodeType = schema?.nodeType;
-      if (typeof nodeType === 'string' && nodeType && !index.has(nodeType)) {
+      // Keyed by the NORMALIZED name: a scene says `DirectionalLightNode` while the class's own
+      // schema says `DirectionalLight`, and that gap is exactly the kind of mismatch this file
+      // exists to catch rather than to trip over.
+      const key = normalizeNodeTypeName(nodeType ?? '');
+      if (key && !index.has(key)) {
         index.set(
-          nodeType,
+          key,
           (schema.properties ?? []).map(property => property.name)
         );
       }
@@ -263,7 +279,7 @@ describe('flow recipe contract', () => {
         // has to own the property — a typo here reaches the field as a scene key
         // nothing reads, with no warning anywhere.
         const nodeType = nodes.get(entry.node)?.type ?? '';
-        const declared = NODE_SCHEMA_PROPERTIES.get(nodeType);
+        const declared = schemaPropertiesFor(nodeType);
         expect(declared, `tunable "${key}" → unknown node type "${nodeType}"`).toBeTruthy();
         expect(
           declared,

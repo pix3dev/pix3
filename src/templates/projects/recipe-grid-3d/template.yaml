@@ -1,0 +1,10 @@
+id: recipe-grid-3d
+title: Grid 3D
+description: A solid block of cubes you carve by tapping — clear every cube except the hidden core ones. Voxel carving, 3D minesweeper, layer puzzles, tap-to-mine.
+projectType: 3d
+targetPlatform: mobile
+viewport: { width: 1080, height: 1920 }
+# The build/full-run entry scene (Project Settings → Default Export Scene Path).
+# The menu boots first; PLAY transitions to main.pix3scene (the board).
+entryScene: scenes/menu.pix3scene
+order: 63

@@ -344,7 +344,12 @@ export class Pix3Welcome extends ComponentBase {
   /** Recipe cards: the Flow catalog once it is installed, else the bundled 2D templates. */
   private getRecipeCards(): ProjectTemplate[] {
     const templates = this.templateService.getTemplates();
-    const recipes = templates.filter(template => template.id.startsWith('recipe-'));
+    // A recipe is either its own template (`recipe-*`) or a shipped template promoted into the
+    // catalog by declaring the recipe it serves — the 3D recipe is the second kind, and filtering
+    // on the id prefix alone is what kept it out of this list.
+    const recipes = templates.filter(
+      template => template.id.startsWith('recipe-') || Boolean(template.recipeId)
+    );
     return recipes.length > 0
       ? recipes
       : templates.filter(template => template.projectType === '2d');
@@ -371,8 +376,8 @@ export class Pix3Welcome extends ComponentBase {
   };
 
   /** A recipe card pins the genre; whatever is already typed still describes the game. */
-  private onRecipeCard = (templateId: string): void => {
-    this.pinnedRecipeId = this.pinnedRecipeId === templateId ? null : templateId;
+  private onRecipeCard = (recipeId: string): void => {
+    this.pinnedRecipeId = this.pinnedRecipeId === recipeId ? null : recipeId;
   };
 
   /**
@@ -794,7 +799,10 @@ export class Pix3Welcome extends ComponentBase {
     return html`
       <div class="hero-recipes" role="list" aria-label="Start from a recipe">
         ${recipes.map(recipe => {
-          const pinned = this.pinnedRecipeId === recipe.id;
+          // Pin the RECIPE id, not the template id: it is what the planner is told to use, and it
+          // is validated against the recipe catalog.
+          const recipeId = recipe.recipeId ?? recipe.id;
+          const pinned = this.pinnedRecipeId === recipeId;
           return html`
             <button
               class="hero-recipe ${pinned ? 'hero-recipe--pinned' : ''}"
@@ -803,7 +811,7 @@ export class Pix3Welcome extends ComponentBase {
               aria-pressed=${pinned}
               title=${recipe.description || recipe.title}
               ?disabled=${this.isBootstrapping}
-              @click=${() => this.onRecipeCard(recipe.id)}
+              @click=${() => this.onRecipeCard(recipeId)}
             >
               ${recipe.coverUrl
                 ? html`<img class="hero-recipe__cover" src=${recipe.coverUrl} alt="" />`

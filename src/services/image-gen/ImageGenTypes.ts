@@ -73,8 +73,24 @@ export interface ProviderModel {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  /**
+   * Short price tag rendered next to the label in every model picker (e.g. `'$0.039/img'`,
+   * `'8 cr'`). A display string rather than a number because providers meter differently — dollars
+   * per output image for direct APIs, credits for aggregators — and because it is a hand-maintained
+   * snapshot, not something the API reports. Omit it when the price is not a single figure (e.g.
+   * OpenAI, where it depends on the quality tier).
+   */
+  readonly price?: string;
   readonly capabilities: ImageModelCapabilities;
 }
+
+/**
+ * Option text for a model picker. Shared by the Generate panel and the settings dialog so both
+ * spell the price the same way; a `<option>` renders plain text only, hence the interpunct instead
+ * of separate markup.
+ */
+export const modelPickerLabel = (model: ProviderModel): string =>
+  model.price ? `${model.label} · ${model.price}` : model.label;
 
 /** Per-request context supplied by the caller (key + selected model + optional proxy hooks). */
 export interface RequestContext {

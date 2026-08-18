@@ -1110,9 +1110,11 @@ export class Pix3EditorShell extends ComponentBase {
               <div class="workspace" role="presentation">
                 <div class="layout-host" role="application" aria-busy=${!this.isLayoutReady}></div>
               </div>
-              <pix3-status-bar></pix3-status-bar>
             `
           : html``}
+        <!-- Shared by both shells: Vibe needs the same "is the bridge up / is a key set / what
+             version am I on" readout Studio has, so the bar lives outside the Studio branch. -->
+        <pix3-status-bar></pix3-status-bar>
         ${this.renderWorkspaceOverlay()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}

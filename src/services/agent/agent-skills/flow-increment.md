@@ -19,6 +19,10 @@ menu → game → win/lose, controls, score. It runs right now.
   checklist; `design/decisions.md` records forks that are already settled — **read it before
   asking anything, so you never ask twice.**
 - Then `scene_tree` once. That is enough exploration to start. Do not survey the project.
+- **If `design/brief.md` notes that the request was downgraded** — a 3D ask served by a 2D
+  recipe, a genre substituted for the nearest one — say so in your first message, plainly, in
+  the user's language. Presenting the substitute as if it were the ask is how a request for a
+  3D puzzle becomes isometric sprites that nobody wanted.
 
 **Extend the recipe, do not rebuild it.** Adding an entity type, a rule, a spawner or a HUD
 element is a few additive calls at an extension point the recipe declares. Rewriting

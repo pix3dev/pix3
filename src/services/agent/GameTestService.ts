@@ -14,6 +14,7 @@ import {
   type RuntimeTimeMode,
   type ResolvedRuntimeTimeConfig,
   type SceneRunner,
+  collectRenderabilityIssues,
 } from '@pix3/runtime';
 import {
   assertionAxisNames,
@@ -1560,6 +1561,15 @@ export class GameTestService {
         runner.paused
           ? 'The game ended up paused after the run despite the report, so what you observe is the outcome frame.'
           : 'The game was paused on the outcome frame but the editor resumed it as the run handed control back — what you observe now is a LATER state.',
+      ];
+    }
+    // A PASS over a scene that cannot draw is the most expensive kind of green: the run judged
+    // state that was never on screen. Say so in the report rather than leaving it to be noticed.
+    const sceneIssues = collectRenderabilityIssues(runner.getLiveRootNodes());
+    if (sceneIssues.length > 0) {
+      result.notes = [
+        ...(result.notes ?? []),
+        ...sceneIssues.map(issue => `SCENE NOT RENDERABLE — ${issue.message}`),
       ];
     }
     return outcome;

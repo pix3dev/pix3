@@ -1122,6 +1122,18 @@ export class ViewportRendererService {
     }
   }
 
+  /**
+   * Whether the picture you are looking at is lit by the EDITOR's lights rather than the scene's.
+   *
+   * The fallback exists for humans blocking out a level (an all-black viewport while you place the
+   * first mesh is hostile), and it is exactly why a screenshot cannot be trusted to prove a 3D
+   * scene renders: the running game has no such lights. Callers that hand a picture to someone who
+   * cannot see the difference — the agent's `viewport_screenshot` — must say so.
+   */
+  isUsingEditorFallbackLighting(): boolean {
+    return this.isEditorFallbackLightingEnabled();
+  }
+
   private isEditorFallbackLightingEnabled(): boolean {
     return appState.ui.showLighting && !this.activeSceneHasExplicitLights();
   }

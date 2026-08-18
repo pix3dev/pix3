@@ -3,6 +3,7 @@ import { appState } from '@/state';
 import {
   isTestHarnessComponentType,
   registerScriptErrorSink,
+  type RenderabilityIssue,
   type ScriptErrorInfo,
 } from '@pix3/runtime';
 import { LoggingService } from '@/services/core/LoggingService';
@@ -57,6 +58,37 @@ export class RuntimeErrorBridgeService {
   reportPlayModeFailure(message: string, detail?: unknown): void {
     this.loggingService.error(message, detail);
     appState.ui.playModeError = { message, at: Date.now() };
+  }
+
+  /**
+   * Report renderability problems found when a scene started playing (see
+   * `collectRenderabilityIssues`).
+   *
+   * These are warnings, not errors — the game is running, nothing threw — but a scene whose meshes
+   * have no light draws a black screen, which is indistinguishable from a crash to anyone looking
+   * at it, and invisible to anyone looking at the console. So they go to the Logs panel *and* raise
+   * the Game-tab banner: this class of failure is only ever caught by being told about it.
+   */
+  reportSceneIssues(issues: readonly RenderabilityIssue[]): void {
+    if (issues.length === 0) {
+      return;
+    }
+    for (const issue of issues) {
+      this.loggingService.warn(`Scene renderability: ${issue.message}`, {
+        code: issue.code,
+        severity: issue.severity,
+        nodeIds: issue.nodeIds,
+        nodeCount: issue.nodeCount,
+      });
+    }
+    // Only a scene that cannot DRAW earns the banner. Performance advice is real but it is not a
+    // failure, and a banner that cries wolf about material cost would get dismissed along with the
+    // black screens it sits next to.
+    const blocking = issues.find(issue => issue.severity !== 'advice');
+    // Never overwrite a real error banner with a lint warning — a thrown script is the bigger news.
+    if (blocking && appState.ui.playModeError === null) {
+      appState.ui.playModeError = { message: blocking.message, at: Date.now() };
+    }
   }
 
   private readonly handleScriptError = (error: ScriptErrorInfo): void => {

@@ -188,3 +188,49 @@ pix3-status-bar .status-project {
     opacity: 0.7;
   }
 }
+
+/* Agent reachability lanes: the local bridge and the browser-held Gemini key. Both are buttons —
+   the state they report is only actionable in Agent settings, so the whole pill opens it. */
+pix3-status-bar .status-lane {
+  gap: 5px;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+
+pix3-status-bar .status-lane:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+
+pix3-status-bar .status-lane svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.75;
+}
+
+pix3-status-bar .status-lane-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Green means connected, not "notable": amber is the editor's warning colour, so using the accent
+   here read as a problem on a bar whose other amber pills genuinely are ones. */
+pix3-status-bar .status-lane.is-on .status-lane-dot {
+  background: var(--ok);
+}
+
+/* Deliberately not a warning colour: no bridge / no key is a normal setup for a user who only
+   works locally, so it reads as "off", not "broken". */
+pix3-status-bar .status-lane.is-off {
+  color: var(--fg-3);
+}
+
+pix3-status-bar .status-lane.is-off .status-lane-dot {
+  background: var(--line-strong);
+  opacity: 0.6;
+}

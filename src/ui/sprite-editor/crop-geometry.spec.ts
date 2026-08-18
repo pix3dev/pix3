@@ -4,6 +4,7 @@ import { StageZoomPanController, type StageViewport } from '@/ui/shared/stage-zo
 import {
   applyCropDrag,
   clampToImage,
+  contentCropRect,
   cropRectToPixels,
   describeCropRect,
   initialCropRect,
@@ -184,5 +185,52 @@ describe('crop geometry in image-pixel space', () => {
   it('reports the selection size in image pixels, not display pixels', () => {
     expect(describeCropRect({ x: 4, y: 4, w: 63.7, h: 32.2 })).toBe('64 × 32 px');
     expect(describeCropRect({ x: 4, y: 4, w: 0, h: 0 })).toBe('1 × 1 px');
+  });
+});
+
+describe('contentCropRect', () => {
+  it('opens the selection on the opaque bounds', () => {
+    expect(contentCropRect({ x: 40, y: 30, width: 100, height: 60 }, IMAGE)).toEqual({
+      x: 40,
+      y: 30,
+      w: 100,
+      h: 60,
+    });
+  });
+
+  it('falls back to the centred box when nothing is opaque', () => {
+    expect(contentCropRect(null, IMAGE)).toEqual(initialCropRect(IMAGE));
+  });
+
+  it('falls back to the centred box when the content fills the canvas', () => {
+    // An opaque sheet (or a halo the threshold missed): a frame on the border has nothing to grab
+    // and would crop nothing.
+    expect(
+      contentCropRect({ x: 0, y: 0, width: IMAGE.width, height: IMAGE.height }, IMAGE)
+    ).toEqual(initialCropRect(IMAGE));
+  });
+
+  it('keeps a full-width band that is not full-height', () => {
+    expect(contentCropRect({ x: 0, y: 80, width: IMAGE.width, height: 40 }, IMAGE)).toEqual({
+      x: 0,
+      y: 80,
+      w: IMAGE.width,
+      h: 40,
+    });
+  });
+
+  it('clamps bounds that overflow the image', () => {
+    expect(contentCropRect({ x: 300, y: 190, width: 999, height: 999 }, IMAGE)).toEqual({
+      x: 300,
+      y: 190,
+      w: 20,
+      h: 10,
+    });
+  });
+
+  it('ignores degenerate bounds', () => {
+    expect(contentCropRect({ x: 10, y: 10, width: 0, height: 0 }, IMAGE)).toEqual(
+      initialCropRect(IMAGE)
+    );
   });
 });

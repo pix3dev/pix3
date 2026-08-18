@@ -172,6 +172,7 @@ pix3-sprite-editor-panel textarea {
 pix3-sprite-editor-panel .ag-toolbar-button,
 :is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-action-button {
   padding: 0.4rem 0.8rem;
+  line-height: 1.1;
   border-radius: var(--radius-1);
   border: 1px solid var(--line-1);
   background: transparent;
@@ -187,6 +188,33 @@ pix3-sprite-editor-panel .ag-toolbar-button:hover:not(:disabled),
 :is(pix3-sprite-editor-panel, .pix3-dropdown-portal) .ag-action-button:hover:not(:disabled) {
   background: var(--bg-2);
   color: var(--fg-0);
+}
+
+/* Icon + label buttons: lay the two out as flex items rather than leaving the inline SVG on the
+   text baseline (which parks it a couple of pixels high and reads as a wonky icon), and pin the
+   button's own size — the toolbar is a wrapping flex row, so a shrinkable button collapses to
+   min-content and breaks the label onto a second line under the icon. */
+pix3-sprite-editor-panel .ag-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  /* Same box height as the icon-only buttons and the separators, so the whole row shares one
+     baseline instead of stepping 24 / 26 / 30px depending on whether a label has an icon. */
+  min-height: 30px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+pix3-sprite-editor-panel .ag-toolbar-button svg,
+pix3-sprite-editor-panel .ag-icon-button svg {
+  flex: none;
+  display: block;
+}
+
+pix3-sprite-editor-panel .ag-icon-button {
+  flex: 0 0 auto;
 }
 
 pix3-sprite-editor-panel .ag-toolbar-button.is-active {

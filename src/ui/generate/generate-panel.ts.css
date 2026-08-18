@@ -308,7 +308,8 @@ pix3-generate-panel .gp-key-button.is-connected {
 }
 
 pix3-generate-panel .gp-model-select {
-  max-width: 12rem;
+  /* Wide enough that the price tag appended to the label stays visible when collapsed. */
+  max-width: 15rem;
   font-size: 0.82rem;
   padding: 0.35rem 0.4rem;
 }
