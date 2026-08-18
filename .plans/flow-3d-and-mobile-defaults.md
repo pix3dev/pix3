@@ -21,7 +21,7 @@ file. Nothing has been verified in a running editor yet — see "Left to do" at 
 | P1.1 `material.type` on GeometryMesh | done | `GeometryMesh.ts` (`standard`/`lambert`/`basic`, live family switch, round-trip), `SceneLoader`, `ShaderEffectStack.retarget()` |
 | P1.2 mobile creation-time default | done | `src/core/material-defaults.ts`, `CreateBoxOperation`, `playable-3d` scene, planner `targetPlatform` |
 | P2.1 DeepCore verification | n/a — resolved by inspection | DeepCore consumes `@pix3/runtime` from **npm** (`^1.2.0`), not yalc, and uses no `GeometryMesh` at all; the node default is unchanged, so there is no regression surface to publish against |
-| P2.2 second 3D recipe | deliberately not started | its own precondition is telemetry from the first one |
+| P2.2 `recipe-grid-3d` | done, **verified playable live** | `src/templates/projects/recipe-grid-3d/` — the plan's original P0.4 shape, built once the first live run supplied the telemetry it was waiting for (the real 3D ask was a voxel carve) |
 | P2.3 quality → runtime plumbing | already existed | `ProjectBuildService` writes `antialias`/`shadows`/`maxPixelRatio` into the export config and `player-main.ts` applies all three via `RuntimeRenderer` |
 | P2.4 PBR-on-mobile advisory | done | `renderability-lint.ts` (`pbr-on-mobile`, severity `advice`) |
 
@@ -365,9 +365,52 @@ cards now read Playable 3D, Playable 2D, Arena 2D, Bouncer 2D, Tapper 2D.
 **Observation, not fixed.** An inert node still appears in the Scene Tree looking like any other
 node — the tree gives no hint that its type is unknown. The lint says so, the tree does not.
 
+## `recipe-grid-3d` (P2.2) — built and proven
+
+The plan gated a second 3D recipe on "telemetry from the first one". The live run supplied it in
+one shot: the real 3D ask was *carve voxels off a cube*, so the recipe is the carving board the
+plan originally wanted as `recipe-grid-3d` — and the generic 3D stage (`recipe-scene-3d`) stays as
+the fallback for 3D ideas that are not a grid of things to tap.
+
+`GridBoard` generates the cubes (board size is config, not a scene edit), picks by 3D raycast, and
+emits `cell-cleared` / `core-hit` / `board-cleared`; `GridRules` owns score, lives, win/lose and the
+debug provider; `ScoreHud`/`MenuFlow` are shared with the 2D recipes. Every cube is
+`material.type: lambert`, per the mobile policy above. The 3D fallback now points at this recipe
+rather than the blank stage: when the planner could not name what it wanted, the one that already
+plays is the better guess.
+
+**Proven in the running editor**, each by state and not by screenshot:
+
+| mechanic | evidence |
+| --- | --- |
+| board builds | 64 cubes under `board-anchor`, `clearable: 58` (64 − 6 cores) |
+| tap removes one cube | three consecutive taps, `remaining` −1 each, `score` +1 each |
+| clearing the board wins | `cell-cleared(0)` → `finish(true)` → `board-cleared` |
+| a core costs a life | tap aimed at a revealed core: `lives` 3 → 2, `remaining` and `score` unchanged |
+
+Three real bugs the live run caught, none of which the test suite could have:
+
+1. **`board-built` was emitted into a signal nobody was connected to yet.** Components start in
+   scene order, the board is first, so the rules script connected *after* the board had already
+   announced itself — the HUD showed 0 cubes on a full board. `GridRules.adoptBoardCount()` now
+   pulls the count as well as listening for it, so either component order works.
+2. **The camera was aimed by eye and missed.** It read fine on a full board — some cube always
+   catches the centre ray — and missed a 1×1×1 board entirely. Solved properly for the engine's
+   **XYZ** Euler order (`R = Rx·Ry`): pitch `-36.87°`, yaw `30.96°`. Under the YXZ order the two
+   numbers are swapped, which is exactly the wrong answer that looked right.
+3. **Tap coordinates are 2D world space, centred on the origin** — the middle of the screen is
+   `(0, 0)`, not `(540, 960)`. The recipe's Verify section now says so, because the wrong reading
+   produces a tap that silently lands outside the frustum.
+
+Also noted in the recipe: winning under the finger means the pointer-UP can press the RETRY button
+the win just revealed, restarting the run before you read the result. Assert on the transition
+(`board-cleared` / `game-won`), not the end state.
+
 ## Left to do
 
-1. **P2.2**, when there is telemetry to design it from.
+1. Nothing from this plan. Follow-ups worth their own task: an inert node still looks like a normal
+   node in the Scene Tree (only the lint says otherwise), and `InstancedMesh3D` has no authored
+   material, so the mobile material policy does not reach it.
 3. **`InstancedMesh3D` has no authored material at all** — the loader never builds one, so a
    scene-authored instanced mesh always gets the shared `DEFAULT_MATERIAL` (PBR white). Out of
    scope here (it is a script/ECS-facing node), but it means the mobile material policy does not

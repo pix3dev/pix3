@@ -97,8 +97,14 @@ tunables:
 
 - `play_start`, then `game_observe` — `sceneIssues` must be **absent**, and
   `game.snapshot()` carries `remaining` (cubes still to clear).
-- Tap the block: `game_input {type:'tap', x:540, y:960}` and assert `remaining`
-  went **down** in `game.changed`. That is the proof a tap reached the board —
-  not a screenshot, which the editor's fallback lighting can flatter.
-- Win: set `sizeX/sizeY/sizeZ: 1` and `coreCount: 0`, then one tap should raise
-  `phase: 'won'`.
+- Tap the block: `game_input {type:'tap', x:0, y:0}` and assert `remaining` went
+  **down** in `game.changed`. That is the proof a tap reached the board — not a
+  screenshot, which the editor's fallback lighting can flatter. Note the units:
+  tap coordinates are 2D world space, which is **centred on the origin**, so the
+  middle of the screen is `(0, 0)` and not `(540, 960)`.
+- Win: set `sizeX/sizeY/sizeZ: 1` and `coreCount: 0`, then one tap clears the
+  board. Read the *transition*, not the end state: the win overlay appears on the
+  pointer-DOWN that clears the last cube, so the matching pointer-UP can land on
+  the RETRY button underneath the finger and start a fresh run before you look.
+  Assert on `board-cleared` / `game-won`, or tap a last cube that is not under
+  the end screen's buttons.

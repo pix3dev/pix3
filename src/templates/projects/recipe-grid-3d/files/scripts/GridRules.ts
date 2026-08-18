@@ -134,6 +134,12 @@ export class GridRules extends Script {
     owner?.connect('board-cleared', this, () => this.finish(true));
     owner?.connect('hud-ready', this, () => this.broadcast());
 
+    // Components start in scene order, and the board is listed first — so by now it has already
+    // built and already emitted `board-built`, into a signal nobody was connected to yet. Pull the
+    // number as well as listening for it: the connect above covers a later rebuild (or a scene that
+    // lists the components the other way round), this covers the first one.
+    this.adoptBoardCount();
+
     this.setNodeVisible(String(this.config.resultNode ?? ''), false);
     this.bindButton(String(this.config.retryButton ?? ''), () => this.scene?.commands.dispatch('restart'), false);
     this.bindButton(String(this.config.menuButton ?? ''), () => this.scene?.commands.dispatch('return-to-menu'), true);
@@ -180,6 +186,29 @@ export class GridRules extends Script {
     this.setNodeVisible(String(this.config.resultNode ?? ''), true);
     this.setButtonEnabled(String(this.config.retryButton ?? ''), true);
     this.node?.emit(won ? 'game-won' : 'game-lost', this.score);
+  }
+
+  /**
+   * Read the live cube count off whichever sibling component owns the board.
+   *
+   * Duck-typed rather than importing `GridBoard`: a project that swaps in its own board keeps
+   * working as long as it answers `getRemaining()`.
+   */
+  private adoptBoardCount(): void {
+    if (this.clearable > 0) {
+      return;
+    }
+    for (const component of this.node?.components ?? []) {
+      const getRemaining = (component as { getRemaining?: unknown }).getRemaining;
+      if (typeof getRemaining === 'function') {
+        const value = Number((getRemaining as () => number).call(component));
+        if (Number.isFinite(value) && value > 0) {
+          this.clearable = value;
+          this.remaining = value;
+          return;
+        }
+      }
+    }
   }
 
   private onCellCleared(remaining: number): void {

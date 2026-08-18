@@ -49,9 +49,15 @@ root:
           fov: 50
           near: 0.1
           far: 200
+          # Aimed exactly at the origin, where the board centres itself. Solved for the engine's
+          # XYZ Euler order (R = Rx·Ry), NOT the yaw-then-pitch YXZ order the numbers would have
+          # under a camera rig: pitch = -asin(0.6) = -36.87°, yaw = asin(6/|[6,6,8]|) = 30.96°.
+          # Swap the two and the view tilts off target — invisible on a full board (some cube
+          # still catches the centre ray) and fatal on a 1x1x1 one, which is why the recipe's
+          # Verify section shrinks the board.
           transform:
             position: [6, 6, 8]
-            rotationEuler: [-27, 33, 0]
+            rotationEuler: [-36.87, 30.96, 0]
             scale: [1, 1, 1]
         children: []
       - id: key-light
