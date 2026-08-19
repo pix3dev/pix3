@@ -13,6 +13,7 @@ import {
   type BgRemovalQuality,
 } from '@/services/bg-removal/BackgroundRemovalService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { ensureProjectParentDirectory } from '@/services/project/project-file-writes';
 import { GenerationHistoryService } from '@/services/image-gen/GenerationHistoryService';
 import { appState } from '@/state';
 import {
@@ -620,7 +621,8 @@ export class AssetGenService {
       createdAt: number;
     }>
   > {
-    const records = await this.historyService.list(limit);
+    // Images only: the store is shared with generated prototype sounds, and a WAV has no width.
+    const records = await this.historyService.list(limit, 'image');
     return records.map(record => ({
       id: record.id,
       prompt: record.prompt,
@@ -781,20 +783,7 @@ export class AssetGenService {
   }
 
   private async ensureParentDirectory(relativePath: string): Promise<void> {
-    const segments = relativePath.split('/');
-    segments.pop();
-    let accumulated = '';
-    for (const segment of segments) {
-      if (!segment) {
-        continue;
-      }
-      accumulated = accumulated ? `${accumulated}/${segment}` : segment;
-      try {
-        await this.storage.createDirectory(accumulated);
-      } catch {
-        // directory likely already exists
-      }
-    }
+    await ensureProjectParentDirectory(this.storage, relativePath);
   }
 
   private newId(): string {

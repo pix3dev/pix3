@@ -1,0 +1,11 @@
+# prompt: pistol gunshot, sharp crack with a short room tail
+# tags: gun, pistol, gunshot, weapon
+# A gunshot is a crack and a room, and the room is most of what tells you the
+# calibre. The three source layers are over in a fifth of a second; the reverb
+# on the fourth is deliberately short and damped, because a long tail belongs
+# to the game engine, which knows what building the player is standing in.
+sound "pistol shot" 450ms impact
+  crack: noise white >> hp ~3000Hz[1500..7000] | gain 0.44 attack 0ms decay 45ms
+  body: noise brown >> lp ~900Hz[350..2000] | gain 0.36 decay 170ms
+  punch: sub ~110Hz[60..180] -> 55Hz in 60ms | gain 0.4 attack 2ms decay 200ms
+  room: noise pink >> lp ~2000Hz[800..5000] >> verb 180ms mix 0.4 | gain 0.12 decay 180ms delay 30ms

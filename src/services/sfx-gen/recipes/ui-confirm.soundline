@@ -1,0 +1,9 @@
+# prompt: positive confirm blip for a dialog
+# tags: ui, confirm, ok, blip
+# Two sine notes a fifth apart, the second one held longer. "Positive" in an
+# interface is almost entirely the direction: the same pair played downwards
+# reads as a dismissal.
+sound "ui confirm" 115ms ui
+  low: tone sine ~880Hz[600..1200] | gain 0.36 decay 45ms
+  high: tone sine ~1320Hz[900..1800] | gain 0.32 decay 60ms delay 45ms
+  air: click 1ms >> hp ~4000Hz[2000..8000] | gain 0.16 attack 0ms decay 18ms

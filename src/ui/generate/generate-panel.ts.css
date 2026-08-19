@@ -689,3 +689,239 @@ pix3-generate-panel .gp-drop-overlay {
   pointer-events: none;
   z-index: 5;
 }
+
+/* Mode toggle (Image | Sound) --------------------------------------------
+ *
+ * A segmented pair in the head rather than two panels: the head, the settings
+ * entry point and the generation history are shared chrome, and only the middle
+ * of the body differs between the two lanes.
+ */
+pix3-generate-panel .gp-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+}
+
+pix3-generate-panel .gp-mode-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border: none;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+pix3-generate-panel .gp-mode-button + .gp-mode-button {
+  border-left: 1px solid var(--line-1);
+}
+
+pix3-generate-panel .gp-mode-button:hover {
+  color: var(--fg-0);
+}
+
+pix3-generate-panel .gp-mode-button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Sound lane ------------------------------------------------------------- */
+pix3-generate-panel .gp-sound-prompt {
+  resize: vertical;
+  min-height: 4rem;
+  max-height: 14rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+}
+
+pix3-generate-panel .gp-sound-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 0.75rem;
+}
+
+/*
+ * ONE updating line, not a log. The loop emits an event per stage and a further
+ * one per optimizer generation — the fit is the slow part — so appending would
+ * bury the shape of the run, and a spinner would hide that the search is working.
+ */
+pix3-generate-panel .gp-sound-progress {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-generate-panel .gp-sound-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+}
+
+pix3-generate-panel .gp-sound-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+pix3-generate-panel .gp-sound-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+pix3-generate-panel .gp-sound-play:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+pix3-generate-panel .gp-sound-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+pix3-generate-panel .gp-badge.is-warning {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/*
+ * The verdict sentence. A refusal (voices, believable animals, real recordings)
+ * is the contract working, so it reads as information rather than as a failure.
+ */
+pix3-generate-panel .gp-sound-outcome {
+  font-size: 0.75rem;
+  color: var(--fg-2);
+}
+
+pix3-generate-panel .gp-sound-outcome.is-refused {
+  color: var(--warn);
+}
+
+pix3-generate-panel .gp-sound-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+pix3-generate-panel .gp-sound-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  font-size: 0.73rem;
+  line-height: 1.35;
+  color: var(--fg-2);
+}
+
+pix3-generate-panel .gp-sound-issue.is-error {
+  color: var(--danger);
+}
+
+pix3-generate-panel .gp-sound-issue.is-warn {
+  color: var(--warn);
+}
+
+pix3-generate-panel .gp-sound-rule {
+  color: var(--fg-3);
+}
+
+pix3-generate-panel .gp-sound-name {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+pix3-generate-panel .gp-sound-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-generate-panel .gp-sound-feedback-input {
+  resize: vertical;
+  min-height: 3rem;
+  max-height: 10rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+pix3-generate-panel .gp-sound-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+pix3-generate-panel .gp-sound-history-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+pix3-generate-panel .gp-sound-history-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: none;
+  color: var(--fg-1);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+pix3-generate-panel .gp-sound-history-open:hover {
+  border-color: var(--line-1);
+  background: var(--bg-2);
+}
+
+pix3-generate-panel .gp-sound-history-prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

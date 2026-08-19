@@ -1,0 +1,9 @@
+# prompt: character landing on dirt, soft thump
+# tags: land, thump, dirt, platformer
+# Dirt absorbs: there is no ring under this at all, only a sub that drops as it
+# lands, brown noise with the top taken off, and a thin scatter of grit thrown
+# up 20 ms later.
+sound "land thump" 250ms impact
+  thump: sub ~80Hz[45..140] -> 45Hz in 80ms | gain 0.45 attack 4ms decay 200ms
+  dirt: noise brown >> lp ~900Hz[350..2000] | gain 0.3 decay 120ms
+  grit: grains ~2200Hz[900..5000] rate 80 width 4ms spread 2 bend 1 | gain 0.16 decay 140ms delay 20ms

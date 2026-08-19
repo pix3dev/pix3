@@ -1,0 +1,10 @@
+# prompt: magic sparkle, twinkling fairy dust
+# tags: magic, sparkle, fairy, fantasy
+# "Sparkle" is a grain field with no bend at all: `bend 1` is the ice and glass
+# end of the range, so each grain is a bright ping whose pitch does not move.
+# Give it the water bend and the same recipe turns into a drain.
+sound "magic sparkle" 700ms pickup
+  shimmer: fm ~2093Hz[1200..4200] ratio 3.5 index 6 -> 0.5 in 300ms | gain 0.26 decay 400ms
+  rise: chirp sine ~900Hz[500..1800] -> ~2400Hz[1400..4800] in 300ms | gain 0.18 attack 30ms decay 380ms
+  dust: grains ~5000Hz[2500..9000] rate ~90[40..250] width 4ms spread 2.5 bend 1 | gain 0.18 attack 40ms decay 420ms delay 40ms
+  bell: modal glass ~3136Hz[1800..6000] Q100 | gain 0.14 decay 350ms delay 260ms

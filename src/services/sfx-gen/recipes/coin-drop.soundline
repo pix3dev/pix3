@@ -1,0 +1,12 @@
+# prompt: coins dropping onto stone
+# tags: coin, drop, money, loot
+# `shell-casing` with more objects and no ordering: coins spilling are not one
+# thing bouncing, so the pitches go up and down rather than climbing, and the
+# grain field at the end is the ones still settling. The floor layer is what
+# stops three metal rings reading as a wind chime.
+sound "coin drop" 700ms pickup
+  floor: noise pink >> lp ~1200Hz[500..2800] | gain 0.12 decay 120ms
+  first: modal metal ~3200Hz[1500..6000] Q120 | gain 0.28 decay 220ms
+  second: modal metal ~2600Hz[1200..5000] Q110 | gain 0.22 decay 200ms delay 130ms
+  third: modal metal ~3800Hz[1800..7000] Q100 | gain 0.18 decay 180ms delay 250ms
+  clatter: grains ~4000Hz[2000..8000] rate 25 width 6ms spread 1.2 bend 1 | gain 0.16 decay 300ms delay 320ms

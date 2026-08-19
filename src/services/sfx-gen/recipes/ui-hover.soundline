@@ -1,0 +1,8 @@
+# prompt: soft menu hover tick
+# tags: ui, hover, menu, tick
+# A hover fires dozens of times a minute, so it is the one interface sound that
+# has to be quieter than it feels: a soft-edged tick with a breath of tone under
+# it, and no transient sharp enough to notice twice.
+sound "ui hover" 55ms ui
+  tick: click ~1.6ms[0.8..3] >> lp ~3400Hz[1500..7000] | gain 0.34 attack 0ms decay 40ms
+  air: tone sine ~2600Hz[1600..4200] | gain 0.14 decay 45ms

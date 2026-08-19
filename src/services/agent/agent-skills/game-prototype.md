@@ -1,7 +1,7 @@
 # Skill: game-prototype
 
 > Reliable defaults for this editor. Follow the tool/format specifics exactly; adapt the
-> *process* to the task if you have a better plan.
+> _process_ to the task if you have a better plan.
 
 How to turn a game design document (GDD) into a **playable** prototype in this Pix3
 project. Do the small, safe thing first; verify; then continue.
@@ -16,7 +16,7 @@ project. Do the small, safe thing first; verify; then continue.
   the GDD. Note the game name, core loop, controls, win/lose, and screens.
 - For each image in `design/` (references, mockups), call `analyze_image` with
   `question: "list the visual style tokens for an image-generation prompt: palette hex,
-  rendering style, lighting, camera angle, mood"`. Keep the answer — you will paste it into
+rendering style, lighting, camera angle, mood"`. Keep the answer — you will paste it into
   every `generate_asset` prompt so all art matches. (If your model can already see images,
   you may skip analyze_image, but doing it still gives you reusable style tokens.)
 - `scene_tree` to see what the project template already gives you (screens, buttons,
@@ -60,6 +60,7 @@ While the game is playing, send real input and let the tool tell you what reacte
 `game_input {steps:[{type:'key',code:'ArrowUp',ms:800}],observe:['Player']}`. The one-line
 `verdict` fuses every signal — **`moved:false` does NOT mean nothing happened.** Match the
 signal to the mechanic:
+
 - **Movement** (player, car): `observed.Player.moved`/`delta`, and `alignForward` for direction.
 - **Spawning / shooting / pools / HUD**: the container (e.g. `Cannonballs`) never moves — watch
   it and read `observed.Cannonballs.activity` (`spawned`/`visibleChildPeak`/`maxChildDistance`),
@@ -71,16 +72,16 @@ signal to the mechanic:
 - **Transient visual effects** (hover, `core:PunchScale`, `core:PopIn`, fades): use a `hover` step
   and read scale/opacity peaks (`scaleDelta`/`activity.maxScaleDelta`/`activity.opacityRange`) — a
   separate screenshot always shows the resting state.
-Tap UI buttons by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long
-press — don't shorten `holdMs`); after that first physical tap, drive the control with an
-`invoke` step (see the verify-and-fix skill). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
-For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to read baseline
-`activity` before attributing anything to your input.
-**Anything that plays out over time — a wave clearing, a death, the score climbing — is decided by
-`game_run` with an explicit success condition (`until:[{kind:'gameStateChanged',path:'score',by:1}]`),
-not by watching and judging.** It sends no input: `game_input` first, in realtime, then `game_run`
-to judge what follows. A gameplay increment is DONE only when a run confirms it, not when the code
-compiles.
+  Tap UI buttons by name: `{type:'tap',target:'PlayButton'}` (a Button2D needs the default long
+  press — don't shorten `holdMs`); after that first physical tap, drive the control with an
+  `invoke` step (see the verify-and-fix skill). Keys use `KeyboardEvent.code` (`'KeyW'`, `'ArrowLeft'`, `'Space'`).
+  For self-movers/spawners use `game_observe {nodes:['AICar'],sampleMs:1500}` to read baseline
+  `activity` before attributing anything to your input.
+  **Anything that plays out over time — a wave clearing, a death, the score climbing — is decided by
+  `game_run` with an explicit success condition (`until:[{kind:'gameStateChanged',path:'score',by:1}]`),
+  not by watching and judging.** It sends no input: `game_input` first, in realtime, then `game_run`
+  to judge what follows. A gameplay increment is DONE only when a run confirms it, not when the code
+  compiles.
 
 ## 4. How to make changes (use tools, not hand-edited files)
 
@@ -105,7 +106,7 @@ compiles.
   scene) or as component `config` (via `add_component` config / `set_component_property`) so the
   editor and the designer can see and tweak them. Hardcoding an array of coordinates inside a
   `Script` hides the data from the editor and is a last resort. If a `set_property` looks
-  ignored, check the value *shape* first — a vector wants `{ x, y }` (an `[x, y]` array is also
+  ignored, check the value _shape_ first — a vector wants `{ x, y }` (an `[x, y]` array is also
   accepted), a rotation wants a number — rather than hardcoding a workaround.
 
 ## 4½. Engine API traps (these compile clean and then break at runtime)
@@ -122,7 +123,7 @@ Every one of these passes `compile_scripts` clean — including its type-check, 
   after `play_start` is the only way to catch it.
 - **Keyboard events are case-sensitive**: `event.key` is `'ArrowUp'`, `'w'` — checking
   `keys['arrowup']` never matches. Prefer `event.code` (`'KeyW'`, `'ArrowUp'`, layout-independent).
-- **`getComponent` takes the component *class*, never a string.** `node.getComponent('user:CarController')`
+- **`getComponent` takes the component _class_, never a string.** `node.getComponent('user:CarController')`
   does not type-check and returns garbage/`null` at runtime (it does `components.find(c => c instanceof type)`).
   To reach another script, import its class with a relative path — all `scripts/` files bundle together, so
   `import { CarController } from './CarController'; const car = this.node.getComponent(CarController);` works.
@@ -156,6 +157,20 @@ makes it the right tool for icons, buttons, bars, arrows, flat props and blockou
 of what a prototype needs. Upgrade the pieces that want painterly or textured art (hero
 sprites, backgrounds, key illustrations) to a raster model afterwards, when the game plays.
 
+**Sound has the same three-rung ladder, and the first rung costs nothing.** Start with the
+built-in synth presets — `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup'
+| 'win' | 'lose' | 'laser' | 'tick')` plays on the first frame with no file, no asset and no
+waiting, so every mechanic gets its sound in the same increment as the mechanic. Reach for `generate_sfx` only when a sound needs its _own
+character_ — this game's weapon, this game's pickup, a UI voice the presets do not have. It
+writes a procedural recipe with your own model and renders it locally (one text completion, no
+metered audio API), saving `res://sfx/<name>.wav`; `scene.audio.play('res://sfx/pop.wav')`,
+`AudioPlayer` and `core:PlaySound` all take it untouched. **What it saves is a placeholder**,
+exactly like SVG art: a sound designer's final file later overwrites the same path and nothing
+else changes, so list generated sounds as placeholders in your summary. Keep the `soundline`
+the tool returns — passing it back with `feedback` ("duller, 100 ms shorter") edits that sound
+deterministically instead of rolling a different one. Never ask it for music, an ambience bed
+or a voice: procedural synthesis cannot do them and the tool will decline, which is an answer,
+not a failure to retry.
 
 ## 6. Finish
 

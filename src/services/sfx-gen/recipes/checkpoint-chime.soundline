@@ -1,0 +1,11 @@
+# prompt: checkpoint reached, soft two-note chime
+# tags: checkpoint, save, chime, reward
+# Quieter than `levelup-fanfare` on purpose: a checkpoint fires often and a
+# fanfare that fires often is noise. Two FM voices whose index falls to almost
+# nothing, so both notes end as sines, over a sine pad that never has a
+# transient at all.
+sound "checkpoint" 850ms pickup
+  pad: tone sine ~523Hz[300..900] | gain 0.16 attack 80ms hold 200ms decay 400ms
+  one: fm ~1046Hz[600..2000] ratio 2 index 4 -> 0.5 in 200ms | gain 0.24 decay 300ms
+  air: grains ~7000Hz[3500..11000] rate 50 width 5ms spread 2 bend 1 | gain 0.09 attack 60ms decay 380ms delay 200ms
+  two: fm ~1568Hz[900..3000] ratio 2 index 3.5 -> 0.5 in 220ms | gain 0.24 decay 380ms delay 180ms

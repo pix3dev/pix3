@@ -1,0 +1,8 @@
+# prompt: retro menu select blip
+# tags: select, menu, retro, 8bit
+# The shortest useful sound in the catalog and the one a menu uses most. A
+# square at a fixed pitch with no sweep at all: anything that moves reads as an
+# action, and moving between rows is not an action.
+sound "8bit select" 60ms ui
+  blip: tone square ~1200Hz[700..2200] | gain 0.3 decay 45ms
+  tick: click 1ms >> hp ~3000Hz[1500..7000] | gain 0.14 attack 0ms decay 12ms

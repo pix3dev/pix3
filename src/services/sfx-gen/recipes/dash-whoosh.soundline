@@ -1,0 +1,8 @@
+# prompt: quick dash whoosh with a doppler feel
+# tags: dash, whoosh, doppler, movement
+# Doppler is the falling half. The filter rises for 60 ms while the source
+# approaches and then drops for 140 ms as it recedes, and the tonal layer falls
+# with it — a shift the ear reads as distance rather than as a pitch bend.
+sound "dash whoosh" 280ms
+  rush: noise white >> bp ~2600Hz[1000..6000] -> 5200Hz in 60ms -> ~700Hz[300..1400] in 140ms Q2 | gain 0.42 attack 20ms decay 220ms
+  body: chirp tri ~420Hz[200..900] -> 140Hz in 180ms | gain 0.2 attack 20ms decay 200ms

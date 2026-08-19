@@ -1,0 +1,8 @@
+# prompt: small sci-fi pistol zap, quick and thin
+# tags: laser, pistol, zap, weapon
+# "Small" is the high-pass, not the pitch. A sidearm and a cannon can start on
+# the same note; what says sidearm is that there is nothing under 700 Hz to
+# feel, so the shot lands entirely in the ear.
+sound "laser pistol" 150ms laser
+  zap: chirp saw ~2600Hz[1200..5000] -> 480Hz in 90ms >> hp ~700Hz[300..1600] | gain 0.5 decay 130ms
+  tick: click 1ms >> bp ~4000Hz[2000..8000] Q3 | gain 0.22 attack 0ms decay 12ms

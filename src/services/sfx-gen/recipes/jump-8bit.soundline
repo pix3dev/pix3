@@ -1,0 +1,8 @@
+# prompt: retro 8-bit jump, rising square blip
+# tags: jump, retro, 8bit, platformer
+# One square wave sweeping two and a half octaves upward, which is the whole
+# sound — the era had one oscillator to spend on it. The held note on top is
+# the apex of the arc, and it is the only thing here that is not a sweep.
+sound "8bit jump" 200ms
+  jump: chirp square ~180Hz[100..400] -> ~900Hz[500..1800] in 120ms | gain 0.4 decay 170ms
+  top: tone square ~900Hz[500..1600] | gain 0.16 decay 60ms delay 120ms

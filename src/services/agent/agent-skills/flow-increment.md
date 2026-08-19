@@ -51,7 +51,7 @@ a conversation.
 
 ## 3. Prove it, then say what you proved
 
-`compile_scripts ok` is not proof, and `moved: true` is not proof of the *right* motion.
+`compile_scripts ok` is not proof, and `moved: true` is not proof of the _right_ motion.
 Before you close a turn that changed game logic: `play_start`, then `game_input` /
 `game_observe` on the affected node, checking the signal that matches the mechanic (see
 `game-prototype` §3), then `read_errors`.
@@ -86,7 +86,7 @@ and a tap on it is refused with the reason. To reveal an overlay, make the **con
 **A button that does nothing: read `control` before theorising.** `game_observe` reports
 `control: { enabled, hovering, pressed }` for every UI control. `enabled: false` means the press
 can never register — the recipe binds the result-overlay's RETRY handler and leaves the button
-disabled until *its own* game-over path enables it, so a script that shows the overlay itself gets
+disabled until _its own_ game-over path enables it, so a script that shows the overlay itself gets
 an on-screen button that ignores every tap. `hovering: false` after a hover means the pointer never
 reached its bounds. Measured: three turns were spent guessing at engine internals for a button whose
 snapshot said `enabled: false` all along.
@@ -145,6 +145,16 @@ or two pieces that genuinely want painterly art, and do that as its own incremen
 `glowColor`/`glowStrength` are one-liners with no assets and no setup. Add the sound, the burst
 and the score popup **in the same increment as the mechanic they belong to** — feel deferred to a
 late "polish" increment is feel the user never gets to see.
+
+**Sound follows the same ladder as art, and its cheap rung is cheaper still.** The nine
+`scene.audio.sfx(preset)` sounds need no file and play on the first frame, so they are what a
+Flow turn uses by default. When a sound needs its own character — this game's weapon, this
+game's pickup — `generate_sfx` writes a procedural recipe with your own model and renders it
+locally into `res://sfx/<name>.wav` for the price of a text completion. It is fast enough to
+slip into a turn, and what it saves is a **placeholder a designer's file overwrites later**, so
+name it for the thing and say so in your summary. Keep the returned `soundline`: "duller, 100 ms
+shorter" then edits that exact sound instead of re-rolling. Music, ambience beds and voices are
+out of scope — the tool declines them, and that is an answer rather than something to retry.
 
 ## 7. Keep your own context small
 

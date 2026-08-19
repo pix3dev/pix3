@@ -1,16 +1,26 @@
 import { injectable } from '@/fw/di';
 
-/** A persisted AI image generation, kept for later reuse. */
+/**
+ * What kind of artifact a record holds. Absent means `image`: every record written before sound
+ * generation existed is one, and back-filling a field on an IndexedDB store nobody can migrate
+ * (it lives in the user's browser) would be a schema bump for no gain. Read it through
+ * {@link generationKind}, never directly.
+ */
+export type GenerationKind = 'image' | 'sound';
+
+/** A persisted AI generation — an image, or a baked prototype sound — kept for later reuse. */
 export interface GenerationRecord {
   id: string;
   createdAt: number;
+  /** Omitted on legacy records, which are all images. See {@link generationKind}. */
+  kind?: GenerationKind;
   providerId: string;
   modelId: string;
   prompt: string;
   aspectRatio?: string;
   imageSize?: string;
   mimeType: string;
-  /** The generated image (structured-cloneable, stored directly in IndexedDB). */
+  /** The generated artifact — image or WAV (structured-cloneable, stored directly in IndexedDB). */
   blob: Blob;
   width?: number;
   height?: number;
@@ -22,12 +32,34 @@ export interface GenerationRecord {
    * call — the raster is the artifact, but the source is the master.
    */
   svgSource?: string;
+  /**
+   * The `soundline` recipe this WAV was baked from (`kind: 'sound'`). Exactly the `svgSource` move,
+   * for the same reason: "make it duller and shorter" is then a deterministic edit of known text plus
+   * a re-render, not a re-roll that also changes everything the user liked.
+   */
+  soundlineSource?: string;
+  /**
+   * Grammar the {@link soundlineSource} is written in (e.g. `soundline/v0`). Stored so a record whose
+   * grammar has since moved on can be recognised as un-editable instead of being fed to a parser that
+   * rejects it confusingly. The baked WAV is unaffected either way — it is an ordinary audio file.
+   */
+  grammarVersion?: string;
+  /** Rendered length in ms, for a sound record — what a list row shows without decoding the blob. */
+  durationMs?: number;
 }
 
+/** A record's kind, with the legacy default applied. */
+export const generationKind = (record: Pick<GenerationRecord, 'kind'>): GenerationKind =>
+  record.kind ?? 'image';
+
 /**
- * Persists AI image generations in IndexedDB so the user can browse and reuse past results without
+ * Persists AI generations in IndexedDB so the user can browse and reuse past results without
  * re-generating (and re-paying). This is a local cache keyed by a generated id, independent of the
  * project files — saving a generation into the project is a separate, explicit action.
+ *
+ * Images and sounds share the store rather than getting one each: the records differ by two optional
+ * fields, and every consumer already filters (`generationKind`) — a second IndexedDB database with its
+ * own versioning, its own open/close plumbing and its own subscription would buy nothing.
  */
 @injectable()
 export class GenerationHistoryService {
@@ -56,8 +88,14 @@ export class GenerationHistoryService {
     return full;
   }
 
-  /** List records, newest first, capped to `limit`. */
-  async list(limit = 200): Promise<GenerationRecord[]> {
+  /**
+   * List records, newest first, capped to `limit`.
+   *
+   * `kind` filters in the cursor rather than in the caller, so a `limit` of 20 means twenty records of
+   * the kind asked for — filtering afterwards would silently return three sounds because seventeen
+   * images happened to be newer.
+   */
+  async list(limit = 200, kind?: GenerationKind): Promise<GenerationRecord[]> {
     const db = await this.openDb();
     try {
       return await new Promise<GenerationRecord[]>((resolve, reject) => {
@@ -69,7 +107,10 @@ export class GenerationHistoryService {
         cursorReq.onsuccess = () => {
           const cursor = cursorReq.result;
           if (cursor && results.length < limit) {
-            results.push(cursor.value as GenerationRecord);
+            const record = cursor.value as GenerationRecord;
+            if (!kind || generationKind(record) === kind) {
+              results.push(record);
+            }
             cursor.continue();
           } else {
             resolve(results);

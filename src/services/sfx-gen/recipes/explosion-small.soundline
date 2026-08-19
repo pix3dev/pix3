@@ -1,0 +1,10 @@
+# prompt: small grenade blast, sharp crack
+# tags: grenade, blast, explosion, crack
+# Small means the crack arrives before the body and the whole thing is over in
+# half a second. The debris field is delayed by 90 ms because fragments land
+# after the blast, not with it.
+sound "grenade blast" 520ms explosion
+  crack: noise white >> hp ~2200Hz[1000..5000] | gain 0.38 decay 70ms
+  blast: noise brown >> lp ~1600Hz[500..4000] -> 300Hz in 250ms | gain 0.4 decay 320ms
+  boom: sub ~90Hz[45..160] -> 40Hz in 200ms | gain 0.42 attack 4ms decay 420ms
+  debris: grains ~1200Hz[500..3000] rate 70 width 5ms spread 2.5 bend 0.9 | gain 0.16 decay 380ms delay 90ms

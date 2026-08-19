@@ -1,0 +1,8 @@
+# prompt: short harsh error buzz for a rejected action
+# tags: ui, error, deny, buzz
+# A minor second between the two squares, kept deliberately: the beating between
+# 220 and 233 Hz is what the ear reads as "wrong", and the waveshaper only makes
+# that reading louder.
+sound "ui error" 100ms ui
+  buzz: tone square ~220Hz[140..340] >> dist drive ~3[1..8] mix 0.6 | gain 0.26 decay 90ms
+  beat: tone square ~233Hz[150..360] | gain 0.2 decay 85ms delay 6ms

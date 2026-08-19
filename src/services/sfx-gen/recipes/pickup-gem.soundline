@@ -1,0 +1,9 @@
+# prompt: sparkling gem pickup, glassy arpeggio
+# tags: gem, pickup, sparkle, reward
+# Three notes of a major triad, each one thinner than the last: the two FM
+# voices lose their modulation index as they decay, which is what a struck
+# glass does, and the last note is left to ring on a glass modal bank.
+sound "gem pickup" 500ms pickup
+  one: fm ~1568Hz[900..2400] ratio 3.5 index 4 -> 0.5 in 140ms | gain 0.3 decay 180ms
+  two: fm ~2093Hz[1200..3200] ratio 3.5 index 3.5 -> 0.5 in 140ms | gain 0.26 decay 190ms delay 90ms
+  three: modal glass ~3136Hz[1800..4800] Q90 | gain 0.24 decay 300ms delay 180ms

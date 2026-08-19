@@ -23,6 +23,12 @@ import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { LoggingService } from '@/services/core/LoggingService';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/image-gen/AssetGenService';
+import {
+  MAX_SFX_ITERATIONS,
+  SFX_DIRECTORY,
+  SfxGenService,
+  describeSfxOutcome,
+} from '@/services/sfx-gen/SfxGenService';
 import { blobToBase64, type AlphaStats } from '@/services/image-gen/image-ops';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import { Model3DExportService } from '@/services/model-gen/Model3DExportService';
@@ -334,6 +340,9 @@ export class AgentToolRegistry {
 
   @inject(AssetGenService)
   private readonly assetGen!: AssetGenService;
+
+  @inject(SfxGenService)
+  private readonly sfxGen!: SfxGenService;
 
   @inject(Model3DGenService)
   private readonly model3dGen!: Model3DGenService;
@@ -1593,6 +1602,47 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.generateAsset(args),
+      },
+      {
+        name: 'generate_sfx',
+        description:
+          "Generate a named, game-specific PROTOTYPE sound effect and save it as a WAV under `res://sfx/`. Your own LLM writes a procedural `soundline` recipe, a validator checks it against the physics of its category, and it is rendered locally — one text completion, no metered audio API, no key of its own. THE LADDER, in order: (1) for instant feedback sounds that need no file at all, call `scene.audio.sfx(preset)` from a script — the nine built-in presets are 'tap', 'score', 'bounce', 'explosion', 'powerup', 'win', 'lose', 'laser', 'tick'; zero cost, plays on the first frame; (2) when a sound needs its OWN character (a specific weapon, a specific pickup, a UI voice for this game), use this tool — the WAV it saves is a placeholder meant to be REPLACED by a sound designer's file later, keeping the same path; (3) final audio comes from outside and just overwrites the file. NEVER use this for music, ambience beds or any voice — procedural synthesis cannot do them, and the pipeline will decline (you get `ok: true` with `outcome: \"refused\"` and an explanation; that is a normal answer, not a failure to retry). Returns the saved path, duration, peak, validator warnings, and the `soundline` recipe — keep that recipe: passing it back with `feedback` edits the sound deterministically (\"duller, 100 ms shorter\") instead of re-rolling a different one.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            prompt: {
+              type: 'string',
+              description:
+                'What the sound is, in a few words — "crisp coin pickup", "small grenade blast", "soft menu hover tick". Say the material and the action; the category contract does the rest. In edit mode this is the change being asked for.',
+            },
+            name: {
+              type: 'string',
+              description: `File name for the WAV (e.g. "coin_pickup"). A bare name lands in \`${SFX_DIRECTORY}/\`; the .wav extension is added when missing. Omit to use the name the recipe gives itself.`,
+            },
+            soundline: {
+              type: 'string',
+              description:
+                'The recipe returned by a previous call, to EDIT rather than redesign. Pass it together with `feedback`: the model changes only what was asked for, so the sound stays recognisably the same one.',
+            },
+            feedback: {
+              type: 'string',
+              description:
+                'The change to make to `soundline` ("less metallic", "100 ms shorter"). Used instead of `prompt` when both are present.',
+            },
+            maxIterations: {
+              type: 'integer',
+              description: `Trips through the model, including the first (default 4, max ${MAX_SFX_ITERATIONS}). Raise it only when a sound keeps failing validation.`,
+            },
+            save: {
+              type: 'boolean',
+              description:
+                'Write the WAV into the project. Default true. Pass false to audition a recipe and iterate on it without leaving files behind.',
+            },
+          },
+          required: ['prompt'],
+          additionalProperties: false,
+        },
+        handler: args => this.generateSfx(args),
       },
       {
         name: 'process_asset',
@@ -3182,6 +3232,87 @@ export class AgentToolRegistry {
       for (const id of handleIds) {
         this.assetGen.discard(id);
       }
+    }
+  }
+
+  /**
+   * Generate one prototype SFX and (by default) save it as `res://sfx/<name>.wav`.
+   *
+   * Two outcomes are deliberately NOT errors, because both are the pipeline working and both are
+   * things the model has to explain rather than retry:
+   *
+   * - `refused` — the txt2sfx contract tells the writer to decline a human voice, a believable animal
+   *   or a real-world recording. A thrown error there reads as "try again", and the model would.
+   * - `distance` / a validator warning on an accepted recipe — the sound exists and is saved; the
+   *   caveat is information about *this* sound, not a reason to spend another completion.
+   */
+  private async generateSfx(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!(await this.sfxGen.isAvailable())) {
+      return {
+        ok: false,
+        error:
+          'No LLM is configured for the agent, so no recipe can be written. Ask the user to pick a ' +
+          'provider and model in Settings → AI Agent (or start the Pix3AgentBridge).',
+      };
+    }
+    const soundline =
+      typeof args.soundline === 'string' && args.soundline.trim() ? args.soundline : undefined;
+    const feedback =
+      typeof args.feedback === 'string' && args.feedback.trim() ? args.feedback.trim() : undefined;
+    // In edit mode the change request is the prompt; `prompt` stays required so a caller that passes
+    // only `soundline` still says what to do with it.
+    const prompt = soundline && feedback ? feedback : asString(args.prompt);
+    const save = args.save !== false;
+
+    try {
+      const result = await this.sfxGen.generate({
+        prompt,
+        ...(soundline ? { soundline } : {}),
+        ...(typeof args.maxIterations === 'number'
+          ? { maxIterations: Math.floor(args.maxIterations) }
+          : {}),
+      });
+
+      const warnings = result.issues
+        .filter(issue => issue.severity === 'warn')
+        .map(issue => `${issue.layer ? `${issue.layer}: ` : ''}${issue.rule} — ${issue.hint}`);
+      const errors = result.issues
+        .filter(issue => issue.severity === 'error')
+        .map(issue => `${issue.layer ? `${issue.layer}: ` : ''}${issue.rule} — ${issue.hint}`);
+
+      const base: Record<string, unknown> = {
+        ok: true,
+        outcome: result.outcome,
+        accepted: result.accepted,
+        note: describeSfxOutcome(result),
+        // The recipe is the master. Handing it back is what makes the next tweak a deterministic edit
+        // instead of a re-roll that changes everything the user already liked.
+        soundline: result.soundline || undefined,
+        grammarVersion: result.grammarVersion,
+        ...(warnings.length > 0 ? { warnings } : {}),
+        ...(errors.length > 0 ? { errors } : {}),
+      };
+
+      if (!result.wav) {
+        return base;
+      }
+      const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim() : '';
+      const saved = save ? await this.sfxGen.save(result, name) : null;
+      return {
+        ...base,
+        ...(saved
+          ? {
+              saved: { path: saved.path, bytes: saved.bytes },
+              // A scene/script reference is what the caller does next; spell it out.
+              resourcePath: `res://${saved.path}`,
+            }
+          : { saved: null, note: `${String(base.note)} Not saved (save: false).` }),
+        durationMs: result.durationMs,
+        peak: result.peak,
+        clipped: result.clipped,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

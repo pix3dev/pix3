@@ -1,0 +1,10 @@
+# prompt: car engine idling loop
+# tags: engine, idle, car, loop
+# The firing order is a delay line, not a sequence of notes: one sub thump
+# recirculated every 55 ms is about eleven pulses a second, which is a
+# four-cylinder at idle. Feedback is kept at 0.5 rather than the rotor's 0.88
+# because the tail has to die inside the loop period, or the seam is audible.
+sound "engine idle" 950ms cycle loop
+  chug: sub ~55Hz[35..90] >> delay ~55ms[30..110] feedback 0.5 mix 1 | gain 0.4 decay 40ms
+  rumble: noise brown >> lp ~500Hz[200..1200] | gain 0.3 attack 100ms decay 800ms
+  whir: tone saw ~180Hz[90..380] >> lp ~800Hz[300..2000] | gain 0.12 attack 150ms decay 700ms

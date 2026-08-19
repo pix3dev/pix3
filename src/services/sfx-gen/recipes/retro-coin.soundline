@@ -1,0 +1,8 @@
+# prompt: retro 8-bit coin pickup, two notes
+# tags: coin, retro, 8bit, pickup
+# The canonical arcade coin: a short note and a long one a fourth above it, both
+# square, no envelope shaping beyond the decay. The interval is the sound — the
+# same two lengths on one pitch is a stutter, not a reward.
+sound "8bit coin" 350ms pickup
+  blip: tone square ~988Hz[600..1600] | gain 0.3 decay 70ms
+  note: tone square ~1319Hz[800..2200] | gain 0.3 decay 250ms delay 70ms

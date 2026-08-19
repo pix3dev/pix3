@@ -1,0 +1,8 @@
+# prompt: soft cartoon hop
+# tags: jump, hop, cartoon, soft
+# The same rising gesture as `jump-8bit` with every hard edge removed: a sine
+# instead of a square, a 6 ms attack instead of none, and a breath of low-passed
+# noise for the feet leaving the ground.
+sound "soft hop" 220ms
+  hop: chirp sine ~260Hz[140..520] -> ~780Hz[400..1600] in 100ms | gain 0.42 attack 6ms decay 180ms
+  air: noise pink >> lp ~1800Hz[700..4000] | gain 0.12 attack 10ms decay 90ms

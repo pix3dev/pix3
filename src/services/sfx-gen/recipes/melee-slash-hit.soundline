@@ -1,0 +1,11 @@
+# prompt: sword slash connecting with a body
+# tags: slash, hit, melee, combat
+# A hit that lands is a swing with something in the way, so the swing is here
+# too — 130 ms of it before anything else starts. That gap is what a game needs
+# to line the sound up with the animation, and it is why this is one recipe
+# rather than a whoosh the engine has to schedule against a thud.
+sound "slash hit" 500ms impact
+  swing: noise white >> bp ~1600Hz[700..3600] -> ~4200Hz[2000..8000] in 120ms Q1.6 | gain 0.26 attack 40ms decay 120ms
+  cut: noise pink >> hp ~2200Hz[1000..5000] | gain 0.28 attack 0ms decay 60ms delay 130ms
+  flesh: sub ~90Hz[45..160] -> 50Hz in 80ms | gain 0.34 attack 3ms decay 220ms delay 130ms
+  ring: modal metal ~1900Hz[900..4000] Q70 | gain 0.16 decay 260ms delay 135ms

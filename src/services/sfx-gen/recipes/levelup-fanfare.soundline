@@ -1,0 +1,10 @@
+# prompt: short level-up fanfare, three rising notes
+# tags: levelup, fanfare, reward, jingle
+# A major triad walked upwards, arcade squares rather than sines because the
+# harmonics are what carry through a game mix. The last note is held two and a
+# half times as long as the first two — that is the whole shape of a fanfare.
+sound "level up" 700ms pickup
+  one: tone square ~523Hz[350..700] | gain 0.3 decay 150ms
+  two: tone square ~659Hz[450..880] | gain 0.3 decay 150ms delay 130ms
+  three: tone square ~784Hz[520..1050] | gain 0.32 decay 380ms delay 260ms
+  shine: fm ~1568Hz[1000..2400] ratio 3 index 5 -> 0.5 in 260ms | gain 0.18 decay 330ms delay 280ms

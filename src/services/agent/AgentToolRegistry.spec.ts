@@ -128,6 +128,7 @@ describe('AgentToolRegistry', () => {
         'viewport_screenshot',
         'analyze_image',
         'generate_asset',
+        'generate_sfx',
         'process_asset',
       ])
     );
@@ -671,6 +672,189 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  describe('generate_sfx', () => {
+    const COIN =
+      'sound "coin pickup" 200ms pickup\n  body: tone sine 880Hz | gain 0.8 decay 150ms\n';
+
+    const soundResult = (over: Record<string, unknown> = {}) => ({
+      outcome: 'accepted',
+      accepted: true,
+      soundline: COIN,
+      grammarVersion: 'soundline/v0',
+      issues: [],
+      llmProviderId: 'stub',
+      llmModelId: 'stub-model',
+      wav: new Blob([new Uint8Array([82, 73, 70, 70])], { type: 'audio/wav' }),
+      durationMs: 250,
+      peak: 0.8,
+      clipped: false,
+      suggestedName: 'coin_pickup',
+      ...over,
+    });
+
+    /** Named parameters, so `mock.calls[n][i]` stays typed (a bare `async () =>` infers `[]`). */
+    const makeSfxGen = (available = true) => ({
+      isAvailable: vi.fn(async () => available),
+      generate: vi.fn(async (_options: Record<string, unknown>) => soundResult()),
+      save: vi.fn(async (_result: unknown, _name: string) => ({
+        path: 'sfx/coin_pickup.wav',
+        bytes: 4,
+        durationMs: 250,
+      })),
+    });
+
+    it('refuses when no LLM lane is configured, pointing at Agent settings', async () => {
+      const sfxGen = makeSfxGen(false);
+      const registry = buildRegistry({ sfxGen });
+      const result = (await registry.execute('generate_sfx', { prompt: 'a coin' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/Settings → AI Agent/);
+      expect(sfxGen.generate).not.toHaveBeenCalled();
+    });
+
+    it('generates, saves under res://sfx/, and hands the recipe back for later edits', async () => {
+      const sfxGen = makeSfxGen();
+      const registry = buildRegistry({ sfxGen });
+
+      const result = (await registry.execute('generate_sfx', {
+        prompt: 'crisp coin pickup',
+        name: 'coin_pickup',
+      })) as Record<string, unknown>;
+
+      expect(sfxGen.generate).toHaveBeenCalledWith({ prompt: 'crisp coin pickup' });
+      expect(sfxGen.save.mock.calls[0][1]).toBe('coin_pickup');
+      expect(result.ok).toBe(true);
+      expect(result.outcome).toBe('accepted');
+      expect(result.saved).toMatchObject({ path: 'sfx/coin_pickup.wav' });
+      expect(result.resourcePath).toBe('res://sfx/coin_pickup.wav');
+      expect(result.durationMs).toBe(250);
+      expect(result.peak).toBe(0.8);
+      // The recipe is the master; without it the next tweak is a re-roll.
+      expect(result.soundline).toContain('sound "coin pickup"');
+      expect(result.grammarVersion).toBe('soundline/v0');
+    });
+
+    it('treats prompt+soundline+feedback as an edit, sending the feedback as the request', async () => {
+      const sfxGen = makeSfxGen();
+      const registry = buildRegistry({ sfxGen });
+
+      await registry.execute('generate_sfx', {
+        prompt: 'crisp coin pickup',
+        soundline: COIN,
+        feedback: 'duller, 100 ms shorter',
+      });
+
+      expect(sfxGen.generate).toHaveBeenCalledWith({
+        prompt: 'duller, 100 ms shorter',
+        soundline: COIN,
+      });
+    });
+
+    it('reports a refusal as a NORMAL result — a retry would only refuse again', async () => {
+      const sfxGen = makeSfxGen();
+      sfxGen.generate.mockResolvedValue(
+        soundResult({
+          accepted: false,
+          outcome: 'refused',
+          soundline: '',
+          wav: undefined,
+          durationMs: undefined,
+          peak: undefined,
+          message: 'A human voice is out of scope for procedural synthesis.',
+        })
+      );
+      const registry = buildRegistry({ sfxGen });
+
+      const result = (await registry.execute('generate_sfx', {
+        prompt: 'a man saying hello',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.outcome).toBe('refused');
+      expect(result.accepted).toBe(false);
+      expect(String(result.note)).toContain('out of scope');
+      expect(result.saved).toBeUndefined();
+      expect(sfxGen.save).not.toHaveBeenCalled();
+    });
+
+    it('surfaces validator warnings on an accepted sound', async () => {
+      const sfxGen = makeSfxGen();
+      sfxGen.generate.mockResolvedValue(
+        soundResult({
+          issues: [
+            {
+              severity: 'warn',
+              layer: 'body',
+              rule: 'pickup.decay',
+              got: '150ms',
+              expected: '< 120ms',
+              hint: 'Shorten the decay.',
+            },
+          ],
+        })
+      );
+      const registry = buildRegistry({ sfxGen });
+
+      const result = (await registry.execute('generate_sfx', { prompt: 'a coin' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual(['body: pickup.decay — Shorten the decay.']);
+      expect(result.errors).toBeUndefined();
+    });
+
+    it('honours save:false so a recipe can be iterated on without leaving files', async () => {
+      const sfxGen = makeSfxGen();
+      const registry = buildRegistry({ sfxGen });
+
+      const result = (await registry.execute('generate_sfx', {
+        prompt: 'a coin',
+        save: false,
+      })) as Record<string, unknown>;
+
+      expect(sfxGen.save).not.toHaveBeenCalled();
+      expect(result.saved).toBeNull();
+      expect(result.soundline).toContain('sound "coin pickup"');
+      expect(String(result.note)).toContain('Not saved');
+    });
+
+    it('clamps the iteration budget rather than trusting the caller', async () => {
+      const sfxGen = makeSfxGen();
+      const registry = buildRegistry({ sfxGen });
+      await registry.execute('generate_sfx', { prompt: 'a coin', maxIterations: 99 });
+      // The service owns the cap; the tool must not silently drop the field either.
+      expect(sfxGen.generate.mock.calls[0][0].maxIterations).toBe(99);
+    });
+
+    it('reports a save failure as an error rather than claiming success', async () => {
+      const sfxGen = makeSfxGen();
+      sfxGen.save.mockRejectedValue(new Error('No project is open — cannot save.'));
+      const registry = buildRegistry({ sfxGen });
+
+      const result = (await registry.execute('generate_sfx', { prompt: 'a coin' })) as Record<
+        string,
+        unknown
+      >;
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/No project is open/);
+    });
+
+    it('teaches the ladder and the music/voice exclusion in its description', () => {
+      const spec = buildRegistry()
+        .specs()
+        .find(tool => tool.name === 'generate_sfx');
+      expect(spec).toBeDefined();
+      const description = spec?.description ?? '';
+      expect(description).toContain('scene.audio.sfx');
+      expect(description).toMatch(/replaced by a sound designer/i);
+      expect(description).toMatch(/never use this for music, ambience beds or any voice/i);
+      expect(description).toContain('res://sfx/');
+    });
+  });
   describe('process_asset', () => {
     const makeAssetGen = () => ({
       open: vi.fn(async () => ({ id: 'img-open', width: 900, height: 700 })),

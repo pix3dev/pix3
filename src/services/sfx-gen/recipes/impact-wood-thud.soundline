@@ -1,0 +1,9 @@
+# prompt: dull wooden thud
+# tags: wood, thud, impact, hit
+# Dullness is a low Q and a low-passed transient: wood loses its high partials
+# within a few milliseconds, so anything still bright after the knock reads as
+# a different material.
+sound "wood thud" 200ms impact
+  thud: modal wood ~180Hz[90..340] Q18 | gain 0.44 decay 180ms
+  knock: click ~3ms[1..5] >> lp ~1200Hz[500..2600] | gain 0.4 attack 0ms decay 40ms
+  body: sub ~70Hz[40..120] | gain 0.28 decay 160ms

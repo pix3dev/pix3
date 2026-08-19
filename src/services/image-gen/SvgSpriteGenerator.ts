@@ -1,8 +1,11 @@
 import { inject, injectable } from '@/fw/di';
-import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
-import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
-import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
-import type { LlmContentBlock, LlmMessage, LlmModel, LlmProvider } from '@/services/llm/LlmTypes';
+import { LlmLaneResolver, type LlmLane } from '@/services/llm/LlmLaneResolver';
+import {
+  AGENT_DEFAULT_MODEL_ID,
+  formatLlmModelId,
+  parseLlmModelId,
+} from '@/services/llm/llm-model-id';
+import type { LlmContentBlock, LlmMessage } from '@/services/llm/LlmTypes';
 import { ImageGenError, type ReferenceImage } from '@/services/image-gen/ImageGenTypes';
 import {
   MAX_SVG_SOURCE_LENGTH,
@@ -12,27 +15,17 @@ import {
 } from '@/services/image-gen/svg-render';
 
 /**
- * Sentinel model id meaning "whatever the agent chat is using right now". It carries no slash, which
- * is what separates it from a pinned {@link formatSvgModelId} pick — and it deliberately re-resolves
- * on every call, so switching the agent's model in the chat switches this too.
+ * The composite-id encoding and the "use the agent's own lane" sentinel are shared with every other
+ * feature that borrows the agent chat's model (see `@/services/llm/llm-model-id`); these aliases keep
+ * the image-gen-facing names that callers and the picker already use.
  */
-export const AGENT_DEFAULT_MODEL_ID = 'agent-default';
+export { AGENT_DEFAULT_MODEL_ID };
 
 /** Image-gen `modelId` for one LLM provider+model pair (image-gen model ids are a single string). */
-export const formatSvgModelId = (providerId: string, modelId: string): string =>
-  `${providerId}/${modelId}`;
+export const formatSvgModelId = formatLlmModelId;
 
 /** Split a composite `"<llmProviderId>/<llmModelId>"` id. Null for the sentinel or malformed input. */
-export const parseSvgModelId = (
-  composite: string
-): { providerId: string; modelId: string } | null => {
-  const slash = composite.indexOf('/');
-  if (slash <= 0 || slash === composite.length - 1) {
-    return null;
-  }
-  // Split on the FIRST slash only: gateway model ids carry their own (`anthropic/claude-sonnet-4.5`).
-  return { providerId: composite.slice(0, slash), modelId: composite.slice(slash + 1) };
-};
+export const parseSvgModelId = parseLlmModelId;
 
 /** What the generator was asked to draw. */
 export interface SvgSpriteRequest {
@@ -58,16 +51,8 @@ export interface SvgSpriteResult {
   readonly llmModelId: string;
 }
 
-/**
- * A resolved LLM lane: provider + model + endpoint. Deliberately key-free so it can be resolved
- * synchronously (the model picker needs it); the credential is read separately, at call time.
- */
-export interface SvgLlmTarget {
-  readonly provider: LlmProvider;
-  readonly modelId: string;
-  readonly baseUrl?: string;
-  readonly model?: LlmModel;
-}
+/** A resolved LLM lane: provider + model + endpoint. See {@link LlmLane}. */
+export type SvgLlmTarget = LlmLane;
 
 const MAX_OUTPUT_TOKENS = 8192;
 /** One retry: models that fluff the format once nearly always get it right when shown the failure. */
@@ -151,14 +136,8 @@ const toImageBlocks = (references: readonly ReferenceImage[]): LlmContentBlock[]
  */
 @injectable()
 export class SvgSpriteGenerator {
-  @inject(AgentSettingsService)
-  private readonly agentSettings!: AgentSettingsService;
-
-  @inject(LlmProviderRegistry)
-  private readonly llmRegistry!: LlmProviderRegistry;
-
-  @inject(LlmModelCatalogService)
-  private readonly catalog!: LlmModelCatalogService;
+  @inject(LlmLaneResolver)
+  private readonly lanes!: LlmLaneResolver;
 
   /**
    * The lane a given image-gen `modelId` resolves to. A composite id pins a provider+model; the
@@ -166,35 +145,12 @@ export class SvgSpriteGenerator {
    * stored pick for a bridge lane that is currently down degrades instead of failing.
    */
   resolveTarget(modelId?: string): SvgLlmTarget | null {
-    const composite = modelId ? parseSvgModelId(modelId) : null;
-    if (composite) {
-      const provider = this.llmRegistry.get(composite.providerId);
-      if (provider) {
-        return this.describeTarget(provider, composite.modelId);
-      }
-    }
-    const provider = this.agentSettings.getSelectedProvider();
-    if (!provider) {
-      return null;
-    }
-    const selectedModelId = this.agentSettings.getSelectedModelId(provider.id) ?? '';
-    if (!selectedModelId) {
-      return null;
-    }
-    return this.describeTarget(provider, selectedModelId);
+    return this.lanes.resolve(modelId);
   }
 
   /** Whether an LLM lane is usable right now (drives the "no key needed, but is one reachable?" check). */
   async isAvailable(): Promise<boolean> {
-    const target = this.resolveTarget();
-    if (!target) {
-      return false;
-    }
-    try {
-      return Boolean(await this.agentSettings.getApiKey(target.provider.id));
-    } catch {
-      return false;
-    }
+    return this.lanes.isAvailable();
   }
 
   /** Models offered in the image-gen picker: the agent's current lane, as composite ids. */
@@ -204,16 +160,7 @@ export class SvgSpriteGenerator {
     description?: string;
     supportsImages: boolean;
   }> {
-    const provider = this.agentSettings.getSelectedProvider();
-    if (!provider) {
-      return [];
-    }
-    return this.catalog.getModels(provider.id).map(model => ({
-      id: formatSvgModelId(provider.id, model.id),
-      label: `${provider.label} · ${model.label}`,
-      description: model.description,
-      supportsImages: model.capabilities.supportsImages,
-    }));
+    return this.lanes.listOptions().map(option => ({ ...option }));
   }
 
   /** Whether the lane behind `modelId` can see reference images. */
@@ -234,7 +181,7 @@ export class SvgSpriteGenerator {
           '(or start the Pix3AgentBridge) — the SVG provider draws with the agent’s model.'
       );
     }
-    const apiKey = (await this.agentSettings.getApiKey(target.provider.id)) ?? '';
+    const apiKey = await this.lanes.getApiKey(target);
     if (!apiKey) {
       throw new ImageGenError(
         'missing-key',
@@ -302,15 +249,6 @@ export class SvgSpriteGenerator {
   }
 
   // -- internals -------------------------------------------------------------
-
-  private describeTarget(provider: LlmProvider, modelId: string): SvgLlmTarget {
-    return {
-      provider,
-      modelId,
-      baseUrl: this.agentSettings.getBaseUrl(provider.id),
-      model: this.catalog.getModel(provider.id, modelId) ?? provider.getModel(modelId),
-    };
-  }
 
   private async chat(
     target: SvgLlmTarget,

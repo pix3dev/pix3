@@ -43,3 +43,17 @@ packages/pix3-collab-server/projects/
 # project opened in the editor must not drag them into a commit.
 .pix3/
 repomix-output.xml
+
+# yalc: a linked local copy of another repo's build output — currently `@txt2sfx/*`, the SFX engine
+# behind `generate_sfx`, while it is still an unpublished workspace package. The `file:.yalc/...`
+# entries in package.json ARE committed (they say which mechanism the dependency uses today); the
+# copied dist is not, because it is somebody else's build rather than source.
+#
+# The consequence to know: `npm install` on a fresh clone cannot resolve those entries until the
+# store is refilled. From a checkout of https://github.com/txt2sfx/txt2sfx:
+#   tsc -b packages/shared packages/core packages/analyzer packages/optimizer packages/agent
+#   (cd packages/<name> && npx yalc publish)   # shared, core, analyzer, optimizer, agent — in order
+#   npx yalc add @txt2sfx/shared @txt2sfx/core @txt2sfx/analyzer @txt2sfx/optimizer @txt2sfx/agent
+# Publishing `@txt2sfx/*` to npm retires this whole paragraph and is the intended end state.
+.yalc/
+yalc.lock
