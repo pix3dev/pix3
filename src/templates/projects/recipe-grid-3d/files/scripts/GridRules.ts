@@ -141,8 +141,12 @@ export class GridRules extends Script {
     this.adoptBoardCount();
 
     this.setNodeVisible(String(this.config.resultNode ?? ''), false);
+    // Both end-screen buttons start disabled, because in THIS recipe the menu button lives inside
+    // the hidden `result-overlay` (the 2D recipes park theirs in the always-visible HUD, where
+    // enabling it is right). Leaving it enabled read as "you can leave mid-run" while the control
+    // was invisible and sitting over the middle of the board.
     this.bindButton(String(this.config.retryButton ?? ''), () => this.scene?.commands.dispatch('restart'), false);
-    this.bindButton(String(this.config.menuButton ?? ''), () => this.scene?.commands.dispatch('return-to-menu'), true);
+    this.bindButton(String(this.config.menuButton ?? ''), () => this.scene?.commands.dispatch('return-to-menu'), false);
     this.broadcast();
   }
 
@@ -185,6 +189,7 @@ export class GridRules extends Script {
     }
     this.setNodeVisible(String(this.config.resultNode ?? ''), true);
     this.setButtonEnabled(String(this.config.retryButton ?? ''), true);
+    this.setButtonEnabled(String(this.config.menuButton ?? ''), true);
     this.node?.emit(won ? 'game-won' : 'game-lost', this.score);
   }
 

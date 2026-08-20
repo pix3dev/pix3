@@ -16,7 +16,7 @@ export class PointLightNode extends Node3D {
 
   constructor(props: PointLightNodeProps) {
     super(props, 'PointLight');
-    const color = new Color(props.color ?? '#ffffff').convertSRGBToLinear();
+    const color = new Color(props.color ?? '#ffffff');
     const intensity = typeof props.intensity === 'number' ? props.intensity : 1;
     const distance = typeof props.distance === 'number' ? props.distance : 0;
     const decay = typeof props.decay === 'number' ? props.decay : 2;
@@ -35,7 +35,7 @@ export class PointLightNode extends Node3D {
           ui: { label: 'Color', group: 'Light' },
           getValue: (n: unknown) => '#' + (n as PointLightNode).light.color.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as PointLightNode).light.color.set(String(v)).convertSRGBToLinear();
+            (n as PointLightNode).light.color.set(String(v));
           },
         }),
         defineProperty('intensity', 'number', {

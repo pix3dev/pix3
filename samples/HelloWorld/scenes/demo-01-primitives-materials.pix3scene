@@ -31,7 +31,7 @@ root:
         name: Key Light
         properties:
           intensity: 2.2
-          color: "#ffe7be"
+          color: "#fff4e0"
           castShadow: true
           shadowCameraSize: 24
           shadowMapSize: 2048
@@ -44,8 +44,8 @@ root:
         type: HemisphereLightNode
         name: Sky Fill
         properties:
-          skyColor: "#80afff"
-          groundColor: "#0b0604"
+          skyColor: "#bcd8ff"
+          groundColor: "#3b2a22"
           intensity: 0.7
           transform:
             position: [0, 6, 0]
@@ -56,7 +56,7 @@ root:
         type: AmbientLightNode
         name: Ambient
         properties:
-          color: "#040406"
+          color: "#22222a"
           intensity: 0.4
           transform:
             position: [0, 0, 0]
@@ -67,7 +67,7 @@ root:
         type: PointLightNode
         name: Accent Point
         properties:
-          color: "#ff2500"
+          color: "#ff6a00"
           intensity: 30
           distance: 22
           decay: 2
@@ -81,7 +81,7 @@ root:
         type: SpotLightNode
         name: Rim Spot
         properties:
-          color: "#2267ff"
+          color: "#66aaff"
           intensity: 40
           distance: 40
           angle: 32

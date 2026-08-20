@@ -567,11 +567,20 @@ export abstract class UIControl2D extends Node2D implements Interactive {
   }
 
   /**
-   * Whether the funnel would accept a synthetic frame at `point` — the two gates that make a
-   * semantic invocation fail honestly rather than silently do nothing.
+   * Whether the funnel would accept a synthetic frame at `point` — the gates that make a semantic
+   * invocation fail honestly rather than silently do nothing.
+   *
+   * Visibility belongs here and not in the "bypassed" column: the semantic channel exists to skip
+   * ONE premise, that a finger can physically reach the control on screen. Whether the control is
+   * on screen *at all* is a different claim, and a `click` that reports success on a control inside
+   * a hidden panel would let an agent walk through a menu the player cannot open.
    */
   protected canAcceptSemanticPointer(point: Vector2 = this.getSemanticPointerPoint()): boolean {
-    return this.enabled && this.isPointerAllowedByAncestorScrollContainers(point);
+    return (
+      this.enabled &&
+      this.isVisibleInTree() &&
+      this.isPointerAllowedByAncestorScrollContainers(point)
+    );
   }
 
   /** Drop any semantic hold and return the control to real input. */
@@ -646,6 +655,18 @@ export abstract class UIControl2D extends Node2D implements Interactive {
     // A disabled control accepts nothing and must not stay stuck in a state it can no longer
     // leave, so drop hover/press instead of freezing them mid-interaction.
     if (!this.enabled) {
+      this.cancelPointerInteraction();
+      return;
+    }
+
+    // Hiding a panel has to make its controls inert, and nothing upstream does that for us:
+    // `NodeBase.tick` recurses into invisible children on purpose (components on a hidden node keep
+    // running), and three.js only skips the subtree when it RENDERS. Without this gate a button
+    // under a hidden overlay still hovers, presses and clicks — and registers a hover, so
+    // `isPointerOverUI` reports the finger as being over UI that nobody can see. That is not
+    // hypothetical: a hidden end-screen sits over the middle of the playfield in every scene built
+    // from the game recipes, and a drag across it opened its menu button mid-run.
+    if (!this.isVisibleInTree()) {
       this.cancelPointerInteraction();
       return;
     }

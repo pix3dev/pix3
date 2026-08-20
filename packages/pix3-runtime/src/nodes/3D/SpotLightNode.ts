@@ -20,7 +20,7 @@ export class SpotLightNode extends Node3D {
 
   constructor(props: SpotLightNodeProps) {
     super(props, 'SpotLight');
-    const color = new Color(props.color ?? '#ffffff').convertSRGBToLinear();
+    const color = new Color(props.color ?? '#ffffff');
     const intensity = typeof props.intensity === 'number' ? props.intensity : 1;
     const distance = typeof props.distance === 'number' ? props.distance : 0;
     const angle = typeof props.angle === 'number' ? props.angle : Math.PI / 3;
@@ -74,7 +74,7 @@ export class SpotLightNode extends Node3D {
           ui: { label: 'Color', group: 'Light' },
           getValue: (n: unknown) => '#' + (n as SpotLightNode).light.color.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as SpotLightNode).light.color.set(String(v)).convertSRGBToLinear();
+            (n as SpotLightNode).light.color.set(String(v));
           },
         }),
         defineProperty('intensity', 'number', {

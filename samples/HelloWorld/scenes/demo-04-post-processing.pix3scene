@@ -91,7 +91,7 @@ root:
         type: PointLightNode
         name: Fill Point
         properties:
-          color: "#88aaff"
+          color: "#c1d5ff"
           intensity: 25
           distance: 25
           decay: 2

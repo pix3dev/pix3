@@ -62,7 +62,7 @@ root:
         type: HemisphereLightNode
         name: Sky Fill
         properties:
-          skyColor: "#0a2cff"
+          skyColor: "#3873ff"
           groundColor: "#000000"
           intensity: 0.9
           transform:
@@ -75,7 +75,7 @@ root:
         name: Key Light
         properties:
           intensity: 1
-          color: "#ff520b"
+          color: "#ff9a3b"
           castShadow: true
           shadowCameraSize: 20
           shadowMapSize: 2048

@@ -82,7 +82,7 @@ describe('GeometryMesh material family', () => {
 
     const material = materialOf(mesh) as MeshLambertMaterial;
     expect(material).toBeInstanceOf(MeshLambertMaterial);
-    expect('#' + material.color.clone().convertLinearToSRGB().getHexString()).toBe('#ff8800');
+    expect('#' + material.color.getHexString()).toBe('#ff8800');
     expect((mesh.serializeConfig().material as Record<string, unknown>).roughness).toBeUndefined();
   });
 

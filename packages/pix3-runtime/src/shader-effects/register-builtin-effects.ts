@@ -83,7 +83,7 @@ float pix3Noise(vec2 p){
     uPix3DissolveAmount: { value: 0 },
     uPix3DissolveScale: { value: 8 },
     uPix3DissolveEdgeWidth: { value: 0.05 },
-    uPix3DissolveEdgeColor: { value: new Color('#ffae42').convertSRGBToLinear() },
+    uPix3DissolveEdgeColor: { value: new Color('#ffae42') },
   }),
 };
 
@@ -135,7 +135,7 @@ uniform float uPix3RimPower;`,
     },
   ],
   createUniforms: () => ({
-    uPix3RimColor: { value: new Color('#ffffff').convertSRGBToLinear() },
+    uPix3RimColor: { value: new Color('#ffffff') },
     uPix3RimIntensity: { value: 1 },
     uPix3RimPower: { value: 2 },
   }),
@@ -225,7 +225,7 @@ uniform float uPix3FlashAmount;`,
     },
   ],
   createUniforms: () => ({
-    uPix3FlashColor: { value: new Color('#ffffff').convertSRGBToLinear() },
+    uPix3FlashColor: { value: new Color('#ffffff') },
     uPix3FlashAmount: { value: 0 },
   }),
 };
@@ -373,7 +373,7 @@ uniform float uPix3TintAmount;`,
     },
   ],
   createUniforms: () => ({
-    uPix3TintColor: { value: new Color('#ffffff').convertSRGBToLinear() },
+    uPix3TintColor: { value: new Color('#ffffff') },
     uPix3TintAmount: { value: 1 },
   }),
 };

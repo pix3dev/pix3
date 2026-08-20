@@ -382,6 +382,16 @@ button raised on the first finger down and dropped by the last one up.
 conversion (null when that pointer is not down — a tap that went down and up in
 one frame is already gone, so fall back to the no-argument call).
 
+**A hidden control takes no input.** `UIControl2D` gates both channels — a real
+finger and a semantic `invokeInteraction` — on `visible` being true on the control
+*and every ancestor* (`NodeBase.isVisibleInTree()`, the Godot
+`is_visible_in_tree` line: boolean only, a fully transparent control still
+responds). So hiding a panel is enough to take its buttons out of play; you do not
+also have to disable them, and a hidden control no longer registers hover, so
+`isPointerOverUI` stops claiming a finger that is over nothing. Note what this does
+**not** change: `tick` still runs on hidden nodes on purpose, so components on a
+hidden node (a spawner, a timer, a state machine) keep working.
+
 ### Signals (node events)
 `node.connect(name, target, method)` / `disconnect` / `emit(name, ...args)`. The
 decoupled event bus between nodes, scripts, animation event tracks, and juice

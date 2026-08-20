@@ -54,8 +54,8 @@ root:
         type: HemisphereLightNode
         name: Sky Fill
         properties:
-          skyColor: "#cfe4ff"
-          groundColor: "#2a241c"
+          skyColor: "#e9f3ff"
+          groundColor: "#71695d"
           intensity: 0.7
           transform:
             position: [0, 6, 0]

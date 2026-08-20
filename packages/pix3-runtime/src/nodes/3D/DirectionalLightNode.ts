@@ -20,7 +20,7 @@ export class DirectionalLightNode extends Node3D {
 
   constructor(props: DirectionalLightNodeProps) {
     super(props, 'DirectionalLight');
-    const color = new Color(props.color ?? '#ffffff').convertSRGBToLinear();
+    const color = new Color(props.color ?? '#ffffff');
     const intensity = typeof props.intensity === 'number' ? props.intensity : 1;
     this.light = new DirectionalLight(color, intensity);
     this.light.castShadow = props.castShadow ?? true;
@@ -78,7 +78,7 @@ export class DirectionalLightNode extends Node3D {
           ui: { label: 'Color', group: 'Light' },
           getValue: (n: unknown) => '#' + (n as DirectionalLightNode).light.color.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as DirectionalLightNode).light.color.set(String(v)).convertSRGBToLinear();
+            (n as DirectionalLightNode).light.color.set(String(v));
           },
         }),
         defineProperty('intensity', 'number', {

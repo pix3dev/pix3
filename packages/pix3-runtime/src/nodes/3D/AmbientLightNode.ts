@@ -13,7 +13,7 @@ export class AmbientLightNode extends Node3D {
 
   constructor(props: AmbientLightNodeProps) {
     super(props, 'AmbientLight');
-    const color = new Color(props.color ?? '#ffffff').convertSRGBToLinear();
+    const color = new Color(props.color ?? '#ffffff');
     const intensity = typeof props.intensity === 'number' ? props.intensity : 0.5;
     this.light = new AmbientLight(color, intensity);
     this.add(this.light);
@@ -28,7 +28,7 @@ export class AmbientLightNode extends Node3D {
           ui: { label: 'Color', group: 'Light' },
           getValue: (n: unknown) => '#' + (n as AmbientLightNode).light.color.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as AmbientLightNode).light.color.set(String(v)).convertSRGBToLinear();
+            (n as AmbientLightNode).light.color.set(String(v));
           },
         }),
         defineProperty('intensity', 'number', {

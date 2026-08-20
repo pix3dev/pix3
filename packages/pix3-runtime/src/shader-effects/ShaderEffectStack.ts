@@ -370,7 +370,7 @@ export class ShaderEffectStack {
         (uniform as { value: number }).value = Number(value);
         break;
       case 'color':
-        (uniform.value as Color).set(String(value)).convertSRGBToLinear();
+        (uniform.value as Color).set(String(value));
         break;
       case 'vector2': {
         const vec = value as { x: number; y: number };

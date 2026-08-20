@@ -319,7 +319,7 @@ float pix3Noise(vec2 p){
 #endif
 ```
 
-Color uniforms stored linear: setters do `new Color(hex).convertSRGBToLinear()` into `uniform.value` (same convention as `material.color`, `GeometryMesh.ts:68`); getters convert back like the existing `color` prop (:355-357).
+Color uniforms stored linear: setters do `new Color(hex)` into `uniform.value` — `Color.set` already converts the authored sRGB hex into the linear working space, so do NOT call `convertSRGBToLinear()` on top (same convention as `material.color`; the double conversion was a real bug, see `.plans/srgb-double-conversion-fix.md`). Getters serialize the authored hex from `effect.params`, never read back from the uniform.
 
 ## 3. Node API + schema
 

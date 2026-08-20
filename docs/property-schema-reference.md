@@ -86,6 +86,13 @@ while `'color'` gets the picker + a compact hex field; a fixed value set typed `
 free text, while `'select'`/`'enum'` (with `ui.options`) gets a dropdown. Numbers, colours and enums
 are also width-capped in the Inspector — only text and resource pickers span the row.
 
+`'color'` values are **authored sRGB hex strings** (`'#rrggbb'`). Pass them straight to
+`Color.set(value)` in `setValue` and read them straight back with `'#' + color.getHexString()` in
+`getValue` — three's `ColorManagement` is enabled, so those two calls already do the sRGB ↔ linear
+conversion. Never add `convertSRGBToLinear()` / `convertLinearToSRGB()`; that applies the transfer
+function twice and renders the colour far too dark (see the colour entry in `CLAUDE.md`, guarded by
+`packages/pix3-runtime/src/core/color-convention.spec.ts`).
+
 ```typescript
 interface PropertyDefinition {
   name: string;                     // property key, dotted for components (e.g. "position.x")

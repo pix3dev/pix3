@@ -159,7 +159,7 @@ export class GeometryMesh
     const geometry = GeometryMesh.buildGeometry(geometryKind, this._size);
 
     const mat = props.material ?? {};
-    const color = new Color(mat.color ?? '#4e8df5').convertSRGBToLinear();
+    const color = new Color(mat.color ?? '#4e8df5');
     const roughness = typeof mat.roughness === 'number' ? mat.roughness : 0.35;
     const metalness = typeof mat.metalness === 'number' ? mat.metalness : 0.25;
 
@@ -588,7 +588,7 @@ export class GeometryMesh
     const colorMat = this._colorMaterial;
     const material: Record<string, unknown> = { type: this._materialType };
     if (colorMat) {
-      material.color = '#' + colorMat.color.clone().convertLinearToSRGB().getHexString();
+      material.color = '#' + colorMat.color.getHexString();
     }
     // Roughness/metalness are meaningless off `standard`; writing them anyway would resurrect PBR
     // values the moment someone switched the material back, which is not what they authored.
@@ -679,11 +679,11 @@ export class GeometryMesh
           ui: { label: 'Color', group: 'Material' },
           getValue: (n: unknown) => {
             const mat = (n as GeometryMesh)._colorMaterial;
-            return mat ? '#' + mat.color.clone().convertLinearToSRGB().getHexString() : '#4e8df5';
+            return mat ? '#' + mat.color.getHexString() : '#4e8df5';
           },
           setValue: (n: unknown, v: unknown) => {
             const mat = (n as GeometryMesh)._colorMaterial;
-            if (mat) mat.color.set(String(v)).convertSRGBToLinear();
+            if (mat) mat.color.set(String(v));
           },
         }),
         defineProperty('roughness', 'number', {

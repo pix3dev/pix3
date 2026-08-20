@@ -14,8 +14,8 @@ export class HemisphereLightNode extends Node3D {
 
   constructor(props: HemisphereLightNodeProps) {
     super(props, 'HemisphereLight');
-    const skyColor = new Color(props.skyColor ?? '#ffffff').convertSRGBToLinear();
-    const groundColor = new Color(props.groundColor ?? '#444444').convertSRGBToLinear();
+    const skyColor = new Color(props.skyColor ?? '#ffffff');
+    const groundColor = new Color(props.groundColor ?? '#444444');
     const intensity = typeof props.intensity === 'number' ? props.intensity : 0.5;
     this.light = new HemisphereLight(skyColor, groundColor, intensity);
     this.add(this.light);
@@ -30,7 +30,7 @@ export class HemisphereLightNode extends Node3D {
           ui: { label: 'Sky Color', group: 'Light' },
           getValue: (n: unknown) => '#' + (n as HemisphereLightNode).light.color.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as HemisphereLightNode).light.color.set(String(v)).convertSRGBToLinear();
+            (n as HemisphereLightNode).light.color.set(String(v));
           },
         }),
         defineProperty('groundColor', 'color', {
@@ -38,7 +38,7 @@ export class HemisphereLightNode extends Node3D {
           getValue: (n: unknown) =>
             '#' + (n as HemisphereLightNode).light.groundColor.getHexString(),
           setValue: (n: unknown, v: unknown) => {
-            (n as HemisphereLightNode).light.groundColor.set(String(v)).convertSRGBToLinear();
+            (n as HemisphereLightNode).light.groundColor.set(String(v));
           },
         }),
         defineProperty('intensity', 'number', {

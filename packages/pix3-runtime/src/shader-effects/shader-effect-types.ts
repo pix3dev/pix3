@@ -58,9 +58,10 @@ export interface ShaderEffectParamDef {
   default: ShaderEffectParamValue;
   /**
    * Name of the uniform in this effect's bag to sync when the param changes.
-   * `color` params are pushed through `Color.set(hex).convertSRGBToLinear()`
-   * (matches `material.color`). Omit for CPU-only params (e.g. uv-scroll speed,
-   * which feeds `onTick` instead of a uniform).
+   * `color` params are pushed through `Color.set(hex)` — which already converts
+   * the authored sRGB hex into the linear working space, so never convert again
+   * by hand (matches `material.color`). Omit for CPU-only params (e.g. uv-scroll
+   * speed, which feeds `onTick` instead of a uniform).
    */
   uniform?: string;
   ui?: PropertyUIHints;

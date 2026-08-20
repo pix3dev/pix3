@@ -342,6 +342,30 @@ export class NodeBase extends Object3D {
   }
 
   /**
+   * Whether this node is visible all the way up to the scene root.
+   *
+   * `visible` is per-node — three.js skips a hidden subtree at render time but never folds the flag
+   * into the children — so "can the player see this" is a walk, not a property read. Input gating
+   * is what needs it: {@link tick} deliberately keeps running on hidden nodes (a hidden spawner,
+   * timer or state machine must keep working), so nothing upstream filters a hidden control out and
+   * it has to ask before it accepts a finger.
+   *
+   * Boolean only: a fully transparent node still counts as visible here, the same line Godot's
+   * `is_visible_in_tree` draws. Fading something out is not the same statement as taking it away,
+   * and a control that stopped responding halfway through a fade would be the surprising one.
+   */
+  isVisibleInTree(): boolean {
+    let node: Object3D | null = this;
+    while (node) {
+      if (!node.visible) {
+        return false;
+      }
+      node = node.parent;
+    }
+    return true;
+  }
+
+  /**
    * Tick method called every frame to update scripts.
    * Calls onUpdate on enabled components and recursively on children.
    * @param dt - Delta time in seconds since last frame
