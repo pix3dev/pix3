@@ -26,6 +26,36 @@ export interface EvalAgentSummary {
   messageCount: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Prompt tokens served from cache, and written to it — the two halves of the caching bet. */
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  /** Tool-use rounds this conversation spent, and the cap it was allowed. */
+  iterationsUsed?: number;
+  iterationCap?: number;
+}
+
+/**
+ * Counted, not judged: the cost side of a run.
+ *
+ * A scorecard that only says "the game works" cannot tell an improvement from an equally-good run
+ * that took three times the tokens — and every planned change to the agent's tools (source access, a
+ * probe, one multi-edit instead of thirty replacements) is a bet about exactly these numbers. They
+ * are derived from the recorded tool calls and the conversation, so they cost nothing to collect and
+ * cannot be argued with afterwards.
+ */
+export interface EvalRunMetrics {
+  toolCalls: number;
+  /**
+   * Calls that asked the compiler whether the last edit type-checks. A high count next to a working
+   * result is the signature of guessing at an API instead of reading it.
+   */
+  compileRoundTrips: number;
+  /** Calls that read the engine's own source (the alternative to guessing). */
+  engineReads: number;
+  /** Screenshots taken. Verifying by picture what state could have answered is the expensive path. */
+  screenshots: number;
+  /** Calls that read live runtime state (game_observe / game_run / game_trace / read_errors). */
+  stateVerifications: number;
 }
 
 /** One recorded tool call from the agent's conversation, in emission order. */
@@ -233,6 +263,7 @@ export interface EvalReport {
   total: number;
   checks: EvalCheckResult[];
   agent: EvalAgentSummary;
+  metrics: EvalRunMetrics;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +305,25 @@ export async function runEvalSpec(harness: EvalHarness, spec: EvalSpec): Promise
     total: results.length,
     checks: results,
     agent: harness.agentSummary(),
+    metrics: runMetrics(harness.toolCalls()),
+  };
+}
+
+/** Tool names counted into {@link EvalRunMetrics}, by what the call was FOR. */
+const COMPILE_TOOLS = new Set(['compile_scripts', 'check_scripts']);
+const ENGINE_READ_TOOLS = new Set(['engine_read', 'engine_search']);
+const SCREENSHOT_TOOLS = new Set(['viewport_screenshot', 'analyze_image']);
+const STATE_TOOLS = new Set(['game_observe', 'game_run', 'game_trace', 'read_errors', 'read_logs']);
+
+function runMetrics(calls: readonly EvalToolCall[]): EvalRunMetrics {
+  const count = (names: ReadonlySet<string>): number =>
+    calls.reduce((total, call) => total + (names.has(call.name) ? 1 : 0), 0);
+  return {
+    toolCalls: calls.length,
+    compileRoundTrips: count(COMPILE_TOOLS),
+    engineReads: count(ENGINE_READ_TOOLS),
+    screenshots: count(SCREENSHOT_TOOLS),
+    stateVerifications: count(STATE_TOOLS),
   };
 }
 

@@ -202,27 +202,56 @@ export class AgentSettingsService {
 
   /** Resolve the selected model id for a provider (falls back to its first model). */
   getSelectedModelId(providerId: string): string | undefined {
+    return this.resolveSelectedModel(providerId).modelId;
+  }
+
+  /**
+   * Which model will actually serve the next turn, and whether that is the one the user picked.
+   *
+   * A stale selection has to be replaced — sending a dead model id just fails — but replacing it
+   * *silently* is worse than failing: the substitute can be a different tier (this provider list is
+   * ordered `fable, opus, sonnet, haiku`, so falling back to index 0 turns a Haiku pick into the
+   * most expensive model in the lane, and an Opus pick into a different family), and the user goes
+   * on attributing the run's behaviour and cost to a model that never ran. So the substitution is
+   * reported, and it prefers a model of the same *tier* — matched on the tier word in the id, which
+   * is how every provider in this registry names them — before giving up on the first entry.
+   *
+   * The stored preference is never rewritten: if the model comes back to the catalog, so does the
+   * user's original pick.
+   */
+  resolveSelectedModel(providerId: string): {
+    modelId: string | undefined;
+    /** The stored pick, when it could not be honoured. Absent when nothing was substituted. */
+    requested?: string;
+  } {
     const prefs = this.ensureLoaded();
     const provider = this.registry.get(providerId);
     if (!provider) {
-      return undefined;
+      return { modelId: undefined };
     }
     const stored = prefs.modelByProvider[providerId];
     if (stored) {
       // Providers that accept arbitrary ids (OpenAI-compatible / local) or fetch a live catalog
       // (their real model set is wider than the static fallback list) pass any stored id through.
-      // For static fixed-list providers, a stored id no longer in the list (e.g. a deprecated
-      // Gemini model) falls back to the first model so a stale selection can't keep sending a
-      // dead id.
       if (
         provider.requiresBaseUrl ||
         typeof provider.listModels === 'function' ||
         provider.models.some(model => model.id === stored)
       ) {
-        return stored;
+        return { modelId: stored };
       }
+      const substitute = pickClosestModelId(stored, provider.models);
+      return substitute ? { modelId: substitute, requested: stored } : { modelId: undefined };
     }
-    return provider.models[0]?.id;
+    return { modelId: provider.models[0]?.id };
+  }
+
+  /** The pick that could not be honoured for this provider, or null when nothing was substituted. */
+  getModelSubstitution(providerId: string): { requested: string; resolved: string } | null {
+    const resolved = this.resolveSelectedModel(providerId);
+    return resolved.requested && resolved.modelId
+      ? { requested: resolved.requested, resolved: resolved.modelId }
+      : null;
   }
 
   /**
@@ -399,4 +428,43 @@ export class AgentSettingsService {
     const snapshot = this.getPreferences();
     this.listeners.forEach(listener => listener(snapshot));
   }
+}
+
+/**
+ * Tier words that appear in model ids across the providers in this registry. A stale pick is
+ * replaced with a model of the same tier when one exists, because tier is what the user was
+ * actually choosing — "the cheap one" or "the strong one" — and any other substitution changes the
+ * answer's cost and quality without saying so.
+ */
+const MODEL_TIER_WORDS = [
+  'opus',
+  'sonnet',
+  'haiku',
+  'fable',
+  'pro',
+  'flash-lite',
+  'flash',
+  'mini',
+  'nano',
+] as const;
+
+/** The tier word in a model id, or null when it names none. */
+function modelTier(modelId: string): string | null {
+  const id = modelId.toLowerCase();
+  return MODEL_TIER_WORDS.find(word => id.includes(word)) ?? null;
+}
+
+/**
+ * The closest available model to a stale pick: same tier if the catalog has one, else the first
+ * entry (which is a real substitution and is reported as such by the caller).
+ */
+function pickClosestModelId(stored: string, models: readonly { id: string }[]): string | undefined {
+  const tier = modelTier(stored);
+  if (tier) {
+    const sameTier = models.find(model => modelTier(model.id) === tier);
+    if (sameTier) {
+      return sameTier.id;
+    }
+  }
+  return models[0]?.id;
 }

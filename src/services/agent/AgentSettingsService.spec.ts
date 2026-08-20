@@ -304,4 +304,84 @@ describe('AgentSettingsService', () => {
     expect(secrets.store.get('ai-provider:pix3-bridge:token')).toBe('bridge-token');
     expect(await service.getApiKey('opencode-zen')).toBe('bridge-token');
   });
+  /**
+   * A stale model pick must be replaced — sending a dead id just fails — but a silent replacement is
+   * the worse failure: the substitute can be a different tier, and the user keeps attributing the
+   * run's quality and cost to a model that never answered. This is not hypothetical; a lane whose
+   * list is ordered `fable, opus, sonnet, haiku` turns any stale pick into the first entry.
+   */
+  describe('a model pick that can no longer be honoured', () => {
+    const caps = {
+      supportsTools: true,
+      supportsImages: true,
+      supportsSystemPrompt: true,
+      maxOutputTokens: 32_000,
+    };
+    /** Static fixed-list provider, ordered the way the bridge lane orders its models. */
+    const staticLane = (): LlmProvider => ({
+      id: 'static-lane',
+      label: 'Static lane',
+      models: [
+        { id: 'claude-fable-5', label: 'Fable 5', capabilities: caps },
+        { id: 'claude-opus-4-8', label: 'Opus 4.8', capabilities: caps },
+        { id: 'claude-sonnet-5', label: 'Sonnet 5', capabilities: caps },
+        { id: 'claude-haiku-4-5', label: 'Haiku 4.5', capabilities: caps },
+      ],
+      apiKeySecretId: 'ai-provider:static-lane:api-key',
+      getModel: () => undefined,
+      chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+    });
+
+    const withStaticLane = (): AgentSettingsService => {
+      const service = new AgentSettingsService();
+      const registry = new LlmProviderRegistry();
+      registry.setBridgeProviders([...bridgeStubs(), staticLane()]);
+      Object.defineProperty(service, 'registry', { value: registry, configurable: true });
+      Object.defineProperty(service, 'secrets', {
+        value: new FakeSecretStorage(),
+        configurable: true,
+      });
+      return service;
+    };
+
+    it('honours a pick that is still offered, and reports no substitution', () => {
+      const service = withStaticLane();
+      service.updatePreferences({ modelByProvider: { 'static-lane': 'claude-sonnet-5' } });
+      expect(service.getSelectedModelId('static-lane')).toBe('claude-sonnet-5');
+      expect(service.getModelSubstitution('static-lane')).toBeNull();
+    });
+
+    it('substitutes within the same tier rather than the head of the list', () => {
+      const service = withStaticLane();
+      // The tier the user was choosing ("the strong one") still exists under a newer version.
+      service.updatePreferences({ modelByProvider: { 'static-lane': 'claude-opus-5' } });
+      expect(service.getSelectedModelId('static-lane')).toBe('claude-opus-4-8');
+      expect(service.getModelSubstitution('static-lane')).toEqual({
+        requested: 'claude-opus-5',
+        resolved: 'claude-opus-4-8',
+      });
+    });
+
+    it('falls back to the first model when no tier matches — and still says so', () => {
+      const service = withStaticLane();
+      service.updatePreferences({ modelByProvider: { 'static-lane': 'gpt-9-turbo' } });
+      expect(service.getSelectedModelId('static-lane')).toBe('claude-fable-5');
+      expect(service.getModelSubstitution('static-lane')?.requested).toBe('gpt-9-turbo');
+    });
+
+    it('keeps the stored pick, so it comes back when the model does', () => {
+      const service = withStaticLane();
+      service.updatePreferences({ modelByProvider: { 'static-lane': 'claude-opus-5' } });
+      service.getSelectedModelId('static-lane');
+      expect(service.getPreferences().modelByProvider['static-lane']).toBe('claude-opus-5');
+    });
+
+    it('never substitutes on a live-catalog provider: the stored id is sent as-is', () => {
+      const service = withStaticLane();
+      // `opencode-zen` declares listModels, so its real catalog is wider than the static list.
+      service.updatePreferences({ modelByProvider: { 'opencode-zen': 'some-new-model' } });
+      expect(service.getSelectedModelId('opencode-zen')).toBe('some-new-model');
+      expect(service.getModelSubstitution('opencode-zen')).toBeNull();
+    });
+  });
 });

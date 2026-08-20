@@ -3,6 +3,12 @@ import { appState } from '@/state';
 import { guessMimeType } from '@/core/remote-preview/protocol';
 import { ensureAssetTypeFolder } from '@/core/asset-categories';
 import {
+  ENGINE_PATH_PREFIX,
+  loadEngineSources,
+  readEngineSource,
+  searchEngineSources,
+} from '@/core/engine-source';
+import {
   clearScriptDiagnosticErrors,
   componentToDTO,
   errors as capturedErrors,
@@ -524,7 +530,8 @@ export class AgentToolRegistry {
       },
       {
         name: 'node_inspect',
-        description: 'Full detail of one node: transform, properties, and script components.',
+        description:
+          "Full detail of one node: transform, properties, and script components. These are the AUTHORED values from the editor's scene — while the game is playing the running node may hold different ones (a script moved it, retextured it, rewrote its label), and the result then carries `authoredWhilePlaying` saying so. Verify a running game with game_observe, never with this.",
         inputSchema: {
           type: 'object',
           properties: { nodeId: { type: 'string' } },
@@ -823,6 +830,60 @@ export class AgentToolRegistry {
             asString(args.path),
             args.offset === undefined ? undefined : asInt(args.offset, 1),
             args.limit === undefined ? undefined : asInt(args.limit, 0)
+          ),
+      },
+      {
+        name: 'engine_search',
+        description: `Search the ENGINE's own source (\`${ENGINE_PATH_PREFIX}src/**\`) — the shipped \`@pix3/runtime\` that your scripts import. Read-only ground truth: this is what the code actually does, so prefer it over guessing a property name from documentation, and use it whenever a compile error names a type you did not write (\`does not exist in type 'ShakeOptions'\` → search \`interface ShakeOptions\` and read the fields). It cannot be edited — it is the engine inside this editor build, not a project file. Returns matches as \`{path, line, text}\` (feed \`line\` straight to engine_read's \`offset\`), plus \`matchCount\`/\`truncated\` so a flood of hits reads as "narrow the query" rather than "that is all of them".`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Literal substring, or a regex with regex:true.',
+            },
+            regex: { type: 'boolean' },
+            pathFilter: {
+              type: 'string',
+              description: 'Only search paths containing this text, e.g. `nodes/2D` or `JuiceApi`.',
+            },
+            maxMatches: { type: 'integer', description: 'Default 40, max 200.' },
+            contextLines: {
+              type: 'integer',
+              description: 'Lines of context around each hit (max 4). Cheaper than a full read.',
+            },
+          },
+          required: ['query'],
+          additionalProperties: false,
+        },
+        handler: async args =>
+          searchEngineSources(await loadEngineSources(), {
+            query: asString(args.query),
+            regex: args.regex === true,
+            pathFilter: args.pathFilter === undefined ? undefined : asString(args.pathFilter),
+            maxMatches: args.maxMatches === undefined ? undefined : asInt(args.maxMatches, 40),
+            contextLines: args.contextLines === undefined ? undefined : asInt(args.contextLines, 0),
+          }),
+      },
+      {
+        name: 'engine_read',
+        description: `Read a slice of one ENGINE source file (read-only; see engine_search). Paths are package-relative — \`${ENGINE_PATH_PREFIX}src/core/JuiceApi.ts\` — and the shorter forms (\`src/core/JuiceApi.ts\`, or just \`JuiceApi.ts\` when unambiguous) resolve too; a path that does not resolve comes back with \`suggestions\` instead of a dead end. Use \`offset\` (1-based line) + \`limit\` to read around a search hit rather than pulling whole files: the engine has files thousands of lines long, and the interface you need is usually 20 of them.`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            offset: { type: 'integer', description: '1-based line to start from (default 1).' },
+            limit: { type: 'integer', description: 'Lines to return (default 200, max 800).' },
+          },
+          required: ['path'],
+          additionalProperties: false,
+        },
+        handler: async args =>
+          readEngineSource(
+            await loadEngineSources(),
+            asString(args.path),
+            args.offset === undefined ? 1 : asInt(args.offset, 1),
+            args.limit === undefined ? undefined : asInt(args.limit, 200)
           ),
       },
       {
@@ -1929,10 +1990,23 @@ export class AgentToolRegistry {
     };
   }
 
-  private nodeInspect(nodeId: string): (NodeDTO & { components?: unknown[] }) | null {
+  private nodeInspect(
+    nodeId: string
+  ): (NodeDTO & { components?: unknown[]; authoredWhilePlaying?: string }) | null {
     const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
     if (!(node instanceof NodeBase)) return null;
-    const dto = nodeToDTO(node, 0);
+    const dto: NodeDTO & { components?: unknown[]; authoredWhilePlaying?: string } = nodeToDTO(
+      node,
+      0
+    );
+    // Unlike scene_tree's `staleWhilePlaying`, this fires even when the running game is in the SAME
+    // scene, because that is the case that misleads: the authored label of a result overlay reads
+    // "YOU WIN" for the whole run while the live node says whatever the rules script last wrote.
+    // Measured: a verification pass "confirmed" a win text it had never actually observed.
+    if (appState.ui.isPlaying) {
+      dto.authoredWhilePlaying =
+        'The game is PLAYING and these are the AUTHORED values — the live node may differ (scripts mutate labels, transforms, textures at runtime). Read the running state with game_observe.';
+    }
     // Enrich each component with the explicit ids the mutation tools need (componentId + type),
     // which the generic ComponentDTO only exposes ambiguously as `scriptId`.
     dto.components = node.components.map((c, i) => ({

@@ -1249,6 +1249,13 @@ export class AgentChatPanel extends ComponentBase {
     const autoHint = this.providerAutoSelected
       ? '\nAuto-selected (a paired bridge wins over the built-in Gemini) — pick a model to pin it.'
       : '';
+    // Same reasoning one step down: a model that was substituted for a stale pick has to say so.
+    // Otherwise the picker shows a model the user never chose, and every judgment about the run —
+    // how good it was, what it cost — gets attributed to a model that did not answer.
+    const substitution = this.settings.getModelSubstitution(this.providerId);
+    const substitutionHint = substitution
+      ? `\nSubstituted for "${substitution.requested}", which this provider no longer offers — pick a model to replace it.`
+      : '';
     return html`
       <button
         type="button"
@@ -1258,7 +1265,7 @@ export class AgentChatPanel extends ComponentBase {
         aria-haspopup="listbox"
         aria-expanded=${String(this.modelPickerOpen)}
         title=${this.keyConfigured
-          ? `${providerHint} · ${label}${autoHint}`
+          ? `${providerHint} · ${label}${autoHint}${substitutionHint}`
           : `No API key for ${providerHint || 'this provider'} — click to add one`}
         @click=${() => this.toggleModelPicker()}
       >
@@ -1268,6 +1275,11 @@ export class AgentChatPanel extends ComponentBase {
               >${this.icons.getIcon('key', IconSize.SMALL)}</span
             >`}
         <span class="agent-model-picker-label">${label}</span>
+        ${substitution
+          ? html`<span class="agent-model-picker-substituted" aria-label="Substituted model"
+              >!</span
+            >`
+          : null}
         ${providerHint ? html`<span class="agent-model-picker-hint">${providerHint}</span>` : null}
         <span class="agent-model-picker-caret"
           >${this.icons.getIcon('chevron-down-caret', IconSize.SMALL)}</span

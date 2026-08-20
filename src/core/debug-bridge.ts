@@ -327,12 +327,26 @@ function createEvalHarness(): EvalHarness {
     },
     agentSummary() {
       const state = service<AgentChatService>(AgentChatService).getState();
+      // Iterations are counted from the history rather than tracked by the loop: one assistant
+      // message carrying tool calls IS one tool-use round, and reading it back this way also works
+      // for a conversation restored from storage, which a live counter would report as zero.
+      const iterationsUsed = state.messages.reduce((total, message) => {
+        if (message.role !== 'assistant' || typeof message.content === 'string') {
+          return total;
+        }
+        return total + (message.content.some(block => block.type === 'tool-use') ? 1 : 0);
+      }, 0);
       return {
         status: state.status,
         notice: state.notice,
         messageCount: state.messages.length,
         inputTokens: state.totalUsage.inputTokens,
         outputTokens: state.totalUsage.outputTokens,
+        cacheReadTokens: state.totalUsage.cacheReadTokens,
+        cacheCreationTokens: state.totalUsage.cacheCreationTokens,
+        iterationsUsed,
+        iterationCap:
+          service<AgentSettingsService>(AgentSettingsService).getPreferences().maxToolIterations,
       };
     },
     findNodes(query) {

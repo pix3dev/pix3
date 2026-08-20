@@ -1252,6 +1252,23 @@ pix3-agent-chat-panel .agent-model-picker-hint {
   display: none;
 }
 
+/* A model that stands in for a stale pick. Warning-coloured, not error-coloured: the agent works,
+   it just is not the model that was chosen — and the tooltip names the one that is missing. */
+pix3-agent-chat-panel .agent-model-picker-substituted {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: var(--bg-0);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 pix3-agent-chat-panel .agent-model-picker-caret {
   display: inline-flex;
   flex: 0 0 auto;

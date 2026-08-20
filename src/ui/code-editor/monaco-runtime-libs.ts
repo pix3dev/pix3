@@ -15,6 +15,8 @@
 
 import type * as Monaco from 'monaco-editor';
 
+import { ENGINE_SOURCE_LOADERS } from '@/core/engine-source';
+
 /** A virtual file registered with the TS worker. */
 export interface MonacoLib {
   /** Virtual `file:///…` path used for module resolution. */
@@ -22,16 +24,10 @@ export interface MonacoLib {
   readonly content: string;
 }
 
-// Runtime TypeScript sources. Same glob shape as PlayableHtmlBuildService so
-// Vite emits the modules once and reuses them here.
-const RUNTIME_SOURCE_LOADERS = import.meta.glob(
-  [
-    '../../../packages/pix3-runtime/src/**/*.ts',
-    '../../../packages/pix3-runtime/src/**/*.js',
-    '../../../packages/pix3-runtime/src/**/*.json',
-  ],
-  { query: '?raw', import: 'default' }
-) as Record<string, () => Promise<string>>;
+// Runtime TypeScript sources, shared with `@/core/engine-source` (which serves the same files to
+// the agent's engine_read/engine_search). One glob, two consumers: the type worker and the agent
+// must never end up type-checking against one copy of the engine and reading another.
+const RUNTIME_SOURCE_LOADERS = ENGINE_SOURCE_LOADERS;
 
 // three.js type declarations (three itself ships none; @types/three does).
 // Registered under `file:///node_modules/three/**` so the bare `three`
