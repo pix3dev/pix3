@@ -241,33 +241,32 @@ export class ProjectLifecycleService {
 
     const hasUnsavedChanges = this.editorTabService.getDirtyTabs().length > 0;
 
-    if (appState.ui.warnOnUnsavedUnload && hasUnsavedChanges) {
-      const choice = await this.dialogService.showChoice({
-        title: 'Close Project',
-        message: 'You have unsaved changes. Save them before closing the project?',
-        confirmLabel: 'Save',
-        secondaryLabel: "Don't Save",
-        cancelLabel: 'Cancel',
-        secondaryIsDangerous: true,
-      });
-
-      if (choice === 'cancel') {
-        return false;
-      }
-
-      if (choice === 'confirm') {
-        await this.editorTabService.saveDirtyTabs();
-      }
-
+    // Closing a project is cheap and reversible (the recent list and the project link both lead
+    // straight back), so it only asks when there is work that would be lost. Anything else — a
+    // clean project, or unsaved work with the warning switched off — closes without a dialog,
+    // which is what makes the menu logo a one-click way back to the welcome screen.
+    if (!appState.ui.warnOnUnsavedUnload || !hasUnsavedChanges) {
       return true;
     }
 
-    return this.dialogService.showConfirmation({
+    const choice = await this.dialogService.showChoice({
       title: 'Close Project',
-      message: 'Are you sure you want to close the project?',
-      confirmLabel: 'Close Project',
+      message: 'You have unsaved changes. Save them before closing the project?',
+      confirmLabel: 'Save',
+      secondaryLabel: "Don't Save",
       cancelLabel: 'Cancel',
+      secondaryIsDangerous: true,
     });
+
+    if (choice === 'cancel') {
+      return false;
+    }
+
+    if (choice === 'confirm') {
+      await this.editorTabService.saveDirtyTabs();
+    }
+
+    return true;
   }
 
   private async createProjectInternal(

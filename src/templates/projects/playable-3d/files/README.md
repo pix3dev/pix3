@@ -6,10 +6,10 @@ A Pix3 project created from the **Playable 3D** template — a portrait playable
 
 - **Tap-to-start intro** (`intro-overlay`) — the first tap unlocks browser audio and starts the game (`scripts/GameFlow.ts`).
 - **Gameplay placeholder** — replace the demo box and ground in `main.pix3scene` with your game.
-- **End screen with CTA** (`end-screen`) — the PLAY NOW button calls the engine Playable SDK (`playable.openStore`); set your store URL in the `user:CtaButton` component config on `cta-button`.
+- **End screen with CTA** (`end-screen`) — the PLAY NOW button reports game end (`playable.gameEnd()`) and logs the click. It opens nothing: the ad network decides the store target at delivery time (`mraid.open` / `dapi.openStoreUrl`), so wire its SDK in `CtaButton.ctaClick()` when you package the ad.
 - `GameFlow` shows the end screen automatically after `autoWinAfterSec` seconds — replace that with your real win/lose condition.
 - **Readable state** — `GameFlow` publishes a `registerGameDebug` snapshot (phase, timer, overlay visibility, session end), so tooling reads the run's state instead of judging it from a screenshot. Add your own fields as you add state.
-- **Intent-first handlers** — every reaction to the player is a named method (`GameFlow.start/finish/restart`, `CtaButton.ctaClick/openStore`) that the event handler merely calls; keep that shape and the game stays drivable by intent.
+- **Intent-first handlers** — every reaction to the player is a named method (`GameFlow.start/finish/restart`, `CtaButton.ctaClick`) that the event handler merely calls; keep that shape and the game stays drivable by intent.
 - **Canonical roots** — `game-root` holds the 3D scene, `hud-root` the 2D overlay layer (intro gate, HUD, end screen); routines and assertions address them by those ids.
 
 ## Project structure

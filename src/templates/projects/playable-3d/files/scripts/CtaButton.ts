@@ -1,8 +1,11 @@
 /**
  * CtaButton — the playable's call-to-action. Attach to a Button2D; on press it
- * reports game end and opens the store page via the engine Playable SDK
- * (`mraid.open` when an ad network provides it, `window.open` otherwise).
- * Set your real store URL in the component config.
+ * reports game end and logs the click. It deliberately does NOT open a store
+ * page: which URL a playable opens (and whether it opens one at all) is decided
+ * by the ad network at delivery time via `mraid.open` / `dapi.openStoreUrl`, so
+ * a hardcoded store URL in a template is a wrong default that ships a real
+ * navigation out of the game on every tap. Wire the network SDK here when you
+ * package the ad; until then the log is the whole contract.
  *
  * The press handler does nothing itself: it dispatches the named command
  * `cta-click`, whose handler is the intent method `ctaClick()`. Keep that shape
@@ -11,40 +14,11 @@
  * the wiring survives any relayout of the UI, and one real tap is enough to
  * prove the button still raises the intent it claims.
  */
-import { Script, playable, type PropertySchema } from '@pix3/runtime';
+import { Script, playable } from '@pix3/runtime';
 import type { NodeBase } from '@pix3/runtime';
 
 export class CtaButton extends Script {
   private disposeCommands: (() => void)[] = [];
-
-  constructor(id: string, type: string) {
-    super(id, type);
-    this.config = {
-      storeUrl: 'https://play.google.com/store/apps',
-    };
-  }
-
-  static getPropertySchema(): PropertySchema {
-    return {
-      nodeType: 'CtaButton',
-      properties: [
-        {
-          name: 'storeUrl',
-          type: 'string',
-          ui: {
-            label: 'Store URL',
-            description: 'App store page opened when the button is pressed',
-            group: 'CTA',
-          },
-          getValue: s => (s as CtaButton).config.storeUrl,
-          setValue: (s, v) => {
-            (s as CtaButton).config.storeUrl = typeof v === 'string' ? v : '';
-          },
-        },
-      ],
-      groups: { CTA: { label: 'Call To Action', expanded: true } },
-    };
-  }
 
   onAttach(node: NodeBase): void {
     node.connect('pressed', this, this.handlePressed);
@@ -56,7 +30,7 @@ export class CtaButton extends Script {
     const commands = this.scene?.commands;
     this.disposeCommands = [
       commands?.register('cta-click', () => this.ctaClick(), {
-        description: 'Accept the call to action: end the session and open the store page.',
+        description: 'Accept the call to action: end the session and report the CTA click.',
       }),
     ].filter((dispose): dispose is () => void => dispose !== undefined);
   }
@@ -69,15 +43,10 @@ export class CtaButton extends Script {
     super.onDetach();
   }
 
-  /** Intent: the player accepted the call to action — end the session and go to the store. */
+  /** Intent: the player accepted the call to action — end the session and report the click. */
   ctaClick(): void {
     playable.gameEnd();
-    this.openStore();
-  }
-
-  /** Intent: open the configured store page through the Playable SDK. */
-  openStore(): void {
-    playable.openStore(String(this.config.storeUrl ?? ''));
+    console.info(`[CtaButton] CTA clicked (${this.node?.name ?? this.node?.id ?? 'unknown node'})`);
   }
 
   private handlePressed = (): void => {

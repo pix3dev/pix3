@@ -973,3 +973,49 @@ pix3-welcome .welcome-dropzone {
     max-height: 11rem;
   }
 }
+
+/* ── Projects column fills the card ───────────────────────────────────────────
+   Above the stacking breakpoint both columns share one grid row, so the project
+   list is handed the leftover height of that row instead of stopping at its own
+   cap and leaving dead space under it. Below the breakpoint the columns stack and
+   the capped, self-scrolling list is still the right shape — hence the guard. */
+@media (min-width: 961px) {
+  pix3-welcome .welcome-columns {
+    align-items: stretch;
+  }
+
+  pix3-welcome .welcome-column--secondary {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  pix3-welcome .welcome-column--secondary .recent-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* The card must stay the same height whatever the active tab holds — one project
+     or forty, cloud or local. So the panel takes the row's leftover height and its
+     content is lifted out of intrinsic sizing entirely: an absolutely positioned
+     child contributes nothing to the row's auto height, which is what a plain
+     `flex: 1` + `overflow: auto` could not do (auto grid rows size to max-content,
+     so the list still inflated the card). */
+  pix3-welcome .welcome-column--secondary .project-tabs__panel {
+    position: relative;
+    flex: 1;
+    max-height: none;
+    /* Floor for the case nobody plans for: a viewport short enough that the row has
+       no leftover left to give. */
+    min-height: 8rem;
+    overflow: visible;
+  }
+
+  pix3-welcome .welcome-column--secondary .project-tabs__scroll {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+  }
+}

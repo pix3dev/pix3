@@ -124,8 +124,8 @@ export const FALLBACK_RECIPE_ID = 'recipe-arena-2d';
 /** Recipe ids the planner may choose from, with the one-liners it needs to choose well. */
 /**
  * Recipe ids the planner may pick that are served by an existing template folder under another
- * name. The playable-ad "recipe" is the shipped `playable-2d` template (tap-gate + CTA + store
- * hook) promoted into the catalog with a `design/recipe.md`; without this alias the planner's
+ * name. The playable-ad "recipe" is the shipped `playable-2d` template (tap-gate + CTA hook)
+ * promoted into the catalog with a `design/recipe.md`; without this alias the planner's
  * correct answer would silently fall back to the arena recipe.
  */
 const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {

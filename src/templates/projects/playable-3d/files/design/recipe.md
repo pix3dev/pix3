@@ -43,7 +43,7 @@ of a light.
 | `hud-label` | in-game text line |
 | `intro-overlay` → `intro-dim`, `intro-label` | the tap gate; the first tap hides it, starts the game, unlocks browser audio |
 | `end-screen` → `end-dim`, `end-label`, `cta-button` | end screen, hidden at start |
-| `cta-button` | hosts `CtaButton` — `playable.gameEnd()` + `playable.openStore(storeUrl)` |
+| `cta-button` | hosts `CtaButton` — `playable.gameEnd()` + a `[CtaButton] CTA clicked` log; the store call belongs to the ad network SDK, not to the template |
 
 `GameFlow.finish()` reveals the end screen; call it from your gameplay code for a
 real win/lose instead of the placeholder timer.
@@ -61,7 +61,6 @@ tunables:
   autoWinAfterSec: { node: hud-root, component: "user:GameFlow", property: autoWinAfterSec, min: 0, max: 120, default: 15 }
   introNode: { node: hud-root, component: "user:GameFlow", property: introNode, default: intro-overlay }
   endNode: { node: hud-root, component: "user:GameFlow", property: endNode, default: end-screen }
-  ctaUrl: { node: cta-button, component: "user:CtaButton", property: storeUrl, default: "https://play.google.com/store/apps" }
   keyLightIntensity: { node: key-light, property: intensity, min: 0, max: 4, default: 1.2 }
   ambientIntensity: { node: ambient-light, property: intensity, min: 0, max: 2, default: 0.5 }
 ```

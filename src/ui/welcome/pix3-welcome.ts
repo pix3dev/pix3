@@ -668,7 +668,9 @@ export class Pix3Welcome extends ComponentBase {
     if (entry.backend === 'cloud') {
       return 'Cloud';
     }
-    return entry.backend === 'browser' ? 'Browser' : 'Local';
+    // Both rows under the Local Projects tab are local; the badge says WHERE, so a
+    // file-system project reads "Folder" rather than repeating the tab's own word.
+    return entry.backend === 'browser' ? 'Browser' : 'Folder';
   }
 
   private getProjectBadgeClass(entry: RecentProjectEntry): string {
@@ -1019,114 +1021,116 @@ export class Pix3Welcome extends ComponentBase {
                 </div>
 
                 <div class="project-tabs__panel" role="tabpanel">
-                  ${this.activeTab === 'cloud'
-                    ? html`
-                        ${!this.isAuthenticated
-                          ? html`
-                              <div class="cloud-auth-status">
-                                <button
-                                  type="button"
-                                  class="cloud-auth-status__button"
-                                  @click=${this.onLoginRequest}
-                                >
-                                  Login
-                                </button>
-                                <div class="cloud-auth-status__hint">
-                                  Login to load cloud projects.
+                  <div class="project-tabs__scroll">
+                    ${this.activeTab === 'cloud'
+                      ? html`
+                          ${!this.isAuthenticated
+                            ? html`
+                                <div class="cloud-auth-status">
+                                  <button
+                                    type="button"
+                                    class="cloud-auth-status__button"
+                                    @click=${this.onLoginRequest}
+                                  >
+                                    Login
+                                  </button>
+                                  <div class="cloud-auth-status__hint">
+                                    Login to load cloud projects.
+                                  </div>
                                 </div>
-                              </div>
-                            `
-                          : this.cloudProjectsLoading && this.cloudProjects.length === 0
-                            ? html`<div class="recent-empty">Loading cloud projects...</div>`
-                            : this.cloudProjects.length
-                              ? html`<ul>
-                                    ${this.cloudProjects.map(p => {
-                                      const isDeleting = this.deletingCloudProjectId === p.id;
-                                      return html`<li>
-                                        <div class="recent-row">
-                                          <button
-                                            class="recent-item"
-                                            data-cloud-id="${p.id}"
-                                            ?disabled=${isDeleting}
-                                            @click=${this.onCloudProject}
+                              `
+                            : this.cloudProjectsLoading && this.cloudProjects.length === 0
+                              ? html`<div class="recent-empty">Loading cloud projects...</div>`
+                              : this.cloudProjects.length
+                                ? html`<ul>
+                                      ${this.cloudProjects.map(p => {
+                                        const isDeleting = this.deletingCloudProjectId === p.id;
+                                        return html`<li>
+                                          <div class="recent-row">
+                                            <button
+                                              class="recent-item"
+                                              data-cloud-id="${p.id}"
+                                              ?disabled=${isDeleting}
+                                              @click=${this.onCloudProject}
+                                            >
+                                              <span class="folder-icon" aria-hidden="true"
+                                                >${this.iconService.getIcon(
+                                                  'cloud-outline',
+                                                  18
+                                                )}</span
+                                              >
+                                              <span class="recent-name">${p.name}</span>
+                                              <span class="recent-backend">Cloud</span>
+                                              <span class="recent-time"
+                                                >${this.formatTime(
+                                                  new Date(p.updated_at).getTime()
+                                                )}</span
+                                              >
+                                            </button>
+                                            ${this.isCloudProjectOwner(p)
+                                              ? html`
+                                                  <button
+                                                    class="cloud-project-delete"
+                                                    type="button"
+                                                    data-cloud-delete-id="${p.id}"
+                                                    ?disabled=${isDeleting}
+                                                    @click=${this.onDeleteCloudProject}
+                                                    aria-label="Delete cloud project ${p.name}"
+                                                  >
+                                                    ${isDeleting ? 'Deleting...' : 'Delete'}
+                                                  </button>
+                                                `
+                                              : null}
+                                          </div>
+                                        </li>`;
+                                      })}
+                                    </ul>
+                                    ${this.cloudProjectsError
+                                      ? html`<div class="recent-error">
+                                          ${this.cloudProjectsError}
+                                        </div>`
+                                      : null}`
+                                : html`<div class="recent-empty">No cloud projects yet.</div>`}
+                        `
+                      : html`
+                          ${localProjectItems.length
+                            ? html`<ul>
+                                ${localProjectItems.map(
+                                  ({ entry, recentIndex }) =>
+                                    html`<li>
+                                      <div class="recent-row">
+                                        <button
+                                          class="recent-item"
+                                          data-recent-index="${recentIndex}"
+                                          @click=${this.onRecent}
+                                        >
+                                          <span class="folder-icon" aria-hidden="true"
+                                            >${this.getProjectIcon(entry)}</span
                                           >
-                                            <span class="folder-icon" aria-hidden="true"
-                                              >${this.iconService.getIcon(
-                                                'cloud-outline',
-                                                18
-                                              )}</span
-                                            >
-                                            <span class="recent-name">${p.name}</span>
-                                            <span class="recent-backend">Cloud</span>
-                                            <span class="recent-time"
-                                              >${this.formatTime(
-                                                new Date(p.updated_at).getTime()
-                                              )}</span
-                                            >
-                                          </button>
-                                          ${this.isCloudProjectOwner(p)
-                                            ? html`
-                                                <button
-                                                  class="cloud-project-delete"
-                                                  type="button"
-                                                  data-cloud-delete-id="${p.id}"
-                                                  ?disabled=${isDeleting}
-                                                  @click=${this.onDeleteCloudProject}
-                                                  aria-label="Delete cloud project ${p.name}"
-                                                >
-                                                  ${isDeleting ? 'Deleting...' : 'Delete'}
-                                                </button>
-                                              `
-                                            : null}
-                                        </div>
-                                      </li>`;
-                                    })}
-                                  </ul>
-                                  ${this.cloudProjectsError
-                                    ? html`<div class="recent-error">
-                                        ${this.cloudProjectsError}
-                                      </div>`
-                                    : null}`
-                              : html`<div class="recent-empty">No cloud projects yet.</div>`}
-                      `
-                    : html`
-                        ${localProjectItems.length
-                          ? html`<ul>
-                              ${localProjectItems.map(
-                                ({ entry, recentIndex }) =>
-                                  html`<li>
-                                    <div class="recent-row">
-                                      <button
-                                        class="recent-item"
-                                        data-recent-index="${recentIndex}"
-                                        @click=${this.onRecent}
-                                      >
-                                        <span class="folder-icon" aria-hidden="true"
-                                          >${this.getProjectIcon(entry)}</span
+                                          <span class="recent-name">${entry.name}</span>
+                                          <span class=${this.getProjectBadgeClass(entry)}
+                                            >${this.getProjectBadgeLabel(entry)}</span
+                                          >
+                                          <span class="recent-time"
+                                            >${this.formatTime(entry.lastOpenedAt)}</span
+                                          >
+                                        </button>
+                                        <button
+                                          class="recent-remove"
+                                          title="Remove from recent"
+                                          data-recent-index="${recentIndex}"
+                                          @click=${this.onRemoveRecent}
+                                          aria-label="Remove recent"
                                         >
-                                        <span class="recent-name">${entry.name}</span>
-                                        <span class=${this.getProjectBadgeClass(entry)}
-                                          >${this.getProjectBadgeLabel(entry)}</span
-                                        >
-                                        <span class="recent-time"
-                                          >${this.formatTime(entry.lastOpenedAt)}</span
-                                        >
-                                      </button>
-                                      <button
-                                        class="recent-remove"
-                                        title="Remove from recent"
-                                        data-recent-index="${recentIndex}"
-                                        @click=${this.onRemoveRecent}
-                                        aria-label="Remove recent"
-                                      >
-                                        ${this.iconService.getIcon('x-close', 12)}
-                                      </button>
-                                    </div>
-                                  </li>`
-                              )}
-                            </ul>`
-                          : html`<div class="recent-empty">No local projects yet.</div>`}
-                      `}
+                                          ${this.iconService.getIcon('x-close', 12)}
+                                        </button>
+                                      </div>
+                                    </li>`
+                                )}
+                              </ul>`
+                            : html`<div class="recent-empty">No local projects yet.</div>`}
+                        `}
+                  </div>
                 </div>
               </div>
             </aside>

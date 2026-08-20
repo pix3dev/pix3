@@ -236,6 +236,5 @@ root:
               - id: cta-action
                 type: user:CtaButton
                 enabled: true
-                config:
-                  storeUrl: "https://play.google.com/store/apps"
+                config: {}
             children: []

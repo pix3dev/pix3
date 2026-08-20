@@ -121,7 +121,6 @@ import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
 import type { WorkspaceMode } from '@/state/AppState';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
-import { ProjectService } from '@/services/project/ProjectService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
@@ -169,9 +168,6 @@ import './pix3-editor-shell.ts.css';
 export class Pix3EditorShell extends ComponentBase {
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
-
-  @inject(ProjectService)
-  private readonly projectService!: ProjectService;
 
   @inject(AuthService)
   private readonly authService!: AuthService;
@@ -289,7 +285,7 @@ export class Pix3EditorShell extends ComponentBase {
 
   @state()
   private currentHash =
-    typeof window !== 'undefined' ? window.location.hash || '#editor' : '#editor';
+    typeof window !== 'undefined' ? window.location.hash || '#welcome' : '#welcome';
 
   @state()
   private dialogs: DialogInstance[] = [];
@@ -695,15 +691,17 @@ export class Pix3EditorShell extends ComponentBase {
       this.scriptExecutionService.onSceneChanged(activeSceneId);
     });
 
-    // If the app was reloaded (HMR) and the URL indicates the editor, try to auto-open
-    // the most recent project so the shell will initialize and avoid showing the welcome UI.
+    // Landing on the editor is a welcome-screen landing, never an implicit session resume: a
+    // project is reopened only on purpose — by following a project link (the URL the router keeps
+    // stamped while a project is open, so a reload of that tab still restores) or by picking an
+    // entry from the welcome screen's recent list. Auto-opening the last project on every visit
+    // got in the way of the common case, which is coming here to try a new idea.
     try {
       if (typeof window !== 'undefined' && window.location.hash === '') {
-        // Default to editor if no hash is set
-        window.location.hash = '#editor';
+        window.location.hash = '#welcome';
       }
 
-      this.currentHash = window.location.hash || '#editor';
+      this.currentHash = window.location.hash || '#welcome';
 
       const isEditor =
         window.location.hash.startsWith('#editor') || window.location.hash.startsWith('#flow');
@@ -711,32 +709,11 @@ export class Pix3EditorShell extends ComponentBase {
         const { currentParams } = appState.router;
         const noTargetFound = !currentParams.projectId && !currentParams.localSessionId;
 
-        // If a project is not already open, attempt to open the most recent one (best-effort).
+        // An `#editor`/`#flow` URL carrying no project (bookmark, or a link that lost its query)
+        // has nothing for the router to restore — send it to the welcome screen so the recent
+        // list is one click away instead of leaving an empty shell behind.
         if (noTargetFound && appState.project.status !== 'ready') {
-          const recents = this.projectService.getRecentProjects();
-          // `recents` is sorted by lastOpenedAt (most recent first). Restore the
-          // most recently opened project regardless of backend — previously we
-          // always preferred any browser project over a local one, so a local
-          // project opened later would still lose to an older browser project on
-          // reload. Cloud entries are only openable while authenticated, so skip
-          // those when signed out.
-          const preferredRecent =
-            recents.find(
-              entry =>
-                entry.backend === 'browser' ||
-                entry.backend === 'local' ||
-                (entry.backend === 'cloud' && this.isAuthenticated)
-            ) ?? null;
-
-          if (preferredRecent) {
-            // Don't block the UI; attempt to open the most recent project in background.
-            void this.projectService.openRecentProject(preferredRecent).catch(() => {
-              // If auto-open fails (permission denied or no handle), redirect to welcome.
-              window.location.hash = '#welcome';
-            });
-          } else {
-            window.location.hash = '#welcome';
-          }
+          window.location.hash = '#welcome';
         }
       }
     } catch {
