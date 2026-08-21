@@ -1,6 +1,10 @@
 import type { PropertyValues } from 'lit';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
-import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
+import {
+  AgentChatService,
+  type AgentChatState,
+  type AgentTextAttachment,
+} from '@/services/agent/AgentChatService';
 import { DialogService } from '@/services/editor/DialogService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { LightboxService, type LightboxItem } from '@/services/editor/LightboxService';
@@ -21,6 +25,27 @@ const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif|svg|avif|bmp)$/i;
 
 /** Every `res://…` reference in the markdown source, image or not. */
 const RES_REFERENCE = /res:\/\/[^\s)'"<>\]]+/g;
+
+/** How much of the rendered selection is quoted back as the "focus" hint. */
+const FOCUS_HINT_LIMIT = 200;
+
+/**
+ * A live selection inside the rendered document, resolved back to the markdown source.
+ *
+ * `startLine`/`endLine` are 0-based inclusive line indices into {@link Pix3IdeaDoc.source} — the
+ * snapshot that was rendered, never "the current file", which the agent may already have rewritten.
+ */
+interface IdeaDocSelection {
+  readonly startLine: number;
+  readonly endLine: number;
+  /** The source slice covering the selected blocks — valid markdown, and a `str_replace` needle. */
+  readonly slice: string;
+  /** What the user actually highlighted, as rendered text (a hint, not the edit target). */
+  readonly rendered: string;
+  /** Viewport coordinates for the floating toolbar (CSS pixels, `position: fixed`). */
+  readonly left: number;
+  readonly top: number;
+}
 
 /**
  * The idea-stage design document: the game's brief (`design/gdd.md`) rendered as readable HTML in
@@ -79,6 +104,10 @@ export class Pix3IdeaDoc extends ComponentBase {
   @state()
   private agentRunning = false;
 
+  /** The live selection inside the rendered document, or `null` when there is none to act on. */
+  @state()
+  private selection: IdeaDocSelection | null = null;
+
   /** `res://` path → object URL, for images currently referenced by {@link source}. */
   private readonly blobUrls = new Map<string, string>();
 
@@ -95,6 +124,9 @@ export class Pix3IdeaDoc extends ComponentBase {
     // The overlay lives on `document.body`, outside every panel that clips with `overflow: hidden`.
     ensureLightboxHost();
     this.disposeAgent = this.agentChat.subscribe(state => this.onAgentState(state));
+    // `selectionchange` is the only event that fires when a selection is *dropped* (a click
+    // elsewhere, Escape, a keyboard collapse) — pointerup alone would leave the toolbar stranded.
+    document.addEventListener('selectionchange', this.onSelectionChange);
     void this.reload();
   }
 
@@ -102,6 +134,8 @@ export class Pix3IdeaDoc extends ComponentBase {
     super.disconnectedCallback();
     this.disposeAgent?.();
     this.disposeAgent = undefined;
+    document.removeEventListener('selectionchange', this.onSelectionChange);
+    this.selection = null;
     // Nothing else owns these URLs, so the component must release them all on the way out.
     for (const url of this.blobUrls.values()) {
       URL.revokeObjectURL(url);
@@ -131,6 +165,7 @@ export class Pix3IdeaDoc extends ComponentBase {
         return;
       }
       this.source = '';
+      this.selection = null;
       this.missing = true;
       this.syncImageBlobs('', token);
       return;
@@ -144,6 +179,8 @@ export class Pix3IdeaDoc extends ComponentBase {
     if (token !== this.reloadToken) {
       return;
     }
+    // Anchors point into the snapshot that was rendered; a new source invalidates them.
+    this.selection = null;
     this.source = text;
     this.missing = false;
   }
@@ -291,6 +328,116 @@ export class Pix3IdeaDoc extends ComponentBase {
     this.lightbox.open(items, Math.max(0, images.indexOf(image)));
   }
 
+  // ── Selection → agent context ───────────────────────────────────────────────
+
+  private readonly onSelectionChange = (): void => {
+    // Only ever *retracts* the toolbar: a fresh selection is captured on pointerup/keyup, when the
+    // gesture has finished. Reacting to every intermediate change would flicker the toolbar mid-drag.
+    if (!this.selection) {
+      return;
+    }
+    const selection = document.getSelection();
+    if (!selection || selection.isCollapsed) {
+      this.selection = null;
+    }
+  };
+
+  /**
+   * Resolve the current DOM selection back to a slice of the markdown source.
+   *
+   * The slice — not `selection.toString()` — is what the agent gets: the rendered text has lost the
+   * markdown syntax (`**bold**` reads as "bold"), so a `str_replace` against it would never match.
+   * Granularity is whole blocks on purpose: that is exactly coarse enough for the slice to be valid
+   * markdown and an exact `str_replace` needle.
+   */
+  private captureSelection(): void {
+    const body = this.querySelector('.idea-doc__body');
+    const selection = document.getSelection();
+    if (!body || !selection || selection.isCollapsed || selection.rangeCount === 0) {
+      this.selection = null;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) {
+      this.selection = null;
+      return;
+    }
+    const start = blockLinesOf(range.startContainer, body);
+    const end = blockLinesOf(range.endContainer, body);
+    if (!start || !end) {
+      this.selection = null;
+      return;
+    }
+    const startLine = Math.min(start[0], end[0]);
+    const endLine = Math.max(start[1], end[1]);
+    const slice = this.source
+      .split('\n')
+      .slice(startLine, endLine + 1)
+      .join('\n');
+    if (!slice.trim()) {
+      this.selection = null;
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    this.selection = {
+      startLine,
+      endLine,
+      slice,
+      rendered: condense(selection.toString()),
+      left: rect.left + rect.width / 2,
+      top: rect.bottom,
+    };
+  }
+
+  private readonly onBodyPointerUp = (): void => {
+    // After the browser has settled the selection for this gesture.
+    requestAnimationFrame(() => this.captureSelection());
+  };
+
+  private readonly onBodyKeyUp = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      this.selection = null;
+      return;
+    }
+    if (event.shiftKey || event.key === 'Shift' || event.ctrlKey || event.metaKey) {
+      this.captureSelection();
+    }
+  };
+
+  /** The chip that goes to the agent: path, line range, the exact source slice, and the focus hint. */
+  private selectionAttachment(anchor: IdeaDocSelection): AgentTextAttachment {
+    const from = anchor.startLine + 1;
+    const to = anchor.endLine + 1;
+    const fence = fenceFor(anchor.slice);
+    const focus = anchor.rendered
+      ? `\n\nThe user highlighted this inside the fragment: "${truncate(anchor.rendered, FOCUS_HINT_LIMIT)}"`
+      : '';
+    return {
+      name: `${this.docPath}:${from}–${to}`,
+      content:
+        [
+          `Selected fragment of \`${this.docPath}\`, lines ${from}–${to}.`,
+          'Edit it with `str_replace` against this exact text — it matches the file verbatim.',
+          '',
+          `${fence}markdown`,
+          anchor.slice,
+          fence,
+        ].join('\n') + focus,
+    };
+  }
+
+  private sendSelectionToAgent(prefill?: string): void {
+    const anchor = this.selection;
+    if (!anchor) {
+      return;
+    }
+    this.agentChat.composeContext({
+      attachment: this.selectionAttachment(anchor),
+      ...(prefill && { prefill }),
+    });
+    this.selection = null;
+  }
+
   private onEditSource(): void {
     this.draft = this.source;
     this.editing = true;
@@ -336,9 +483,10 @@ export class Pix3IdeaDoc extends ComponentBase {
     return html`
       <div class="idea-doc">
         ${this.renderToolbar()}
-        <div class="idea-doc__scroll">
+        <div class="idea-doc__scroll" @scroll=${() => (this.selection = null)}>
           ${this.editing ? this.renderSource() : this.renderPreview()}
         </div>
+        ${this.renderSelectionMenu()}
       </div>
     `;
   }
@@ -399,6 +547,43 @@ export class Pix3IdeaDoc extends ComponentBase {
     `;
   }
 
+  /**
+   * The floating selection toolbar. `pointerdown` is swallowed on purpose: letting it through would
+   * collapse the very selection the buttons are about to read.
+   */
+  private renderSelectionMenu() {
+    const anchor = this.selection;
+    if (!anchor || this.editing) {
+      return null;
+    }
+    return html`
+      <div
+        class="idea-doc__selection-menu"
+        style=${`left: ${Math.round(anchor.left)}px; top: ${Math.round(anchor.top)}px`}
+        @pointerdown=${(event: PointerEvent) => event.preventDefault()}
+      >
+        <button
+          type="button"
+          class="idea-doc__selection-action"
+          title="Attach the selected fragment to the chat"
+          @click=${() => this.sendSelectionToAgent()}
+        >
+          ${this.iconService.getIcon('message-square', IconSize.SMALL)}
+          <span>Discuss</span>
+        </button>
+        <button
+          type="button"
+          class="idea-doc__selection-action"
+          title="Attach the fragment and start a rewrite request"
+          @click=${() => this.sendSelectionToAgent('Change the selected fragment: ')}
+        >
+          ${this.iconService.getIcon('edit-3', IconSize.SMALL)}
+          <span>Change</span>
+        </button>
+      </div>
+    `;
+  }
+
   private renderSource() {
     return html`
       <textarea
@@ -424,6 +609,8 @@ export class Pix3IdeaDoc extends ComponentBase {
         class="idea-doc__body"
         @click=${(event: MouseEvent) => this.onBodyClick(event)}
         @keydown=${(event: KeyboardEvent) => this.onBodyKeyDown(event)}
+        @pointerup=${this.onBodyPointerUp}
+        @keyup=${this.onBodyKeyUp}
       >
         ${renderMarkdownLite(this.source, { mode: 'doc', resolveImage: this.resolveImage })}
       </article>
@@ -458,6 +645,39 @@ function collectImagePaths(source: string): Set<string> {
     }
   }
   return paths;
+}
+
+/**
+ * The `data-md-lines` range of the block a selection endpoint sits in, or `null` when the endpoint
+ * is not inside an anchored block (`markdown-lite` stamps every block it renders, so this happens
+ * only for stray text nodes the renderer did not produce).
+ */
+function blockLinesOf(node: Node, body: Element): [number, number] | null {
+  const element = node instanceof Element ? node : node.parentElement;
+  const block = element?.closest('[data-md-lines]');
+  if (!block || !body.contains(block)) {
+    return null;
+  }
+  const [start, end] = (block.getAttribute('data-md-lines') ?? '').split('-').map(Number);
+  return Number.isFinite(start) && Number.isFinite(end) ? [start, end] : null;
+}
+
+/** A fence long enough to survive a slice that itself contains fenced code. */
+function fenceFor(text: string): string {
+  let longest = 0;
+  for (const run of text.match(/`+/g) ?? []) {
+    longest = Math.max(longest, run.length);
+  }
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
+/** Rendered selections carry the document's line breaks; the hint wants one line. */
+function condense(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit).trimEnd()}…`;
 }
 
 declare global {

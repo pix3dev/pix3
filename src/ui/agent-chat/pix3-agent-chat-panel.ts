@@ -7,6 +7,7 @@ import {
   type AgentChatState,
   type AgentTurnMetric,
   type AgentTurnOrigin,
+  type ComposeContextRequest,
 } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
@@ -751,6 +752,7 @@ export class AgentChatPanel extends ComponentBase {
   private disposeSelectionContextSub?: () => void;
   private disposeSettingsSubscription?: () => void;
   private disposeComposeSubscription?: () => void;
+  private disposeComposeContextSubscription?: () => void;
   private disposeCatalogSubscription?: () => void;
   private disposeBridgeSubscription?: () => void;
   private readonly messagesRef = createRef<HTMLDivElement>();
@@ -781,6 +783,10 @@ export class AgentChatPanel extends ComponentBase {
     // "Fix with Agent" and other prefill requests drop a prompt into the composer for review.
     this.disposeComposeSubscription = this.chat.subscribeCompose(text => {
       this.applyComposePrefill(text);
+    });
+    // Context chips (a selection in the idea document) join the *ongoing* draft instead.
+    this.disposeComposeContextSubscription = this.chat.subscribeComposeContext(request => {
+      this.applyComposeContext(request);
     });
     this.disposeSettingsSubscription = this.settings.subscribe(prefs => {
       this.syncSelectedProvider();
@@ -830,6 +836,8 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeChatSubscription = undefined;
     this.disposeComposeSubscription?.();
     this.disposeComposeSubscription = undefined;
+    this.disposeComposeContextSubscription?.();
+    this.disposeComposeContextSubscription = undefined;
     this.disposeSettingsSubscription?.();
     this.disposeSettingsSubscription = undefined;
     this.disposeCatalogSubscription?.();
@@ -2336,6 +2344,35 @@ export class AgentChatPanel extends ComponentBase {
     this.attachWarning = '';
     this.historyIndex = -1;
     this.historyOpen = false;
+    this.shouldStickToBottom = true;
+    void this.updateComplete.then(() => {
+      const ta = this.querySelector<HTMLTextAreaElement>('.agent-input');
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  }
+
+  /**
+   * Stage a context chip raised from outside (the idea document's selection) without disturbing the
+   * conversation: the draft is extended, not replaced, and chips already staged survive. A chip
+   * carrying the same slice twice replaces the earlier one rather than sending the fragment twice.
+   */
+  private applyComposeContext(request: ComposeContextRequest): void {
+    const { name, content } = request.attachment;
+    const kept = this.attachments.filter(
+      a => !(a.kind === 'text' && a.name === name && a.content === content)
+    );
+    this.attachments = [
+      ...kept,
+      { id: `att-${this.attachmentSeq++}`, kind: 'text', name, content },
+    ];
+    this.attachWarning = '';
+    if (request.prefill) {
+      const draft = this.draft.trimEnd();
+      this.draft = draft ? `${draft} ${request.prefill}` : request.prefill;
+    }
     this.shouldStickToBottom = true;
     void this.updateComplete.then(() => {
       const ta = this.querySelector<HTMLTextAreaElement>('.agent-input');

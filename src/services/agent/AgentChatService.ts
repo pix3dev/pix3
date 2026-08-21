@@ -61,6 +61,22 @@ export interface AgentAttachments {
 }
 
 /**
+ * A context chip raised from outside the panel (the idea document's text selection).
+ *
+ * Deliberately not the {@link AgentChatService.composePrefill} channel: a chip augments the ongoing
+ * discussion — it stages an attachment next to whatever is already in the composer instead of
+ * replacing the draft — because a selection is usually the third clarification of a conversation,
+ * not the start of a new one. Cache-safety is automatic: the attachment travels inside the last
+ * user message, so the cached prefix is untouched.
+ */
+export interface ComposeContextRequest {
+  /** Staged as a composer chip and inlined into the next user message. */
+  readonly attachment: AgentTextAttachment;
+  /** Appended to the draft — never replaces it (e.g. "Change the selected fragment: "). */
+  readonly prefill?: string;
+}
+
+/**
  * Who answered one assistant turn. Recorded per turn rather than read from the current settings,
  * because the selection can change mid-conversation (a bridge comes up, the user switches models)
  * and a reply must keep saying which model actually produced it.
@@ -484,6 +500,10 @@ export class AgentChatService {
   private readonly composeListeners = new Set<(text: string) => void>();
   /** Prefill queued before the panel mounted; delivered on the next subscribe. */
   private pendingCompose: string | null = null;
+  /** Context-chip channel — carries a staged text attachment (+ optional prefill) to the panel. */
+  private readonly contextListeners = new Set<(request: ComposeContextRequest) => void>();
+  /** Chips raised before the panel mounted; delivered in order on the next subscribe. */
+  private pendingContext: ComposeContextRequest[] = [];
   /**
    * Serialized (tools + system + messages) of the last request sent, in wire order — used to
    * estimate how much of the next request's leading prefix is unchanged (the predicted cacheable
@@ -899,10 +919,41 @@ export class AgentChatService {
     };
   }
 
+  /**
+   * Context channel: stage a text attachment (and optionally extend the draft) in the mounted
+   * composer, leaving the conversation, the draft and the other attachments alone. Queued when the
+   * panel is not mounted yet, same as the prefill channel.
+   */
+  composeContext(request: ComposeContextRequest): void {
+    if (this.contextListeners.size > 0) {
+      for (const listener of this.contextListeners) {
+        listener(request);
+      }
+      return;
+    }
+    this.pendingContext.push(request);
+  }
+
+  /** Subscribe to context-chip requests. Immediately flushes any queued chips, in order. */
+  subscribeComposeContext(listener: (request: ComposeContextRequest) => void): () => void {
+    this.contextListeners.add(listener);
+    if (this.pendingContext.length > 0) {
+      const queued = this.pendingContext;
+      this.pendingContext = [];
+      for (const request of queued) {
+        listener(request);
+      }
+    }
+    return () => {
+      this.contextListeners.delete(listener);
+    };
+  }
+
   dispose(): void {
     this.stop();
     this.listeners.clear();
     this.composeListeners.clear();
+    this.contextListeners.clear();
   }
 
   private async refreshConversations(): Promise<void> {

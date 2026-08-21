@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState } from '@/state';
-import { AgentChatService, LLM_REQUEST_TIMEOUT_MS } from './AgentChatService';
+import {
+  AgentChatService,
+  LLM_REQUEST_TIMEOUT_MS,
+  type ComposeContextRequest,
+} from './AgentChatService';
 import {
   LlmError,
   type ChatParams,
@@ -1581,6 +1585,35 @@ describe('AgentChatService', () => {
     expect(service.getState().messages).toHaveLength(0);
     expect(service.getState().activeConversationId).toBeNull();
     expect(received).toEqual(['Fix this runtime error: boom']);
+  });
+
+  it('composeContext stages a chip without touching the conversation, and queues before mount', async () => {
+    const service = buildService({
+      chat: vi.fn(async () => textResult('ok')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+    });
+    await service.send('hi');
+    const before = service.getState().messages.length;
+    expect(before).toBeGreaterThan(0);
+
+    // Raised before anyone subscribed — must survive until the panel mounts.
+    service.composeContext({ attachment: { name: 'design/gdd.md:3-3', content: 'slice' } });
+
+    const received: ComposeContextRequest[] = [];
+    service.subscribeComposeContext(request => received.push(request));
+    service.composeContext({
+      attachment: { name: 'design/gdd.md:5-7', content: 'other slice' },
+      prefill: 'Change the selected fragment: ',
+    });
+
+    expect(received.map(r => r.attachment.name)).toEqual([
+      'design/gdd.md:3-3',
+      'design/gdd.md:5-7',
+    ]);
+    expect(received[1].prefill).toBe('Change the selected fragment: ');
+    // The chip joins the ongoing discussion — unlike composeFix, nothing was reset.
+    expect(service.getState().messages).toHaveLength(before);
   });
 
   it('composeFix queues the prompt when no composer is subscribed yet', async () => {

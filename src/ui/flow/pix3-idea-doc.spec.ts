@@ -47,6 +47,14 @@ const idleState: AgentChatState = {
 class AgentChatStub {
   private listener: ((state: AgentChatState) => void) | null = null;
   private state: AgentChatState = idleState;
+  readonly contextRequests: { attachment: { name: string; content: string }; prefill?: string }[] =
+    [];
+
+  composeContext = vi.fn(
+    (request: { attachment: { name: string; content: string }; prefill?: string }) => {
+      this.contextRequests.push(request);
+    }
+  );
 
   subscribe(listener: (state: AgentChatState) => void): () => void {
     this.listener = listener;
@@ -311,5 +319,91 @@ describe('pix3-idea-doc', () => {
     expect(state?.items.map(item => item.path)).toEqual(['references/a.png', 'references/b.png']);
     expect(state?.items[1]).toMatchObject({ kind: 'image', title: 'second' });
     expect(state?.items[1].url).toBe(images[1].getAttribute('src'));
+  });
+  describe('selection → agent context', () => {
+    // The DI container hands out the same stub across the tests of this file.
+    beforeEach(() => {
+      agentChat().contextRequests.length = 0;
+    });
+
+    const SOURCE = [
+      '# Ant Strategy', // 0
+      '', // 1
+      'Colonies fight over **sugar**.', // 2
+      '', // 3
+      'A second paragraph nobody selected.', // 4
+    ].join('\n');
+
+    /** Select from the first paragraph's text into it, the way a drag would leave the DOM. */
+    const selectParagraph = (element: IdeaDocElement, selector: string): void => {
+      const block = element.querySelector(selector)!;
+      const range = document.createRange();
+      range.selectNodeContents(block);
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      element
+        .querySelector('.idea-doc__body')!
+        .dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, shiftKey: true }));
+    };
+
+    const menuButton = (element: IdeaDocElement, label: string): HTMLButtonElement | undefined =>
+      Array.from(element.querySelectorAll<HTMLButtonElement>('.idea-doc__selection-action')).find(
+        button => button.textContent?.includes(label)
+      );
+
+    it('sends the source slice — not the rendered text — as a chip', async () => {
+      storage().files.set(DOC_PATH, SOURCE);
+      const element = await mount();
+
+      selectParagraph(element, '.md-p');
+      await settle(element);
+      expect(element.querySelector('.idea-doc__selection-menu')).toBeTruthy();
+
+      menuButton(element, 'Discuss')!.click();
+      await settle(element);
+
+      const [request] = agentChat().contextRequests;
+      expect(request.prefill).toBeUndefined();
+      expect(request.attachment.name).toBe(`${DOC_PATH}:3–3`);
+      // The markdown syntax has to survive — `str_replace` matches the file, not the rendering.
+      expect(request.attachment.content).toContain('Colonies fight over **sugar**.');
+      expect(request.attachment.content).toContain(DOC_PATH);
+      expect(request.attachment.content).toContain('str_replace');
+      // Only the selected block travels.
+      expect(request.attachment.content).not.toContain('A second paragraph');
+      // The toolbar retracts once the chip is staged.
+      expect(element.querySelector('.idea-doc__selection-menu')).toBeNull();
+    });
+
+    it('"Change" adds a rewrite prefill on top of the same chip', async () => {
+      storage().files.set(DOC_PATH, SOURCE);
+      const element = await mount();
+
+      selectParagraph(element, 'h1');
+      await settle(element);
+      menuButton(element, 'Change')!.click();
+      await settle(element);
+
+      const [request] = agentChat().contextRequests;
+      expect(request.prefill).toContain('Change the selected fragment');
+      expect(request.attachment.name).toBe(`${DOC_PATH}:1–1`);
+      expect(request.attachment.content).toContain('# Ant Strategy');
+    });
+
+    it('drops the anchor when the document is re-read under it', async () => {
+      storage().files.set(DOC_PATH, SOURCE);
+      const element = await mount();
+
+      selectParagraph(element, '.md-p');
+      await settle(element);
+      expect(element.querySelector('.idea-doc__selection-menu')).toBeTruthy();
+
+      storage().files.set(DOC_PATH, '# Termite Strategy\n\nMounds everywhere.');
+      agentChat().emit({ status: 'running', activeTool: 'str_replace' });
+      await settle(element);
+
+      expect(element.querySelector('.idea-doc__selection-menu')).toBeNull();
+    });
   });
 });
