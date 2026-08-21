@@ -1,4 +1,6 @@
 import { inject, injectable } from '@/fw/di';
+import { IDEA_TEMPLATE_ID } from '@/services/flow/FlowStageService';
+import { FLOW_REFERENCES_INDEX_PATH } from '@/services/flow/FlowReferencesService';
 import { appState } from '@/state';
 import {
   createDefaultProjectManifest,
@@ -14,7 +16,7 @@ import { AgentChatService } from '@/services/agent/AgentChatService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
-import { base64ToBlob, extractPalette, tintImage } from '@/services/image-gen/image-ops';
+import { base64ToBlob, tintImage } from '@/services/image-gen/image-ops';
 import type { LlmImageBlock, LlmMessage } from '@/services/llm/LlmTypes';
 import {
   applyScenePatches,
@@ -23,11 +25,14 @@ import {
   parseRecipePlaceholders,
   parseRecipeTunables,
   resolveTunables,
+  IDEA_PRESERVED_PATHS,
   type RecipePlaceholder,
   type RecipeTunable,
   type ScenePatch,
   type TunableResolution,
 } from '@/services/flow/recipe-contract';
+import { FlowReferencesService } from '@/services/flow/FlowReferencesService';
+import { FlowStageService } from '@/services/flow/FlowStageService';
 import {
   attachmentProjectPath,
   type ComposerAttachment,
@@ -37,8 +42,13 @@ import { buildProjectMap } from '@/services/flow/flow-project-map';
 import {
   FLOW_BRIEF_PATH,
   FLOW_DECISIONS_PATH,
+  FLOW_GDD_PATH,
   FLOW_PROGRESS_PATH,
 } from '@/services/flow/FlowPlanService';
+import {
+  FLOW_RECIPE_HINT_METADATA_KEY,
+  FLOW_STAGE_METADATA_KEY,
+} from '@/services/flow/FlowStageService';
 
 // ---------------------------------------------------------------------------
 // The brief (design §5.3)
@@ -289,6 +299,30 @@ export interface PrototypeBootstrapResult {
   readonly userNotices: readonly string[];
 }
 
+/**
+ * Template the idea stage scaffolds from: one empty 2D canvas and nothing else. A project is still
+ * created up front so "Open in Studio", project activation and the storage layer all behave
+ * normally — the recipe that fills it in is chosen later, on the way to the prototype (design §3.1).
+ */
+// Re-exported for the callers that already import it from here (`export … from` alone would not
+// bind it locally, and this module uses it in four places).
+export { IDEA_TEMPLATE_ID };
+
+// Metadata sidecar for `references/` — role and origin per saved file (design §3.6). Owned by
+// `FlowReferencesService` (the panel and the agent tool registry write it too) and re-exported here
+// for the callers that already import it from this module.
+export { FLOW_REFERENCES_INDEX_PATH };
+
+export interface PrototypeIdeaResult {
+  /** Project name, derived from the prompt with no model in the loop. */
+  readonly title: string;
+  readonly templateId: string;
+  /** Attachments that became project files. */
+  readonly references: readonly PrototypeBriefReference[];
+  /** Everything that degraded on the way (a file that could not be written). */
+  readonly notes: readonly string[];
+}
+
 const IDLE_STATUS: PrototypeBootstrapStatus = {
   phase: 'idle',
   message: '',
@@ -296,13 +330,18 @@ const IDLE_STATUS: PrototypeBootstrapStatus = {
   error: null,
 };
 
+/**
+ * The style tokens document. Written by the expander here and — from V6 — by the references panel
+ * when the user makes a mood board "the style", which is why the transition reads it back instead
+ * of re-deriving the palette from an image.
+ */
+export const FLOW_STYLE_PATH = 'design/style.md';
+
 const MAX_PLANNER_TOKENS = 2048;
 /** Cap on how much of an attached document reaches the planner (design §5.7 — never inline a GDD). */
 const DOC_EXCERPT_CHARS = 4000;
 /** At most this many images are described by the vision helper before the planner call. */
 const MAX_VISION_IMAGES = 2;
-/** Colours quantized out of a style reference. */
-const PALETTE_SIZE = 5;
 /** How long the first agent turn waits for the shell to open the scene before going anyway. */
 const SCENE_WAIT_MS = 10_000;
 
@@ -349,6 +388,12 @@ export class PrototypeBootstrapService {
   @inject(LlmModelCatalogService)
   private readonly catalog!: LlmModelCatalogService;
 
+  @inject(FlowStageService)
+  private readonly flowStage!: FlowStageService;
+
+  @inject(FlowReferencesService)
+  private readonly references!: FlowReferencesService;
+
   private status: PrototypeBootstrapStatus = IDLE_STATUS;
   private readonly listeners = new Set<(status: PrototypeBootstrapStatus) => void>();
   private running = false;
@@ -368,28 +413,118 @@ export class PrototypeBootstrapService {
   }
 
   /**
-   * Prompt → open project. Resolves once the project is on disk and open; the agent's first
-   * increment runs on after that, so the caller is never blocked on a model.
+   * Prompt → open project at the **idea stage**: no planner, no expander, no recipe, no LLM call at
+   * all on the way in (design §3.1). Everything here is deterministic — a name derived from the
+   * prompt, an empty canvas, the attachments saved as project files, and three seeded documents —
+   * which is what makes this path faster than the prototype path it replaces rather than slower.
+   *
+   * The status is deliberately left alone: `planning`/`expanding` are the phases the prompt-hero
+   * narrates with a spinner, and there is nothing to narrate here. The one model call on this path
+   * is the agent's own first turn, which starts AFTER the project is open.
    */
-  async run(request: PrototypeBootstrapRequest): Promise<PrototypeBootstrapResult> {
+  async startIdea(request: PrototypeBootstrapRequest): Promise<PrototypeIdeaResult> {
     if (this.running) {
       throw new Error('A prototype is already being created.');
     }
     this.running = true;
     const notes: string[] = [];
+    let references: PrototypeBriefReference[] = [];
     try {
       const attachments = request.attachments ?? [];
+      const title = deriveTitle(request.prompt);
+
+      // OPFS is the anonymous user's storage and browsers may evict it under pressure.
+      try {
+        await this.browserStore.requestPersistence();
+      } catch {
+        // Best effort — a project that cannot be made persistent is still a working project.
+      }
+
+      await this.projectService.createNewProjectWithOptions(
+        {
+          name: title,
+          manifest: this.buildIdeaManifest(title, request.recipeId),
+          templateId: IDEA_TEMPLATE_ID,
+          backend: 'browser',
+        },
+        {
+          beforeActivate: async () => {
+            // Attachments become project files FIRST: a reference that lives only in the
+            // conversation is gone the moment the context is compacted (design §5.7).
+            references = await this.persistAttachments(attachments, notes);
+            await this.writeIdeaDocs(title, request.prompt, request, references, notes);
+          },
+        }
+      );
+
+      // A project born in Flow reopens in Flow after a reload.
+      this.workspaceMode.remember('flow');
+
+      if (request.startAgentTurn !== false) {
+        // Deliberately not awaited: the caller's job is done once the editor is open, and the
+        // first turn is a full agent run.
+        void this.startIdeaTurn(request.prompt, request.recipeId, references).catch(error => {
+          console.error('[PrototypeBootstrapService] First idea turn failed to start:', error);
+        });
+      }
+
+      return { title, templateId: IDEA_TEMPLATE_ID, references, notes };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /**
+   * Idea stage → prototype, **in the project that is already open** (design §3.1, §2.4).
+   *
+   * Both halves of the retired welcome-to-prototype path are here, with different inputs: the
+   * planner is fed the idea documents instead of the bare prompt (that is the whole reason the
+   * stage exists — the recipe is the most expensive thing to get wrong, so it is chosen last, when
+   * the input is richest), and the expander lays the recipe over this project rather than creating
+   * a new one.
+   *
+   * Structurally one-way. Reusing the project id is not a detail: a new project would change it and
+   * orphan the chat history, the recents entry and the remembered workspace mode, and leave a stub
+   * project behind in the list.
+   *
+   * The status stream is the same one the prompt-hero and the shell already narrate
+   * (`planning` → `expanding` → `ready`/`error`), so the CTA needs no second channel.
+   */
+  async startPrototype(options?: {
+    readonly startAgentTurn?: boolean;
+  }): Promise<PrototypeBootstrapResult> {
+    if (this.running) {
+      throw new Error('A prototype is already being created.');
+    }
+    if (appState.project.status !== 'ready') {
+      throw new Error('Open the idea project first: there is nothing to turn into a prototype.');
+    }
+    if (!this.flowStage.isIdeaStage()) {
+      throw new Error('This project is already a prototype.');
+    }
+
+    this.running = true;
+    const notes: string[] = [];
+    try {
+      // Narrated before the first read: the CTA is a click the user is watching, and the reads
+      // below are I/O.
       this.setStatus({
         phase: 'planning',
-        message: 'Reading your idea…',
-        error: null,
+        message: 'Reading your design document…',
         brief: null,
+        error: null,
       });
+      const idea = await this.readIdeaContext();
 
-      // The palette is quantized from the user's own style reference rather than asked for as hex
-      // codes: free, instant and exact where a model is none of those (design §5.7).
-      const palette = await this.paletteFromReferences(attachments);
-      const { brief, issues, userNotices } = await this.plan(request, attachments, palette);
+      // The prompt is passed as the request's own `prompt` and NOT as `recipeId`: a pinned recipe
+      // skips the planner's genre choice entirely, and `recipeHint` is a hint the document is
+      // allowed to have outgrown (design §2.1). It travels in the prompt as a hint instead.
+      const { brief, issues, userNotices } = await this.plan(
+        { prompt: idea.prompt },
+        [],
+        idea.palette,
+        idea
+      );
       notes.push(...issues);
 
       this.setStatus({
@@ -398,7 +533,7 @@ export class PrototypeBootstrapService {
         brief,
         error: null,
       });
-      const { templateId, expandNotes } = await this.expand(brief, request.prompt, attachments);
+      const { templateId, expandNotes } = await this.expandIntoCurrentProject(brief, idea.prompt);
       notes.push(...expandNotes);
 
       this.setStatus({
@@ -408,10 +543,10 @@ export class PrototypeBootstrapService {
         error: null,
       });
 
-      if (request.startAgentTurn !== false) {
-        // Deliberately not awaited: the first increment is a full agent run, and the hero's job is
-        // done the moment the project is open and playable.
-        void this.startFirstTurn(brief, request.prompt, userNotices).catch(error => {
+      if (options?.startAgentTurn !== false) {
+        // Deliberately not awaited: the caller's job ends when the project is playable, and the
+        // first increment is a full agent run.
+        void this.startFirstTurn(brief, idea.prompt, userNotices).catch(error => {
           console.error('[PrototypeBootstrapService] First agent turn failed to start:', error);
         });
       }
@@ -450,7 +585,8 @@ export class PrototypeBootstrapService {
   private async plan(
     request: PrototypeBootstrapRequest,
     attachments: readonly ComposerAttachment[],
-    palette: string[]
+    palette: string[],
+    idea?: PlannerIdeaContext
   ): Promise<{ brief: PrototypeBrief; issues: string[]; userNotices: string[] }> {
     const issues: string[] = [];
     const fallback = (): PrototypeBrief =>
@@ -472,7 +608,7 @@ export class PrototypeBootstrapService {
     const visionNotes =
       images.length > 0 && !supportsImages ? await this.describeReferences(images, issues) : [];
 
-    const userText = buildPlannerPrompt(request, attachments, palette, visionNotes);
+    const userText = buildPlannerPrompt(request, attachments, palette, visionNotes, idea);
     const content: LlmMessage['content'] =
       supportsImages && images.length > 0
         ? [
@@ -544,81 +680,81 @@ export class PrototypeBootstrapService {
     return notes;
   }
 
-  /** Quantized palette of the first style reference, or an empty array when there is none. */
-  private async paletteFromReferences(
-    attachments: readonly ComposerAttachment[]
-  ): Promise<string[]> {
-    const styleImage =
-      attachments.filter(isImageAttachment).find(image => image.role === 'style') ??
-      attachments.filter(isImageAttachment).find(image => image.role !== 'content');
-    if (!styleImage) {
-      return [];
-    }
-    try {
-      const swatches = await extractPalette(
-        base64ToBlob(styleImage.base64, styleImage.mimeType),
-        PALETTE_SIZE
-      );
-      return swatches.map(swatch => swatch.hex);
-    } catch {
-      return [];
-    }
-  }
-
   // -- expander --------------------------------------------------------------
 
   /**
-   * Create the project from the recipe and patch the copied files **in place, before any scene is
-   * opened** (contract §5). Patching text on disk instead of mutating a loaded scene means no
-   * races with the scene loader, no operations, and nothing in the undo stack that the user would
-   * have to undo past to reach their own first edit.
+   * The expander: the recipe is laid over the OPEN project (design §3.1).
+   *
+   * Three steps and then a fourth — copy the template, patch the copied files on disk, write the
+   * design docs, and only then reactivate, because the editor is holding the idea-stage version of
+   * everything the copy just replaced. That order is what keeps it race-free: nothing re-opens a
+   * scene until the scene files on disk are final.
    */
-  private async expand(
+  private async expandIntoCurrentProject(
     brief: PrototypeBrief,
-    prompt: string,
-    attachments: readonly ComposerAttachment[]
+    prompt: string
   ): Promise<{ templateId: string; expandNotes: string[] }> {
     const expandNotes: string[] = [];
     const templateId = this.resolveTemplateId(brief.recipeId, expandNotes);
+    const template = this.templates.getTemplate(templateId);
+    // The project keeps the name it was created with: it is what the user has been looking at, what
+    // the recents entry says, and what `{{PROJECT_NAME}}` in the recipe's own files should become.
+    const projectName = appState.project.projectName?.trim() || brief.title;
 
-    // OPFS is the anonymous user's storage and browsers may evict it under pressure.
-    try {
-      await this.browserStore.requestPersistence();
-    } catch {
-      // Best effort — a project that cannot be made persistent is still a working project.
-    }
-
-    await this.projectService.createNewProjectWithOptions(
-      {
-        name: brief.title,
-        manifest: this.buildManifest(brief, templateId),
-        templateId,
-        backend: 'browser',
-      },
-      {
-        beforeActivate: async () => {
-          await this.seedProject(brief, prompt, attachments, templateId, expandNotes);
-        },
-      }
+    const manifest = this.buildPrototypeManifest(brief, templateId, projectName);
+    // The stage flips LAST. The copy is the one step here that can fail half-done, and a manifest
+    // that already said `prototype` over a half-copied recipe would be unrecoverable: the CTA
+    // refuses a project that is not at the idea stage, so the user would be left with a broken
+    // project and no way to ask for it again. Written as `idea` first, a failed transition is
+    // simply a transition to retry.
+    await this.projectService.applyTemplateFiles(
+      projectName,
+      { ...manifest, metadata: { ...manifest.metadata, [FLOW_STAGE_METADATA_KEY]: 'idea' } },
+      templateId,
+      { skip: IDEA_PRESERVED_PATHS }
     );
 
-    // A project born in Flow reopens in Flow after a reload.
-    this.workspaceMode.remember('flow');
+    // The references were saved as project files back at `startIdea` (and by the panel and the
+    // agent since), so there is nothing to persist — only to read back, so the brief and the style
+    // doc point at them.
+    const references = await this.collectProjectReferences(expandNotes);
+    await this.applyRecipe(brief, prompt, references, templateId, expandNotes, {
+      preserveDecisions: true,
+    });
+
+    await this.projectService.saveProjectManifest(manifest);
+    try {
+      await this.projectService.reactivateCurrentProject({
+        ...(template?.entryScenePath ? { entryScenePath: template.entryScenePath } : {}),
+      });
+    } catch (error) {
+      // By this point the recipe is on disk and the manifest says `prototype`: the transition
+      // itself succeeded, and the only thing that can still fail here is opening the scene — which
+      // the Flow stage retries on its own. Failing the whole call would put an error banner over a
+      // project that is fine, so it degrades to a note.
+      expandNotes.push(
+        `The project was built, but its first scene did not open yet: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     return { templateId, expandNotes };
   }
 
-  /** Everything written into the fresh project before its first scene loads. */
-  private async seedProject(
+  /**
+   * Patch the copied recipe files and write the design docs.
+   *
+   * Kept separate from {@link expandIntoCurrentProject} because the two halves fail differently:
+   * everything here degrades into `notes` (a scene without the node a tunable names, a placeholder
+   * that is not in the project), while the copy and the reactivation around it are the steps that
+   * are allowed to fail the transition.
+   */
+  private async applyRecipe(
     brief: PrototypeBrief,
     prompt: string,
-    attachments: readonly ComposerAttachment[],
+    references: readonly PrototypeBriefReference[],
     templateId: string,
-    notes: string[]
+    notes: string[],
+    options?: { readonly preserveDecisions?: boolean }
   ): Promise<void> {
-    // Attachments become project files FIRST: a reference that lives only in the conversation is
-    // gone the moment the context is compacted (design §5.7).
-    const references = await this.persistAttachments(attachments, notes);
-
     const recipe = await this.readOptional('design/recipe.md');
     if (!recipe) {
       notes.push(
@@ -635,7 +771,7 @@ export class PrototypeBootstrapService {
     const resolution = resolveTunables(themedTunables(brief), declared);
     await this.applyTunables(resolution, brief, declared, notes);
     await this.tintPlaceholders(placeholders, brief.style.palette, notes);
-    await this.writeDesignDocs(brief, prompt, references, resolution, notes);
+    await this.writeDesignDocs(brief, prompt, references, resolution, notes, options);
   }
 
   /** Images → `references/`, documents → `design/source/` (design §5.7's hard rule). */
@@ -796,7 +932,8 @@ export class PrototypeBootstrapService {
     prompt: string,
     references: readonly PrototypeBriefReference[],
     resolution: TunableResolution,
-    notes: string[]
+    notes: string[],
+    options?: { readonly preserveDecisions?: boolean }
   ): Promise<void> {
     const withReferences: PrototypeBrief = { ...brief, references };
     await this.writeFile(
@@ -805,15 +942,94 @@ export class PrototypeBootstrapService {
       notes
     );
     await this.writeFile(FLOW_PROGRESS_PATH, renderProgressMarkdown(brief), notes);
-    await this.writeFile(FLOW_DECISIONS_PATH, renderDecisionsMarkdown(), notes);
+    // The scaffold is only written where there is nothing to scaffold over. Coming from the idea
+    // stage the file holds every fork the user already settled, and re-seeding it would throw away
+    // the one document the transition exists to carry forward.
+    if (!options?.preserveDecisions) {
+      await this.writeFile(FLOW_DECISIONS_PATH, renderDecisionsMarkdown(), notes);
+    }
     if (
       brief.style.artStyle ||
       brief.style.mood ||
       brief.style.theme ||
       brief.style.palette.length > 0
     ) {
-      await this.writeFile('design/style.md', renderStyleMarkdown(brief, references), notes);
+      await this.writeFile(FLOW_STYLE_PATH, renderStyleMarkdown(brief, references), notes);
     }
+  }
+
+  // -- idea stage ------------------------------------------------------------
+
+  /**
+   * The manifest of a project that has no recipe yet: the `idea-blank` template's own defaults plus
+   * the two metadata fields the stage runs on. `recipeHint` is written as a HINT on purpose — the
+   * welcome card said "tapper", and an idea is allowed to move to another genre before the planner
+   * gets to choose (design §2.1).
+   */
+  private buildIdeaManifest(title: string, recipeId: string | undefined): ProjectManifest {
+    const template = this.templates.getTemplate(IDEA_TEMPLATE_ID);
+    const manifest = createDefaultProjectManifest();
+    const targetPlatform = template?.targetPlatform ?? manifest.targetPlatform;
+    return {
+      ...manifest,
+      viewportBaseSize: {
+        width: template?.viewport.width ?? manifest.viewportBaseSize.width,
+        height: template?.viewport.height ?? manifest.viewportBaseSize.height,
+      },
+      projectType: template?.projectType ?? manifest.projectType,
+      targetPlatform,
+      quality: createDefaultQualitySettings(targetPlatform),
+      metadata: {
+        ...(manifest.metadata ?? {}),
+        projectName: title,
+        templateId: IDEA_TEMPLATE_ID,
+        [FLOW_STAGE_METADATA_KEY]: 'idea',
+        ...(recipeId ? { [FLOW_RECIPE_HINT_METADATA_KEY]: recipeId } : {}),
+      },
+    };
+  }
+
+  /**
+   * The three files the idea stage starts from: the design document (the source of truth for the
+   * idea), the decisions log, and the references index. Written through the same forgiving helper
+   * as the prototype docs — a document that could not be written is a note, never a failed project.
+   */
+  private async writeIdeaDocs(
+    title: string,
+    prompt: string,
+    request: PrototypeBootstrapRequest,
+    references: readonly PrototypeBriefReference[],
+    notes: string[]
+  ): Promise<void> {
+    await this.writeFile(
+      FLOW_GDD_PATH,
+      renderIdeaGddMarkdown(title, prompt, request.recipeId, references),
+      notes
+    );
+    await this.writeFile(FLOW_DECISIONS_PATH, renderDecisionsMarkdown(), notes);
+    // `writeTextFile` does NOT create missing parents, and a first prompt with no attachments never
+    // creates `references/` on its way through `persistAttachments` — so the index write failed
+    // silently into `notes` (observed live) until this directory was ensured first.
+    try {
+      await this.storage.createDirectory('references');
+    } catch {
+      // Already there, or unwritable — the index write below reports the real problem either way.
+    }
+    await this.writeFile(FLOW_REFERENCES_INDEX_PATH, renderReferencesIndex(references), notes);
+  }
+
+  /**
+   * The agent's first idea-stage turn. No `buildProjectMap` and no wait for a scene: the project is
+   * an empty canvas nobody opens at this stage, so a map of it would be a list of the files this
+   * very method just wrote, and the scene wait would only spend ten seconds finding nothing.
+   */
+  async startIdeaTurn(
+    prompt: string,
+    recipeId: string | undefined,
+    references: readonly PrototypeBriefReference[]
+  ): Promise<void> {
+    await this.agentChat.newConversation();
+    await this.agentChat.send(renderIdeaFirstTurnMessage(prompt, recipeId, references));
   }
 
   // -- first turn ------------------------------------------------------------
@@ -853,7 +1069,10 @@ export class PrototypeBootstrapService {
 
   /** The recipe the planner named, else the fallback recipe, else whatever template exists. */
   private resolveTemplateId(recipeId: string, notes: string[]): string {
-    const available = this.templates.getTemplates();
+    // Visible templates only: a hidden template (`idea-blank`) is stage scaffolding, and expanding
+    // a prototype from an empty canvas would hand the agent the empty folder the recipes exist to
+    // avoid — including through the substitute branch below, which picks "any 2d template".
+    const available = this.templates.getVisibleTemplates();
     const aliased = RECIPE_TEMPLATE_ALIASES[recipeId] ?? recipeId;
     if (available.some(template => template.id === aliased)) {
       return aliased;
@@ -897,6 +1116,97 @@ export class PrototypeBootstrapService {
         projectName: brief.title,
         templateId,
       },
+    };
+  }
+
+  /**
+   * The manifest the project gets when the recipe lands on it: the recipe template's own shape
+   * (viewport, project type, entry scene) with the idea stage's metadata carried over.
+   *
+   * Carrying `metadata` is not cosmetic. `recipeHint` is what the "Idea" tab and any later planner
+   * run read to know where the idea came from, and dropping keys the idea stage wrote would make
+   * the transition a quiet data loss. `flowStage` flips to `prototype` — that flip is the whole
+   * persisted meaning of the transition (design §3.2), and it is one-way.
+   */
+  private buildPrototypeManifest(
+    brief: PrototypeBrief,
+    templateId: string,
+    projectName: string
+  ): ProjectManifest {
+    const base = this.buildManifest(brief, templateId);
+    const existing = appState.project.manifest?.metadata ?? {};
+    return {
+      ...base,
+      metadata: {
+        ...existing,
+        ...base.metadata,
+        projectName,
+        [FLOW_STAGE_METADATA_KEY]: 'prototype',
+      },
+    };
+  }
+
+  /**
+   * The references already on disk, as brief entries: `references/**` plus the read-only
+   * `design/source/**`, through the same service the references column is built from.
+   *
+   * Style CANDIDATES are left out on purpose (design §3.9): a mood board the user did not pick is a
+   * question that was already answered, and feeding all four to the planner re-opens it.
+   */
+  private async collectProjectReferences(notes: string[]): Promise<PrototypeBriefReference[]> {
+    let list;
+    try {
+      list = await this.references.list();
+    } catch (error) {
+      notes.push(
+        `Could not read the references folder: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return [];
+    }
+    const references: PrototypeBriefReference[] = [];
+    for (const item of [...list.references, ...list.sources]) {
+      if (item.missing || item.role === 'style-candidate') {
+        continue;
+      }
+      const isImage = item.kind === 'image';
+      references.push({
+        path: isImage ? `res://${item.path}` : item.path,
+        kind: isImage ? 'image' : 'doc',
+        ...(isImage && (item.role === 'style' || item.role === 'content' || item.role === 'layout')
+          ? { role: item.role }
+          : {}),
+        ...(item.caption ? { note: item.caption } : {}),
+      });
+    }
+    return references;
+  }
+
+  /**
+   * Everything the planner gets at the transition, read from the project's own files.
+   *
+   * The prompt comes out of `design/gdd.md` rather than being kept in memory or in the manifest:
+   * the transition can happen days and one reload after the prompt was typed, and the document is
+   * the copy that survives that (it is also the copy the user may have edited, which is the right
+   * one to plan from).
+   */
+  private async readIdeaContext(): Promise<
+    PlannerIdeaContext & { prompt: string; palette: string[] }
+  > {
+    const [gdd, style, decisions] = await Promise.all([
+      this.readOptional(FLOW_GDD_PATH),
+      this.readOptional(FLOW_STYLE_PATH),
+      this.readOptional(FLOW_DECISIONS_PATH),
+    ]);
+    const hint = appState.project.manifest?.metadata?.[FLOW_RECIPE_HINT_METADATA_KEY];
+    return {
+      prompt: gdd ? extractIdeaPrompt(gdd) : '',
+      ...(gdd ? { gddExcerpt: summarizeDocument(gdd) } : {}),
+      ...(style ? { style: style.trim() } : {}),
+      decisions: decisions ? extractDecisionLines(decisions) : [],
+      ...(typeof hint === 'string' && hint.trim() ? { recipeHint: hint.trim() } : {}),
+      // Quantized from the reference the user made the style, by the panel, at pick time — so the
+      // palette that reaches the recipe is measured rather than a model's memory of a hex code.
+      palette: style ? parseStylePalette(style) : [],
     };
   }
 
@@ -998,12 +1308,33 @@ export const PLANNER_SYSTEM_PROMPT = [
   '  a wow item is a phrase. Never use an em dash inside one — the tracker reads it as a note.',
 ].join('\n');
 
+/**
+ * What the idea stage adds to the planner's turn (design §3.1): the documents the user and the
+ * agent worked out, on top of the prompt they started from.
+ *
+ * All optional and all budgeted by the caller. The prompt itself is NOT in here — it stays the
+ * request's own `prompt`, so it keeps its position as the first thing the planner reads, which is
+ * the "explicit prompt beats the document beats the image" priority of parent §5.7 expressed as
+ * ordering rather than as a rule the model has to remember.
+ */
+export interface PlannerIdeaContext {
+  /** Budgeted excerpt of `design/gdd.md` — never the whole document. */
+  readonly gddExcerpt?: string;
+  /** `design/style.md` verbatim (it is short by construction). */
+  readonly style?: string;
+  /** One line per settled fork, from `design/decisions.md`. */
+  readonly decisions?: readonly string[];
+  /** The recipe card the user clicked on the launcher. A hint, never an instruction. */
+  readonly recipeHint?: string;
+}
+
 /** The planner's user turn: the idea, the catalog, references, and the exact JSON shape wanted. */
 export const buildPlannerPrompt = (
   request: PrototypeBootstrapRequest,
   attachments: readonly ComposerAttachment[],
   palette: readonly string[],
-  visionNotes: readonly string[]
+  visionNotes: readonly string[],
+  idea?: PlannerIdeaContext
 ): string => {
   const lines: string[] = [
     `IDEA: ${request.prompt.trim() || '(no text — see the references)'}`,
@@ -1016,6 +1347,35 @@ export const buildPlannerPrompt = (
     lines.push('RECIPE CATALOG (choose exactly one id):');
     for (const recipe of RECIPE_CATALOG) {
       lines.push(`- ${recipe.id}: ${recipe.blurb}`);
+    }
+    lines.push('');
+    if (idea?.recipeHint) {
+      lines.push(
+        `The user clicked the "${idea.recipeHint}" card before writing any of this down. It is a` +
+          ' HINT, not an instruction: pick the recipe the design document below actually describes,',
+        'even when that is a different genre.',
+        ''
+      );
+    }
+  }
+
+  if (idea?.gddExcerpt) {
+    lines.push(
+      'DESIGN DOCUMENT `design/gdd.md` (excerpt — the full file stays in the project and the agent',
+      'reads the section it needs):',
+      idea.gddExcerpt,
+      ''
+    );
+  }
+
+  if (idea?.style) {
+    lines.push('STYLE `design/style.md` (already agreed with the user — keep it):', idea.style, '');
+  }
+
+  if (idea?.decisions && idea.decisions.length > 0) {
+    lines.push('DECISIONS ALREADY SETTLED (do not re-open these):');
+    for (const decision of idea.decisions) {
+      lines.push(`- ${decision}`);
     }
     lines.push('');
   }
@@ -1094,6 +1454,79 @@ export const summarizeDocument = (content: string, budget = DOC_EXCERPT_CHARS): 
     .join('\n');
   const head = trimmed.slice(0, Math.max(0, budget - headings.length - 40));
   return `${head}\n…\nOUTLINE:\n${headings}`;
+};
+
+/**
+ * The user's original words, recovered from `design/gdd.md`.
+ *
+ * Three sources in falling order of fidelity: the `## What the user asked for` section the seed
+ * writes the prompt into verbatim, the `**Pitch:**` line the agent fills in, then the `# H1`. The
+ * order is the priority rule of parent §5.7 applied to one file — what the user *typed* outranks
+ * what the agent *wrote about* what they typed — and it matters because this string is the first
+ * thing the planner reads at the transition.
+ */
+export const extractIdeaPrompt = (markdown: string): string => {
+  // Deliberately NOT the `m` flag: with it the `$` in the lookahead matches the end of the first
+  // line, the lazy group captures nothing, and every document reads as "the section is empty".
+  const section =
+    /(?:^|\n)##[ \t]+What the user asked for[ \t]*\r?\n([\s\S]*?)(?=\r?\n#{1,6}[ \t]|$)/i
+      .exec(markdown)?.[1]
+      ?.trim();
+  if (section && !/^\((?:no prompt text|nothing typed)/i.test(section)) {
+    return section;
+  }
+  const pitch = /^\*\*Pitch:\*\*[ \t]*(.+)$/m.exec(markdown)?.[1]?.trim();
+  // `_to be filled_` is the seeded placeholder; treating it as the idea would plan a game out of
+  // the scaffold's own words.
+  if (pitch && !/^_?to be filled_?$/i.test(pitch)) {
+    return pitch;
+  }
+  return /^#[ \t]+(.+)$/m.exec(markdown)?.[1]?.trim() ?? '';
+};
+
+/**
+ * `design/decisions.md` → one line per settled fork.
+ *
+ * Both shapes the file can hold are read: the `## question` + `- **Chosen:**` block the scaffold
+ * documents, and the single-line `- **question** → choice` form `record_decision` appends (V5).
+ * Fenced blocks are stripped first — the scaffold's own example is a fenced `## <the question>`,
+ * and reading it back would plan the game around a template.
+ */
+export const extractDecisionLines = (markdown: string, limit = 30): string[] => {
+  const withoutFences = markdown.replace(/```[\s\S]*?(?:```|$)/g, '');
+  const lines = withoutFences.split(/\r?\n/);
+  const decisions: string[] = [];
+  let question: string | null = null;
+  for (const line of lines) {
+    const heading = /^##[ \t]+(.+)$/.exec(line);
+    if (heading) {
+      question = heading[1].trim();
+      continue;
+    }
+    const chosen = /^[ \t]*[-*][ \t]*\*\*Chosen:\*\*[ \t]*(.+)$/i.exec(line);
+    if (chosen && question) {
+      decisions.push(`${question} → ${chosen[1].trim()}`);
+      question = null;
+      continue;
+    }
+    const oneLiner = /^[ \t]*[-*][ \t]*\*\*(.+?)\*\*[ \t]*(?:→|->)[ \t]*(.+)$/.exec(line);
+    if (oneLiner) {
+      decisions.push(`${oneLiner[1].trim()} → ${oneLiner[2].trim()}`);
+    }
+  }
+  return decisions.slice(0, limit);
+};
+
+/**
+ * The palette out of `design/style.md`'s `- **Palette:** #… , #…` line.
+ *
+ * Read back rather than re-measured: the colours were quantized from the reference image the user
+ * chose (`extractPalette`), and a model asked to remember them instead returns colours that are
+ * nearly right, which is the one kind of wrong a palette must not be.
+ */
+export const parseStylePalette = (markdown: string): string[] => {
+  const line = /^[ \t]*[-*][ \t]*\*\*Palette:\*\*[ \t]*(.+)$/im.exec(markdown)?.[1] ?? '';
+  return [...line.matchAll(/#[0-9a-f]{3,8}\b/gi)].map(match => match[0]);
 };
 
 /**
@@ -1319,14 +1752,18 @@ export const fallbackBrief = (prompt: string): PrototypeBrief => ({
 
 /** A short project name out of the prompt's first words. */
 export const deriveTitle = (prompt: string): string => {
-  const words = prompt
-    .trim()
-    .replace(/["'`]/g, '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 5)
-    .join(' ');
-  const title = words.slice(0, 48).trim();
+  const cleaned = prompt.trim().replace(/["'`]/g, '');
+  // Cut at the first clause boundary when there is one: "ant colony strategy: build tunnels,
+  // gather food" names itself in its first clause, and taking a flat five words instead produced
+  // titles that ended mid-phrase on a comma ("Ant colony strategy: build tunnels,").
+  const clause = cleaned.split(/\s*[:;.!?—–]\s*|\s*,\s*/)[0] ?? '';
+  const source = clause.split(/\s+/).filter(Boolean).length >= 2 ? clause : cleaned;
+  const words = source.split(/\s+/).filter(Boolean).slice(0, 5).join(' ');
+  // Trailing punctuation survives the word split ("coins," when the cut lands on a comma).
+  const title = words
+    .slice(0, 48)
+    .replace(/[\s,;:.!?—–-]+$/, '')
+    .trim();
   if (!title) {
     return 'New Prototype';
   }
@@ -1492,6 +1929,138 @@ export const renderProgressMarkdown = (brief: PrototypeBrief): string => {
     }
   }
   lines.push('');
+  return lines.join('\n');
+};
+
+/**
+ * `design/gdd.md` — the idea-stage design document (design §3.1 step 2).
+ *
+ * A fixed skeleton of empty sections rather than a generated draft: the sections are what tells the
+ * agent (and the user) which questions the idea still owes an answer to, and filling them is the
+ * agent's own first turn — generating a draft here would cost a second model call to say what that
+ * turn is about to say anyway. The `# Title` and `**Pitch:**` lines mirror `brief.md`'s format so
+ * `FlowPlanService` reads the header out of either file.
+ */
+export const renderIdeaGddMarkdown = (
+  title: string,
+  prompt: string,
+  recipeId: string | undefined,
+  references: readonly PrototypeBriefReference[] = []
+): string => {
+  const lines: string[] = [
+    `# ${title}`,
+    '',
+    '**Pitch:** _to be filled_',
+    '',
+    '## What the user asked for',
+    '',
+    prompt.trim() || '(no prompt text — see the references)',
+    '',
+    '## Concept',
+    '',
+  ];
+  if (recipeId) {
+    // A hint, not a decision: the genre is chosen by the planner on the way to the prototype, and
+    // the idea is allowed to have moved by then.
+    lines.push(`Genre hint from the launcher: \`${recipeId}\`.`, '');
+  }
+  lines.push(
+    '## Core loop & mechanics',
+    '',
+    '## Controls',
+    '',
+    '## Screens & UI',
+    '',
+    '## Art & audio',
+    '',
+    '## Progression & difficulty',
+    '',
+    '## Open questions',
+    ''
+  );
+  if (references.length > 0) {
+    lines.push('## References', '');
+    for (const reference of references) {
+      const role = reference.role ? ` — ${reference.role}` : '';
+      lines.push(`- \`${reference.path}\` (${reference.kind}${role})`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+};
+
+/**
+ * `references/index.json` — role and origin per saved reference (design §3.6).
+ *
+ * Keyed by FILE NAME rather than project path: the index sits in the folder it describes, and the
+ * references panel builds its list from `listDirectory('references')`, whose entries are names.
+ * Missing entries degrade to "name + role `style`", so this file is a convenience, not a contract.
+ */
+export const renderReferencesIndex = (references: readonly PrototypeBriefReference[]): string => {
+  const entries: Record<string, { readonly role: string; readonly origin: 'user' }> = {};
+  for (const reference of references) {
+    // Only images live in `references/`; documents went to `design/source/` and are not part of
+    // this index (see `attachmentProjectPath`).
+    if (reference.kind !== 'image') {
+      continue;
+    }
+    const fileName = reference.path.split('/').pop();
+    if (!fileName) {
+      continue;
+    }
+    entries[fileName] = {
+      // The role is the chip the user set (or `guessAttachmentRole`'s default) — nothing here is
+      // classified by a model, that is deferred to the transition (design §3.1).
+      role: reference.role ?? 'style',
+      origin: 'user',
+    };
+  }
+  return `${JSON.stringify(entries, null, 2)}\n`;
+};
+
+/**
+ * The agent's opening message at the idea stage: the prompt, the references, and one job — work
+ * through the `idea-stage` skill, keep `design/gdd.md` current, and end the turn with a question.
+ *
+ * The instruction to ask is load-bearing rather than polite: a turn that fills every section by
+ * guessing produces a document nobody agreed to, which is the exact failure this stage exists to
+ * prevent (design §1.1).
+ */
+export const renderIdeaFirstTurnMessage = (
+  prompt: string,
+  recipeId: string | undefined,
+  references: readonly PrototypeBriefReference[] = []
+): string => {
+  const lines: string[] = [
+    'New idea — we are at the **idea stage**: there is no game yet, and there will not be one this',
+    'turn. What exists is a design document to work out together.',
+    '',
+    `What the user asked for: "${prompt.trim() || '(nothing typed — read the references)'}"`,
+  ];
+  if (recipeId) {
+    lines.push('', `They picked the \`${recipeId}\` card on the launcher — treat it as a hint.`);
+  }
+  if (references.length > 0) {
+    lines.push('', 'They attached (already saved as project files):');
+    for (const reference of references) {
+      const role = reference.role ? `, role \`${reference.role}\`` : '';
+      lines.push(`- \`${reference.path}\` (${reference.kind}${role})`);
+    }
+  }
+  lines.push(
+    '',
+    'Read the `idea-stage` skill first (`read_skill { id: "idea-stage" }`) and work by it.',
+    '',
+    `The source of truth is \`${FLOW_GDD_PATH}\` — it is already seeded with the section skeleton and`,
+    'the prompt. Fill in what the prompt and the references actually say, in the same turn, editing',
+    'with `str_replace`. Everything you and the user agree on lives in that file; this conversation',
+    'gets compacted and the file does not.',
+    '',
+    'Do NOT guess the parts the user has not decided. End this turn with **one or two** questions',
+    'through `ask_user` — the forks where a wrong guess would mean redoing the game later.',
+    '',
+    'There is no scene, no script and no play mode at this stage. Nothing to compile, nothing to run.'
+  );
   return lines.join('\n');
 };
 

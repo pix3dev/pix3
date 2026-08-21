@@ -1,0 +1,345 @@
+/* Idea-stage design document. Light-DOM component: every rule is scoped under the host tag so the
+   generic `.idea-doc*` / `.md-*` names cannot leak into the shell that embeds it (or into the chat
+   panel, which renders the same `.md-*` classes with its own typography). */
+
+pix3-idea-doc {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+pix3-idea-doc .idea-doc {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-1);
+}
+
+pix3-idea-doc .idea-doc__toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-0);
+}
+
+pix3-idea-doc .idea-doc__path {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-idea-doc .idea-doc__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--row-h);
+  padding: 0 8px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+pix3-idea-doc .idea-doc__action:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-idea-doc .idea-doc__action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+pix3-idea-doc .idea-doc__action--primary:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+pix3-idea-doc .idea-doc__action svg {
+  flex: 0 0 auto;
+}
+
+pix3-idea-doc .idea-doc__scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  /* The page itself never scrolls sideways — wide tables and code scroll inside their own box. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+pix3-idea-doc .idea-doc__empty {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+pix3-idea-doc .idea-doc__source {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 100%;
+  padding: 16px 20px;
+  border: 0;
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: none;
+  tab-size: 2;
+}
+
+pix3-idea-doc .idea-doc__source:focus-visible {
+  outline: none;
+}
+
+pix3-idea-doc .idea-doc__body {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+  color: var(--fg-1);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+pix3-idea-doc .idea-doc__body h1,
+pix3-idea-doc .idea-doc__body h2,
+pix3-idea-doc .idea-doc__body h3,
+pix3-idea-doc .idea-doc__body h4,
+pix3-idea-doc .idea-doc__body h5,
+pix3-idea-doc .idea-doc__body h6 {
+  margin: 1.6em 0 0.5em;
+  color: var(--fg-0);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+pix3-idea-doc .idea-doc__body h1 {
+  margin-top: 0;
+  font-size: 24px;
+}
+
+pix3-idea-doc .idea-doc__body h2 {
+  font-size: 18px;
+}
+
+pix3-idea-doc .idea-doc__body h3 {
+  font-size: 15px;
+}
+
+pix3-idea-doc .idea-doc__body h4 {
+  font-size: 14px;
+}
+
+pix3-idea-doc .idea-doc__body h5,
+pix3-idea-doc .idea-doc__body h6 {
+  color: var(--fg-2);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+pix3-idea-doc .idea-doc__body .md-p {
+  margin: 0 0 0.85em;
+}
+
+pix3-idea-doc .idea-doc__body .md-list {
+  margin: 0 0 0.85em;
+  padding-left: 1.4em;
+}
+
+pix3-idea-doc .idea-doc__body .md-list li {
+  margin: 0.2em 0;
+}
+
+pix3-idea-doc .idea-doc__body .md-hr {
+  margin: 1.8em 0;
+  border: 0;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-idea-doc .idea-doc__body .md-quote {
+  margin: 0 0 1em;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--accent-line);
+  color: var(--fg-2);
+}
+
+/* Task items: the box and its check are drawn in CSS. A pure renderer has no IconService, and the
+   glyph must not be an emoji or a Unicode symbol. */
+pix3-idea-doc .idea-doc__body .md-task {
+  position: relative;
+  padding-left: 0.6em;
+  list-style: none;
+}
+
+pix3-idea-doc .idea-doc__body .md-task::before {
+  position: absolute;
+  top: 0.36em;
+  left: -0.9em;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-2);
+  content: '';
+}
+
+pix3-idea-doc .idea-doc__body .md-task--done {
+  color: var(--fg-2);
+}
+
+pix3-idea-doc .idea-doc__body .md-task--done::before {
+  border-color: var(--accent-line);
+  background: var(--accent);
+}
+
+pix3-idea-doc .idea-doc__body .md-task--done::after {
+  position: absolute;
+  top: 0.52em;
+  left: -0.72em;
+  width: 6px;
+  height: 3px;
+  border-bottom: 1.5px solid var(--accent-fg);
+  border-left: 1.5px solid var(--accent-fg);
+  content: '';
+  transform: rotate(-45deg);
+}
+
+/* `display: block` turns the table into its own horizontal scroller — a wide spec table must not
+   push the document sideways. */
+pix3-idea-doc .idea-doc__body .md-table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 0 1.2em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+pix3-idea-doc .idea-doc__body .md-table th,
+pix3-idea-doc .idea-doc__body .md-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--line-1);
+  text-align: left;
+  vertical-align: top;
+}
+
+pix3-idea-doc .idea-doc__body .md-table th {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+pix3-idea-doc .idea-doc__body .md-th--center,
+pix3-idea-doc .idea-doc__body .md-td--center {
+  text-align: center;
+}
+
+pix3-idea-doc .idea-doc__body .md-th--right,
+pix3-idea-doc .idea-doc__body .md-td--right {
+  text-align: right;
+}
+
+pix3-idea-doc .idea-doc__body .md-figure {
+  margin: 0 0 1.2em;
+  text-align: center;
+}
+
+pix3-idea-doc .idea-doc__body .md-figcaption {
+  margin-top: 6px;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+pix3-idea-doc .idea-doc__body .md-img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-0);
+}
+
+pix3-idea-doc .idea-doc__body .md-img-missing {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-1);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+pix3-idea-doc .idea-doc__body .md-code {
+  margin: 0 0 1em;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+pix3-idea-doc .idea-doc__body code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+pix3-idea-doc .idea-doc__body .md-code code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}
+
+pix3-idea-doc .idea-doc__body a {
+  color: var(--pix3-accent-color);
+  text-decoration: none;
+}
+
+pix3-idea-doc .idea-doc__body a:hover {
+  text-decoration: underline;
+}
+
+/* Document images expand into the shared lightbox. The affordance is stamped onto the rendered
+   `<img>` after each render (see `makeImagesExpandable`), so the styling hangs off `role="button"`
+   rather than off a wrapper the pure markdown renderer would have had to emit. */
+pix3-idea-doc .idea-doc__body .md-img[role='button'] {
+  cursor: zoom-in;
+}
+
+pix3-idea-doc .idea-doc__body .md-img[role='button']:hover {
+  border-color: var(--accent-line);
+}
+
+pix3-idea-doc .idea-doc__body .md-img[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -1,0 +1,10 @@
+id: idea-blank
+title: Idea (blank)
+description: Starting point for the Flow idea stage — one empty Full HD 2D canvas, no game. The recipe is chosen later, when the idea becomes a prototype.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1920, height: 1080 }
+# Last in every ordering, and hidden from the pickers: this template is reached only through the
+# idea-stage bootstrap, never chosen by a user or by the recipe resolver.
+order: 99
+hidden: true

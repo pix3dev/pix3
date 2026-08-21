@@ -715,7 +715,7 @@ export class ProjectService {
       }
 
       // Create base project structure
-      await this.createProjectStructure(options.name, options.manifest, options.templateId);
+      await this.applyTemplateFiles(options.name, options.manifest, options.templateId);
 
       await activateOptions?.beforeActivate?.();
 
@@ -752,11 +752,29 @@ export class ProjectService {
     }
   }
 
-  private async createProjectStructure(
+  /**
+   * Write a template's files (and the manifest) into the **current** storage.
+   *
+   * Used twice: once for a brand new project, and once by the Flow idea→prototype transition, which
+   * lays a recipe over a project that is already open (`.plans/vibe-idea-stage.md` §3.1). Nothing
+   * here assumes an empty folder — every directory create is a no-op when the directory exists and
+   * every write is an overwrite — so the only thing the second caller needs is a way to say which
+   * paths are the USER's rather than the template's.
+   *
+   * `options.skip` is that list: an exact project-relative path, or a directory whose whole subtree
+   * is left alone. It is a safety net rather than a filter — recipes do not ship those paths, and
+   * `recipes.spec.ts` fails if one ever starts to — because "the transition silently overwrote the
+   * design document" is not a failure the user could recover from.
+   */
+  async applyTemplateFiles(
     name: string,
     manifest: ProjectManifest,
-    templateId?: string
+    templateId?: string,
+    options?: { readonly skip?: readonly string[] }
   ): Promise<void> {
+    const skipped = (options?.skip ?? []).map(entry => entry.replace(/\/+$/, ''));
+    const isSkipped = (relativePath: string): boolean =>
+      skipped.some(entry => relativePath === entry || relativePath.startsWith(`${entry}/`));
     const templateService = ServiceContainer.getInstance().getService<ProjectTemplateService>(
       ServiceContainer.getInstance().getOrCreateToken(ProjectTemplateService)
     );
@@ -787,6 +805,9 @@ export class ProjectService {
     const projectName = name.trim() || 'Pix3 Project';
     const templateTextFiles = await templateService.getTemplateTextFiles(template.id);
     for (const [relativePath, contents] of templateTextFiles) {
+      if (isSkipped(relativePath)) {
+        continue;
+      }
       await this.ensureParentDirectories(relativePath, ensuredDirectories);
       await this.storage.writeTextFile(
         relativePath,
@@ -799,6 +820,9 @@ export class ProjectService {
     // empty at this point, so aborting would leave the user unable to retry.
     const companionWarnings: string[] = [];
     const writeCompanionFile = async (relativePath: string, contents: string): Promise<void> => {
+      if (isSkipped(relativePath)) {
+        return;
+      }
       try {
         await this.ensureParentDirectories(relativePath, ensuredDirectories);
         await this.storage.writeTextFile(relativePath, contents);
@@ -808,7 +832,11 @@ export class ProjectService {
       }
     };
 
-    for (const dir of ['design', 'design/references']) {
+    // `references/` is where every attached or generated reference image actually lands
+    // (`attachmentProjectPath`), and the pre-launch atlas already excludes it. `design/references`
+    // was seeded here for years and nothing ever wrote to it — an empty folder that reads like the
+    // canonical one is worse than no folder at all.
+    for (const dir of ['design', 'references']) {
       try {
         await this.ensureDirectoryPath(dir, ensuredDirectories);
       } catch (error) {
@@ -822,6 +850,9 @@ export class ProjectService {
     }
 
     for (const [relativePath, url] of template.binaryFiles) {
+      if (isSkipped(relativePath)) {
+        continue;
+      }
       try {
         const response = await fetch(url);
         if (!response.ok) {
@@ -1464,6 +1495,61 @@ export class ProjectService {
     appState.scenes.pendingScenePaths = [ProjectService.STARTUP_SCENE_RESOURCE_PATH];
     appState.project.lastOpenedScenePath = ProjectService.STARTUP_SCENE_RESOURCE_PATH;
     await editorTabService.focusOrOpenScene(ProjectService.STARTUP_SCENE_RESOURCE_PATH);
+  }
+
+  /**
+   * Re-open the project that is already open, because its files changed underneath the editor.
+   *
+   * The one caller today is the Flow idea→prototype transition: a recipe was just laid over an open
+   * project, so every scene, script and manifest value the session is holding is stale while the
+   * project id, the directory handle and the recents entry must NOT change (a new id would orphan
+   * the chat history, the remembered workspace mode and the recents entry — design §3.1).
+   *
+   * Deliberately the same sequence as opening a project, not a hot patch: drop the open documents,
+   * re-read the manifest, rebuild the scripts, load the entry scene. The alternative — invalidating
+   * scenes, scripts and ECS in place — is a whole class of desync bugs (see "active scene = dual
+   * source of truth"), and reactivation costs a second on a project this small.
+   *
+   * Two details are load-bearing:
+   * - The script rebuild is **forced**. `ProjectScriptLoaderService` skips a build whose project id
+   *   it has already built, and here the id never changed — so without the force the recipe's
+   *   `user:*` classes are absent from the registry and its scenes load with the game logic
+   *   silently dropped.
+   * - The scene is opened through `ensureSceneActive`, which knows both workspaces: Flow has no
+   *   Golden Layout, so the tab route `openStartupScene` takes would no-op there.
+   */
+  async reactivateCurrentProject(options?: { readonly entryScenePath?: string }): Promise<void> {
+    if (appState.project.status !== 'ready') {
+      throw new Error('No project is open.');
+    }
+    const container = ServiceContainer.getInstance();
+    const scenePath = (options?.entryScenePath ?? ProjectService.STARTUP_SCENE_PATH).replace(
+      /^res:\/\//i,
+      ''
+    );
+    const resourcePath = `res://${scenePath}`;
+
+    // Scene ids come from the scene PATH, so the project that was open and the project that is
+    // there now both have a `scenes-main` — leaving the descriptor in place would reuse the empty
+    // idea-stage graph for the recipe's scene.
+    this.clearOpenDocumentState();
+    appState.project.manifest = await this.loadProjectManifest();
+    appState.project.lastOpenedScenePath = resourcePath;
+    appState.scenes.pendingScenePaths = [resourcePath];
+    // A whole template's worth of files appeared; every panel that lists the project re-reads on
+    // this signal rather than watching the file system.
+    appState.project.fileRefreshSignal += 1;
+
+    const scripts = container.getService(
+      container.getOrCreateToken(
+        (await import('@/services/scripting/ProjectScriptLoaderService')).ProjectScriptLoaderService
+      )
+    ) as import('@/services/scripting/ProjectScriptLoaderService').ProjectScriptLoaderService;
+    await scripts.syncAndBuild({ force: true });
+    await scripts.ensureReady();
+
+    const { ensureSceneActive } = await import('@/features/scripts/play-workspace');
+    await ensureSceneActive(container, resourcePath);
   }
 
   closeCurrentProject(): void {

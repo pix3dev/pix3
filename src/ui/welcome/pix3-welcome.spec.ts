@@ -319,10 +319,10 @@ describe('Pix3Welcome prompt hero', () => {
   class PrototypeBootstrapServiceStub {
     modeWhenRun: string | null = null;
     lastRequest: unknown = null;
-    run = vi.fn(async (request: unknown) => {
+    startIdea = vi.fn(async (request: unknown) => {
       this.lastRequest = request;
       this.modeWhenRun = workspaceStub?.mode ?? null;
-      return { brief: null, templateId: 'recipe-arena-2d', notes: [] };
+      return { title: 'Ants', templateId: 'idea-blank', references: [], notes: [] };
     });
     reset = vi.fn();
     subscribe(listener: (status: unknown) => void): () => void {
@@ -381,7 +381,7 @@ describe('Pix3Welcome prompt hero', () => {
     workspaceStub.set.mockClear();
     workspaceStub.claimNextProject.mockClear();
     workspaceStub.clearPendingMode.mockClear();
-    bootstrap.run.mockClear();
+    bootstrap.startIdea.mockClear();
     bootstrap.modeWhenRun = null;
     bootstrap.lastRequest = null;
 
@@ -410,12 +410,46 @@ describe('Pix3Welcome prompt hero', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(bootstrap.run).toHaveBeenCalledTimes(1);
+    expect(bootstrap.startIdea).toHaveBeenCalledTimes(1);
     expect(bootstrap.modeWhenRun).toBe('flow');
     expect(workspaceStub?.calls[0]).toBe('flow');
     // Flipping the shell is only half of it: the project the bootstrap is about to create has to
     // inherit Flow, or it resolves to Studio the instant it becomes ready — mid-generation.
     expect(workspaceStub?.pendingMode).toBe('flow');
+  });
+
+  it('opens the idea stage, never the retired straight-to-prototype path', async () => {
+    const { welcome, bootstrap } = await mountHero();
+    await typePrompt(welcome, 'a strategy about ants');
+
+    (welcome.querySelector('.hero-make') as HTMLButtonElement).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await welcome.updateComplete;
+
+    expect(bootstrap.startIdea).toHaveBeenCalledTimes(1);
+    // Everything around the call is unchanged: Flow is claimed before the project exists, so the
+    // shell that appears when it becomes ready is the Flow one.
+    expect(bootstrap.modeWhenRun).toBe('flow');
+    expect(workspaceStub?.pendingMode).toBe('flow');
+    // No planner and no expander run on this path, so the hero never enters its spinner phases.
+    expect(welcome.querySelector('.hero-spinner')).toBeNull();
+    expect(welcome.querySelector('.welcome-error')).toBeNull();
+  });
+
+  it('rolls the shell back when the idea stage fails to start', async () => {
+    const { welcome, bootstrap } = await mountHero();
+    bootstrap.startIdea.mockRejectedValueOnce(new Error('storage is full'));
+    await typePrompt(welcome, 'ants');
+
+    (welcome.querySelector('.hero-make') as HTMLButtonElement).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await welcome.updateComplete;
+
+    expect(workspaceStub?.calls).toEqual(['flow', 'studio']);
+    expect(workspaceStub?.pendingMode).toBeNull();
+    expect(welcome.querySelector('.welcome-error')?.textContent).toContain('storage is full');
   });
 
   it('sends the typed prompt and the pinned recipe together', async () => {
@@ -446,19 +480,19 @@ describe('Pix3Welcome prompt hero', () => {
 
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
     await Promise.resolve();
-    expect(bootstrap.run).not.toHaveBeenCalled();
+    expect(bootstrap.startIdea).not.toHaveBeenCalled();
     expect(workspaceStub?.calls).toEqual([]);
 
     await typePrompt(welcome, 'pop the balloons');
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(bootstrap.run).toHaveBeenCalledTimes(1);
+    expect(bootstrap.startIdea).toHaveBeenCalledTimes(1);
   });
 
   it('returns to the previous shell when the build fails, instead of stranding an empty stage', async () => {
     const { welcome, bootstrap } = await mountHero();
-    bootstrap.run.mockRejectedValueOnce(new Error('planner exploded'));
+    bootstrap.startIdea.mockRejectedValueOnce(new Error('planner exploded'));
     await typePrompt(welcome, 'a coin tapper');
 
     (welcome.querySelector('.hero-make') as HTMLButtonElement).click();

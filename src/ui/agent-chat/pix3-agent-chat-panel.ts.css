@@ -537,6 +537,27 @@ pix3-agent-chat-panel .agent-message-md a {
 
 /* ── Tool images (screenshots / previews) ───────────────────────────────── */
 
+/* The image itself is wrapped in a button so it can be expanded from the keyboard; the wrapper adds
+   nothing but the affordance, hence the full reset. */
+pix3-agent-chat-panel .agent-image-expand {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-2);
+  background: none;
+  cursor: zoom-in;
+}
+
+pix3-agent-chat-panel .agent-image-expand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+pix3-agent-chat-panel .agent-image-expand:hover .agent-image {
+  border-color: var(--accent-line);
+}
+
 pix3-agent-chat-panel .agent-image {
   align-self: flex-start;
   max-width: min(20rem, 88%);
@@ -1861,6 +1882,21 @@ pix3-agent-chat-panel .agent-attachment {
   border: 1px solid var(--line-1);
   background: var(--bg-2);
   font-size: 0.68rem;
+}
+
+pix3-agent-chat-panel .agent-attachment-expand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: none;
+  cursor: zoom-in;
+}
+
+pix3-agent-chat-panel .agent-attachment-expand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 pix3-agent-chat-panel .agent-attachment-thumb {

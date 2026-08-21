@@ -6,7 +6,12 @@ import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
-import { AgentToolRegistry, AGENT_TOOL_IMAGES_KEY } from '@/services/agent/AgentToolRegistry';
+import {
+  AgentToolRegistry,
+  AGENT_TOOL_IMAGES_KEY,
+  IDEA_STAGE_TOOLS,
+} from '@/services/agent/AgentToolRegistry';
+import { FlowStageService } from '@/services/flow/FlowStageService';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
 import {
@@ -463,6 +468,9 @@ export class AgentChatService {
   @inject(BridgeConnectionService)
   private readonly bridgeConnection!: BridgeConnectionService;
 
+  @inject(FlowStageService)
+  private readonly flowStage!: FlowStageService;
+
   private state: AgentChatState = IDLE_STATE;
   private readonly listeners = new Set<(state: AgentChatState) => void>();
   private abortController: AbortController | null = null;
@@ -861,6 +869,23 @@ export class AgentChatService {
     }
   }
 
+  /**
+   * Same channel as {@link composeFix}, but the conversation is left alone.
+   *
+   * The distinction is the point: "Fix with Agent" starts from a clean thread on purpose, while a
+   * prefill raised from inside an ongoing discussion (the references column's "regenerate") must
+   * keep it — resetting there would throw away the exchange that produced the asset being redone.
+   */
+  composePrefill(text: string): void {
+    if (this.composeListeners.size > 0) {
+      for (const listener of this.composeListeners) {
+        listener(text);
+      }
+      return;
+    }
+    this.pendingCompose = text;
+  }
+
   /** Subscribe to composer-prefill requests. Immediately flushes any queued prompt. */
   subscribeCompose(listener: (text: string) => void): () => void {
     this.composeListeners.add(listener);
@@ -922,8 +947,13 @@ export class AgentChatService {
     // Model capabilities come from the (possibly live-fetched) catalog: strip tools for models
     // that can't call them, and pass the model's output budget instead of provider flat defaults.
     const model = this.modelCatalog.getModel(provider.id, modelId);
+    // At the Flow idea stage the surface is deliberately smaller: no scene, script, play-mode or
+    // gameplay tool exists to be called against a project that is an empty canvas (design §3.10).
+    const allowedTools = this.flowStage.isIdeaStage() ? IDEA_STAGE_TOOLS : undefined;
     const tools =
-      model?.capabilities.supportsTools === false ? undefined : this.toolRegistry.specs();
+      model?.capabilities.supportsTools === false
+        ? undefined
+        : this.toolRegistry.specs(allowedTools);
     // Reasoning-depth level, only when the (possibly live-fetched) model advertises the chosen one —
     // so the provider can emit it verbatim and a stale/unsupported pick is quietly ignored.
     const reasoningPref =

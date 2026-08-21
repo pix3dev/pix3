@@ -29,7 +29,7 @@ const TEMPLATE_META_MODULES = import.meta.glob('../../templates/projects/*/templ
 }) as Record<string, string>;
 
 // Lazy (not eager): template file CONTENTS are only needed at project-creation
-// time (`ProjectService.createProjectStructure`), never for the template
+// time (`ProjectService.applyTemplateFiles`), never for the template
 // picker list — eagerly bundling every template's every file into the main
 // chunk cost ~85 KB for a feature most sessions never touch.
 const TEMPLATE_TEXT_MODULES = import.meta.glob(
@@ -121,6 +121,15 @@ export interface ProjectTemplate {
    * menu) differs from the editor startup scene.
    */
   readonly entryScenePath?: string;
+  /**
+   * Keep this template out of every template LIST (the create-project picker, the Flow recipe
+   * resolver) while leaving it reachable by id.
+   *
+   * It exists for templates a code path picks on the user's behalf — `idea-blank` is scaffolding
+   * for the Flow idea stage, not a starter anybody would pick, and letting it into the picker or
+   * into the recipe fallback chain would offer an empty canvas as if it were a game.
+   */
+  readonly hidden?: boolean;
   /** Extra empty directories to create (bundles cannot carry empty folders). */
   readonly directories: readonly string[];
   /** Project-relative path → bundled asset URL (fetched at copy time). */
@@ -159,6 +168,15 @@ export class ProjectTemplateService {
       this.templates = this.buildTemplates();
     }
     return this.templates;
+  }
+
+  /**
+   * The templates a LIST may show: every template except the {@link ProjectTemplate.hidden} ones.
+   * Anything that offers templates as a choice — the picker, the Flow recipe resolver — reads this
+   * rather than {@link getTemplates}, which stays the complete set for lookups by id.
+   */
+  getVisibleTemplates(): readonly ProjectTemplate[] {
+    return this.getTemplates().filter(template => template.hidden !== true);
   }
 
   getTemplate(id: string): ProjectTemplate | null {
@@ -261,6 +279,7 @@ export class ProjectTemplateService {
         },
         coverUrl: coversByTemplate.get(id) ?? null,
         ...(recipeIdRaw ? { recipeId: recipeIdRaw } : {}),
+        ...(meta.hidden === true ? { hidden: true } : {}),
         order: asPositiveInt(meta.order, 1000),
         entryScenePath,
         directories,

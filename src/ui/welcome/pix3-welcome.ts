@@ -343,7 +343,9 @@ export class Pix3Welcome extends ComponentBase {
 
   /** Recipe cards: the Flow catalog once it is installed, else the bundled 2D templates. */
   private getRecipeCards(): ProjectTemplate[] {
-    const templates = this.templateService.getTemplates();
+    // Visible templates only: the fallback branch below offers every 2D template as a card, and
+    // `idea-blank` is scaffolding a code path picks, never a starter to choose.
+    const templates = this.templateService.getVisibleTemplates();
     // A recipe is either its own template (`recipe-*`) or a shipped template promoted into the
     // catalog by declaring the recipe it serves — the 3D recipe is the second kind, and filtering
     // on the id prefix alone is what kept it out of this list.
@@ -396,12 +398,17 @@ export class Pix3Welcome extends ComponentBase {
     this.projectError = null;
     const previousMode = this.workspaceModeService.get();
     this.workspaceModeService.claimNextProject('flow');
+    const request = {
+      prompt: this.prompt,
+      attachments: this.attachments,
+      ...(this.pinnedRecipeId ? { recipeId: this.pinnedRecipeId } : {}),
+    };
     try {
-      await this.bootstrapService.run({
-        prompt: this.prompt,
-        attachments: this.attachments,
-        ...(this.pinnedRecipeId ? { recipeId: this.pinnedRecipeId } : {}),
-      });
+      // The prompt opens the IDEA stage: a project, a seeded design document and the agent's first
+      // turn, with no planner and no LLM call on the way in. The recipe is chosen later, at
+      // "Start prototype", when the brief is worked out — which is the whole point of the stage
+      // (plan §3.1). The old straight-to-prototype path was retired with the transition.
+      await this.bootstrapService.startIdea(request);
     } catch (error) {
       // Nothing was created, so leaving the shell in Flow would strand the user in an empty stage —
       // and the unclaimed Flow must not be inherited by whatever project the user opens next.

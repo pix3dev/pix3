@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AmbientLightNode, GeometryMesh, NodeBase } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
-import { AgentToolRegistry, type JsonSchema } from './AgentToolRegistry';
+import { AgentToolRegistry, IDEA_STAGE_TOOLS, type JsonSchema } from './AgentToolRegistry';
 import { GameTestService } from './GameTestService';
 import { GAME_ASSERTION_KINDS } from './game-assertions';
 import {
@@ -143,6 +143,57 @@ describe('AgentToolRegistry', () => {
 
   it('throws on an unknown tool', async () => {
     await expect(buildRegistry().execute('nope')).rejects.toThrow(/Unknown tool/);
+  });
+
+  describe('specs(allow) — the Flow idea-stage preset', () => {
+    it('offers text, files, images and questions, and nothing else', () => {
+      const names = buildRegistry()
+        .specs(IDEA_STAGE_TOOLS)
+        .map(spec => spec.name);
+
+      expect(names.sort()).toEqual([...IDEA_STAGE_TOOLS].sort());
+    });
+
+    it('hides every scene, script, play-mode and gameplay tool', () => {
+      // The class of failure this closes: an agent creating nodes and scripts against a design
+      // nobody has agreed to, at a stage where the genre recipe has not been chosen yet.
+      const names = new Set(
+        buildRegistry()
+          .specs(IDEA_STAGE_TOOLS)
+          .map(spec => spec.name)
+      );
+
+      for (const forbidden of [
+        'scene_tree',
+        'node_inspect',
+        'create_node',
+        'set_property',
+        'add_component',
+        'compile_scripts',
+        'play_start',
+        'play_restart',
+        'game_input',
+        'game_observe',
+        'game_run',
+        'viewport_screenshot',
+        'run_command',
+      ]) {
+        expect(names.has(forbidden), `${forbidden} must not be offered at the idea stage`).toBe(
+          false
+        );
+      }
+    });
+
+    it('is the full surface with no allow-set (the prototype stage)', () => {
+      const registry = buildRegistry();
+      const all = registry.specs().map(spec => spec.name);
+
+      expect(all).toContain('create_node');
+      expect(all).toContain('play_start');
+      expect(all.length).toBeGreaterThan(IDEA_STAGE_TOOLS.size);
+      // `execute` is not gated by the filter: the allow-set narrows what the MODEL is offered.
+      expect(registry.list().map(tool => tool.name)).toEqual(all);
+    });
   });
 
   describe('viewport_screenshot', () => {
@@ -669,6 +720,149 @@ describe('AgentToolRegistry', () => {
       });
 
       expect(assetGen.postProcess).toHaveBeenCalledWith('img-1', 'icon', { maxSize: 128 });
+    });
+
+    /**
+     * The idea stage's default output folder and its index write are decided HERE, in the tool, not
+     * asked for in the skill: "the artefact exists but is not in the references list" is the quiet
+     * breakage a prompt cannot fix (design §3.6).
+     */
+    describe('at the idea stage', () => {
+      const ideaRegistry = (
+        assetGen: ReturnType<typeof makeAssetGen>,
+        flowReferences: { upsert: ReturnType<typeof vi.fn> }
+      ): AgentToolRegistry =>
+        buildRegistry({ assetGen, flowReferences, flowStage: { isIdeaStage: () => true } });
+
+      it('puts a bare name in references/ and indexes it with origin agent and the prompt as caption', async () => {
+        const assetGen = makeAssetGen(true);
+        assetGen.save = vi.fn(async () => ({
+          path: 'references/mood-1.png',
+          width: 256,
+          height: 256,
+          bytes: 1234,
+          mimeType: 'image/png',
+        }));
+        const flowReferences = { upsert: vi.fn(async () => undefined) };
+
+        await ideaRegistry(assetGen, flowReferences).execute('generate_asset', {
+          prompt: 'flat vector city at dusk',
+          name: 'mood-1.png',
+        });
+
+        expect(assetGen.save).toHaveBeenCalledWith('img-2', 'references/mood-1.png', {});
+        expect(flowReferences.upsert).toHaveBeenCalledWith('mood-1.png', {
+          origin: 'agent',
+          caption: 'flat vector city at dusk',
+          prompt: 'flat vector city at dusk',
+        });
+      });
+
+      /**
+       * Observed live: the model asked for `design/reference_screenshot.png`, so the picture it had
+       * just drawn never showed up in the references column — the one place the user looks for it.
+       * At this stage nothing else consumes a generated file, so the folder is not the model's to
+       * choose; only the file name is.
+       */
+      it('redirects an explicit folder into references/ and still indexes it', async () => {
+        const assetGen = makeAssetGen(true);
+        // The real `save` writes at the path it is handed; the stub reports the redirected one.
+        assetGen.save = vi.fn(async () => ({
+          path: 'references/reference_screenshot.png',
+          width: 256,
+          height: 256,
+          bytes: 1234,
+          mimeType: 'image/png',
+        }));
+        const flowReferences = { upsert: vi.fn(async () => undefined) };
+
+        await ideaRegistry(assetGen, flowReferences).execute('generate_asset', {
+          prompt: 'a fake screenshot',
+          name: 'design/reference_screenshot.png',
+        });
+
+        expect(assetGen.save).toHaveBeenCalledWith(
+          'img-2',
+          'references/reference_screenshot.png',
+          {}
+        );
+        expect(flowReferences.upsert).toHaveBeenCalledWith('reference_screenshot.png', {
+          origin: 'agent',
+          caption: 'a fake screenshot',
+          prompt: 'a fake screenshot',
+        });
+      });
+
+      it('says in the result that the folder was decided for the model', async () => {
+        const assetGen = makeAssetGen(true);
+        assetGen.save = vi.fn(async () => ({
+          path: 'references/mood-1.png',
+          width: 256,
+          height: 256,
+          bytes: 1234,
+          mimeType: 'image/png',
+        }));
+
+        const result = (await ideaRegistry(assetGen, {
+          upsert: vi.fn(async () => undefined),
+        }).execute('generate_asset', { prompt: 'a mood', name: 'mood-1.png' })) as {
+          note: string;
+        };
+
+        expect(result.note).toContain('references/');
+        expect(result.note).toMatch(/not yours to choose/i);
+      });
+
+      /**
+       * Observed live, twice: the model generated a moodboard (which lands in `references/`), then
+       * "corrected" the location with process_asset into `design/` and deleted the original — so
+       * the artefact vanished from the Files column, the only place the user looks for it.
+       */
+      it('refuses to process a reference OUT of references/', async () => {
+        const assetGen = makeAssetGen(true);
+        const registry = ideaRegistry(assetGen, { upsert: vi.fn(async () => undefined) });
+        appState.project.status = 'ready';
+
+        const result = (await registry.execute('process_asset', {
+          path: 'references/mood-1.png',
+          name: 'design/mood-1.png',
+        })) as { ok: boolean; error: string };
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/references\//);
+        expect(assetGen.open).not.toHaveBeenCalled();
+        appState.project.status = 'idle';
+      });
+
+      it('still processes a reference in place', async () => {
+        const assetGen = makeAssetGen(true);
+        assetGen.save = vi.fn(async () => ({
+          path: 'references/mood-1.png',
+          width: 256,
+          height: 256,
+          bytes: 1234,
+          mimeType: 'image/png',
+        }));
+        const registry = ideaRegistry(assetGen, { upsert: vi.fn(async () => undefined) });
+        appState.project.status = 'ready';
+
+        const result = (await registry.execute('process_asset', {
+          path: 'references/mood-1.png',
+        })) as { ok: boolean };
+
+        expect(result.ok).toBe(true);
+        expect(assetGen.save).toHaveBeenCalledWith('img-2', 'references/mood-1.png', {});
+        appState.project.status = 'idle';
+      });
+    });
+
+    it('keeps the asset-type folder for a bare name at the prototype stage', async () => {
+      const assetGen = makeAssetGen(true);
+      const registry = buildRegistry({ assetGen, flowStage: { isIdeaStage: () => false } });
+
+      await registry.execute('generate_asset', { prompt: 'a car', name: 'car.png' });
+
+      expect(assetGen.save).toHaveBeenCalledWith('img-2', 'sprites/car.png', {});
     });
   });
 
@@ -1268,6 +1462,23 @@ describe('AgentToolRegistry', () => {
       await registry.execute('fs_delete', { path: 'scripts/a.ts' });
       expect(storage.deleteEntry).toHaveBeenCalledWith('scripts/a.ts');
       expect(appState.project.fileRefreshSignal || 0).toBeGreaterThan(before);
+    });
+
+    /**
+     * Observed live: the agent deleted two generated references and their `index.json` entries
+     * outlived the files, so the sidecar described pictures nobody had.
+     */
+    it('fs_delete prunes the references index entry, and only under references/', async () => {
+      const storage = makeStorage();
+      const flowReferences = { removeEntry: vi.fn(async () => undefined) };
+      const registry = buildRegistry({ storage, flowReferences });
+
+      await registry.execute('fs_delete', { path: 'references/mood-1.png' });
+      expect(flowReferences.removeEntry).toHaveBeenCalledWith('mood-1.png');
+
+      flowReferences.removeEntry.mockClear();
+      await registry.execute('fs_delete', { path: 'design/gdd.md' });
+      expect(flowReferences.removeEntry).not.toHaveBeenCalled();
     });
 
     it('rejects paths containing ".."', async () => {

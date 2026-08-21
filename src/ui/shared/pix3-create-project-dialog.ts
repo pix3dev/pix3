@@ -110,7 +110,8 @@ export class Pix3CreateProjectDialog extends ComponentBase {
   }
 
   private renderTemplateStep() {
-    const templates = this.projectTemplateService.getTemplates();
+    // Visible templates only: `hidden` ones (e.g. `idea-blank`) are scaffolding a code path picks.
+    const templates = this.projectTemplateService.getVisibleTemplates();
 
     return html`
       <div class="template-grid" role="listbox" aria-label="Project templates">

@@ -11,6 +11,7 @@ import {
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
 import { IconService, IconSize } from '@/services/editor/IconService';
+import { LightboxService, type LightboxItem } from '@/services/editor/LightboxService';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
@@ -26,6 +27,7 @@ import {
   type LlmToolUseBlock,
   type ReasoningEffort,
 } from '@/services/llm/LlmTypes';
+import { ensureLightboxHost } from '@/ui/shared/pix3-lightbox';
 import { renderMarkdownLite } from './markdown-lite';
 import './pix3-agent-chat-panel.ts.css';
 
@@ -124,7 +126,8 @@ export type DisplayItem =
     }
   /** A `[Pix3]` harness nudge: shown collapsed to its heading, never as a user message. */
   | { kind: 'notice'; key: string; label: string; text: string }
-  | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
+  /** `key` is `<message>-<block>`, so the images of one message can be flipped through together. */
+  | { kind: 'image'; key: string; role: 'user' | 'assistant'; mimeType: string; data: string }
   | { kind: 'tool'; call: LlmToolUseBlock; result: LlmToolResultBlock | null }
   | { kind: 'metrics'; metric: AgentTurnMetric }
   /** Boundary where the service compacted the history — the thread visibly jumps here. */
@@ -187,6 +190,7 @@ export const toDisplayItems = (
         // Screenshots / asset previews emitted by tools (they ride in user turns).
         items.push({
           kind: 'image',
+          key,
           role: message.role,
           mimeType: block.mimeType,
           data: block.data,
@@ -508,6 +512,9 @@ const describeToolCall = (call: LlmToolUseBlock): string => {
 /** A tool-use block paired with its (possibly missing) result. */
 type ToolEntry = { call: LlmToolUseBlock; result: LlmToolResultBlock | null };
 
+/** One inline image of the transcript, as the lightbox needs it. */
+type ChatImage = { readonly mimeType: string; readonly data: string };
+
 /** A run of adjacent tool calls, plus the message rows around them, after grouping. */
 type RenderRow =
   | {
@@ -521,7 +528,17 @@ type RenderRow =
       lastAssistant: boolean;
     }
   | { kind: 'notice'; key: string; label: string; text: string }
-  | { kind: 'image'; role: 'user' | 'assistant'; mimeType: string; data: string }
+  | {
+      kind: 'image';
+      key: string;
+      role: 'user' | 'assistant';
+      mimeType: string;
+      data: string;
+      /** Every image of the same message, in order — what the lightbox arrows walk. */
+      siblings: readonly ChatImage[];
+      /** This image's position inside {@link siblings}. */
+      siblingIndex: number;
+    }
   | { kind: 'metrics'; metric: AgentTurnMetric }
   | { kind: 'divider' }
   | { kind: 'toolgroup'; id: string; tools: ToolEntry[] };
@@ -663,6 +680,9 @@ export class AgentChatPanel extends ComponentBase {
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
+  @inject(LightboxService)
+  private readonly lightbox!: LightboxService;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -750,6 +770,10 @@ export class AgentChatPanel extends ComponentBase {
 
   connectedCallback(): void {
     super.connectedCallback();
+
+    // The shared lightbox lives on `document.body` — this panel is inside a Golden Layout pane that
+    // clips with `overflow: hidden`, so a full-screen overlay could never render in here.
+    ensureLightboxHost();
 
     this.disposeChatSubscription = this.chat.subscribe(chatState => {
       this.chatState = chatState;
@@ -926,6 +950,17 @@ export class AgentChatPanel extends ComponentBase {
    */
   private buildRenderRows(items: readonly DisplayItem[]): RenderRow[] {
     const rows: RenderRow[] = [];
+    // A tool that captured five screenshots arrives as five separate rows, so each image row has to
+    // carry its whole message's list — otherwise the lightbox arrows have nowhere to go.
+    const imagesByMessage = new Map<string, Extract<DisplayItem, { kind: 'image' }>[]>();
+    for (const item of items) {
+      if (item.kind === 'image') {
+        const messageKey = item.key.split('-')[0];
+        const group = imagesByMessage.get(messageKey) ?? [];
+        group.push(item);
+        imagesByMessage.set(messageKey, group);
+      }
+    }
     let pending: ToolEntry[] = [];
     const flush = (): void => {
       if (pending.length > 0) {
@@ -952,7 +987,16 @@ export class AgentChatPanel extends ComponentBase {
       } else if (item.kind === 'notice') {
         rows.push({ kind: 'notice', key: item.key, label: item.label, text: item.text });
       } else if (item.kind === 'image') {
-        rows.push({ kind: 'image', role: item.role, mimeType: item.mimeType, data: item.data });
+        const siblings = imagesByMessage.get(item.key.split('-')[0]) ?? [item];
+        rows.push({
+          kind: 'image',
+          key: item.key,
+          role: item.role,
+          mimeType: item.mimeType,
+          data: item.data,
+          siblings: siblings.map(image => ({ mimeType: image.mimeType, data: image.data })),
+          siblingIndex: Math.max(0, siblings.indexOf(item)),
+        });
       } else if (item.kind === 'divider') {
         rows.push({ kind: 'divider' });
       } else {
@@ -1025,14 +1069,24 @@ export class AgentChatPanel extends ComponentBase {
       </div>`;
     }
     if (row.kind === 'image') {
+      // A button, not a clickable `<img>`: a screenshot the agent sent must be reachable by
+      // keyboard like every other affordance in the transcript.
       return html`
         <div class="agent-left-row">
           <span class="agent-avatar-gutter"></span>
-          <img
-            class="agent-image"
-            alt="Tool-captured image"
-            src=${`data:${row.mimeType};base64,${row.data}`}
-          />
+          <button
+            type="button"
+            class="agent-image-expand"
+            title="Show larger"
+            aria-label="Show larger"
+            @click=${() => this.openChatImage(row)}
+          >
+            <img
+              class="agent-image"
+              alt="Tool-captured image"
+              src=${`data:${row.mimeType};base64,${row.data}`}
+            />
+          </button>
         </div>
       `;
     }
@@ -2149,11 +2203,19 @@ export class AgentChatPanel extends ComponentBase {
           att => html`
             <span class="agent-attachment" title=${att.name}>
               ${att.kind === 'image'
-                ? html`<img
-                    class="agent-attachment-thumb"
-                    alt=${att.name}
-                    src=${`data:${att.mimeType};base64,${att.base64}`}
-                  />`
+                ? html`<button
+                    type="button"
+                    class="agent-attachment-expand"
+                    title="Show larger"
+                    aria-label=${`Show larger: ${att.name}`}
+                    @click=${() => this.openAttachmentImage(att.id)}
+                  >
+                    <img
+                      class="agent-attachment-thumb"
+                      alt=${att.name}
+                      src=${`data:${att.mimeType};base64,${att.base64}`}
+                    />
+                  </button>`
                 : html`<span class="agent-attachment-icon"
                     >${this.icons.getIcon('file-text', IconSize.SMALL)}</span
                   >`}
@@ -2175,6 +2237,43 @@ export class AgentChatPanel extends ComponentBase {
           : null}
       </div>
     `;
+  }
+
+  /**
+   * Expand a transcript image. The list handed over is the whole message's images, so the arrows
+   * walk the moodboard the tool returned rather than dead-ending on the one that was clicked.
+   *
+   * `data:` URLs, not object URLs: the transcript already holds the base64, and minting blobs here
+   * would put this panel in the business of revoking them.
+   */
+  private openChatImage(row: Extract<RenderRow, { kind: 'image' }>): void {
+    ensureLightboxHost();
+    const items: LightboxItem[] = row.siblings.map(image => ({
+      kind: 'image',
+      title: 'Tool-captured image',
+      url: `data:${image.mimeType};base64,${image.data}`,
+      mimeType: image.mimeType,
+    }));
+    this.lightbox.open(items, row.siblingIndex);
+  }
+
+  /** Expand a staged composer attachment; the arrows walk the other staged images. */
+  private openAttachmentImage(id: string): void {
+    ensureLightboxHost();
+    const images = this.attachments.filter(
+      (att): att is Extract<ComposerAttachment, { kind: 'image' }> => att.kind === 'image'
+    );
+    const index = images.findIndex(att => att.id === id);
+    if (index < 0) {
+      return;
+    }
+    const items: LightboxItem[] = images.map(att => ({
+      kind: 'image',
+      title: att.name,
+      url: `data:${att.mimeType};base64,${att.base64}`,
+      mimeType: att.mimeType,
+    }));
+    this.lightbox.open(items, index);
   }
 
   // ── Handlers ────────────────────────────────────────────────────────────────

@@ -9,12 +9,24 @@ pix3-flow-shell {
   background: var(--bg-0);
 }
 
+/* A column rather than a fixed grid: the transition banner is an optional row between the header
+   and the body, and a `grid-template-rows: auto auto 1fr` would hand the body the banner's track
+   whenever the banner is absent (the same off-by-one-track bug the stacked layout below hit). */
 pix3-flow-shell .flow-shell {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+pix3-flow-shell .flow-header,
+pix3-flow-shell .flow-transition {
+  flex: none;
+}
+
+pix3-flow-shell .flow-body {
+  flex: 1 1 auto;
 }
 
 /* ── Header ─────────────────────────────────────────────────────────────── */
@@ -136,169 +148,68 @@ pix3-flow-shell .flow-action svg {
   flex: none;
 }
 
-/* ── Plan sidebar ───────────────────────────────────────────────────────── */
-
-/* Docked right of the stage, not in the header: the steps are sentences, and a header row of chips
-   ellipsized them into noise. Collapses to a rail so the toggle is always reachable without a
-   floating button over the game. */
-pix3-flow-shell .flow-plan-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  width: 260px;
-  border-left: 1px solid var(--line-1);
-  background: var(--bg-1);
-}
-
-pix3-flow-shell .flow-plan-panel--collapsed {
-  width: 38px;
-}
-
-pix3-flow-shell .flow-plan-panel__head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  min-height: 38px;
-  color: var(--fg-2);
-  font-size: 11px;
-}
-
-pix3-flow-shell .flow-plan-panel--collapsed .flow-plan-panel__head {
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 4px;
-}
-
-pix3-flow-shell .flow-plan-panel__title {
-  flex: 1;
+/* The one action of the idea stage: leaving it. Accented because it is the only forward step on
+   that screen; disabled only while the transition it starts is running. */
+pix3-flow-shell .flow-action--cta {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--fg-0);
   font-weight: 600;
-  color: var(--fg-1);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
-pix3-flow-shell .flow-plan-panel__count {
-  color: var(--fg-3);
-  font-variant-numeric: tabular-nums;
+pix3-flow-shell .flow-action--cta:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
-pix3-flow-shell .flow-plan-panel__toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-1);
-  background: transparent;
-  color: var(--fg-2);
-  cursor: pointer;
-}
-
-pix3-flow-shell .flow-plan-panel__toggle:hover {
-  background: var(--bg-2);
-  border-color: var(--line-2);
-  color: var(--fg-0);
-}
-
-pix3-flow-shell .flow-plan-panel__toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-pix3-flow-shell .flow-plan-panel__toggle svg {
-  width: 14px;
-  height: 14px;
-}
-
-pix3-flow-shell .flow-plan {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 8px 12px;
-  color: var(--fg-2);
-  font-size: 11px;
-}
-
-pix3-flow-shell .flow-plan--empty {
-  gap: 6px;
-  color: var(--fg-3);
-  line-height: 1.45;
-}
-
-/* Steps wrap onto as many lines as they need — that is the whole reason this left the header. */
-pix3-flow-shell .flow-plan__step {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: var(--radius-1);
-  background: var(--bg-2);
-  border: 1px solid transparent;
-  line-height: 1.35;
-}
-
-pix3-flow-shell .flow-plan__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-pix3-flow-shell .flow-plan__note {
-  color: var(--fg-3);
-}
-
-pix3-flow-shell .flow-plan__working {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  color: var(--fg-3);
-}
-
-pix3-flow-shell .flow-plan__step svg {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  /* Nudge onto the first text line's optical centre. */
-  margin-top: 2px;
-}
-
-pix3-flow-shell .flow-plan__step--done {
-  color: var(--fg-1);
-}
-
-pix3-flow-shell .flow-plan__step--done svg {
-  color: var(--accent);
-}
-
-pix3-flow-shell .flow-plan__step--active {
-  color: var(--fg-0);
+pix3-flow-shell .flow-action--cta:disabled:hover {
   background: var(--accent-soft);
   border-color: var(--accent-line);
+  color: var(--fg-0);
 }
 
-pix3-flow-shell .flow-plan__step--active svg {
-  animation: pix3-flow-spin 1.4s linear infinite;
+/* ── Transition banner ──────────────────────────────────────────────────── */
+
+/* The narration of the ~10 s transition. Full width under the header so it cannot be missed, and
+   outside the stage/document column because the transition is what replaces that column. */
+pix3-flow-shell .flow-transition {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: 12px;
 }
 
-pix3-flow-shell .flow-plan__step--todo {
-  color: var(--fg-3);
+pix3-flow-shell .flow-transition__text {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
+pix3-flow-shell .flow-transition--error {
+  color: var(--danger);
+  background: var(--bg-2);
+}
+
+pix3-flow-shell .flow-transition--error svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* The stage bar's "working" spinner. The plan checklist that introduced this class now lives in
+   `pix3-flow-side-panel`, which carries its own copy — this one is for the status row under the
+   stage, which is a shell affordance. */
 pix3-flow-shell .flow-plan__spinner {
+  display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 50%;
   border: 2px solid var(--line-strong);
   border-top-color: var(--accent);
   animation: pix3-flow-spin 0.8s linear infinite;
-  display: inline-block;
 }
 
 @keyframes pix3-flow-spin {
@@ -356,6 +267,84 @@ pix3-flow-shell .flow-chat .agent-chat {
   min-width: 0;
 }
 
+/* ── Prototype view: game and document in one column ────────────────────── */
+
+pix3-flow-shell .flow-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+pix3-flow-shell .flow-view__switch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 8px 16px 0;
+}
+
+/* Same segmented reading as `pix3-mode-switch` — the half you are on is filled — but local to this
+   shell: it switches a view inside Vibe, not the workspace mode, and sharing the component would
+   mean sharing its workspace-mode wiring. */
+pix3-flow-shell .flow-view__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+pix3-flow-shell .flow-view__option svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+pix3-flow-shell .flow-view__option[data-current='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--fg-0);
+  cursor: default;
+}
+
+pix3-flow-shell .flow-view__option[data-current='false']:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+pix3-flow-shell .flow-view__option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+pix3-flow-shell .flow-view__divider {
+  inline-size: 0;
+  block-size: 12px;
+  margin: 0 3px;
+  border-inline-start: 1px solid var(--line-2);
+}
+
+/* The hidden half of the switch. `display: none` is what the UA's `[hidden]` would do, but both
+   `.flow-stage` and `.flow-doc` set their own `display`, so it has to be said again — and it has to
+   be `display: none` rather than `visibility: hidden` so the hidden view claims no grid track. */
+pix3-flow-shell .flow-stage[hidden],
+pix3-flow-shell .flow-doc[hidden] {
+  display: none;
+}
+
 pix3-flow-shell .flow-stage {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -365,6 +354,17 @@ pix3-flow-shell .flow-stage {
      instead of letting the canvas paint over the chat. */
   overflow: hidden;
   background: var(--bg-0);
+}
+
+/* The document column at the idea stage. It takes the stage's place in the row, but not its
+   letterboxing: a document wants the whole column and its own scrolling. */
+pix3-flow-shell .flow-doc {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-1);
 }
 
 pix3-flow-shell .flow-stage__frame {
@@ -473,15 +473,15 @@ pix3-flow-shell .flow-stage__status {
   }
 
   /* Stacked layout: the sidebar becomes a bottom strip, capped so it never eats the stage. */
-  pix3-flow-shell .flow-plan-panel,
-  pix3-flow-shell .flow-plan-panel--collapsed {
+  pix3-flow-shell pix3-flow-side-panel,
+  pix3-flow-shell pix3-flow-side-panel[collapsed] {
     width: auto;
     max-height: 30vh;
     border-left: none;
     border-top: 1px solid var(--line-1);
   }
 
-  pix3-flow-shell .flow-plan-panel--collapsed .flow-plan-panel__head {
+  pix3-flow-shell pix3-flow-side-panel[collapsed] .side-panel__head {
     flex-direction: row;
     padding: 8px;
   }

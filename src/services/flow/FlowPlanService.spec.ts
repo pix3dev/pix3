@@ -1,5 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { parseChecklist } from './FlowPlanService';
+import {
+  FLOW_BRIEF_PATH,
+  FLOW_GDD_PATH,
+  FLOW_PROGRESS_PATH,
+  FlowPlanService,
+  parseChecklist,
+} from './FlowPlanService';
+
+/** A FlowPlanService reading from an in-memory project instead of the real storage service. */
+const planServiceOver = (files: Record<string, string>): FlowPlanService => {
+  const service = new FlowPlanService();
+  Object.defineProperty(service, 'storage', {
+    value: {
+      readTextFile: async (path: string) => {
+        const contents = files[path];
+        if (contents === undefined) {
+          throw new Error(`no such file: ${path}`);
+        }
+        return contents;
+      },
+    },
+    configurable: true,
+  });
+  return service;
+};
+
+describe('FlowPlanService.load', () => {
+  it('takes the header title from the brief when there is one', async () => {
+    const plan = await planServiceOver({
+      [FLOW_BRIEF_PATH]: '# Coin Tapper\n\n**Pitch:** tap the coins\n',
+      [FLOW_PROGRESS_PATH]: '- [~] Controls\n',
+    }).load();
+
+    expect(plan.title).toBe('Coin Tapper');
+    expect(plan.pitch).toBe('tap the coins');
+    expect(plan.steps).toHaveLength(1);
+  });
+
+  it('falls back to the design document at the idea stage, where no brief exists', async () => {
+    // There is no recipe and no planner run yet, so `brief.md` is absent — without this fallback the
+    // header would show the derived project name instead of the game the two of them are naming.
+    const plan = await planServiceOver({
+      [FLOW_GDD_PATH]: '# Ant Wars\n\n**Pitch:** _to be filled_\n\n## Concept\n',
+    }).load();
+
+    expect(plan.title).toBe('Ant Wars');
+    // The pitch stays a brief-only field: the seeded placeholder is not a pitch.
+    expect(plan.pitch).toBeNull();
+    expect(plan.steps).toEqual([]);
+  });
+
+  it('is empty when the project has none of the three documents', async () => {
+    const plan = await planServiceOver({}).load();
+    expect(plan).toEqual({ pitch: null, title: null, steps: [] });
+  });
+});
 
 describe('parseChecklist', () => {
   it('maps checkbox markers onto plan-step statuses', () => {

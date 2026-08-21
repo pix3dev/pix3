@@ -1,4 +1,5 @@
 import { injectable } from '@/fw/di';
+import ideaStage from './agent-skills/idea-stage.md?raw';
 import flowIncrement from './agent-skills/flow-increment.md?raw';
 import gamePrototype from './agent-skills/game-prototype.md?raw';
 import assetGeneration from './agent-skills/asset-generation.md?raw';
@@ -25,6 +26,12 @@ export interface AgentSkill {
 @injectable()
 export class AgentSkillsService {
   private readonly skills: readonly AgentSkill[] = [
+    {
+      id: 'idea-stage',
+      whenToUse:
+        'working out the IDEA in Flow (a design document, no game yet) — read this FIRST there',
+      content: ideaStage,
+    },
     {
       id: 'flow-increment',
       whenToUse:

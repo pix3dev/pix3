@@ -3,11 +3,19 @@ import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
+import { DialogService } from '@/services/editor/DialogService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
-import { FlowPlanService, type FlowPlan, type FlowPlanStep } from '@/services/flow/FlowPlanService';
+import { FlowPlanService, type FlowPlan } from '@/services/flow/FlowPlanService';
+import { FlowStageService, type FlowStage } from '@/services/flow/FlowStageService';
+import {
+  PrototypeBootstrapService,
+  type PrototypeBootstrapPhase,
+} from '@/services/flow/PrototypeBootstrapService';
 import '@/ui/agent-chat/pix3-agent-chat-panel';
 import '@/ui/shared/pix3-mode-switch';
+import './pix3-flow-side-panel';
+import './pix3-idea-doc';
 import './pix3-flow-shell.ts.css';
 
 const EMPTY_PLAN: FlowPlan = { pitch: null, title: null, steps: [] };
@@ -17,8 +25,6 @@ const MIN_CHAT_WIDTH = 300;
 const MIN_STAGE_WIDTH = 360;
 const DEFAULT_CHAT_WIDTH = 420;
 const CHAT_WIDTH_KEY = 'pix3.flow.chatWidth:v1';
-
-const PLAN_OPEN_KEY = 'pix3.flow.planOpen:v1';
 
 const loadChatWidth = (): number => {
   try {
@@ -34,22 +40,6 @@ const persistChatWidth = (width: number): void => {
     localStorage.setItem(CHAT_WIDTH_KEY, String(width));
   } catch {
     // A split that forgets itself is a small loss; never break the shell over storage.
-  }
-};
-
-const loadPlanOpen = (): boolean => {
-  try {
-    return localStorage.getItem(PLAN_OPEN_KEY) !== '0';
-  } catch {
-    return true;
-  }
-};
-
-const persistPlanOpen = (open: boolean): void => {
-  try {
-    localStorage.setItem(PLAN_OPEN_KEY, open ? '1' : '0');
-  } catch {
-    // Same as the split width: a forgotten preference must never break the shell.
   }
 };
 
@@ -88,8 +78,25 @@ export class Pix3FlowShell extends ComponentBase {
   @inject(FlowPlanService)
   private readonly planService!: FlowPlanService;
 
+  @inject(FlowStageService)
+  private readonly stageService!: FlowStageService;
+
+  @inject(PrototypeBootstrapService)
+  private readonly bootstrap!: PrototypeBootstrapService;
+
+  @inject(DialogService)
+  private readonly dialogs!: DialogService;
+
   @state()
   private plan: FlowPlan = EMPTY_PLAN;
+
+  /**
+   * Which stage the open project is in. Re-read on every project change so reopening a project
+   * lands back in the stage it was left in (design §2.6) — and so a transition, when it ships,
+   * flips this shell without recreating it.
+   */
+  @state()
+  private stage: FlowStage = 'prototype';
 
   @state()
   private isPlaying = appState.ui.isPlaying;
@@ -103,8 +110,19 @@ export class Pix3FlowShell extends ComponentBase {
   @state()
   private stageError: string | null = null;
 
+  /**
+   * Which half of the prototype stage is on screen (design §2.5). The game is the default: the
+   * document is where the project came from, the game is what the user is now iterating on.
+   */
   @state()
-  private planOpen = loadPlanOpen();
+  private stageView: StageView = 'game';
+
+  /** Phase of a transition this shell started, mirrored from the bootstrap status stream. */
+  @state()
+  private transitionPhase: PrototypeBootstrapPhase | null = null;
+
+  @state()
+  private transitionError: string | null = null;
 
   private chatWidth = loadChatWidth();
   private stageHost?: HTMLElement;
@@ -128,9 +146,17 @@ export class Pix3FlowShell extends ComponentBase {
   private readonly adoptedRunningSession = appState.ui.isPlaying;
   /** True while the last agent turn touched the game, so the stage is restarted when it settles. */
   private stageDirty = false;
+  private disposeBootstrap?: () => void;
+  /**
+   * The document is mounted lazily and then kept mounted for the rest of the session: the first
+   * switch to Idea pays for the file read and the blob URLs, every switch after it is free — and
+   * an unmount/remount cycle would throw away the scroll position and a half-typed source edit.
+   */
+  private ideaDocMounted = false;
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.stage = this.stageService.getStage();
 
     this.disposeUi = subscribe(appState.ui, () => {
       this.isPlaying = appState.ui.isPlaying;
@@ -143,6 +169,20 @@ export class Pix3FlowShell extends ComponentBase {
     });
 
     this.disposeAgent = this.agentChat.subscribe(state => this.onAgentState(state));
+
+    // Narrating the transition is the whole reason this shell reads the status stream: the pipeline
+    // it kicks off takes ~10 s, and principle 6 forbids spending them behind a modal.
+    this.disposeBootstrap = this.bootstrap.subscribe(status => {
+      if (this.transitionPhase === null) {
+        // Not our run: a status left over from the welcome screen's own bootstrap must not paint a
+        // banner over a project that is already open.
+        return;
+      }
+      this.transitionPhase = status.phase;
+      if (status.phase === 'error') {
+        this.transitionError = status.error ?? status.message;
+      }
+    });
 
     void this.refreshPlan();
   }
@@ -161,21 +201,54 @@ export class Pix3FlowShell extends ComponentBase {
     this.disposeAgent = undefined;
     this.disposeProject?.();
     this.disposeProject = undefined;
+    this.disposeBootstrap?.();
+    this.disposeBootstrap = undefined;
   }
 
   protected firstUpdated(): void {
-    this.stageHost = this.querySelector<HTMLElement>('.flow-stage__host') ?? undefined;
-    this.stageFrame = this.querySelector<HTMLElement>('.flow-stage__frame') ?? undefined;
-    if (this.stageHost) {
-      this.playSession.registerTabHost(this.stageHost, window);
-    }
-    if (this.stageFrame) {
-      this.resizeObserver = new ResizeObserver(() => this.fitStage());
-      this.resizeObserver.observe(this.stageFrame);
-    }
+    this.syncStageHost();
     this.setChatWidth(this.chatWidth);
     this.fitStage();
     void this.onProjectChanged();
+  }
+
+  protected updated(): void {
+    // The stage exists in the DOM only at the prototype stage, and the stage can flip under this
+    // shell (reopening a project, and later the transition), so the runtime host is attached and
+    // detached from here rather than once in firstUpdated.
+    this.syncStageHost();
+  }
+
+  /**
+   * Mount the runtime into the stage host when there is one, and let go of it when there is not.
+   *
+   * At the idea stage `registerTabHost` is never called at all: the runtime is not mounted, no
+   * scene is loaded and nothing ticks (design §3.2). That is the point of the stage — the tokens
+   * and the seconds go into text and pictures, not into an engine nobody is looking at.
+   */
+  private syncStageHost(): void {
+    const host = this.querySelector<HTMLElement>('.flow-stage__host') ?? undefined;
+    if (host !== this.stageHost) {
+      if (this.stageHost) {
+        this.playSession.unregisterTabHost(this.stageHost);
+      }
+      this.stageHost = host;
+      if (host) {
+        this.playSession.registerTabHost(host, window);
+      }
+    }
+
+    const frame = this.querySelector<HTMLElement>('.flow-stage__frame') ?? undefined;
+    if (frame === this.stageFrame) {
+      return;
+    }
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
+    this.stageFrame = frame;
+    if (frame) {
+      this.resizeObserver = new ResizeObserver(() => this.fitStage());
+      this.resizeObserver.observe(frame);
+    }
   }
 
   /**
@@ -242,8 +315,16 @@ export class Pix3FlowShell extends ComponentBase {
       return;
     }
     const projectId = appState.project.id;
+    // Read on every project change, not once: a project closed at the idea stage has to reopen
+    // into it (design §2.6), and the manifest is what remembers that.
+    this.stage = this.stageService.getStage();
     await this.refreshPlan();
     this.fitStage();
+    if (this.stage === 'idea') {
+      // No stage to start, and nothing to auto-start it for. Deliberately not marking the project
+      // as auto-started either — the transition to the prototype has to be free to start it.
+      return;
+    }
     if (projectId && this.autoStartedProjectId !== projectId) {
       const isFirstObservation = this.autoStartedProjectId === null;
       this.autoStartedProjectId = projectId;
@@ -273,7 +354,9 @@ export class Pix3FlowShell extends ComponentBase {
       // A finished increment lands on the stage without the user asking: re-read the checklist and
       // restart the running game so what they poke is what the agent just built.
       void this.refreshPlan();
-      if (this.stageDirty) {
+      // At the idea stage the agent's writes are documents; the doc component re-reads them itself,
+      // and there is no game to restart.
+      if (this.stageDirty && this.stage !== 'idea') {
         this.stageDirty = false;
         void this.restartStage();
       }
@@ -368,10 +451,10 @@ export class Pix3FlowShell extends ComponentBase {
 
   private setChatWidth(width: number): void {
     const body = this.querySelector<HTMLElement>('.flow-body');
-    // The plan panel sits in the same row, so its width is not available to the chat/stage split —
+    // The sidebar sits in the same row, so its width is not available to the chat/stage split —
     // measured rather than assumed, since it is a rail when collapsed and a panel when open.
     const planWidth =
-      this.querySelector<HTMLElement>('.flow-plan-panel')?.getBoundingClientRect().width ?? 0;
+      this.querySelector<HTMLElement>('pix3-flow-side-panel')?.getBoundingClientRect().width ?? 0;
     const max = body
       ? body.getBoundingClientRect().width - MIN_STAGE_WIDTH - planWidth
       : MIN_CHAT_WIDTH;
@@ -383,9 +466,10 @@ export class Pix3FlowShell extends ComponentBase {
   }
 
   protected render() {
+    const isIdea = this.stage === 'idea';
     return html`
       <div class="flow-shell">
-        ${this.renderHeader()}
+        ${this.renderHeader()} ${this.renderTransitionBanner()}
         <div class="flow-body">
           <aside class="flow-chat" aria-label="Flow chat">
             <pix3-agent-chat-panel></pix3-agent-chat-panel>
@@ -399,16 +483,98 @@ export class Pix3FlowShell extends ComponentBase {
             @pointerdown=${this.onSplitterDown}
             @keydown=${this.onSplitterKey}
           ></div>
-          <main class="flow-stage" aria-label="Game stage">
-            <div class="flow-stage__frame">
-              <div class="flow-stage__host"></div>
-              ${this.renderStageOverlay()}
-            </div>
-            ${this.renderStageBar()}
-          </main>
-          ${this.renderPlanPanel()}
+          ${isIdea ? this.renderIdeaDoc() : this.renderPrototypeView()} ${this.renderSidePanel()}
         </div>
       </div>
+    `;
+  }
+
+  /**
+   * The prototype stage: the game and the design document in the same column, with a segmented
+   * switch over them (design §2.5).
+   *
+   * **The stage is hidden, never unmounted.** `.flow-stage__host` is the element the runtime is
+   * registered against, so taking it out of the DOM would make `syncStageHost` unregister the host
+   * and kill the session — the user would come back from the Idea tab to a fresh game with their
+   * score gone. Hiding it costs a game that keeps ticking into an invisible canvas, which is the
+   * cheaper wrong thing by far: it is what makes coming back show the SAME session.
+   */
+  private renderPrototypeView() {
+    const showDoc = this.stageView === 'idea';
+    return html`
+      <div class="flow-view">
+        ${this.renderViewSwitch()} ${this.renderStage(showDoc)}
+        ${this.ideaDocMounted ? this.renderIdeaDoc(!showDoc) : null}
+      </div>
+    `;
+  }
+
+  private renderViewSwitch() {
+    return html`
+      <div class="flow-view__switch" role="group" aria-label="Prototype view">
+        ${this.renderViewOption('game', 'Game', 'gamepad', 'the live game')}
+        <span class="flow-view__divider" aria-hidden="true"></span>
+        ${this.renderViewOption('idea', 'Idea', 'file-text', 'the design document')}
+      </div>
+    `;
+  }
+
+  private renderViewOption(view: StageView, label: string, icon: string, hint: string) {
+    const isCurrent = this.stageView === view;
+    return html`
+      <button
+        class="flow-view__option"
+        type="button"
+        data-view=${view}
+        data-current=${isCurrent ? 'true' : 'false'}
+        aria-pressed=${isCurrent}
+        title=${isCurrent ? `Showing ${hint}` : `Show ${hint}`}
+        @click=${() => this.selectView(view)}
+      >
+        ${this.icons.getIcon(icon, IconSize.SMALL)}<span class="flow-view__label">${label}</span>
+      </button>
+    `;
+  }
+
+  private selectView(view: StageView): void {
+    if (this.stageView === view) {
+      return;
+    }
+    if (view === 'idea') {
+      this.ideaDocMounted = true;
+    }
+    this.stageView = view;
+    // Coming back to the game re-shows an element that was `display: none`, so its frame has to be
+    // re-measured — the letterbox was computed against a collapsed box while it was hidden.
+    void this.updateComplete.then(() => this.fitStage());
+  }
+
+  private renderStage(hidden = false) {
+    return html`
+      <main class="flow-stage" aria-label="Game stage" ?hidden=${hidden}>
+        <div class="flow-stage__frame">
+          <div class="flow-stage__host"></div>
+          ${this.renderStageOverlay()}
+        </div>
+        ${this.renderStageBar()}
+      </main>
+    `;
+  }
+
+  /**
+   * The design document. At the idea stage it stands in for the game stage — no Play/Restart bar,
+   * because there is nothing to play, and the sidebar beside it shows only its Files tab, since
+   * `design/progress.md` is written by the recipe expander and a greyed-out Plan tab would
+   * advertise an affordance with no meaning yet.
+   *
+   * After the transition the SAME element is what the Idea half of the switch shows: the brief does
+   * not die when the recipe is expanded, it becomes the tab that is always there (design §2.5).
+   */
+  private renderIdeaDoc(hidden = false) {
+    return html`
+      <main class="flow-doc" aria-label="Design document" ?hidden=${hidden}>
+        <pix3-idea-doc doc-path="design/gdd.md"></pix3-idea-doc>
+      </main>
     `;
   }
 
@@ -431,117 +597,169 @@ export class Pix3FlowShell extends ComponentBase {
           <span class="flow-header__title" title=${title}>${title}</span>
           <pix3-mode-switch></pix3-mode-switch>
         </div>
-        <div class="flow-header__actions">
-          <button
-            class="flow-action"
-            type="button"
-            title="Play this build on a phone over the local network"
-            @click=${() => void this.commandDispatcher.executeById('project.start-remote-preview')}
-          >
-            ${this.icons.getIcon('smartphone', IconSize.SMALL)}<span>Device</span>
-          </button>
-          <button
-            class="flow-action"
-            type="button"
-            title="Build a single self-contained HTML file of the game"
-            @click=${() => void this.commandDispatcher.executeById('project.export-playable-html')}
-          >
-            ${this.icons.getIcon('download', IconSize.SMALL)}<span>Download HTML</span>
-          </button>
-        </div>
+        <div class="flow-header__actions">${this.renderHeaderActions()}</div>
       </header>
     `;
   }
 
   /**
-   * The increment checklist, docked to the right of the stage and collapsible to a rail.
-   *
-   * It used to live in the header, where it was wrong twice over: the steps are sentences, so they
-   * were ellipsized to uselessness in a row of chips, and they pushed on the project identity next
-   * to them. Here they wrap, and the whole thing folds away when the user just wants to play.
+   * Device and Download HTML are prototype-stage actions: at the idea stage there is no build to
+   * put on a phone or into a file, and offering either would be offering an empty canvas as a game.
+   * What replaces them is the one action that stage has — the way out of it.
    */
-  private renderPlanPanel() {
-    const done = this.plan.steps.filter(step => step.status === 'done').length;
-    const total = this.plan.steps.length;
-    const progress = total > 0 ? `${done}/${total}` : '';
-    const label = this.planOpen
-      ? 'Hide plan'
-      : total > 0
-        ? `Show plan (${done} of ${total} done)`
-        : 'Show plan';
-    return html`
-      <aside
-        class="flow-plan-panel ${this.planOpen ? '' : 'flow-plan-panel--collapsed'}"
-        aria-label="Plan"
-      >
-        <div class="flow-plan-panel__head">
-          <button
-            class="flow-plan-panel__toggle"
-            type="button"
-            aria-expanded=${this.planOpen ? 'true' : 'false'}
-            title=${label}
-            aria-label=${label}
-            @click=${this.togglePlan}
-          >
-            ${this.icons.getIcon(this.planOpen ? 'chevron-right' : 'list', IconSize.SMALL)}
-          </button>
-          ${this.planOpen
-            ? html`<span class="flow-plan-panel__title">Plan</span> ${progress
-                  ? html`<span class="flow-plan-panel__count">${progress}</span>`
-                  : null}`
-            : progress
-              ? html`<span class="flow-plan-panel__count">${progress}</span>`
-              : null}
-        </div>
-        ${this.planOpen ? this.renderPlanSteps() : null}
-      </aside>
-    `;
-  }
-
-  private renderPlanSteps() {
-    if (this.plan.steps.length === 0) {
+  private renderHeaderActions() {
+    if (this.stage === 'idea') {
+      const busy = this.transitionPhase !== null;
       return html`
-        <div class="flow-plan flow-plan--empty">
-          ${this.isAgentRunning
-            ? html`<span class="flow-plan__spinner"></span><span>Working…</span>`
-            : html`<span>No plan yet — ask for a change and the steps appear here.</span>`}
-        </div>
+        <button
+          class="flow-action flow-action--cta"
+          type="button"
+          ?disabled=${busy}
+          title="Expand a genre recipe into this project and start playing it"
+          @click=${() => void this.onStartPrototype()}
+        >
+          ${busy
+            ? html`<span class="flow-plan__spinner" aria-hidden="true"></span>`
+            : this.icons.getIcon('arrow-right', IconSize.SMALL)}<span
+            >${busy ? 'Starting…' : 'Start prototype'}</span
+          >
+        </button>
       `;
     }
     return html`
-      <div class="flow-plan" role="list">
-        ${this.plan.steps.map(step => this.renderPlanStep(step))}
-        ${this.isAgentRunning
-          ? html`<span class="flow-plan__working"
-              ><span class="flow-plan__spinner"></span><span>Working…</span></span
-            >`
-          : null}
+      <button
+        class="flow-action"
+        type="button"
+        title="Play this build on a phone over the local network"
+        @click=${() => void this.commandDispatcher.executeById('project.start-remote-preview')}
+      >
+        ${this.icons.getIcon('smartphone', IconSize.SMALL)}<span>Device</span>
+      </button>
+      <button
+        class="flow-action"
+        type="button"
+        title="Build a single self-contained HTML file of the game"
+        @click=${() => void this.commandDispatcher.executeById('project.export-playable-html')}
+      >
+        ${this.icons.getIcon('download', IconSize.SMALL)}<span>Download HTML</span>
+      </button>
+    `;
+  }
+
+  /**
+   * The right sidebar: the increment checklist and the project's file list, in one tabbed column.
+   *
+   * Rendered at BOTH stages, which is the change V3 makes: the idea stage used to have no sidebar
+   * at all because a plan does not exist there, but the file list does — references are most of what
+   * that stage produces. The panel itself hides the Plan tab when the stage has no plan.
+   */
+  private renderSidePanel() {
+    return html`
+      <pix3-flow-side-panel
+        .stage=${this.stage}
+        .plan=${this.plan}
+        .agentRunning=${this.isAgentRunning}
+        .activeTool=${this.activeTool}
+        @panel-resize=${this.onPanelResize}
+      ></pix3-flow-side-panel>
+    `;
+  }
+
+  /**
+   * The transition's one line of narration, above the document the user is reading.
+   *
+   * It sits in the shell rather than inside the document column on purpose: the pipeline replaces
+   * what is IN that column (the document gives way to a game stage), and a banner that dies with
+   * its host is a banner that vanishes mid-sentence.
+   */
+  private renderTransitionBanner() {
+    if (this.transitionError) {
+      return html`
+        <div class="flow-transition flow-transition--error" role="alert">
+          ${this.icons.getIcon('alert-triangle', IconSize.SMALL)}
+          <span class="flow-transition__text">${this.transitionError}</span>
+          <button class="flow-action" type="button" @click=${() => void this.runTransition()}>
+            Try again
+          </button>
+          <button
+            class="flow-action flow-action--ghost"
+            type="button"
+            @click=${this.dismissTransitionError}
+          >
+            Dismiss
+          </button>
+        </div>
+      `;
+    }
+    if (this.transitionPhase === null) {
+      return null;
+    }
+    return html`
+      <div class="flow-transition" role="status">
+        <span class="flow-plan__spinner" aria-hidden="true"></span>
+        <span class="flow-transition__text">${TRANSITION_LABELS[this.transitionPhase]}</span>
       </div>
     `;
   }
 
-  private renderPlanStep(step: FlowPlanStep) {
-    const icon =
-      step.status === 'done' ? 'check-circle' : step.status === 'active' ? 'loader' : 'circle';
-    return html`
-      <span class="flow-plan__step flow-plan__step--${step.status}" role="listitem">
-        ${this.icons.getIcon(icon, IconSize.SMALL)}
-        <span class="flow-plan__body">
-          <span class="flow-plan__label">${step.title}</span>
-          ${step.note ? html`<span class="flow-plan__note">${step.note}</span>` : null}
-        </span>
-      </span>
-    `;
+  private readonly dismissTransitionError = (): void => {
+    this.transitionError = null;
+    // The service keeps its `error` status until someone clears it, and a stale error there would
+    // re-paint this banner the next time the stream fires.
+    this.bootstrap.reset();
+  };
+
+  /**
+   * The one forward step of the idea stage. Confirmed first because it is structurally one-way:
+   * the recipe cannot be folded back up (design §2.5), so the user is told what survives it.
+   */
+  private async onStartPrototype(): Promise<void> {
+    if (this.transitionPhase !== null) {
+      return;
+    }
+    const confirmed = await this.dialogs.showConfirmation({
+      title: 'Start the prototype?',
+      message:
+        'A genre recipe will be expanded into this project — scenes, scripts and a playable build. ' +
+        'Your brief and references stay exactly where they are and remain available on the Idea tab.',
+      confirmLabel: 'Start prototype',
+      cancelLabel: 'Keep working on the idea',
+    });
+    if (!confirmed) {
+      return;
+    }
+    await this.runTransition();
   }
 
-  private readonly togglePlan = (): void => {
-    this.planOpen = !this.planOpen;
-    persistPlanOpen(this.planOpen);
-    // The stage column just changed width; re-letterbox it rather than wait for the observer.
-    void this.updateComplete.then(() => {
-      this.setChatWidth(this.chatWidth);
-      this.fitStage();
-    });
+  /**
+   * Run the transition without asking again — the CTA asks once, and the retry after a failure is
+   * the same answer being acted on a second time.
+   */
+  private async runTransition(): Promise<void> {
+    if (this.transitionPhase !== null) {
+      return;
+    }
+    this.transitionError = null;
+    // Set before the call, not from the stream: this doubles as the "the run is ours" flag the
+    // status listener checks, and the first status can land before the await resumes.
+    this.transitionPhase = 'planning';
+    try {
+      await this.bootstrap.startPrototype();
+      this.transitionPhase = null;
+      // The stage is read back from the manifest rather than assumed: if the transition stopped
+      // short of writing it, this shell stays on the idea stage instead of showing an empty game.
+      this.stageView = 'game';
+      await this.onProjectChanged();
+    } catch (error) {
+      this.transitionPhase = null;
+      this.transitionError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** The sidebar collapsed or expanded: the stage column changed width, so re-letterbox the game. */
+  private readonly onPanelResize = (): void => {
+    this.setChatWidth(this.chatWidth);
+    this.fitStage();
   };
 
   private renderStageBar() {
@@ -595,6 +813,21 @@ export class Pix3FlowShell extends ComponentBase {
     return null;
   }
 }
+
+/** Which half of the prototype stage the column shows (design §2.5). */
+type StageView = 'game' | 'idea';
+
+/**
+ * What the user reads while the transition runs. Phase names are pipeline vocabulary; these are
+ * what the two ~5 s waits actually mean to the person watching them.
+ */
+const TRANSITION_LABELS: Readonly<Record<PrototypeBootstrapPhase, string>> = {
+  idle: 'Starting the prototype…',
+  planning: 'Planning the recipe…',
+  expanding: 'Building your project…',
+  ready: 'Your prototype is live.',
+  error: 'Could not build the prototype.',
+};
 
 /**
  * Tool names whose success means the running game is out of date. Restarting after every turn

@@ -1,0 +1,37 @@
+# Pix3 Scene File (YAML)
+# Idea-stage placeholder scene: a Full HD canvas with nothing on it but a background.
+# Deliberately bare — the idea stage mounts no runtime, and the recipe that will fill this
+# project in is not chosen until "Start prototype". The canonical `game-root` id is kept so
+# routines and assertions written against it keep working after the recipe is applied.
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Empty canvas for a project still at the idea stage
+root:
+  - id: game-root
+    type: Group2D
+    name: Game Root
+    properties:
+      width: 1920
+      height: 1080
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    children:
+      - id: background
+        type: ColorRect2D
+        name: Background
+        properties:
+          width: 1920
+          height: 1080
+          color: "#1a1a2e"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []

@@ -18,6 +18,8 @@ import {
   type NodeSummary,
 } from '@/core/agent-introspection';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { FlowStageService } from '@/services/flow/FlowStageService';
+import { FlowReferencesService, REFERENCES_DIR } from '@/services/flow/FlowReferencesService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 import {
@@ -134,6 +136,30 @@ export interface AgentToolSpec {
   readonly description: string;
   readonly inputSchema: JsonSchema;
 }
+
+/**
+ * The tools the agent gets at the Flow **idea stage** (design §3.10): text, files, images and
+ * questions. Not one scene, script, play-mode or gameplay tool.
+ *
+ * Two reasons, and the second is the important one. It halves the tools block of every request at a
+ * stage where the project is an empty canvas — and it removes a whole class of turn where the agent
+ * "gets a head start" on a scene that the genre recipe is about to overwrite. The set is constant
+ * within the stage, so the cached prompt prefix stays stable; it changes exactly once, at the
+ * transition, where `newConversation()` resets the cache anyway.
+ */
+export const IDEA_STAGE_TOOLS: ReadonlySet<string> = new Set([
+  'read_skill',
+  'ask_advisor',
+  'ask_user',
+  'fs_list',
+  'fs_read',
+  'fs_write',
+  'str_replace',
+  'fs_delete',
+  'generate_asset',
+  'analyze_image',
+  'process_asset',
+]);
 
 // Script collection mirrors PreviewHostService.collectScriptFiles.
 const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
@@ -400,6 +426,12 @@ export class AgentToolRegistry {
   @inject(ScriptRegistry)
   private readonly scriptRegistry!: ScriptRegistry;
 
+  @inject(FlowStageService)
+  private readonly flowStage!: FlowStageService;
+
+  @inject(FlowReferencesService)
+  private readonly flowReferences!: FlowReferencesService;
+
   private tools: AgentToolDefinition[] | null = null;
 
   constructor() {
@@ -412,13 +444,22 @@ export class AgentToolRegistry {
     return this.ensureTools();
   }
 
-  /** LLM-facing tool specs (name/description/inputSchema — no handler). */
-  specs(): AgentToolSpec[] {
-    return this.ensureTools().map(({ name, description, inputSchema }) => ({
-      name,
-      description,
-      inputSchema,
-    }));
+  /**
+   * LLM-facing tool specs (name/description/inputSchema — no handler).
+   *
+   * `allow` narrows the list by name, for callers that run the agent in a mode where only part of
+   * the surface makes sense (see {@link IDEA_STAGE_TOOLS}). It filters the SPECS only: `execute`
+   * still knows every tool, because the gate belongs where the request is built, not where a name
+   * is resolved.
+   */
+  specs(allow?: ReadonlySet<string>): AgentToolSpec[] {
+    return this.ensureTools()
+      .filter(tool => !allow || allow.has(tool.name))
+      .map(({ name, description, inputSchema }) => ({
+        name,
+        description,
+        inputSchema,
+      }));
   }
 
   /** Execute a tool by name. Throws for an unknown tool; handlers own their own error semantics. */
@@ -1623,7 +1664,7 @@ export class AgentToolRegistry {
             name: {
               type: 'string',
               description:
-                'Target file name or relative path (e.g. "sprites/car.png"). Projects use a flat layout — one folder per asset type at the project root (`sprites/`, `models/`, `audio/`, …), never nested under `assets/`. A bare name is placed in the matching type folder automatically; the extension is added when missing.',
+                'Target file name or relative path (e.g. "sprites/car.png"). Projects use a flat layout — one folder per asset type at the project root (`sprites/`, `models/`, `audio/`, …), never nested under `assets/`. A bare name is placed in the matching type folder automatically — at the IDEA stage it goes to `references/` instead, since that is the folder the references column lists; the extension is added when missing.',
             },
             transparent: {
               type: 'boolean',
@@ -2843,6 +2884,17 @@ export class AgentToolRegistry {
     const safe = this.safePath(path);
     // deleteEntry likewise bumps fileRefreshSignal internally.
     await this.storage.deleteEntry(safe);
+    // Prune the sidecar with the file. Observed live: the agent deleted two generated references
+    // and their index entries outlived them, leaving the index describing files nobody has. The
+    // panel lists the FOLDER so it degraded silently — but an index that lies is a bad index.
+    if (safe.startsWith(`${REFERENCES_DIR}/`)) {
+      try {
+        await this.flowReferences.removeEntry(safe.slice(REFERENCES_DIR.length + 1));
+      } catch {
+        // The delete already happened and is what was asked for; a stale sidecar entry is not
+        // worth failing the tool over.
+      }
+    }
     return { ok: true, path: safe };
   }
 
@@ -3257,9 +3309,7 @@ export class AgentToolRegistry {
     }
 
     const prompt = asString(args.prompt);
-    // Bare file names land in the category folder at the project root (`car.png` →
-    // `sprites/car.png`) so generated art never litters the project root.
-    const name = ensureAssetTypeFolder(this.safePath(asString(args.name)));
+    const name = this.resolveGeneratedAssetPath(asString(args.name));
     const references = Array.isArray(args.references)
       ? args.references.filter((r): r is string => typeof r === 'string')
       : undefined;
@@ -3288,6 +3338,7 @@ export class AgentToolRegistry {
       // often come out sideways and the model can't otherwise re-orient without regenerating.
       const oriented = await this.applyOrientation(processed.id, args, id => handleIds.add(id));
       const saved = await this.assetGen.save(oriented, name, {});
+      await this.recordGeneratedReference(saved.path, prompt);
       const transparency = await this.assetGen.alphaStats(oriented);
       // Preview the ORIENTED handle (what was actually saved), not the raw generation.
       return {
@@ -3299,13 +3350,75 @@ export class AgentToolRegistry {
         // pass skipped background removal — say so, or "no bg-removal ran" reads as a failure.
         ...(generated.svgSource ? { vector: true } : {}),
         transparency,
-        note: transparencyNote(preset, transparency),
+        // The idea-stage folder is decided here, so the result has to SAY so: a model that asked
+        // for another folder and is told nothing reads its own request as authoritative and
+        // "corrects" the file back out of the list (observed twice live).
+        note: this.flowStage.isIdeaStage()
+          ? `Saved to "${saved.path}". At the idea stage every artefact lives in ` +
+            `\`${REFERENCES_DIR}/\` — that is the folder the user's Files column lists, so the ` +
+            `folder is not yours to choose. Do NOT copy or move it elsewhere; point at this path. ` +
+            transparencyNote(preset, transparency)
+          : transparencyNote(preset, transparency),
         ...(await this.previewImages(oriented)),
       };
     } finally {
       for (const id of handleIds) {
         this.assetGen.discard(id);
       }
+    }
+  }
+
+  /**
+   * Where a generated image lands when the model gave a bare file name.
+   *
+   * At the **idea stage** that is `references/`, not the asset-type folder: the only thing generated
+   * there is a reference (a moodboard, a mockup), and the references column lists exactly one
+   * folder. This is decided in code rather than asked for in the skill because "the artefact exists
+   * but is not in the list" is precisely the kind of quiet breakage a prompt does not fix — the
+   * model would be right about the file and wrong about the folder, with nothing to notice it.
+   *
+   * At the idea stage an explicit folder does NOT win, and that is deliberate: observed live, the
+   * model asked for `design/reference_screenshot.png`, so the picture it had just drawn never
+   * appeared in the references column — the one place the user looks for it. There is no scene and
+   * no sprite at this stage for anything else to consume, so every generated file belongs in
+   * `references/`; only the file NAME is taken from what was asked for. The saved path comes back in
+   * the tool result, so the model still knows where to point at it.
+   */
+  private resolveGeneratedAssetPath(name: string): string {
+    const path = this.safePath(name);
+    if (this.flowStage.isIdeaStage()) {
+      return `${REFERENCES_DIR}/${path.split('/').pop() || path}`;
+    }
+    // Bare file names land in the category folder at the project root (`car.png` →
+    // `sprites/car.png`) so generated art never litters the project root.
+    return ensureAssetTypeFolder(path);
+  }
+
+  /**
+   * Note a generated file in `references/index.json` — deterministically, not by asking the model to
+   * remember. The card in the references column reads `origin` to offer "regenerate" and `caption`
+   * to say what the picture was for; both are facts this call already has.
+   *
+   * Only files that actually landed under `references/` are recorded: the index describes that one
+   * folder, and a `sprites/` entry in it would be metadata about a file nothing reads it for.
+   */
+  private async recordGeneratedReference(savedPath: string, prompt: string): Promise<void> {
+    if (!savedPath.startsWith(`${REFERENCES_DIR}/`)) {
+      return;
+    }
+    const fileName = savedPath.slice(REFERENCES_DIR.length + 1);
+    // Nested paths are keyed by their file name, like every other entry (the index sits in the
+    // folder it describes).
+    const key = fileName.split('/').pop() ?? fileName;
+    try {
+      await this.flowReferences.upsert(key, { origin: 'agent', caption: prompt, prompt });
+    } catch (error) {
+      // A missing index entry degrades to "name + origin user" on the card; failing the whole
+      // generation over its sidecar would throw away the image that was just paid for.
+      this.logger.warn('[AgentToolRegistry] Could not index generated reference', {
+        savedPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -3399,6 +3512,26 @@ export class AgentToolRegistry {
     const maxSize = typeof args.maxSize === 'number' ? Math.floor(args.maxSize) : undefined;
     const outName =
       typeof args.name === 'string' && args.name.trim() ? this.safePath(args.name) : path;
+
+    // At the idea stage a reference may not be processed OUT of `references/`. Observed live, twice:
+    // the model generated a moodboard (which lands in `references/`), then "corrected" the location
+    // with process_asset into `design/` and `fs_delete`d the original — so the artefact it had just
+    // made vanished from the Files column, which is the only place the user looks for it. Refusing
+    // is deterministic; the same instruction in a skill was read once and then outvoted by the
+    // model's own earlier turn.
+    if (
+      this.flowStage.isIdeaStage() &&
+      path.startsWith(`${REFERENCES_DIR}/`) &&
+      !outName.startsWith(`${REFERENCES_DIR}/`)
+    ) {
+      return {
+        ok: false,
+        error:
+          `At the idea stage every artefact lives in \`${REFERENCES_DIR}/\` — that is the folder ` +
+          `the Files column lists, so moving "${path}" to "${outName}" would hide it from the ` +
+          `user. Process it in place, or pass a name under \`${REFERENCES_DIR}/\`.`,
+      };
+    }
 
     const opened = await this.assetGen.open(path);
     const handleIds = new Set<string>([opened.id]);

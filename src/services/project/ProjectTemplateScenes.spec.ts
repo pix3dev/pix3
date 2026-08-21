@@ -108,6 +108,7 @@ describe('bundled project templates', () => {
     expect(templateDirs.sort()).toEqual([
       'empty-2d',
       'empty-3d',
+      'idea-blank',
       'minigame-2d',
       'playable-2d',
       'playable-3d',
@@ -131,7 +132,11 @@ describe('bundled project templates', () => {
       expect(['2d', '3d']).toContain(meta.projectType);
 
       expect(existsSync(join(templateDir, STARTUP_SCENE))).toBe(true);
-      expect(existsSync(join(templateDir, 'cover.png'))).toBe(true);
+      // A hidden template is never drawn as a card (it is picked by a code path, not a user), so a
+      // cover would only be an eagerly bundled image nothing renders.
+      if (meta.hidden !== true) {
+        expect(existsSync(join(templateDir, 'cover.png'))).toBe(true);
+      }
       expect(existsSync(join(templateDir, 'files/README.md'))).toBe(true);
     });
 

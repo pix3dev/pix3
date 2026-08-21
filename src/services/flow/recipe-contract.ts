@@ -11,6 +11,22 @@ import { parse, parseDocument, isSeq, isMap } from 'yaml';
  * testable without a browser, a project or a model.
  */
 
+/**
+ * Paths the idea→prototype transition never overwrites: the user's own work
+ * (`.plans/vibe-idea-stage.md` §3.1). An entry ending in `/` covers the whole subtree.
+ *
+ * Part of the recipe contract rather than of the transition, because it is a statement about what a
+ * recipe may contain: no template ships any of these, and `recipes.spec.ts` fails if one starts to.
+ * A recipe that quietly shipped a `design/gdd.md` would replace the document the user spent the
+ * whole idea stage writing, and nothing would report it.
+ */
+export const IDEA_PRESERVED_PATHS: readonly string[] = [
+  'design/gdd.md',
+  'design/decisions.md',
+  'design/source/',
+  'references/',
+];
+
 /** One declared tuning point: a property on a node (or on a component of that node). */
 export interface RecipeTunable {
   readonly key: string;

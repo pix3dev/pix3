@@ -18,6 +18,12 @@ export interface FlowPlan {
 }
 
 export const FLOW_BRIEF_PATH = 'design/brief.md';
+/**
+ * The idea-stage design document (design §3.3) — a separate file from `brief.md` on purpose:
+ * `brief.md` is the compact machine artifact the planner writes and the agent inlines, this is the
+ * human document that grows to pages with images and tables.
+ */
+export const FLOW_GDD_PATH = 'design/gdd.md';
 export const FLOW_PROGRESS_PATH = 'design/progress.md';
 export const FLOW_DECISIONS_PATH = 'design/decisions.md';
 
@@ -38,15 +44,19 @@ export class FlowPlanService {
   private readonly storage!: ProjectStorageService;
 
   async load(): Promise<FlowPlan> {
-    const [brief, progress] = await Promise.all([
+    const [brief, progress, gdd] = await Promise.all([
       this.readOptional(FLOW_BRIEF_PATH),
       this.readOptional(FLOW_PROGRESS_PATH),
+      this.readOptional(FLOW_GDD_PATH),
     ]);
-    if (brief === null && progress === null) {
+    if (brief === null && progress === null && gdd === null) {
       return EMPTY_PLAN;
     }
+    // At the idea stage there is no brief yet (no recipe, no planner run), so the header would
+    // fall back to the derived project name. The design document's own `# H1` is the name the
+    // user and the agent have been agreeing on, which is what the header should say.
     return {
-      title: brief ? extractTitle(brief) : null,
+      title: brief ? extractTitle(brief) : gdd ? extractTitle(gdd) : null,
       pitch: brief ? extractPitch(brief) : null,
       steps: progress ? parseChecklist(progress) : [],
     };

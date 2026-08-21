@@ -1,0 +1,425 @@
+/* Full-screen viewer shared by the references column, the chat and the design document. Light-DOM
+   component: every rule is scoped under the host tag, including the `.md-*` classes the markdown
+   renderer emits — those names are also used by the chat panel and by `pix3-idea-doc`, each with
+   its own typography, and an unscoped rule here would repaint theirs. */
+
+pix3-lightbox {
+  display: contents;
+}
+
+pix3-lightbox .lightbox {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* Above every modal: the lightbox is opened FROM dialogs and panels, never behind them. */
+  z-index: var(--pix3-z-modal-top, 500);
+  /* Modal scrim, following the literal every other dialog in the app uses — there is no token. */
+  background: oklch(0 0 0 / 0.72);
+  backdrop-filter: blur(6px);
+}
+
+pix3-lightbox .lightbox__dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1400px, 100%);
+  height: min(1000px, 100%);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-float);
+}
+
+pix3-lightbox .lightbox__dialog:focus-visible {
+  outline: none;
+}
+
+pix3-lightbox .lightbox__header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-0);
+}
+
+pix3-lightbox .lightbox__titles {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+pix3-lightbox .lightbox__title {
+  overflow: hidden;
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-lightbox .lightbox__path {
+  overflow: hidden;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-lightbox .lightbox__counter {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+pix3-lightbox .lightbox__btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: none;
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+pix3-lightbox .lightbox__btn:hover {
+  border-color: var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-lightbox .lightbox__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+pix3-lightbox .lightbox__body {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 4px;
+  min-height: 0;
+  padding: 6px;
+}
+
+pix3-lightbox .lightbox__step {
+  align-self: center;
+  width: 34px;
+  height: 64px;
+  background: var(--bg-2);
+  border-color: var(--line-1);
+}
+
+pix3-lightbox .lightbox__stage {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-2);
+  background: var(--bg-0);
+}
+
+/* Only the image stage swallows gestures: the document and text stages must keep scrolling. */
+pix3-lightbox .lightbox__stage--image {
+  touch-action: none;
+}
+
+pix3-lightbox .lightbox__image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* Zoom/pan is written straight onto this element, so the origin must be its own centre. */
+  transform-origin: center center;
+  user-select: none;
+  /* Transparency checkerboard, so a cut-out sprite does not read as a white plate. */
+  background: repeating-conic-gradient(oklch(1 0 0 / 0.06) 0% 25%, transparent 0% 50%) 0 0 / 16px
+    16px;
+}
+
+pix3-lightbox .lightbox__text {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
+}
+
+pix3-lightbox .lightbox__plaque {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+pix3-lightbox .lightbox__plaque-icon {
+  display: inline-flex;
+  color: var(--fg-3);
+}
+
+pix3-lightbox .lightbox__plaque-name {
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+pix3-lightbox .lightbox__plaque-meta {
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+pix3-lightbox .lightbox__plaque-note {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+/* ── Document mode ─────────────────────────────────────────────────────────── */
+
+pix3-lightbox .lightbox__doc {
+  width: 100%;
+  height: 100%;
+  /* The page never scrolls sideways — wide tables and code scroll inside their own box. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 28px 32px 64px;
+  color: var(--fg-1);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+pix3-lightbox .lightbox__doc > * {
+  max-width: 820px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+pix3-lightbox .lightbox__doc h1,
+pix3-lightbox .lightbox__doc h2,
+pix3-lightbox .lightbox__doc h3,
+pix3-lightbox .lightbox__doc h4,
+pix3-lightbox .lightbox__doc h5,
+pix3-lightbox .lightbox__doc h6 {
+  margin: 1.6em auto 0.5em;
+  color: var(--fg-0);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+pix3-lightbox .lightbox__doc h1 {
+  margin-top: 0;
+  font-size: 26px;
+}
+
+pix3-lightbox .lightbox__doc h2 {
+  font-size: 19px;
+}
+
+pix3-lightbox .lightbox__doc h3 {
+  font-size: 16px;
+}
+
+pix3-lightbox .lightbox__doc h4 {
+  font-size: 14px;
+}
+
+pix3-lightbox .lightbox__doc h5,
+pix3-lightbox .lightbox__doc h6 {
+  color: var(--fg-2);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+pix3-lightbox .lightbox__doc .md-p {
+  margin-bottom: 0.85em;
+}
+
+pix3-lightbox .lightbox__doc .md-list {
+  margin-bottom: 0.85em;
+  padding-left: 1.4em;
+}
+
+pix3-lightbox .lightbox__doc .md-list li {
+  margin: 0.2em 0;
+}
+
+pix3-lightbox .lightbox__doc .md-hr {
+  margin: 1.8em auto;
+  border: 0;
+  border-top: 1px solid var(--line-1);
+}
+
+pix3-lightbox .lightbox__doc .md-quote {
+  margin-bottom: 1em;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--accent-line);
+  color: var(--fg-2);
+}
+
+/* Task items: box and check are drawn in CSS — a pure renderer has no IconService, and the glyph
+   must never be an emoji or a Unicode symbol. */
+pix3-lightbox .lightbox__doc .md-task {
+  position: relative;
+  padding-left: 0.6em;
+  list-style: none;
+}
+
+pix3-lightbox .lightbox__doc .md-task::before {
+  position: absolute;
+  top: 0.36em;
+  left: -0.9em;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-2);
+  content: '';
+}
+
+pix3-lightbox .lightbox__doc .md-task--done {
+  color: var(--fg-2);
+}
+
+pix3-lightbox .lightbox__doc .md-task--done::before {
+  border-color: var(--accent-line);
+  background: var(--accent);
+}
+
+pix3-lightbox .lightbox__doc .md-task--done::after {
+  position: absolute;
+  top: 0.52em;
+  left: -0.72em;
+  width: 6px;
+  height: 3px;
+  border-bottom: 1.5px solid var(--accent-fg);
+  border-left: 1.5px solid var(--accent-fg);
+  content: '';
+  transform: rotate(-45deg);
+}
+
+/* `display: block` turns the table into its own horizontal scroller. */
+pix3-lightbox .lightbox__doc .md-table {
+  display: block;
+  width: max-content;
+  max-width: 820px;
+  margin-bottom: 1.2em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+pix3-lightbox .lightbox__doc .md-table th,
+pix3-lightbox .lightbox__doc .md-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--line-1);
+  text-align: left;
+  vertical-align: top;
+}
+
+pix3-lightbox .lightbox__doc .md-table th {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+pix3-lightbox .lightbox__doc .md-th--center,
+pix3-lightbox .lightbox__doc .md-td--center {
+  text-align: center;
+}
+
+pix3-lightbox .lightbox__doc .md-th--right,
+pix3-lightbox .lightbox__doc .md-td--right {
+  text-align: right;
+}
+
+pix3-lightbox .lightbox__doc .md-figure {
+  margin-bottom: 1.2em;
+  text-align: center;
+}
+
+pix3-lightbox .lightbox__doc .md-figcaption {
+  margin-top: 6px;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+pix3-lightbox .lightbox__doc .md-img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  background: var(--bg-0);
+}
+
+pix3-lightbox .lightbox__doc .md-img-missing {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-1);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+pix3-lightbox .lightbox__doc .md-code {
+  margin-bottom: 1em;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+pix3-lightbox .lightbox__doc code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+pix3-lightbox .lightbox__doc .md-code code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}
+
+pix3-lightbox .lightbox__doc a {
+  color: var(--pix3-accent-color);
+  text-decoration: none;
+}
+
+pix3-lightbox .lightbox__doc a:hover {
+  text-decoration: underline;
+}

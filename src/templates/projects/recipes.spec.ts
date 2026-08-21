@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
@@ -7,6 +7,7 @@ import * as runtime from '@pix3/runtime';
 import { normalizeNodeTypeName } from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 import { parseRoutine } from '@/services/agent/game-routines';
+import { IDEA_PRESERVED_PATHS } from '@/services/flow/recipe-contract';
 
 /**
  * Contract drift guard for the Flow "recipe" templates (`.plans/done/flow-recipes-contract.md`).
@@ -325,10 +326,17 @@ describe('flow recipe contract', () => {
  */
 const EMPTY_TEMPLATE_PREFIX = 'empty-';
 
-/** Every shipped template that carries a game (i.e. all but `empty-*`). */
+/**
+ * Bare templates whose id does not start with `empty-`. `idea-blank` scaffolds the Flow IDEA stage
+ * — a project that has a design document and deliberately no game yet — so demanding a debug
+ * provider and a routine of it would be demanding the very thing the stage exists to defer.
+ */
+const BARE_TEMPLATES = new Set(['idea-blank']);
+
+/** Every shipped template that carries a game. */
 const GAMEPLAY_TEMPLATES = readdirSync(TEMPLATES_ROOT)
   .filter(entry => statSync(join(TEMPLATES_ROOT, entry)).isDirectory())
-  .filter(entry => !entry.startsWith(EMPTY_TEMPLATE_PREFIX))
+  .filter(entry => !entry.startsWith(EMPTY_TEMPLATE_PREFIX) && !BARE_TEMPLATES.has(entry))
   .sort();
 
 /** The root id routines and assertions are written against, in every template. */
@@ -451,4 +459,69 @@ describe('template testability contract', () => {
       }
     });
   }
+});
+
+/**
+ * The Flow idea→prototype transition lays a recipe over a project that is ALREADY the user's
+ * (`.plans/vibe-idea-stage.md` §3.1): the design document, the decisions log, the source documents
+ * they attached and the whole references folder are theirs, and `applyTemplateFiles(…, { skip })`
+ * refuses to overwrite them.
+ *
+ * That skip list is a safety net over a contract this spec is the enforcement of: no template ships
+ * those paths. Should one ever start to, the file would be quietly dropped on transition (worse: a
+ * recipe author would think it shipped) — so it fails here, at the moment the file is added, rather
+ * than in a project nobody can recover.
+ */
+describe('idea-stage files a recipe may not ship', () => {
+  const listAllFiles = (dir: string, base = dir, collected: string[] = []): string[] => {
+    if (!existsSync(dir)) {
+      return collected;
+    }
+    for (const entry of readdirSync(dir)) {
+      const fullPath = join(dir, entry);
+      if (statSync(fullPath).isDirectory()) {
+        listAllFiles(fullPath, base, collected);
+      } else {
+        collected.push(relative(base, fullPath).split(sep).join('/'));
+      }
+    }
+    return collected;
+  };
+
+  const ALL_TEMPLATES = readdirSync(TEMPLATES_ROOT)
+    .filter(entry => statSync(join(TEMPLATES_ROOT, entry)).isDirectory())
+    .sort();
+
+  it('the preserved-path list is not empty', () => {
+    // A typo that emptied the list would make every assertion below pass while the transition
+    // overwrote everything.
+    expect(IDEA_PRESERVED_PATHS.length).toBeGreaterThan(0);
+    expect(IDEA_PRESERVED_PATHS).toContain('design/gdd.md');
+  });
+
+  for (const templateId of ALL_TEMPLATES) {
+    it(`${templateId}: ships no file the transition would have to skip`, () => {
+      const shipped = listAllFiles(join(TEMPLATES_ROOT, templateId, 'files'));
+      for (const preserved of IDEA_PRESERVED_PATHS) {
+        const prefix = preserved.replace(/\/+$/, '');
+        const offenders = shipped.filter(path => path === prefix || path.startsWith(`${prefix}/`));
+        expect(
+          offenders,
+          `${templateId} ships ${offenders.join(', ')}, which the idea→prototype transition ` +
+            `refuses to overwrite — the user's own "${preserved}" would win and this file would ` +
+            'never reach a project that came through the idea stage'
+        ).toEqual([]);
+      }
+    });
+  }
+
+  it('the agent overlay ships none of them either', () => {
+    // The overlay (AGENTS.md, CLAUDE.md, design/README.md, .claude/skills/**) is written into every
+    // project by the same call, so it is under the same rule.
+    const overlay = listAllFiles(resolve(process.cwd(), 'src/templates/agent'));
+    for (const preserved of IDEA_PRESERVED_PATHS) {
+      const prefix = preserved.replace(/\/+$/, '');
+      expect(overlay.filter(path => path === prefix || path.startsWith(`${prefix}/`))).toEqual([]);
+    }
+  });
 });
