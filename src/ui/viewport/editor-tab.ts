@@ -103,6 +103,9 @@ export class EditorTabComponent extends ComponentBase {
   private showGrid = false;
 
   @state()
+  private showAxisGizmo = false;
+
+  @state()
   private snapToGrid = false;
 
   @state()
@@ -208,6 +211,7 @@ export class EditorTabComponent extends ComponentBase {
 
     // Initialize state from current appState values
     this.showGrid = appState.ui.showGrid;
+    this.showAxisGizmo = appState.ui.showAxisGizmo;
     this.snapToGrid = appState.ui.snapToGrid;
     this.showLayer2D = appState.ui.showLayer2D;
     this.showLayer3D = appState.ui.showLayer3D;
@@ -219,6 +223,7 @@ export class EditorTabComponent extends ComponentBase {
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
       this.showGrid = appState.ui.showGrid;
+      this.showAxisGizmo = appState.ui.showAxisGizmo;
       this.snapToGrid = appState.ui.snapToGrid;
       this.showLayer2D = appState.ui.showLayer2D;
       this.showLayer3D = appState.ui.showLayer3D;
@@ -349,6 +354,7 @@ export class EditorTabComponent extends ComponentBase {
             {
               transformMode: isSceneTab ? this.transformMode : null,
               showGrid: this.showGrid,
+              showAxisGizmo: this.showAxisGizmo,
               snapToGrid: this.snapToGrid,
               showLighting: this.showLighting,
               navigationMode: this.navigationMode,
@@ -373,6 +379,7 @@ export class EditorTabComponent extends ComponentBase {
               onToggleNavigationMode: () => this.toggleNavigationMode(),
               onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
               onToggleGrid: () => this.toggleGrid(),
+              onToggleAxisGizmo: () => this.toggleAxisGizmo(),
               onToggleSnapToGrid: () => this.toggleSnapToGrid(),
               onToggleLighting: () => this.toggleLighting(),
               onToggleLayer3D: () => this.toggleLayer3D(),
@@ -762,6 +769,10 @@ export class EditorTabComponent extends ComponentBase {
     void this.commandDispatcher.executeById('view.toggle-grid');
   }
 
+  private toggleAxisGizmo(): void {
+    void this.commandDispatcher.executeById('view.toggle-axis-gizmo');
+  }
+
   private toggleSnapToGrid(): void {
     void this.commandDispatcher.executeById('view.toggle-snap-to-grid');
   }
@@ -913,6 +924,15 @@ export class EditorTabComponent extends ComponentBase {
 
     const isToolbar = this.isToolbarInteraction(event);
     if (isToolbar) return;
+
+    // The corner orientation gizmo is chrome painted into the canvas: it snaps the
+    // camera onto an axis and must never resolve as a pick, or a click over it
+    // would clear the selection along with it.
+    if (this.viewportRenderer.handleAxisGizmoPointerDown(event)) {
+      this.focusViewportRegion();
+      this.clearPointerInteraction();
+      return;
+    }
 
     this.focusViewportRegion();
 
@@ -1210,6 +1230,13 @@ export class EditorTabComponent extends ComponentBase {
       this.pointerDownPos = undefined;
       this.pointerDownTime = undefined;
       this.isDragging = false;
+      return;
+    }
+
+    // Releasing over the orientation gizmo: the press was swallowed on pointer-down,
+    // so there is no pending interaction left to resolve into a selection.
+    if (this.viewportRenderer.isAxisGizmoInteraction(event)) {
+      this.clearPointerInteraction();
       return;
     }
 

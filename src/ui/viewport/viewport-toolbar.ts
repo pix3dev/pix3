@@ -9,6 +9,7 @@ import type { TransformMode } from '@/services/viewport/ViewportRenderService';
 export interface ViewportToolbarState {
   readonly transformMode: TransformMode | null;
   readonly showGrid: boolean;
+  readonly showAxisGizmo: boolean;
   readonly snapToGrid: boolean;
   readonly showLighting: boolean;
   readonly navigationMode: NavigationMode | null;
@@ -40,6 +41,7 @@ export interface ViewportToolbarHandlers {
   readonly onToggleNavigationMode?: () => void;
   readonly onSelectPreviewCamera: (itemId: string) => void;
   readonly onToggleGrid: () => void;
+  readonly onToggleAxisGizmo: () => void;
   readonly onToggleSnapToGrid: () => void;
   readonly onToggleLighting: () => void;
   readonly onToggleLayer3D: () => void;
@@ -325,8 +327,10 @@ export function renderViewportToolbar(
         )}
         <pix3-viewport-visibility-popover
           .showGrid=${state.showGrid}
+          .showAxisGizmo=${state.showAxisGizmo}
           .showLighting=${state.showLighting}
           @toggle-grid=${() => handlers.onToggleGrid()}
+          @toggle-axis-gizmo=${() => handlers.onToggleAxisGizmo()}
           @toggle-lighting=${() => handlers.onToggleLighting()}
         ></pix3-viewport-visibility-popover>
       </div>

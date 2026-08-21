@@ -643,6 +643,8 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
     set2DMarqueePreviewNodeIds: vi.fn<(nodeIds: string[]) => boolean>(() => false),
     clear2DMarqueePreview: vi.fn<() => boolean>(() => false),
     has2DTransform: vi.fn(() => false),
+    handleAxisGizmoPointerDown: vi.fn(() => false),
+    isAxisGizmoInteraction: vi.fn(() => false),
   };
   const sceneManager = {
     getSceneGraph: vi.fn<(sceneId: string) => SceneGraph | null>(() => null),

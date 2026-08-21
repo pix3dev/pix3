@@ -16,6 +16,7 @@ import { Viewport3DContentSync } from '@/services/viewport/Viewport3DContentSync
 import { ViewportNavigation } from '@/services/viewport/ViewportNavigation';
 import { ViewportPicking } from '@/services/viewport/ViewportPicking';
 import { ViewportAdornments } from '@/services/viewport/ViewportAdornments';
+import { ViewportAxisGizmo } from '@/services/viewport/ViewportAxisGizmo';
 import { ViewportTransformSession } from '@/services/viewport/ViewportTransformSession';
 import {
   Viewport2DProxyRegistry,
@@ -212,6 +213,15 @@ export class ViewportRendererService {
   // Owns the GPU/CPU frame-timing concern. Reads the *current* renderer via a
   // getter since it's created lazily and can be re-created on viewport re-init.
   private readonly gpuTimer = new ViewportGpuTimer(() => this.renderer);
+  // Owns the bottom-right orientation gizmo (the X/Y/Z view cube). Wired via
+  // closures because the camera it visualizes is swapped on projection change
+  // and the canvas is created lazily.
+  private readonly axisGizmo = new ViewportAxisGizmo({
+    getCanvas: () => this.canvas,
+    getCamera: () => this.camera,
+    getOrbitControls: () => this.orbitControls,
+    requestRender: () => this.requestRender(),
+  });
   // Owns the screenshot / framed-capture concern. Wired via closures because the
   // renderer/canvas/scene/camera are created lazily (viewport re-init) and the
   // called methods (renderFrame, frameNodes, isVisibleInHierarchy,
@@ -1961,6 +1971,9 @@ export class ViewportRendererService {
       this.orbitControls?.update();
     }
 
+    // After the controls: a view-cube flight owns the camera pose for this frame.
+    this.axisGizmo.update(delta);
+
     this.contentSync3D.syncSprite3DBillboarding(this.camera);
 
     // Render main scene with perspective camera (3D layer and gizmos).
@@ -2129,6 +2142,13 @@ export class ViewportRendererService {
         this.viewportSize.height * pixelRatio
       );
       this.scene.background = savedBackground;
+    }
+
+    // Orientation gizmo, over every pass. `autoClear` stays off: the gizmo owns a
+    // 128px corner of the same framebuffer, and a clear here wipes the whole frame.
+    if (!this.suppressGizmosForCapture) {
+      this.renderer.autoClear = false;
+      this.axisGizmo.render(this.renderer);
     }
 
     this.renderer.autoClear = true;
@@ -4475,7 +4495,25 @@ export class ViewportRendererService {
    * counts are refreshed by their tickers on every rendered frame.
    */
   private hasContinuousPreviewWork(): boolean {
-    return this.previewAnimationActions.size > 0 || this.previewTicker.hasActivePreview();
+    return (
+      this.previewAnimationActions.size > 0 ||
+      this.previewTicker.hasActivePreview() ||
+      this.axisGizmo.isAnimating()
+    );
+  }
+
+  /**
+   * Pointer-down over the orientation gizmo: snaps the camera onto the clicked
+   * axis. Returns true when the press belongs to the gizmo, in which case the
+   * viewport must not also treat it as a pick.
+   */
+  handleAxisGizmoPointerDown(event: PointerEvent): boolean {
+    return this.axisGizmo.handlePointerDown(event);
+  }
+
+  /** True while a pointer event lands on the orientation gizmo's corner box. */
+  isAxisGizmoInteraction(event: PointerEvent): boolean {
+    return this.axisGizmo.containsPointer(event);
   }
 
   private shouldPauseForWindowFocus(): boolean {
@@ -4508,6 +4546,9 @@ export class ViewportRendererService {
       mixer.stopAllAction();
     }
     this.animationMixers.clear();
+
+    // Dispose the orientation gizmo (canvas label textures + axis materials)
+    this.axisGizmo.dispose();
 
     // Dispose orbit controls
     this.orbitControls?.dispose();

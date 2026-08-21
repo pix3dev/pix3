@@ -20,6 +20,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Colour renders too dark in 3D / authoring a `color` property | this file → "Authored colours convert exactly once" |
 | Why the exported .html weighs what it does / export size | this file → "Playable export size" |
 | Viewport not repainting / render-on-demand | this file → "Editor viewport renders on demand" |
+| A viewport inset/overlay draws in the wrong place / `setViewport` units | this file → "Viewport insets are sized in device pixels" |
 | Command / Operation / undo wiring | `AGENTS.md` → "Commands and Operations"; code in `src/features/<area>/` |
 | Editor UI (Lit, panels, icons, theming) | `AGENTS.md` → "Component System" + `pix3-ui-conventions` skill |
 | ECS / `InstancedMesh3D` bulk API | `nodes-and-systems.md` → "ECS"; `node-types-reference.md` → `### InstancedMesh3D` |
@@ -131,6 +132,10 @@ Full measurements and the deferred work: `.plans/done/playable-export-size.md`.
 ### Editor viewport renders on demand (non-obvious)
 
 The `ViewportRenderService` rAF loop does **not** paint every frame. A frame renders only when something marked the viewport dirty (`requestRender()`), an editor preview is animating (animation-clip / particle / component preview), or the 500 ms idle heartbeat is due — an idle editor costs near-zero CPU/GPU (important for agent-driven background-tab sessions). Dirty marking comes from: Valtio state subscriptions, canvas pointer/wheel/drag events, Orbit/Transform controls `change` events, and `THREE.DefaultLoadingManager.onLoad` for async textures. If you add code that mutates three.js objects outside those paths (timers, async callbacks, direct service calls), call `viewportRenderService.requestRender()` afterwards — otherwise the change won't appear until the next heartbeat (≤500 ms) and, worse, will look intermittently "laggy". `requestRender()` renders synchronously when the loop is stopped (paused / window unfocused / hidden tab), so background-tab edits still land on canvas.
+
+### Viewport insets are sized in device pixels, not CSS pixels (non-obvious)
+
+`ViewportRendererService.resize()` calls `renderer.setSize(cssWidth * devicePixelRatio, ...)` **while** `setPixelRatio(dpr)` is also set, so the renderer's logical space is *device* pixels (and the drawing buffer ends up dpr x larger again). Everything that draws into a sub-rectangle of the frame therefore has to convert: the camera-preview inset multiplies its CSS-pixel geometry by `renderer.getPixelRatio()`, and `ViewportAxisGizmo` derives the scale as `rendererLogicalWidth / canvas.clientWidth`. Hand `setViewport`/`setScissor` raw CSS pixels and your inset lands short of where you meant it, scaled down by the device pixel ratio — it looks fine on a 1x monitor and wrong on every other one. Pointer hit-tests for those insets stay in CSS pixels (that is what `clientX` speaks), so the two spaces must be converted, never mixed.
 
 ## Conventions worth flagging
 

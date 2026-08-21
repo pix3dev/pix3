@@ -105,6 +105,7 @@ import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
+import { ToggleAxisGizmoCommand } from '@/features/viewport/ToggleAxisGizmoCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
 import { ToggleLayer3DCommand } from '@/features/viewport/ToggleLayer3DCommand';
 import { ZoomDefaultCommand } from '@/features/viewport/ZoomDefaultCommand';
@@ -435,6 +436,7 @@ export class Pix3EditorShell extends ComponentBase {
     const rotateModeCommand = new SetTransformModeCommand('rotate');
     const scaleModeCommand = new SetTransformModeCommand('scale');
     const toggleGridCommand = new ToggleGridCommand();
+    const toggleAxisGizmoCommand = new ToggleAxisGizmoCommand();
     const toggleSnapToGridCommand = new ToggleSnapToGridCommand();
     const toggleLayer2DCommand = new ToggleLayer2DCommand();
     const toggleLayer3DCommand = new ToggleLayer3DCommand();
@@ -501,6 +503,7 @@ export class Pix3EditorShell extends ComponentBase {
       rotateModeCommand,
       scaleModeCommand,
       toggleGridCommand,
+      toggleAxisGizmoCommand,
       toggleSnapToGridCommand,
       toggleLayer2DCommand,
       toggleLayer3DCommand,

@@ -331,6 +331,8 @@ export interface UIState {
   editorCameraProjection: EditorCameraProjection;
   /** Toggle for showing the 3D grid helper */
   showGrid: boolean;
+  /** Toggle for the viewport's corner orientation gizmo (X/Y/Z view cube) */
+  showAxisGizmo: boolean;
   /** Snap dragged 2D nodes to a grid */
   snapToGrid: boolean;
   /** Grid cell size in world units used for 2D snapping */
@@ -598,6 +600,7 @@ export const createInitialAppState = (): AppState => ({
     showLayer3D: true,
     editorCameraProjection: 'perspective',
     showGrid: true,
+    showAxisGizmo: true,
     snapToGrid: false,
     grid2DSize: 16,
     showLighting: true,

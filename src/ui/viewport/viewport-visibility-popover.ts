@@ -14,6 +14,9 @@ export class ViewportVisibilityPopover extends ComponentBase {
   @property({ type: Boolean })
   showLighting = false;
 
+  @property({ type: Boolean })
+  showAxisGizmo = false;
+
   @state()
   private isOpen = false;
 
@@ -114,6 +117,12 @@ export class ViewportVisibilityPopover extends ComponentBase {
             this.showGrid,
             'toggle-grid',
             'Show or hide the editor grid'
+          )}
+          ${this.renderToggleRow(
+            'Axis Gizmo',
+            this.showAxisGizmo,
+            'toggle-axis-gizmo',
+            'Show the orientation gizmo in the 3D viewport corner'
           )}
           ${this.renderToggleRow(
             'System Lighting',
