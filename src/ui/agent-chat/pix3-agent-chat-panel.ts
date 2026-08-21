@@ -113,7 +113,7 @@ export const isNudgeText = (role: 'user' | 'assistant', text: string): boolean =
 /** A file staged in the composer before it is sent (pasted, dropped, or picked). */
 type ComposerAttachment =
   | { id: string; kind: 'image'; name: string; mimeType: string; base64: string }
-  | { id: string; kind: 'text'; name: string; content: string };
+  | { id: string; kind: 'text'; name: string; content: string; contextKey?: string };
 
 /** One rendered chat entry, derived from the wire history (tool calls paired with their results). */
 export type DisplayItem =
@@ -2355,32 +2355,33 @@ export class AgentChatPanel extends ComponentBase {
   }
 
   /**
-   * Stage a context chip raised from outside (the idea document's selection) without disturbing the
-   * conversation: the draft is extended, not replaced, and chips already staged survive. A chip
-   * carrying the same slice twice replaces the earlier one rather than sending the fragment twice.
+   * Stage — or retract — a context chip raised from outside (the idea document's selection) without
+   * disturbing the conversation: the draft and the unrelated attachments are left exactly as they
+   * are, because the user is mid-sentence next to it. A `replaceKey` makes the chip a *slot*:
+   * re-selecting in the document swaps the fragment, dropping the selection takes it back
+   * (`attachment: null`). Focus is deliberately not taken; grabbing it here would collapse the
+   * selection the user just made.
    */
   private applyComposeContext(request: ComposeContextRequest): void {
-    const { name, content } = request.attachment;
-    const kept = this.attachments.filter(
-      a => !(a.kind === 'text' && a.name === name && a.content === content)
-    );
-    this.attachments = [
-      ...kept,
-      { id: `att-${this.attachmentSeq++}`, kind: 'text', name, content },
-    ];
-    this.attachWarning = '';
-    if (request.prefill) {
-      const draft = this.draft.trimEnd();
-      this.draft = draft ? `${draft} ${request.prefill}` : request.prefill;
-    }
-    this.shouldStickToBottom = true;
-    void this.updateComplete.then(() => {
-      const ta = this.querySelector<HTMLTextAreaElement>('.agent-input');
-      if (ta) {
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
+    const { attachment, replaceKey } = request;
+    const kept = this.attachments.filter(a => {
+      if (a.kind !== 'text') return true;
+      if (replaceKey && a.contextKey === replaceKey) return false;
+      return !(attachment && a.name === attachment.name && a.content === attachment.content);
     });
+    this.attachments = attachment
+      ? [
+          ...kept,
+          {
+            id: `att-${this.attachmentSeq++}`,
+            kind: 'text',
+            name: attachment.name,
+            content: attachment.content,
+            ...(replaceKey && { contextKey: replaceKey }),
+          },
+        ]
+      : kept;
+    this.attachWarning = '';
   }
 
   private async sendDraft(): Promise<void> {

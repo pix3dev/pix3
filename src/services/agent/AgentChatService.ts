@@ -64,16 +64,19 @@ export interface AgentAttachments {
  * A context chip raised from outside the panel (the idea document's text selection).
  *
  * Deliberately not the {@link AgentChatService.composePrefill} channel: a chip augments the ongoing
- * discussion — it stages an attachment next to whatever is already in the composer instead of
- * replacing the draft — because a selection is usually the third clarification of a conversation,
- * not the start of a new one. Cache-safety is automatic: the attachment travels inside the last
- * user message, so the cached prefix is untouched.
+ * discussion — it stages an attachment next to whatever is already in the composer and never
+ * touches the draft, because the user is writing their own question next to it. Cache-safety is
+ * automatic: the attachment travels inside the last user message, so the cached prefix is untouched.
  */
 export interface ComposeContextRequest {
-  /** Staged as a composer chip and inlined into the next user message. */
-  readonly attachment: AgentTextAttachment;
-  /** Appended to the draft — never replaces it (e.g. "Change the selected fragment: "). */
-  readonly prefill?: string;
+  /** Staged as a composer chip and inlined into the next user message. `null` retracts the slot. */
+  readonly attachment: AgentTextAttachment | null;
+  /**
+   * Slot identity. A new chip with the same key evicts the previous one, so a source that keeps
+   * re-raising the same *kind* of context (the document's current selection) never stacks up chips
+   * — and can take it back when the context is gone (see {@link AgentChatService.clearComposeContext}).
+   */
+  readonly replaceKey?: string;
 }
 
 /**
@@ -920,9 +923,9 @@ export class AgentChatService {
   }
 
   /**
-   * Context channel: stage a text attachment (and optionally extend the draft) in the mounted
-   * composer, leaving the conversation, the draft and the other attachments alone. Queued when the
-   * panel is not mounted yet, same as the prefill channel.
+   * Context channel: stage a text attachment in the mounted composer, leaving the conversation, the
+   * draft and the unrelated attachments alone. Queued when the panel is not mounted yet, same as
+   * the prefill channel.
    */
   composeContext(request: ComposeContextRequest): void {
     if (this.contextListeners.size > 0) {
@@ -931,7 +934,20 @@ export class AgentChatService {
       }
       return;
     }
-    this.pendingContext.push(request);
+    this.pendingContext = request.replaceKey
+      ? [...this.pendingContext.filter(q => q.replaceKey !== request.replaceKey), request]
+      : [...this.pendingContext, request];
+  }
+
+  /**
+   * Retract the chip occupying a slot — the context it stood for is gone (the user dropped the
+   * selection it came from). A queued chip is dropped outright rather than delivered and undone.
+   */
+  clearComposeContext(replaceKey: string): void {
+    this.pendingContext = this.pendingContext.filter(q => q.replaceKey !== replaceKey);
+    for (const listener of this.contextListeners) {
+      listener({ attachment: null, replaceKey });
+    }
   }
 
   /** Subscribe to context-chip requests. Immediately flushes any queued chips, in order. */

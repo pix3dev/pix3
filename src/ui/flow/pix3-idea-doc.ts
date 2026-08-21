@@ -30,7 +30,7 @@ const RES_REFERENCE = /res:\/\/[^\s)'"<>\]]+/g;
 const FOCUS_HINT_LIMIT = 200;
 
 /**
- * A live selection inside the rendered document, resolved back to the markdown source.
+ * A selection inside the rendered document, resolved back to the markdown source.
  *
  * `startLine`/`endLine` are 0-based inclusive line indices into {@link Pix3IdeaDoc.source} — the
  * snapshot that was rendered, never "the current file", which the agent may already have rewritten.
@@ -42,9 +42,6 @@ interface IdeaDocSelection {
   readonly slice: string;
   /** What the user actually highlighted, as rendered text (a hint, not the edit target). */
   readonly rendered: string;
-  /** Viewport coordinates for the floating toolbar (CSS pixels, `position: fixed`). */
-  readonly left: number;
-  readonly top: number;
 }
 
 /**
@@ -104,9 +101,8 @@ export class Pix3IdeaDoc extends ComponentBase {
   @state()
   private agentRunning = false;
 
-  /** The live selection inside the rendered document, or `null` when there is none to act on. */
-  @state()
-  private selection: IdeaDocSelection | null = null;
+  /** Line range of the fragment already staged as a chip — re-selecting the same one is a no-op. */
+  private stagedRange: string | null = null;
 
   /** `res://` path → object URL, for images currently referenced by {@link source}. */
   private readonly blobUrls = new Map<string, string>();
@@ -124,8 +120,8 @@ export class Pix3IdeaDoc extends ComponentBase {
     // The overlay lives on `document.body`, outside every panel that clips with `overflow: hidden`.
     ensureLightboxHost();
     this.disposeAgent = this.agentChat.subscribe(state => this.onAgentState(state));
-    // `selectionchange` is the only event that fires when a selection is *dropped* (a click
-    // elsewhere, Escape, a keyboard collapse) — pointerup alone would leave the toolbar stranded.
+    // `selectionchange` is the only event that fires when a selection is *dropped* — pointerup
+    // never reports the click that deselects.
     document.addEventListener('selectionchange', this.onSelectionChange);
     void this.reload();
   }
@@ -135,7 +131,8 @@ export class Pix3IdeaDoc extends ComponentBase {
     this.disposeAgent?.();
     this.disposeAgent = undefined;
     document.removeEventListener('selectionchange', this.onSelectionChange);
-    this.selection = null;
+    // The chip stands for a selection in *this* view; leaving the view takes it back with us.
+    this.retractSelection();
     // Nothing else owns these URLs, so the component must release them all on the way out.
     for (const url of this.blobUrls.values()) {
       URL.revokeObjectURL(url);
@@ -165,7 +162,7 @@ export class Pix3IdeaDoc extends ComponentBase {
         return;
       }
       this.source = '';
-      this.selection = null;
+      this.stagedRange = null;
       this.missing = true;
       this.syncImageBlobs('', token);
       return;
@@ -180,7 +177,7 @@ export class Pix3IdeaDoc extends ComponentBase {
       return;
     }
     // Anchors point into the snapshot that was rendered; a new source invalidates them.
-    this.selection = null;
+    this.stagedRange = null;
     this.source = text;
     this.missing = false;
   }
@@ -228,6 +225,11 @@ export class Pix3IdeaDoc extends ComponentBase {
   };
 
   private onAgentState(state: AgentChatState): void {
+    // A started turn flushed the composer's attachments, chip included: the same fragment must be
+    // stageable again without the user having to select something else first.
+    if (!this.wasRunning && state.status === 'running') {
+      this.stagedRange = null;
+    }
     this.agentRunning = state.status === 'running';
     const tool = state.activeTool ?? null;
     if (tool !== this.lastTool) {
@@ -330,43 +332,82 @@ export class Pix3IdeaDoc extends ComponentBase {
 
   // ── Selection → agent context ───────────────────────────────────────────────
 
-  private readonly onSelectionChange = (): void => {
-    // Only ever *retracts* the toolbar: a fresh selection is captured on pointerup/keyup, when the
-    // gesture has finished. Reacting to every intermediate change would flicker the toolbar mid-drag.
-    if (!this.selection) {
-      return;
-    }
-    const selection = document.getSelection();
-    if (!selection || selection.isCollapsed) {
-      this.selection = null;
-    }
-  };
-
   /**
-   * Resolve the current DOM selection back to a slice of the markdown source.
+   * Resolve the current DOM selection back to a slice of the markdown source and stage it as the
+   * chat's context chip. No toolbar, no confirmation: selecting *is* the gesture, and the chip is a
+   * single slot, so the next selection swaps it and a stray click leaves the last one in place.
    *
    * The slice — not `selection.toString()` — is what the agent gets: the rendered text has lost the
    * markdown syntax (`**bold**` reads as "bold"), so a `str_replace` against it would never match.
    * Granularity is whole blocks on purpose: that is exactly coarse enough for the slice to be valid
    * markdown and an exact `str_replace` needle.
    */
+  private get selectionSlotKey(): string {
+    return `idea-doc:${this.docPath}`;
+  }
+
+  /**
+   * Take the chip back when the selection it stood for is dropped.
+   *
+   * Only a collapse *inside the document* counts. Clicking into the chat composer to type the
+   * question also collapses the page selection — retracting there would delete the context exactly
+   * when the user is about to ask about it — but the caret lands outside this body, so it is left
+   * alone.
+   */
+  private readonly onSelectionChange = (): void => {
+    if (this.stagedRange === null) {
+      return;
+    }
+    const body = this.querySelector('.idea-doc__body');
+    const selection = document.getSelection();
+    if (!body || !selection) {
+      return;
+    }
+    const insideDocument = selection.anchorNode ? body.contains(selection.anchorNode) : false;
+    if (selection.isCollapsed && insideDocument) {
+      this.retractSelection();
+    }
+  };
+
+  private retractSelection(): void {
+    if (this.stagedRange === null) {
+      return;
+    }
+    this.stagedRange = null;
+    this.agentChat.clearComposeContext(this.selectionSlotKey);
+  }
+
   private captureSelection(): void {
+    const anchor = this.resolveSelection();
+    if (!anchor) {
+      return;
+    }
+    const range = `${anchor.startLine}-${anchor.endLine}`;
+    if (range === this.stagedRange) {
+      return;
+    }
+    this.stagedRange = range;
+    this.agentChat.composeContext({
+      attachment: this.selectionAttachment(anchor),
+      // One slot per document: re-selecting swaps the fragment instead of stacking chips.
+      replaceKey: this.selectionSlotKey,
+    });
+  }
+
+  private resolveSelection(): IdeaDocSelection | null {
     const body = this.querySelector('.idea-doc__body');
     const selection = document.getSelection();
     if (!body || !selection || selection.isCollapsed || selection.rangeCount === 0) {
-      this.selection = null;
-      return;
+      return null;
     }
     const range = selection.getRangeAt(0);
     if (!body.contains(range.startContainer) || !body.contains(range.endContainer)) {
-      this.selection = null;
-      return;
+      return null;
     }
     const start = blockLinesOf(range.startContainer, body);
     const end = blockLinesOf(range.endContainer, body);
     if (!start || !end) {
-      this.selection = null;
-      return;
+      return null;
     }
     const startLine = Math.min(start[0], end[0]);
     const endLine = Math.max(start[1], end[1]);
@@ -375,18 +416,9 @@ export class Pix3IdeaDoc extends ComponentBase {
       .slice(startLine, endLine + 1)
       .join('\n');
     if (!slice.trim()) {
-      this.selection = null;
-      return;
+      return null;
     }
-    const rect = range.getBoundingClientRect();
-    this.selection = {
-      startLine,
-      endLine,
-      slice,
-      rendered: condense(selection.toString()),
-      left: rect.left + rect.width / 2,
-      top: rect.bottom,
-    };
+    return { startLine, endLine, slice, rendered: condense(selection.toString()) };
   }
 
   private readonly onBodyPointerUp = (): void => {
@@ -395,10 +427,7 @@ export class Pix3IdeaDoc extends ComponentBase {
   };
 
   private readonly onBodyKeyUp = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') {
-      this.selection = null;
-      return;
-    }
+    // Keyboard selections (shift+arrows, ctrl+A) must reach the chip too.
     if (event.shiftKey || event.key === 'Shift' || event.ctrlKey || event.metaKey) {
       this.captureSelection();
     }
@@ -410,7 +439,7 @@ export class Pix3IdeaDoc extends ComponentBase {
     const to = anchor.endLine + 1;
     const fence = fenceFor(anchor.slice);
     const focus = anchor.rendered
-      ? `\n\nThe user highlighted this inside the fragment: "${truncate(anchor.rendered, FOCUS_HINT_LIMIT)}"`
+      ? `\nThe user highlighted this inside the fragment: "${truncate(anchor.rendered, FOCUS_HINT_LIMIT)}"`
       : '';
     return {
       name: `${this.docPath}:${from}–${to}`,
@@ -424,18 +453,6 @@ export class Pix3IdeaDoc extends ComponentBase {
           fence,
         ].join('\n') + focus,
     };
-  }
-
-  private sendSelectionToAgent(prefill?: string): void {
-    const anchor = this.selection;
-    if (!anchor) {
-      return;
-    }
-    this.agentChat.composeContext({
-      attachment: this.selectionAttachment(anchor),
-      ...(prefill && { prefill }),
-    });
-    this.selection = null;
   }
 
   private onEditSource(): void {
@@ -483,10 +500,9 @@ export class Pix3IdeaDoc extends ComponentBase {
     return html`
       <div class="idea-doc">
         ${this.renderToolbar()}
-        <div class="idea-doc__scroll" @scroll=${() => (this.selection = null)}>
+        <div class="idea-doc__scroll">
           ${this.editing ? this.renderSource() : this.renderPreview()}
         </div>
-        ${this.renderSelectionMenu()}
       </div>
     `;
   }
@@ -543,43 +559,6 @@ export class Pix3IdeaDoc extends ComponentBase {
                 <span>Expand</span>
               </button>
             `}
-      </div>
-    `;
-  }
-
-  /**
-   * The floating selection toolbar. `pointerdown` is swallowed on purpose: letting it through would
-   * collapse the very selection the buttons are about to read.
-   */
-  private renderSelectionMenu() {
-    const anchor = this.selection;
-    if (!anchor || this.editing) {
-      return null;
-    }
-    return html`
-      <div
-        class="idea-doc__selection-menu"
-        style=${`left: ${Math.round(anchor.left)}px; top: ${Math.round(anchor.top)}px`}
-        @pointerdown=${(event: PointerEvent) => event.preventDefault()}
-      >
-        <button
-          type="button"
-          class="idea-doc__selection-action"
-          title="Attach the selected fragment to the chat"
-          @click=${() => this.sendSelectionToAgent()}
-        >
-          ${this.iconService.getIcon('message-square', IconSize.SMALL)}
-          <span>Discuss</span>
-        </button>
-        <button
-          type="button"
-          class="idea-doc__selection-action"
-          title="Attach the fragment and start a rewrite request"
-          @click=${() => this.sendSelectionToAgent('Change the selected fragment: ')}
-        >
-          ${this.iconService.getIcon('edit-3', IconSize.SMALL)}
-          <span>Change</span>
-        </button>
       </div>
     `;
   }

@@ -47,14 +47,20 @@ const idleState: AgentChatState = {
 class AgentChatStub {
   private listener: ((state: AgentChatState) => void) | null = null;
   private state: AgentChatState = idleState;
-  readonly contextRequests: { attachment: { name: string; content: string }; prefill?: string }[] =
-    [];
+  readonly contextRequests: {
+    attachment: { name: string; content: string } | null;
+    replaceKey?: string;
+  }[] = [];
 
   composeContext = vi.fn(
-    (request: { attachment: { name: string; content: string }; prefill?: string }) => {
+    (request: { attachment: { name: string; content: string } | null; replaceKey?: string }) => {
       this.contextRequests.push(request);
     }
   );
+
+  clearComposeContext = vi.fn((replaceKey: string) => {
+    this.contextRequests.push({ attachment: null, replaceKey });
+  });
 
   subscribe(listener: (state: AgentChatState) => void): () => void {
     this.listener = listener;
@@ -324,6 +330,8 @@ describe('pix3-idea-doc', () => {
     // The DI container hands out the same stub across the tests of this file.
     beforeEach(() => {
       agentChat().contextRequests.length = 0;
+      agentChat().composeContext.mockClear();
+      agentChat().clearComposeContext.mockClear();
     });
 
     const SOURCE = [
@@ -334,8 +342,8 @@ describe('pix3-idea-doc', () => {
       'A second paragraph nobody selected.', // 4
     ].join('\n');
 
-    /** Select from the first paragraph's text into it, the way a drag would leave the DOM. */
-    const selectParagraph = (element: IdeaDocElement, selector: string): void => {
+    /** Select a rendered block the way finishing a drag over it would leave the DOM. */
+    const select = (element: IdeaDocElement, selector: string): void => {
       const block = element.querySelector(selector)!;
       const range = document.createRange();
       range.selectNodeContents(block);
@@ -347,63 +355,104 @@ describe('pix3-idea-doc', () => {
         .dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, shiftKey: true }));
     };
 
-    const menuButton = (element: IdeaDocElement, label: string): HTMLButtonElement | undefined =>
-      Array.from(element.querySelectorAll<HTMLButtonElement>('.idea-doc__selection-action')).find(
-        button => button.textContent?.includes(label)
-      );
-
-    it('sends the source slice — not the rendered text — as a chip', async () => {
+    it('stages the source slice — not the rendered text — the moment a fragment is selected', async () => {
       storage().files.set(DOC_PATH, SOURCE);
       const element = await mount();
 
-      selectParagraph(element, '.md-p');
-      await settle(element);
-      expect(element.querySelector('.idea-doc__selection-menu')).toBeTruthy();
-
-      menuButton(element, 'Discuss')!.click();
+      select(element, '.md-p');
       await settle(element);
 
       const [request] = agentChat().contextRequests;
-      expect(request.prefill).toBeUndefined();
-      expect(request.attachment.name).toBe(`${DOC_PATH}:3–3`);
-      // The markdown syntax has to survive — `str_replace` matches the file, not the rendering.
-      expect(request.attachment.content).toContain('Colonies fight over **sugar**.');
-      expect(request.attachment.content).toContain(DOC_PATH);
-      expect(request.attachment.content).toContain('str_replace');
-      // Only the selected block travels.
-      expect(request.attachment.content).not.toContain('A second paragraph');
-      // The toolbar retracts once the chip is staged.
+      expect(request.attachment?.name).toBe(`${DOC_PATH}:3–3`);
+      // Selecting is the whole gesture — no toolbar, no confirmation step.
       expect(element.querySelector('.idea-doc__selection-menu')).toBeNull();
+      // The markdown syntax has to survive — `str_replace` matches the file, not the rendering.
+      expect(request.attachment?.content).toContain('Colonies fight over **sugar**.');
+      expect(request.attachment?.content).toContain(DOC_PATH);
+      expect(request.attachment?.content).toContain('str_replace');
+      // Only the selected block travels.
+      expect(request.attachment?.content).not.toContain('A second paragraph');
     });
 
-    it('"Change" adds a rewrite prefill on top of the same chip', async () => {
+    it('swaps the chip on the next selection instead of stacking, and ignores a re-select', async () => {
       storage().files.set(DOC_PATH, SOURCE);
       const element = await mount();
 
-      selectParagraph(element, 'h1');
+      select(element, '.md-p');
       await settle(element);
-      menuButton(element, 'Change')!.click();
+      select(element, '.md-p'); // same fragment again — nothing new to say
+      await settle(element);
+      select(element, 'h1');
       await settle(element);
 
-      const [request] = agentChat().contextRequests;
-      expect(request.prefill).toContain('Change the selected fragment');
-      expect(request.attachment.name).toBe(`${DOC_PATH}:1–1`);
-      expect(request.attachment.content).toContain('# Ant Strategy');
+      const requests = agentChat().contextRequests;
+      expect(requests.map(r => r.attachment?.name)).toEqual([`${DOC_PATH}:3–3`, `${DOC_PATH}:1–1`]);
+      // Both went to the same slot, so the panel keeps exactly one document chip.
+      expect(new Set(requests.map(r => r.replaceKey))).toEqual(new Set([`idea-doc:${DOC_PATH}`]));
+      expect(requests[1].attachment?.content).toContain('# Ant Strategy');
     });
 
-    it('drops the anchor when the document is re-read under it', async () => {
+    /** Collapse the page selection at a point, the way a click does. */
+    const collapseAt = (node: Node): void => {
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.collapse(true);
+      selection.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+    };
+
+    it('takes the chip back when the selection is dropped inside the document', async () => {
       storage().files.set(DOC_PATH, SOURCE);
       const element = await mount();
 
-      selectParagraph(element, '.md-p');
+      select(element, '.md-p');
       await settle(element);
-      expect(element.querySelector('.idea-doc__selection-menu')).toBeTruthy();
+      collapseAt(element.querySelector('h1')!);
+      await settle(element);
 
-      storage().files.set(DOC_PATH, '# Termite Strategy\n\nMounds everywhere.');
+      const requests = agentChat().contextRequests;
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual({ attachment: null, replaceKey: `idea-doc:${DOC_PATH}` });
+      expect(agentChat().clearComposeContext).toHaveBeenCalledWith(`idea-doc:${DOC_PATH}`);
+    });
+
+    it('keeps the chip when the caret leaves for the composer', async () => {
+      storage().files.set(DOC_PATH, SOURCE);
+      const element = await mount();
+
+      select(element, '.md-p');
+      await settle(element);
+      // Clicking into the chat's textarea collapses the page selection too — retracting there would
+      // delete the context exactly when the user starts typing the question about it.
+      const outside = document.createElement('textarea');
+      document.body.appendChild(outside);
+      collapseAt(outside);
+      await settle(element);
+
+      expect(agentChat().contextRequests).toHaveLength(1);
+      expect(agentChat().clearComposeContext).not.toHaveBeenCalled();
+      outside.remove();
+    });
+
+    it('re-stages after the document was re-read under the selection', async () => {
+      storage().files.set(DOC_PATH, SOURCE);
+      const element = await mount();
+
+      select(element, '.md-p');
+      await settle(element);
+      expect(agentChat().contextRequests).toHaveLength(1);
+
+      storage().files.set(DOC_PATH, '# Ant Strategy\n\nTermites, actually.');
       agentChat().emit({ status: 'running', activeTool: 'str_replace' });
       await settle(element);
 
-      expect(element.querySelector('.idea-doc__selection-menu')).toBeNull();
+      // Same line range, different text — the stale anchor must not suppress the new chip.
+      select(element, '.md-p');
+      await settle(element);
+      expect(agentChat().contextRequests).toHaveLength(2);
+      expect(agentChat().contextRequests[1].attachment?.content).toContain('Termites, actually.');
     });
   });
 });

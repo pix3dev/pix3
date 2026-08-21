@@ -1587,7 +1587,7 @@ describe('AgentChatService', () => {
     expect(received).toEqual(['Fix this runtime error: boom']);
   });
 
-  it('composeContext stages a chip without touching the conversation, and queues before mount', async () => {
+  it('composeContext stages a keyed chip without touching the conversation', async () => {
     const service = buildService({
       chat: vi.fn(async () => textResult('ok')),
       execute: vi.fn(),
@@ -1597,23 +1597,46 @@ describe('AgentChatService', () => {
     const before = service.getState().messages.length;
     expect(before).toBeGreaterThan(0);
 
-    // Raised before anyone subscribed — must survive until the panel mounts.
-    service.composeContext({ attachment: { name: 'design/gdd.md:3-3', content: 'slice' } });
+    // Raised before anyone subscribed — must survive until the panel mounts, and the second chip of
+    // the same slot must evict the first one there too (only the latest selection is context).
+    service.composeContext({
+      attachment: { name: 'design/gdd.md:3-3', content: 'first' },
+      replaceKey: 'idea-doc:design/gdd.md',
+    });
+    service.composeContext({
+      attachment: { name: 'design/gdd.md:5-7', content: 'second' },
+      replaceKey: 'idea-doc:design/gdd.md',
+    });
 
     const received: ComposeContextRequest[] = [];
     service.subscribeComposeContext(request => received.push(request));
-    service.composeContext({
-      attachment: { name: 'design/gdd.md:5-7', content: 'other slice' },
-      prefill: 'Change the selected fragment: ',
-    });
+    service.composeContext({ attachment: { name: 'notes.md:1-2', content: 'other' } });
 
-    expect(received.map(r => r.attachment.name)).toEqual([
-      'design/gdd.md:3-3',
-      'design/gdd.md:5-7',
-    ]);
-    expect(received[1].prefill).toBe('Change the selected fragment: ');
+    expect(received.map(r => r.attachment?.name)).toEqual(['design/gdd.md:5-7', 'notes.md:1-2']);
     // The chip joins the ongoing discussion — unlike composeFix, nothing was reset.
     expect(service.getState().messages).toHaveLength(before);
+
+    // The context it stood for is gone — the slot is retracted, the unkeyed chip is untouched.
+    service.clearComposeContext('idea-doc:design/gdd.md');
+    expect(received[2]).toEqual({ attachment: null, replaceKey: 'idea-doc:design/gdd.md' });
+  });
+
+  it('clearComposeContext drops a chip still queued instead of delivering it', async () => {
+    const service = buildService({
+      chat: vi.fn(async () => textResult('ok')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+    });
+    service.composeContext({
+      attachment: { name: 'design/gdd.md:3-3', content: 'slice' },
+      replaceKey: 'idea-doc:design/gdd.md',
+    });
+    service.clearComposeContext('idea-doc:design/gdd.md');
+
+    const received: ComposeContextRequest[] = [];
+    service.subscribeComposeContext(request => received.push(request));
+    // Nothing to undo on mount: the queued chip left with the selection.
+    expect(received).toEqual([]);
   });
 
   it('composeFix queues the prompt when no composer is subscribed yet', async () => {
