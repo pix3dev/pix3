@@ -18,6 +18,7 @@ import {
 } from '@/services/editor/TabPerformanceService';
 import { LayoutManagerService } from '@/core/LayoutManager';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { IconService, IconSize } from '@/services/editor/IconService';
@@ -34,10 +35,10 @@ interface StatusMessage {
 }
 
 /**
- * The provider whose key the editor holds itself. Everything else metered runs through the local
- * bridge, so these two indicators together answer "can the agent talk to a model at all?".
+ * The built-in providers whose keys this browser holds itself (Gemini, OpenRouter) come from the
+ * registry; everything else metered runs through the local bridge. The two lane indicators together
+ * answer "can the agent talk to a model at all?".
  */
-const GEMINI_PROVIDER_ID = 'gemini';
 
 @customElement('pix3-status-bar')
 export class Pix3StatusBar extends ComponentBase {
@@ -63,6 +64,9 @@ export class Pix3StatusBar extends ComponentBase {
 
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
+
+  @inject(LlmProviderRegistry)
+  private readonly llmProviders!: LlmProviderRegistry;
 
   @inject(BridgeConnectionService)
   private readonly bridge!: BridgeConnectionService;
@@ -101,8 +105,9 @@ export class Pix3StatusBar extends ComponentBase {
   @state()
   private bridgeProviderCount = 0;
 
+  /** Labels of the built-in providers this browser has a key for (empty = none configured). */
   @state()
-  private geminiKeyPresent = false;
+  private directKeyLabels: string[] = [];
 
   @state()
   private diagnostics: ScriptDiagnosticsSummary | null = null;
@@ -145,13 +150,14 @@ export class Pix3StatusBar extends ComponentBase {
       this.syncPerformanceProbe();
     });
 
-    // Both agent lanes at a glance: the local bridge (every metered provider) and the one key the
-    // browser holds itself (Gemini). A probe result can arrive long after startup, so subscribe.
+    // Both agent lanes at a glance: the local bridge (every metered provider) and the built-in
+    // provider keys the browser holds itself. A probe result can arrive long after startup, so
+    // subscribe.
     this.disposeBridgeSubscription = this.bridge.subscribe(() => {
       this.syncBridgeState();
     });
     this.disposeAgentSettingsSubscription = this.agentSettings.subscribe(() => {
-      void this.refreshGeminiKey();
+      void this.refreshDirectKeys();
     });
     this.syncBridgeState();
 
@@ -192,15 +198,21 @@ export class Pix3StatusBar extends ComponentBase {
   private syncBridgeState(): void {
     this.bridgeAvailable = this.bridge.isAvailable();
     this.bridgeProviderCount = this.bridge.getEntries().length;
-    void this.refreshGeminiKey();
+    void this.refreshDirectKeys();
   }
 
-  private async refreshGeminiKey(): Promise<void> {
+  private async refreshDirectKeys(): Promise<void> {
     try {
-      this.geminiKeyPresent = await this.agentSettings.hasApiKey(GEMINI_PROVIDER_ID);
+      const providers = this.llmProviders.listStatic().filter(provider => !provider.hidden);
+      const labels = await Promise.all(
+        providers.map(async provider =>
+          (await this.agentSettings.hasApiKey(provider.id)) ? provider.label : null
+        )
+      );
+      this.directKeyLabels = labels.filter((label): label is string => label !== null);
     } catch {
       // Secret storage unavailable (locked / non-DOM test env) — report "no key" rather than throw.
-      this.geminiKeyPresent = false;
+      this.directKeyLabels = [];
     }
   }
 
@@ -298,8 +310,8 @@ export class Pix3StatusBar extends ComponentBase {
 
   /**
    * The two ways the agent can reach a model, side by side: the local Pix3AgentBridge (which owns
-   * every metered provider's key) and the Gemini key this browser stores itself. Both are one click
-   * from the place they are configured — a dead bridge or a missing key is otherwise only
+   * every metered provider's key) and the built-in provider keys this browser stores itself. Both
+   * are one click from the place they are configured — a dead bridge or a missing key is otherwise only
    * discoverable by sending a prompt and reading the failure.
    */
   private renderAgentLanes() {
@@ -310,10 +322,13 @@ export class Pix3StatusBar extends ComponentBase {
       : 'Pix3AgentBridge not reachable — metered providers (OpenAI, Anthropic, Claude Code) are ' +
         'unavailable.\nStart it with `npx @pix3/agent-bridge`, then open its pairing link.\n' +
         'Click to open Agent settings.';
-    const keyTitle = this.geminiKeyPresent
-      ? 'Gemini API key configured in this browser.\nClick to open Agent settings.'
-      : 'No Gemini API key stored in this browser.\nWithout it (and without the bridge) the agent ' +
-        'and the asset generator cannot run.\nClick to open Agent settings.';
+    const hasDirectKey = this.directKeyLabels.length > 0;
+    const keyTitle = hasDirectKey
+      ? `API key configured in this browser: ${this.directKeyLabels.join(', ')}.\nClick to open ` +
+        'Agent settings.'
+      : 'No built-in provider key stored in this browser (Gemini, OpenRouter).\nWithout one ' +
+        '(and without the bridge) the agent and the asset generator cannot run.\nClick to ' +
+        'open Agent settings.';
 
     return html`
       <button
@@ -328,12 +343,14 @@ export class Pix3StatusBar extends ComponentBase {
       </button>
       <button
         type="button"
-        class="status-indicator status-lane ${this.geminiKeyPresent ? 'is-on' : 'is-off'}"
+        class="status-indicator status-lane ${hasDirectKey ? 'is-on' : 'is-off'}"
         title=${keyTitle}
         @click=${this.onAgentLaneClick}
       >
         ${this.icons.getIcon('key', IconSize.SMALL)}
-        <span class="status-lane-label">Gemini</span>
+        <span class="status-lane-label"
+          >${hasDirectKey ? this.directKeyLabels.join(' + ') : 'Keys'}</span
+        >
         <span class="status-lane-dot"></span>
       </button>
     `;

@@ -1,14 +1,17 @@
 import { injectable } from '@/fw/di';
 import { GeminiLlmProvider } from './GeminiLlmProvider';
+import { OpenRouterLlmProvider } from './OpenRouterLlmProvider';
 import type { LlmProvider } from './LlmTypes';
 
 /**
  * Registry of available LLM providers for the in-editor agent.
  *
- * Only **Gemini** ships as a built-in: it sends CORS headers, so the editor calls it directly with
- * the user's own key — the zero-setup path for a basic user. Every other provider (OpenAI, Anthropic,
- * OpenCode Zen, custom OpenAI-compatible endpoints, and the Claude Code MAX lane) is served through a
- * locally-running **Pix3AgentBridge** and registered DYNAMICALLY from the bridge's discovery — see
+ * Two providers ship as built-ins, both because they send CORS headers and can therefore be called
+ * straight from the browser with the user's own key — the zero-setup path for a basic user:
+ * **Gemini** (the default) and **OpenRouter** (one key, every major lab plus a rotating set of free
+ * models). Every other provider (OpenAI, Anthropic, OpenCode Zen, custom OpenAI-compatible
+ * endpoints, and the Claude Code MAX lane) is served through a locally-running **Pix3AgentBridge**
+ * and registered DYNAMICALLY from the bridge's discovery — see
  * {@link import('./BridgeConnectionService').BridgeConnectionService}. When the bridge is down the
  * dynamic set is empty, so those providers simply don't exist and the UI shows a setup call to action.
  *
@@ -24,9 +27,10 @@ export class LlmProviderRegistry {
 
   constructor() {
     this.registerStatic(new GeminiLlmProvider());
+    this.registerStatic(new OpenRouterLlmProvider());
   }
 
-  /** Register a persistent provider (currently only Gemini). */
+  /** Register a persistent provider (Gemini and OpenRouter ship this way). */
   register(provider: LlmProvider): void {
     this.registerStatic(provider);
   }
@@ -59,6 +63,17 @@ export class LlmProviderRegistry {
 
   list(): LlmProvider[] {
     return [...this.staticOrder, ...this.bridgeOrder]
+      .map(id => this.providers.get(id))
+      .filter((provider): provider is LlmProvider => Boolean(provider));
+  }
+
+  /**
+   * The built-in providers only — the ones this browser calls directly with a key it stores itself
+   * (Gemini, OpenRouter), excluding whatever the bridge currently advertises. UI that answers "does
+   * this browser hold a usable key at all?" iterates these.
+   */
+  listStatic(): LlmProvider[] {
+    return this.staticOrder
       .map(id => this.providers.get(id))
       .filter((provider): provider is LlmProvider => Boolean(provider));
   }

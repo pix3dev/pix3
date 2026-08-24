@@ -12,11 +12,13 @@ const makeProvider = (id: string, label = id): LlmProvider => ({
 });
 
 describe('LlmProviderRegistry', () => {
-  it('ships only gemini as a built-in, with gemini as the default', () => {
+  it('ships the browser-callable providers as built-ins, with gemini as the default', () => {
     const registry = new LlmProviderRegistry();
-    expect(registry.list().map(p => p.id)).toEqual(['gemini']);
+    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openrouter']);
+    expect(registry.listStatic().map(p => p.id)).toEqual(['gemini', 'openrouter']);
     expect(registry.getDefault()?.id).toBe('gemini');
     expect(registry.get('gemini')?.label).toContain('Gemini');
+    expect(registry.get('openrouter')?.label).toBe('OpenRouter');
     expect(registry.get('nope')).toBeUndefined();
   });
 
@@ -29,6 +31,7 @@ describe('LlmProviderRegistry', () => {
     ]);
     expect(registry.list().map(p => p.id)).toEqual([
       'gemini',
+      'openrouter',
       'openai',
       'anthropic',
       'claude-bridge',
@@ -41,15 +44,15 @@ describe('LlmProviderRegistry', () => {
   it('replaces the previous bridge set on each call (bridge going down clears them)', () => {
     const registry = new LlmProviderRegistry();
     registry.setBridgeProviders([makeProvider('openai'), makeProvider('cerebras')]);
-    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openai', 'cerebras']);
+    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openrouter', 'openai', 'cerebras']);
 
     registry.setBridgeProviders([makeProvider('openai')]);
-    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openai']);
+    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openrouter', 'openai']);
     expect(registry.get('cerebras')).toBeUndefined();
 
-    // Bridge unreachable → empty set → only Gemini remains.
+    // Bridge unreachable → empty set → only the built-ins remain.
     registry.setBridgeProviders([]);
-    expect(registry.list().map(p => p.id)).toEqual(['gemini']);
+    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openrouter']);
   });
 
   it('prefers a bridge lane over the static default, and falls back to it when the bridge is down', () => {
@@ -73,12 +76,17 @@ describe('LlmProviderRegistry', () => {
     expect(registry.getPreferred()?.id).toBe('openai');
   });
 
-  it('never drops the static gemini provider when swapping bridge sets', () => {
+  it('never drops a static provider when swapping bridge sets', () => {
     const registry = new LlmProviderRegistry();
-    registry.setBridgeProviders([makeProvider('gemini', 'shadow'), makeProvider('openai')]);
-    // A bridge entry colliding with a static id must not evict gemini from the static set.
+    registry.setBridgeProviders([
+      makeProvider('gemini', 'shadow'),
+      makeProvider('openrouter', 'shadow'),
+      makeProvider('openai'),
+    ]);
+    // A bridge entry colliding with a static id must not evict the built-in from the static set.
     registry.setBridgeProviders([]);
     expect(registry.get('gemini')?.label).toContain('Gemini');
-    expect(registry.list().map(p => p.id)).toEqual(['gemini']);
+    expect(registry.get('openrouter')?.label).toBe('OpenRouter');
+    expect(registry.list().map(p => p.id)).toEqual(['gemini', 'openrouter']);
   });
 });

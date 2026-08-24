@@ -337,6 +337,9 @@ const isTextualFile = (file: File): boolean => {
 };
 
 /** Base64 (no `data:` prefix) of a blob, for building image content blocks. */
+/** Model rows rendered per provider before the picker asks the user to search instead. */
+const MAX_UNFILTERED_MODEL_ROWS = 40;
+
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1435,6 +1438,11 @@ export class AgentChatPanel extends ComponentBase {
   private renderModelPickerGroup(provider: LlmProvider, models: readonly LlmModel[]) {
     const hasKey = this.providerKeys[provider.id] ?? false;
     const editing = this.keyEditorProviderId === provider.id;
+    // A gateway catalog can run to hundreds of models (OpenRouter lists ~350 tool-calling ones), and
+    // rendering all of them turns opening the picker into a visible stall. Unsearched, show a slice
+    // and say how much is hidden; a search query lifts the cap because it is already narrowing.
+    const capped = this.modelPickerQuery.trim() === '' && models.length > MAX_UNFILTERED_MODEL_ROWS;
+    const shown = capped ? models.slice(0, MAX_UNFILTERED_MODEL_ROWS) : models;
     return html`
       <div class="agent-mp-group">
         <div class="agent-mp-group-head">
@@ -1468,7 +1476,12 @@ export class AgentChatPanel extends ComponentBase {
           : null}
         ${models.length === 0
           ? html`<div class="agent-mp-none">No models listed.</div>`
-          : models.map(model => this.renderModelPickerRow(provider, model))}
+          : shown.map(model => this.renderModelPickerRow(provider, model))}
+        ${capped
+          ? html`<div class="agent-mp-none">
+              ${models.length - shown.length} more — type to search.
+            </div>`
+          : null}
         ${provider.requiresBaseUrl
           ? html`<input
               class="agent-mp-custom"
