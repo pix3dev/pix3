@@ -45,6 +45,9 @@ const EXAMPLE_PROMPTS: readonly string[] = [
   'a playable ad for a match-3 game with a CTA',
   'top-down survival: dodge falling rocks, grab coins',
   'breakout with power-ups',
+  // Deliberately a grid game: it is the shape that lands on the BLANK recipe, and a first-time user
+  // should be able to tell from this list that the box is not limited to the shipped genres.
+  'snake on a grid that grows every time it eats',
 ];
 
 /**

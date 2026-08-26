@@ -1,6 +1,6 @@
 id: recipe-arena-2d
 title: Arena 2D
-description: An avatar you steer inside a bounded field while spawners drip pickups and hazards; touch turns into score or damage, with lives, a timer and a win/lose flow. Dodgers, collectors, top-down survival, snake, and (by swapping the movement script) runners.
+description: An avatar you steer inside a bounded field while spawners drip pickups and hazards; touch turns into score or damage, with lives, a timer and a win/lose flow. Dodgers, collectors, top-down survival, and (by swapping the movement script) runners. Its steering is continuous, so a grid or turn-based game (snake, sokoban) starts from Blank 2D instead.
 projectType: 2d
 targetPlatform: universal
 viewport: { width: 1080, height: 1920 }

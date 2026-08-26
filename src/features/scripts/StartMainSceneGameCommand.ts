@@ -12,16 +12,23 @@ import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 import { ensureSceneActive, openGameSurface } from '@/features/scripts/play-workspace';
 
 /**
- * Starts the game from the project's main scene (Project Settings →
+ * Starts the game from the project's entry scene (Project Settings →
  * Default Export Scene Path), opening that scene first when needed. Falls
- * back to the active scene when no main scene is configured.
+ * back to the active scene when no entry scene is configured.
+ *
+ * This is the **full-flow** run: on a recipe project the entry scene is the menu, so it also
+ * switches the editor's active scene there — `appState.scenes.activeSceneId` is what play mode binds
+ * to (`GamePlaySessionService.startScene`), so running one scene while the editor shows another is
+ * not expressible. That is why the prototyping surfaces (the Studio toolbar button, the Flow stage)
+ * dispatch `game.start` instead: a menu becoming the active scene mid-session also silently
+ * redirects every agent edit into it.
  */
 export class StartMainSceneGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'game.start-main',
-    title: 'Start Game',
-    description: 'Start the game from the project main scene',
-    keywords: ['play', 'game', 'start', 'main', 'run'],
+    title: 'Play Game (Entry Scene)',
+    description: 'Start the game from the project entry scene',
+    keywords: ['play', 'game', 'start', 'main', 'run', 'entry'],
     menuPath: 'project',
     addToMenu: true,
     menuOrder: 101,

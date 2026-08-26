@@ -7,6 +7,7 @@ import * as runtime from '@pix3/runtime';
 import { normalizeNodeTypeName } from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 import { parseRoutine } from '@/services/agent/game-routines';
+import { RECIPE_CATALOG, RECIPE_TEMPLATE_ALIASES } from '@/services/flow/PrototypeBootstrapService';
 
 /**
  * Contract drift guard for the Flow "recipe" templates (`.plans/done/flow-recipes-contract.md`).
@@ -26,6 +27,7 @@ const CATALOG_TEMPLATES = [
   'playable-2d',
   'playable-3d',
   'recipe-arena-2d',
+  'recipe-blank-2d',
   'recipe-bouncer-2d',
   'recipe-grid-3d',
   'recipe-tapper-2d',
@@ -198,6 +200,66 @@ async function loadSchemaProperties(templateId: string, componentType: string): 
 }
 
 describe('flow recipe contract', () => {
+  /**
+   * Both directions of catalog↔template, because each gap fails silently in a different way.
+   *
+   * A catalog id with no template folder reaches the user as a project quietly started from the
+   * fallback recipe — the planner's correct answer, discarded. A shipped template missing from the
+   * catalog is simply unreachable from a prompt: that is how `empty-2d` sat in the repo for months
+   * while every unmatched idea was answered with a full game the agent had to demolish first.
+   */
+  it('the recipe catalog and the shipped templates agree, both ways', () => {
+    const shipped = new Set(
+      readdirSync(TEMPLATES_ROOT).filter(entry =>
+        statSync(join(TEMPLATES_ROOT, entry)).isDirectory()
+      )
+    );
+
+    for (const recipe of RECIPE_CATALOG) {
+      const templateId = RECIPE_TEMPLATE_ALIASES[recipe.id] ?? recipe.id;
+      expect(
+        shipped.has(templateId),
+        `catalog id "${recipe.id}" resolves to template "${templateId}", which is not shipped`
+      ).toBe(true);
+    }
+
+    const catalogTemplates = new Set(
+      RECIPE_CATALOG.map(recipe => RECIPE_TEMPLATE_ALIASES[recipe.id] ?? recipe.id)
+    );
+    for (const templateId of shipped) {
+      if (!templateId.startsWith('recipe-')) continue;
+      expect(
+        catalogTemplates.has(templateId),
+        `template "${templateId}" ships but no catalog entry resolves to it, so no prompt can reach it`
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * A recipe that boots a menu keeps the menu OUT of the gameplay scene.
+   *
+   * The whole prototyping loop runs on the gameplay scene, so a `MenuFlow` that drifted into
+   * `main.pix3scene` would put a start screen in front of every iteration. Templates without an
+   * `entryScene` are exempt by construction — the playables' inline tap gate is an audio-unlock
+   * requirement of the ad container, not chrome.
+   */
+  it('a template that boots a menu keeps it out of main.pix3scene', () => {
+    for (const templateId of CATALOG_TEMPLATES) {
+      const templateDir = join(TEMPLATES_ROOT, templateId);
+      const metaPath = join(templateDir, 'template.yaml');
+      const meta = parseYaml(readFileSync(metaPath, 'utf8')) as { entryScene?: unknown } | null;
+      if (typeof meta?.entryScene !== 'string' || meta.entryScene.length === 0) {
+        continue;
+      }
+      const mainPath = join(templateDir, 'files', 'scenes', 'main.pix3scene');
+      expect(existsSync(mainPath), `${templateId}: ${mainPath} is missing`).toBe(true);
+      expect(
+        readFileSync(mainPath, 'utf8'),
+        `${templateId}: main.pix3scene carries a MenuFlow — the menu belongs in its own scene`
+      ).not.toContain('user:MenuFlow');
+    }
+  });
+
   it('every recipe-* template is in the catalog list', () => {
     const shipped = readdirSync(TEMPLATES_ROOT)
       .filter(entry => statSync(join(TEMPLATES_ROOT, entry)).isDirectory())

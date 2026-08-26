@@ -1,6 +1,6 @@
 # Pix3 Scene File (YAML)
 # Tapper 2D — the MENU scene. This is the project's ENTRY / export scene
-# (Project Settings → Default Export Scene Path): a full build and "Start Game"
+# (Project Settings → Default Export Scene Path): a full build and "Play Game (Entry Scene)"
 # boot here. PLAY transitions to the game scene (main.pix3scene) via a fade.
 # Wired by scripts/MenuFlow.ts. Iterate on the GAME in main.pix3scene.
 version: 1.0.0

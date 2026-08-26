@@ -1111,8 +1111,15 @@ export class Pix3EditorShell extends ComponentBase {
   private renderToolbar() {
     const isPlaying = appState.ui.isPlaying;
     const runOptions: DropdownItem[] = [
-      { id: 'game.start-main', label: 'Start Game', icon: 'play', disabled: isPlaying },
-      { id: 'game.start', label: 'Start Current Scene', icon: 'film', disabled: isPlaying },
+      // Scene first: it is what the toolbar's own Play button does, and the entry scene is a menu on
+      // every recipe project — a full-flow run is the deliberate choice, not the default.
+      { id: 'game.start', label: 'Play Scene', icon: 'play', disabled: isPlaying },
+      {
+        id: 'game.start-main',
+        label: 'Play Game (Entry Scene)',
+        icon: 'film',
+        disabled: isPlaying,
+      },
       { id: 'run-options-divider', label: '', divider: true },
       { id: 'project.start-remote-preview', label: 'Remote Preview…', icon: 'cast' },
     ];

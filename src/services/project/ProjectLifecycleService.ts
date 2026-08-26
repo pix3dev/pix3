@@ -355,7 +355,7 @@ export class ProjectLifecycleService {
     // A template whose entry (build/full-run) scene differs from the editor
     // startup scene (e.g. Minigame 2D boots a separate menu scene) declares it
     // via `entryScene` in template.yaml; it becomes the manifest default export
-    // scene so builds and "Start Game" boot the whole flow.
+    // scene so builds and "Play Game (Entry Scene)" boot the whole flow.
     const entryScenePath = params.templateId
       ? this.projectTemplateService.getTemplate(params.templateId)?.entryScenePath
       : undefined;
