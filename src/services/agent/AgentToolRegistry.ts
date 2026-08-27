@@ -20,6 +20,7 @@ import {
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { FlowStageService } from '@/services/flow/FlowStageService';
 import { FlowReferencesService, REFERENCES_DIR } from '@/services/flow/FlowReferencesService';
+import { DECISIONS_PATH, appendDecision } from '@/services/flow/decision-log';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 import {
@@ -151,6 +152,7 @@ export const IDEA_STAGE_TOOLS: ReadonlySet<string> = new Set([
   'read_skill',
   'ask_advisor',
   'ask_user',
+  'record_decision',
   'fs_list',
   'fs_read',
   'fs_write',
@@ -552,6 +554,38 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.askUser(args),
+      },
+      {
+        name: 'record_decision',
+        description:
+          'Record a settled fork in `design/decisions.md` — one line, append-only. Call it the moment a STRUCTURAL question is answered by something other than an ask_user chip: the user settled it in prose, or you and the user converged on it while talking. Answers to your own ask_user questions are recorded automatically, so do NOT re-record those — call this on one only to ADD the reason you learned. Same bar as ask_user: a fork where guessing wrong means rebuilding ("win by score or timer?", "one level or a list?"). Never colors, sizes, counts or wording — the log is read at the start of every compacted conversation and handed to the planner, so every line has to earn its tokens. Recording the same question twice REPLACES the earlier line instead of stacking a contradiction.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: "The fork, in the user's language. One sentence.",
+            },
+            choice: { type: 'string', description: 'What was settled on. A few words.' },
+            reason: { type: 'string', description: 'Why, in one line. Optional but valuable.' },
+            alternatives: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'The options that lost, if they were named.',
+            },
+          },
+          required: ['question', 'choice'],
+          additionalProperties: false,
+        },
+        handler: args =>
+          this.recordDecision({
+            question: asString(args.question),
+            choice: asString(args.choice),
+            reason: typeof args.reason === 'string' ? args.reason : '',
+            alternatives: Array.isArray(args.alternatives)
+              ? args.alternatives.filter((item): item is string => typeof item === 'string')
+              : [],
+          }),
       },
       {
         name: 'scene_tree',
@@ -1945,6 +1979,58 @@ export class AgentToolRegistry {
       options,
       allowFreeform,
       note: 'The question was shown to the user and your turn ends here. Their answer arrives as the next user message — do not call more tools.',
+    };
+  }
+
+  /**
+   * Append one settled fork to `design/decisions.md`.
+   *
+   * Deterministic on purpose — a tool rather than "write the line yourself". Models append to a
+   * markdown log with `str_replace` by rewriting its tail, which loses earlier entries, and the
+   * one-line format stops being stable the moment two turns each invent their own. Both failures
+   * are silent: the file still looks like a decision log, and the planner reads the damage.
+   *
+   * {@link AgentChatService} calls this same handler for every `ask_user` answer, so code and model
+   * write through one path and cannot disagree about the format.
+   */
+  async recordDecision(entry: {
+    question: string;
+    choice: string;
+    reason?: string;
+    alternatives?: readonly string[];
+  }): Promise<
+    | { ok: true; path: string; line: string; replaced: boolean; note?: string }
+    | { ok: false; error: string }
+  > {
+    const question = entry.question.trim();
+    const choice = entry.choice.trim();
+    if (!question || !choice) {
+      return { ok: false, error: 'record_decision needs both a `question` and a `choice`.' };
+    }
+    let source = '';
+    try {
+      source = await this.storage.readTextFile(DECISIONS_PATH);
+    } catch {
+      // No log yet (a project that predates the idea stage) — appendDecision seeds the heading.
+      await this.ensureParentDirectories(DECISIONS_PATH);
+    }
+    const { text, line, replaced } = appendDecision(source, {
+      question,
+      choice,
+      reason: entry.reason?.trim() ?? '',
+      rejected: entry.alternatives ?? [],
+    });
+    await this.storage.writeTextFile(DECISIONS_PATH, text);
+    return {
+      ok: true,
+      path: DECISIONS_PATH,
+      line,
+      replaced,
+      ...(replaced
+        ? {
+            note: 'This fork was already recorded, so the earlier line was replaced rather than duplicated.',
+          }
+        : {}),
     };
   }
 

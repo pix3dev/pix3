@@ -1,6 +1,7 @@
 import { inject, injectable } from '@/fw/di';
 import { IDEA_TEMPLATE_ID } from '@/services/flow/FlowStageService';
 import { FLOW_REFERENCES_INDEX_PATH } from '@/services/flow/FlowReferencesService';
+import { extractDecisionEntries } from '@/services/flow/decision-log';
 import { appState } from '@/state';
 import {
   createDefaultProjectManifest,
@@ -1515,37 +1516,21 @@ export const extractIdeaPrompt = (markdown: string): string => {
 };
 
 /**
- * `design/decisions.md` → one line per settled fork.
+ * `design/decisions.md` → one line per settled fork, for the planner prompt.
  *
- * Both shapes the file can hold are read: the `## question` + `- **Chosen:**` block the scaffold
- * documents, and the single-line `- **question** → choice` form `record_decision` appends (V5).
- * Fenced blocks are stripped first — the scaffold's own example is a fenced `## <the question>`,
- * and reading it back would plan the game around a template.
+ * The parsing lives in `decision-log.ts`, next to the writers — the format has four callers and
+ * would drift the moment any one of them owned it. What this adds is the planner's VIEW of an
+ * entry: question, choice, and the reason when there is one; never the date or the rejected
+ * options, which cost tokens in a prompt that is charged for every one of them.
  */
-export const extractDecisionLines = (markdown: string, limit = 30): string[] => {
-  const withoutFences = markdown.replace(/```[\s\S]*?(?:```|$)/g, '');
-  const lines = withoutFences.split(/\r?\n/);
-  const decisions: string[] = [];
-  let question: string | null = null;
-  for (const line of lines) {
-    const heading = /^##[ \t]+(.+)$/.exec(line);
-    if (heading) {
-      question = heading[1].trim();
-      continue;
-    }
-    const chosen = /^[ \t]*[-*][ \t]*\*\*Chosen:\*\*[ \t]*(.+)$/i.exec(line);
-    if (chosen && question) {
-      decisions.push(`${question} → ${chosen[1].trim()}`);
-      question = null;
-      continue;
-    }
-    const oneLiner = /^[ \t]*[-*][ \t]*\*\*(.+?)\*\*[ \t]*(?:→|->)[ \t]*(.+)$/.exec(line);
-    if (oneLiner) {
-      decisions.push(`${oneLiner[1].trim()} → ${oneLiner[2].trim()}`);
-    }
-  }
-  return decisions.slice(0, limit);
-};
+export const extractDecisionLines = (markdown: string, limit = 30): string[] =>
+  extractDecisionEntries(markdown)
+    .slice(0, limit)
+    .map(entry =>
+      entry.reason
+        ? `${entry.question} → ${entry.choice}. ${entry.reason}.`
+        : `${entry.question} → ${entry.choice}`
+    );
 
 /**
  * The palette out of `design/style.md`'s `- **Palette:** #… , #…` line.
@@ -2104,18 +2089,20 @@ export const renderIdeaFirstTurnMessage = (
   return lines.join('\n');
 };
 
-/** `design/decisions.md` — the scaffold the agent appends to when a fork is resolved. */
+/**
+ * `design/decisions.md` — the log of settled forks, one line each.
+ *
+ * The scaffold no longer shows a shape to copy: entries are written by the `record_decision` tool
+ * and by the code that files every `ask_user` answer, so a hand-written example would only invite a
+ * second format into a file four callers parse. The reader still accepts the older `## question` +
+ * `- **Chosen:**` block, for projects seeded before the tool existed.
+ */
 export const renderDecisionsMarkdown = (): string =>
   [
     '# Decisions',
     '',
-    'Every fork the user settled, so nothing is asked twice. Append one entry per decision:',
-    '',
-    '```',
-    '## <the question>',
-    '- **Chosen:** <the answer>',
-    '- **Why:** <one line>',
-    '```',
+    'Every fork the user settled, so nothing is asked twice. One line per decision, appended by',
+    '`record_decision` — and automatically for every answer to an `ask_user` question.',
     '',
   ].join('\n');
 

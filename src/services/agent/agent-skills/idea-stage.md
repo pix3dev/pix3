@@ -52,8 +52,9 @@ file does not.
 - **Choose the small stuff yourself and say so in one line.** Which shade of blue, what the
   currency is called, how many hearts — pick, write it into the document, mention it in a
   half-sentence ("went with three hearts — say the word if you want more").
-- Write the answer into `design/decisions.md` and into the relevant `gdd.md` section the
-  moment you have it.
+- The answer to an `ask_user` question is filed in `design/decisions.md` **for you**, by the
+  editor, before your next turn starts. Do not re-record it. What is still yours to do is to
+  write the consequence into the relevant `gdd.md` section the moment you have it.
 
 ## 4. Only STRUCTURAL decisions go in the decisions log
 
@@ -62,7 +63,12 @@ costs context forever. The bar is the same as for `ask_user`: **a choice where b
 means rebuilding something.** Genre, session shape, win/lose condition, orientation, whether
 progression exists. Not colours, not names, not numbers you can tune later.
 
-Append one entry, never rewrite the file.
+Never write the file by hand — `record_decision { question, choice, reason?, alternatives? }`
+appends the one canonical line. Use it for a fork the user settled **in prose** ("actually,
+let's make it one long level"), which no `ask_user` answer covered. Recording a question that
+is already in the log replaces that line instead of adding a second, so following an
+auto-recorded answer with the reason you learned is safe — and is the only reason to record
+a fork the user answered through a chip.
 
 ## 5. Every artefact lives in `references/` — the folder is not yours to pick
 

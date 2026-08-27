@@ -127,6 +127,11 @@ beforeEach(() => {
   c.addService(c.getOrCreateToken(IconService), IconService, 'singleton');
   c.addService(c.getOrCreateToken(LightboxService), LightboxService, 'singleton');
   lightbox().close();
+  // The container hands out the SAME stub for every test in this file, so a file one case wrote
+  // (a decision log, say) is still there for the next one — which then asserts about a project it
+  // never set up.
+  storage().files.clear();
+  storage().blobs.clear();
   storage().files.set(DOC_PATH, '# Ant Strategy\n\nColony versus colony.');
 
   createdUrls = [];
@@ -453,6 +458,87 @@ describe('pix3-idea-doc', () => {
       await settle(element);
       expect(agentChat().contextRequests).toHaveLength(2);
       expect(agentChat().contextRequests[1].attachment?.content).toContain('Termites, actually.');
+    });
+  });
+
+  describe('decisions', () => {
+    const DECISIONS_PATH = 'design/decisions.md';
+
+    it('shows nothing at all until a fork has been settled', async () => {
+      storage().files.set(DECISIONS_PATH, '# Decisions\n\nOne line per decision.\n');
+      const element = await mount();
+
+      expect(element.querySelector('.idea-doc__decisions')).toBeNull();
+    });
+
+    it('lists the settled forks with their reason and date', async () => {
+      storage().files.set(
+        DECISIONS_PATH,
+        [
+          '# Decisions',
+          '',
+          '- **Coop?** → Solo first. Networking can wait. _(rejected: online)_ — 2026-08-28',
+          '- **Portrait or landscape?** → Landscape. — 2026-08-28',
+        ].join('\n')
+      );
+      const element = await mount();
+
+      const rows = element.querySelectorAll('.idea-doc__decision');
+      expect(rows).toHaveLength(2);
+      expect(rows[0].querySelector('.idea-doc__decision-q')?.textContent).toBe('Coop?');
+      expect(rows[0].querySelector('.idea-doc__decision-a')?.textContent).toBe('Solo first');
+      expect(rows[0].querySelector('.idea-doc__decision-why')?.textContent).toBe(
+        'Networking can wait'
+      );
+      expect(rows[0].querySelector('.idea-doc__decision-rejected')?.textContent).toContain(
+        'online'
+      );
+      // Nothing to say about a decision nobody gave a reason for — no empty row of chrome.
+      expect(rows[1].querySelector('.idea-doc__decision-why')).toBeNull();
+    });
+
+    /**
+     * The section sits OUTSIDE `.idea-doc__body` on purpose: the selection resolver maps
+     * `data-md-lines` back into `gdd.md`, so a decision inside that element would stage a chip
+     * pointing at another file's line numbers.
+     */
+    it('keeps the decisions out of the selectable document body', async () => {
+      storage().files.set(DECISIONS_PATH, '# Decisions\n\n- **Coop?** → Solo first. — 2026-08-28');
+      const element = await mount();
+
+      expect(element.querySelector('.idea-doc__body .idea-doc__decisions')).toBeNull();
+      expect(element.querySelector('.idea-doc__decisions')).not.toBeNull();
+    });
+
+    it('picks up a decision the agent recorded mid-turn', async () => {
+      const element = await mount();
+      expect(element.querySelector('.idea-doc__decisions')).toBeNull();
+
+      storage().files.set(DECISIONS_PATH, '# Decisions\n\n- **Coop?** → Solo first. — 2026-08-28');
+      agentChat().emit({ status: 'running', activeTool: 'record_decision' });
+      await settle(element);
+
+      expect(element.querySelectorAll('.idea-doc__decision')).toHaveLength(1);
+    });
+
+    it('collapses and expands the list', async () => {
+      storage().files.set(DECISIONS_PATH, '# Decisions\n\n- **Coop?** → Solo first. — 2026-08-28');
+      const element = await mount();
+
+      const header = element.querySelector<HTMLButtonElement>('.idea-doc__decisions-header');
+      expect(header?.getAttribute('aria-expanded')).toBe('true');
+
+      header?.click();
+      await settle(element);
+      expect(header?.getAttribute('aria-expanded')).toBe('false');
+      expect(element.querySelector('.idea-doc__decisions-list')).toBeNull();
+    });
+
+    it('still shows the document when there is no decision log to read', async () => {
+      const element = await mount();
+
+      expect(element.querySelector('.idea-doc__body')).not.toBeNull();
+      expect(element.querySelector('.idea-doc__decisions')).toBeNull();
     });
   });
 });

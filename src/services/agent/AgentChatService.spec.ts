@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState } from '@/state';
 import {
   AgentChatService,
@@ -51,6 +51,8 @@ interface Fakes {
   customSoulPrompt?: string;
   /** Fake for `BridgeConnectionService.resetSessions()`. Defaults to a no-op success. */
   resetSessions?: ReturnType<typeof vi.fn>;
+  /** Fake for `AgentToolRegistry.recordDecision()` — the auto-filed `ask_user` answer. */
+  recordDecision?: ReturnType<typeof vi.fn>;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -96,7 +98,11 @@ const buildService = (fakes: Fakes): AgentChatService => {
               },
             },
     },
-    toolRegistry: { specs: () => [], execute: fakes.execute },
+    toolRegistry: {
+      specs: () => [],
+      execute: fakes.execute,
+      recordDecision: fakes.recordDecision ?? vi.fn(async () => ({ ok: true })),
+    },
     advisorService: {
       resolveAdvisor: async () =>
         fakes.advisorAvailable ? { modelId: 'adv-model', apiKey: 'k' } : null,
@@ -774,6 +780,100 @@ describe('AgentChatService', () => {
 
     await service.send('A');
     expect(service.getState().pendingQuestion).toBeNull();
+  });
+
+  describe('answers to ask_user are filed in the decision log by code', () => {
+    /** Run one ask → answer exchange and report what the auto-record was handed. */
+    const answerAQuestion = async (
+      answer: string,
+      recordDecision: ReturnType<typeof vi.fn>
+    ): Promise<AgentChatService> => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolCallResult('ask_user', 'c1', {
+            question: 'Coop: local or online?',
+            options: ['local', 'online'],
+          })
+        )
+        .mockResolvedValueOnce(textResult('noted'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ ok: true, asked: true })),
+        put: vi.fn(async () => undefined),
+        recordDecision,
+      });
+      await service.send('make me a coop game');
+      await service.send(answer);
+      return service;
+    };
+
+    beforeEach(() => {
+      appState.ui.workspaceMode = 'flow';
+    });
+
+    afterEach(() => {
+      appState.ui.workspaceMode = 'studio';
+    });
+
+    it('records the question and the answer without the model spending a tool call', async () => {
+      const recordDecision = vi.fn(async () => ({ ok: true }));
+      await answerAQuestion('local', recordDecision);
+
+      expect(recordDecision).toHaveBeenCalledTimes(1);
+      expect(recordDecision).toHaveBeenCalledWith({
+        question: 'Coop: local or online?',
+        choice: 'local',
+      });
+    });
+
+    /**
+     * Order is the point: the request carrying the answer must already run against a log holding
+     * it, because after a compaction the file is the only place the fork survives.
+     */
+    it('files the decision BEFORE the turn that carries the answer starts', async () => {
+      const order: string[] = [];
+      const recordDecision = vi.fn(async () => {
+        order.push('record');
+        return { ok: true };
+      });
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(toolCallResult('ask_user', 'c1', { question: 'A or B?' }))
+        .mockImplementationOnce(async () => {
+          order.push('chat');
+          return textResult('noted');
+        });
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ ok: true, asked: true })),
+        put: vi.fn(async () => undefined),
+        recordDecision,
+      });
+      await service.send('go');
+      await service.send('A');
+
+      expect(order).toEqual(['record', 'chat']);
+    });
+
+    it('does not touch the log outside Flow — no design/ folder there to own', async () => {
+      appState.ui.workspaceMode = 'studio';
+      const recordDecision = vi.fn(async () => ({ ok: true }));
+      await answerAQuestion('local', recordDecision);
+
+      expect(recordDecision).not.toHaveBeenCalled();
+    });
+
+    it('costs the user nothing when the log cannot be written', async () => {
+      const recordDecision = vi.fn(async () => {
+        throw new Error('storage is gone');
+      });
+      const service = await answerAQuestion('local', recordDecision);
+
+      // The turn still ran and the fork is still resolved.
+      expect(service.getState().status).toBe('idle');
+      expect(service.getState().pendingQuestion).toBeNull();
+    });
   });
 
   it('escalates to ask_advisor when the same call repeats twice with the identical result', async () => {

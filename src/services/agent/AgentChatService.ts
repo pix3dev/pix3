@@ -603,6 +603,7 @@ export class AgentChatService {
 
     // The user is answering (or ignoring) the agent's question — either way the fork is resolved.
     if (this.state.pendingQuestion) {
+      await this.recordAnsweredFork(this.state.pendingQuestion, trimmed);
       this.setState({ pendingQuestion: null });
     }
 
@@ -621,6 +622,32 @@ export class AgentChatService {
       content: buildUserContent(handoff ? `${trimmed}\n\n${handoff}` : trimmed, images, texts),
     });
     await this.runToSettled();
+  }
+
+  /**
+   * Write the answer to an `ask_user` question into `design/decisions.md` — in code, not by asking
+   * the model to remember (design §3.8).
+   *
+   * Two properties come from doing it here. It costs the model nothing: no tool call, no tokens, no
+   * chance of forgetting on the one turn that mattered. And it lands BEFORE the turn starts, so the
+   * very request carrying the answer already works against a log that contains it — which is what
+   * makes the log trustworthy across a compaction, where the conversation that held the question is
+   * gone and the file is all that is left.
+   *
+   * Flow only: outside it there is no `design/` folder to own, and seeding one in an arbitrary
+   * project would be a surprise. Never fatal — a decision that cannot be filed must not cost the
+   * user their turn, so the failure is swallowed into the debug log and the send continues.
+   */
+  private async recordAnsweredFork(question: AgentPendingQuestion, answer: string): Promise<void> {
+    const choice = answer.trim();
+    if (appState.ui.workspaceMode !== 'flow' || !choice) {
+      return;
+    }
+    try {
+      await this.toolRegistry.recordDecision({ question: question.question, choice });
+    } catch (error) {
+      this.debugLog('record-decision-failed', error);
+    }
   }
 
   /**

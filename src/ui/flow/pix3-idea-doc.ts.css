@@ -343,3 +343,99 @@ pix3-idea-doc .idea-doc__body .md-img[role='button']:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ── Decisions ──────────────────────────────────────────────────────────────
+   The settled forks, under the document and deliberately outside `.idea-doc__body`: the selection
+   resolver anchors on that element and maps `data-md-lines` back into `gdd.md`, so a decision
+   rendered inside it would stage a chip pointing at the wrong file's lines. Width is matched to the
+   document column so the two read as one page. */
+pix3-idea-doc .idea-doc__decisions {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 32px 48px;
+}
+
+pix3-idea-doc .idea-doc__decisions-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 0;
+  border: none;
+  border-top: 1px solid var(--line-1);
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+pix3-idea-doc .idea-doc__decisions-header:hover {
+  color: var(--fg-1);
+}
+
+pix3-idea-doc .idea-doc__decisions-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+pix3-idea-doc .idea-doc__decisions-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+pix3-idea-doc .idea-doc__decisions-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-idea-doc .idea-doc__decision {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+pix3-idea-doc .idea-doc__decision:last-child {
+  border-bottom: none;
+}
+
+pix3-idea-doc .idea-doc__decision-q {
+  color: var(--fg-2);
+}
+
+/* The answer is the part a returning user scans for, so it carries the weight and the accent. */
+pix3-idea-doc .idea-doc__decision-a {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+pix3-idea-doc .idea-doc__decision-a::before {
+  content: '→ ';
+  color: var(--accent);
+  font-weight: 400;
+}
+
+pix3-idea-doc .idea-doc__decision-why {
+  color: var(--fg-2);
+}
+
+pix3-idea-doc .idea-doc__decision-rejected,
+pix3-idea-doc .idea-doc__decision-date {
+  color: var(--fg-3);
+  font-size: 12px;
+}

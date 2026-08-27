@@ -9,6 +9,11 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { LightboxService, type LightboxItem } from '@/services/editor/LightboxService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import {
+  DECISIONS_PATH,
+  extractDecisionEntries,
+  type DecisionEntry,
+} from '@/services/flow/decision-log';
 import { renderMarkdownLite } from '@/ui/agent-chat/markdown-lite';
 import { ensureLightboxHost } from '@/ui/shared/pix3-lightbox';
 import './pix3-idea-doc.ts.css';
@@ -101,6 +106,18 @@ export class Pix3IdeaDoc extends ComponentBase {
   @state()
   private agentRunning = false;
 
+  /**
+   * Settled forks from `design/decisions.md`, parsed with the same reader the planner uses.
+   *
+   * Shown here rather than duplicated into the document: one truth per fact (design §3.8), and the
+   * user gets to see exactly what the transition will carry into the prototype.
+   */
+  @state()
+  private decisions: DecisionEntry[] = [];
+
+  @state()
+  private decisionsOpen = true;
+
   /** Line range of the fragment already staged as a chip — re-selecting the same one is a no-op. */
   private stagedRange: string | null = null;
 
@@ -151,8 +168,23 @@ export class Pix3IdeaDoc extends ComponentBase {
     this.makeImagesExpandable();
   }
 
+  /**
+   * Re-read the decision log. Separate from {@link reload} because it fails independently: a
+   * project with no `design/decisions.md` still has a document to show, and a document that failed
+   * to read must not blank a decision list that is perfectly readable.
+   */
+  private async reloadDecisions(): Promise<void> {
+    try {
+      const text = await this.storage.readTextFile(DECISIONS_PATH);
+      this.decisions = extractDecisionEntries(text);
+    } catch {
+      this.decisions = [];
+    }
+  }
+
   /** Re-read the document from disk. Public so the shell can refresh it after a stage change. */
   async reload(): Promise<void> {
+    void this.reloadDecisions();
     const token = ++this.reloadToken;
     let text: string;
     try {
@@ -593,6 +625,68 @@ export class Pix3IdeaDoc extends ComponentBase {
       >
         ${renderMarkdownLite(this.source, { mode: 'doc', resolveImage: this.resolveImage })}
       </article>
+      ${this.renderDecisions()}
+    `;
+  }
+
+  /**
+   * The settled forks, under the document.
+   *
+   * Outside `.idea-doc__body` on purpose: the selection resolver anchors on that element and maps
+   * `data-md-lines` back into `gdd.md`'s source. A decision rendered inside it would resolve to
+   * line numbers of the wrong file, and the chip would send the agent a fragment that does not
+   * exist. Nothing here is selectable-into-context, and that is correct — decisions are settled.
+   *
+   * Nothing is rendered until there is a decision: an empty "Decisions" box on every new project
+   * would be chrome that teaches the user to ignore the section.
+   */
+  private renderDecisions() {
+    if (this.decisions.length === 0) {
+      return null;
+    }
+    return html`
+      <section class="idea-doc__decisions">
+        <button
+          type="button"
+          class="idea-doc__decisions-header"
+          aria-expanded=${this.decisionsOpen ? 'true' : 'false'}
+          @click=${() => {
+            this.decisionsOpen = !this.decisionsOpen;
+          }}
+        >
+          ${this.iconService.getIcon(
+            this.decisionsOpen ? 'chevron-down' : 'chevron-right',
+            IconSize.SMALL
+          )}
+          <span class="idea-doc__decisions-title">Decisions</span>
+          <span class="idea-doc__decisions-count">${this.decisions.length}</span>
+        </button>
+        ${this.decisionsOpen
+          ? html`
+              <ul class="idea-doc__decisions-list">
+                ${this.decisions.map(
+                  entry => html`
+                    <li class="idea-doc__decision">
+                      <span class="idea-doc__decision-q">${entry.question}</span>
+                      <span class="idea-doc__decision-a">${entry.choice}</span>
+                      ${entry.reason
+                        ? html`<span class="idea-doc__decision-why">${entry.reason}</span>`
+                        : null}
+                      ${entry.rejected.length > 0
+                        ? html`<span class="idea-doc__decision-rejected"
+                            >rejected: ${entry.rejected.join(', ')}</span
+                          >`
+                        : null}
+                      ${entry.date
+                        ? html`<span class="idea-doc__decision-date">${entry.date}</span>`
+                        : null}
+                    </li>
+                  `
+                )}
+              </ul>
+            `
+          : null}
+      </section>
     `;
   }
 }

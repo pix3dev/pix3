@@ -526,6 +526,99 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  describe('record_decision', () => {
+    /** A storage double that remembers one file — enough for an append-and-read-back log. */
+    const decisionStorage = (initial: string | null = null) => {
+      const files = new Map<string, string>();
+      if (initial !== null) {
+        files.set('design/decisions.md', initial);
+      }
+      return {
+        files,
+        readTextFile: async (path: string) => {
+          const found = files.get(path);
+          if (found === undefined) {
+            throw new Error(`ENOENT ${path}`);
+          }
+          return found;
+        },
+        writeTextFile: async (path: string, content: string) => {
+          files.set(path, content);
+        },
+        listDirectory: async () => [],
+        createDirectory: async () => {},
+      };
+    };
+
+    it('appends one canonical line to the decision log', async () => {
+      const storage = decisionStorage('# Decisions\n');
+      const result = (await buildRegistry({ storage }).execute('record_decision', {
+        question: 'Win by score or by timer?',
+        choice: 'By timer',
+        reason: 'A fixed session fits the ad slot',
+        alternatives: ['by score'],
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.replaced).toBe(false);
+      expect(result.line).toMatch(
+        /^- \*\*Win by score or by timer\?\*\* → By timer\. A fixed session fits the ad slot\. _\(rejected: by score\)_ — \d{4}-\d{2}-\d{2}$/
+      );
+      expect(storage.files.get('design/decisions.md')).toContain('→ By timer.');
+    });
+
+    it('creates the log when the project has none yet', async () => {
+      const storage = decisionStorage(null);
+      const result = (await buildRegistry({ storage }).execute('record_decision', {
+        question: 'Coop?',
+        choice: 'Solo first',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(storage.files.get('design/decisions.md')).toMatch(/^# Decisions/);
+    });
+
+    /**
+     * The path the feature actually walks: code files the `ask_user` answer, then the agent adds
+     * the reason it learned. A second line would leave the planner reading the same fork twice.
+     */
+    it('replaces the entry for a fork already in the log instead of adding a second', async () => {
+      const storage = decisionStorage(null);
+      const registry = buildRegistry({ storage });
+      await registry.execute('record_decision', { question: 'Coop?', choice: 'Solo first' });
+      const result = (await registry.execute('record_decision', {
+        question: 'Coop?',
+        choice: 'Solo first',
+        reason: 'Networking can wait',
+      })) as Record<string, unknown>;
+
+      expect(result.replaced).toBe(true);
+      const log = storage.files.get('design/decisions.md') ?? '';
+      expect(log.match(/\*\*Coop\?\*\*/g)).toHaveLength(1);
+      expect(log).toContain('Networking can wait');
+    });
+
+    it('refuses an entry that is missing the question or the choice', async () => {
+      const storage = decisionStorage('# Decisions\n');
+      const registry = buildRegistry({ storage });
+      expect(
+        (
+          (await registry.execute('record_decision', { question: ' ', choice: 'x' })) as {
+            ok: boolean;
+          }
+        ).ok
+      ).toBe(false);
+      expect(
+        (
+          (await registry.execute('record_decision', { question: 'x', choice: '' })) as {
+            ok: boolean;
+          }
+        ).ok
+      ).toBe(false);
+      expect(storage.files.get('design/decisions.md')).toBe('# Decisions\n');
+    });
+  });
+
   describe('analyze_image', () => {
     it('captures the viewport and routes it to the vision helper', async () => {
       const captureScreenshot = vi.fn(() => ({

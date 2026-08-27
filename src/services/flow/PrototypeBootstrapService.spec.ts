@@ -1460,8 +1460,11 @@ describe('extractIdeaPrompt', () => {
 
 describe('extractDecisionLines', () => {
   it('reads both shapes and skips the scaffold example', () => {
+    // The `- **Why:**` line of the block shape reaches the planner too, now that both shapes go
+    // through the same reader — it used to be parsed away, which lost the one line saying WHY a
+    // fork went the way it did.
     expect(extractDecisionLines(DECISIONS_MD)).toEqual([
-      'Portrait or landscape? → Portrait',
+      'Portrait or landscape? → Portrait. It is a phone game.',
       'Session length → about two minutes. Matches an ad-break attention span.',
     ]);
   });
