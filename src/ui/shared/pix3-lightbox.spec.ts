@@ -255,3 +255,64 @@ describe('pix3-lightbox', () => {
     expect(picture()?.style.transform).toContain('scale(1)');
   });
 });
+
+describe('annotation mode', () => {
+  /**
+   * The sidecars are named after the source file, so a picture that only exists as a blob URL —
+   * a screenshot pasted into the chat — has nothing to hang them off and cannot be annotated.
+   */
+  it('offers annotation only for an image that is a project file', async () => {
+    const element = await mount();
+
+    lightbox().open([image('Pasted', 'blob:1')]);
+    await settle(element);
+    expect(element.querySelector('button[aria-label="Annotate"]')).toBeNull();
+
+    lightbox().open([{ ...image('Mood', 'blob:2'), path: 'references/mood-1.png' }]);
+    await settle(element);
+    expect(element.querySelector('button[aria-label="Annotate"]')).not.toBeNull();
+  });
+
+  /** A composite must never be annotated again, or drawings nest inside drawings forever. */
+  it('does not offer annotation on its own output', async () => {
+    const element = await mount();
+
+    lightbox().open([{ ...image('Mood', 'blob:1'), path: 'references/mood-1.annot.png' }]);
+    await settle(element);
+
+    expect(element.querySelector('button[aria-label="Annotate"]')).toBeNull();
+  });
+
+  it('swaps the picture for the annotator and back', async () => {
+    const element = await mount();
+    lightbox().open([{ ...image('Mood', 'blob:1'), path: 'references/mood-1.png' }]);
+    await settle(element);
+
+    element.querySelector<HTMLButtonElement>('button[aria-label="Annotate"]')?.click();
+    await settle(element);
+    expect(element.querySelector('pix3-image-annotator')).not.toBeNull();
+    expect(element.querySelector('.lightbox__image')).toBeNull();
+
+    element.querySelector<HTMLButtonElement>('button[aria-label="Stop annotating"]')?.click();
+    await settle(element);
+    expect(element.querySelector('pix3-image-annotator')).toBeNull();
+    expect(element.querySelector('.lightbox__image')).not.toBeNull();
+  });
+
+  it('leaves annotation mode when stepping to another picture', async () => {
+    const element = await mount();
+    lightbox().open([
+      { ...image('One', 'blob:1'), path: 'references/mood-1.png' },
+      { ...image('Two', 'blob:2'), path: 'references/mood-2.png' },
+    ]);
+    await settle(element);
+
+    element.querySelector<HTMLButtonElement>('button[aria-label="Annotate"]')?.click();
+    await settle(element);
+    expect(element.querySelector('pix3-image-annotator')).not.toBeNull();
+
+    lightbox().step(1);
+    await settle(element);
+    expect(element.querySelector('pix3-image-annotator')).toBeNull();
+  });
+});

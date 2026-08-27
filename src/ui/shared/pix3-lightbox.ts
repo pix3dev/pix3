@@ -6,6 +6,8 @@ import {
   type LightboxState,
 } from '@/services/editor/LightboxService';
 import { renderMarkdownLite } from '@/ui/agent-chat/markdown-lite';
+import { isAnnotationArtifact } from './annotation-doc';
+import './pix3-image-annotator';
 import './pix3-lightbox.ts.css';
 
 /** Zoom limits. Below the lower bound the picture is a stamp; above the upper one it is pixels. */
@@ -43,6 +45,16 @@ export class Pix3Lightbox extends ComponentBase {
   /** The open request, or `null` when closed — a closed lightbox renders nothing at all. */
   @state()
   private view: LightboxState | null = null;
+
+  /**
+   * Whether the stage is showing the annotator instead of the picture (design §3.7, phase V7).
+   *
+   * A mode of this overlay rather than a second one: annotating is "show me that bigger, and let me
+   * point at it", and the picture is already centred and sized here. Reset on every open and on
+   * every step, so arrowing to the next reference never lands mid-drawing on the wrong image.
+   */
+  @state()
+  private annotating = false;
 
   private zoom = 1;
   private panX = 0;
@@ -88,6 +100,9 @@ export class Pix3Lightbox extends ComponentBase {
     const item = state ? (state.items[state.index] ?? null) : null;
     if (item !== this.zoomedItem) {
       this.resetZoom(item);
+      // Stepping to another picture leaves annotation mode: the toolbar would otherwise stay armed
+      // over an image the user never chose to draw on.
+      this.annotating = false;
     }
     this.view = state;
     if (state && !wasOpen) {
@@ -305,7 +320,9 @@ export class Pix3Lightbox extends ComponentBase {
           <div class="lightbox__body">
             ${multiple ? this.renderStepButton(-1, 'Previous', 'chevron-left') : null}
             <div
-              class="lightbox__stage ${item.kind === 'image' ? 'lightbox__stage--image' : ''}"
+              class="lightbox__stage ${item.kind === 'image' && !this.annotating
+                ? 'lightbox__stage--image'
+                : ''}"
               @wheel=${this.onStageWheel}
               @dblclick=${this.onStageDoubleClick}
               @pointerdown=${this.onStagePointerDown}
@@ -313,7 +330,9 @@ export class Pix3Lightbox extends ComponentBase {
               @pointerup=${this.onStagePointerUp}
               @pointercancel=${this.onStagePointerUp}
             >
-              ${this.renderItem(item)}
+              ${this.annotating && canAnnotate(item)
+                ? this.renderAnnotator(item)
+                : this.renderItem(item)}
             </div>
             ${multiple ? this.renderStepButton(1, 'Next', 'chevron-right') : null}
           </div>
@@ -333,6 +352,22 @@ export class Pix3Lightbox extends ComponentBase {
         </div>
         ${view.items.length > 1
           ? html`<span class="lightbox__counter">${view.index + 1} / ${view.items.length}</span>`
+          : null}
+        ${canAnnotate(item)
+          ? html`
+              <button
+                type="button"
+                class="lightbox__btn ${this.annotating ? 'is-active' : ''}"
+                title=${this.annotating ? 'Back to the picture' : 'Draw on this picture'}
+                aria-label=${this.annotating ? 'Stop annotating' : 'Annotate'}
+                aria-pressed=${this.annotating ? 'true' : 'false'}
+                @click=${() => {
+                  this.annotating = !this.annotating;
+                }}
+              >
+                ${this.icons.getIcon(this.annotating ? 'image' : 'edit-3', IconSize.MEDIUM)}
+              </button>
+            `
           : null}
         <button
           type="button"
@@ -359,6 +394,27 @@ export class Pix3Lightbox extends ComponentBase {
         ${this.icons.getIcon(icon, IconSize.LARGE)}
       </button>
     `;
+  }
+
+  /**
+   * The annotator, over the same picture.
+   *
+   * `stopPropagation` on the pointer events is the whole trick of nesting it in the stage: the
+   * stage owns pan-and-zoom, and without it every stroke would also drag the picture underneath.
+   * A send closes the overlay — the message is in the chat, and staying here would hide it.
+   */
+  private renderAnnotator(item: LightboxItem) {
+    return html`<pix3-image-annotator
+      class="lightbox__annotator"
+      image-url=${item.url ?? ''}
+      image-path=${item.path ?? ''}
+      @pointerdown=${(event: Event) => event.stopPropagation()}
+      @pointermove=${(event: Event) => event.stopPropagation()}
+      @pointerup=${(event: Event) => event.stopPropagation()}
+      @wheel=${(event: Event) => event.stopPropagation()}
+      @dblclick=${(event: Event) => event.stopPropagation()}
+      @annotation-sent=${() => this.lightbox.close()}
+    ></pix3-image-annotator>`;
   }
 
   private renderItem(item: LightboxItem) {
@@ -472,3 +528,16 @@ declare global {
     'pix3-lightbox': Pix3Lightbox;
   }
 }
+
+/**
+ * Whether this item can be drawn on.
+ *
+ * A project path is required, not optional: the annotation is stored in sidecars named after the
+ * source file, and a picture that only exists as a blob URL (a pasted screenshot in the chat) has
+ * no name to hang them off. Annotation artifacts are excluded so composites never nest.
+ */
+const canAnnotate = (item: LightboxItem): boolean =>
+  item.kind === 'image' &&
+  Boolean(item.url) &&
+  Boolean(item.path) &&
+  !isAnnotationArtifact(item.path ?? '');

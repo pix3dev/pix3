@@ -423,3 +423,21 @@ pix3-lightbox .lightbox__doc a {
 pix3-lightbox .lightbox__doc a:hover {
   text-decoration: underline;
 }
+
+/* ── Annotation mode ────────────────────────────────────────────────────────
+   The annotator fills the stage rather than sitting centred in it: its canvas does its own
+   `contain` fit, and a flex-centred child would have been sized to its (empty) content instead. */
+pix3-lightbox .lightbox__annotator {
+  display: block;
+  align-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+pix3-lightbox .lightbox__btn.is-active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
