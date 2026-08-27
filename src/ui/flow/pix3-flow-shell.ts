@@ -374,6 +374,13 @@ export class Pix3FlowShell extends ComponentBase {
   /**
    * Launch the stage, retrying a few times before showing the user a failure.
    *
+   * `game.start` (the active scene), never `game.start-main` (the project's entry scene). On every
+   * recipe project the entry scene is the MENU, and a Flow project has no active scene when the
+   * stage first launches — so dispatching the entry-scene command here used to make the menu both
+   * what the user watched and, because `appState.scenes.activeSceneId` is the editing surface, what
+   * every subsequent agent edit landed in. `game.start` opens `scenes/main.pix3scene` itself when
+   * nothing is active (see `resolveGameplayScenePath`), so the stage boots on gameplay.
+   *
    * The first launch races project bootstrap: scripts are still compiling, the manifest is still
    * landing, and the project can briefly leave `ready` — any of which makes the scene load blocked
    * (a blocked command is a `false` return, not a throw) and hands the user a red error where their
@@ -384,7 +391,7 @@ export class Pix3FlowShell extends ComponentBase {
   private async startStage(attempt = 0): Promise<void> {
     let failure: string | null = null;
     try {
-      if (await this.commandDispatcher.executeById('game.start-main')) {
+      if (await this.commandDispatcher.executeById('game.start')) {
         return;
       }
       failure = 'The game could not be started.';
@@ -771,9 +778,7 @@ export class Pix3FlowShell extends ComponentBase {
           type="button"
           title=${this.isPlaying ? 'Stop' : 'Play'}
           @click=${() =>
-            void this.commandDispatcher.executeById(
-              this.isPlaying ? 'game.stop' : 'game.start-main'
-            )}
+            void this.commandDispatcher.executeById(this.isPlaying ? 'game.stop' : 'game.start')}
         >
           ${this.icons.getIcon(this.isPlaying ? 'square' : 'play', IconSize.SMALL)}
         </button>

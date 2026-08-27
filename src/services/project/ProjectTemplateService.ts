@@ -115,7 +115,7 @@ export interface ProjectTemplate {
    */
   readonly recipeId?: string;
   /**
-   * Project-relative path (no `res://`) of the scene a build / "Start Game"
+   * Project-relative path (no `res://`) of the scene a build / "Play Game (Entry Scene)"
    * boots into — becomes the manifest's `defaultExportScenePath`. Undefined
    * falls back to `main.pix3scene`. Used by templates whose entry scene (e.g. a
    * menu) differs from the editor startup scene.

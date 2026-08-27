@@ -1,0 +1,27 @@
+{
+  "name": "restart",
+  "description": "Dispatch the run's `restart` intent and confirm a fresh run came back up.",
+  "note": "This is a FORMAT SEED, not a real test of your game — there is no mechanic here yet to test. Keep it (restart stays worth proving after a scene reload) and add a routine per mechanic next to it: run one with game_run {routine:'<name>'}. Steps are the game_input vocabulary plus {type:'command'} for a registered intent; `expect` holds the ordinary game_run predicates, ANDed and judged once after the last step against the frame pair around the run. Only a STEP takes a `why`. Prefer a `gameState` predicate over a node one wherever GameRules already publishes the value — it survives every relayout of the HUD.",
+  "scope": "scenes/main.pix3scene",
+  "params": {},
+  "uses": ["game-root", "result-overlay", "retry-button"],
+  "steps": [
+    {
+      "type": "command",
+      "name": "restart",
+      "why": "The intent RETRY dispatches, taken at the highest channel: it proves the wire without depending on where the button sits, and the dispatch is journalled with the frame it happened on."
+    }
+  ],
+  "expect": [
+    { "kind": "command", "name": "restart" },
+    { "kind": "gameState", "path": "phase", "op": "eq", "value": "playing" },
+    { "kind": "gameState", "path": "score", "op": "eq", "value": 0 },
+    {
+      "kind": "nodeProperty",
+      "name": "result-overlay",
+      "path": "visible",
+      "op": "eq",
+      "value": false
+    }
+  ]
+}

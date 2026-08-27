@@ -138,24 +138,42 @@ export const FALLBACK_RECIPE_ID = 'recipe-arena-2d';
  * promoted into the catalog with a `design/recipe.md`; without this alias the planner's
  * correct answer would silently fall back to the arena recipe.
  */
-const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
+export const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
   'recipe-playable-ad': 'playable-2d',
   'recipe-scene-3d': 'playable-3d',
 };
 
 /**
- * The recipe a 3D idea falls back to. Kept as a named constant because the fallback below has to
- * reach for it: a 3D idea answered with a 2D recipe is not a degraded version of the ask, it is a
- * different game.
+ * The recipe a 3D idea falls back to when nothing else is known about it. Kept as a named constant
+ * because the fallbacks below have to reach for it: a 3D idea answered with a 2D recipe is not a
+ * degraded version of the ask, it is a different game.
  *
  * The grid recipe rather than the generic 3D stage, because the stage is a *blank* — it hands the
  * agent a camera, two lights and a placeholder to replace, while the grid hands it a game that
- * already plays. When the planner could not name what it wanted, the one that plays is the better
- * guess.
+ * already plays. "The one that plays is the better guess" holds only for **silence**, though: an
+ * *invented* 3D id is the planner saying the catalog did not fit, and that case takes the blank 3D
+ * stage instead (see {@link validateBrief}).
  */
 export const FALLBACK_3D_RECIPE_ID = 'recipe-grid-3d';
 
-const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
+/**
+ * The recipe with no mechanics: score/lives/timer, a HUD and a win/lose overlay, and nothing else.
+ *
+ * It is the answer to an *affirmative* signal that the catalog does not fit — the planner naming a
+ * recipe that does not exist. That is a different situation from the one {@link FALLBACK_RECIPE_ID}
+ * covers (a reply that told us nothing about the idea at all), and the two used to share an answer:
+ * an idea shaped like snake was answered with the arena's pointer steering and falling spawners, so
+ * the agent's first increment went on *demolishing* a mechanic before it could build one.
+ */
+export const BLANK_RECIPE_ID = 'recipe-blank-2d';
+
+/**
+ * The 3D counterpart of {@link BLANK_RECIPE_ID}: `recipe-scene-3d` is already a bare stage (camera,
+ * lights, ground, a 2D UI layer, a tap gate and a CTA), so 3D needs no second blank authored for it.
+ */
+export const BLANK_3D_RECIPE_ID = 'recipe-scene-3d';
+
+export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: 'recipe-tapper-2d',
     blurb:
@@ -164,12 +182,17 @@ const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: FALLBACK_RECIPE_ID,
     blurb:
-      'an avatar moves in a bounded field while a spawner sends pickups/hazards at it; touching them scores or hurts. Dodgers, collectors, top-down survival, snake, runners.',
+      'an avatar moves in a bounded field while a spawner sends pickups/hazards at it; touching them scores or hurts. Dodgers, collectors, top-down survival, runners. NOT grid or turn-based movement — its steering is continuous.',
   },
   {
     id: 'recipe-bouncer-2d',
     blurb:
       'a ball under gravity bounces off walls, paddles and bumpers; a paddle keeps it in play. Breakout, pong, plinko, pinball.',
+  },
+  {
+    id: BLANK_RECIPE_ID,
+    blurb:
+      "NO mechanics — an empty 2D field with score/lives/timer bookkeeping, a HUD and a win/lose overlay already wired; the first increment builds the core mechanic itself, CONTROLS INCLUDED. Pick it when the idea's core loop is not what any recipe above ships: grid or turn-based movement (snake, sokoban, match-3), word/card/board games, builders, physics contraptions, idle games. Deleting a wrong mechanic costs more than building on this blank.",
   },
   {
     id: 'recipe-playable-ad',
@@ -1287,9 +1310,16 @@ export const PLANNER_SYSTEM_PROMPT = [
   'Rules:',
   '- Reply with ONE JSON object and nothing else. No prose, no markdown fences.',
   '- Pick `recipeId` from the catalog you are given. Never invent an id.',
-  '- The recipe ALREADY ships a playable skeleton: menu, game, win/lose, working controls, a score',
-  '  and a HUD. It runs before the first increment starts. So `increments` EXTENDS that skeleton —',
-  '  never write "controls", "core loop", "menu" or "score" as a step; those exist.',
+  '- Pick a GENRE recipe only when its shipped mechanic survives the first increment. If that',
+  `  mechanic would first have to be removed or replaced, pick \`${BLANK_RECIPE_ID}\` (2D) or`,
+  `  \`${BLANK_3D_RECIPE_ID}\` (3D) instead: extending beats demolishing, and demolishing loses to`,
+  '  starting from a blank. A breakout still takes the bouncer; a snake or a sokoban takes the blank.',
+  '- A genre recipe ALREADY ships a playable skeleton: menu, game, win/lose, working controls, a',
+  '  score and a HUD. It runs before the first increment starts. So `increments` EXTENDS that',
+  '  skeleton — never write "controls", "core loop", "menu" or "score" as a step; those exist.',
+  '  The BLANK recipes are the exception: they ship the bookkeeping, the HUD and the win/lose screen',
+  '  but NO mechanic and NO controls, so there the first increment IS the core mechanic, controls',
+  '  included — and there is no menu to extend.',
   '- `increments` is 3 to 5 steps. The FIRST one is the mechanic that makes this game THIS game and',
   '  nothing else: flippers for a pinball, grid movement plus growth for a snake, brick rows for a',
   '  breakout, a chasing enemy for a survival game. Then stakes, then escalation, then an art pass.',
@@ -1408,7 +1438,7 @@ export const buildPlannerPrompt = (
       {
         title: 'short project name',
         pitch: 'one line',
-        recipeId: RECIPE_CATALOG[1].id,
+        recipeId: FALLBACK_RECIPE_ID,
         targetPlatform: 'mobile',
         style: {
           palette: ['#101820', '#f5ae39'],
@@ -1605,22 +1635,32 @@ export const validateBrief = (
     recipeId = FALLBACK_RECIPE_ID;
   } else if (!RECIPE_CATALOG.some(recipe => recipe.id === recipeId)) {
     issues.push(`Planner asked for an unknown recipe \`${recipeId}\`.`);
-    // Dimensionality is the one substitution the user notices instantly and blames on the agent:
-    // asked for a 3D puzzle, handed 2D sprites pretending to be one. An invented id that says "3d"
-    // is the planner telling us the idea was three-dimensional, so honour that rather than the
-    // generic fallback — and if there is no 3D recipe installed, say so out loud instead of
-    // shipping the substitute silently.
+    // An INVENTED id is a signal, not just noise: the planner reached past the catalog because
+    // nothing in it fit, so the answer is the recipe with no mechanics rather than the genre
+    // fallback. (Silence — no `recipeId` at all — keeps the genre fallback above: there the reply
+    // said nothing about the idea, and a game that already plays beats a blank stage.)
+    //
+    // Dimensionality still comes first, because it is the one substitution the user notices
+    // instantly and blames on the agent: asked for a 3D puzzle, handed 2D sprites pretending to be
+    // one. An invented id that says "3d" gets the blank 3D stage; if no 3D recipe is installed at
+    // all, say so out loud instead of shipping the substitute silently.
     const wants3D = /3d/i.test(recipeId);
-    const has3DRecipe = RECIPE_CATALOG.some(recipe => recipe.id === FALLBACK_3D_RECIPE_ID);
-    if (wants3D && has3DRecipe) {
-      recipeId = FALLBACK_3D_RECIPE_ID;
+    const blank3D = RECIPE_CATALOG.some(recipe => recipe.id === BLANK_3D_RECIPE_ID)
+      ? BLANK_3D_RECIPE_ID
+      : RECIPE_CATALOG.some(recipe => recipe.id === FALLBACK_3D_RECIPE_ID)
+        ? FALLBACK_3D_RECIPE_ID
+        : null;
+    if (wants3D && blank3D) {
+      recipeId = blank3D;
     } else {
       if (wants3D) {
         userNotices.push(
           `The idea reads as 3D (the planner reached for \`${recipeId}\`), but no 3D recipe is installed, so the project started from a 2D one. Say this to the user in your FIRST message, before the plan, and offer the fork: build the 3D scene by hand (GeometryMesh + lights + Camera3D — slower, but genuinely 3D) or keep the 2D take. Never present the 2D substitute as if it were what they asked for.`
         );
       }
-      recipeId = FALLBACK_RECIPE_ID;
+      recipeId = RECIPE_CATALOG.some(recipe => recipe.id === BLANK_RECIPE_ID)
+        ? BLANK_RECIPE_ID
+        : FALLBACK_RECIPE_ID;
     }
   }
 

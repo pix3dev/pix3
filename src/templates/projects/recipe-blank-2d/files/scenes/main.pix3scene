@@ -1,0 +1,233 @@
+# Pix3 Scene File (YAML)
+# Blank 2D — the ONLY scene in this project, and the one to build in. There is no
+# menu scene on purpose: nothing should stand between opening the project and the
+# gameplay while the mechanic is still being found.
+#
+# What is already wired: score / lives / timer bookkeeping, the HUD that shows
+# them, and a win/lose overlay with RETRY. What is NOT here: any mechanic at all,
+# including controls. That is your first increment — build it inside `board`.
+#
+# Stable node ids (design/recipe.md is the contract — do not rename these):
+#   game-root, game-background, board, board-floor,
+#   hud, score-label, time-label, lives-bar,
+#   result-overlay, result-dim, result-label, retry-button
+#
+# 2D coordinates: origin at the canvas centre, X right, Y UP. Node order in the
+# tree is paint order (later/deeper draws on top).
+version: 1.0.0
+metadata:
+  author: Pix3 Recipe
+  description: Blank gameplay field — bookkeeping, HUD and win/lose only; the mechanic is yours
+root:
+  - id: game-root
+    type: Group2D
+    name: Game Root
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    components:
+      - id: game-rules
+        type: user:GameRules
+        enabled: true
+        config:
+          winMode: score
+          targetScore: 10
+          timeLimitSec: 0
+          startingLives: 3
+          resultNode: result-overlay
+          resultLabel: result-label
+          winText: "YOU WIN!"
+          loseText: "GAME OVER"
+          retryButton: retry-button
+          gameScene: res://scenes/main.pix3scene
+          # Add your mechanic's nodes here (comma-separated) so they stop on game over.
+          freezeNodes: ""
+    children:
+      - id: game-background
+        type: ColorRect2D
+        name: Game Background
+        properties:
+          width: 1080
+          height: 1920
+          color: "#12141c"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: board
+        type: Group2D
+        name: Board
+        properties:
+          width: 980
+          height: 1480
+          transform:
+            position: [0, -80]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: board-floor
+            type: ColorRect2D
+            name: Board Floor
+            properties:
+              width: 980
+              height: 1480
+              color: "#1d212e"
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: hud
+        type: CanvasLayer2D
+        name: HUD
+        properties:
+          width: 1080
+          height: 1920
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        components:
+          - id: score-hud
+            type: user:ScoreHud
+            enabled: true
+            config:
+              sourceNode: game-root
+              scoreLabel: score-label
+              scoreFormat: "SCORE {value}"
+              timeLabel: time-label
+              timeFormat: "{value}"
+              livesBar: lives-bar
+        children:
+          - id: score-label
+            type: Label2D
+            name: Score Label
+            properties:
+              label: "SCORE 0"
+              labelFontSize: 44
+              labelColor: "#ffffff"
+              labelAlign: left
+              transform:
+                position: [-340, 850]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: left
+                verticalAlign: top
+            children: []
+          - id: time-label
+            type: Label2D
+            name: Time Label
+            properties:
+              label: "0"
+              labelFontSize: 44
+              labelColor: "#f5ae39"
+              labelAlign: center
+              transform:
+                position: [0, 850]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: center
+                verticalAlign: top
+            children: []
+          - id: lives-bar
+            type: Bar2D
+            name: Lives Bar
+            properties:
+              width: 240
+              height: 28
+              minValue: 0
+              maxValue: 3
+              value: 3
+              barColor: "#ff4d6d"
+              backBackgroundColor: "#2a3352"
+              showBorder: false
+              transform:
+                position: [340, 855]
+                scale: [1, 1]
+                rotation: 0
+              layout:
+                enabled: true
+                horizontalAlign: right
+                verticalAlign: top
+            children: []
+          - id: result-overlay
+            type: Group2D
+            name: Result Overlay
+            properties:
+              width: 1080
+              height: 1920
+              initiallyVisible: false
+              layout:
+                enabled: true
+                horizontalAlign: stretch
+                verticalAlign: stretch
+            children:
+              - id: result-dim
+                type: ColorRect2D
+                name: Result Dim
+                properties:
+                  width: 1080
+                  height: 1920
+                  color: "#000000"
+                  opacity: 0.7
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                  layout:
+                    enabled: true
+                    horizontalAlign: stretch
+                    verticalAlign: stretch
+                children: []
+              - id: result-label
+                type: Label2D
+                name: Result Label
+                properties:
+                  label: "GAME OVER"
+                  labelFontSize: 88
+                  labelColor: "#ffffff"
+                  labelAlign: center
+                  transform:
+                    position: [0, 160]
+                    scale: [1, 1]
+                    rotation: 0
+                  layout:
+                    enabled: true
+                    horizontalAlign: center
+                    verticalAlign: center
+                children: []
+              - id: retry-button
+                type: Button2D
+                name: Retry Button
+                properties:
+                  width: 420
+                  height: 130
+                  label: "RETRY"
+                  labelFontSize: 50
+                  labelColor: "#12141c"
+                  backgroundColor: "#f5ae39"
+                  hoverColor: "#ffc862"
+                  pressedColor: "#d4922a"
+                  buttonAction: retry
+                  transform:
+                    position: [0, -60]
+                    scale: [1, 1]
+                    rotation: 0
+                  layout:
+                    enabled: true
+                    horizontalAlign: center
+                    verticalAlign: center
+                children: []

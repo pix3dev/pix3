@@ -244,6 +244,9 @@ export interface LlmListModelsContext {
   readonly signal?: AbortSignal;
 }
 
+/** The jobs the editor picks a model for: the agent itself, its advisor, and its vision helper. */
+export type LlmModelRole = 'main' | 'advisor' | 'vision';
+
 export interface LlmProvider {
   readonly id: string;
   readonly label: string;
@@ -266,6 +269,15 @@ export interface LlmProvider {
   readonly hidden?: boolean;
   /** Default host used when no `baseUrl` override is supplied. */
   readonly defaultBaseUrl?: string;
+  /**
+   * The model this provider nominates for each role when the user has not picked one. Without it a
+   * role falls back to the first catalog entry, which is only ever right by accident: the Claude
+   * Code lane lists `fable, opus, sonnet, haiku`, so "first" makes the agent, the advisor it
+   * consults and its vision helper all the same model — and the advisor exists precisely to be a
+   * different, stronger one. Naming them here keeps that judgment with the provider that knows its
+   * own catalog; a provider that omits a role keeps the first-entry fallback.
+   */
+  readonly defaultModelIds?: Readonly<Partial<Record<LlmModelRole, string>>>;
   getModel(modelId: string): LlmModel | undefined;
   chat(params: ChatParams, ctx: LlmRequestContext): Promise<LlmResult>;
   /**

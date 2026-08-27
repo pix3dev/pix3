@@ -1,0 +1,10 @@
+id: recipe-blank-2d
+title: Blank 2D
+description: No mechanics on purpose — an empty field with score, lives, timer, a HUD and a win/lose overlay already wired. For an idea whose core loop is not what any other recipe ships (grid or turn-based movement, word/card/board games, builders, idle); the first increment builds the mechanic itself, controls included.
+projectType: 2d
+targetPlatform: universal
+viewport: { width: 1080, height: 1920 }
+# No `entryScene`: this recipe ships ONE scene, and the whole point is that nothing
+# stands between opening the project and the gameplay. Add a menu later (see
+# design/recipe.md → Extension points) and set it in Project Settings then.
+order: 64

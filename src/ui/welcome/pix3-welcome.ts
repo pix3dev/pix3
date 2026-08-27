@@ -35,19 +35,6 @@ import {
 import { CURRENT_EDITOR_VERSION } from '@/version';
 
 /**
- * Prompts that show what this box is for. Deliberately concrete and deliberately spread across the
- * recipe catalog — a first-time user reading them should be able to tell that a tapper, a runner and
- * a playable ad are all reachable from the same field.
- */
-const EXAMPLE_PROMPTS: readonly string[] = [
-  'a tapper: pop balloons before the timer runs out',
-  'an endless runner dodging obstacles',
-  'a playable ad for a match-3 game with a CTA',
-  'top-down survival: dodge falling rocks, grab coins',
-  'breakout with power-ups',
-];
-
-/**
  * The welcome screen leads with the prompt: Flow is the default way in (design §1.1/§3.1), so
  * "describe your game" is the primary content and opening an existing project sits in a narrower
  * column beside it. Stacking the two put the project lists past the bottom of the viewport on a
@@ -369,12 +356,6 @@ export class Pix3Welcome extends ComponentBase {
       event.preventDefault();
       void this.onSubmitPrompt();
     }
-  };
-
-  private onExampleChip = (example: string): void => {
-    this.prompt = example;
-    const textarea = this.querySelector<HTMLTextAreaElement>('.hero-input');
-    textarea?.focus();
   };
 
   /** A recipe card pins the genre; whatever is already typed still describes the game. */
@@ -779,21 +760,6 @@ export class Pix3Welcome extends ComponentBase {
               <span>${status.error ?? status.message}</span>
             </div>`
           : null}
-
-        <div class="hero-examples">
-          ${EXAMPLE_PROMPTS.map(
-            example => html`
-              <button
-                class="hero-chip"
-                type="button"
-                ?disabled=${this.isBootstrapping}
-                @click=${() => this.onExampleChip(example)}
-              >
-                ${example}
-              </button>
-            `
-          )}
-        </div>
 
         ${this.renderRecipeCards()}
       </section>

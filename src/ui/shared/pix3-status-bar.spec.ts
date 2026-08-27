@@ -185,7 +185,7 @@ describe('Pix3StatusBar', () => {
           listener({});
           return () => undefined;
         };
-        // No Gemini key stored: the two lanes must be able to disagree.
+        // No built-in provider key stored: the two lanes must be able to disagree.
         hasApiKey = async () => false;
       },
       'singleton'
@@ -209,11 +209,64 @@ describe('Pix3StatusBar', () => {
     expect(lanes).toHaveLength(2);
     expect(lanes[0].textContent).toContain('Bridge');
     expect(lanes[0].classList.contains('is-on')).toBe(true);
-    expect(lanes[1].textContent).toContain('Gemini');
+    // With no key of its own the lane names the setting, not a provider.
+    expect(lanes[1].textContent).toContain('Keys');
     expect(lanes[1].classList.contains('is-off')).toBe(true);
 
     lanes[1].click();
     expect(showSettings).toHaveBeenCalledWith('agent');
+  });
+
+  it('names the built-in providers this browser holds a key for', async () => {
+    const container = ServiceContainer.getInstance();
+    container.addService(
+      container.getOrCreateToken(UpdateCheckService),
+      UpdateCheckServiceStub,
+      'singleton'
+    );
+    container.addService(container.getOrCreateToken(DialogService), DialogServiceStub, 'singleton');
+    container.addService(container.getOrCreateToken(LoggingService), LoggingService, 'singleton');
+    container.addService(
+      container.getOrCreateToken(BridgeConnectionService),
+      class {
+        subscribe = () => () => undefined;
+        isAvailable = () => false;
+        getEntries = () => [];
+      },
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(AgentSettingsService),
+      class {
+        subscribe = (listener: (prefs: unknown) => void) => {
+          listener({});
+          return () => undefined;
+        };
+        // Only OpenRouter is configured — the lane must say so rather than report "no key".
+        hasApiKey = async (providerId: string) => providerId === 'openrouter';
+      },
+      'singleton'
+    );
+    container.addService(
+      container.getOrCreateToken(EditorSettingsService),
+      class {
+        showSettings = vi.fn(async () => undefined);
+      },
+      'singleton'
+    );
+
+    const statusBar = document.createElement('pix3-status-bar') as TestStatusBarElement;
+    document.body.appendChild(statusBar);
+    // The key probe is async (one secret lookup per built-in provider), so let it settle.
+    for (let i = 0; i < 5; i += 1) {
+      await Promise.resolve();
+      await statusBar.updateComplete;
+    }
+
+    const lanes = [...statusBar.querySelectorAll('.status-lane')] as HTMLButtonElement[];
+    expect(lanes[1].textContent).toContain('OpenRouter');
+    expect(lanes[1].textContent).not.toContain('Gemini');
+    expect(lanes[1].classList.contains('is-on')).toBe(true);
   });
 
   it('drops the perf readout in Vibe, where the panels it measures are hidden', async () => {

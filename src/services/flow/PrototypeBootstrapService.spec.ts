@@ -36,7 +36,10 @@ import {
   DEFAULT_THEME,
   FALLBACK_RECIPE_ID,
   FALLBACK_3D_RECIPE_ID,
+  BLANK_RECIPE_ID,
+  BLANK_3D_RECIPE_ID,
   PLANNER_SYSTEM_PROMPT,
+  RECIPE_CATALOG,
   THEME_TUNABLES,
   type PrototypeBrief,
 } from './PrototypeBootstrapService';
@@ -111,13 +114,16 @@ describe('validateBrief', () => {
     expect(brief.increments).toEqual(['tap to pop', 'timer', 'win screen']);
   });
 
-  it('falls back to the arena recipe when the planner invents an id', () => {
+  it('falls back to the BLANK recipe when the planner invents an id', () => {
+    // An invented id is an affirmative signal that the catalog did not fit, so the answer is the
+    // recipe with no mechanics. Answering it with the arena is how an idea shaped like snake got a
+    // field of falling pickups the agent had to demolish before it could build anything.
     const { brief, issues } = validateBrief(
       { ...wellFormed, recipeId: 'recipe-metroidvania-2d' },
       'a bubble tapper'
     );
 
-    expect(brief.recipeId).toBe(FALLBACK_RECIPE_ID);
+    expect(brief.recipeId).toBe(BLANK_RECIPE_ID);
     expect(issues.join(' ')).toContain('recipe-metroidvania-2d');
   });
 
@@ -129,8 +135,19 @@ describe('validateBrief', () => {
       'a 3d puzzle where you carve voxels off a cube'
     );
 
-    expect(brief.recipeId).toBe(FALLBACK_3D_RECIPE_ID);
+    expect(brief.recipeId).toBe(BLANK_3D_RECIPE_ID);
     expect(issues.join(' ')).toContain('recipe-voxel-puzzle-3d');
+  });
+
+  it('keeps the genre 3D fallback distinct from the blank 3D one', () => {
+    // The fork in one assertion. Silence about a 3D idea keeps `recipe-grid-3d` (a game that
+    // plays); an invented 3D id gets the bare stage. Collapsing the two re-creates the path this
+    // change exists to remove — an idea the catalog did not cover, answered with a mechanic.
+    expect(BLANK_3D_RECIPE_ID).not.toBe(FALLBACK_3D_RECIPE_ID);
+    const ids = RECIPE_CATALOG.map(recipe => recipe.id);
+    expect(ids).toContain(FALLBACK_3D_RECIPE_ID);
+    expect(ids).toContain(BLANK_3D_RECIPE_ID);
+    expect(ids).toContain(BLANK_RECIPE_ID);
   });
 
   it('says nothing to the user while a 3D ask can be served in 3D', () => {
@@ -162,12 +179,16 @@ describe('validateBrief', () => {
     expect(message).toContain('The idea reads as 3D but every recipe is 2D.');
   });
 
-  it('falls back when the recipe id is missing entirely', () => {
+  it('falls back to a GENRE recipe when the recipe id is missing entirely', () => {
+    // The other half of the fork: silence says nothing about the idea (a provider hiccup, most
+    // likely), and with zero signal the game that already plays beats a blank stage — the Flow
+    // stage being alive from the first frame is the design invariant here.
     const { recipeId, ...withoutRecipe } = wellFormed;
     void recipeId;
     const { brief, issues } = validateBrief(withoutRecipe, 'a bubble tapper');
 
     expect(brief.recipeId).toBe(FALLBACK_RECIPE_ID);
+    expect(brief.recipeId).not.toBe(BLANK_RECIPE_ID);
     expect(issues.join(' ')).toContain('no recipeId');
   });
 

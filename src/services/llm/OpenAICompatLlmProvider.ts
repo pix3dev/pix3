@@ -13,6 +13,7 @@ import {
   type LlmResult,
   type LlmStopReason,
   type LlmUsage,
+  type ReasoningEffort,
 } from './LlmTypes';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
@@ -90,7 +91,7 @@ export class OpenAICompatLlmProvider implements LlmProvider {
   async listModels(ctx: LlmListModelsContext): Promise<LlmModel[]> {
     const baseUrl = (ctx.baseUrl ?? this.defaultBaseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
     const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { ...this.extraHeaders() };
     if (ctx.apiKey) {
       headers.Authorization = `Bearer ${ctx.apiKey}`;
     }
@@ -144,6 +145,25 @@ export class OpenAICompatLlmProvider implements LlmProvider {
   }
 
   /**
+   * Extra request headers sent on both {@link chat} and {@link listModels}, merged before the
+   * `Authorization` header. Empty here; gateways that ask for attribution headers (OpenRouter's
+   * `HTTP-Referer` / `X-Title`) override it.
+   */
+  protected extraHeaders(): Record<string, string> {
+    return {};
+  }
+
+  /**
+   * Map a unified {@link ReasoningEffort} onto the value sent as `reasoning_effort`. OpenAI-style
+   * reasoning models take the low/medium/high triad, so the extended Anthropic-only levels are
+   * clamped down here rather than 400-ing the request. Gateways that do accept the wider range
+   * (OpenRouter forwards `xhigh`/`max` to the models that advertise them) override this.
+   */
+  protected mapReasoningEffort(effort: ReasoningEffort): string {
+    return effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+  }
+
+  /**
    * Whether an empty API key should be rejected before hitting the endpoint. A locally-hosted
    * endpoint (Ollama / LM Studio) needs no key, so the hosted OpenAI default is the only host that
    * requires one here. Subclasses that target an always-keyed host (e.g. Cerebras) override this.
@@ -179,7 +199,10 @@ export class OpenAICompatLlmProvider implements LlmProvider {
 
     const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
     const body = this.buildBody(params, ctx.modelId);
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...this.extraHeaders(),
+    };
     if (ctx.apiKey) {
       headers.Authorization = `Bearer ${ctx.apiKey}`;
     }
@@ -244,10 +267,7 @@ export class OpenAICompatLlmProvider implements LlmProvider {
     }
 
     if (params.reasoningEffort) {
-      // OpenAI-style reasoning models take `reasoning_effort` with the low/medium/high triad; the
-      // extended Anthropic-only levels are clamped down so a stray value can't 400 the request.
-      const effort = params.reasoningEffort;
-      body.reasoning_effort = effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+      body.reasoning_effort = this.mapReasoningEffort(params.reasoningEffort);
     }
 
     return body;

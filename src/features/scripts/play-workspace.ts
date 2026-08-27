@@ -90,6 +90,47 @@ export const ensureSceneActive = async (
   }
 };
 
+/** Path (relative, no scheme) of the scene the editor treats as the gameplay scene. */
+const GAMEPLAY_SCENE_PATH = 'scenes/main.pix3scene';
+
+const stripScheme = (path: string): string =>
+  path
+    .replace(/^res:\/\//i, '')
+    .replace(/^\/+/, '')
+    .toLowerCase();
+
+/**
+ * Which scene to open when a play command is asked to run "the current scene" and nothing is open.
+ *
+ * The order deliberately prefers the **gameplay** scene over the project's entry scene: recipe
+ * projects boot a menu (`entryScene: scenes/menu.pix3scene` → `defaultExportScenePath`), and landing
+ * a prototyping session on the menu is both what the user sees on the stage and — worse — what every
+ * subsequent agent edit targets, since `appState.scenes.activeSceneId` is the editing surface.
+ * `AgentToolRegistry.ensureActiveScene` already reasons this way; this is the same order, reachable
+ * from the commands.
+ *
+ * The manifest's `defaultExportScenePath` is **not** in the order, on purpose: on a recipe project
+ * that value *is* the menu. A project that genuinely ships no `scenes/main.pix3scene` and has no
+ * scene open gets a failure naming the path it looked for, and the caller can still run the whole
+ * flow through `game.start-main` — which is a better outcome than silently prototyping on a menu.
+ */
+export const resolveGameplayScenePath = (state: {
+  scenes: { descriptors: Record<string, { filePath?: string } | undefined> };
+}): string => {
+  const descriptorPaths = Object.values(state.scenes.descriptors)
+    .map(descriptor => descriptor?.filePath ?? '')
+    .filter(path => path.length > 0);
+
+  return (
+    descriptorPaths.find(path => stripScheme(path) === GAMEPLAY_SCENE_PATH) ??
+    descriptorPaths[0] ??
+    // Nothing is open: a fresh Flow project, which never had a startup scene opened for it
+    // (`PrototypeBootstrapService` goes straight to `createNewProjectWithOptions`, skipping
+    // `openStartupScene`). Every shipped template carries this path.
+    `res://${GAMEPLAY_SCENE_PATH}`
+  );
+};
+
 /**
  * Reveal the surface the running game is drawn on. Studio opens/focuses the Game tab; in Flow the
  * stage is permanently mounted, so there is nothing to open.

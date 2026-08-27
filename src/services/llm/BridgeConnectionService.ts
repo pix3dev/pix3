@@ -275,6 +275,10 @@ export class BridgeConnectionService {
     this.entries = entries;
     const bridgeUrl = this.getBridgeUrl();
     this.registry.setBridgeProviders(entries.map(entry => createBridgeProvider(entry, bridgeUrl)));
+    // The bridge is the only provider set that nominates a model per role (advisor / vision helper),
+    // and it only exists once a probe succeeds — so this is where those defaults can first be filled
+    // in. Deliberate picks are pinned and left alone.
+    this.settings.applyAssistantDefaults();
     this.notify();
   }
 
