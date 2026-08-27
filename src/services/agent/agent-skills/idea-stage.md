@@ -91,18 +91,21 @@ scratch note that is not the design document itself belongs in `references/`.
 When the conversation reaches "what should it look like", do not describe three styles in
 prose. Generate them.
 
-- 2–4 candidates in one turn via `generate_asset`, named `mood-<n>.png`. At this stage a bare
-  name lands in `references/` on its own — you do not need to spell the folder out. Give each a
-  short prompt that differs in ONE axis (flat vector vs painterly vs pixel), not in three —
-  the point is a comparison the user can make.
-- The tool records each generation in `references/index.json` itself, with your prompt as the
-  caption. The one thing it cannot know is what the picture is FOR: add `role: "style-candidate"`
-  to those entries so the cards read as a set of candidates rather than as finished art.
+- 2–4 candidates in one turn via `generate_asset`, named `mood-<n>.png`, each with
+  **`role: "style-candidate"`**. At this stage a bare name lands in `references/` on its own —
+  you do not need to spell the folder out. Give each a short prompt that differs in ONE axis
+  (flat vector vs painterly vs pixel), not in three — the point is a comparison the user can
+  make. The tool records your prompt as the caption; the role is the part it cannot guess, and
+  it is what turns the cards into a set of candidates rather than finished art.
 - **End that turn with "which one is closer?"** The candidates ARE the question.
-- The choice is theirs to make, not yours to guess: they either say which one in the chat or
-  press "make this the style" on the card where the panel offers it. Never write
-  `design/style.md` from a candidate you happen to like — once they HAVE chosen, record the
-  choice in `design/decisions.md` and write `style.md` from that candidate.
+- **You do not adopt the style — the user does, with one click.** Each candidate card carries a
+  droplet button that measures the image's palette, writes `design/style.md` and files the
+  choice in the decision log, all in code. So when they answer in the chat, do not write
+  `style.md` and do not `record_decision` the style yourself: say which card to press
+  ("нажмите каплю на mood-2"). A palette you describe in words is a palette you guessed; the
+  button's is measured from the pixels, and the whole point of doing it this way is that the
+  look the user picked is exactly the look the project carries.
+- Once `design/style.md` exists, it is the style: quote its tokens into every later prompt.
 - Object and layout references work as they do at the prototype stage: `role: content` is a
   thing to depict, `role: layout` is structure to read and never to copy.
 

@@ -19,7 +19,11 @@ import {
 } from '@/core/agent-introspection';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { FlowStageService } from '@/services/flow/FlowStageService';
-import { FlowReferencesService, REFERENCES_DIR } from '@/services/flow/FlowReferencesService';
+import {
+  FlowReferencesService,
+  REFERENCES_DIR,
+  type FlowReferenceRole,
+} from '@/services/flow/FlowReferencesService';
 import { DECISIONS_PATH, appendDecision } from '@/services/flow/decision-log';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
@@ -1733,6 +1737,12 @@ export class AgentToolRegistry {
               enum: ['horizontal', 'vertical'],
               description: 'Mirror the result horizontally or vertically (applied after rotate).',
             },
+            role: {
+              type: 'string',
+              enum: ['style', 'content', 'layout', 'style-candidate'],
+              description:
+                'What the picture is FOR, recorded in the references index (only for files landing under `references/`). Pass \'style-candidate\' for every image of a moodboard turn: the column then offers the user a one-click "make it the style", which measures the palette and writes design/style.md without spending a turn. Omit for ordinary generation — the role is guessed from the name.',
+            },
           },
           required: ['prompt', 'name'],
           additionalProperties: false,
@@ -3424,7 +3434,7 @@ export class AgentToolRegistry {
       // often come out sideways and the model can't otherwise re-orient without regenerating.
       const oriented = await this.applyOrientation(processed.id, args, id => handleIds.add(id));
       const saved = await this.assetGen.save(oriented, name, {});
-      await this.recordGeneratedReference(saved.path, prompt);
+      await this.recordGeneratedReference(saved.path, prompt, asReferenceRole(args.role));
       const transparency = await this.assetGen.alphaStats(oriented);
       // Preview the ORIENTED handle (what was actually saved), not the raw generation.
       return {
@@ -3488,7 +3498,11 @@ export class AgentToolRegistry {
    * Only files that actually landed under `references/` are recorded: the index describes that one
    * folder, and a `sprites/` entry in it would be metadata about a file nothing reads it for.
    */
-  private async recordGeneratedReference(savedPath: string, prompt: string): Promise<void> {
+  private async recordGeneratedReference(
+    savedPath: string,
+    prompt: string,
+    role?: FlowReferenceRole
+  ): Promise<void> {
     if (!savedPath.startsWith(`${REFERENCES_DIR}/`)) {
       return;
     }
@@ -3497,7 +3511,14 @@ export class AgentToolRegistry {
     // folder it describes).
     const key = fileName.split('/').pop() ?? fileName;
     try {
-      await this.flowReferences.upsert(key, { origin: 'agent', caption: prompt, prompt });
+      await this.flowReferences.upsert(key, {
+        origin: 'agent',
+        caption: prompt,
+        prompt,
+        // Omitted rather than written as undefined: without a role the index keeps whatever
+        // `guessAttachmentRole` decided from the name, which is the right default.
+        ...(role ? { role } : {}),
+      });
     } catch (error) {
       // A missing index entry degrades to "name + origin user" on the card; failing the whole
       // generation over its sidecar would throw away the image that was just paid for.
@@ -4454,6 +4475,19 @@ const sliceEditContext = (
     }
   }
   return null;
+};
+
+/**
+ * The `role` a generation declares, or undefined for "let the index guess from the name".
+ *
+ * Validated against the roles the references index understands rather than trusted: an unknown
+ * string would be written into `index.json` and come back as a role chip nothing can render.
+ */
+const asReferenceRole = (value: unknown): FlowReferenceRole | undefined => {
+  const roles: readonly FlowReferenceRole[] = ['style', 'content', 'layout', 'style-candidate'];
+  return typeof value === 'string' && roles.includes(value as FlowReferenceRole)
+    ? (value as FlowReferenceRole)
+    : undefined;
 };
 
 const asString = (value: unknown): string => {

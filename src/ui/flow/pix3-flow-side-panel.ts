@@ -16,6 +16,7 @@ import {
   type FlowReferenceRole,
 } from '@/services/flow/FlowReferencesService';
 import { DeleteReferenceCommand } from '@/features/flow/DeleteReferenceCommand';
+import { MakeStyleCommand } from '@/features/flow/MakeStyleCommand';
 import {
   ATTACHMENT_ROLES,
   attachmentRoleHint,
@@ -360,6 +361,23 @@ export class Pix3FlowSidePanel extends ComponentBase {
     await this.refresh();
   }
 
+  /**
+   * Answer the moodboard by clicking, not by typing (design §3.9).
+   *
+   * The whole point of the button is that the choice costs no turn: the palette is measured from
+   * the image and `design/style.md` is written by code, so the look the user picked is exactly the
+   * look the project carries — no model in between to paraphrase the colours.
+   */
+  private async onMakeStyle(item: FlowReferenceItem): Promise<void> {
+    this.busy = true;
+    try {
+      await this.commandDispatcher.execute(new MakeStyleCommand({ path: item.path }));
+    } finally {
+      this.busy = false;
+    }
+    await this.refresh();
+  }
+
   private async onDelete(item: FlowReferenceItem): Promise<void> {
     await this.commandDispatcher.execute(new DeleteReferenceCommand({ path: item.path }));
     // Refresh regardless of the result: a delete the user declined leaves the list correct anyway,
@@ -629,6 +647,19 @@ export class Pix3FlowSidePanel extends ComponentBase {
                 </button>
               `
             : null}
+          ${canBecomeStyle(item)
+            ? html`
+                <button
+                  class="ref-card__action"
+                  type="button"
+                  title="Make this the project style — measures its palette and writes design/style.md"
+                  aria-label=${`Make ${item.name} the style`}
+                  @click=${() => void this.onMakeStyle(item)}
+                >
+                  ${this.icons.getIcon('droplet', IconSize.SMALL)}
+                </button>
+              `
+            : null}
           ${item.origin === 'agent' && !item.pinned && !item.readOnly
             ? html`
                 <button
@@ -703,6 +734,21 @@ const kindIcon = (item: FlowReferenceItem): string => {
   if (['ttf', 'otf', 'woff', 'woff2'].includes(ext)) return 'type';
   return 'file';
 };
+
+/**
+ * Whether the card offers "make it the style".
+ *
+ * Raster images under `references/` only — the palette is read from pixels, so an SVG or a text
+ * file would adopt an empty one. The picture already carrying the `style` role is skipped: the
+ * button would rewrite the same three files with the same contents and push a no-op onto history.
+ */
+const canBecomeStyle = (item: FlowReferenceItem): boolean =>
+  item.kind === 'image' &&
+  !item.pinned &&
+  !item.readOnly &&
+  !item.missing &&
+  item.role !== 'style' &&
+  /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(item.name);
 
 const roleChipLabel = (role: FlowReferenceRole): string =>
   role === 'style-candidate' ? 'candidate' : attachmentRoleLabel(role);

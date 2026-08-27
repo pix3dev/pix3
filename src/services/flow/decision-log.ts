@@ -44,8 +44,13 @@ export interface DecisionEntry {
  */
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').replace(/[*_`]/g, '').trim();
 
-/** Trailing sentence punctuation, so `choice` and `reason` join into one readable sentence. */
-const stripTrailingStop = (text: string): string => text.replace(/[.!?]+$/, '');
+/**
+ * End a fragment with exactly one sentence stop, so `choice` and `reason` read as one sentence.
+ *
+ * `…` counts as a stop it already has: a caller handing in a deliberately truncated phrase would
+ * otherwise get `stations….`, which is what the first condensed moodboard caption wrote live.
+ */
+const endWithStop = (text: string): string => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 /**
  * Today as `YYYY-MM-DD`, in the USER's timezone. Split out so tests can hand in a fixed day.
@@ -76,9 +81,9 @@ export const formatDecisionLine = (
   const reason = collapse(entry.reason ?? '');
   const rejected = (entry.rejected ?? []).map(collapse).filter(Boolean);
   const date = entry.date ?? todayStamp();
-  const parts = [`- **${question}** → ${stripTrailingStop(choice)}.`];
+  const parts = [`- **${question}** → ${endWithStop(choice)}`];
   if (reason) {
-    parts.push(`${stripTrailingStop(reason)}.`);
+    parts.push(endWithStop(reason));
   }
   if (rejected.length > 0) {
     parts.push(`_(rejected: ${rejected.join(', ')})_`);
