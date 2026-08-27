@@ -384,4 +384,94 @@ describe('AgentSettingsService', () => {
       expect(service.getModelSubstitution('opencode-zen')).toBeNull();
     });
   });
+
+  /**
+   * A lane whose list runs `fable, opus, sonnet, haiku` makes "the first entry" the default for
+   * every role at once, which is the one arrangement the advisor must not have: it exists to be a
+   * second, stronger opinion than the model driving the turn. `defaultModelIds` is how a provider
+   * says which of its own models belongs in which seat.
+   */
+  describe('role models a provider nominates', () => {
+    const caps = {
+      supportsTools: true,
+      supportsImages: true,
+      supportsSystemPrompt: true,
+      maxOutputTokens: 32_000,
+    };
+    const nominatingLane = (): LlmProvider => ({
+      id: 'nominating-lane',
+      label: 'Nominating lane',
+      models: [
+        { id: 'claude-fable-5', label: 'Fable 5', capabilities: caps },
+        { id: 'claude-opus-4-8', label: 'Opus 4.8', capabilities: caps },
+      ],
+      defaultModelIds: {
+        main: 'claude-opus-4-8',
+        advisor: 'claude-fable-5',
+        vision: 'claude-opus-4-8',
+      },
+      apiKeySecretId: 'ai-provider:pix3-bridge:token',
+      getModel: () => undefined,
+      chat: async () => ({ content: [], stopReason: 'end_turn' as const }),
+    });
+
+    const withNominatingLane = (): AgentSettingsService => {
+      const service = new AgentSettingsService();
+      const registry = new LlmProviderRegistry();
+      registry.setBridgeProviders([nominatingLane()]);
+      Object.defineProperty(service, 'registry', { value: registry, configurable: true });
+      Object.defineProperty(service, 'secrets', {
+        value: new FakeSecretStorage(),
+        configurable: true,
+      });
+      return service;
+    };
+
+    it('uses the nominated main model, not the head of the catalog', () => {
+      expect(withNominatingLane().getSelectedModelId('nominating-lane')).toBe('claude-opus-4-8');
+    });
+
+    it('still honours a model the user picked by hand', () => {
+      const service = withNominatingLane();
+      service.updatePreferences({ modelByProvider: { 'nominating-lane': 'claude-fable-5' } });
+      expect(service.getSelectedModelId('nominating-lane')).toBe('claude-fable-5');
+    });
+
+    it('fills the advisor and vision seats with the nominated models', () => {
+      const service = withNominatingLane();
+      service.applyAssistantDefaults();
+      const prefs = service.getPreferences();
+      expect(prefs.advisorProviderId).toBe('nominating-lane');
+      expect(prefs.advisorModelId).toBe('claude-fable-5');
+      expect(prefs.visionProviderId).toBe('nominating-lane');
+      expect(prefs.visionModelId).toBe('claude-opus-4-8');
+      // Filled in, not chosen — so a later probe may revise it.
+      expect(prefs.advisorPinned).toBe(false);
+      expect(prefs.visionPinned).toBe(false);
+    });
+
+    it('leaves a deliberate "Off" / "Auto" alone, probe after probe', () => {
+      const service = withNominatingLane();
+      service.updatePreferences({ advisorProviderId: '', visionProviderId: '' });
+      service.applyAssistantDefaults();
+      const prefs = service.getPreferences();
+      expect(prefs.advisorProviderId).toBe('');
+      expect(prefs.visionProviderId).toBe('');
+    });
+
+    it('does not touch a hand-picked assistant provider', () => {
+      const service = withNominatingLane();
+      service.updatePreferences({ visionProviderId: 'gemini', visionModelId: 'gemini-pro' });
+      service.applyAssistantDefaults();
+      expect(service.getPreferences().visionProviderId).toBe('gemini');
+      expect(service.getPreferences().visionModelId).toBe('gemini-pro');
+    });
+
+    it('does nothing when no registered provider nominates role models', () => {
+      const service = buildService();
+      service.applyAssistantDefaults();
+      expect(service.getPreferences().advisorProviderId).toBe('');
+      expect(service.getPreferences().visionProviderId).toBe('');
+    });
+  });
 });

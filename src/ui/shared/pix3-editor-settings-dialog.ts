@@ -22,7 +22,7 @@ import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { BRIDGE_TOKEN_SECRET_ID, DEFAULT_BRIDGE_URL } from '@/services/llm/BridgeProviders';
-import { formatPricingHint, type LlmModel } from '@/services/llm/LlmTypes';
+import { formatPricingHint, type LlmModel, type LlmProvider } from '@/services/llm/LlmTypes';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import {
   StropheAccountService,
@@ -179,6 +179,18 @@ export class EditorSettingsDialog extends ComponentBase {
 
   @state()
   private activeSection: EditorSettingsTab = 'general';
+
+  /**
+   * Keys of the explanations currently expanded. Every note in this dialog lives behind an (i)
+   * toggle: the prose is worth keeping (most of it explains a decision the control itself cannot
+   * convey) but stacked permanently under every field it buried the controls.
+   */
+  @state()
+  private openNotes: readonly string[] = [];
+
+  /** Keys of the API-key rows currently expanded — a key is entered once and then stays put. */
+  @state()
+  private openKeys: readonly string[] = [];
 
   /** Active sub-tab id within the current section (empty when the section has none). */
   @state()
@@ -417,9 +429,21 @@ export class EditorSettingsDialog extends ComponentBase {
       this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
       this.requestUpdate();
     });
-    // Re-render when the bridge connects/disconnects (dynamic providers appear/disappear).
+    // Re-render when the bridge connects/disconnects (dynamic providers appear/disappear). A probe
+    // also fills in the assistant roles from the lane that nominates models for them, so the local
+    // copies of those prefs are re-read — otherwise this pane would keep showing "Off"/"Auto" for
+    // settings that have just been decided under it.
     this.disposeBridgeSubscription = this.bridge.subscribe(() => {
       this.bridgeAvailable = this.bridge.isAvailable();
+      const prefs = this.agentSettings.getPreferences();
+      this.advisorProviderId = prefs.advisorProviderId;
+      this.advisorModelId = prefs.advisorModelId;
+      this.visionProviderId = prefs.visionProviderId;
+      this.visionModelId = prefs.visionModelId;
+      void this.refreshBridgeStatus();
+      void this.refreshAdvisorKeyStatus();
+      void this.refreshVisionKeyStatus();
+      void this.refreshAssistantStatus();
       this.requestUpdate();
     });
   }
@@ -493,6 +517,80 @@ export class EditorSettingsDialog extends ComponentBase {
     `;
   }
 
+  /** An (i) button that reveals the note registered under `key` by {@link renderNote}. */
+  private renderInfo(key: string, label = 'Explain this setting') {
+    const open = this.openNotes.includes(key);
+    return html`<button
+      type="button"
+      class="info-toggle ${open ? 'is-open' : ''}"
+      aria-expanded=${open}
+      aria-label=${label}
+      title=${label}
+      @click=${() => this.toggleNote(key)}
+    >
+      ${this.icons.getIcon('info', IconSize.SMALL)}
+    </button>`;
+  }
+
+  /** The note for `key`, rendered only while its {@link renderInfo} toggle is on. */
+  private renderNote(key: string, body: unknown) {
+    return this.openNotes.includes(key) ? html`<div class="field-note">${body}</div>` : null;
+  }
+
+  private toggleNote(key: string): void {
+    this.openNotes = this.openNotes.includes(key)
+      ? this.openNotes.filter(item => item !== key)
+      : [...this.openNotes, key];
+  }
+
+  /**
+   * The key button that reveals the entry row for `key`. Its own colour carries the status that used
+   * to need a permanently-visible "Configured" chip, so a keyed provider still reads at a glance.
+   */
+  private renderKeyToggle(key: string, configured: boolean, label: string) {
+    const open = this.openKeys.includes(key);
+    const title = `${label} — ${configured ? 'configured' : 'not set'}`;
+    return html`<button
+      type="button"
+      class="key-toggle ${configured ? 'is-set' : ''} ${open ? 'is-open' : ''}"
+      aria-expanded=${open}
+      aria-label=${title}
+      title=${title}
+      @click=${() => this.toggleKey(key)}
+    >
+      ${this.icons.getIcon('key', IconSize.SMALL)}
+    </button>`;
+  }
+
+  /** The key entry row for `key`, rendered only while its {@link renderKeyToggle} is on. */
+  private renderKeyPanel(key: string, body: unknown) {
+    return this.openKeys.includes(key) ? html`<div class="key-panel">${body}</div>` : null;
+  }
+
+  private toggleKey(key: string): void {
+    this.openKeys = this.openKeys.includes(key)
+      ? this.openKeys.filter(item => item !== key)
+      : [...this.openKeys, key];
+  }
+
+  /**
+   * Who holds this provider's credential, which decides what its key button opens:
+   * - `subscription` — the bridge's Agent-SDK lane: the pairing token IS the only credential, and it
+   *   is set up in the bridge panel, so a second field here would only be a way to overwrite it by
+   *   accident;
+   * - `bridge` — a metered provider proxied by the bridge, whose real key never enters the browser;
+   * - `local` — a key this browser stores itself.
+   */
+  private keyOwner(
+    providerId: string,
+    apiKeySecretId: string
+  ): 'subscription' | 'bridge' | 'local' {
+    if (this.bridge.getEntries().some(e => e.id === providerId && e.kind === 'agent-sdk')) {
+      return 'subscription';
+    }
+    return apiKeySecretId === BRIDGE_TOKEN_SECRET_ID ? 'bridge' : 'local';
+  }
+
   private renderSubtabs(subtabs: readonly SettingsSubtab[]) {
     return html`
       <div class="settings-subtabs" role="tablist">
@@ -538,12 +636,14 @@ export class EditorSettingsDialog extends ComponentBase {
   private renderAboutTab() {
     return html`
       <div class="settings-field">
-        <span class="key-label">Version</span>
-        <div class="hint">
-          Pix3 Editor
-          ${CURRENT_EDITOR_VERSION.displayVersion}${CURRENT_EDITOR_VERSION.publishedAt
-            ? ` · published ${new Date(CURRENT_EDITOR_VERSION.publishedAt).toLocaleDateString()}`
-            : ''}
+        <div class="field-head">
+          <span class="field-title">Version</span>
+          <span class="resolved-tag">
+            Pix3 Editor
+            ${CURRENT_EDITOR_VERSION.displayVersion}${CURRENT_EDITOR_VERSION.publishedAt
+              ? ` · published ${new Date(CURRENT_EDITOR_VERSION.publishedAt).toLocaleDateString()}`
+              : ''}
+          </span>
         </div>
       </div>
 
@@ -588,68 +688,86 @@ export class EditorSettingsDialog extends ComponentBase {
   private renderGeneralTab() {
     return html`
       <div class="settings-field">
-        <label class="toggle-row">
-          <input
-            type="checkbox"
-            .checked=${this.warnOnUnsavedUnload}
-            @change=${this.onWarnToggle}
-          />
-          <span>Warn me about unsaved changes when leaving the page</span>
-        </label>
-        <div class="hint">
-          Disable this to skip the browser confirmation dialog on refresh or navigation.
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.warnOnUnsavedUnload}
+              @change=${this.onWarnToggle}
+            />
+            <span>Warn me about unsaved changes when leaving the page</span>
+          </label>
+          ${this.renderInfo('warn-unsaved')}
         </div>
+        ${this.renderNote(
+          'warn-unsaved',
+          'Disable this to skip the browser confirmation dialog on refresh or navigation.'
+        )}
       </div>
 
       <div class="settings-field">
-        <label class="toggle-row">
-          <input
-            type="checkbox"
-            .checked=${this.pauseRenderingOnUnfocus}
-            @change=${this.onPauseToggle}
-          />
-          <span>Pause rendering when window is unfocused</span>
-        </label>
-        <div class="hint">
-          Reduces CPU/GPU usage and saves battery when you are working in another window.
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.pauseRenderingOnUnfocus}
+              @change=${this.onPauseToggle}
+            />
+            <span>Pause rendering when window is unfocused</span>
+          </label>
+          ${this.renderInfo('pause-rendering')}
         </div>
+        ${this.renderNote(
+          'pause-rendering',
+          'Reduces CPU/GPU usage and saves battery when you are working in another window.'
+        )}
       </div>
 
       <div class="settings-section">
-        <h3 class="section-title">2D Navigation</h3>
+        <h3 class="section-title"><span>2D Navigation</span></h3>
 
         <div class="settings-field">
-          <label class="slider-row">
-            <span>Pan Sensitivity: ${this.navigation2D.panSensitivity.toFixed(2)}</span>
-            <input
-              type="range"
-              min="0.1"
-              max="1.0"
-              step="0.05"
-              .value=${String(this.navigation2D.panSensitivity)}
-              @input=${this.onPanSensitivityChange}
-            />
-          </label>
-          <div class="hint">
-            Controls how fast the camera pans with mouse wheel or trackpad gestures.
+          <div class="field-head">
+            <span class="field-title">
+              Pan sensitivity: ${this.navigation2D.panSensitivity.toFixed(2)}
+            </span>
+            ${this.renderInfo('pan-sensitivity')}
           </div>
+          ${this.renderNote(
+            'pan-sensitivity',
+            'Controls how fast the camera pans with mouse wheel or trackpad gestures.'
+          )}
+          <input
+            type="range"
+            aria-label="Pan sensitivity"
+            min="0.1"
+            max="1.0"
+            step="0.05"
+            .value=${String(this.navigation2D.panSensitivity)}
+            @input=${this.onPanSensitivityChange}
+          />
         </div>
 
         <div class="settings-field">
-          <label class="slider-row">
-            <span>Zoom Sensitivity: ${this.navigation2D.zoomSensitivity.toFixed(4)}</span>
-            <input
-              type="range"
-              min="0.001"
-              max="0.01"
-              step="0.0005"
-              .value=${String(this.navigation2D.zoomSensitivity)}
-              @input=${this.onZoomSensitivityChange}
-            />
-          </label>
-          <div class="hint">
-            Controls how fast the camera zooms with Ctrl+wheel or pinch gestures.
+          <div class="field-head">
+            <span class="field-title">
+              Zoom sensitivity: ${this.navigation2D.zoomSensitivity.toFixed(4)}
+            </span>
+            ${this.renderInfo('zoom-sensitivity')}
           </div>
+          ${this.renderNote(
+            'zoom-sensitivity',
+            'Controls how fast the camera zooms with Ctrl+wheel or pinch gestures.'
+          )}
+          <input
+            type="range"
+            aria-label="Zoom sensitivity"
+            min="0.001"
+            max="0.01"
+            step="0.0005"
+            .value=${String(this.navigation2D.zoomSensitivity)}
+            @input=${this.onZoomSensitivityChange}
+          />
         </div>
       </div>
     `;
@@ -658,19 +776,29 @@ export class EditorSettingsDialog extends ComponentBase {
   private renderAgentModelTab() {
     const providers = this.llmProviders.list().filter(provider => !provider.hidden);
     if (providers.length === 0) {
-      return html`<div class="hint">No LLM providers are registered.</div>`;
+      return html`<div class="field-note">No LLM providers are registered.</div>`;
     }
     const provider = this.llmProviders.get(this.llmProviderId) ?? providers[0];
     const models = provider ? this.llmModelCatalog.getModels(provider.id) : [];
     const canRefreshModels = provider ? this.llmModelCatalog.supportsRefresh(provider.id) : false;
     const helpUrl = provider?.apiKeyHelpUrl;
+    const owner = provider ? this.keyOwner(provider.id, provider.apiKeySecretId) : 'local';
 
     return html`
       ${this.renderBridgePanel()}
       <div class="settings-field">
-        <label class="select-row">
-          <span>Provider</span>
-          <select @change=${this.onLlmProviderChange}>
+        <div class="field-head">
+          <span class="field-title">Provider &amp; model</span>
+          ${this.renderInfo('llm-model')}
+        </div>
+        ${this.renderNote(
+          'llm-model',
+          html`Answers every turn in the Agent chat. Bridge-served providers appear here only while
+          Pix3AgentBridge is running; Gemini and OpenRouter are called straight from this browser
+          with a key you paste.`
+        )}
+        <div class="inline-row">
+          <select class="inline-select" aria-label="Provider" @change=${this.onLlmProviderChange}>
             ${providers.map(
               item =>
                 html`<option value=${item.id} ?selected=${item.id === this.llmProviderId}>
@@ -678,13 +806,7 @@ export class EditorSettingsDialog extends ComponentBase {
                 </option>`
             )}
           </select>
-        </label>
-      </div>
-
-      <div class="settings-field">
-        <label class="select-row">
-          <span>Model</span>
-          <select @change=${this.onLlmModelSelectChange}>
+          <select class="inline-select" aria-label="Model" @change=${this.onLlmModelSelectChange}>
             ${models.map(model => {
               const hint = formatPricingHint(model.pricing);
               return html`<option
@@ -702,7 +824,7 @@ export class EditorSettingsDialog extends ComponentBase {
           </select>
           ${canRefreshModels
             ? html`<button
-                class="btn-key-save llm-models-refresh ${this.llmModelsBusy ? 'is-busy' : ''}"
+                class="icon-btn ${this.llmModelsBusy ? 'is-busy' : ''}"
                 title="Fetch the provider's current model list"
                 aria-label="Refresh model list"
                 @click=${this.onRefreshLlmModels}
@@ -711,8 +833,12 @@ export class EditorSettingsDialog extends ComponentBase {
                 ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
               </button>`
             : null}
-        </label>
-        ${this.llmModelsMessage ? html`<div class="hint">${this.llmModelsMessage}</div>` : null}
+          ${this.renderKeyToggle(
+            'llm',
+            owner === 'local' ? this.llmKeyConfigured : this.bridgeTokenConfigured,
+            `${provider?.label ?? 'Provider'} API key`
+          )}
+        </div>
         ${this.llmModelCustomMode
           ? html`<input
               type="text"
@@ -722,93 +848,114 @@ export class EditorSettingsDialog extends ComponentBase {
               placeholder="custom model id (e.g. a local model name)"
             />`
           : null}
+        ${this.llmModelsMessage
+          ? html`<div class="field-note">${this.llmModelsMessage}</div>`
+          : null}
+        ${this.renderKeyPanel('llm', this.renderLlmKeyBody(provider, owner, helpUrl))}
       </div>
 
       ${provider?.requiresBaseUrl
         ? html`<div class="settings-field">
-            <label class="select-row">
-              <span>Base URL</span>
-              <input
-                type="text"
-                .value=${this.llmBaseUrl}
-                @change=${this.onLlmBaseUrlChange}
-                placeholder=${provider.defaultBaseUrl ?? 'https://…'}
-              />
-            </label>
-            <div class="hint">
-              Hosted OpenAI by default; point it at Ollama / LM Studio for local models (enable CORS
-              there, e.g. <code>OLLAMA_ORIGINS</code>).
+            <div class="field-head">
+              <span class="field-title">Base URL</span>
+              ${this.renderInfo('llm-base-url')}
             </div>
+            ${this.renderNote(
+              'llm-base-url',
+              html`Hosted OpenAI by default; point it at Ollama / LM Studio for local models (enable
+                CORS there, e.g. <code>OLLAMA_ORIGINS</code>).`
+            )}
+            <input
+              type="text"
+              .value=${this.llmBaseUrl}
+              @change=${this.onLlmBaseUrlChange}
+              placeholder=${provider.defaultBaseUrl ?? 'https://…'}
+            />
           </div>`
         : null}
-      ${provider?.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID
-        ? html`<div class="settings-field">
-            <div class="hint">
-              The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
-              machine — manage it there, not here:
-            </div>
-            ${this.renderCommandBlock(`pix3-agent-bridge provider set-key ${provider.id} <key>`)}
-          </div>`
-        : html`<div class="settings-field">
-            <span class="key-label">
-              API Key
-              <span class="key-status ${this.llmKeyConfigured ? 'is-set' : 'is-unset'}">
-                ${this.llmKeyConfigured ? 'Configured' : 'Not set'}
-              </span>
-            </span>
-            <div class="key-row">
-              <input
-                type="password"
-                autocomplete="off"
-                placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
-                .value=${this.llmKeyInput}
-                @input=${this.onLlmKeyInput}
-              />
-              <button
-                class="btn-key-save"
-                @click=${this.onSaveLlmKey}
-                ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
-              >
-                Save
-              </button>
-              ${this.llmKeyConfigured
-                ? html`<button
-                    class="btn-key-clear"
-                    @click=${this.onClearLlmKey}
-                    ?disabled=${this.llmKeyBusy}
-                  >
-                    Clear
-                  </button>`
-                : null}
-            </div>
-            <div class="hint">
-              ${this.llmKeyMessage
-                ? html`<span>${this.llmKeyMessage}</span>`
-                : html`Paste your provider API
-                  key${helpUrl
-                    ? html` (get one from
-                        <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a
-                        >)`
-                    : ''}.
-                  Stored encrypted in this browser only — never synced, and only sent to the
-                  selected provider.`}
-            </div>
-          </div>`}
 
       <div class="settings-field">
-        <label class="toggle-row">
-          <input
-            type="checkbox"
-            .checked=${this.llmDebugMode}
-            @change=${this.onLlmDebugModeChange}
-          />
-          <span>Debug mode</span>
-        </label>
-        <div class="hint">
-          Reveals the raw wire-format conversation log, the resolved system prompt, and per-response
-          timing / tokens-per-second in the Agent panel, and logs every request and response to the
-          browser devtools console.
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.llmDebugMode}
+              @change=${this.onLlmDebugModeChange}
+            />
+            <span>Debug mode</span>
+          </label>
+          ${this.renderInfo('llm-debug')}
         </div>
+        ${this.renderNote(
+          'llm-debug',
+          html`Reveals the raw wire-format conversation log, the resolved system prompt, and
+          per-response timing / tokens-per-second in the Agent panel, and logs every request and
+          response to the browser devtools console.`
+        )}
+      </div>
+    `;
+  }
+
+  /** What the main provider's key button opens — see {@link keyOwner} for the three cases. */
+  private renderLlmKeyBody(
+    provider: LlmProvider | undefined,
+    owner: 'subscription' | 'bridge' | 'local',
+    helpUrl: string | undefined
+  ) {
+    if (!provider) {
+      return null;
+    }
+    if (owner === 'subscription') {
+      return html`<div class="field-note">
+        Served by your Claude subscription through Pix3AgentBridge — there is no provider key. The
+        only credential is the bridge pairing token above.
+      </div>`;
+    }
+    if (owner === 'bridge') {
+      return html`
+        <div class="field-note">
+          The API key for <strong>${provider.label}</strong> lives in Pix3AgentBridge on your
+          machine — manage it there, not here:
+        </div>
+        ${this.renderCommandBlock(`pix3-agent-bridge provider set-key ${provider.id} <key>`)}
+      `;
+    }
+    return html`
+      <div class="key-row">
+        <input
+          type="password"
+          autocomplete="off"
+          placeholder=${this.llmKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+          .value=${this.llmKeyInput}
+          @input=${this.onLlmKeyInput}
+        />
+        <button
+          class="btn-key-save"
+          @click=${this.onSaveLlmKey}
+          ?disabled=${!this.llmKeyInput.trim() || this.llmKeyBusy}
+        >
+          Save
+        </button>
+        ${this.llmKeyConfigured
+          ? html`<button
+              class="btn-key-clear"
+              @click=${this.onClearLlmKey}
+              ?disabled=${this.llmKeyBusy}
+            >
+              Clear
+            </button>`
+          : null}
+      </div>
+      <div class="field-note">
+        ${this.llmKeyMessage
+          ? html`<span>${this.llmKeyMessage}</span>`
+          : html`Paste your provider API
+            key${helpUrl
+              ? html` (get one from
+                  <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+              : ''}.
+            Stored encrypted in this browser only — never synced, and only sent to the selected
+            provider.`}
       </div>
     `;
   }
@@ -856,78 +1003,93 @@ export class EditorSettingsDialog extends ComponentBase {
     return html`
       <div class="settings-section">
         <h3 class="section-title">
-          Pix3AgentBridge
+          <span>Pix3AgentBridge</span>
           <span class="key-status ${connected ? 'is-set' : 'is-unset'}">
             ${connected ? 'Connected' : 'Not running'}
           </span>
+          ${this.renderInfo('bridge', 'About Pix3AgentBridge')}
         </h3>
-        <div class="hint">
-          Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your machine
-          so keys never enter the browser. Gemini works without it. Start it and open the pairing
-          link it prints — that stores the token for you; the field below is only for pasting it by
-          hand. Then add providers:
-        </div>
-        ${this.renderCommandBlock('npx @pix3/agent-bridge')}
-        ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}
+        ${this.renderNote(
+          'bridge',
+          html`Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your
+          machine so keys never enter the browser. Gemini works without it. Start it and open the
+          pairing link it prints — that stores the token for you; the field behind the key button is
+          only for pasting it by hand. Then add providers:
+          ${this.renderCommandBlock('npx @pix3/agent-bridge')}
+          ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}`
+        )}
 
         <div class="settings-field">
-          <span class="key-label">
-            Pairing token
-            <span class="key-status ${this.bridgeTokenConfigured ? 'is-set' : 'is-unset'}">
-              ${this.bridgeTokenConfigured ? 'Configured' : 'Not set'}
-            </span>
-          </span>
-          <div class="key-row">
-            <input
-              type="password"
-              autocomplete="off"
-              placeholder=${this.bridgeTokenConfigured ? '•••••••• stored' : 'Paste pairing token'}
-              .value=${this.bridgeTokenInput}
-              @input=${this.onBridgeTokenInput}
-            />
+          <div class="field-head">
+            <span class="field-title">Bridge URL</span>
+            ${this.renderInfo('bridge-url')}
+            <span class="field-head-spacer"></span>
             <button
-              class="btn-key-save"
-              @click=${this.onSaveBridgeToken}
-              ?disabled=${!this.bridgeTokenInput.trim() || this.bridgeBusy}
+              class="icon-btn"
+              title="Recheck the connection"
+              aria-label="Recheck the bridge connection"
+              @click=${this.onProbeBridge}
+              ?disabled=${this.bridgeBusy}
             >
-              Save
+              ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
             </button>
-            ${this.bridgeTokenConfigured
-              ? html`<button
-                  class="btn-key-clear"
-                  @click=${this.onClearBridgeToken}
-                  ?disabled=${this.bridgeBusy}
-                >
-                  Clear
-                </button>`
-              : null}
-            <button class="btn-key-save" @click=${this.onProbeBridge} ?disabled=${this.bridgeBusy}>
-              Recheck
-            </button>
+            ${this.renderKeyToggle('bridge-token', this.bridgeTokenConfigured, 'Pairing token')}
           </div>
+          ${this.renderNote(
+            'bridge-url',
+            'Only change this if you run the bridge on a non-default port.'
+          )}
+          <input
+            type="text"
+            .value=${this.bridgeUrlInput}
+            @change=${this.onBridgeUrlChange}
+            placeholder=${DEFAULT_BRIDGE_URL}
+          />
+          ${this.renderKeyPanel(
+            'bridge-token',
+            html`
+              <div class="key-row">
+                <input
+                  type="password"
+                  autocomplete="off"
+                  placeholder=${this.bridgeTokenConfigured
+                    ? '•••••••• stored'
+                    : 'Paste pairing token'}
+                  .value=${this.bridgeTokenInput}
+                  @input=${this.onBridgeTokenInput}
+                />
+                <button
+                  class="btn-key-save"
+                  @click=${this.onSaveBridgeToken}
+                  ?disabled=${!this.bridgeTokenInput.trim() || this.bridgeBusy}
+                >
+                  Save
+                </button>
+                ${this.bridgeTokenConfigured
+                  ? html`<button
+                      class="btn-key-clear"
+                      @click=${this.onClearBridgeToken}
+                      ?disabled=${this.bridgeBusy}
+                    >
+                      Clear
+                    </button>`
+                  : null}
+              </div>
+              <div class="field-note">
+                The token the bridge prints on start — or just open the pairing link next to it,
+                which stores it for you.
+              </div>
+            `
+          )}
           ${this.bridgeMessage
-            ? html`<div class="hint ${this.bridgeMessageIsWarning ? 'hint--warn' : ''}">
+            ? html`<div class="field-note ${this.bridgeMessageIsWarning ? 'field-note--warn' : ''}">
                 ${this.bridgeMessage}
               </div>`
             : null}
+          ${connected && entries.length > 0
+            ? html`<div class="field-note">Serving: ${entries.map(e => e.label).join(', ')}.</div>`
+            : null}
         </div>
-
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Bridge URL</span>
-            <input
-              type="text"
-              .value=${this.bridgeUrlInput}
-              @change=${this.onBridgeUrlChange}
-              placeholder=${DEFAULT_BRIDGE_URL}
-            />
-          </label>
-          <div class="hint">Only change this if you run the bridge on a non-default port.</div>
-        </div>
-
-        ${connected && entries.length > 0
-          ? html`<div class="hint">Serving: ${entries.map(e => e.label).join(', ')}.</div>`
-          : null}
       </div>
     `;
   }
@@ -1012,7 +1174,7 @@ export class EditorSettingsDialog extends ComponentBase {
 
   private renderAgentAssistantsTab() {
     if (this.llmProviders.list().length === 0) {
-      return html`<div class="hint">No LLM providers are registered.</div>`;
+      return html`<div class="field-note">No LLM providers are registered.</div>`;
     }
     return html`${this.renderAdvisorField()} ${this.renderVisionField()}`;
   }
@@ -1025,8 +1187,10 @@ export class EditorSettingsDialog extends ComponentBase {
    * already keyed needs no extra input.
    */
   private renderSecondaryLlm(config: {
+    /** Stable key for this block's note / key-panel toggles. */
+    key: string;
     title: string;
-    hint: string;
+    hint: unknown;
     providerId: string;
     modelId: string;
     /** Label of the first provider option (value=''): 'Off' for advisor, 'Auto' for vision. */
@@ -1052,106 +1216,116 @@ export class EditorSettingsDialog extends ComponentBase {
       const visionModels = allModels.filter(m => m.capabilities.supportsImages);
       return visionModels.length > 0 ? visionModels : allModels;
     })();
+    const owner = provider ? this.keyOwner(provider.id, provider.apiKeySecretId) : 'local';
 
     return html`
       <div class="settings-subsection">
-        <h4 class="subsection-title">${config.title}</h4>
-        <div class="hint">${config.hint}</div>
+        <div class="field-head">
+          <h4 class="subsection-title">${config.title}</h4>
+          ${this.renderInfo(config.key)}
+          ${config.status
+            ? html`<span class="resolved-tag" title="What this role resolves to right now">
+                ${config.status}
+              </span>`
+            : null}
+        </div>
+        ${this.renderNote(config.key, config.hint)}
 
-        <div class="settings-field">
-          <label class="select-row">
-            <span>Provider</span>
-            <select
-              @change=${(e: Event) =>
-                config.onProviderChange((e.target as HTMLSelectElement).value)}
-            >
-              <option value="" ?selected=${config.providerId === ''}>
-                ${config.providerNoneLabel}
-              </option>
-              ${this.llmProviders
-                .list()
-                .map(
-                  item =>
-                    html`<option value=${item.id} ?selected=${item.id === config.providerId}>
-                      ${item.label}
-                    </option>`
-                )}
-            </select>
-          </label>
+        <div class="inline-row">
+          <select
+            class="inline-select"
+            aria-label="Provider"
+            @change=${(e: Event) => config.onProviderChange((e.target as HTMLSelectElement).value)}
+          >
+            <option value="" ?selected=${config.providerId === ''}>
+              ${config.providerNoneLabel}
+            </option>
+            ${this.llmProviders
+              .list()
+              .map(
+                item =>
+                  html`<option value=${item.id} ?selected=${item.id === config.providerId}>
+                    ${item.label}
+                  </option>`
+              )}
+          </select>
+          <select
+            class="inline-select"
+            aria-label="Model"
+            ?disabled=${!provider}
+            @change=${(e: Event) => config.onModelChange((e.target as HTMLSelectElement).value)}
+          >
+            <option value="" ?selected=${config.modelId === ''}>${config.modelDefaultLabel}</option>
+            ${models.map(model => {
+              const hint = formatPricingHint(model.pricing);
+              return html`<option value=${model.id} ?selected=${model.id === config.modelId}>
+                ${model.label}${hint ? ` · ${hint}` : ''}
+              </option>`;
+            })}
+          </select>
+          ${provider
+            ? this.renderKeyToggle(
+                `${config.key}-key`,
+                config.keyConfigured,
+                `${provider.label} API key`
+              )
+            : null}
         </div>
 
         ${provider
-          ? html`
-              <div class="settings-field">
-                <label class="select-row">
-                  <span>Model</span>
-                  <select
-                    @change=${(e: Event) =>
-                      config.onModelChange((e.target as HTMLSelectElement).value)}
-                  >
-                    <option value="" ?selected=${config.modelId === ''}>
-                      ${config.modelDefaultLabel}
-                    </option>
-                    ${models.map(model => {
-                      const hint = formatPricingHint(model.pricing);
-                      return html`<option
-                        value=${model.id}
-                        ?selected=${model.id === config.modelId}
+          ? this.renderKeyPanel(
+              `${config.key}-key`,
+              owner === 'local'
+                ? html`
+                    <div class="key-row">
+                      <input
+                        type="password"
+                        autocomplete="off"
+                        placeholder=${config.keyConfigured ? '•••••••• stored' : 'Paste API key'}
+                        .value=${config.keyInput}
+                        @input=${(e: Event) =>
+                          config.onKeyInput((e.target as HTMLInputElement).value)}
+                      />
+                      <button
+                        class="btn-key-save"
+                        @click=${config.onSaveKey}
+                        ?disabled=${!config.keyInput.trim() || config.keyBusy}
                       >
-                        ${model.label}${hint ? ` · ${hint}` : ''}
-                      </option>`;
-                    })}
-                  </select>
-                </label>
-              </div>
-
-              <div class="settings-field">
-                <span class="key-label">
-                  ${provider.label} API Key
-                  <span class="key-status ${config.keyConfigured ? 'is-set' : 'is-unset'}">
-                    ${config.keyConfigured ? 'Configured' : 'Not set'}
-                  </span>
-                </span>
-                <div class="key-row">
-                  <input
-                    type="password"
-                    autocomplete="off"
-                    placeholder=${config.keyConfigured ? '•••••••• stored' : 'Paste API key'}
-                    .value=${config.keyInput}
-                    @input=${(e: Event) => config.onKeyInput((e.target as HTMLInputElement).value)}
-                  />
-                  <button
-                    class="btn-key-save"
-                    @click=${config.onSaveKey}
-                    ?disabled=${!config.keyInput.trim() || config.keyBusy}
-                  >
-                    Save
-                  </button>
-                  ${config.keyConfigured
-                    ? html`<button
-                        class="btn-key-clear"
-                        @click=${config.onClearKey}
-                        ?disabled=${config.keyBusy}
-                      >
-                        Clear
-                      </button>`
-                    : null}
-                </div>
-                <div class="hint">
-                  Shares the encrypted key with this provider everywhere in the app.
-                </div>
-              </div>
-            `
+                        Save
+                      </button>
+                      ${config.keyConfigured
+                        ? html`<button
+                            class="btn-key-clear"
+                            @click=${config.onClearKey}
+                            ?disabled=${config.keyBusy}
+                          >
+                            Clear
+                          </button>`
+                        : null}
+                    </div>
+                    <div class="field-note">
+                      Shares the encrypted key with this provider everywhere in the app.
+                    </div>
+                  `
+                : html`<div class="field-note">
+                    ${provider.label} is served by Pix3AgentBridge, so it has no key of its own here
+                    — the pairing token in <strong>Model &amp; Key</strong> is the only credential.
+                  </div>`
+            )
           : null}
-        ${config.status ? html`<div class="hint">Currently resolved: ${config.status}</div>` : null}
       </div>
     `;
   }
 
   private renderAdvisorField() {
     return this.renderSecondaryLlm({
-      title: 'Advisor model (optional)',
-      hint: 'A deliberately stronger model the agent can consult via the ask_advisor tool when it is stuck or facing a design decision. Off by default — never auto-picked.',
+      key: 'advisor',
+      title: 'Advisor model',
+      hint: html`A deliberately stronger model the agent can consult via the
+        <code>ask_advisor</code> tool when it is stuck or facing a design decision. Off unless a
+        provider serves it at no marginal cost — the Claude Code (MAX) bridge lane nominates its
+        strongest model here as soon as the bridge connects. Picking anything yourself (including
+        Off) is remembered and never overwritten.`,
       providerId: this.advisorProviderId,
       modelId: this.advisorModelId,
       providerNoneLabel: 'Off',
@@ -1173,8 +1347,11 @@ export class EditorSettingsDialog extends ComponentBase {
 
   private renderVisionField() {
     return this.renderSecondaryLlm({
-      title: 'Vision helper (optional)',
-      hint: 'Lets a text-only main model "see" images (analyze_image) by delegating to a vision-capable model. Auto = the first provider with a key and a vision model — which lands on your main model when it already supports images.',
+      key: 'vision',
+      title: 'Vision helper',
+      hint: html`Lets a text-only main model "see" images (<code>analyze_image</code>) by delegating
+      to a vision-capable model. Auto = the first provider with a key and a vision model — which
+      lands on your main model when it already supports images.`,
       providerId: this.visionProviderId,
       modelId: this.visionModelId,
       providerNoneLabel: 'Auto',
@@ -1359,10 +1536,14 @@ export class EditorSettingsDialog extends ComponentBase {
   private renderAgentSoulsTab() {
     const customSelected = this.soulId === CUSTOM_SOUL_ID;
     return html`
-      <div class="hint">
-        Give the agent a name and a character. The soul only changes how it talks — not what it
-        does.
+      <div class="field-head">
+        <span class="field-title">Personality</span>
+        ${this.renderInfo('souls')}
       </div>
+      ${this.renderNote(
+        'souls',
+        'Give the agent a name and a character. The soul only changes how it talks — not what it does.'
+      )}
 
       <div class="soul-grid">
         ${SOUL_PRESETS.map(soul => this.renderSoulCard(soul, soul.id === this.soulId))}
@@ -1446,18 +1627,27 @@ export class EditorSettingsDialog extends ComponentBase {
   private renderImagesGenerationTab() {
     const providers = this.imageProviders.list();
     if (providers.length === 0) {
-      return html`<div class="hint">No image providers are registered.</div>`;
+      return html`<div class="field-note">No image providers are registered.</div>`;
     }
     const provider = this.imageProviders.get(this.aiProviderId) ?? providers[0];
     const models = provider?.models ?? [];
     const activeModel = provider?.getModel(this.aiModelId);
     const helpUrl = provider?.apiKeyHelpUrl;
+    const ownsKey = provider?.requiresApiKey !== false;
 
     return html`
       <div class="settings-field">
-        <label class="select-row">
-          <span>Provider</span>
-          <select @change=${this.onAiProviderChange}>
+        <div class="field-head">
+          <span class="field-title">Provider &amp; model</span>
+          ${this.renderInfo('image-model')}
+        </div>
+        ${this.renderNote(
+          'image-model',
+          activeModel?.description ??
+            'Draws every generation in the Sprite Editor and the AI image tools.'
+        )}
+        <div class="inline-row">
+          <select class="inline-select" aria-label="Provider" @change=${this.onAiProviderChange}>
             ${providers.map(
               item =>
                 html`<option value=${item.id} ?selected=${item.id === this.aiProviderId}>
@@ -1465,13 +1655,7 @@ export class EditorSettingsDialog extends ComponentBase {
                 </option>`
             )}
           </select>
-        </label>
-      </div>
-
-      <div class="settings-field">
-        <label class="select-row">
-          <span>Model</span>
-          <select @change=${this.onAiModelChange}>
+          <select class="inline-select" aria-label="Model" @change=${this.onAiModelChange}>
             ${models.map(
               model =>
                 html`<option value=${model.id} ?selected=${model.id === this.aiModelId}>
@@ -1479,89 +1663,82 @@ export class EditorSettingsDialog extends ComponentBase {
                 </option>`
             )}
           </select>
-        </label>
-        ${activeModel?.description
-          ? html`<div class="hint">${activeModel.description}</div>`
-          : null}
+          ${this.renderKeyToggle(
+            'image',
+            ownsKey ? this.aiKeyConfigured : false,
+            `${provider?.label ?? 'Provider'} API key`
+          )}
+        </div>
+        ${this.renderKeyPanel(
+          'image',
+          ownsKey
+            ? this.renderImageKeyBody(helpUrl)
+            : html`<div class="field-note">
+                This provider has no key of its own — it draws with the model the Agent chat is set
+                to. Configure that in the Agent (LLM) tab.
+              </div>`
+        )}
       </div>
 
-      ${provider?.requiresApiKey === false
-        ? html`<div class="settings-field">
-            <span class="key-label">API Key</span>
-            <div class="hint">
-              This provider has no key of its own — it draws with the model the Agent chat is set
-              to. Configure that in the AI Agent tab.
-            </div>
-          </div>`
-        : this.renderImageKeyField(helpUrl)}
-
       <div class="settings-field">
-        <label class="select-row">
-          <span>Default save size (downscale)</span>
-          <select @change=${this.onDefaultSaveSizeChange}>
-            <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
-            <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
-            <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
-            <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
-            <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
-            <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
-          </select>
-        </label>
-        <div class="hint">
-          Downscales the longest edge when saving a generated image into the project (never
-          upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in
-          the Sprite Editor.
+        <div class="field-head">
+          <span class="field-title">Default save size (downscale)</span>
+          ${this.renderInfo('image-save-size')}
         </div>
+        ${this.renderNote(
+          'image-save-size',
+          'Downscales the longest edge when saving a generated image into the project (never upscales). Game elements rarely need the full 1K/2K generation. Overridable per-save in the Sprite Editor.'
+        )}
+        <select aria-label="Default save size" @change=${this.onDefaultSaveSizeChange}>
+          <option value="0" ?selected=${this.defaultSaveMaxSize === 0}>Original size</option>
+          <option value="1024" ?selected=${this.defaultSaveMaxSize === 1024}>≤ 1024 px</option>
+          <option value="512" ?selected=${this.defaultSaveMaxSize === 512}>≤ 512 px</option>
+          <option value="256" ?selected=${this.defaultSaveMaxSize === 256}>≤ 256 px</option>
+          <option value="128" ?selected=${this.defaultSaveMaxSize === 128}>≤ 128 px</option>
+          <option value="64" ?selected=${this.defaultSaveMaxSize === 64}>≤ 64 px</option>
+        </select>
       </div>
     `;
   }
 
-  /** API-key entry for an image provider that owns one. */
-  private renderImageKeyField(helpUrl: string | undefined) {
+  /** API-key entry for an image provider that owns one (behind its key button). */
+  private renderImageKeyBody(helpUrl: string | undefined) {
     return html`
-      <div class="settings-field">
-        <span class="key-label">
-          API Key
-          <span class="key-status ${this.aiKeyConfigured ? 'is-set' : 'is-unset'}">
-            ${this.aiKeyConfigured ? 'Configured' : 'Not set'}
-          </span>
-        </span>
-        <div class="key-row">
-          <input
-            type="password"
-            autocomplete="off"
-            placeholder=${this.aiKeyConfigured ? '•••••••• stored' : 'Paste API key'}
-            .value=${this.aiKeyInput}
-            @input=${this.onAiKeyInput}
-          />
-          <button
-            class="btn-key-save"
-            @click=${this.onSaveAiKey}
-            ?disabled=${!this.aiKeyInput.trim() || this.aiKeyBusy}
-          >
-            Save
-          </button>
-          ${this.aiKeyConfigured
-            ? html`<button
-                class="btn-key-clear"
-                @click=${this.onClearAiKey}
-                ?disabled=${this.aiKeyBusy}
-              >
-                Clear
-              </button>`
-            : null}
-        </div>
-        <div class="hint">
-          ${this.aiKeyMessage
-            ? html`<span>${this.aiKeyMessage}</span>`
-            : html`Paste your provider API
-              key${helpUrl
-                ? html` (get one from
-                    <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
-                : ''}.
-              Stored encrypted in this browser only — never synced, and only sent to the selected
-              provider.`}
-        </div>
+      <div class="key-row">
+        <input
+          type="password"
+          autocomplete="off"
+          placeholder=${this.aiKeyConfigured ? '•••••••• stored' : 'Paste API key'}
+          .value=${this.aiKeyInput}
+          @input=${this.onAiKeyInput}
+        />
+        <button
+          class="btn-key-save"
+          @click=${this.onSaveAiKey}
+          ?disabled=${!this.aiKeyInput.trim() || this.aiKeyBusy}
+        >
+          Save
+        </button>
+        ${this.aiKeyConfigured
+          ? html`<button
+              class="btn-key-clear"
+              @click=${this.onClearAiKey}
+              ?disabled=${this.aiKeyBusy}
+            >
+              Clear
+            </button>`
+          : null}
+      </div>
+      <div class="field-note">
+        ${this.aiKeyMessage
+          ? html`<span>${this.aiKeyMessage}</span>`
+          : html`Paste your provider API
+            key${helpUrl
+              ? html` (get one from
+                  <a href=${helpUrl} target="_blank" rel="noreferrer">the provider console</a>)`
+              : ''}.
+            Stored encrypted in this browser only — never synced, and only sent to the selected
+            provider.`}
       </div>
     `;
   }
@@ -1579,107 +1756,116 @@ export class EditorSettingsDialog extends ComponentBase {
 
     return html`
       <div class="settings-field">
-        <span class="key-label">
-          API Key
-          <span class="key-status ${this.stropheKeyConfigured ? 'is-set' : 'is-unset'}">
-            ${this.stropheKeyConfigured ? 'Connected' : 'Not set'}
-          </span>
-        </span>
-        <div class="key-row">
-          <input
-            type="password"
-            autocomplete="off"
-            placeholder=${this.stropheKeyConfigured ? '•••••••• stored' : 'Paste your Strophe key'}
-            .value=${this.stropheKeyInput}
-            @input=${this.onStropheKeyInput}
-          />
-          <button
-            class="btn-key-save"
-            @click=${this.onSaveStropheKey}
-            ?disabled=${!this.stropheKeyInput.trim() || this.stropheBusy}
-          >
-            ${this.stropheBusy ? 'Checking…' : 'Save'}
-          </button>
-          ${this.stropheKeyConfigured
-            ? html`<button
-                class="btn-key-clear"
-                @click=${this.onClearStropheKey}
-                ?disabled=${this.stropheBusy}
+        <div class="field-head">
+          <span class="field-title">Account</span>
+          ${this.renderInfo('strophe-key')}
+          ${account
+            ? html`<span class="resolved-tag">
+                ${describeSpendHeadroom(account)}${account.plan ? ` · plan ${account.plan}` : ''}
+              </span>`
+            : html`<span class="key-status is-unset">Not set</span>`}
+          <span class="field-head-spacer"></span>
+          ${this.renderKeyToggle('strophe', this.stropheKeyConfigured, 'Strophe API key')}
+        </div>
+        ${this.renderNote(
+          'strophe-key',
+          html`Create a key in
+            <a href=${STROPHE_KEY_HELP_URL} target="_blank" rel="noreferrer"
+              >Strophe → Settings → Integrations</a
+            >. It is checked against your account before being stored, then kept encrypted in this
+            browser only. A Strophe key is a password to the account's credits, so give it only the
+            scopes the editor needs (<code>catalog:read</code>, <code>generations:read</code>,
+            <code>generations:write</code>, <code>files:write</code>, <code>account:read</code>) and
+            set a daily credit limit on it — both are per-key settings in the Strophe console, and
+            they cap what a leaked key, or an agent running unattended, can spend.`
+        )}
+        ${this.renderKeyPanel(
+          'strophe',
+          html`
+            <div class="key-row">
+              <input
+                type="password"
+                autocomplete="off"
+                placeholder=${this.stropheKeyConfigured
+                  ? '•••••••• stored'
+                  : 'Paste your Strophe key'}
+                .value=${this.stropheKeyInput}
+                @input=${this.onStropheKeyInput}
+              />
+              <button
+                class="btn-key-save"
+                @click=${this.onSaveStropheKey}
+                ?disabled=${!this.stropheKeyInput.trim() || this.stropheBusy}
               >
-                Clear
-              </button>`
-            : null}
-        </div>
-        <div class="hint">
-          ${this.stropheMessage
-            ? html`<span>${this.stropheMessage}</span>`
-            : html`Create a key in
-                <a href=${STROPHE_KEY_HELP_URL} target="_blank" rel="noreferrer"
-                  >Strophe → Settings → Integrations</a
-                >. The key is checked against your account before it is stored, then kept encrypted
-                in this browser only.`}
-        </div>
-      </div>
-
-      ${account
-        ? html`<div class="settings-field">
-            <span class="key-label">Account</span>
-            <div class="hint">
-              ${describeSpendHeadroom(account)}${account.plan
-                ? html` · plan ${account.plan}`
-                : ''}${account.team?.name ? html` · team ${account.team.name}` : ''}
+                ${this.stropheBusy ? 'Checking…' : 'Save'}
+              </button>
+              ${this.stropheKeyConfigured
+                ? html`<button
+                    class="btn-key-clear"
+                    @click=${this.onClearStropheKey}
+                    ?disabled=${this.stropheBusy}
+                  >
+                    Clear
+                  </button>`
+                : null}
             </div>
-            ${scopes.length > 0
-              ? html`<div class="hint">Key scopes: ${scopes.join(', ')}</div>`
+            ${this.stropheMessage
+              ? html`<div class="field-note">${this.stropheMessage}</div>`
               : null}
-            ${account.availableCredits === null
-              ? html`<div class="hint">
-                  This account bills against a shared team pool, so Strophe does not report a credit
-                  balance — the figure above is this key's own daily allowance.
+            ${account
+              ? html`<div class="field-note">
+                  ${account.team?.name ? html`Team ${account.team.name}. ` : ''}${scopes.length > 0
+                    ? html`Key scopes: ${scopes.join(', ')}.`
+                    : ''}
+                  ${account.availableCredits === null
+                    ? html` This account bills against a shared team pool, so Strophe reports no
+                      credit balance — the figure above is this key's own daily allowance.`
+                    : ''}
                 </div>`
               : null}
-          </div>`
-        : null}
-
-      <div class="settings-field">
-        <div class="hint">
-          A Strophe key is a password to the account's credits, so give it only the scopes the
-          editor needs (<code>catalog:read</code>, <code>generations:read</code>,
-          <code>generations:write</code>, <code>files:write</code>, <code>account:read</code>) and
-          set a daily credit limit on it. Both are per-key settings in the Strophe console, and they
-          cap what a leaked key — or an agent running unattended — can spend.
-        </div>
+          `
+        )}
       </div>
 
       <div class="settings-field">
-        <span class="key-label">Image generation</span>
-        <div class="hint">
-          Strophe appears as a provider in <strong>AI Images → Generation</strong>; pick a model
-          there. Each image is charged separately, so a count of 4 costs four generations. Strophe
-          exposes no transparency flag, so transparent cutouts still run through the local (free)
-          background removal.
+        <div class="field-head">
+          <span class="field-title">Image generation</span>
+          ${this.renderInfo('strophe-images')}
         </div>
+        ${this.renderNote(
+          'strophe-images',
+          html`Strophe appears as a provider in <strong>AI Images → Generation</strong>; pick a
+            model there. Each image is charged separately, so a count of 4 costs four generations.
+            Strophe exposes no transparency flag, so transparent cutouts still run through the local
+            (free) background removal.`
+        )}
       </div>
 
       <div class="settings-field">
-        <label class="select-row">
-          <span>Neural image→3D backend</span>
-          <select @change=${this.onNeural3dProviderChange}>
+        <div class="field-head">
+          <span class="field-title">Neural image→3D backend</span>
+          ${this.renderInfo('strophe-3d')}
+        </div>
+        ${this.renderNote(
+          'strophe-3d',
+          "Used by Model Lab's neural lane. Strophe needs no proxy and works in a production build; Tripo3D direct requires the dev-only proxy routes. PBR textures are requested when the model supports them, and Strophe reports no numeric progress, so Model Lab's progress bar is interpolated from the model's own time estimate."
+        )}
+        <div class="inline-row">
+          <select
+            class="inline-select"
+            aria-label="Neural image→3D backend"
+            @change=${this.onNeural3dProviderChange}
+          >
             <option value="strophe" ?selected=${usingStrophe3d}>Strophe (credits)</option>
             <option value="tripo" ?selected=${!usingStrophe3d}>Tripo3D direct (own key)</option>
           </select>
-        </label>
-        <div class="hint">
-          Used by Model Lab's neural lane. Strophe needs no proxy and works in a production build;
-          Tripo3D direct requires the dev-only proxy routes.
-        </div>
-      </div>
-
-      ${usingStrophe3d
-        ? html`<div class="settings-field">
-            <label class="select-row">
-              <span>3D model</span>
-              <select @change=${this.onNeural3dFamilyChange} ?disabled=${families.length === 0}>
+          ${usingStrophe3d
+            ? html`<select
+                class="inline-select"
+                aria-label="3D model"
+                @change=${this.onNeural3dFamilyChange}
+                ?disabled=${families.length === 0}
+              >
                 ${families.length === 0
                   ? html`<option value=${this.neural3dFamilyId}>
                       ${this.stropheKeyConfigured ? 'Loading…' : 'Connect a key first'}
@@ -1695,24 +1881,30 @@ export class EditorSettingsDialog extends ComponentBase {
                             : ''}${family.generationTime ? ` · ~${family.generationTime}s` : ''}
                         </option>`
                     )}
-              </select>
-            </label>
-            <div class="hint">
-              PBR textures are requested when the model supports them. Strophe reports no numeric
-              progress, so Model Lab's progress bar is interpolated from the model's own time
-              estimate.
-            </div>
-          </div>`
-        : null}
+              </select>`
+            : null}
+        </div>
+      </div>
     `;
   }
 
   private renderImagesBackgroundTab() {
     return html`
       <div class="settings-field">
-        <label class="select-row">
-          <span>Background removal engine</span>
-          <select @change=${this.onBgEngineChange}>
+        <div class="field-head">
+          <span class="field-title">Background removal</span>
+          ${this.renderInfo('bg-removal')}
+        </div>
+        ${this.renderNote(
+          'bg-removal',
+          html`Runs on-device (no API key). U²-Net is Apache-2.0 for both code and weights and runs
+          on the CPU, so it works without WebGPU — it mattes at 320², so edges are softer. BiRefNet
+          is MIT-licensed and higher quality, but runs at a fixed 1024² and REQUIRES a WebGPU
+          browser; note that WebGPU is blocklisted on Qualcomm Adreno (Snapdragon X /
+          Windows-on-ARM), so use U²-Net there.`
+        )}
+        <div class="inline-row">
+          <select class="inline-select" aria-label="Engine" @change=${this.onBgEngineChange}>
             <option value="u2net" ?selected=${this.bgEngine === 'u2net'}>
               U²-Net (Apache-2.0, runs on CPU)
             </option>
@@ -1720,43 +1912,30 @@ export class EditorSettingsDialog extends ComponentBase {
               BiRefNet (MIT, needs WebGPU)
             </option>
           </select>
-        </label>
-        ${this.bgEngine === 'u2net'
-          ? html`<label class="select-row">
-              <span>U²-Net quality</span>
-              <select @change=${this.onBgQualityChange}>
-                <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
-                  Balanced · u2netp (4.7 MB)
-                </option>
-                <option value="max" ?selected=${this.bgQuality === 'max'}>
-                  Max · u2net (176 MB)
-                </option>
-              </select>
-            </label>`
-          : null}
-        ${this.bgEngine === 'birefnet'
-          ? html`<label class="select-row">
-              <span>BiRefNet quality</span>
-              <select @change=${this.onBgQualityChange}>
-                <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
-                  Balanced (lite)
-                </option>
-                <option value="max" ?selected=${this.bgQuality === 'max'}>
-                  Max (full, large download)
-                </option>
-              </select>
-            </label>`
-          : null}
+          <select class="inline-select" aria-label="Quality" @change=${this.onBgQualityChange}>
+            ${this.bgEngine === 'u2net'
+              ? html`
+                  <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
+                    Balanced · u2netp (4.7 MB)
+                  </option>
+                  <option value="max" ?selected=${this.bgQuality === 'max'}>
+                    Max · u2net (176 MB)
+                  </option>
+                `
+              : html`
+                  <option value="balanced" ?selected=${this.bgQuality === 'balanced'}>
+                    Balanced (lite)
+                  </option>
+                  <option value="max" ?selected=${this.bgQuality === 'max'}>
+                    Max (full, large download)
+                  </option>
+                `}
+          </select>
+        </div>
         <label class="toggle-row">
           <input type="checkbox" .checked=${this.bgFillHoles} @change=${this.onBgFillHolesChange} />
           <span>Fill interior holes (solid cutout)</span>
         </label>
-        <div class="hint">
-          Runs on-device (no API key).
-          ${this.bgEngine === 'u2net'
-            ? 'U²-Net is Apache-2.0 for both code and weights and runs on the CPU, so it works without WebGPU. It mattes at 320², so edges are softer than BiRefNet’s.'
-            : 'BiRefNet is MIT-licensed and higher quality, but its model runs at a fixed 1024² and REQUIRES a WebGPU browser. Note that WebGPU is blocklisted on Qualcomm Adreno (Snapdragon X / Windows-on-ARM) — use U²-Net there.'}
-        </div>
       </div>
     `;
   }

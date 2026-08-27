@@ -2,7 +2,12 @@ import { inject, injectable } from '@/fw/di';
 import { SecretStorageService } from '@/services/core/SecretStorageService';
 import { DEFAULT_SOUL_ID } from '@/services/agent/AgentSouls';
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
-import { REASONING_EFFORTS, type LlmProvider, type ReasoningEffort } from '@/services/llm/LlmTypes';
+import {
+  REASONING_EFFORTS,
+  type LlmModelRole,
+  type LlmProvider,
+  type ReasoningEffort,
+} from '@/services/llm/LlmTypes';
 
 export interface AgentPreferences {
   /**
@@ -41,13 +46,24 @@ export interface AgentPreferences {
   /** Vision-helper model id (paired with {@link visionProviderId}). Empty = first vision model. */
   visionModelId: string;
   /**
+   * Whether {@link visionProviderId} is the user's own choice. Unlike {@link selectedProviderId},
+   * empty here is a real answer ("Auto"), so it cannot double as "never decided" — hence the flag.
+   * Unpinned settings are what {@link AgentSettingsService.applyAssistantDefaults} is allowed to
+   * fill in when a provider that nominates role models shows up.
+   */
+  visionPinned: boolean;
+  /**
    * Provider of the **advisor** model — a deliberately stronger model the agent may consult via
-   * `ask_advisor` when stuck or facing a design decision. Empty = the advisor feature is off
-   * (never auto-picked: "stronger than the main model" is a judgment only the user can make).
+   * `ask_advisor` when stuck or facing a design decision. Empty = the advisor feature is off. Not
+   * auto-picked from a metered provider ("stronger than the main model" is a judgment that spends
+   * the user's money), only from one that nominates a model for the role at zero marginal cost —
+   * see {@link AgentSettingsService.applyAssistantDefaults}.
    */
   advisorProviderId: string;
   /** Advisor model id (paired with {@link advisorProviderId}). Empty = the provider's selected model. */
   advisorModelId: string;
+  /** Whether {@link advisorProviderId} is the user's own choice — see {@link visionPinned}. */
+  advisorPinned: boolean;
   /** Max LLM ⇄ tool-call round trips per agent turn (safety cap on the agentic loop). */
   maxToolIterations: number;
   /**
@@ -123,6 +139,15 @@ export class AgentSettingsService {
     // dropdown, the debug bridge acting for the user) — so writing one is what pins it.
     if (patch.selectedProviderId !== undefined && patch.providerPinned === undefined) {
       next.providerPinned = Boolean(patch.selectedProviderId);
+    }
+    // Same reasoning for the two assistant roles, except that their "empty" IS a decision ("Off" /
+    // "Auto"), so writing one pins it even when the value is empty — an opt-out must survive the
+    // next bridge probe.
+    if (patch.advisorProviderId !== undefined && patch.advisorPinned === undefined) {
+      next.advisorPinned = true;
+    }
+    if (patch.visionProviderId !== undefined && patch.visionPinned === undefined) {
+      next.visionPinned = true;
     }
     if (patch.modelByProvider) {
       next.modelByProvider = { ...this.ensureLoaded().modelByProvider, ...patch.modelByProvider };
@@ -243,7 +268,61 @@ export class AgentSettingsService {
       const substitute = pickClosestModelId(stored, provider.models);
       return substitute ? { modelId: substitute, requested: stored } : { modelId: undefined };
     }
-    return { modelId: provider.models[0]?.id };
+    return { modelId: this.nominatedModelId(provider, 'main') ?? provider.models[0]?.id };
+  }
+
+  /**
+   * Fill in the assistant roles (advisor / vision helper) from a provider that nominates a model for
+   * them — today only the Claude Code (MAX) bridge lane, which is why {@link
+   * import('@/services/llm/BridgeConnectionService').BridgeConnectionService} calls this after every
+   * discovery probe. Only *unpinned* settings are touched, so "Off" / "Auto" chosen by hand is never
+   * re-filled behind the user's back.
+   *
+   * The advisor was deliberately never auto-picked, because guessing "stronger than the main model"
+   * spends someone else's money on a judgment they didn't make. A subscription lane removes exactly
+   * that objection — the marginal cost is zero — and leaves only the capability question, which the
+   * provider answers itself via {@link LlmProvider.defaultModelIds}.
+   */
+  applyAssistantDefaults(): void {
+    const prefs = this.ensureLoaded();
+    const patch: Partial<AgentPreferences> = {};
+
+    if (!prefs.advisorPinned) {
+      const provider = this.findNominatingProvider('advisor');
+      const modelId = provider ? this.nominatedModelId(provider, 'advisor') : undefined;
+      if (provider && modelId && prefs.advisorProviderId !== provider.id) {
+        patch.advisorProviderId = provider.id;
+        patch.advisorModelId = modelId;
+        patch.advisorPinned = false;
+      }
+    }
+    if (!prefs.visionPinned) {
+      const provider = this.findNominatingProvider('vision');
+      const modelId = provider ? this.nominatedModelId(provider, 'vision') : undefined;
+      if (provider && modelId && prefs.visionProviderId !== provider.id) {
+        patch.visionProviderId = provider.id;
+        patch.visionModelId = modelId;
+        patch.visionPinned = false;
+      }
+    }
+    if (Object.keys(patch).length > 0) {
+      this.updatePreferences(patch);
+    }
+  }
+
+  /** The first registered provider that nominates a model for `role` (see `defaultModelIds`). */
+  private findNominatingProvider(role: LlmModelRole): LlmProvider | undefined {
+    return this.registry
+      .list()
+      .find(provider => !provider.hidden && Boolean(this.nominatedModelId(provider, role)));
+  }
+
+  /** The provider's nominated model for a role, but only if its catalog still lists that model. */
+  private nominatedModelId(provider: LlmProvider, role: LlmModelRole): string | undefined {
+    const nominated = provider.defaultModelIds?.[role];
+    return nominated && provider.models.some(model => model.id === nominated)
+      ? nominated
+      : undefined;
   }
 
   /** The pick that could not be honoured for this provider, or null when nothing was substituted. */
@@ -337,8 +416,10 @@ export class AgentSettingsService {
       bridgeUrl: '',
       visionProviderId: '',
       visionModelId: '',
+      visionPinned: false,
       advisorProviderId: '',
       advisorModelId: '',
+      advisorPinned: false,
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
       debugMode: false,
       soulId: DEFAULT_SOUL_ID,
@@ -385,6 +466,12 @@ export class AgentSettingsService {
             : defaults.visionProviderId,
         visionModelId:
           typeof parsed.visionModelId === 'string' ? parsed.visionModelId : defaults.visionModelId,
+        // Preferences written before the flag existed load as pinned when they name a provider: the
+        // user of the day had no other way to set one, so it was a choice.
+        visionPinned:
+          typeof parsed.visionPinned === 'boolean'
+            ? parsed.visionPinned
+            : Boolean(parsed.visionProviderId),
         advisorProviderId:
           typeof parsed.advisorProviderId === 'string'
             ? parsed.advisorProviderId
@@ -393,6 +480,10 @@ export class AgentSettingsService {
           typeof parsed.advisorModelId === 'string'
             ? parsed.advisorModelId
             : defaults.advisorModelId,
+        advisorPinned:
+          typeof parsed.advisorPinned === 'boolean'
+            ? parsed.advisorPinned
+            : Boolean(parsed.advisorProviderId),
         maxToolIterations:
           typeof parsed.maxToolIterations === 'number' &&
           Number.isFinite(parsed.maxToolIterations) &&

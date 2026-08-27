@@ -672,7 +672,6 @@ pix3-welcome .hero-make:hover:not([disabled]) {
 
 pix3-welcome .hero-make[disabled],
 pix3-welcome .hero-attach[disabled],
-pix3-welcome .hero-chip[disabled],
 pix3-welcome .hero-recipe[disabled] {
   opacity: 0.55;
   cursor: default;
@@ -717,33 +716,6 @@ pix3-welcome .hero-warning {
   margin-top: 0.6rem;
   color: var(--fg-2);
   font-size: 0.82rem;
-}
-
-pix3-welcome .hero-examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.75rem;
-}
-
-pix3-welcome .hero-chip {
-  padding: 0.4rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--line-2);
-  background: var(--bg-2);
-  color: var(--fg-1);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-pix3-welcome .hero-chip:hover:not([disabled]) {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--fg-0);
 }
 
 pix3-welcome .hero-recipes {

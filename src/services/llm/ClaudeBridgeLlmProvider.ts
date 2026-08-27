@@ -42,6 +42,18 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
   protected override readonly missingKeyMessage =
     'No bridge pairing token configured. Start pix3-agent-bridge and paste the token it prints.';
 
+  /**
+   * Every model in this lane costs the same ($0 — it draws on the subscription's limits), so the
+   * only thing left to weigh is capability. Opus runs the agent loop and answers vision questions;
+   * Fable, the most capable of the four, is held back for the advisor, whose entire job is to be a
+   * second and stronger opinion than whatever is driving the turn.
+   */
+  readonly defaultModelIds = {
+    main: 'claude-opus-4-8',
+    advisor: 'claude-fable-5',
+    vision: 'claude-opus-4-8',
+  } as const;
+
   override readonly models: readonly LlmModel[] = [
     {
       id: 'claude-fable-5',
