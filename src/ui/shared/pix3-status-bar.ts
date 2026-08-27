@@ -442,7 +442,7 @@ export class Pix3StatusBar extends ComponentBase {
         ?disabled=${this.bundleSizeComputing}
         @click=${this.onBundleSizeClick}
       >
-        📦 ${label}
+        ${this.icons.getIcon('bundle', IconSize.SMALL)} ${label}
       </button>
     `;
   }
