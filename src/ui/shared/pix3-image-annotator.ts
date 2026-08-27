@@ -247,14 +247,21 @@ export class Pix3ImageAnnotator extends ComponentBase {
       return;
     }
     this.drawPointerId = event.pointerId;
-    // Capture so a stroke that leaves the canvas still tracks and still ends.
-    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
     this.draft = {
       tool: this.tool,
       color: this.color,
       width: this.nominalWidth,
       points: [point],
     };
+    // Capture so a stroke that leaves the canvas still tracks and still ends. Attempted AFTER the
+    // draft exists and guarded: `setPointerCapture` throws for a pointerId with no active pointer,
+    // and a throw here used to take the whole stroke with it — capture is an enhancement to
+    // drawing, never a precondition for it.
+    try {
+      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    } catch {
+      // No capture: the stroke still draws, it just stops tracking if the pointer leaves.
+    }
     this.paint();
   };
 
@@ -263,10 +270,14 @@ export class Pix3ImageAnnotator extends ComponentBase {
       return;
     }
     // Coalesced events are what makes a fast pen stroke smooth instead of a polyline of chords.
-    const events =
+    // The empty-list fallback is not paranoia: `getCoalescedEvents()` answers an empty array for an
+    // untrusted event, and without it a synthetic pointermove contributes no sample at all — the
+    // move is silently swallowed, which is how a pen stroke can end up never committing.
+    const coalesced =
       this.draft.tool === 'pen' && typeof event.getCoalescedEvents === 'function'
         ? event.getCoalescedEvents()
-        : [event];
+        : [];
+    const events = coalesced.length > 0 ? coalesced : [event];
     const sampled = events.map(sample => this.pointFrom(sample));
     this.draft =
       this.draft.tool === 'pen'
@@ -281,9 +292,15 @@ export class Pix3ImageAnnotator extends ComponentBase {
       return;
     }
     this.drawPointerId = null;
-    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
     const draft = this.draft;
     this.draft = null;
+    // Same guard as the capture, and for the same reason: releasing a capture that was never taken
+    // must not be what loses the stroke the user just finished drawing.
+    try {
+      (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Nothing was captured; there is nothing to release.
+    }
     if (draft && isDrawable(draft)) {
       this.strokes = [...this.strokes, draft];
     }
@@ -405,12 +422,16 @@ export class Pix3ImageAnnotator extends ComponentBase {
       await this.storage.writeBinaryFile(paths.png, await blob.arrayBuffer());
       const data = await blobToBase64(blob);
       const summary = describeAnnotation(this.doc);
-      await this.agentChat.send(
+      // Announce the hand-off BEFORE the turn, and do not await it: `send` resolves only once the
+      // whole agentic loop has settled, so awaiting it held the overlay open — over the very
+      // conversation the user had just started — for as long as the agent worked. Errors from the
+      // turn belong to the chat panel, which renders its own; nothing here can add to them.
+      this.dispatchEvent(new CustomEvent('annotation-sent', { bubbles: true, composed: true }));
+      void this.agentChat.send(
         `Annotation on \`res://${this.imagePath}\`${summary ? ` — ${summary}` : ''}. ` +
           `The composite is saved at \`res://${paths.png}\`, the strokes at \`res://${paths.json}\`.`,
         { images: [{ type: 'image', mimeType: 'image/png', data }] }
       );
-      this.dispatchEvent(new CustomEvent('annotation-sent', { bubbles: true, composed: true }));
     } catch (error) {
       this.status = `Could not send the annotation: ${messageOf(error)}`;
     } finally {

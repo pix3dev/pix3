@@ -214,6 +214,74 @@ describe('pix3-image-annotator', () => {
     expect(element.querySelector('.annotator__status')?.textContent).toContain('Could not render');
   });
 
+  /**
+   * `getCoalescedEvents()` answers an EMPTY array for an untrusted event, so without the fallback a
+   * synthetic pointermove contributes no sample and the pen stroke never reaches two points — which
+   * is exactly how it failed the first time it was driven from a script.
+   */
+  it('records a pen drag even when no coalesced samples are reported', async () => {
+    const element = await mount();
+    const canvas = element.querySelector('canvas');
+    if (!canvas) {
+      throw new Error('no canvas');
+    }
+    // happy-dom never loads a blob URL, and the component rightly refuses to draw on nothing.
+    Object.assign(element, { image: {}, imageWidth: 128, imageHeight: 128 });
+    const move = (x: number, y: number, type: string) =>
+      canvas.dispatchEvent(
+        Object.assign(new Event(type, { bubbles: true }), {
+          pointerId: 1,
+          button: 0,
+          buttons: 1,
+          pressure: 0.5,
+          clientX: x,
+          clientY: y,
+          getCoalescedEvents: () => [],
+        })
+      );
+    move(10, 10, 'pointerdown');
+    move(40, 40, 'pointermove');
+    move(40, 40, 'pointerup');
+    await settle(element);
+
+    expect(button(element, 'Undo')?.disabled).toBe(false);
+  });
+
+  /**
+   * Found live: `send` resolves only once the whole agentic loop has settled, so awaiting it before
+   * announcing the hand-off held the lightbox open over the very conversation the user had just
+   * started — for as long as the agent worked.
+   */
+  it('announces the hand-off before the turn, not after it settles', async () => {
+    const element = await mount();
+    Object.assign(element, { image: {}, imageWidth: 8, imageHeight: 8 });
+    await addStroke(element);
+
+    // A turn that never settles on its own — the state the overlay used to be stuck behind.
+    const turn: { release: () => void } = { release: () => {} };
+    agentChat().send.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          turn.release = resolve;
+        })
+    );
+    // Flattening needs a 2d context happy-dom does not have; the ORDER is what this checks.
+    Object.assign(element, {
+      flatten: async () => new Blob(['png'], { type: 'image/png' }),
+    });
+
+    const events: Event[] = [];
+    element.addEventListener('annotation-sent', event => events.push(event));
+
+    button(element, 'Send to agent')?.click();
+    await settle(element);
+
+    // The turn is still running, and the hand-off has already been announced.
+    expect(agentChat().send).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(1);
+    turn.release();
+  });
+
   it('surfaces a failed save instead of silently losing the drawing', async () => {
     const element = await mount();
     await addStroke(element);
