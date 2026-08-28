@@ -60,6 +60,15 @@ npx vitest src/services/play/ScriptExecutionService.spec.ts        # watch mode
 
 Node 24 is required (`engines: >=24.15.0 <25`). `npm install` runs a `postinstall` that copies `esbuild.wasm` into `public/` — needed for in-editor script compilation.
 
+**Stopping a background dev process needs the CHILD pid, not the `npm` wrapper.** Killing the job you started (`npm run dev`, or `npm start` in `tools/pix3-agent-bridge`) reaps `npm` and leaves the `node` process it spawned running and still holding the port — so the next `npm run dev` silently attaches to a *stale* server, or the port probe says "already up" when nothing you control is serving it. Find the real listener and kill that:
+
+```bash
+netstat -ano | grep LISTENING | grep -E ":8123|:8484"   # 8123 = vite, 8484 = agent bridge
+# confirm the command line before killing, then: Stop-Process -Id <pid> -Force
+```
+
+Always check the command line first (`Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"`): both are plain `node.exe`, and this machine usually has several unrelated ones.
+
 Note: `vitest.config.ts` runs every `*.spec.ts` under `src/` and `packages/pix3-runtime/src/` — there is no exclude list. (An older exclude block named three specs that no longer exist and has been removed.)
 
 ## Repository topology
