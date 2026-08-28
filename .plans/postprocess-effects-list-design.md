@@ -2,7 +2,7 @@
 
 # Design spec: Registry-backed attached-effect list on the PostProcess node
 
-Mirrors the shipped GeometryMesh pattern (`.plans/shader-effects-v2-list-design.md` → `packages/pix3-runtime/src/shader-effects/`). Same UX (Add-Effect picker + per-effect cards + enable/remove), same instance-schema mechanism for keyframe-animatability — but the effects are `postprocessing`-lib `Effect` objects composited by `PostProcessingPipeline`, **not** GLSL chunks injected into a material.
+Mirrors the shipped GeometryMesh pattern (`.plans/done/shader-effects-v2-list-design.md` → `packages/pix3-runtime/src/shader-effects/`). Same UX (Add-Effect picker + per-effect cards + enable/remove), same instance-schema mechanism for keyframe-animatability — but the effects are `postprocessing`-lib `Effect` objects composited by `PostProcessingPipeline`, **not** GLSL chunks injected into a material.
 
 Engine-level change (runtime + serialization + editor ops/UI + docs) — per CLAUDE.md **requires user confirmation before implementation**, then `cd packages/pix3-runtime && npm run yalc:publish` + `yalc update` in DeepCore, and a `docs/nodes-and-systems.md` update.
 

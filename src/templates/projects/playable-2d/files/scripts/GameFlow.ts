@@ -8,6 +8,11 @@
  * placeholder, after `autoWinAfterSec` seconds. Replace the timer with your
  * real win/lose condition.
  *
+ * `skipIntro` starts the run already playing, gate hidden — a prototyping vent, so
+ * that iterating on the game does not cost a tap per reload. Turn it back off before
+ * shipping: in an ad container the first tap is what unlocks browser audio, so a
+ * playable that never gates on one is a playable that plays silently.
+ *
  * Two conventions here are worth keeping as you replace the placeholder:
  *
  * - **Intent-first handlers.** Every reaction to the player lives in a named
@@ -39,6 +44,8 @@ export class GameFlow extends Script {
       endNode: 'end-screen',
       // Placeholder auto-win timer in seconds (0 = never; call finish() instead).
       autoWinAfterSec: 15,
+      // Prototyping vent: start in `playing` with the gate already gone.
+      skipIntro: false,
     };
   }
 
@@ -77,6 +84,20 @@ export class GameFlow extends Script {
           getValue: s => (s as GameFlow).config.autoWinAfterSec,
           setValue: (s, v) => {
             (s as GameFlow).config.autoWinAfterSec = Math.max(0, Number(v) || 0);
+          },
+        },
+        {
+          name: 'skipIntro',
+          type: 'boolean',
+          ui: {
+            label: 'Skip Intro',
+            description:
+              'Start already playing, with the tap gate hidden. For prototyping only — a shipped playable needs the tap to unlock audio.',
+            group: 'Flow',
+          },
+          getValue: s => (s as GameFlow).config.skipIntro === true,
+          setValue: (s, v) => {
+            (s as GameFlow).config.skipIntro = v === true;
           },
         },
       ],
@@ -125,12 +146,17 @@ export class GameFlow extends Script {
         phase: this.phase,
         elapsedSec: Math.round(this.elapsed * 100) / 100,
         autoWinAfterSec: Number(this.config.autoWinAfterSec) || 0,
+        skipIntro: this.config.skipIntro === true,
         introVisible: this.isNodeVisible(String(this.config.introNode ?? '')),
         endVisible: this.isNodeVisible(String(this.config.endNode ?? '')),
         // Set by playable.gameEnd() — the CTA button reports the session as over.
         gameEnded: playable.hasGameEnded(),
       }),
     });
+
+    if (this.config.skipIntro === true) {
+      this.openTheGate();
+    }
   }
 
   onDetach(): void {
@@ -172,6 +198,14 @@ export class GameFlow extends Script {
     if (this.phase !== 'intro') {
       return;
     }
+    this.openTheGate();
+  }
+
+  /**
+   * Hide the gate and go to `playing`. Shared by the tap and by `skipIntro`, so the two
+   * cannot drift into two slightly different notions of "the run has begun".
+   */
+  private openTheGate(): void {
     this.setNodeVisible(String(this.config.introNode ?? ''), false);
     this.phase = 'playing';
   }
@@ -185,12 +219,19 @@ export class GameFlow extends Script {
     this.setNodeVisible(String(this.config.endNode ?? ''), true);
   }
 
-  /** Intent: return to the tap-to-start gate and arm a fresh run. */
+  /**
+   * Intent: arm a fresh run — back at the tap-to-start gate, or straight into play when
+   * `skipIntro` is on. A restart that re-raised a gate the project has turned off would
+   * strand every routine that restarts between checks behind a tap nobody is going to make.
+   */
   restart(): void {
     this.phase = 'intro';
     this.elapsed = 0;
     this.setNodeVisible(String(this.config.endNode ?? ''), false);
     this.setNodeVisible(String(this.config.introNode ?? ''), true);
+    if (this.config.skipIntro === true) {
+      this.openTheGate();
+    }
   }
 
   private setNodeVisible(query: string, visible: boolean): void {

@@ -9,6 +9,15 @@
  * placeholder, after `autoWinAfterSec` seconds. Replace the timer with your
  * real win/lose condition.
  *
+ * `skipIntro` starts the run already playing, gate hidden — a prototyping vent, so
+ * that iterating on the game does not cost a tap per reload. Turn it back off before
+ * shipping: in an ad container the first tap is what unlocks browser audio, so a
+ * playable that never gates on one is a playable that plays silently.
+ *
+ * `GameRules` on the same node keeps score, lives and the clock, and ends the run through
+ * this script's `finish` command — one phase machine, one end screen, one debug provider.
+ * Its numbers ride along in the snapshot below.
+ *
  * Two conventions here are worth keeping as you replace the placeholder:
  *
  * - **Intent-first handlers.** Every reaction to the player lives in a named
@@ -25,6 +34,19 @@
  */
 import { Script, playable, registerGameDebug, type PropertySchema } from '@pix3/runtime';
 
+/**
+ * What this script needs from a bookkeeping component, and the whole of what the two know
+ * about each other. `bookkeeping`/`resetRun` are required (they are how the component is
+ * recognised); the lifecycle pair is optional so a hand-written replacement can implement
+ * only what it uses.
+ */
+interface RunBookkeeping {
+  bookkeeping(): Record<string, unknown>;
+  resetRun(): void;
+  startRun?(): void;
+  endRun?(won?: boolean): void;
+}
+
 export class GameFlow extends Script {
   private phase: 'intro' | 'playing' | 'ended' = 'intro';
   private elapsed = 0;
@@ -40,6 +62,8 @@ export class GameFlow extends Script {
       endNode: 'end-screen',
       // Placeholder auto-win timer in seconds (0 = never; call finish() instead).
       autoWinAfterSec: 15,
+      // Prototyping vent: start in `playing` with the gate already gone.
+      skipIntro: false,
     };
   }
 
@@ -78,6 +102,20 @@ export class GameFlow extends Script {
           getValue: s => (s as GameFlow).config.autoWinAfterSec,
           setValue: (s, v) => {
             (s as GameFlow).config.autoWinAfterSec = Math.max(0, Number(v) || 0);
+          },
+        },
+        {
+          name: 'skipIntro',
+          type: 'boolean',
+          ui: {
+            label: 'Skip Intro',
+            description:
+              'Start already playing, with the tap gate hidden. For prototyping only — a shipped playable needs the tap to unlock audio.',
+            group: 'Flow',
+          },
+          getValue: s => (s as GameFlow).config.skipIntro === true,
+          setValue: (s, v) => {
+            (s as GameFlow).config.skipIntro = v === true;
           },
         },
       ],
@@ -126,12 +164,21 @@ export class GameFlow extends Script {
         phase: this.phase,
         elapsedSec: Math.round(this.elapsed * 100) / 100,
         autoWinAfterSec: Number(this.config.autoWinAfterSec) || 0,
+        skipIntro: this.config.skipIntro === true,
         introVisible: this.isNodeVisible(String(this.config.introNode ?? '')),
         endVisible: this.isNodeVisible(String(this.config.endNode ?? '')),
         // Set by playable.gameEnd() — the CTA button reports the session as over.
         gameEnded: playable.hasGameEnded(),
+        // Score/lives/clock, when the scene carries the bookkeeping component. Merged into
+        // THIS snapshot rather than published as a second provider: `registerGameDebug` keeps
+        // one, so a second call would silently displace this one.
+        ...(this.rules()?.bookkeeping() ?? {}),
       }),
     });
+
+    if (this.config.skipIntro === true) {
+      this.openTheGate();
+    }
   }
 
   onDetach(): void {
@@ -173,8 +220,19 @@ export class GameFlow extends Script {
     if (this.phase !== 'intro') {
       return;
     }
+    this.openTheGate();
+  }
+
+  /**
+   * Hide the gate and go to `playing`. Shared by the tap and by `skipIntro`, so the two
+   * cannot drift into two slightly different notions of "the run has begun".
+   */
+  private openTheGate(): void {
     this.setNodeVisible(String(this.config.introNode ?? ''), false);
     this.phase = 'playing';
+    // The run begins HERE, not when the scene loads: a clock started behind the tap gate
+    // measures how long the overlay was on screen.
+    this.rules()?.startRun?.();
   }
 
   /** Intent: end the run and reveal the end screen. Call this from game code on win/lose. */
@@ -183,15 +241,50 @@ export class GameFlow extends Script {
       return;
     }
     this.phase = 'ended';
+    // Tell the rules before revealing the screen: they write the outcome text into the end
+    // label, and they must stop ticking — otherwise the run reads as `ended` with no
+    // outcome, and a time limit fires a second ending behind the end screen.
+    this.rules()?.endRun?.();
     this.setNodeVisible(String(this.config.endNode ?? ''), true);
   }
 
-  /** Intent: return to the tap-to-start gate and arm a fresh run. */
+  /**
+   * Intent: arm a fresh run — back at the tap-to-start gate, or straight into play when
+   * `skipIntro` is on. A restart that re-raised a gate the project has turned off would
+   * strand every routine that restarts between checks behind a tap nobody is going to make.
+   */
   restart(): void {
     this.phase = 'intro';
     this.elapsed = 0;
     this.setNodeVisible(String(this.config.endNode ?? ''), false);
     this.setNodeVisible(String(this.config.introNode ?? ''), true);
+    // One intent arms a fresh run everywhere: a restart that puts the gate back but keeps
+    // last run's score is the kind of half-reset that makes a routine's second pass lie.
+    this.rules()?.resetRun();
+    if (this.config.skipIntro === true) {
+      this.openTheGate();
+    }
+  }
+
+  /**
+   * The bookkeeping component on this node, if the scene has one (`GameRules`).
+   *
+   * Duck-typed rather than imported: delete `GameRules` and this template still runs the
+   * gate, the timer and the CTA exactly as it did before — the two scripts know about each
+   * other only through the two methods named here.
+   */
+  private rules(): RunBookkeeping | null {
+    for (const component of this.node?.components ?? []) {
+      const candidate = component as unknown as Partial<RunBookkeeping>;
+      if (
+        component !== this &&
+        typeof candidate.bookkeeping === 'function' &&
+        typeof candidate.resetRun === 'function'
+      ) {
+        return candidate as RunBookkeeping;
+      }
+    }
+    return null;
   }
 
   private setNodeVisible(query: string, visible: boolean): void {

@@ -6,27 +6,76 @@ import {
   InstancedMesh,
   Material,
   Matrix4,
-  MeshStandardMaterial,
   Quaternion,
   Vector3,
   type BufferGeometry,
 } from 'three';
 
 import { Node3D, type Node3DProps } from '../Node3D';
+import {
+  asMaterialType,
+  buildFamilyMaterial,
+  GEOMETRY_MATERIAL_TYPES,
+  materialFamilyOf,
+  type GeometryMaterialType,
+} from './material-family';
 import type { PropertySchema } from '../../fw/property-schema';
 
 const DEFAULT_GEOMETRY = new BoxGeometry(1, 1, 1);
-const DEFAULT_MATERIAL = new MeshStandardMaterial({ color: '#ffffff' });
+/**
+ * What an instanced mesh looks like when the scene authors no material at all.
+ *
+ * These are three's OWN `MeshStandardMaterial` defaults, not `GeometryMesh`'s (0.35 / 0.25): every
+ * instanced mesh that predates the authored-material block rendered with a plain
+ * `new MeshStandardMaterial({ color: '#ffffff' })`, and reading it back with different numbers
+ * would restyle those scenes on load and then bake the new look in on the first save.
+ */
+const DEFAULT_MATERIAL_COLOR = '#ffffff';
+const DEFAULT_ROUGHNESS = 1;
+const DEFAULT_METALNESS = 0;
+/** What a material outside the three known families reports as; `standard` is the node default. */
+const UNKNOWN_FAMILY_REPORTS_AS: GeometryMaterialType = 'standard';
+/** First slot of a one-or-many material, for the checks that only need a representative. */
+const firstOf = (material: Material | Material[]): Material | undefined =>
+  Array.isArray(material) ? material[0] : material;
 const TRANSLATION_SCRATCH = new Vector3();
 const ROTATION_SCRATCH = new Quaternion();
 const SCALE_SCRATCH = new Vector3(1, 1, 1);
 const MATRIX_SCRATCH = new Matrix4();
 const COLOR_SCRATCH = new Color();
 
+/**
+ * The authored material, as it appears under `material:` in a `.pix3scene`.
+ *
+ * The same vocabulary `GeometryMesh` uses, minus the texture maps and shader effects — an
+ * instanced mesh shares one material across every instance, so per-instance texturing is not a
+ * thing this node can express, and the per-instance colour buffer covers the variation people
+ * actually want. Maps can be added later without changing this shape.
+ */
+export interface InstancedMaterialConfig {
+  /** Material family (see `GEOMETRY_MATERIAL_TYPES`). Defaults to `standard`. */
+  type?: string;
+  color?: string;
+  /** `standard` only. */
+  roughness?: number;
+  /** `standard` only. */
+  metalness?: number;
+}
+
 export interface InstancedMesh3DProps extends Omit<Node3DProps, 'type'> {
   maxInstances: number;
   geometry?: BufferGeometry;
+  /**
+   * A ready three.js material, for code that builds its own. Takes precedence over
+   * {@link InstancedMesh3DProps.materialConfig} — a caller holding a real material means it.
+   */
   material?: Material | Material[];
+  /**
+   * The authored material. This is the scene-file path: before it existed the loader built no
+   * material at all, so every scene-authored instanced mesh silently rendered as shared white PBR,
+   * unreachable from the inspector and untouched by the project's mobile material policy.
+   */
+  materialConfig?: InstancedMaterialConfig;
   castShadow?: boolean;
   receiveShadow?: boolean;
   enablePerInstanceColor?: boolean;
@@ -74,6 +123,10 @@ export class InstancedMesh3D extends Node3D {
 
   private readonly matrixBuffer: Float32Array;
   private readonly colorBuffer: Float32Array | null;
+  /** Authored material family; decides what is built and what round-trips. */
+  private _materialType: GeometryMaterialType;
+  /** True while the mesh renders a material this node built and therefore owns. */
+  private _ownsMaterial: boolean;
   private transformsDirty = false;
   private colorsDirty = false;
   private boundsDirty = false;
@@ -92,7 +145,20 @@ export class InstancedMesh3D extends Node3D {
     this.enablePerInstanceColor = props.enablePerInstanceColor ?? false;
 
     const geometry = props.geometry ?? DEFAULT_GEOMETRY;
-    const material = props.material ?? DEFAULT_MATERIAL;
+    const config = props.materialConfig ?? {};
+    this._ownsMaterial = props.material === undefined;
+    const material =
+      props.material ??
+      buildFamilyMaterial(asMaterialType(config.type), {
+        color: new Color(config.color ?? DEFAULT_MATERIAL_COLOR),
+        roughness: typeof config.roughness === 'number' ? config.roughness : DEFAULT_ROUGHNESS,
+        metalness: typeof config.metalness === 'number' ? config.metalness : DEFAULT_METALNESS,
+      });
+    // A material handed in by code decides the family that is REPORTED and SERIALIZED: keeping the
+    // authored `type` here would make the node claim a family it is not rendering.
+    this._materialType =
+      (props.material ? materialFamilyOf(firstOf(props.material)) : null) ??
+      asMaterialType(config.type);
     this.mesh = new InstancedMesh(geometry, material, maxInstances);
     this.mesh.name = `${this.name}-mesh`;
     this.mesh.castShadow = this.castShadow;
@@ -118,19 +184,123 @@ export class InstancedMesh3D extends Node3D {
   protected override disposeResources(): void {
     // Frees the instanceMatrix / instanceColor GPU buffers.
     this.mesh.dispose();
-    // Only dispose owned geometry/material — the module-level DEFAULT_* singletons
-    // are shared across every InstancedMesh3D and must not be disposed. (Does not
-    // call super.disposeResources(), whose generic pass would hit those defaults.)
+    // Only dispose owned geometry — `DEFAULT_GEOMETRY` is shared across every InstancedMesh3D and
+    // must not be disposed. (Does not call super.disposeResources(), whose generic pass would hit
+    // it.) The material is always this node's own: either one built here from the authored config,
+    // or one handed in by the caller, which the node has taken over for its lifetime.
     if (this.mesh.geometry !== DEFAULT_GEOMETRY) {
       this.mesh.geometry.dispose();
     }
     const material = this.mesh.material;
-    const materials = Array.isArray(material) ? material : [material];
-    for (const entry of materials) {
-      if (entry && entry !== DEFAULT_MATERIAL) {
-        entry.dispose();
-      }
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      entry?.dispose();
     }
+  }
+
+  /** Every material slot the mesh renders with (one, unless the geometry has groups). */
+  private get materialSlots(): Material[] {
+    const material = this.mesh.material;
+    return Array.isArray(material) ? material.filter(Boolean) : material ? [material] : [];
+  }
+
+  /** The slot the single-value accessors read; `null` when the mesh has no material at all. */
+  private get singleMaterial(): Material | null {
+    return this.materialSlots[0] ?? null;
+  }
+
+  /** The authored material family. */
+  get materialType(): GeometryMaterialType {
+    return this._materialType;
+  }
+
+  /**
+   * Swap the material family in place, carrying the colour over.
+   *
+   * A caller-supplied material is replaced too: asking for a family is asking for that family, and
+   * silently keeping the old material would be the same class of quiet no-op this whole change is
+   * about. Roughness/metalness only exist on `standard`, so they come back at their defaults.
+   */
+  set materialType(value: GeometryMaterialType) {
+    const next = asMaterialType(value);
+    if (next === this._materialType && this._ownsMaterial) {
+      return;
+    }
+    // Rebuilt slot by slot: a multi-material mesh (geometry groups) collapsed to one slot here
+    // would stop drawing most of itself, and the dropped materials would leak.
+    const previous = this.materialSlots;
+    const rebuilt = previous.map(slot =>
+      buildFamilyMaterial(next, {
+        color: this.colorOf(slot)?.clone() ?? new Color(DEFAULT_MATERIAL_COLOR),
+        ...this.pbrOf(slot),
+      })
+    );
+    this._materialType = next;
+    this.mesh.material = Array.isArray(this.mesh.material)
+      ? rebuilt
+      : (rebuilt[0] ??
+        buildFamilyMaterial(next, {
+          color: new Color(DEFAULT_MATERIAL_COLOR),
+          roughness: DEFAULT_ROUGHNESS,
+          metalness: DEFAULT_METALNESS,
+        }));
+    this._ownsMaterial = true;
+    // Dispose only after the replacement is in place, so a throw above cannot leave the mesh
+    // rendering a freed material.
+    for (const slot of previous) {
+      slot.dispose();
+    }
+  }
+
+  /** Material colour as an authored `#rrggbb` — the same convention every other node serializes. */
+  get color(): string {
+    const color = this.colorOf(this.singleMaterial);
+    return color ? `#${color.getHexString()}` : DEFAULT_MATERIAL_COLOR;
+  }
+
+  set color(value: string) {
+    // Every slot, not just the first: the getter reports one colour, so leaving the others behind
+    // would make the node describe itself wrongly. `Color.set` converts the authored sRGB hex into
+    // the working space on its own (`ColorManagement` is three's default) — never convert here too.
+    for (const slot of this.materialSlots) {
+      this.colorOf(slot)?.set(value);
+    }
+  }
+
+  /**
+   * The authored material, in the shape a `.pix3scene` carries it — or `null` when this node's
+   * material is not expressible in it.
+   *
+   * A multi-slot mesh is exactly that case: the block describes ONE material, so writing it would
+   * quietly discard every slot but the first on the next load. Such a mesh is built by code, which
+   * rebuilds it on load anyway, so the honest serialization is no block at all — which is also what
+   * the file carried before this block existed.
+   */
+  serializeMaterialConfig(): InstancedMaterialConfig | null {
+    if (Array.isArray(this.mesh.material) || !this.singleMaterial) {
+      return null;
+    }
+    const config: InstancedMaterialConfig = { type: this._materialType, color: this.color };
+    // Only `standard` has these, and writing them for the other families would resurrect PBR
+    // values on a round-trip through a mesh that has no use for them.
+    if (this._materialType === 'standard') {
+      Object.assign(config, this.pbrOf(this.singleMaterial));
+    }
+    return config;
+  }
+
+  /** A material's `color`, when it has one (every family here does; a custom one may not). */
+  private colorOf(material: Material | null): Color | null {
+    const color = (material as (Material & { color?: unknown }) | null)?.color;
+    return color instanceof Color ? color : null;
+  }
+
+  /** A material's PBR pair, defaulted for the families that do not carry them. */
+  private pbrOf(material: Material | null): { roughness: number; metalness: number } {
+    const std = material as (Material & { roughness?: number; metalness?: number }) | null;
+    return {
+      roughness: typeof std?.roughness === 'number' ? std.roughness : DEFAULT_ROUGHNESS,
+      metalness: typeof std?.metalness === 'number' ? std.metalness : DEFAULT_METALNESS,
+    };
   }
 
   get visibleInstanceCount(): number {
@@ -146,8 +316,22 @@ export class InstancedMesh3D extends Node3D {
     this.boundsDirty = true;
   }
 
+  /**
+   * Replace the material from code. The node owns whatever it renders, so the material being
+   * replaced is disposed and the reported family is re-read from the new one — without both, a mesh
+   * swapped to `basic` at runtime kept leaking a standard material and went on **saving**
+   * `type: standard`, describing a material it had not rendered since load.
+   */
   setMaterial(material: Material | Material[]): void {
+    const previous = this.materialSlots;
     this.mesh.material = material;
+    this._materialType = materialFamilyOf(firstOf(material)) ?? UNKNOWN_FAMILY_REPORTS_AS;
+    this._ownsMaterial = false;
+    for (const slot of previous) {
+      if (!(Array.isArray(material) ? material.includes(slot) : material === slot)) {
+        slot.dispose();
+      }
+    }
   }
 
   writeMatrices(data: InstanceMatrixArrayView, options: InstancedWriteOptions = {}): void {
@@ -290,6 +474,34 @@ export class InstancedMesh3D extends Node3D {
           },
         },
         {
+          name: 'materialType',
+          type: 'enum',
+          ui: {
+            label: 'Material Type',
+            description:
+              'standard = PBR (desktop-class cost), lambert = diffuse-only (the mobile default), basic = unlit',
+            group: 'Material',
+            options: [...GEOMETRY_MATERIAL_TYPES],
+          },
+          getValue: (node: unknown) => (node as InstancedMesh3D).materialType,
+          setValue: (node: unknown, value: unknown) => {
+            (node as InstancedMesh3D).materialType = String(value) as GeometryMaterialType;
+          },
+        },
+        {
+          name: 'color',
+          type: 'color',
+          ui: {
+            label: 'Color',
+            description: 'Shared by every instance; per-instance colour multiplies it',
+            group: 'Material',
+          },
+          getValue: (node: unknown) => (node as InstancedMesh3D).color,
+          setValue: (node: unknown, value: unknown) => {
+            (node as InstancedMesh3D).color = String(value);
+          },
+        },
+        {
           name: 'castShadow',
           type: 'boolean',
           ui: {
@@ -342,6 +554,11 @@ export class InstancedMesh3D extends Node3D {
       ],
       groups: {
         ...baseSchema.groups,
+        Material: {
+          label: 'Material',
+          description: 'The one material every instance renders with',
+          expanded: true,
+        },
         Rendering: {
           label: 'Rendering',
           description: 'Instanced mesh rendering options',

@@ -87,6 +87,7 @@ import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
+import { resolveGameplayScenePath } from '@/features/scripts/play-workspace';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import {
@@ -2050,20 +2051,17 @@ export class AgentToolRegistry {
    * Scene-dependent tools auto-open the project scene when none is active. The editor can end up
    * scene-less mid-session (e.g. a failed reload of an externally rewritten scene file closes the
    * tab), and the agent has no tool to open scenes — models then flail with fs_write rewrites and
-   * forbidden commands (observed in eval runs). Prefer the editor startup scene (`main.pix3scene`,
-   * the gameplay scene the agent iterates on) so recovery never lands the agent on a menu/entry
-   * scene; fall back to the configured entry scene, then any known scene.
+   * forbidden commands (observed in eval runs). Which scene to reach for is not this class's
+   * decision to make twice: `resolveGameplayScenePath` is the same order the play commands use
+   * (gameplay scene → any known scene → the shipped `scenes/main.pix3scene` path), and it
+   * deliberately leaves the configured entry scene out — on a recipe project that value is the
+   * MENU, and recovering onto the menu silently redirects every subsequent agent edit into it.
    */
   private async ensureActiveScene(): Promise<void> {
     if (this.sceneManager.getActiveSceneGraph()) {
       return;
     }
-    const startupPath = 'scenes/main.pix3scene';
-    const stripPrefix = (p: string): string => p.replace(/^res:\/\//i, '').replace(/^\/+/, '');
-    const descriptorPaths = Object.values(appState.scenes.descriptors).map(d => d.filePath ?? '');
-    const startupDescriptor = descriptorPaths.find(p => stripPrefix(p) === startupPath);
-    const configured = appState.project.manifest?.defaultExportScenePath?.trim() ?? '';
-    const raw = startupDescriptor || configured || descriptorPaths[0] || startupPath;
+    const raw = resolveGameplayScenePath(appState);
     const path = raw.startsWith('res://') ? raw : `res://${raw.replace(/^res:\/\//i, '')}`;
     await this.editorTabs.focusOrOpenScene(path);
     // The scene loads asynchronously behind the tab activation; give it a few seconds.

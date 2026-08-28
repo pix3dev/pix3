@@ -42,6 +42,14 @@ export interface SceneTreeNode {
   isPrefabNode?: boolean;
   isPrefabRoot?: boolean;
   isPrefabChild?: boolean;
+  /**
+   * The node's `type:` is one the loader does not know, so it was built as a bare `NodeBase` and
+   * does nothing. Set here rather than derived in the row, because the row renders a view model and
+   * the fact is a property of the live node.
+   */
+  isInert?: boolean;
+  /** Why it is inert, spelled out (with a "did you mean" when one is close). Tooltip text. */
+  inertReason?: string;
 }
 
 interface ScriptRevealRequestDetail {
@@ -236,6 +244,15 @@ export class SceneTreeNodeComponent extends ComponentBase {
                     >${this.getInstanceFileName(this.node.instancePath)}</span
                   >`
                 : null}
+              ${this.node.isInert
+                ? html`<span
+                    class="tree-node__inert-badge"
+                    title=${this.node.inertReason ??
+                    `Unknown node type "${this.node.type}" — this node does nothing.`}
+                    aria-label="Unrecognised node type"
+                    >${this.renderToggleIcon('alert-triangle')}</span
+                  >`
+                : null}
               ${this.node.isPrefabRoot
                 ? html`<span class="tree-node__prefab-badge" title="Prefab instance root">🔗</span>`
                 : null}
@@ -333,6 +350,11 @@ export class SceneTreeNodeComponent extends ComponentBase {
     const base = node.instancePath
       ? `${node.name} · ${node.type} · ${node.instancePath}`
       : `${node.name} · ${node.type}`;
+    if (node.isInert) {
+      // Ahead of the prefab note on purpose: an inert node does nothing at all, which outranks
+      // every other thing this row could tell you about it.
+      return `${base} · ${node.inertReason ?? 'unrecognised type — this node does nothing'}`;
+    }
     if (node.isPrefabChild) {
       return `${base} · part of prefab instance — open prefab to edit structure`;
     }

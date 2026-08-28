@@ -206,8 +206,12 @@ const asNode = (object: Object3D): NodeBase | null => (object instanceof NodeBas
  * A node the loader could not build: it fell through to the permissive `NodeBase` fallback *and*
  * its type is not one the vocabulary knows. Both halves are needed — `Group` is a legitimate bare
  * `NodeBase`, and a known type on a real subclass is obviously fine.
+ *
+ * Exported because the lint is not the only surface that owes the user this fact: an inert node is
+ * indistinguishable from a working one in the Scene Tree, which is the first place anybody looks
+ * when a node "is there but does nothing".
  */
-const isInertNode = (node: NodeBase): boolean =>
+export const isInertNode = (node: NodeBase): boolean =>
   Object.getPrototypeOf(node) === NodeBase.prototype && !isKnownSceneNodeType(node.type);
 
 /** Three sets an `isMesh*Material` flag on every material instance; no class imports needed. */

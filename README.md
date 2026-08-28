@@ -45,7 +45,7 @@ The cloud server sets `PREVIEW_PUBLIC_URL=https://cloud.pix3.dev`, so join links
 
 **Export** ships two flavors: single-file playable HTML (assets base64-embedded) and **HTML + assets zip** (`Project → Export HTML + Assets (Zip)`) for static hosting without the base64 overhead.
 
-The full rapid-prototyping design is in `.plans/rapid-prototyping-design.md`.
+The full rapid-prototyping design is in `.plans/done/rapid-prototyping-design.md`.
 
 ## Collaboration Server (`packages/pix3-collab-server`)
 

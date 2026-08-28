@@ -208,7 +208,7 @@ describe('ProjectService — local project identity', () => {
 });
 
 /**
- * The transition's half of `applyTemplateFiles` (`.plans/vibe-idea-stage.md` §3.1, the phase's main
+ * The transition's half of `applyTemplateFiles` (`.plans/done/vibe-idea-stage.md` §3.1, the phase's main
  * risk): a recipe is laid over a project that already has the user's design document, decisions and
  * references in it. What is asserted here is the pair of properties that makes that survivable —
  * the recipe DOES arrive, and the user's files are NOT touched.
@@ -311,7 +311,7 @@ describe('ProjectService.applyTemplateFiles', () => {
 });
 
 /**
- * Reactivation after the Flow transition (`.plans/vibe-idea-stage.md` §3.1).
+ * Reactivation after the Flow transition (`.plans/done/vibe-idea-stage.md` §3.1).
  *
  * The riskiest sequence of the phase: the project id, the handle and the recents entry stay, while
  * every document the session was holding has to be dropped and re-read. Each assertion below is a

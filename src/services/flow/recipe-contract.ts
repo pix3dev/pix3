@@ -13,7 +13,7 @@ import { parse, parseDocument, isSeq, isMap } from 'yaml';
 
 /**
  * Paths the idea→prototype transition never overwrites: the user's own work
- * (`.plans/vibe-idea-stage.md` §3.1). An entry ending in `/` covers the whole subtree.
+ * (`.plans/done/vibe-idea-stage.md` §3.1). An entry ending in `/` covers the whole subtree.
  *
  * Part of the recipe contract rather than of the transition, because it is a statement about what a
  * recipe may contain: no template ships any of these, and `recipes.spec.ts` fails if one starts to.

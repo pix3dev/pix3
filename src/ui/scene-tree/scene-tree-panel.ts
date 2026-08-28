@@ -3,7 +3,7 @@ import { repeat } from 'lit/directives/repeat.js';
 
 import { ComponentBase, customElement, html, state, inject } from '@/fw';
 import { appState, type SceneDescriptor } from '@/state';
-import { NodeBase } from '@pix3/runtime';
+import { NodeBase, describeUnknownNodeType, isInertNode } from '@pix3/runtime';
 import { getNodeVisuals } from './node-visuals.helper';
 import type { SceneTreeNode } from './scene-tree-node';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
@@ -496,6 +496,10 @@ export class SceneTreePanel extends ComponentBase {
   private buildTreeNodes(nodes: NodeBase[]): SceneTreeNode[] {
     return nodes.map(node => {
       const { color, icon } = getNodeVisuals(node);
+      // A node whose `type:` the loader did not recognise looks exactly like a working one here —
+      // same row, same icon, same children — and the tree is the first place anyone looks when a
+      // node "is there but has no effect". Until now only the agent lint knew (`inert-nodes`).
+      const inert = isInertNode(node);
       return {
         id: node.nodeId,
         name: node.name,
@@ -510,6 +514,8 @@ export class SceneTreePanel extends ComponentBase {
         isPrefabNode: isPrefabNode(node),
         isPrefabRoot: isPrefabInstanceRoot(node),
         isPrefabChild: isPrefabChildNode(node),
+        isInert: inert,
+        inertReason: inert ? describeUnknownNodeType(node.name, node.type) : undefined,
         // Only include NodeBase children, filter out Three.js objects like Mesh, Light, etc.
         children: this.buildTreeNodes(node.children.filter(child => child instanceof NodeBase)),
       };

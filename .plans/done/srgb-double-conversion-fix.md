@@ -1,6 +1,7 @@
 # Fix: engine-wide sRGB double conversion of authored colours
 
-Status: in progress · Owner: runtime · Breaking visual change (accepted by the user)
+Status: **shipped** — implemented, verified and in `main` since `2009d8d` (2026-08-20).
+Owner: runtime · Breaking visual change (accepted by the user).
 
 ## The bug, in one paragraph
 

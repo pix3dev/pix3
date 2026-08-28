@@ -525,7 +525,7 @@ describe('template testability contract', () => {
 
 /**
  * The Flow idea→prototype transition lays a recipe over a project that is ALREADY the user's
- * (`.plans/vibe-idea-stage.md` §3.1): the design document, the decisions log, the source documents
+ * (`.plans/done/vibe-idea-stage.md` §3.1): the design document, the decisions log, the source documents
  * they attached and the whole references folder are theirs, and `applyTemplateFiles(…, { skip })`
  * refuses to overwrite them.
  *

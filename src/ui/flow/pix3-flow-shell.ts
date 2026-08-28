@@ -43,6 +43,16 @@ const persistChatWidth = (width: number): void => {
   }
 };
 
+/**
+ * The one place in this shell that names the entry-scene play command.
+ *
+ * It exists as a constant so the guard in `pix3-flow-shell.spec.ts` can state the invariant
+ * precisely: the stage's *automatic* launch is gameplay (`game.start`), and the entry scene is
+ * reachable only through the explicitly-labelled secondary action a person clicks. A bare literal
+ * would make "does this file mention `game.start-main`?" unable to tell those two apart.
+ */
+const ENTRY_SCENE_PLAY_COMMAND = 'game.start-main';
+
 /** How many times a stage launch is attempted before the failure reaches the user. */
 const STAGE_START_ATTEMPTS = 4;
 /** Gap between those attempts — long enough for a project to finish settling, short enough to feel instant. */
@@ -109,6 +119,15 @@ export class Pix3FlowShell extends ComponentBase {
 
   @state()
   private stageError: string | null = null;
+
+  /**
+   * Whether the project declares an entry scene, which is what makes "play from the entry scene" a
+   * *different* run from the stage's normal one. Without one, `game.start-main` degrades to playing
+   * the active scene — the same thing the Play button already does — so the secondary action is
+   * hidden rather than offered as a button that silently does nothing new.
+   */
+  @state()
+  private hasEntryScene = false;
 
   /**
    * Which half of the prototype stage is on screen (design §2.5). The game is the default: the
@@ -312,12 +331,16 @@ export class Pix3FlowShell extends ComponentBase {
 
   private async onProjectChanged(): Promise<void> {
     if (appState.project.status !== 'ready') {
+      // The previous project's answer must not outlive it: the entry-scene action is offered per
+      // project, and a stale `true` would offer it for one that has none.
+      this.hasEntryScene = false;
       return;
     }
     const projectId = appState.project.id;
     // Read on every project change, not once: a project closed at the idea stage has to reopen
     // into it (design §2.6), and the manifest is what remembers that.
     this.stage = this.stageService.getStage();
+    this.hasEntryScene = (appState.project.manifest?.defaultExportScenePath?.trim() ?? '') !== '';
     await this.refreshPlan();
     this.fitStage();
     if (this.stage === 'idea') {
@@ -410,6 +433,32 @@ export class Pix3FlowShell extends ComponentBase {
       return;
     }
     this.stageError = failure;
+  }
+
+  /**
+   * The full run: start at the project's entry scene (its menu) instead of the gameplay scene.
+   *
+   * Deliberately a **person-initiated** action and nothing else. The menu→game transition is a real
+   * thing to check inside Vibe, but it costs the editor's active scene — `game.start-main` moves it,
+   * and the active scene is simultaneously what plays, what the viewport shows and what the agent
+   * edits. That is a fine price for a click, and not one to pay behind the user's back on every
+   * stage launch (see `startStage`).
+   */
+  private async startFromEntryScene(): Promise<void> {
+    this.stageError = null;
+    try {
+      // The stage auto-starts on mount, so this button is almost always clicked while a game
+      // is already running — and the play commands refuse to start a second one. Stopping
+      // first is what the click means: "run it again, from the top."
+      if (appState.ui.isPlaying) {
+        await this.commandDispatcher.executeById('game.stop');
+      }
+      if (!(await this.commandDispatcher.executeById(ENTRY_SCENE_PLAY_COMMAND))) {
+        this.stageError = 'The entry scene could not be started.';
+      }
+    } catch (error) {
+      this.stageError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   private async restartStage(): Promise<void> {
@@ -790,6 +839,17 @@ export class Pix3FlowShell extends ComponentBase {
         >
           ${this.icons.getIcon('rotate-ccw', IconSize.SMALL)}
         </button>
+        ${this.hasEntryScene
+          ? html`<button
+              class="flow-stage__button flow-stage__button--secondary"
+              type="button"
+              title="Play from entry scene — the full run, starting at the menu"
+              aria-label="Play from entry scene"
+              @click=${() => void this.startFromEntryScene()}
+            >
+              ${this.icons.getIcon('skip-back', IconSize.SMALL)}
+            </button>`
+          : null}
         <span class="flow-stage__status">
           ${this.isAgentRunning && toolLabel
             ? html`<span class="flow-plan__spinner"></span><span>${toolLabel}</span>`

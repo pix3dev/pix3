@@ -1,5 +1,12 @@
 # SVG sprites via the agent LLM (svg-llm image provider)
 
+Status: **shipped** — v1 (order of work 1–4) implemented and in `main` since `4a9811b`
+(2026-08-19). `svg-llm` is a registered `ImageGenProvider`
+(`src/services/image-gen/SvgLlmImageProvider.ts` + `SvgSpriteGenerator.ts` + `svg-render.ts`), the
+Generate panel exposes it with W×H inputs, and `generate_asset` passes `width`/`height` through and
+recommends the provider for schematic art in its own description. **Phase 2 below is a deliberate
+backlog, not pending work.**
+
 ## Idea
 
 For fast iteration, many sprites don't need a text-to-image model (nanobanana): schematic /

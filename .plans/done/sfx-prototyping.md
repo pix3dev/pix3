@@ -1,5 +1,12 @@
 # Prototype SFX via the agent LLM (txt2sfx → baked WAV)
 
+Status: **shipped** — v1 (order of work 1–4) implemented and verified live; in `main` since
+`25dfeba`/`47d0a13`/`208dbae` (2026-08-19). `@txt2sfx/*` are published to npm and consumed from the
+registry; `SoundlineLlmAdapter` + the bundled recipe bank + `SfxGenService` live in
+`src/services/sfx-gen/`, Sound mode is part of the `Generate` panel, and `generate_sfx` is a
+registered agent tool referenced by the `game-prototype` / `flow-increment` / `asset-generation`
+skills. **Phase 2 below is a deliberate backlog, not pending work.**
+
 ## Idea
 
 Same move as [svg-llm-sprites](svg-llm-sprites.md), for sound: a prototype needs a *named,

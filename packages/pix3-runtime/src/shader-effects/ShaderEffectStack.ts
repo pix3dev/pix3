@@ -10,7 +10,7 @@
  * effect list and the same uniform `{ value }` refs, so a param edit reflects
  * everywhere without a recompile, and a define toggle recompiles them all.
  *
- * Node-agnostic — the runtime stays editor-agnostic. See `.plans/shader-effects-2d.md`.
+ * Node-agnostic — the runtime stays editor-agnostic. See `.plans/done/shader-effects-2d.md`.
  */
 import { Color, type Material } from 'three';
 import type { PropertySchema, PropertyDefinition } from '../fw/property-schema';

@@ -7,7 +7,7 @@
  * pure data + injectors — they have NO lifecycle (unlike Script components), so
  * they live in a module-level registry rather than the DI ScriptRegistry.
  *
- * See `.plans/shader-effects-v2-list-design.md`.
+ * See `.plans/done/shader-effects-v2-list-design.md`.
  */
 import type { PropertyUIHints } from '../fw/property-schema';
 

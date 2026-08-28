@@ -22,7 +22,8 @@ vi.mock('./pix3-flow-side-panel', () => ({}));
 type TestShell = HTMLElement & { updateComplete: Promise<unknown> };
 
 class CommandDispatcherStub {
-  executeById = vi.fn(async () => true);
+  // The command id is declared so tests can assert on WHICH command the shell dispatched.
+  executeById = vi.fn(async (_commandId: string) => true);
 }
 
 class GamePlaySessionServiceStub {
@@ -71,7 +72,8 @@ const manifestWith = (metadata: Record<string, unknown>): ProjectManifest => ({
 
 /** Register the stubs and mount the shell over a ready project with the given manifest metadata. */
 const mountShell = async (
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
+  manifestOverrides: Partial<ProjectManifest> = {}
 ): Promise<{
   shell: TestShell;
   playSession: GamePlaySessionServiceStub;
@@ -119,7 +121,7 @@ const mountShell = async (
   appState.project.status = 'ready';
   appState.project.id = 'project-1';
   appState.project.projectName = 'Ant Wars';
-  appState.project.manifest = manifestWith(metadata);
+  appState.project.manifest = { ...manifestWith(metadata), ...manifestOverrides };
 
   const shell = document.createElement('pix3-flow-shell') as TestShell;
   document.body.appendChild(shell);
@@ -210,6 +212,83 @@ describe('Pix3FlowShell — idea stage', () => {
     const { shell } = await mountShell({ flowStage: 'idea' });
 
     expect(shell.querySelector('.flow-view__switch')).toBeNull();
+  });
+});
+
+describe('Pix3FlowShell — the entry-scene run', () => {
+  /**
+   * The invariant phase 1 of the plan established, restated as a test now that a SECOND start
+   * command is reachable from this shell: the automatic launch is the gameplay scene. Starting the
+   * stage on the entry scene is what used to make the menu both what the user watched and — because
+   * `appState.scenes.activeSceneId` is the editing surface — what every agent edit landed in.
+   */
+  it('auto-starts the stage on the active scene, never on the entry scene', async () => {
+    await mountShell(
+      { projectName: 'Ant Wars' },
+      { defaultExportScenePath: 'scenes/menu.pix3scene' }
+    );
+    const dispatcher = ServiceContainer.getInstance().getService<CommandDispatcherStub>(
+      ServiceContainer.getInstance().getOrCreateToken(CommandDispatcher)
+    );
+
+    const dispatched = dispatcher.executeById.mock.calls.map(call => call[0]);
+    expect(dispatched).toContain('game.start');
+    expect(dispatched).not.toContain('game.start-main');
+  });
+
+  it('offers the entry-scene run as a secondary action, and dispatches it on click', async () => {
+    const { shell } = await mountShell(
+      { projectName: 'Ant Wars' },
+      { defaultExportScenePath: 'scenes/menu.pix3scene' }
+    );
+    const dispatcher = ServiceContainer.getInstance().getService<CommandDispatcherStub>(
+      ServiceContainer.getInstance().getOrCreateToken(CommandDispatcher)
+    );
+    dispatcher.executeById.mockClear();
+
+    const secondary = shell.querySelector<HTMLButtonElement>('.flow-stage__button--secondary');
+    expect(secondary).not.toBeNull();
+    secondary?.click();
+    await settle(shell);
+
+    expect(dispatcher.executeById).toHaveBeenCalledWith('game.start-main');
+  });
+
+  /**
+   * The stage auto-starts on mount, so this button is clicked while a game is already running
+   * almost every time — and both play commands refuse to start a second one. Gating the button on
+   * `!isPlaying` therefore hid it exactly when it was wanted; stopping first is what the click
+   * means.
+   */
+  it('stops the running game before starting from the entry scene', async () => {
+    const { shell } = await mountShell(
+      { projectName: 'Ant Wars' },
+      { defaultExportScenePath: 'scenes/menu.pix3scene' }
+    );
+    const dispatcher = ServiceContainer.getInstance().getService<CommandDispatcherStub>(
+      ServiceContainer.getInstance().getOrCreateToken(CommandDispatcher)
+    );
+    appState.ui.isPlaying = true;
+    await settle(shell);
+    dispatcher.executeById.mockClear();
+
+    shell.querySelector<HTMLButtonElement>('.flow-stage__button--secondary')?.click();
+    await settle(shell);
+
+    expect(dispatcher.executeById.mock.calls.map(call => call[0])).toEqual([
+      'game.stop',
+      'game.start-main',
+    ]);
+  });
+
+  /**
+   * Without an entry scene `game.start-main` degrades to playing the active scene — the same run
+   * the Play button already gives. A button that silently does nothing new is worse than no button.
+   */
+  it('hides the secondary action when the project declares no entry scene', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+
+    expect(shell.querySelector('.flow-stage__button--secondary')).toBeNull();
   });
 });
 

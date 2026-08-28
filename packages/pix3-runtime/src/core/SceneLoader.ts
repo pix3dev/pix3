@@ -134,6 +134,13 @@ export interface InstancedMesh3DProperties {
   receiveShadow?: boolean;
   enablePerInstanceColor?: boolean;
   frustumCulled?: boolean;
+  /** Same vocabulary as `GeometryMesh`'s, minus the maps — see `InstancedMaterialConfig`. */
+  material?: {
+    type?: string;
+    color?: string;
+    roughness?: number;
+    metalness?: number;
+  };
 }
 
 export interface DirectionalLightNodeProperties {
@@ -1736,6 +1743,16 @@ export class SceneLoader {
         const parsed = this.parseNode3DTransforms(baseProps.properties as Record<string, unknown>);
         const props = baseProps.properties as InstancedMesh3DProperties;
         const maxInstances = this.asPositiveInteger(props.maxInstances);
+        // Authored material, in the same shape GeometryMesh reads. Passed even when the scene
+        // declares none: the node then builds its own default instead of sharing one global white
+        // PBR material, which is what made the family unreachable from the inspector.
+        const material = this.asRecord((props as Record<string, unknown>).material);
+        const materialConfig = {
+          type: this.asString(material?.type),
+          color: this.asString(material?.color),
+          roughness: typeof material?.roughness === 'number' ? material.roughness : undefined,
+          metalness: typeof material?.metalness === 'number' ? material.metalness : undefined,
+        };
 
         if (maxInstances === null) {
           throw new SceneValidationError(
@@ -1759,6 +1776,7 @@ export class SceneLoader {
               ? props.enablePerInstanceColor
               : false,
           frustumCulled: typeof props.frustumCulled === 'boolean' ? props.frustumCulled : undefined,
+          materialConfig,
         });
       }
       case 'DirectionalLightNode': {

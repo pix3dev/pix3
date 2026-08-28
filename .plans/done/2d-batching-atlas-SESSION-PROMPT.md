@@ -8,7 +8,7 @@
 Implement **2D draw-call optimization for the Pix3 runtime**: pre-launch texture-atlas packing (with caching) + paint-order-preserving sprite batching, so a 2D game frame drops from ~1 draw call per node to a handful. This is an **engine-level** feature (touches `packages/pix3-runtime` + editor), so per `CLAUDE.md` state the plan and get my confirmation before writing code.
 
 ## Authoritative plan — read first
-- **`.plans/2d-batching-atlas-design.md`** — the full, implementation-ready design (Fable-authored). This is the source of truth: phases, file map, the paint-order invariant (B1), the atlas-region-composition gotchas, the `AssetLoader.loadTexture` remap chokepoint, cache keying, export/player integration, and the 10 open decisions (all already decided — recommendation-first). Follow it.
+- **`.plans/done/2d-batching-atlas-design.md`** — the full, implementation-ready design (Fable-authored). This is the source of truth: phases, file map, the paint-order invariant (B1), the atlas-region-composition gotchas, the `AssetLoader.loadTexture` remap chokepoint, cache keying, export/player integration, and the 10 open decisions (all already decided — recommendation-first). Follow it.
 - Also read: `AGENTS.md` (binding coding rules), `CLAUDE.md` (repo topology, on-demand rendering, 2D render-order notes), `docs/nodes-and-systems.md` (update it after adding the engine feature). Load the **`pix3-game-dev`** skill before writing runtime/render code.
 
 ## Repo state you're inheriting (branch `feat/editor-improvements`)

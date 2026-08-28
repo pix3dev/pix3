@@ -7,8 +7,6 @@ import {
   TorusGeometry,
   Mesh,
   MeshStandardMaterial,
-  MeshLambertMaterial,
-  MeshBasicMaterial,
   Color,
   SRGBColorSpace,
   BufferGeometry,
@@ -17,6 +15,13 @@ import {
   type Texture,
 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
+import {
+  asMaterialType,
+  buildFamilyMaterial,
+  effectTargetFor,
+  GEOMETRY_MATERIAL_TYPES,
+  type GeometryMaterialType,
+} from './material-family';
 import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../fw/property-schema-utils';
@@ -53,27 +58,16 @@ type MappedMaterial = Material & {
   aoMapIntensity?: number;
 };
 
-export const GEOMETRY_MATERIAL_TYPES = ['standard', 'lambert', 'basic'] as const;
-export type GeometryMaterialType = (typeof GEOMETRY_MATERIAL_TYPES)[number];
-
-export const DEFAULT_GEOMETRY_MATERIAL_TYPE: GeometryMaterialType = 'standard';
-
-const asMaterialType = (value: unknown): GeometryMaterialType =>
-  typeof value === 'string' && (GEOMETRY_MATERIAL_TYPES as readonly string[]).includes(value)
-    ? (value as GeometryMaterialType)
-    : DEFAULT_GEOMETRY_MATERIAL_TYPE;
-
 /**
- * Which shader-effect family a material type belongs to.
- *
- * `lambert` maps to `standard` rather than getting a family of its own: the four anchors the effect
- * composer injects at (`uv_vertex`, `color_fragment`, `emissivemap_fragment`, `opaque_fragment`)
- * all exist in three's meshlambert shader, so standard-targeted effects compile there. Giving
- * lambert no effects at all would mean picking the mobile material silently disables a project's
- * shader effects — a worse failure than the one this whole change is about.
+ * The material families and their builder live in `material-family` — `InstancedMesh3D` authors the
+ * same three. Re-exported here because these names are public API that consumer projects import
+ * from `@pix3/runtime`, and moving a file is not a reason to break them.
  */
-const effectTargetFor = (type: GeometryMaterialType): 'standard' | 'basic' =>
-  type === 'basic' ? 'basic' : 'standard';
+export {
+  GEOMETRY_MATERIAL_TYPES,
+  DEFAULT_GEOMETRY_MATERIAL_TYPE,
+  type GeometryMaterialType,
+} from './material-family';
 
 /** Supported primitive kinds. `size` is interpreted per-shape (see buildGeometry). */
 export const GEOMETRY_KINDS = ['box', 'sphere', 'plane', 'cylinder', 'cone', 'torus'] as const;
@@ -169,7 +163,7 @@ export class GeometryMesh
       target: effectTargetFor(this._materialType),
     });
 
-    const material = GeometryMesh.buildMaterial(this._materialType, {
+    const material = buildFamilyMaterial(this._materialType, {
       color,
       roughness,
       metalness,
@@ -248,30 +242,6 @@ export class GeometryMesh
     }
   }
 
-  /**
-   * Build the three.js material for a family. `roughness`/`metalness` exist only on `standard`;
-   * the other two ignore them, and {@link serializeConfig} stops writing them so a round-trip does
-   * not resurrect PBR values on a mesh that has no use for them.
-   */
-  private static buildMaterial(
-    type: GeometryMaterialType,
-    opts: { color: Color; roughness: number; metalness: number }
-  ): Material {
-    switch (type) {
-      case 'basic':
-        return new MeshBasicMaterial({ color: opts.color });
-      case 'lambert':
-        return new MeshLambertMaterial({ color: opts.color });
-      case 'standard':
-      default:
-        return new MeshStandardMaterial({
-          color: opts.color,
-          roughness: opts.roughness,
-          metalness: opts.metalness,
-        });
-    }
-  }
-
   /** The authored material family. */
   get materialType(): GeometryMaterialType {
     return this._materialType;
@@ -295,7 +265,7 @@ export class GeometryMesh
     const previousColor = this._colorMaterial?.color.clone() ?? new Color('#4e8df5');
     const previousMap = this._colorMaterial?.map ?? null;
     const std = this._stdMaterial;
-    const material = GeometryMesh.buildMaterial(next, {
+    const material = buildFamilyMaterial(next, {
       color: previousColor,
       roughness: std?.roughness ?? 0.35,
       metalness: std?.metalness ?? 0.25,

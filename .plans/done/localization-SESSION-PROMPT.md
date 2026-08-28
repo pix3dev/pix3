@@ -8,7 +8,7 @@
 Continue the **unified localization (i18n/l10n) system for Pix3**. **All planned phases (0–3) are implemented and live-verified**, but the Phase 2+3 work sits **uncommitted in the working tree** — your first job is to review and commit it in sensible increments, then take the post-MVP polish backlog.
 
 ## Authoritative context — read first
-- **`.plans/localization-design.md`** — the full design (source of truth for data model, API, phases §8, open decisions).
+- **`.plans/done/localization-design.md`** — the full design (source of truth for data model, API, phases §8, open decisions).
 - `docs/pix3-specification.md` **§6.17 Localization** (v1.22) and the Localization section in `docs/nodes-and-systems.md` — describe exactly what shipped.
 - Auto-memory `localization-i18n.md` has the condensed history + debug lessons.
 - `AGENTS.md` / `CLAUDE.md` as always; `pix3-ui-conventions` before touching panel UI, `pix3-game-dev` before runtime work.

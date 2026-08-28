@@ -756,7 +756,7 @@ export class ProjectService {
    * Write a template's files (and the manifest) into the **current** storage.
    *
    * Used twice: once for a brand new project, and once by the Flow idea→prototype transition, which
-   * lays a recipe over a project that is already open (`.plans/vibe-idea-stage.md` §3.1). Nothing
+   * lays a recipe over a project that is already open (`.plans/done/vibe-idea-stage.md` §3.1). Nothing
    * here assumes an empty folder — every directory create is a no-op when the directory exists and
    * every write is an overwrite — so the only thing the second caller needs is a way to say which
    * paths are the USER's rather than the template's.

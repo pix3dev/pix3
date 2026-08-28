@@ -442,6 +442,19 @@ pix3-flow-shell .flow-stage__button:hover {
   color: var(--fg-0);
 }
 
+/* The entry-scene run is the rarer of the two: present, but never competing with Play/Restart. */
+pix3-flow-shell .flow-stage__button--secondary {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-3);
+}
+
+pix3-flow-shell .flow-stage__button--secondary:hover {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+}
+
 pix3-flow-shell .flow-stage__button svg {
   width: 14px;
   height: 14px;

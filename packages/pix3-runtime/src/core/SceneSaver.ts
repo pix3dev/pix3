@@ -655,6 +655,16 @@ export class SceneSaver {
       Object.assign(props, node.serializeConfig());
     } else if (node instanceof InstancedMesh3D) {
       props.maxInstances = node.maxInstances;
+      // Read from the live material, like the GeometryMesh branch above — an inspector edit that
+      // never reached the file is the same bug twice. `null` means the live material is not
+      // expressible as one authored block (a code-built multi-slot mesh), and then the honest
+      // output is no block rather than one describing the first slot only.
+      const instancedMaterial = node.serializeMaterialConfig();
+      if (instancedMaterial) {
+        props.material = instancedMaterial;
+      } else {
+        delete props.material;
+      }
       props.castShadow = node.mesh.castShadow;
       props.receiveShadow = node.mesh.receiveShadow;
       props.enablePerInstanceColor = node.enablePerInstanceColor;

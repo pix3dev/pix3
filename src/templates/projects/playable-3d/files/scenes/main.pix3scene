@@ -1,6 +1,8 @@
 # Pix3 Scene File (YAML)
 # Playable 3D blank (portrait 1080x1920): 3D gameplay placeholder plus a 2D UI
-# layer with a tap-to-start intro overlay and an end screen with a CTA button.
+# layer with a tap-to-start intro overlay, a score/lives/time HUD, and an end
+# screen with a CTA button. `hud-root` carries all three components: GameFlow
+# (phases), GameRules (score/lives/win-lose) and ScoreHud (display only).
 version: 1.0.0
 metadata:
   author: Pix3 Template
@@ -102,6 +104,30 @@ root:
           introNode: intro-overlay
           endNode: end-screen
           autoWinAfterSec: 15
+          skipIntro: false
+      - id: game-rules
+        type: user:GameRules
+        enabled: true
+        config:
+          winMode: score
+          targetScore: 10
+          timeLimitSec: 0
+          startingLives: 3
+          resultLabel: end-label
+          winText: "YOU WIN!"
+          loseText: "GAME OVER"
+          # The run starts when GameFlow leaves the tap gate, not when the scene loads.
+          startWithFlow: true
+      - id: score-hud
+        type: user:ScoreHud
+        enabled: true
+        config:
+          sourceNode: hud-root
+          scoreLabel: score-label
+          scoreFormat: "SCORE {value}"
+          timeLabel: time-label
+          timeFormat: "{value}"
+          livesBar: lives-bar
     children:
       - id: hud-label
         type: Label2D
@@ -112,12 +138,67 @@ root:
           labelColor: "#ffffff"
           labelAlign: center
           transform:
-            position: [0, 860]
+            position: [0, 780]
             scale: [1, 1]
             rotation: 0
           layout:
             enabled: true
             horizontalAlign: center
+            verticalAlign: top
+        children: []
+      - id: score-label
+        type: Label2D
+        name: Score Label
+        properties:
+          label: "SCORE 0"
+          labelFontSize: 44
+          labelColor: "#ffffff"
+          labelAlign: left
+          transform:
+            position: [-340, 880]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: left
+            verticalAlign: top
+        children: []
+      - id: time-label
+        type: Label2D
+        name: Time Label
+        properties:
+          label: "0"
+          labelFontSize: 44
+          labelColor: "#f5ae39"
+          labelAlign: center
+          transform:
+            position: [0, 880]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: top
+        children: []
+      - id: lives-bar
+        type: Bar2D
+        name: Lives Bar
+        properties:
+          width: 240
+          height: 28
+          minValue: 0
+          maxValue: 3
+          value: 3
+          barColor: "#ff4d6d"
+          backBackgroundColor: "#2a3352"
+          showBorder: false
+          transform:
+            position: [340, 885]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: right
             verticalAlign: top
         children: []
       - id: intro-overlay
