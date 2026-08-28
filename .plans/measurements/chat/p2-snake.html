@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Змейка</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1e2a38, #0f1620);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #f0f0f0;
+  }
+  h1 {
+    margin: 10px 0;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px #4caf50;
+  }
+  #wrap {
+    position: relative;
+  }
+  canvas {
+    background: #101820;
+    border: 3px solid #4caf50;
+    border-radius: 8px;
+    box-shadow: 0 0 25px rgba(76,175,80,0.5);
+    display: block;
+  }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    width: 400px;
+    max-width: 90vw;
+    margin-bottom: 8px;
+    font-size: 18px;
+  }
+  #overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0 0 10px; color: #4caf50; }
+  #overlay p { margin: 4px 0 16px; opacity: 0.8; }
+  button {
+    padding: 10px 24px;
+    font-size: 16px;
+    background: #4caf50;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  button:hover { background: #66bb6a; }
+  .hint {
+    margin-top: 12px;
+    font-size: 13px;
+    opacity: 0.6;
+    text-align: center;
+    max-width: 400px;
+  }
+  .controls-mobile {
+    display: grid;
+    grid-template-columns: repeat(3, 60px);
+    grid-template-rows: repeat(2, 60px);
+    gap: 6px;
+    margin-top: 14px;
+  }
+  .controls-mobile button {
+    font-size: 20px;
+    padding: 0;
+  }
+  .ctrl-up { grid-column: 2; grid-row: 1; }
+  .ctrl-left { grid-column: 1; grid-row: 2; }
+  .ctrl-down { grid-column: 2; grid-row: 2; }
+  .ctrl-right { grid-column: 3; grid-row: 2; }
+</style>
+</head>
+<body>
+
+<h1>🐍 Змейка</h1>
+
+<div id="hud">
+  <div>Счёт: <span id="score">0</span></div>
+  <div>Рекорд: <span id="best">0</span></div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="400" height="400"></canvas>
+  <div id="overlay">
+    <h2 id="overlay-title">Готовы?</h2>
+    <p id="overlay-text">Управление: стрелки / WASD</p>
+    <button id="startBtn">Старт</button>
+  </div>
+</div>
+
+<div class="hint">Пробел — пауза. После проигрыша нажмите кнопку или Enter, чтобы начать заново.</div>
+
+<div class="controls-mobile">
+  <button class="ctrl-up">▲</button>
+  <button class="ctrl-left">◀</button>
+  <button class="ctrl-down">▼</button>
+  <button class="ctrl-right">▶</button>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const box = 20;
+const cols = canvas.width / box;
+const rows = canvas.height / box;
+
+const scoreEl = document.getElementById('score');
+const bestEl = document.getElementById('best');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayText = document.getElementById('overlay-text');
+const startBtn = document.getElementById('startBtn');
+
+let snake, direction, nextDirection, food, score, best, running, paused, gameLoop;
+
+best = parseInt(localStorage.getItem('snakeBest') || '0', 10);
+bestEl.textContent = best;
+
+function randomFood() {
+  let pos;
+  do {
+    pos = {
+      x: Math.floor(Math.random() * cols),
+      y: Math.floor(Math.random() * rows)
+    };
+  } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+  return pos;
+}
+
+function initGame() {
+  snake = [
+    { x: 9, y: 10 },
+    { x: 8, y: 10 },
+    { x: 7, y: 10 }
+  ];
+  direction = { x: 1, y: 0 };
+  nextDirection = { x: 1, y: 0 };
+  food = randomFood();
+  score = 0;
+  scoreEl.textContent = score;
+  paused = false;
+}
+
+function drawCell(x, y, color, radius = 4) {
+  ctx.fillStyle = color;
+  const px = x * box, py = y * box;
+  ctx.beginPath();
+  ctx.moveTo(px + radius, py);
+  ctx.arcTo(px + box, py, px + box, py + box, radius);
+  ctx.arcTo(px + box, py + box, px, py + box, radius);
+  ctx.arcTo(px, py + box, px, py, radius);
+  ctx.arcTo(px, py, px + box, py, radius);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function draw() {
+  ctx.fillStyle = '#101820';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // grid subtle
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  for (let i = 0; i <= cols; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * box, 0);
+    ctx.lineTo(i * box, canvas.height);
+    ctx.stroke();
+  }
+  for (let j = 0; j <= rows; j++) {
+    ctx.beginPath();
+    ctx.moveTo(0, j * box);
+    ctx.lineTo(canvas.width, j * box);
+    ctx.stroke();
+  }
+
+  // food
+  drawCell(food.x, food.y, '#ff5252', 8);
+
+  // snake
+  snake.forEach((seg, i) => {
+    const color = i === 0 ? '#81c784' : '#4caf50';
+    drawCell(seg.x, seg.y, color);
+  });
+}
+
+function update() {
+  direction = nextDirection;
+  const head = {
+    x: snake[0].x + direction.x,
+    y: snake[0].y + direction.y
+  };
+
+  // wall collision
+  if (head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows) {
+    return gameOver();
+  }
+  // self collision
+  if (snake.some(s => s.x === head.x && s.y === head.y)) {
+    return gameOver();
+  }
+
+  snake.unshift(head);
+
+  if (head.x === food.x && head.y === food.y) {
+    score += 10;
+    scoreEl.textContent = score;
+    food = randomFood();
+  } else {
+    snake.pop();
+  }
+}
+
+function tick() {
+  if (!running || paused) return;
+  update();
+  if (!running) return; // gameOver может остановить
+  draw();
+}
+
+function gameOver() {
+  running = false;
+  clearInterval(gameLoop);
+  if (score > best) {
+    best = score;
+    localStorage.setItem('snakeBest', best);
+    bestEl.textContent = best;
+  }
+  overlayTitle.textContent = 'Игра окончена';
+  overlayText.textContent = `Счёт: ${score}. Нажмите, чтобы сыграть снова.`;
+  startBtn.textContent = 'Заново';
+  overlay.classList.remove('hidden');
+}
+
+function startGame() {
+  initGame();
+  running = true;
+  overlay.classList.add('hidden');
+  clearInterval(gameLoop);
+  gameLoop = setInterval(tick, 110);
+  draw();
+}
+
+function setDirection(dx, dy) {
+  // предотвращаем разворот на 180 градусов
+  if (direction.x === -dx && direction.y === -dy) return;
+  nextDirection = { x: dx, y: dy };
+}
+
+document.addEventListener('keydown', (e) => {
+  switch (e.key) {
+    case 'ArrowUp': case 'w': case 'W': setDirection(0, -1); break;
+    case 'ArrowDown': case 's': case 'S': setDirection(0, 1); break;
+    case 'ArrowLeft': case 'a': case 'A': setDirection(-1, 0); break;
+    case 'ArrowRight': case 'd': case 'D': setDirection(1, 0); break;
+    case ' ':
+      if (running) {
+        paused = !paused;
+        if (paused) {
+          overlayTitle.textContent = 'Пауза';
+          overlayText.textContent = 'Нажмите пробел, чтобы продолжить';
+          overlay.classList.remove('hidden');
+        } else {
+          overlay.classList.add('hidden');
+        }
+      }
+      break;
+    case 'Enter':
+      if (!running) startGame();
+      break;
+  }
+});
+
+startBtn.addEventListener('click', startGame);
+
+// mobile controls
+document.querySelector('.ctrl-up').addEventListener('click', () => setDirection(0, -1));
+document.querySelector('.ctrl-down').addEventListener('click', () => setDirection(0, 1));
+document.querySelector('.ctrl-left').addEventListener('click', () => setDirection(-1, 0));
+document.querySelector('.ctrl-right').addEventListener('click', () => setDirection(1, 0));
+
+// swipe support
+let touchStartX = 0, touchStartY = 0;
+canvas.addEventListener('touchstart', (e) => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+}, { passive: true });
+
+canvas.addEventListener('touchend', (e) => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    setDirection(dx > 0 ? 1 : -1, 0);
+  } else {
+    setDirection(0, dy > 0 ? 1 : -1);
+  }
+}, { passive: true });
+
+// начальная отрисовка фона
+initGame();
+draw();
+</script>
+</body>
+</html>

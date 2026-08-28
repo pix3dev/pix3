@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🪙 Монеткотап</title>
+<style>
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Verdana, sans-serif;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #1e1e3f, #2d1b4e, #4a1a5c);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+    user-select: none;
+    padding-bottom: 40px;
+  }
+
+  h1 {
+    margin: 20px 0 5px;
+    font-size: 2rem;
+    text-shadow: 0 0 15px gold;
+    letter-spacing: 1px;
+  }
+
+  .score {
+    font-size: 2.2rem;
+    font-weight: bold;
+    color: gold;
+    text-shadow: 0 0 10px rgba(255,215,0,0.7);
+    margin-bottom: 5px;
+  }
+
+  .per-sec {
+    font-size: 0.95rem;
+    opacity: 0.7;
+    margin-bottom: 20px;
+  }
+
+  .coin-wrap {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    margin-bottom: 30px;
+  }
+
+  #coin {
+    width: 220px;
+    height: 220px;
+    cursor: pointer;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff6c0, #ffd700 45%, #d4af00 75%, #a67c00);
+    box-shadow: 0 0 40px rgba(255,215,0,0.6), inset 0 0 20px rgba(255,255,255,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 5rem;
+    transition: transform 0.08s ease;
+    border: 6px solid #b8860b;
+  }
+
+  #coin:active {
+    transform: scale(0.9);
+  }
+
+  .pop {
+    position: absolute;
+    pointer-events: none;
+    font-weight: bold;
+    color: #ffe066;
+    font-size: 1.3rem;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+    animation: floatUp 0.9s ease-out forwards;
+  }
+
+  @keyframes floatUp {
+    0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -80px) scale(1.4); }
+  }
+
+  .shop {
+    background: rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 20px;
+    width: 90%;
+    max-width: 420px;
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .shop h2 {
+    text-align: center;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+    color: #ffd700;
+  }
+
+  .upgrade {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    transition: background 0.2s;
+  }
+
+  .upgrade:hover {
+    background: rgba(255,255,255,0.15);
+  }
+
+  .upgrade .info {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .upgrade .name {
+    font-weight: bold;
+    font-size: 1rem;
+  }
+
+  .upgrade .desc {
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .upgrade button {
+    background: linear-gradient(135deg, #ffd700, #d4af00);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-weight: bold;
+    cursor: pointer;
+    color: #3a2c00;
+    transition: transform 0.1s, opacity 0.2s;
+    min-width: 90px;
+  }
+
+  .upgrade button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .upgrade button:not(:disabled):hover {
+    transform: scale(1.05);
+  }
+
+  .reset-btn {
+    margin-top: 20px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.6);
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .reset-btn:hover {
+    background: rgba(255,0,0,0.2);
+    color: #fff;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🪙 Монеткотап</h1>
+  <div class="score" id="score">0 монет</div>
+  <div class="per-sec" id="perSec">0 монет/сек</div>
+
+  <div class="coin-wrap">
+    <div id="coin">🪙</div>
+  </div>
+
+  <div class="shop">
+    <h2>🛒 Улучшения</h2>
+    <div id="upgrades"></div>
+  </div>
+
+  <button class="reset-btn" onclick="resetGame()">Сбросить прогресс</button>
+
+<script>
+  // ---------- Состояние игры ----------
+  let state = {
+    coins: 0,
+    clickPower: 1,
+    perSecond: 0,
+    upgrades: {
+      power: { level: 0, baseCost: 20, name: "Сильный клик", desc: "+1 монета за клик", },
+      auto1: { level: 0, baseCost: 50, name: "Кошелёк", desc: "+1 монета/сек" },
+      auto2: { level: 0, baseCost: 300, name: "Сундук", desc: "+5 монет/сек" },
+      auto3: { level: 0, baseCost: 2000, name: "Монетный станок", desc: "+25 монет/сек" },
+    }
+  };
+
+  const saved = localStorage.getItem('coinClickerSave');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      state = Object.assign(state, parsed);
+    } catch(e) {}
+  }
+
+  const scoreEl = document.getElementById('score');
+  const perSecEl = document.getElementById('perSec');
+  const coinEl = document.getElementById('coin');
+  const upgradesEl = document.getElementById('upgrades');
+
+  function formatNum(n) {
+    n = Math.floor(n);
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  }
+
+  function costFor(up) {
+    return Math.floor(up.baseCost * Math.pow(1.6, up.level));
+  }
+
+  function recalcPerSecond() {
+    state.perSecond =
+      state.upgrades.auto1.level * 1 +
+      state.upgrades.auto2.level * 5 +
+      state.upgrades.auto3.level * 25;
+  }
+
+  function recalcClickPower() {
+    state.clickPower = 1 + state.upgrades.power.level;
+  }
+
+  function render() {
+    scoreEl.textContent = formatNum(state.coins) + " монет";
+    perSecEl.textContent = formatNum(state.perSecond) + " монет/сек";
+
+    upgradesEl.innerHTML = '';
+    for (const key in state.upgrades) {
+      const up = state.upgrades[key];
+      const cost = costFor(up);
+      const div = document.createElement('div');
+      div.className = 'upgrade';
+      div.innerHTML = `
+        <div class="info">
+          <span class="name">${up.name} (ур. ${up.level})</span>
+          <span class="desc">${up.desc}</span>
+        </div>
+        <button ${state.coins < cost ? 'disabled' : ''} onclick="buyUpgrade('${key}')">
+          Купить<br>${formatNum(cost)} 🪙
+        </button>
+      `;
+      upgradesEl.appendChild(div);
+    }
+  }
+
+  function buyUpgrade(key) {
+    const up = state.upgrades[key];
+    const cost = costFor(up);
+    if (state.coins >= cost) {
+      state.coins -= cost;
+      up.level++;
+      recalcClickPower();
+      recalcPerSecond();
+      render();
+      save();
+    }
+  }
+
+  function spawnPop(x, y, text) {
+    const pop = document.createElement('div');
+    pop.className = 'pop';
+    pop.textContent = text;
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    document.querySelector('.coin-wrap').appendChild(pop);
+    setTimeout(() => pop.remove(), 900);
+  }
+
+  coinEl.addEventListener('click', (e) => {
+    state.coins += state.clickPower;
+    render();
+    save();
+
+    const rect = coinEl.getBoundingClientRect();
+    const wrapRect = document.querySelector('.coin-wrap').getBoundingClientRect();
+    const x = e.clientX - wrapRect.left;
+    const y = e.clientY - wrapRect.top;
+    spawnPop(x, y, '+' + state.clickPower);
+
+    coinEl.style.transform = 'scale(0.9) rotate(' + (Math.random()*20-10) + 'deg)';
+    setTimeout(() => coinEl.style.transform = 'scale(1)', 100);
+  });
+
+  function save() {
+    localStorage.setItem('coinClickerSave', JSON.stringify(state));
+  }
+
+  function resetGame() {
+    if (confirm('Точно сбросить весь прогресс?')) {
+      localStorage.removeItem('coinClickerSave');
+      location.reload();
+    }
+  }
+
+  // Автодоход раз в секунду
+  setInterval(() => {
+    if (state.perSecond > 0) {
+      state.coins += state.perSecond;
+      render();
+      save();
+    }
+  }, 1000);
+
+  recalcClickPower();
+  recalcPerSecond();
+  render();
+</script>
+
+</body>
+</html>
