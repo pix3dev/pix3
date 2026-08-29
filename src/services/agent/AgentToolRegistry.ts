@@ -19,6 +19,7 @@ import {
 } from '@/core/agent-introspection';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { FlowStageService } from '@/services/flow/FlowStageService';
+import { FLOW_PROGRESS_PATH } from '@/services/flow/FlowPlanService';
 import {
   FlowReferencesService,
   REFERENCES_DIR,
@@ -26,6 +27,7 @@ import {
 } from '@/services/flow/FlowReferencesService';
 import { DECISIONS_PATH, appendDecision } from '@/services/flow/decision-log';
 import { EditorTabService } from '@/services/editor/EditorTabService';
+import { StudioViewportMountService } from '@/services/editor/StudioViewportMountService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 import {
   ScriptCompilerService,
@@ -93,6 +95,7 @@ import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateCompone
 import {
   SceneManager,
   NodeBase,
+  Node3D,
   collectRenderabilityIssues,
   ScriptRegistry,
   getNodePropertySchema,
@@ -101,9 +104,10 @@ import {
   type ResolvedRuntimeTimeConfig,
   type RuntimeTimeConfig,
   type RuntimeTimeMode,
+  type SceneRunner,
 } from '@pix3/runtime';
 import { renderabilityNote } from '@/services/agent/renderability-note';
-import { Vector2, Vector3 } from 'three';
+import { Frustum, Matrix4, Mesh, Vector2, Vector3, type Object3D } from 'three';
 import {
   buildCreateNodeCommand,
   CREATABLE_NODE_TYPES,
@@ -127,6 +131,14 @@ export interface AgentToolImage {
  * providers are multimodal), so the model *sees* screenshots/previews instead of reading base64.
  */
 export const AGENT_TOOL_IMAGES_KEY = '__images';
+
+/**
+ * What the screenshot tools say once even an on-demand Studio mount could not produce a viewport.
+ * Reached when there is no project, no scene to front, or no editor shell at all — never merely
+ * because the session lives in Vibe, which now mounts the viewport hidden on request.
+ */
+const EDITOR_VIEWPORT_UNAVAILABLE =
+  'The viewport is not initialized yet (open a project with a scene first).';
 
 /** A tool the agent may call. `handler` returns JSON-safe data (never a live object). */
 export interface AgentToolDefinition {
@@ -330,6 +342,22 @@ const FS_WRITE_GUARD_CHARS = 2_000;
  * one tool result (`MAX_TOOL_RESULT_CHARS` = 24 000, and JSON escaping of newlines/quotes inflates
  * text by well under 50 %), so serving it in full is strictly cheaper than the paging loop.
  */
+/**
+ * Filenames under `design/` that mean "the build plan" to a model but nothing to the editor.
+ * A write to one of these earns a pointer at {@link FLOW_PROGRESS_PATH} — see `strayPlanNote`.
+ */
+const PLAN_SHAPED_STEMS: ReadonlySet<string> = new Set([
+  'plan',
+  'plans',
+  'roadmap',
+  'tasks',
+  'todo',
+  'todos',
+  'backlog',
+  'milestones',
+  'checklist',
+]);
+
 const FS_READ_FULL_CHARS = 16_000;
 
 /** Lines of the updated file returned on each side of a successful str_replace. */
@@ -376,6 +404,14 @@ export class AgentToolRegistry {
 
   @inject(ViewportRendererService)
   private readonly viewportRenderer!: ViewportRendererService;
+
+  /**
+   * Builds the edit-mode viewport on demand. Vibe never constructs the docking editor, so in a
+   * session that has not visited Studio there is no viewport to photograph — the screenshot tools
+   * ask for one before reporting a failure.
+   */
+  @inject(StudioViewportMountService)
+  private readonly studioViewportMount!: StudioViewportMountService;
 
   @inject(AssetGenService)
   private readonly assetGen!: AssetGenService;
@@ -1088,7 +1124,8 @@ export class AgentToolRegistry {
       },
       {
         name: 'play_status',
-        description: 'Whether the scene is playing and the current play-mode status.',
+        description:
+          "Whether the scene is playing, plus WHAT THE LAST FRAME DREW — the black-screen triage call. While a runtime is attached it also returns `render` (drawCalls / triangles / geometries / textures, read straight off the renderer, so they answer the same in Studio and in Vibe) and `visible3D` {camera, meshCount, inFrustum, onScreen}: the active Camera3D, how many 3D meshes the running scene has, how many are inside that camera's frustum, and how many actually land on screen. Zero on either counter means the 3D pass is drawing NOTHING and `hint` names the likely cause — a handful of draw calls for a scene full of meshes says the same thing. Trust `onScreen` over `inFrustum`: one big flat mesh (a ground plane) keeps clipping the frustum from a camera pointed the other way. Call this before screenshotting a 3D scene that renders only its background colour.",
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.playStatus(),
       },
@@ -2812,18 +2849,51 @@ export class AgentToolRegistry {
     // open code tabs / the asset browser pick the change up — no direct appState mutation here.
     await this.storage.writeTextFile(safe, content);
     const reloadedScene = await this.reloadSceneIfOpen(safe);
+    const notes: string[] = [];
+    if (createdDirectories.length) {
+      notes.push(
+        `Created ${createdDirectories.length === 1 ? 'a new directory' : 'new directories'} on the way to this file: ${createdDirectories.join(', ')}. Nothing else in the project uses ${createdDirectories.length === 1 ? 'it' : 'them'} yet, so if a segment there is a typo, fs_delete it and write again under the right path.`
+      );
+    }
+    const strayPlanNote = await this.strayPlanNote(safe);
+    if (strayPlanNote) {
+      notes.push(strayPlanNote);
+    }
     return {
       ok: true,
       path: safe,
       ...(reloadedScene ? { reloadedScene } : {}),
       ...(isLargeRewrite ? { forcedOverwrite: true as const, reason: options.reason } : {}),
-      ...(createdDirectories.length
-        ? {
-            createdDirectories,
-            note: `Created ${createdDirectories.length === 1 ? 'a new directory' : 'new directories'} on the way to this file: ${createdDirectories.join(', ')}. Nothing else in the project uses ${createdDirectories.length === 1 ? 'it' : 'them'} yet, so if a segment there is a typo, fs_delete it and write again under the right path.`,
-          }
-        : {}),
+      ...(createdDirectories.length ? { createdDirectories } : {}),
+      ...(notes.length ? { note: notes.join(' ') } : {}),
     };
+  }
+
+  /**
+   * A nudge for a plan written to the wrong filename, or null when there is nothing to say.
+   *
+   * The Plan tab reads exactly {@link FLOW_PROGRESS_PATH}; a session that wrote its build
+   * plan to `design/plan.md` left that tab empty for the whole run and never learned why,
+   * because a write to an unclaimed path is a perfectly successful write. So: say it, and
+   * only when it can matter — the file is plan-shaped, it is not `progress.md` itself, and
+   * no `progress.md` exists yet (once one does, a second planning document is the agent's
+   * own business and none of ours).
+   */
+  private async strayPlanNote(path: string): Promise<string | null> {
+    if (path === FLOW_PROGRESS_PATH || !path.startsWith('design/')) {
+      return null;
+    }
+    const stem = path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/i, '');
+    if (!PLAN_SHAPED_STEMS.has(stem.toLowerCase())) {
+      return null;
+    }
+    try {
+      await this.storage.readTextFile(FLOW_PROGRESS_PATH);
+      return null;
+    } catch {
+      // No progress.md — the Plan tab has nothing to show, and this file is why.
+    }
+    return `Written, and kept. One thing though: the editor's Plan tab reads ${FLOW_PROGRESS_PATH} and only that path, and the project has no ${FLOW_PROGRESS_PATH} — so this plan is invisible to the user. Write the checklist there too (or instead) if you want it shown.`;
   }
 
   /**
@@ -3160,10 +3230,12 @@ export class AgentToolRegistry {
    * frame on the live runtime canvas via {@link GamePlaySessionService}; the
    * editor path uses the edit-mode viewport (proxy visuals, gizmos and all).
    */
-  private captureView(
+  private async captureView(
     source: AgentCaptureSource,
     maxSize: number
-  ): { shot: CanvasScreenshot; view: 'game' | 'editor'; note?: string } | { error: string } {
+  ): Promise<
+    { shot: CanvasScreenshot; view: 'game' | 'editor'; note?: string } | { error: string }
+  > {
     if (source !== 'editor' && appState.ui.isPlaying) {
       const shot = this.playSession.captureScreenshot({ maxSize });
       if (shot) {
@@ -3181,19 +3253,46 @@ export class AgentToolRegistry {
           'The game is not running — call play_start first (or use source "editor" for the edit-mode viewport).',
       };
     }
-    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
+    const shot = await this.captureEditorViewport(maxSize);
     if (!shot) {
-      return { error: 'The viewport is not initialized yet (open a project with a scene first).' };
+      return { error: EDITOR_VIEWPORT_UNAVAILABLE };
     }
     return {
       shot,
       view: 'editor',
-      // 'auto' while isPlaying only lands here when the game canvas was not ready — say so,
-      // or the model reads the edit-mode frame as the running game.
+      // Either way the model has to know this frame is NOT the running game (the editor lights
+      // and draws it differently) -- but only the 'auto' fallback landed here because the game
+      // canvas was unavailable. Telling that to an agent that explicitly asked for the editor
+      // reports a failure that did not happen, and sends it chasing a canvas that is fine.
       ...(appState.ui.isPlaying
-        ? { note: 'The game canvas was not ready; this is the EDIT-MODE viewport instead.' }
+        ? {
+            note:
+              source === 'editor'
+                ? 'The game is playing; this is the EDIT-MODE viewport, not the running game.'
+                : 'The game canvas was not ready; this is the EDIT-MODE viewport instead.',
+          }
         : {}),
     };
+  }
+
+  /**
+   * Capture the edit-mode viewport, building it first if this session never opened Studio.
+   *
+   * A Vibe-only session has no viewport at all — the shell skips Golden Layout entirely — so the
+   * first capture legitimately returns null there. Mounting it (hidden, without moving the user out
+   * of Vibe) and asking once more is the difference between the agent being able to look at the
+   * scene it is editing and being blind in one of the two workspaces. When the mount cannot happen
+   * the retry is skipped and the caller still gets the honest "not initialized".
+   */
+  private async captureEditorViewport(maxSize: number): Promise<CanvasScreenshot | null> {
+    const shot = this.viewportRenderer.captureScreenshot({ maxSize });
+    if (shot) {
+      return shot;
+    }
+    if (!(await this.studioViewportMount.ensureStudioViewportMounted())) {
+      return null;
+    }
+    return this.viewportRenderer.captureScreenshot({ maxSize });
   }
 
   /**
@@ -3220,7 +3319,9 @@ export class AgentToolRegistry {
     };
   }
 
-  private viewportScreenshot(args: Record<string, unknown>): Record<string, unknown> {
+  private async viewportScreenshot(
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
     const maxSize = asInt(args.maxSize, 1024);
     const source = asCaptureSource(args.source);
     const nodeId = typeof args.nodeId === 'string' && args.nodeId ? args.nodeId : undefined;
@@ -3233,7 +3334,7 @@ export class AgentToolRegistry {
     }
 
     if (frame !== 'current') {
-      return this.framedViewportScreenshot(frame as 'all' | 'selection' | 'node', {
+      return await this.framedViewportScreenshot(frame as 'all' | 'selection' | 'node', {
         maxSize,
         source,
         nodeId,
@@ -3243,7 +3344,7 @@ export class AgentToolRegistry {
     }
 
     // Unframed: capture as-is (game while playing unless source forces editor).
-    const capture = this.captureView(source, maxSize);
+    const capture = await this.captureView(source, maxSize);
     if ('error' in capture) {
       return { ok: false, error: capture.error };
     }
@@ -3271,7 +3372,7 @@ export class AgentToolRegistry {
    * content / a selection / a node, optionally isolating the target. Always the
    * editor (never the game) and always restores the user's camera.
    */
-  private framedViewportScreenshot(
+  private async framedViewportScreenshot(
     frame: 'all' | 'selection' | 'node',
     opts: {
       maxSize: number;
@@ -3280,7 +3381,7 @@ export class AgentToolRegistry {
       isolate: boolean;
       padding?: number;
     }
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     if (frame === 'node' && !opts.nodeId) {
       return { ok: false, error: 'frame:"node" requires nodeId.' };
     }
@@ -3301,18 +3402,20 @@ export class AgentToolRegistry {
     const paddingMultiplier =
       opts.padding !== undefined ? Math.min(3, Math.max(1, 1 + 2 * opts.padding)) : undefined;
 
-    const result = this.viewportRenderer.captureFramedScreenshot({
+    const framedOptions = {
       maxSize: opts.maxSize,
       frame,
       nodeId: opts.nodeId,
       isolate: opts.isolate,
       paddingMultiplier,
-    });
+    };
+    let result = this.viewportRenderer.captureFramedScreenshot(framedOptions);
+    // Same Vibe gap as the unframed path: no Studio in this session means no viewport to frame.
+    if (result === null && (await this.studioViewportMount.ensureStudioViewportMounted())) {
+      result = this.viewportRenderer.captureFramedScreenshot(framedOptions);
+    }
     if (result === null) {
-      return {
-        ok: false,
-        error: 'The viewport is not initialized yet (open a project with a scene first).',
-      };
+      return { ok: false, error: EDITOR_VIEWPORT_UNAVAILABLE };
     }
     if ('error' in result) {
       return { ok: false, error: result.error };
@@ -3365,7 +3468,7 @@ export class AgentToolRegistry {
   /** Turn an `analyze_image` source (viewport / game / handle / project path) into an inline image block. */
   private async resolveImageForAnalysis(source: string): Promise<LlmImageBlock> {
     if (source === 'viewport' || source === 'game' || source === 'editor') {
-      const capture = this.captureView(source === 'viewport' ? 'auto' : source, 1024);
+      const capture = await this.captureView(source === 'viewport' ? 'auto' : source, 1024);
       if ('error' in capture) {
         throw new Error(capture.error);
       }
@@ -3950,8 +4053,58 @@ export class AgentToolRegistry {
     return { ok, scene: safe, reloaded };
   }
 
-  private playStatus(): { isPlaying: boolean; playModeStatus: string } {
-    return { isPlaying: appState.ui.isPlaying, playModeStatus: appState.ui.playModeStatus };
+  /**
+   * `play_status` — is it playing, AND what did the last frame actually draw.
+   *
+   * The two extra blocks exist because of a session that spent ~20 steps on a black
+   * 3D layer: a script had called `lookAt` on a `Camera3D` (a `Node3D` that merely
+   * *holds* the three.js camera, so the object branch aimed its +Z at the target and
+   * the real camera 180° away), and nothing an agent could call said "this frame drew
+   * four objects out of thirty". `render` is that reading, and `visible3D` turns it
+   * into a cause: a scene with meshes and zero of them in the frustum is an aiming
+   * bug, not a missing-content one.
+   *
+   * Both blocks are read on demand from the live runtime, never from the Profiler panel's
+   * sampling: that subscription is dropped in Vibe (nothing there can display it), and an
+   * agent's picture of the running game must not change with the workspace the user
+   * happens to be looking at.
+   *
+   * The runner comes from {@link GamePlaySessionService.getActiveRuntime} for the
+   * reason spelled out on {@link gameTime}: it is the runtime the game is actually
+   * being played in, tab host or popout.
+   */
+  private playStatus(): {
+    isPlaying: boolean;
+    playModeStatus: string;
+    render?: {
+      drawCalls: number;
+      triangles: number;
+      geometries: number;
+      textures: number;
+    };
+    visible3D?: Visible3DSummary;
+  } {
+    const status = { isPlaying: appState.ui.isPlaying, playModeStatus: appState.ui.playModeStatus };
+    const runtime = this.playSession.getActiveRuntime();
+    if (!runtime) {
+      return status;
+    }
+    // Straight off the renderer, not through ProfilerSessionService: the profiler holds its
+    // per-frame subscription only while a panel can display it, so in Vibe every one of its
+    // readings is null — and "what did the last frame draw" must answer the same in both
+    // workspaces. The runner calls `beginStatsFrame()` before each render, so these counters
+    // describe the last completed frame whenever they are read.
+    const stats = runtime.renderer.getStatsSnapshot();
+    return {
+      ...status,
+      render: {
+        drawCalls: stats.calls,
+        triangles: stats.triangles,
+        geometries: stats.geometries,
+        textures: stats.textures,
+      },
+      visible3D: summarizeVisible3D(runtime.runner),
+    };
   }
 
   /**
@@ -4405,6 +4558,121 @@ function parseToleranceArg(
     tolerance[key] = value;
   }
   return Object.keys(tolerance).length ? { tolerance } : {};
+}
+
+/** `play_status.visible3D` — "does the active camera see anything", answered with numbers. */
+interface Visible3DSummary {
+  /** Name of the `Camera3D` the 3D pass renders through, or null when the scene has none. */
+  camera: string | null;
+  /** three.js meshes living under `Node3D` nodes of the running clone. */
+  meshCount: number;
+  /** How many of those pass a frustum test against the active camera, right now. */
+  inFrustum: number;
+  /**
+   * How many of those have their CENTRE inside the projected image.
+   *
+   * The frustum test alone is too forgiving to answer "is the screen black": it uses each
+   * mesh's bounding SPHERE, so one big flat object — a ground plane is the usual one —
+   * keeps clipping a corner of the frustum from a camera that is pointed the other way.
+   * Measured on the scene this was built for: a camera turned 180° off the content still
+   * scored `inFrustum: 1` (the ground) while the renderer drew 4 calls of pure HUD. Centres
+   * are the cruder test and the honest one here — `onScreen: 0` across a whole scene is
+   * what a black frame actually looks like.
+   */
+  onScreen: number;
+  /** Present only when there IS 3D content and effectively none of it is in view. */
+  hint?: string;
+}
+
+/**
+ * Count the running clone's 3D meshes and how many the active camera can currently see.
+ *
+ * Written against the live graph rather than the authored scene on purpose: the whole
+ * point is to catch a camera a *script* turned. Matrices are forced up to date first —
+ * a paused or background-tab runner may not have painted since the last mutation, and a
+ * stale `matrixWorld` would answer about the frame before the bug.
+ */
+function summarizeVisible3D(runner: SceneRunner): Visible3DSummary {
+  const roots = runner.getLiveRootNodes();
+  for (const root of roots) {
+    root.updateMatrixWorld(true);
+  }
+  const meshes = collect3DMeshes(roots);
+  const cameraNode = runner.getActiveCamera3D();
+  if (!cameraNode) {
+    return {
+      camera: null,
+      meshCount: meshes.length,
+      inFrustum: 0,
+      onScreen: 0,
+      ...(meshes.length > 0
+        ? {
+            hint: 'The scene has 3D meshes but no ACTIVE Camera3D, so the 3D pass draws nothing — add a Camera3D (or make one current) and re-check.',
+          }
+        : {}),
+    };
+  }
+  // The inner camera, not the node: the node is a plain Node3D holding it, and the
+  // frustum is defined by the camera's own projection and world matrices.
+  const camera = cameraNode.camera;
+  camera.updateMatrixWorld(true);
+  const frustum = new Frustum().setFromProjectionMatrix(
+    new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  );
+  // `intersectsObject` computes a missing geometry bounding sphere itself and applies
+  // the mesh's world matrix to it — the world-space test we want, without a copy here.
+  const inFrustum = meshes.reduce(
+    (count, mesh) => count + (frustum.intersectsObject(mesh) ? 1 : 0),
+    0
+  );
+  const viewProjection = new Matrix4().multiplyMatrices(
+    camera.projectionMatrix,
+    camera.matrixWorldInverse
+  );
+  const centre = new Vector3();
+  const onScreen = meshes.reduce((count, mesh) => {
+    mesh.getWorldPosition(centre).applyMatrix4(viewProjection);
+    const inside =
+      Math.abs(centre.x) <= 1 && Math.abs(centre.y) <= 1 && centre.z >= -1 && centre.z <= 1;
+    return count + (inside ? 1 : 0);
+  }, 0);
+  return {
+    camera: cameraNode.name || cameraNode.nodeId,
+    meshCount: meshes.length,
+    inFrustum,
+    onScreen,
+    // Either counter reaching zero means the frame has no 3D in it; see `onScreen` for why
+    // the frustum count alone would have missed the case this was built for.
+    ...(meshes.length > 0 && (inFrustum === 0 || onScreen === 0)
+      ? {
+          hint: `${meshes.length} 3D meshes exist and NONE of them land on screen through ${cameraNode.name || 'the camera'} (inFrustum ${inFrustum}, onScreen ${onScreen}) — in order of likelihood: the camera is aimed away from the content (read \`forward\` on it via game_observe and compare it with where the meshes are; when a script aims the camera at runtime, \`forward\` and the authored rotation from node_inspect disagree and that disagreement IS the bug), the content is behind \`near\` or beyond \`far\`, or it sits off to one side.`,
+        }
+      : {}),
+  };
+}
+
+/**
+ * Every three.js `Mesh` whose nearest node ancestor is a `Node3D`.
+ *
+ * The 2D layer is meshes too (quads for sprites and labels), so counting `Mesh`
+ * instances alone would report a 2D-only HUD as "3D content that the camera cannot
+ * see" — the exact wrong diagnosis for a black 3D pass with a working HUD.
+ */
+function collect3DMeshes(roots: readonly NodeBase[]): Mesh[] {
+  const meshes: Mesh[] = [];
+  const visit = (object: Object3D, under3D: boolean): void => {
+    const inside = object instanceof NodeBase ? object instanceof Node3D : under3D;
+    if (inside && object instanceof Mesh) {
+      meshes.push(object);
+    }
+    for (const child of object.children) {
+      visit(child, inside);
+    }
+  };
+  for (const root of roots) {
+    visit(root, false);
+  }
+  return meshes;
 }
 
 const isCommandAllowed = (commandId: string): boolean =>

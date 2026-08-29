@@ -210,10 +210,34 @@ describe('FlowReferencesService.list', () => {
     });
   });
 
+  it('lists the rest of design/ beside the gdd, by name, without a delete affordance', async () => {
+    storage.texts.set('design/gdd.md', '# Ant Wars\n');
+    storage.texts.set('design/plan.md', '# Plan\n\n1. Scene and camera\n');
+    storage.texts.set('design/decisions.md', '# Decisions\n');
+    // The Sources group owns this subtree — it must not also show up as a design document.
+    storage.texts.set('design/source/brief-from-user.md', '# Notes\n');
+
+    const list = await service.list();
+
+    expect(list.design.map(item => item.path)).toEqual(['design/decisions.md', 'design/plan.md']);
+    expect(list.design[1]).toMatchObject({
+      name: 'plan.md',
+      group: 'design',
+      origin: 'agent',
+      kind: 'markdown',
+      previewLine: 'Plan',
+      // The agent's own working memory: shown, opened, but never deleted from this column. Not
+      // pinned — the highlight belongs to the gdd anchor alone.
+      pinned: false,
+      readOnly: true,
+    });
+  });
+
   it('still lists the document when the file does not exist yet', async () => {
     const list = await service.list();
 
     expect(list.document).toMatchObject({ path: 'design/gdd.md', pinned: true, missing: true });
+    expect(list.design).toEqual([]);
     expect(list.references).toEqual([]);
     expect(list.sources).toEqual([]);
   });

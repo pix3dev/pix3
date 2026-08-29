@@ -10,6 +10,9 @@ import {
 /** The design document, pinned to the top of the list and never deletable from it (design §3.6). */
 export const IDEA_DOC_PATH = 'design/gdd.md';
 
+/** Where every design document lives. Its `source/` subfolder is the separate Sources group. */
+export const DESIGN_DIR = 'design';
+
 /** Everything the user drops, uploads or the agent generates at the idea stage. */
 export const REFERENCES_DIR = 'references';
 
@@ -43,7 +46,7 @@ export type FlowReferenceOrigin = 'user' | 'agent';
 export type FlowReferenceKind = 'image' | 'markdown' | 'text' | 'other';
 
 /** Which section of the list an item belongs to. */
-export type FlowReferenceGroup = 'document' | 'references' | 'sources';
+export type FlowReferenceGroup = 'document' | 'design' | 'references' | 'sources';
 
 /** One entry of `references/index.json`. Every field except the file name itself is optional. */
 export interface FlowReferenceIndexEntry {
@@ -81,6 +84,8 @@ export interface FlowReferenceItem {
 export interface FlowReferenceList {
   /** Always present, even when the file is not: the document is the list's anchor. */
   readonly document: FlowReferenceItem;
+  /** The other documents the agent keeps in `design/` — plan, decisions, style, progress… */
+  readonly design: readonly FlowReferenceItem[];
   readonly references: readonly FlowReferenceItem[];
   readonly sources: readonly FlowReferenceItem[];
 }
@@ -121,8 +126,9 @@ export const classifyReferenceKind = (name: string): FlowReferenceKind => {
 };
 
 /**
- * The idea stage's file list: `design/gdd.md` pinned on top, everything in `references/**`, and the
- * read-only documents the first prompt left in `design/source/**` (design §3.6).
+ * The idea stage's file list: the `design/` documents (`gdd.md` pinned on top, then whatever else
+ * the agent has written there), everything in `references/**`, and the read-only documents the
+ * first prompt left in `design/source/**` (design §3.6).
  *
  * Three properties carry the feature:
  *  - **The directory listing is the truth, `references/index.json` is a convenience.** A file with
@@ -143,12 +149,13 @@ export class FlowReferencesService {
   /** The whole list, ready to render: groups resolved, metadata merged, newest first. */
   async list(): Promise<FlowReferenceList> {
     const index = await this.readIndex();
-    const [document, references, sources] = await Promise.all([
+    const [document, design, references, sources] = await Promise.all([
       this.describeDocument(),
+      this.describeDesignDocs(),
       this.describeGroup(REFERENCES_DIR, 'references', index, false),
       this.describeGroup(SOURCES_DIR, 'sources', index, true),
     ]);
-    return { document, references, sources };
+    return { document, design, references, sources };
   }
 
   /** `references/index.json`, or an empty index when it is absent or unreadable. */
@@ -284,6 +291,55 @@ export class FlowReferencesService {
       modifiedAt: await this.readModifiedAt(IDEA_DOC_PATH),
       missing: false,
     };
+  }
+
+  /**
+   * The rest of `design/`: the plan, the decision log, the style sheet — whatever the agent has
+   * written beside the gdd. Listed because the agent *says* it wrote them ("План записан в
+   * design/plan.md") and the column was the one place the user would look for them.
+   *
+   * Not recursive and not a hardcoded list of names: `design/source/**` is the Sources group and
+   * gets skipped as a directory, while the agent invents document names as it goes (`plan.md` is
+   * one it made up), so anything else in the folder is a real artefact of this project.
+   *
+   * Sorted by name, not by mtime like the other groups: these few files are rewritten on almost
+   * every turn, and a newest-first order would reshuffle the column under the user's cursor.
+   */
+  private async describeDesignDocs(): Promise<FlowReferenceItem[]> {
+    let entries: FileDescriptor[];
+    try {
+      entries = await this.storage.listDirectory(DESIGN_DIR);
+    } catch {
+      return [];
+    }
+    const descriptors = entries
+      .filter(entry => entry.kind !== 'directory' && entry.path !== IDEA_DOC_PATH)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return Promise.all(
+      descriptors.map(async (descriptor): Promise<FlowReferenceItem> => {
+        const kind = classifyReferenceKind(descriptor.name);
+        return {
+          path: descriptor.path,
+          name: descriptor.name,
+          group: 'design',
+          kind,
+          origin: 'agent',
+          role: null,
+          caption: null,
+          previewLine: await this.readPreviewLine(descriptor.path, descriptor.size ?? null, kind),
+          sizeBytes: descriptor.size ?? null,
+          modifiedAt: await this.readModifiedAt(descriptor.path),
+          // The panel never writes here, so it never deletes here either: these are the agent's own
+          // working memory, and deleting decisions.md from under it breaks the next turn.
+          readOnly: true,
+          // Only the gdd is pinned — it is the list's anchor, and the highlight has to mean that
+          // one document, not the whole folder.
+          pinned: false,
+          missing: false,
+        };
+      })
+    );
   }
 
   private async describeGroup(

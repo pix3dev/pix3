@@ -25,7 +25,14 @@ rendering style, lighting, camera angle, mood"`. Keep the answer — you will pa
   `nodes-and-systems.md`, `node-types-reference.md`) in full — everything you read is re-sent
   on every following step and starves the build phase. Use `read_skill` with its `section`
   parameter, or read only the doc section for the node types you actually plan to use.
-  Aim to start building after ~6–8 exploration calls.
+  **Stop exploring at 8 calls — that is a cap, not a target.** One measured session spent 33
+  (25 `engine_search` + 8 `engine_read`) before its first `play_start`, and still got the central
+  question wrong. When the cap runs out with a question still open, do NOT read more: build the
+  smallest runnable thing that would answer it and let the running game answer. A wrong guess
+  costs one `play_start`; ten more searches cost the build phase.
+- **`engine_search` indexes the runtime package only (`@pix3/runtime/src/**`).** An empty result
+  means "not in that package", never "the engine cannot do this" — read §4¾ before you conclude a
+  capability is missing and start writing it yourself.
 
 ## 2. Restate the plan (one short message to the user) and write it down
 
@@ -37,6 +44,9 @@ for approval unless the user asked a question.
 one `[ ]` line per increment plus a `## Notes` section. This file is your memory across
 turns and sessions: a turn that hits the iteration cap (or gets cut off) resumes from it
 instead of starting over. Keep it under ~40 lines; overwrite the whole file on each update.
+**The filename is load-bearing** — the editor's Plan tab reads `design/progress.md` and nothing
+else. A session that wrote its plan to `design/plan.md` left the user watching an empty Plan tab
+for the entire build; the plan existed and no one could see it.
 
 ## 3. Build in increments — verify each before the next
 
@@ -46,6 +56,12 @@ Order increments so the game is runnable as early as possible:
 2. **Core mechanic** — the one verb the GDD is about (move, shoot, match, dodge…).
 3. **Win / lose** — a reachable end state.
 4. **Feel & art** — juice, sound, then generated art (see the `asset-generation` skill).
+
+**Never write the whole scene plus its scripts before the first `play_start`.** A measured session
+authored the complete scene YAML and a 505-line script before running anything once; the first run
+came up black and, with no smaller version that had ever worked, there was nothing to bisect
+against — every line written that day was still a suspect. The point of an increment is not
+tidiness, it is that when a run fails there is exactly one new thing in it.
 
 After each increment: `play_start`, then `play_status` and `read_errors`. Fix errors before
 moving on. Stop play mode (`play_stop`) before large edits — and once the increment is
@@ -134,6 +150,29 @@ Every one of these passes `compile_scripts` clean — including its type-check, 
   the real API (`read_skill`, `node_inspect`) instead of casting.
 - **Write each script once.** Think the design through, then write the file and immediately
   `compile_scripts`. Rewriting the same file 3–4 times burns your iteration budget.
+
+## 4¾. 3D rigid-body physics: Rapier is here, and `engine_search` cannot see it
+
+`engine_search` searches `@pix3/runtime/src/**` and Rapier does not live there — the editor wires
+it and exposes it to project scripts through the runtime import map. So searching `rigidbody`,
+then `physics`, then `rapier`, and getting back only comment mentions is **not** evidence the
+engine has no physics: one session read it that way and hand-wrote a 505-line box solver. A
+project script imports it like `@pix3/runtime` or `three`:
+
+```ts
+import RAPIER from '@dimforge/rapier3d-compat';
+// ...
+await RAPIER.init(); // resolved stub in the editor; real init in an export
+const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+```
+
+It is lazy-loaded — the editor fetches the wasm only once a compiled bundle mentions the module,
+so the import costs nothing until you write it — and the single-file playable export vendors it,
+so a game built on it still exports. Use it for **3D rigid-body work only**: 2D games stay on the
+engine's own collision (`Collision2DService`, the hitbox behaviours), which the editor and the
+verification tools already understand. Physics state is opaque to the editor by design; a game that
+wants collider wireframes registers them through the runtime's physics-debug hook
+(`registerPhysicsDebugSource`, alongside `registerGameDebug`).
 
 ## 5. Art comes last, and placeholders come first
 

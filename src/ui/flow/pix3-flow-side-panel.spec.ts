@@ -58,6 +58,7 @@ const listWith = (over: Partial<FlowReferenceList> = {}): FlowReferenceList => (
     pinned: true,
     missing: false,
   },
+  design: [],
   references: [],
   sources: [],
   ...over,

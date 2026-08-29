@@ -86,6 +86,8 @@ const nodeMap = (
         position: { x: world.x ?? 0, y: world.y ?? 0, z: world.z ?? 0 },
         worldPosition: { x: world.x ?? 0, y: world.y ?? 0, z: world.z ?? 0 },
         rotationZ,
+        rotation: { x: 0, y: 0, z: rotationZ },
+        forward: { x: 0, y: 0, z: -1 },
         scale: { x: scale, y: scale, z: scale },
         childCount: 0,
         visibleChildCount: 0,

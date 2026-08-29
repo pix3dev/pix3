@@ -733,6 +733,18 @@ export class SceneRunner {
   }
 
   /**
+   * The `Camera3D` node the 3D pass is currently rendering through, or null when
+   * the scene has none. For automation asking "can the camera see anything" — the
+   * answer has to come from the runner rather than from the first Camera3D in the
+   * tree, because a script can swap the active one at any time
+   * (`SceneService.setActiveCameraNode`) and the swapped-out camera is still a
+   * perfectly ordinary node sitting in the graph.
+   */
+  getActiveCamera3D(): Camera3D | null {
+    return this.activeCamera;
+  }
+
+  /**
    * Case-insensitive exact-name lookup over the running clone (first match in
    * forward DFS order, same order as `findNodeById`). Convenience for automation
    * that targets nodes the way a user talks about them ("PlayButton") rather than

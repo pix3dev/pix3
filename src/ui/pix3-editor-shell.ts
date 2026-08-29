@@ -122,6 +122,7 @@ import { NudgeNodesCommand } from '@/features/properties/NudgeNodesCommand';
 import { appState } from '@/state';
 import type { WorkspaceMode } from '@/state/AppState';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
+import { StudioViewportMountService } from '@/services/editor/StudioViewportMountService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
@@ -233,6 +234,9 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(WorkspaceModeService)
   private readonly workspaceModeService!: WorkspaceModeService;
 
+  @inject(StudioViewportMountService)
+  private readonly studioViewportMount!: StudioViewportMountService;
+
   @inject(ProjectSettingsService)
   private readonly projectSettingsService!: ProjectSettingsService;
 
@@ -280,6 +284,17 @@ export class Pix3EditorShell extends ComponentBase {
    */
   @state()
   private studioLayoutMounted = false;
+
+  /**
+   * True once an agent-facing caller asked for the edit-mode viewport while Flow is on screen.
+   *
+   * Deliberately NOT a workspace-mode change: the user stays in Vibe and their screen must not
+   * move. It only lets `ensureStudioLayout()` run in Flow and puts the Studio branch in the DOM,
+   * where CSS parks it offscreen instead of hiding it outright — a `display: none` host measures
+   * 0x0, and Golden Layout plus the WebGL viewport would come up at zero size.
+   */
+  @state()
+  private agentStudioMountRequested = false;
 
   @state()
   private routerStatus = appState.router.status;
@@ -361,6 +376,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeAnimationAutoSliceSubscription?: () => void;
   private disposeAssetImportSubscription?: () => void;
   private disposeSaveGeneratedAssetSubscription?: () => void;
+  private disposeStudioViewportMounter?: () => void;
   private onWelcomeProjectReady?: (e: Event) => void;
   private keyboardHandler?: (e: KeyboardEvent) => void;
   private accountPopoverPointerHandler?: (e: PointerEvent) => void;
@@ -650,6 +666,12 @@ export class Pix3EditorShell extends ComponentBase {
       this.requestUpdate();
     });
 
+    // The agent's way into the Studio viewport. Registering a callback (rather than letting a
+    // service reach into this component) is what keeps the mounting private to the shell.
+    this.disposeStudioViewportMounter = this.studioViewportMount.registerMounter(() =>
+      this.mountStudioForAgent()
+    );
+
     this.disposeSubscription = subscribe(appState.router, () => {
       this.routerStatus = appState.router.status;
       if (this.routerStatus === 'authenticating' && !this.isAuthModalOpen) {
@@ -667,8 +689,9 @@ export class Pix3EditorShell extends ComponentBase {
       this.syncProfilerPanelFocusWithPlayMode();
       this.isLayoutReady = appState.ui.isLayoutReady;
       this.workspaceMode = appState.ui.workspaceMode;
-      // Flow never mounts Golden Layout, so `isLayoutReady` stays false there forever — the shell
-      // is "ready" as soon as a project is open.
+      // Flow does not mount Golden Layout for the user, so `isLayoutReady` stays false there (an
+      // agent-requested offscreen mount can flip it, which is exactly why Flow must not read it) —
+      // the shell is "ready" as soon as a project is open.
       this.shellReady =
         this.workspaceMode === 'flow' ? appState.project.status === 'ready' : this.isLayoutReady;
       if (this.workspaceMode === 'studio') {
@@ -776,6 +799,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeAssetImportSubscription = undefined;
     this.disposeSaveGeneratedAssetSubscription?.();
     this.disposeSaveGeneratedAssetSubscription = undefined;
+    this.disposeStudioViewportMounter?.();
+    this.disposeStudioViewportMounter = undefined;
     if (this.onWelcomeProjectReady) {
       this.removeEventListener(
         'pix3-welcome:project-ready',
@@ -1004,10 +1029,17 @@ export class Pix3EditorShell extends ComponentBase {
    * (and everything its panels pull in) just to leave it hidden.
    *
    * Called from every place a project or the workspace mode can change, so entering Studio later
-   * in the session initializes the layout at that moment instead.
+   * in the session initializes the layout at that moment instead. The one exception to "only in
+   * Studio" is an explicit agent mount — see {@link mountStudioForAgent}.
    */
   private async ensureStudioLayout(): Promise<void> {
-    if (appState.ui.workspaceMode !== 'studio' || appState.project.status !== 'ready') {
+    if (appState.project.status !== 'ready') {
+      return;
+    }
+    // Flow builds nothing on its own, but an agent that needs the edit-mode viewport may ask for the
+    // branch explicitly (`mountStudioForAgent`). That request is a mount, never a mode switch — the
+    // user is left in Vibe and the branch is parked offscreen.
+    if (appState.ui.workspaceMode !== 'studio' && !this.agentStudioMountRequested) {
       return;
     }
     if (this.layoutInitStarted) {
@@ -1047,6 +1079,63 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   /**
+   * Build the Studio branch for an agent-facing caller that needs the edit-mode viewport, WITHOUT
+   * taking the user out of Vibe. Registered with `StudioViewportMountService` on connect; nothing
+   * reaches it unless an agent tool asks, so a human-only Vibe session still builds nothing.
+   *
+   * The user's workspace mode is never touched. All that changes is `agentStudioMountRequested`,
+   * which puts the branch in the DOM at a real (offscreen, invisible, click-through) size — see the
+   * `data-studio-offscreen` rule in the stylesheet for why it cannot simply stay `display: none`.
+   */
+  private async mountStudioForAgent(): Promise<boolean> {
+    if (appState.project.status !== 'ready') {
+      return false;
+    }
+    this.agentStudioMountRequested = true;
+    // The `.layout-host` only exists after the Studio branch of render() has run.
+    this.requestUpdate();
+    await this.updateComplete;
+    await this.ensureStudioLayout();
+    if (!this.layoutInitStarted) {
+      return false;
+    }
+    await this.ensureSceneTabForOffscreenViewport();
+    // Golden Layout's ResizeObserver may have seen the host at 0x0 (the branch was `display: none`
+    // until the render above), and it keeps those sizes until something asks it to re-measure.
+    this.layoutManager.refreshSize();
+    await this.updateComplete;
+    return true;
+  }
+
+  /**
+   * Put a scene in front of the freshly mounted layout.
+   *
+   * The editor viewport is not a permanent panel: `pix3-editor-tab` attaches the shared canvas only
+   * while it is the ACTIVE editor tab, and the default layout fronts Home. A project that has only
+   * ever been open in Vibe also has no stored tab session for `ensureStudioLayout()` to restore, so
+   * without this the branch comes up complete and still has no viewport in it.
+   */
+  private async ensureSceneTabForOffscreenViewport(): Promise<void> {
+    const activeTab = appState.tabs.tabs.find(tab => tab.id === appState.tabs.activeTabId);
+    if (activeTab?.type === 'scene') {
+      return;
+    }
+    const openSceneTab = appState.tabs.tabs.find(tab => tab.type === 'scene');
+    const activeSceneId = appState.scenes.activeSceneId;
+    const resourcePath =
+      openSceneTab?.resourceId ??
+      (activeSceneId ? appState.scenes.descriptors[activeSceneId]?.filePath : undefined) ??
+      appState.scenes.pendingScenePaths[0];
+    if (!resourcePath) {
+      return;
+    }
+    // Opening the scene the session is ALREADY editing: the graph is loaded, so this only fronts a
+    // tab the user cannot see. Deliberately not a different scene — the agent must photograph what
+    // it is editing, and `activeSceneId` is that editing surface.
+    await this.editorTabService.openResourceTab('scene', resourcePath);
+  }
+
+  /**
    * Land a freshly opened project in the shell it belongs to: `#flow` in the URL, else whatever
    * shell this project was last used in, else Studio. Runs once per opened project id so a manual
    * "Open in Studio" is not undone by the next project-state notification.
@@ -1073,11 +1162,16 @@ export class Pix3EditorShell extends ComponentBase {
     // so letting the template swap tear that host out would strand the layout in a detached tree —
     // and `ensureStudioLayout()` only builds once, so coming back from Flow would land on an empty
     // workspace. Keep the branch mounted from then on and let CSS hide it while Flow is on screen.
-    const showStudio = !isFlow || this.studioLayoutMounted;
+    const showStudio = !isFlow || this.studioLayoutMounted || this.agentStudioMountRequested;
+    // Flow + an agent-requested mount is the one case where the branch must be laid out rather than
+    // hidden: the stylesheet parks it offscreen at a fixed size so Golden Layout and the WebGL
+    // viewport measure something real, invisibly.
+    const studioOffscreen = isFlow && this.agentStudioMountRequested;
     return html`
       <div
         class="editor-shell"
         data-workspace=${this.workspaceMode}
+        data-studio-offscreen=${studioOffscreen ? 'true' : 'false'}
         data-ready=${this.shellReady ? 'true' : 'false'}
       >
         ${isFlow ? html`<pix3-flow-shell></pix3-flow-shell>` : html``}

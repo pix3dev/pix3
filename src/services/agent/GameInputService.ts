@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Quaternion, Vector3 } from 'three';
 import { injectable, inject } from '@/fw/di';
 import { appState } from '@/state';
 import { errors as capturedErrors, safeSerialize, type Json } from '@/core/agent-introspection';
@@ -108,6 +108,21 @@ export interface LiveNodeSnapshot {
   /** World position — what actually moved on screen. */
   worldPosition: { x: number; y: number; z: number };
   rotationZ: number;
+  /**
+   * Full local euler in radians (round3). `rotationZ` alone is a 2D-shaped reading:
+   * it says nothing about a node tilted on X/Y, which is every 3D camera and every
+   * 3D mover.
+   */
+  rotation: { x: number; y: number; z: number };
+  /**
+   * World-space direction the node faces — its local −Z through the world quaternion
+   * (round3), the same convention a three.js camera looks down. Only interesting for
+   * 3D nodes (a 2D node's forward is always the screen normal), and there it is the
+   * field that makes a mis-aimed node self-evident: a camera that renders an empty
+   * frame reports a `forward` pointing away from the content, and a mover that walks
+   * backwards reports one opposed to its motion.
+   */
+  forward: { x: number; y: number; z: number };
   /** Local scale — what PunchScale/PopIn/hover-scale animate (round3). */
   scale: { x: number; y: number; z: number };
   /**
@@ -570,6 +585,25 @@ const hiddenByAncestorName = (node: { parent?: unknown }): string | null => {
   }
   return null;
 };
+
+/**
+ * The node's world-space forward (`-Z` through its world quaternion), rounded like every
+ * other transform reading here.
+ *
+ * Exported because {@link LiveNodeSnapshot} is built in two places and an orientation that
+ * disagrees between them would be worse than not having one. The vectors are allocated per
+ * call rather than shared scratch: the routine layer holds snapshots as baselines, so a
+ * reused Vector3 would rewrite the past.
+ */
+export function worldForward(node: NodeBase): { x: number; y: number; z: number } {
+  const forward = new Vector3(0, 0, -1).applyQuaternion(node.getWorldQuaternion(new Quaternion()));
+  return { x: round3(forward.x), y: round3(forward.y), z: round3(forward.z) };
+}
+
+/** Local euler in radians, rounded — the 3D half of the orientation `rotationZ` only hints at. */
+export function localRotation(node: NodeBase): { x: number; y: number; z: number } {
+  return { x: round3(node.rotation.x), y: round3(node.rotation.y), z: round3(node.rotation.z) };
+}
 
 /**
  * Interaction state of a `UIControl2D`, or null for a node that is not one. Duck-typed on the three
@@ -1944,6 +1978,8 @@ export class GameInputService {
       position: { x: node.position.x, y: node.position.y, z: node.position.z },
       worldPosition: { x: world.x, y: world.y, z: world.z },
       rotationZ: node.rotation.z,
+      rotation: localRotation(node),
+      forward: worldForward(node),
       scale: { x: round3(node.scale.x), y: round3(node.scale.y), z: round3(node.scale.z) },
       ...(typeof opacity === 'number' ? { opacity: round3(opacity) } : {}),
       ...(displayText !== null ? { text: displayText } : {}),

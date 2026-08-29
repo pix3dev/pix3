@@ -107,7 +107,12 @@ import {
   type ControlVerdict,
   type NegativeControlSpec,
 } from '@/services/agent/game-control';
-import { GameInputService, type LiveNodeSnapshot } from '@/services/agent/GameInputService';
+import {
+  GameInputService,
+  localRotation,
+  worldForward,
+  type LiveNodeSnapshot,
+} from '@/services/agent/GameInputService';
 import { GameBotHost } from '@/services/agent/GameBotHost';
 import {
   BotSession,
@@ -2147,6 +2152,8 @@ function snapshotLiveNode(runner: SceneRunner, query: string): LiveNodeSnapshot 
     position: { x: node.position.x, y: node.position.y, z: node.position.z },
     worldPosition: { x: world.x, y: world.y, z: world.z },
     rotationZ: node.rotation.z,
+    rotation: localRotation(node),
+    forward: worldForward(node),
     scale: { x: node.scale.x, y: node.scale.y, z: node.scale.z },
     childCount: children.length,
     visibleChildCount: children.filter(child => child.visible).length,

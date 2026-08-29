@@ -46,6 +46,27 @@ pix3-editor-shell {
   display: none;
 }
 
+/* An agent asked for the edit-mode viewport in a Vibe session that never opened Studio
+   (StudioViewportMountService -> the shell's `mountStudioForAgent`). The branch has to EXIST at a
+   real size: `display: none` gives its host a 0x0 box, so Golden Layout initializes at zero and the
+   WebGL viewport is never resized off 1x1 — the capture comes back blank or fails outright. But the
+   user is still in Vibe and must see nothing change, so it is laid out where nobody can reach it:
+   `visibility: hidden` (which, unlike `display: none`, still produces boxes for ResizeObserver and
+   getBoundingClientRect), parked far off-screen, click-through, and `position: fixed` so it is out
+   of flow and cannot disturb the Flow grid. 1280x720 matches the 16:9 of the default project
+   viewport, which is the aspect the capture path expects to photograph.
+   The toolbar has nothing to contribute to a screenshot and stays hidden. */
+.editor-shell[data-workspace='flow'][data-studio-offscreen='true'] > .workspace {
+  display: block;
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+  inset-block-start: 0;
+  inset-inline-start: -20000px;
+  inline-size: 1280px;
+  block-size: 720px;
+}
+
 .toolbar-layer {
   position: relative;
 }

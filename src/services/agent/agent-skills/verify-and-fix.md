@@ -289,6 +289,16 @@ accrue the "one physical proof per control" the ladder above is built on — tap
   real node type (it loaded as a placeholder that does nothing — the message names the correct
   spelling). Never settle this with a viewport screenshot: the editor lights the scene with
   fallback lights the running game does not have, and says so via `editorFallbackLighting`.
+  **When all three codes come up clean and the screen is still the bare clear colour, the cause is
+  at runtime, not in the file.** Ask `play_status`: it reports `render` (draw calls / triangles of
+  the last frame) and `visible3D` (the active camera, how many 3D meshes exist, and how many are
+  inside its frustum). Meshes present with `inFrustum: 0` means **the camera is not looking at the
+  scene** — not a light, not a material, and no screenshot can tell you that. Then read the
+  camera's LIVE orientation with `game_observe` and look at `forward` (its world-space facing
+  vector), NOT the authored rotation from `node_inspect`: a script that aims the camera at runtime
+  makes the two disagree, and that disagreement IS the bug. `rotationZ` alone cannot show a 3D
+  mis-aim — a camera turned 180° off the content has every node present, `visible: true`,
+  positioned and lit, and still draws zero objects.
 - **"Cannot read properties of undefined (reading 'scene'/'input')"** — a script used
   `this.scene` / `this.input` before the scene was ready, or in an editor preview. Guard with
   `if (!this.scene) return;` at the top of `onUpdate`.
@@ -339,8 +349,12 @@ accrue the "one physical proof per control" the ladder above is built on — tap
 
 - Re-read the failing script with `fs_read` — don't guess its contents.
 - `read_logs` shows your own `console.log` output from scripts; add logging to narrow it down.
-- After two failed fix attempts, consult the advisor (if `ask_advisor` is available): put the
-  exact error text, the failing script's source, and what you already tried into `context`.
-  Apply its fix, then re-run this loop.
+- **Count your fix attempts, and call the advisor at two.** `ask_advisor` (when it is available)
+  is not a last resort — the trigger is countable: two attempts that did not change the symptom,
+  or one symptom you still cannot explain after reading the code that should explain it. Put the
+  exact error text, the failing script's source, and what you already tried into `context`, apply
+  its fix, then re-run this loop. A measured session had an advisor configured, went ~20 steps
+  stuck without ever calling it, and ended with the bug unresolved: an advisor you never ask is
+  the most expensive tool in the box.
 - Report the exact error text to the user with the file/line if you can't resolve it (advisor
   included) — and say what you tried.

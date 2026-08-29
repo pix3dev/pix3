@@ -320,9 +320,15 @@ export class GamePlaySessionService {
    * (the agent's `game_input`/`game_observe` tools and the debug bridge) that
    * needs the running clone's nodes, the canvas to aim synthetic pointer events
    * at, and the host window. The returned objects are live — treat as read-only.
+   *
+   * `renderer` is here so a caller can read the last frame's counters directly
+   * (`getStatsSnapshot`) instead of through {@link ProfilerSessionService}: the profiler
+   * only samples while a panel can show the numbers, so in Vibe its readings are null,
+   * and an agent's questions must not depend on which workspace the user is looking at.
    */
   getActiveRuntime(): {
     runner: SceneRunner;
+    renderer: RuntimeRenderer;
     canvas: HTMLCanvasElement;
     windowRef: Window;
   } | null {
@@ -332,6 +338,7 @@ export class GamePlaySessionService {
     const host = this.activeHostKind === 'popout' ? this.popoutHost : this.tabHost;
     return {
       runner: this.runner,
+      renderer: this.renderer,
       canvas: this.renderer.domElement,
       windowRef: host?.windowRef ?? window,
     };

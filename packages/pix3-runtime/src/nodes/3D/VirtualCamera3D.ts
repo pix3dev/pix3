@@ -1,5 +1,6 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
+import { aimCameraNodeAt } from './Camera3D';
 import type { NodeBase } from '../NodeBase';
 import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
@@ -290,6 +291,17 @@ export class VirtualCamera3D extends Node3D {
     ) {
       this.setWorldPosition(clampedX, clampedY, clampedZ);
     }
+  }
+
+  /**
+   * Same correction as {@link Camera3D.lookAt}: this node stands in for a camera, and its own
+   * look-at solve already aims -Z at the target, so the inherited `Object3D.lookAt` must not aim
+   * the other way.
+   */
+  override lookAt(vector: Vector3): void;
+  override lookAt(x: number, y: number, z: number): void;
+  override lookAt(x: Vector3 | number, y?: number, z?: number): void {
+    aimCameraNodeAt(this, x, y, z);
   }
 
   private solveLookAt(dt: number): void {

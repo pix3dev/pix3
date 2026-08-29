@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
+import { Group, OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'three';
 
 import { Camera3D } from './Camera3D';
 
@@ -72,5 +72,53 @@ describe('Camera3D', () => {
     expect(camera.bottom).toBe(-5);
     expect(camera.left).toBe(-10);
     expect(camera.right).toBe(10);
+  });
+
+  /**
+   * `Object3D.lookAt` aims +Z at the target for anything that is not itself a camera, and this node
+   * only *holds* one — so without the override the rendered camera faces exactly backwards and the
+   * scene renders as the bare clear colour.
+   */
+  describe('lookAt', () => {
+    const forwardOf = (node: Camera3D): Vector3 => {
+      node.updateMatrixWorld(true);
+      return new Vector3(0, 0, -1).applyQuaternion(
+        node.camera.getWorldQuaternion(new Quaternion())
+      );
+    };
+
+    it('points the camera at the target, not away from it', () => {
+      const cameraNode = new Camera3D({ id: 'cam-look', name: 'Camera' });
+      cameraNode.position.set(0, 4, -8);
+
+      cameraNode.lookAt(0, 1.2, 2);
+
+      const expected = new Vector3(0, 1.2, 2).sub(new Vector3(0, 4, -8)).normalize();
+      const forward = forwardOf(cameraNode);
+      expect(forward.x).toBeCloseTo(expected.x, 5);
+      expect(forward.y).toBeCloseTo(expected.y, 5);
+      expect(forward.z).toBeCloseTo(expected.z, 5);
+    });
+
+    it('accepts a Vector3 target, like the method it overrides', () => {
+      const cameraNode = new Camera3D({ id: 'cam-look-vec', name: 'Camera' });
+      cameraNode.position.set(0, 0, 5);
+
+      cameraNode.lookAt(new Vector3(0, 0, 0));
+
+      expect(forwardOf(cameraNode).z).toBeCloseTo(-1, 5);
+    });
+
+    it('still faces the world target when the camera sits under a rotated parent', () => {
+      const parent = new Group();
+      parent.rotation.y = Math.PI / 2;
+      const cameraNode = new Camera3D({ id: 'cam-look-child', name: 'Camera' });
+      parent.add(cameraNode);
+      parent.updateMatrixWorld(true);
+
+      cameraNode.lookAt(0, 0, -10);
+
+      expect(forwardOf(cameraNode).z).toBeCloseTo(-1, 5);
+    });
   });
 });

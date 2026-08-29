@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AmbientLightNode, GeometryMesh, NodeBase } from '@pix3/runtime';
+import { AmbientLightNode, Camera3D, GeometryMesh, Node3D, NodeBase } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
 import { AgentToolRegistry, IDEA_STAGE_TOOLS, type JsonSchema } from './AgentToolRegistry';
@@ -36,6 +36,15 @@ const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegist
         ? { isUsingEditorFallbackLighting: () => false, ...(value as object) }
         : value;
     Object.defineProperty(registry, key, { value: stub, configurable: true });
+  }
+  // The screenshot tools ask this service to build Vibe's missing viewport before they give up.
+  // A spec has no editor shell, so default it to "nothing to mount" rather than let the tools
+  // resolve the real (WebGL-backed) service out of the container.
+  if (!('studioViewportMount' in overrides)) {
+    Object.defineProperty(registry, 'studioViewportMount', {
+      value: { ensureStudioViewportMounted: async () => false },
+      configurable: true,
+    });
   }
   return registry;
 };
@@ -269,6 +278,73 @@ describe('AgentToolRegistry', () => {
       expect(String(result.error)).toMatch(/not initialized/);
     });
 
+    it('mounts the Studio viewport on demand and retries when Vibe never built one', async () => {
+      // A session reloaded straight into Vibe has no viewport at all — the shell skips Golden
+      // Layout there on purpose. The agent must still be able to look at the authored scene, so
+      // the tool asks for a hidden mount and photographs it instead of reporting a dead end.
+      let mounted = false;
+      const captureScreenshot = vi.fn(() =>
+        mounted ? { dataBase64: 'TU9VTlQ', mimeType: 'image/jpeg', width: 640, height: 360 } : null
+      );
+      const ensureStudioViewportMounted = vi.fn(async () => {
+        mounted = true;
+        return true;
+      });
+      const registry = buildRegistry({
+        viewportRenderer: { captureScreenshot },
+        studioViewportMount: { ensureStudioViewportMounted },
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(ensureStudioViewportMounted).toHaveBeenCalledTimes(1);
+      expect(captureScreenshot).toHaveBeenCalledTimes(2);
+      expect(result.ok).toBe(true);
+      expect(result.view).toBe('editor');
+      expect(result.__images).toEqual([{ mimeType: 'image/jpeg', data: 'TU9VTlQ' }]);
+    });
+
+    it('keeps the honest error when there is no shell to mount a viewport in', async () => {
+      const captureScreenshot = vi.fn(() => null);
+      const registry = buildRegistry({
+        viewportRenderer: { captureScreenshot },
+        studioViewportMount: { ensureStudioViewportMounted: async () => false },
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(result.ok).toBe(false);
+      expect(String(result.error)).toMatch(/not initialized/);
+      // No point asking the renderer twice when nothing was mounted in between.
+      expect(captureScreenshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('a framed capture mounts the Studio viewport too', async () => {
+      let mounted = false;
+      const captureFramedScreenshot = vi.fn(() =>
+        mounted ? { dataBase64: 'Rk9P', mimeType: 'image/jpeg', width: 512, height: 512 } : null
+      );
+      const node = makeNode({ nodeId: 'n42', name: 'Hero' });
+      const registry = buildRegistry({
+        viewportRenderer: { captureFramedScreenshot },
+        sceneManager: { getActiveSceneGraph: () => ({ nodeMap: new Map([['n42', node]]) }) },
+        studioViewportMount: {
+          ensureStudioViewportMounted: async () => {
+            mounted = true;
+            return true;
+          },
+        },
+      });
+
+      const result = (await registry.execute('viewport_screenshot', {
+        nodeId: 'n42',
+      })) as Record<string, unknown>;
+
+      expect(captureFramedScreenshot).toHaveBeenCalledTimes(2);
+      expect(result.ok).toBe(true);
+      expect(result.framed).toBe('node');
+    });
+
     it('captures the RUNNING GAME instead of the editor while play mode is active', async () => {
       const gameCapture = vi.fn(() => ({
         dataBase64: 'R0FNRQ',
@@ -314,7 +390,10 @@ describe('AgentToolRegistry', () => {
         expect(result.ok).toBe(true);
         expect(result.view).toBe('editor');
         expect(gameCapture).not.toHaveBeenCalled();
-        expect(String(result.note)).toMatch(/EDIT-MODE/);
+        // It says what the frame IS, not that a capture failed: nothing went wrong here, the
+        // agent asked for the editor and got it while a game happens to be running.
+        expect(String(result.note)).toMatch(/EDIT-MODE viewport, not the running game/);
+        expect(String(result.note)).not.toMatch(/not ready/);
       } finally {
         appState.ui.isPlaying = false;
       }
@@ -1330,6 +1409,54 @@ describe('AgentToolRegistry', () => {
       expect(storage.listDirectory).toHaveBeenCalledTimes(1);
     });
 
+    it('fs_write points a plan written to design/plan.md at the file the Plan tab reads', async () => {
+      // Observed live: a session wrote its build plan to design/plan.md, the write
+      // succeeded, and the Plan tab stayed empty for the whole run with nothing said.
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'design/plan.md',
+        content: '- [ ] build it',
+      })) as Record<string, unknown>;
+
+      // A note, not a refusal: the agent keeps its own document.
+      expect(result.ok).toBe(true);
+      expect(storage.files.get('design/plan.md')).toBe('- [ ] build it');
+      expect(String(result.note)).toContain('design/progress.md');
+    });
+
+    it('fs_write says nothing about progress.md once the project has one', async () => {
+      const storage = makeStorage();
+      storage.files.set('design/progress.md', '- [x] shipped');
+      const registry = buildRegistry({ storage });
+
+      const stray = (await registry.execute('fs_write', {
+        path: 'design/roadmap.md',
+        content: 'later',
+      })) as Record<string, unknown>;
+      // The Plan tab has something to show, so a second planning document is the agent's business.
+      expect(stray.note).toBeUndefined();
+
+      const itself = (await registry.execute('fs_write', {
+        path: 'design/progress.md',
+        content: '- [ ] next',
+      })) as Record<string, unknown>;
+      expect(itself.note).toBeUndefined();
+    });
+
+    it('fs_write leaves an ordinary design/ document alone', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'design/brief.md',
+        content: 'the pitch',
+      })) as Record<string, unknown>;
+
+      expect(result.note).toBeUndefined();
+    });
+
     it('fs_write REFUSES to overwrite a large existing file and points at str_replace', async () => {
       const storage = makeStorage();
       storage.files.set('scripts/Big.ts', 'a'.repeat(2500));
@@ -2319,6 +2446,130 @@ describe('AgentToolRegistry', () => {
     expect(await registry.execute('play_start')).toEqual({ ok: true });
     expect(focusOrOpenScene).toHaveBeenCalledWith('res://scenes/main.pix3scene');
     expect(dispatcher.executeById).toHaveBeenCalledWith('game.start');
+  });
+
+  describe('play_status renders-what triage', () => {
+    /**
+     * A camera looking down -Z from z = 10 and one box at the origin — the smallest scene
+     * where "the camera sees the content" and "the camera is turned around" differ.
+     */
+    const makeScene = (turnCameraAround: boolean, withGround = false) => {
+      const root = new Node3D({ id: 'root', name: 'World' });
+      const camera = new Camera3D({ id: 'cam', name: 'MainCamera' });
+      camera.position.set(0, 0, 10);
+      if (turnCameraAround) {
+        // A camera a script has aimed the wrong way: every node is present, visible and lit,
+        // and the 3D pass still draws nothing.
+        camera.rotation.set(0, Math.PI, 0);
+      }
+      const cube = new GeometryMesh({ id: 'cube', name: 'Cube', geometry: 'box', size: [1, 1, 1] });
+      root.add(camera);
+      root.add(cube);
+      if (withGround) {
+        // A wide, flat ground: its bounding SPHERE keeps clipping the frustum from a camera
+        // pointed the other way, which is how the frustum count alone reads a black frame as
+        // "something is visible". Measured on the real scene this was built for.
+        root.add(
+          new GeometryMesh({ id: 'ground', name: 'Ground', geometry: 'box', size: [40, 0.2, 40] })
+        );
+      }
+      return { root, camera };
+    };
+
+    const makeRegistry = (turnCameraAround: boolean, withGround = false) => {
+      const { root, camera } = makeScene(turnCameraAround, withGround);
+      return buildRegistry({
+        playSession: {
+          getActiveRuntime: () => ({
+            runner: {
+              getLiveRootNodes: () => [root],
+              getActiveCamera3D: () => camera,
+            },
+            // Read straight off the renderer so the answer does not depend on whether a
+            // Profiler panel happens to be sampling -- it is not, in Vibe.
+            renderer: {
+              getStatsSnapshot: () => ({
+                calls: 4,
+                triangles: 18,
+                geometries: 31,
+                textures: 3,
+              }),
+            },
+            canvas: document.createElement('canvas'),
+            windowRef: window,
+          }),
+        },
+      });
+    };
+
+    it('counts the meshes the active camera can see, and reports the renderer counters', async () => {
+      appState.ui.isPlaying = true;
+      const result = (await makeRegistry(false).execute('play_status')) as Record<string, unknown>;
+      appState.ui.isPlaying = false;
+
+      expect(result.render).toEqual({
+        drawCalls: 4,
+        triangles: 18,
+        geometries: 31,
+        textures: 3,
+      });
+      expect(result.visible3D).toEqual({
+        camera: 'MainCamera',
+        meshCount: 1,
+        inFrustum: 1,
+        onScreen: 1,
+      });
+    });
+
+    it('reports zero in frustum and names the causes when the camera is aimed away', async () => {
+      appState.ui.isPlaying = true;
+      const result = (await makeRegistry(true).execute('play_status')) as Record<string, unknown>;
+      appState.ui.isPlaying = false;
+
+      const visible = result.visible3D as {
+        meshCount: number;
+        inFrustum: number;
+        onScreen: number;
+        hint: string;
+      };
+      // The scene still HAS its content — the reading that separates "aimed wrong" from "empty".
+      expect(visible.meshCount).toBe(1);
+      expect(visible.inFrustum).toBe(0);
+      expect(visible.onScreen).toBe(0);
+      expect(visible.hint).toMatch(/aimed away/);
+      expect(visible.hint).toMatch(/forward/);
+    });
+
+    it('still calls it out when one oversized mesh keeps clipping the frustum', async () => {
+      appState.ui.isPlaying = true;
+      const result = (await makeRegistry(true, true).execute('play_status')) as Record<
+        string,
+        unknown
+      >;
+      appState.ui.isPlaying = false;
+
+      const visible = result.visible3D as {
+        meshCount: number;
+        inFrustum: number;
+        onScreen: number;
+        hint: string;
+      };
+      expect(visible.meshCount).toBe(2);
+      // The ground's bounding sphere reaches into the frustum even though the camera is turned
+      // away — the exact false positive that would have silenced the hint.
+      expect(visible.inFrustum).toBeGreaterThan(0);
+      expect(visible.onScreen).toBe(0);
+      expect(visible.hint).toMatch(/aimed away/);
+    });
+
+    it('stays the plain two-field answer when no runtime is attached', async () => {
+      appState.ui.isPlaying = false;
+      const registry = buildRegistry({ playSession: { getActiveRuntime: () => null } });
+      expect(await registry.execute('play_status')).toEqual({
+        isPlaying: false,
+        playModeStatus: appState.ui.playModeStatus,
+      });
+    });
   });
 
   it('play tools drive the game.* commands and report status', async () => {

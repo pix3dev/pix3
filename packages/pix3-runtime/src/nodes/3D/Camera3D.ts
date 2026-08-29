@@ -1,9 +1,61 @@
-import { PerspectiveCamera, OrthographicCamera, Camera, Vector3, Quaternion } from 'three';
+import {
+  PerspectiveCamera,
+  OrthographicCamera,
+  Camera,
+  Matrix4,
+  Object3D,
+  Vector3,
+  Quaternion,
+} from 'three';
 import { Node3D, type Node3DProps } from '../Node3D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { defineProperty, mergeSchemas } from '../../fw/property-schema';
 
 export const TARGET_DISTANCE = 3;
+
+const lookMatrix = new Matrix4();
+const lookTarget = new Vector3();
+const lookPosition = new Vector3();
+const lookParentRotation = new Quaternion();
+
+/**
+ * Aim a camera-shaped node at a world point, the way a camera means it.
+ *
+ * `Object3D.lookAt` has two opposite conventions and chooses between them with `isCamera`/`isLight`:
+ * a camera is turned so its **-Z** faces the target, everything else so its **+Z** does. A Pix3
+ * camera node is a `Node3D` that *holds* a three.js camera as a child, so it fails that check and
+ * inherits the object convention — which leaves the real camera pointed exactly 180° away from the
+ * target, at a scene that renders as nothing but the clear colour.
+ *
+ * Every other aiming path in the engine already speaks the camera convention
+ * ({@link Camera3D.setTargetPosition}, `VirtualCamera3D`'s look blend, the editor's camera gizmo);
+ * this is what makes the inherited method agree with them.
+ */
+export const aimCameraNodeAt = (
+  node: Object3D,
+  x: Vector3 | number,
+  y?: number,
+  z?: number
+): void => {
+  if (x instanceof Vector3) {
+    lookTarget.copy(x);
+  } else {
+    lookTarget.set(x, y ?? 0, z ?? 0);
+  }
+
+  node.updateWorldMatrix(true, false);
+  lookPosition.setFromMatrixPosition(node.matrixWorld);
+  lookMatrix.lookAt(lookPosition, lookTarget, node.up);
+  node.quaternion.setFromRotationMatrix(lookMatrix);
+
+  // A camera parented under a rotated node still has to end up facing the world target.
+  const parent = node.parent;
+  if (parent) {
+    lookMatrix.extractRotation(parent.matrixWorld);
+    lookParentRotation.setFromRotationMatrix(lookMatrix);
+    node.quaternion.premultiply(lookParentRotation.invert());
+  }
+};
 
 export interface Camera3DProps extends Omit<Node3DProps, 'type'> {
   projection?: 'perspective' | 'orthographic';
@@ -37,6 +89,13 @@ export class Camera3D extends Node3D {
       far: props.far ?? 1000,
       orthographicSize: this.orthographicSizeValue,
     });
+  }
+
+  /** @see {@link aimCameraNodeAt} — the inherited `Object3D.lookAt` aims the opposite way. */
+  override lookAt(vector: Vector3): void;
+  override lookAt(x: number, y: number, z: number): void;
+  override lookAt(x: Vector3 | number, y?: number, z?: number): void {
+    aimCameraNodeAt(this, x, y, z);
   }
 
   getTargetPosition(): Vector3 {

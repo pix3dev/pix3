@@ -108,7 +108,7 @@ const extractSection = (content: string, section: string): string | null => {
   // from the needle so any reasonable spelling of a real heading matches.
   const needle = section
     .replace(/^#{1,3}\s*/, '')
-    .replace(/^[\d½.\s]+/, '')
+    .replace(/^[\d½¾.\s]+/, '')
     .toLowerCase();
   if (!needle) {
     return null;

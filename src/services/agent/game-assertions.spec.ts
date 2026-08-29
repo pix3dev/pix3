@@ -645,6 +645,8 @@ const snapshot = (
   position: { x: world.x ?? 0, y: world.y ?? 0, z: world.z ?? 0 },
   worldPosition: { x: world.x ?? 0, y: world.y ?? 0, z: world.z ?? 0 },
   rotationZ: 0,
+  rotation: { x: 0, y: 0, z: 0 },
+  forward: { x: 0, y: 0, z: -1 },
   scale: { x: 1, y: 1, z: 1 },
   childCount: 0,
   visibleChildCount: 0,

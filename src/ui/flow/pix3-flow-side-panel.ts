@@ -40,7 +40,15 @@ const PANEL_TAB_KEY = 'pix3.flow.sidePanelTab:v1';
  * Tool names whose success means the file list on screen is out of date. `fs_write` is in here for
  * the same reason it is in the document's set — the agent writes references and captions with it.
  */
-const FILE_TOUCHING_TOOLS = new Set(['generate_asset', 'fs_write', 'fs_delete', 'process_asset']);
+const FILE_TOUCHING_TOOLS = new Set([
+  'generate_asset',
+  'fs_write',
+  'str_replace',
+  'fs_delete',
+  'process_asset',
+  // Writes design/decisions.md, which the Design group lists.
+  'record_decision',
+]);
 
 /** Coalescing window for refreshes: one agent turn can write a dozen files in a burst. */
 const REFRESH_DEBOUNCE_MS = 120;
@@ -90,6 +98,9 @@ const persistPanelTab = (tab: SidePanelTab): void => {
  *    belong here; only pictures get a thumbnail and a role chip. References mostly arrive from the
  *    user (drop, "+"), not from a generator, and a panel that showed only generated art would send
  *    them to Studio to look for their own files.
+ *  - **Every design document is listed, not just the gdd.** The agent narrates its own writes
+ *    ("the plan is in design/plan.md"), so the column has to be the place those land; they are
+ *    shown without a delete affordance, because they are the agent's working memory.
  *  - **The user's delete goes through the mutation gateway.** `DeleteReferenceCommand` keeps the
  *    bytes in an undo closure; the agent's own `fs_delete` stays outside history, as all its edits do.
  *  - **Thumbnail blob URLs are diff-revoked** (`AssetsPreviewService.objectUrls` pattern): the list
@@ -596,7 +607,7 @@ export class Pix3FlowSidePanel extends ComponentBase {
               ${this.warnings.map(warning => html`<span>${warning}</span>`)}
             </div>`
           : null}
-        ${list ? this.renderCard(list.document) : null}
+        ${list ? this.renderGroup('Design', [list.document, ...list.design], '') : null}
         ${this.renderGroup('References', list?.references ?? [], 'Drop files here, or use +.')}
         ${list && list.sources.length > 0 ? this.renderGroup('Sources', list.sources, '') : null}
         <div class="ref-list__hint">${this.dragging ? 'Drop to add to references' : ''}</div>
@@ -707,7 +718,9 @@ export class Pix3FlowSidePanel extends ComponentBase {
     if (caption) {
       return caption;
     }
-    const parts: string[] = [item.readOnly ? 'attached' : item.origin];
+    // "attached" is about the Sources group specifically — design documents are also read-only
+    // here, but the user did not attach them, the agent wrote them.
+    const parts: string[] = [item.group === 'sources' ? 'attached' : item.origin];
     if (item.sizeBytes !== null) {
       parts.push(formatAttachmentSize(item.sizeBytes));
     }
@@ -716,7 +729,7 @@ export class Pix3FlowSidePanel extends ComponentBase {
 }
 
 const allItems = (list: FlowReferenceList | null): readonly FlowReferenceItem[] =>
-  list ? [list.document, ...list.references, ...list.sources] : [];
+  list ? [list.document, ...list.design, ...list.references, ...list.sources] : [];
 
 /** Feather name for a file the panel cannot show a picture of. Vector always, never a glyph. */
 const kindIcon = (item: FlowReferenceItem): string => {

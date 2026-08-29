@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Euler, Quaternion } from 'three';
 import { registerGameDebug } from '@pix3/runtime';
 import { appState } from '@/state';
 import { clearErrors } from '@/core/agent-introspection';
@@ -25,7 +26,7 @@ interface FakeLiveNode {
   type: string;
   visible: boolean;
   position: { x: number; y: number; z: number };
-  rotation: { z: number };
+  rotation: { x: number; y: number; z: number };
   scale: { x: number; y: number; z: number };
   opacity?: number;
   /** Ancestor chain, walked to decide whether the node is actually on screen. */
@@ -36,6 +37,8 @@ interface FakeLiveNode {
     y: number;
     z: number;
   };
+  /** Real quaternion maths, so the snapshot's `forward` is derived and not asserted into place. */
+  getWorldQuaternion(target: Quaternion): Quaternion;
 }
 
 let childSeq = 0;
@@ -56,12 +59,15 @@ const makeLiveNode = (over: Partial<FakeLiveNode> = {}): FakeLiveNode => {
     type: 'Sprite2D',
     visible: true,
     position: { x: 0, y: 0, z: 0 },
-    rotation: { z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
     children: [],
     getWorldPosition(target) {
       target.set(node.position.x, node.position.y, node.position.z);
       return { x: node.position.x, y: node.position.y, z: node.position.z };
+    },
+    getWorldQuaternion(target) {
+      return target.setFromEuler(new Euler(node.rotation.x, node.rotation.y, node.rotation.z));
     },
     ...over,
   };
@@ -441,7 +447,7 @@ describe('GameInputService', () => {
 
   it('reports travel direction relative to the node facing (forward vs sideways)', async () => {
     // Nose = local +Y (rotation 0), and the node moves +Y → straight forward.
-    const fwd = makeLiveNode({ rotation: { z: 0 } });
+    const fwd = makeLiveNode({ rotation: { x: 0, y: 0, z: 0 } });
     const runtimeF = makeRuntime([fwd]);
     const moverF = setInterval(() => {
       fwd.position.y += 5;
@@ -464,7 +470,7 @@ describe('GameInputService', () => {
     expect(Math.abs(forwardPlayer.alignRight!)).toBeLessThan(0.1);
 
     // Same facing (rotation 0) but the node slides +X → sideways across the body.
-    const side = makeLiveNode({ rotation: { z: 0 } });
+    const side = makeLiveNode({ rotation: { x: 0, y: 0, z: 0 } });
     const runtimeS = makeRuntime([side]);
     const moverS = setInterval(() => {
       side.position.x += 5;
@@ -487,7 +493,7 @@ describe('GameInputService', () => {
   });
 
   it('expect: "forward" verdict passes along the nose and fails when sliding sideways', async () => {
-    const good = makeLiveNode({ rotation: { z: 0 } });
+    const good = makeLiveNode({ rotation: { x: 0, y: 0, z: 0 } });
     const runtimeG = makeRuntime([good]);
     const moverG = setInterval(() => {
       good.position.y += 5;
@@ -502,7 +508,7 @@ describe('GameInputService', () => {
     clearInterval(moverG);
     expect(passed.observed?.Player.directionOk).toBe(true);
 
-    const bad = makeLiveNode({ rotation: { z: 0 } });
+    const bad = makeLiveNode({ rotation: { x: 0, y: 0, z: 0 } });
     const runtimeB = makeRuntime([bad]);
     const moverB = setInterval(() => {
       bad.position.x += 5;
@@ -578,6 +584,29 @@ describe('GameInputService', () => {
     expect(result.observed?.Player.after?.scale.x).toBeCloseTo(1.08, 3);
     expect(result.observed?.Player.scaled).toBe(true);
     expect(result.observed?.Player.scaleDelta?.ratio).toBeCloseTo(1.08, 2);
+  });
+
+  it('reports the full 3D orientation, so a node turned 180° about Y reads forward +Z', async () => {
+    // The camera bug this exists for: `rotationZ` is 0 either way, so a camera aimed
+    // exactly backwards was indistinguishable from one aimed at the scene.
+    const facing = makeLiveNode({ name: 'Camera', type: 'Camera3D' });
+    const turned = makeLiveNode({
+      nodeId: 'cam-2',
+      name: 'Backwards',
+      type: 'Camera3D',
+      rotation: { x: 0, y: Math.PI, z: 0 },
+    });
+    const { service } = buildService(makeRuntime([facing, turned]));
+
+    const result = await service.observe(['Camera', 'Backwards'], 0);
+
+    // Default orientation: -Z, the direction a three.js camera looks down.
+    expect(result.nodes?.Camera?.rotation).toEqual({ x: 0, y: 0, z: 0 });
+    expect(result.nodes?.Camera?.forward.z).toBeCloseTo(-1, 3);
+    // Turned around: the same node reports the opposite forward, while rotationZ stays 0.
+    expect(result.nodes?.Backwards?.rotation.y).toBeCloseTo(Math.PI, 3);
+    expect(result.nodes?.Backwards?.rotationZ).toBe(0);
+    expect(result.nodes?.Backwards?.forward.z).toBeCloseTo(1, 3);
   });
 
   it('omits opacity for a plain node that does not expose it', async () => {

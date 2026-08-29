@@ -53,6 +53,8 @@ const liveNode = (name: string, x = 0, y = 0, z = 0): LiveNodeSnapshot => ({
   position: { x, y, z },
   worldPosition: { x, y, z },
   rotationZ: 0,
+  rotation: { x: 0, y: 0, z: 0 },
+  forward: { x: 0, y: 0, z: -1 },
   scale: { x: 1, y: 1, z: 1 },
   childCount: 0,
   visibleChildCount: 0,
