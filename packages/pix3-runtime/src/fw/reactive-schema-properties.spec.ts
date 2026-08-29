@@ -189,6 +189,33 @@ describe('reactive schema properties', () => {
     expect(node.ref).toBeNull();
   });
 
+  it('repairs an accessor that a subclass field declaration shadowed', () => {
+    // `useDefineForClassFields: true` (the default at target ES2022, and what a consumer of this
+    // package compiles our sources with) turns a subclass field declaration into
+    // Object.defineProperty AFTER the base constructor has already installed its accessor — so the
+    // property silently becomes a plain field again and the refresh is lost. That is exactly what
+    // the two tsconfigs in this repo disagree about, and the repo's own `false` hides it here, so
+    // the shadowing is simulated rather than compiled.
+    const bar = new FakeBar();
+    installReactiveSchemaProperties(bar, FakeBar.schema());
+
+    Object.defineProperty(bar, 'value', {
+      value: 5,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+    bar.value = 30;
+    expect(bar.redraws, 'shadowed: the write must not refresh, or the test proves nothing').toBe(0);
+
+    // The subclass's own install call (every concrete node ends its constructor with one) repairs it.
+    installReactiveSchemaProperties(bar, FakeBar.schema());
+    bar.value = 30;
+
+    expect(bar.value).toBe(30);
+    expect(bar.redraws).toBe(1);
+  });
+
   it('preserves the field value that existed at install time', () => {
     const bar = new FakeBar();
     bar.value = 77; // set before install, the way a constructor does

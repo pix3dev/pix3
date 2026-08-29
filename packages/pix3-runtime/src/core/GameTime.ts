@@ -30,6 +30,9 @@ export interface SlowMotionOptions {
 const DEFAULT_BLEND_MS = 150;
 const DEFAULT_SLOW_SCALE = 0.3;
 
+/** ~0.5 s at 60 fps: long past any legitimate burst of distinct hits. */
+const HITSTOP_STREAK_WARN_FRAMES = 30;
+
 export class GameTime {
   /** Effective multiplier applied to gameplay dt this frame (0..∞). */
   private effectiveScale = 1;
@@ -48,6 +51,17 @@ export class GameTime {
 
   // Hitstop overrides the base scale with 0 while active.
   private hitstopRemainingSec = 0;
+  /**
+   * Longest single request honoured by the freeze in progress; 0 while unfrozen. A re-request no
+   * longer than this cannot push the end of the freeze further away — see {@link hitstop}.
+   */
+  private hitstopWindowSec = 0;
+
+  // Every-frame-caller detection (see the warning in `hitstop`).
+  private frameIndex = 0;
+  private lastHitstopFrame = -1;
+  private hitstopFrameStreak = 0;
+  private warnedAboutHitstopStreak = false;
 
   /** The multiplier gameplay dt is scaled by this frame. */
   get scale(): number {
@@ -70,14 +84,38 @@ export class GameTime {
   }
 
   /**
-   * Freeze the game (scale → 0) for `ms` of real time. Overlapping calls take
-   * the longest pending freeze so rapid hits don't cut each other short.
+   * Freeze the game (scale → 0) for `ms` of real time. Overlapping calls take the LONGEST SINGLE
+   * request, so rapid hits don't cut each other short — but a request no longer than the one that
+   * started the current freeze cannot postpone its end.
+   *
+   * That last clause is load-bearing, not a detail. "Longest *pending*" (what this used to do)
+   * deadlocks: a script that calls `scene.time.hitstop(50)` every frame from `onUpdate` while an
+   * overlap lasts re-arms the freeze faster than it drains, gameplay dt stays 0, so the contact
+   * that triggers the call can never separate — the game is frozen for good, and `GameTime` looks
+   * innocent in isolation because each individual call is correct. Capping one continuous freeze at
+   * the longest request that started it makes the freeze always expire; the misbehaving script then
+   * merely slows the game down instead of stopping it, and says so in the console.
+   *
+   * The trade is deliberate: a second hit of the SAME strength during a freeze no longer extends it.
+   * Without a per-hit identity there is no way to tell that apart from the same hit re-arming, and
+   * one is a bug while the other is 30 ms of juice.
    */
   hitstop(ms: number): void {
     const seconds = Number.isFinite(ms) ? Math.max(0, ms) / 1000 : 0;
-    if (seconds > this.hitstopRemainingSec) {
-      this.hitstopRemainingSec = seconds;
+    this.noteHitstopRequest();
+    if (seconds <= 0) return;
+
+    if (this.hitstopRemainingSec > 0) {
+      // Already frozen: only a strictly stronger hit may extend the window.
+      if (seconds > this.hitstopWindowSec) {
+        this.hitstopRemainingSec = seconds;
+        this.hitstopWindowSec = seconds;
+      }
+      return;
     }
+
+    this.hitstopRemainingSec = seconds;
+    this.hitstopWindowSec = seconds;
   }
 
   /**
@@ -116,6 +154,9 @@ export class GameTime {
   /** Restore normal speed and clear any hitstop / slow-mo. */
   reset(): void {
     this.hitstopRemainingSec = 0;
+    this.hitstopWindowSec = 0;
+    this.lastHitstopFrame = -1;
+    this.hitstopFrameStreak = 0;
     this.setScale(1);
   }
 
@@ -125,9 +166,13 @@ export class GameTime {
    */
   advance(realDtSec: number): void {
     const dt = Number.isFinite(realDtSec) && realDtSec > 0 ? realDtSec : 0;
+    this.frameIndex += 1;
 
     if (this.hitstopRemainingSec > 0) {
       this.hitstopRemainingSec = Math.max(0, this.hitstopRemainingSec - dt);
+      if (this.hitstopRemainingSec === 0) {
+        this.hitstopWindowSec = 0;
+      }
     }
 
     // Progress the active blend toward blendTo.
@@ -152,6 +197,28 @@ export class GameTime {
     }
 
     this.updateEffective();
+  }
+
+  /**
+   * Track how many frames in a row asked for a freeze. One warning per instance: the deadlock this
+   * guards against used to be invisible (a frozen game and a correct-looking `GameTime`), and the
+   * fix belongs in the calling script, which is the only place that knows the contact is the same
+   * one as last frame.
+   */
+  private noteHitstopRequest(): void {
+    this.hitstopFrameStreak =
+      this.lastHitstopFrame >= this.frameIndex - 1 ? this.hitstopFrameStreak + 1 : 1;
+    this.lastHitstopFrame = this.frameIndex;
+
+    if (this.hitstopFrameStreak >= HITSTOP_STREAK_WARN_FRAMES && !this.warnedAboutHitstopStreak) {
+      this.warnedAboutHitstopStreak = true;
+      console.warn(
+        `[GameTime] hitstop() has been called on ${this.hitstopFrameStreak} consecutive frames. ` +
+          'Hitstop is edge-triggered juice: call it once when a contact BEGINS (a signal handler, ' +
+          'or a "was overlapping last frame" guard), not every frame while an overlap lasts. ' +
+          'Requests during a freeze are ignored, so the game runs slowly instead of freezing.'
+      );
+    }
   }
 
   private startBlend(target: number, durationSec: number): void {

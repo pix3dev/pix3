@@ -420,7 +420,11 @@ by a single `GameTime.scale`. The `render()` pass is unscaled, so a frozen frame
 still paints. Timers advance on the real delta, so they expire even while frozen.
 
 - `scene.time.hitstop(ms)` — freeze (scale → 0) for `ms` of real time; overlapping
-  calls take the longest pending freeze.
+  calls take the longest **single request**, and a repeat no longer than the one that
+  started the current freeze cannot postpone its end. Hitstop is edge-triggered juice:
+  call it when a contact *begins*. Calling it every frame while an overlap lasts used to
+  deadlock the game (gameplay `dt` is 0 while frozen, so the contact could never
+  separate); it now only slows the game down and logs one warning naming the fix.
 - `scene.time.slowMotion(scale, { durationMs?, blendMs? })` — ease into a slow-mo
   scale, optionally hold then blend back to 1.
 - `scene.time.setScale(x)` / `reset()` / `scale` / `isFrozen`.

@@ -8,7 +8,11 @@ import { normalizeNodeTypeName } from '@pix3/runtime';
 import type { PropertySchema } from '@pix3/runtime';
 import { parseRoutine } from '@/services/agent/game-routines';
 import { RECIPE_CATALOG, RECIPE_TEMPLATE_ALIASES } from '@/services/flow/PrototypeBootstrapService';
-import { IDEA_PRESERVED_PATHS } from '@/services/flow/recipe-contract';
+import {
+  IDEA_PRESERVED_PATHS,
+  MAX_RECIPE_MD_CHARS,
+  RECIPE_MD_HEADROOM_CHARS,
+} from '@/services/flow/recipe-contract';
 
 /**
  * Contract drift guard for the Flow "recipe" templates (`.plans/done/flow-recipes-contract.md`).
@@ -54,13 +58,11 @@ const REQUIRED_SECTIONS = [
 ];
 
 /**
- * Mirror of `MAX_RECIPE_MD_CHARS` in `AgentChatService`: the agent's system prompt
- * carries `design/recipe.md` verbatim up to this many characters and then cuts the
- * REST OFF. The tail is where "## Do not touch" and "## Verify" live, so a recipe
- * that grows past the limit silently stops shipping its own guardrails — assert the
- * size here instead of discovering it as a badly-behaved agent turn.
+ * What a recipe is allowed to weigh: the truncation cap (see `MAX_RECIPE_MD_CHARS`) minus real
+ * headroom. Both numbers come from `recipe-contract.ts` rather than being restated here — this
+ * block used to be a hand-kept mirror of a literal in `AgentChatService`.
  */
-const MAX_RECIPE_MD_CHARS = 8_000;
+const RECIPE_MD_BUDGET_CHARS = MAX_RECIPE_MD_CHARS - RECIPE_MD_HEADROOM_CHARS;
 
 /** Lazily-loadable modules for every template script, keyed by glob path. */
 const SCRIPT_MODULES = import.meta.glob('./*/files/scripts/*.ts') as Record<
@@ -286,9 +288,11 @@ describe('flow recipe contract', () => {
       const markdown = readFileSync(recipePath, 'utf8');
       expect(
         markdown.length,
-        `recipe.md is ${markdown.length} chars; over ${MAX_RECIPE_MD_CHARS} the agent prompt ` +
-          `truncates it and the tail sections ("Do not touch", "Verify") stop shipping`
-      ).toBeLessThanOrEqual(MAX_RECIPE_MD_CHARS);
+        `recipe.md is ${markdown.length} chars, over the ${RECIPE_MD_BUDGET_CHARS}-char budget. ` +
+          `At ${MAX_RECIPE_MD_CHARS} the agent prompt truncates it and the tail sections ` +
+          `("Do not touch", "Verify") stop shipping, so the budget keeps ` +
+          `${RECIPE_MD_HEADROOM_CHARS} chars of headroom. Cut prose, never a contract section.`
+      ).toBeLessThanOrEqual(RECIPE_MD_BUDGET_CHARS);
     });
 
     it(`${templateId}: every tunable points at a real node`, () => {

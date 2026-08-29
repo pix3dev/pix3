@@ -158,7 +158,9 @@ const resolveSchema = (
  * Pass the static method itself (`installReactiveSchemaProperties(this, Bar2D.getPropertySchema)`)
  * so the schema is built once per class rather than once per node.
  *
- * Idempotent per property, so a subclass calling it after its base class is harmless.
+ * Idempotent per property, so a subclass calling it after its base class is harmless — and more
+ * than harmless: if the subclass re-declared one of the base's schema properties as a field, its
+ * declaration shadowed the base's accessor (define semantics), and this call puts it back.
  *
  * @returns the property names that became reactive on this call (for tests and diagnostics).
  */
@@ -171,9 +173,19 @@ export function installReactiveSchemaProperties(
   const installed = (host[INSTALLED] ??= new Set<string>());
   const added: string[] = [];
   for (const definition of schema.properties) {
-    if (installed.has(definition.name)) {
+    if (installed.has(definition.name) && !isPlainDataField(node, definition.name)) {
+      // Installed and still an accessor: nothing to do. The `isPlainDataField` half is the repair
+      // path — see below.
       continue;
     }
+    // Reaching here WITH the name already installed means the accessor this call put on the
+    // instance has been replaced by a plain field again. Exactly one thing does that: a subclass
+    // declaring a field with the same name under `useDefineForClassFields: true`, whose declaration
+    // runs after the base constructor's install and re-defines the property as own data. That is
+    // not hypothetical — this package ships TypeScript sources, so the semantics belong to the
+    // CONSUMER's tsconfig (`target: ES2022` alone turns define semantics on), and under it the
+    // subclass would silently lose the refresh that the base installed. Re-installing repairs it,
+    // and the subclass's initializer value is the one kept.
     if (makeSchemaPropertyReactive(node, definition) === 'installed') {
       installed.add(definition.name);
       added.push(definition.name);

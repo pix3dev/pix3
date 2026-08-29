@@ -1,6 +1,7 @@
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { buildProjectMap } from '@/services/flow/flow-project-map';
+import { MAX_RECIPE_MD_CHARS } from '@/services/flow/recipe-contract';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
@@ -164,11 +165,6 @@ export interface AgentChatState {
 const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'] as const;
 /** Cap the AGENTS.md slice of the system prompt so a huge file can't dominate the context. */
 const MAX_AGENTS_MD_CHARS = 16_000;
-/**
- * The recipe map is authored to sit in the cached prefix (target < 4 KB); the cap is a guard
- * against a hand-edited recipe.md, not an expected path.
- */
-const MAX_RECIPE_MD_CHARS = 8_000;
 /**
  * Iteration floor for a Flow turn (the Studio default is 40, and users lower it). Below this a
  * turn cannot both build and prove an increment.

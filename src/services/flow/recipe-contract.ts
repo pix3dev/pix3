@@ -27,6 +27,37 @@ export const IDEA_PRESERVED_PATHS: readonly string[] = [
   'references/',
 ];
 
+/**
+ * How much of a recipe's `design/recipe.md` the agent's system prompt carries verbatim before it
+ * CUTS THE REST OFF. The tail is where `## Do not touch` and `## Verify` live, so a recipe that
+ * grows past this silently stops shipping its own guardrails — the failure is invisible in the
+ * field and shows up as a badly-behaved agent turn.
+ *
+ * Lives here, next to the rest of the contract, because two places need the same number:
+ * `AgentChatService` (which does the cutting) and `recipes.spec.ts` (which fails the build long
+ * before a recipe reaches it). It used to be a literal in both, with a comment asking the second
+ * to mirror the first.
+ *
+ * Raised from 8 000 once the recipes had absorbed the `GameRules` ownership contract and the T0
+ * "wow" styling: at 8 000 the flagship `recipe-bouncer-2d` sat at 7 996 chars, and the plan's older
+ * "< 4 KB per recipe" target turned out to be costing content for nothing. A recipe is a per-project
+ * constant inside the CACHED prompt prefix, and the measurement that mattered
+ * (`.plans/prompt-to-playable-flow.md` §11.8) put the turn's cost in exploration hops and tool
+ * results, never here — 2 KB of cached prefix is ~500 tokens written once per conversation.
+ */
+export const MAX_RECIPE_MD_CHARS = 10_000;
+
+/**
+ * Headroom the spec insists on under {@link MAX_RECIPE_MD_CHARS}. Passing the guard at 7 996 of
+ * 8 000 chars — which `recipe-bouncer-2d` did — is not passing it: the next sentence anyone adds
+ * truncates the file's own guardrails.
+ *
+ * The two numbers do different jobs, which is why both exist. The cap is where the damage starts;
+ * the budget is what a recipe is allowed to weigh, and it is the one that stops a recipe from
+ * growing without anyone deciding to let it.
+ */
+export const RECIPE_MD_HEADROOM_CHARS = 1_500;
+
 /** One declared tuning point: a property on a node (or on a component of that node). */
 export interface RecipeTunable {
   readonly key: string;

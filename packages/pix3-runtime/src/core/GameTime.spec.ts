@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GameTime } from './GameTime';
 
 describe('GameTime', () => {
@@ -22,7 +22,7 @@ describe('GameTime', () => {
     expect(time.isFrozen).toBe(false);
   });
 
-  it('stacks hitstops by taking the longest pending freeze', () => {
+  it('stacks hitstops by taking the longest single request', () => {
     const time = new GameTime();
     time.hitstop(50);
     time.hitstop(120); // longer wins
@@ -78,6 +78,69 @@ describe('GameTime', () => {
 
     time.advance(0.06);
     expect(time.scale).toBeCloseTo(0.5, 5); // hitstop expired → back to base
+  });
+
+  it('expires even when a script re-arms it every single frame', () => {
+    // The `.plans/prompt-to-playable-flow.md` §11.3 report: "hitstop called every frame from
+    // onUpdate while an overlap lasts leaves the game frozen". Under the old "longest PENDING
+    // freeze" rule this loop never unfroze — and it could not unfreeze itself, because gameplay dt
+    // is 0 while frozen, so the overlap that drives the call can never separate.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const time = new GameTime();
+    const frame = 1 / 60;
+    let movingFrames = 0;
+
+    for (let i = 0; i < 120; i += 1) {
+      time.hitstop(50); // same contact, same strength, every frame
+      time.advance(frame);
+      if (time.scale > 0) movingFrames += 1;
+    }
+
+    // A 50 ms freeze costs three 16.7 ms frames, then one frame of gameplay gets through: the game
+    // is slowed to a third, not stopped, so the contact can separate and the calls can stop.
+    expect(movingFrames).toBeGreaterThanOrEqual(30);
+
+    // And the script is told where the real fix lives — once, not 120 times.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('consecutive frames');
+    warn.mockRestore();
+  });
+
+  it('does not let a repeat of the same strength postpone the freeze in progress', () => {
+    const time = new GameTime();
+    time.hitstop(100);
+
+    time.advance(0.05); // 0.05 left
+    expect(time.scale).toBe(0);
+    time.hitstop(100); // same strength again — must NOT restart the 0.1s window
+
+    time.advance(0.05);
+    expect(time.scale).toBe(1);
+    expect(time.isFrozen).toBe(false);
+  });
+
+  it('still lets a strictly stronger hit extend an active freeze', () => {
+    const time = new GameTime();
+    time.hitstop(50);
+    time.advance(0.04); // 0.01 left
+
+    time.hitstop(120); // stronger: a fresh 0.12s window
+    time.advance(0.05);
+    expect(time.scale).toBe(0);
+
+    time.advance(0.08);
+    expect(time.scale).toBe(1);
+  });
+
+  it('freezes again for a later, unrelated hit', () => {
+    const time = new GameTime();
+    time.hitstop(50);
+    time.advance(0.05);
+    expect(time.isFrozen).toBe(false);
+
+    time.hitstop(50); // new contact, freeze window starts over
+    time.advance(0.02);
+    expect(time.scale).toBe(0);
   });
 
   it('reset clears hitstop and slow-motion', () => {
