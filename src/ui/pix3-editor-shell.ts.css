@@ -21,6 +21,9 @@ pix3-editor-shell {
 
 .editor-shell {
   display: grid;
+  /* Explicit minmax(0, 1fr): a grid track sizes to its widest item's min-content, so one long
+     status-bar line would otherwise stretch the whole shell past the window. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr auto;
   min-block-size: 100vh;
   min-block-size: 100dvh;

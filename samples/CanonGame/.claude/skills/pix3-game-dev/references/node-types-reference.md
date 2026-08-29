@@ -1,0 +1,927 @@
+# Pix3 Node Types Reference
+
+Per-node property tables for every node type. **Reading economically:** grep the
+`### <NodeName>` heading for one node instead of loading the file; the
+one-line-per-node summary is at "Node Properties Quick Reference" (bottom). For
+*what a node is for* / engine-vs-game, use [nodes-and-systems.md](nodes-and-systems.md);
+for schema authoring, [property-schema-reference.md](property-schema-reference.md).
+
+---
+
+## Base Classes
+
+### NodeBase
+
+The foundation class for all nodes in Pix3. Every node inherits from `NodeBase`, which provides core functionality:
+
+- **Unique ID**: Each node has a system-generated unique identifier
+- **Name**: User-editable name for identification
+- **Type**: The node type string (e.g., "Sprite2D", "Camera3D")
+- **Properties**: Custom key-value data storage
+- **Metadata**: Additional user-defined data
+- **Components**: Script components attached to the node
+
+**Common Properties (all nodes):**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | string | Unique identifier |
+| `name` | string | Display name |
+| `type` | string | Node type |
+| `visible` | boolean | Visibility toggle |
+| `locked` | boolean | Lock for editing |
+| `instancePath` | string | Path to source file |
+
+---
+
+## 2D Nodes
+
+All 2D nodes operate in screen space and are rendered using an orthographic camera. They use a left-handed coordinate system where X increases to the right and Y increases upward.
+
+### Node2D
+
+The base class for all 2D scene nodes. Use this for simple grouping or as a container for other 2D elements.
+
+**Type String:** `Node2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `position` | Vector2 | (0, 0) | X and Y coordinates |
+| `rotation` | number | 0 | Rotation in degrees |
+| `scale` | Vector2 | (1, 1) | X and Y scale factors |
+| `opacity` | number | 1 | Local opacity multiplier, inherited by child 2D nodes |
+| `zIndex` | number | 0 | Draw-order override, `-4096..4096` (integer). Higher draws on top |
+| `zAsRelative` | boolean | true | Add `zIndex` to the parent's effective z instead of treating it as absolute |
+
+**Usage Notes:**
+- Cannot have children by default (set `isContainer = true` to enable)
+- Transforms affect all children in local space
+- Rotation is clockwise, in degrees
+- **Draw order:** by default the 2D pass paints in scene-tree DFS order (a later/deeper node draws
+  on top — Godot-like). `zIndex` lifts a node out of that order without moving it in the tree:
+  nodes are bucketed by *effective* z first, and tree order only breaks ties inside a bucket. With
+  `zAsRelative` (the default) a subtree keeps its internal layering wherever it is reparented; set
+  it to `false` for an "always on top" overlay that must not inherit an ancestor's offset. Both
+  fields serialize only when non-default, so scenes that never touch z-order are unchanged.
+
+---
+
+### Sprite2D
+
+A 2D image display node. Renders a textured quad that always faces the camera.
+
+**Type String:** `Sprite2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `texturePath` | string | null | Path to texture (res://) |
+| `width` | number | 64 | Display width in pixels |
+| `height` | number | 64 | Display height in pixels |
+| `color` | color | #ffffff | Tint color |
+
+**Usage Notes:**
+- Supports PNG, JPG, WebP textures
+- Aspect ratio is controlled by width/height properties
+- Use white color to display texture without tint
+- Texture is scaled to fit the specified dimensions
+
+---
+
+### SpineSkeleton2D
+
+A Spine skeletal-animation node. Renders a skeleton exported from the
+[Spine editor](https://esotericsoftware.com/) in the 2D layer, with animations
+selectable in the Inspector and drivable from scripts.
+
+**Type String:** `SpineSkeleton2D`
+
+**Requires the optional Spine runtime.** `@esotericsoftware/spine-threejs` (`~4.3`)
+is an *optional* peer dependency: pix3 declares the module contract and the host
+registers a loader for it (`setSpineModuleLoader`), so projects that never use
+Spine neither install nor download it. The editor and the exported player register
+it automatically; a consumer project that places a `SpineSkeleton2D` adds:
+
+```ts
+import { setSpineModuleLoader } from '@pix3/runtime';
+
+setSpineModuleLoader(() => import('@esotericsoftware/spine-threejs'));
+```
+
+Using the official Spine Runtimes requires a Spine Editor license (Spine Runtimes
+License). The skeleton export must come from a Spine version matching the installed
+runtime's minor (4.3 export ⇄ 4.3 runtime); a mismatch surfaces as a load error
+naming both files.
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `skeletonPath` | string | null | Skeleton export, `.json` or `.skel` (res://) |
+| `atlasPath` | string | null | Atlas export, `.atlas` (res://) |
+| `texture` | texture ref | null | Optional page-image override; single-page atlases only |
+| `animation` | string / select | '' | Animation to play; a dropdown of real names once loaded |
+| `loop` | boolean | true | Loop the authored animation |
+| `isPlaying` | boolean | true | Advance time in play mode |
+| `skin` | string / select | '' | Skin to apply; empty = the skeleton's default |
+| `timeScale` | number | 1 | Playback speed multiplier |
+| `defaultMix` | number | 0 | Crossfade duration between animations, seconds |
+| `color` | color | #ffffff | Tint (applied through spine's skeleton color) |
+| `twoColorTint` | boolean | false | Enable tint-black rendering (dark-tint exports) |
+| `freeOnFinish` | boolean | false | `queueFree()` when a non-looping animation ends |
+| `previewInEditor` | boolean | false | Animate in the editor viewport. **Off by default** — a placed skeleton holds its first frame; the Inspector's Play/Reset buttons drive it |
+
+**Script API:**
+
+```ts
+const hero = scene.getNode<SpineSkeleton2D>('Hero');
+
+hero.play('run', { loop: true, mixDuration: 0.2 });
+hero.queue('idle', { loop: true, delay: 0.5 });   // after the current entry
+hero.stop({ mixDuration: 0.25 });                 // mix back to the setup pose
+hero.pause();
+hero.resume();
+hero.setSkin('blue');
+hero.setMix('run', 'idle', 0.3);                  // per-pair crossfade
+hero.setTimeScale(1.5);
+
+hero.getAnimationNames();     // ['idle', 'run', …]
+hero.getSkinNames();
+hero.getCurrentAnimation();   // animation on track 0, or null
+hero.getSetupBounds();        // setup-pose AABB, or null before load
+hero.isLoaded;
+
+hero.resetToFirstFrame();     // rewind the current animation (pose only)
+```
+
+In the Inspector the **Animation** group shows the animation and skin as dropdowns
+of the loaded skeleton's real names, plus an **Editor Preview** row: `Play`/`Pause`
+toggles `previewInEditor` (an ordinary undoable edit) and `Reset` rewinds to the
+first frame. Reset is transient pose-only state — it never enters undo history and
+never dirties the scene, matching how the animation timeline's scrub preview
+behaves.
+
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `animation-started` | `(name, trackIndex)` | A track entry became current |
+| `animation-finished` | `(name, trackIndex)` | A non-looping animation ended (also flips `isPlaying` off) |
+| `animation-looped` | `(name, trackIndex)` | A looping animation completed a loop |
+| `spine-event` | `(name, { int, float, string }, trackIndex)` | A keyed animation event fired |
+
+**Export:** the HTML / zip playable export bundles the Spine runtime *statically*
+into `index.html`, but only when a scene actually places a `SpineSkeleton2D` — a
+dynamic import would become a chunk that a single-file export can never fetch.
+Skeleton, atlas and the atlas' page images ship with it; projects without a
+skeleton are unaffected in size. The generated npm project gets the dependency
+added to its `package.json` on the same condition.
+
+**Usage Notes:**
+- Sizing comes from the node transform (`scale`), not a width/height pair — the
+  skeleton is authored in its own pixel units. The parse-time skeleton scale stays
+  at 1 so all instances share one cached `SkeletonData`.
+- The skeleton data and atlas page textures are shared across every node (and the
+  editor viewport proxy) that references the same files; each node owns only its
+  own `Skeleton`/`AnimationState`.
+- Atlas pages are loaded as standalone textures and are excluded from the
+  pre-launch texture atlas — their UVs come from the `.atlas` file. For the same
+  reason a Spine skeleton does not join the 2D quad batcher.
+- Shader effects (`core:adjust`, …) are not supported: spine creates its batch
+  materials dynamically. Use `color` / `twoColorTint` for tinting.
+- CPU cost is per skeleton per frame (geometry is rebuilt on the CPU). Budget for
+  units-to-dozens of visible skeletons, not hundreds.
+
+---
+
+### Button2D
+
+An interactive button control for 2D user interfaces. Responds to pointer clicks and provides visual feedback.
+
+**Type String:** `Button2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `width` | number | 100 | Button width in pixels |
+| `height` | number | 40 | Button height in pixels |
+| `backgroundColor` | color | #4a4a4a | Default background |
+| `hoverColor` | color | #5a5a5a | Background on hover |
+| `pressedColor` | color | #3a3a3a | Background when pressed |
+| `buttonAction` | string | "Submit" | Action identifier |
+
+**Usage Notes:**
+- Emits button press events when clicked
+- Visual states: default, hover, pressed
+- Use `buttonAction` to identify button function in scripts
+
+---
+
+### Label2D
+
+A multiline text label for 2D UI. Wraps text to a fixed box, aligns it in both axes, and can reveal it with a typewriter effect.
+
+**Type String:** `Label2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `label` | string | "" | Text to display; `\n` breaks lines |
+| `labelFontFamily` | string | Arial | Font family |
+| `labelFontSize` | number | 16 | Font size in pixels |
+| `labelColor` | color | #ffffff | Text color |
+| `labelAlign` | enum | center | Horizontal alignment: `left`, `center`, `right` |
+| `labelVAlign` | enum | middle | Vertical alignment: `top`, `middle`, `bottom` |
+| `width` | number | 0 | Fixed box width; text word-wraps to it. 0 = auto-size (no wrap) |
+| `height` | number | 0 | Fixed box height for vertical alignment. 0 = auto-size to the lines |
+| `typewriterSpeed` | number | 0 | Characters per second for the typewriter reveal; 0 = off |
+| `glowColor` | color | #ffffff | Glow colour; inert while `glowStrength` is 0 |
+| `glowStrength` | number | 0 | Neon glow around the glyphs (0–4); 0 = off |
+| `outlineColor` | color | #000000 | Outline colour; inert while `outlineWidth` is 0 |
+| `outlineWidth` | number | 0 | Contrast outline half-width in px; 0 = off |
+
+**Usage Notes:**
+- The box is centered on the node position (like other UI controls); alignment places the text inside that box.
+- Set `width` manually to get word wrap — there is no auto-grow layout yet.
+- **Glow/outline are canvas-drawn** (`ctx.shadowBlur` passes + a `strokeText` underlay), not post-processing — which is exactly why HUD text can glow: a `CanvasLayer2D` subtree is drawn *after* the post-processing composer and can never bloom. Both are off by default, so existing scenes are unchanged.
+- Turning either on grows the label's canvas (and the mesh showing it) by a bleed on each side so the blur/stroke isn't clipped; the tap target stays the authored box.
+- `glowStrength` 1 is a subtle halo, 2–3 reads as neon (each whole step adds an additive shadow pass, capped at 3); the blur scales with `labelFontSize`, so a HUD label and a title glow proportionally.
+- Scripts: `setText(text)` replaces the text and restarts the typewriter; `skipTypewriter()` completes it instantly; `restartTypewriter()` replays it; `isTyping` reports progress; the node emits `'typewriter-complete'` when the reveal finishes.
+- The typewriter runs in play mode only (it advances in `tick`); the editor viewport always shows the full text.
+
+---
+
+### Slider2D
+
+A horizontal slider control for selecting numeric values. Useful for volume controls, brightness settings, or any continuous value input.
+
+**Type String:** `Slider2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `width` | number | 200 | Slider width in pixels |
+| `height` | number | 20 | Slider height in pixels |
+| `handleSize` | number | 20 | Handle knob size |
+| `trackBackgroundColor` | color | #333333 | Empty track color |
+| `trackFilledColor` | color | #4a9eff | Filled track color |
+| `handleColor` | color | #ffffff | Handle color |
+| `minValue` | number | 0 | Minimum value |
+| `maxValue` | number | 100 | Maximum value |
+| `value` | number | 50 | Current value |
+| `axisName` | string | "Slider" | Identifier for axis |
+
+**Usage Notes:**
+- Drag the handle to change values
+- Value is clamped between min and max
+- Emits the pointer lifecycle signals (`pointerdown`/`pressed`/`pointerup`/`released`/`click`) but **no** state signal: the value is written during the drag, so by the time `released`/`click` fire, `value` is already the value the gesture produced. Read `slider.value` there, or track the live value through `input.getAxis(axisName)`.
+
+---
+
+### Joystick2D
+
+A virtual analog stick control for touch or mouse input. Commonly used for character movement or camera control in games.
+
+**Type String:** `Joystick2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `enabled` | boolean | true | When false the stick accepts no input and drops any drag in progress |
+| `radius` | number | 50 | Base radius; also the handle's travel limit |
+| `floating` | boolean | false | Hidden until a touch summons it under the finger, then fades out on release |
+| `axisHorizontal` | string | Horizontal | Virtual axis written with the X deflection (-1..1) |
+| `axisVertical` | string | Vertical | Virtual axis written with the Y deflection (-1..1) |
+
+**Usage Notes:**
+- Writes normalized X/Y values (-1 to 1) into the two named axes; centred is (0, 0)
+- Captures the finger that started the drag and follows only that one, so a second thumb can press
+  buttons (or drive a second stick) without disturbing it. A `pointercancel` — a finger dragged off
+  the edge of the screen — returns the axes to zero, it never leaves them pushed
+- A floating stick starts on a **new** touch that is not over UI, asked per finger: a button held by
+  another thumb no longer blocks it
+- Ideal for mobile/touch interfaces
+
+---
+
+### Checkbox2D
+
+A toggle checkbox control for boolean settings.
+
+**Type String:** `Checkbox2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `width` | number | 24 | Checkbox size |
+| `height` | number | 24 | Checkbox size |
+| `checked` | boolean | false | Checked state |
+| `uncheckedColor` | color | #333333 | Unchecked border |
+| `checkedColor` | color | #4a9eff | Checked fill color |
+
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `pointerdown` / `pressed` | — | A press landed inside the box |
+| `pointerup` / `released` | — | The press ended |
+| `click` | — | Released inside the box — a completed *gesture*, emitted **before** the box flips |
+| `toggled` | `(checked)` | The checked state **changed**, emitted **after** the flip, the repaint and the virtual action are in place |
+
+`click` and `toggled` are deliberately separate, as in Godot (`pressed` vs `toggled`):
+`click` says "the user clicked me" and runs while `checked` still holds its
+pre-click value, so a handler that applies `checked` from `click` applies the
+*previous* state (inverted behaviour). Connect anything that *acts on the state*
+to `toggled` and read the payload or the node:
+
+```ts
+musicToggle.connect('toggled', this, checked => scene.audio.setBusVolume('music', checked ? 1 : 0));
+```
+
+`toggled` fires for every spelling of the change — a tap, the `toggle` /
+`setChecked` interactions, `checkbox.checked = x` from a script, an Inspector
+edit — and never fires when the assigned value equals the current one.
+
+**Usage Notes:**
+- Toggle between checked/unchecked states
+- The hit area spans the box plus its label, so clicking the text toggles too
+- `checkmarkAction` pulses a virtual button for one frame and latches an axis (1/0) with the state
+
+---
+
+### Bar2D
+
+A progress bar or health bar display.
+
+**Type String:** `Bar2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `width` | number | 200 | Bar width in pixels |
+| `height` | number | 20 | Bar height in pixels |
+| `value` | number | 50 | Current fill value |
+| `maxValue` | number | 100 | Maximum fill value |
+| `backgroundColor` | color | #333333 | Background color |
+| `fillColor` | color | #4a9eff | Fill bar color |
+
+**Usage Notes:**
+- Fill percentage = value / maxValue
+- Useful for health bars, mana bars, loading progress
+- Can be oriented horizontally
+
+---
+
+### InventorySlot2D
+
+A specialized slot control for inventory systems. Supports drag-and-drop for item management.
+
+**Type String:** `InventorySlot2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `width` | number | 64 | Slot size |
+| `height` | number | 64 | Slot size |
+| `backgroundColor` | color | #2a2a2a | Empty slot color |
+| `borderColor` | color | #444444 | Border color |
+| `highlightColor` | color | #4a9eff | Selection highlight |
+| `itemCount` | number | 0 | Number of items in slot |
+
+**Signals:**
+
+| Signal | Arguments | When |
+|--------|-----------|------|
+| `pointerdown` / `pressed` / `pointerup` / `released` | — | Pointer lifecycle, same as every UI control |
+| `click` | — | Released inside the slot, emitted **before** the selection flips |
+| `toggled` | `(selected)` | The selection **changed**, emitted **after** the highlight and the virtual action are in place |
+
+Same split as `Checkbox2D`: read `selected` from a `toggled` listener, not from a
+`click` one (which still sees the pre-click value). A slot inside a
+`ScrollContainer2D` refuses the click entirely while the list is being flicked,
+so neither signal fires for a scroll drag.
+
+**Usage Notes:**
+- Can hold one item at a time
+- Visual indicator for item count
+- Supports drag operations
+
+---
+
+### Camera2D
+
+A 2D game camera (Godot-style). Like `VirtualCamera3D` it does **not** render — it *describes* how the shared 2D orthographic pass is framed. Each frame the runtime picks the highest-priority visible `Camera2D` and applies its pan (`position` + `offset`), `zoom`, clamped `limits`, and shake to the 2D camera. With no `Camera2D` in the scene the 2D pass keeps its default identity framing, so existing 2D scenes / playable ads are unaffected. Every knob is a flat schema property, so the keyframe timeline animates `position`, `offset`, `zoom`, `priority`, etc. with no animation code.
+
+**Type String:** `Camera2D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `priority` | number | 10 | Highest-priority visible Camera2D drives the 2D view (animatable) |
+| `zoom` | number | 1 | >1 magnifies (zooms in), <1 zooms out |
+| `offset` | vector2 | 0,0 | Framing offset added to position (never written by follow / shake) |
+| `followTargetId` | node | — | Node whose position this camera follows (empty = authored position) |
+| `followOffset` | vector2 | 0,0 | Offset from the follow target |
+| `followDamping` | number | 8 | Higher = snappier follow (0 = instant) |
+| `deadzone` | vector2 | 0,0 | World half-extents the target may move within before the camera follows |
+| `limitsEnabled` | boolean | false | Clamp the visible view inside an axis-aligned world box |
+| `limitsCenter` | vector2 | 0,0 | Limits box center |
+| `limitsSize` | vector2 | 1000,1000 | Limits box size |
+| `shakeAmplitude` | number | 8 | Peak shake displacement in world units |
+| `shakeFrequency` | number | 24 | Shake oscillation speed |
+| `shakeDuration` | number | 0.35 | Shake duration in seconds |
+| `shakeDecay` | number | 1.5 | Falloff power (0 = steady, 1 = linear, >1 = punchy tail) |
+
+**Usage Notes:**
+- `position` is the camera center (follow damps it toward the target); `offset` is a separate framing bias that follow and shake never touch.
+- Limits clamp the view **center** zoom-aware, so the view edge never crosses the box; a box smaller than the view pins the center to `limitsCenter`.
+- Shake is additive at apply time (never mutates `position`) and, being tick-driven, respects `Time.scale` — a hitstop freezes it, slow-mo stretches it. Trigger it from a script with `scene.juice.shake('camera2d')` (or `scene.juice.shake('camera')` in a pure-2D scene).
+- v1: screen-anchored HUD shares this camera and pans / zooms with the world. Use a `CanvasLayer2D` to pin a HUD.
+
+---
+
+### CanvasLayer2D
+
+A Godot-style `CanvasLayer` — a clean UI overlay band. Its subtree renders on a separate layer through an always-identity camera **after** the post-processing composer, so it is (a) a **fixed HUD** that ignores any `Camera2D` pan/zoom, and (b) **never post-processed** — bloom/vignette/chromatic-aberration leave it crisp (e.g. a restart dialog over a blurred game-over scene). Extends `Group2D` (width/height container); no extra authored properties in v1.
+
+**Type String:** `CanvasLayer2D`
+
+**Properties:** inherits `Group2D` (`width`, `height`) + `Node2D` transform/anchor/opacity.
+
+**Usage Notes:**
+- Content under a CanvasLayer2D is pinned in design-space coordinates regardless of the active Camera2D, and its pointer hit-tests stay correct while the world camera pans.
+- Multiple CanvasLayer2D nodes stack by scene-tree order (like ordinary 2D draw order).
+- Unlike Godot, inheritance is **not** broken: an ancestor's transform, opacity, and visibility still flow into the overlay subtree — only the render camera differs. Author at the scene root for a fully independent layer.
+- Runtime overlay behavior is play-mode only; in the editor it renders as a normal Group2D container.
+
+---
+
+## 3D Nodes
+
+All 3D nodes operate in world space using a perspective camera by default. They use a right-handed coordinate system where X is right, Y is up, and Z is toward the viewer.
+
+### Node3D
+
+The base class for all 3D scene nodes. Use this for simple grouping or as a container for other 3D elements.
+
+**Type String:** `Node3D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `position` | Vector3 | (0, 0, 0) | X, Y, Z coordinates |
+| `rotation` | Euler | (0, 0, 0) | Pitch, Yaw, Roll in degrees |
+| `scale` | Vector3 | (1, 1, 1) | X, Y, Z scale factors |
+
+**Rotation Order:** XYZ (Pitch → Yaw → Roll)
+
+**Usage Notes:**
+- Rotation values are in degrees, stored as radians internally
+- Default scale (1, 1, 1) means no scaling
+- Children inherit all transforms
+
+---
+
+### Camera3D
+
+A camera node that defines the viewpoint for rendering. The scene can have multiple cameras, but only one is active at a time.
+
+**Type String:** `Camera3D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `projection` | enum | perspective | Projection type |
+| `fov` | number | 60 | Field of view (degrees) |
+| `near` | number | 0.1 | Near clipping plane |
+| `far` | number | 1000 | Far clipping plane |
+
+**Projection Types:**
+
+| Type | Description |
+|------|-------------|
+| `perspective` | Perspective projection (default) |
+| `orthographic` | Orthographic projection |
+
+**Usage Notes:**
+- Perspective: Objects get smaller with distance
+- Orthographic: No perspective distortion
+- Default looks down the negative Z axis
+- Use `setTargetPosition()` to point camera at a target
+
+---
+
+### VirtualCamera3D
+
+A lightweight "virtual camera" (Cinemachine-lite). It does **not** render — it only describes a desired framing. Attach a **Camera Brain** (`core:CameraBrain`) component to a real `Camera3D`; each frame the brain picks the highest-priority visible virtual camera and blends the render camera toward it. Because every knob is a schema property, the keyframe timeline can animate `priority`, `fov`, `position`, etc. — switching cameras is "raise this one's priority above that one" — with no animation code.
+
+**Type String:** `VirtualCamera3D`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `priority` | number | 10 | Highest-priority live virtual camera wins (animatable) |
+| `fov` | number | 60 | Field of view applied to a perspective render camera |
+| `orthographicSize` | number | 5 | Size applied to an orthographic render camera |
+| `followTargetId` | node | — | Node whose position this camera follows (empty = authored position) |
+| `followOffset` | vector3 | 0,0,0 | World-space offset from the follow target |
+| `followDamping` | number | 8 | Higher = snappier follow (0 = instant) |
+| `deadzone` | vector3 | 0,0,0 | World half-extents the target may move within before the camera follows |
+| `lookAtTargetId` | node | — | Node this camera orients toward (empty = authored rotation) |
+| `lookAtWeight` | number | 1 | 0 = keep authored rotation, 1 = fully track the target |
+| `rotationDamping` | number | 8 | Higher = snappier aim (0 = instant) |
+| `confinerEnabled` | boolean | false | Clamp the camera position inside an axis-aligned box |
+| `confinerCenter` | vector3 | 0,0,0 | Confiner box center |
+| `confinerSize` | vector3 | 10,10,10 | Confiner box size |
+| `blendDuration` | number | 1 | Seconds to blend the render camera toward this one when it becomes active |
+| `blendEasing` | enum | cubicInOut | Easing curve used for the blend |
+
+**Usage Notes:**
+- Requires a `Camera3D` carrying the `core:CameraBrain` component — that camera is the only one that renders.
+- Standby cameras are still solved every frame, so a camera is already framed when it is cut to.
+- With no follow target, position is left to authored / keyframed values (dolly by keyframes). Same for rotation with no look-at target.
+- Setting a Camera Brain's **Blend On Switch** off makes cuts instantaneous.
+- Scripts can force the *next* activation blend with `CameraBrainBehavior.overrideNextBlend(durationSec, easing?)` — a one-shot override that wins even when Blend On Switch is off. The Cutscene Director (`scene.cutscene.playCinematic`) uses it to smooth the cut into and out of a cinematic virtual camera. See the runtime spec §6.13.
+
+---
+
+### GeometryMesh
+
+A 3D mesh node with a built-in primitive geometry and a PBR material. The shape
+is inspector-switchable and animatable via the `geometry`/`size` schema
+properties.
+
+**Type String:** `GeometryMesh`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `geometry` | enum | "box" | Primitive shape (see below) |
+| `size` | Vector3 | (1, 1, 1) | Interpreted per shape (see below) |
+| `material.color` | color | #4e8df5 | Surface color |
+| `material.roughness` | number | 0.35 | Surface roughness (0-1) |
+| `material.metalness` | number | 0.25 | Metallic appearance (0-1) |
+| `material.map` | texture | — | Albedo (diffuse) texture (res://); required for UV Scroll to be visible |
+| `material.aoMap` | texture | — | Baked ambient-occlusion map (set by the AO baker) |
+| `material.aoMapIntensity` | number | 1 | Strength of the baked AO map (0 = off) |
+
+**Shader Effects (attached list):**
+
+Shader effects are **added from a picker** (Inspector → **Effects** → **Add**),
+Unity/Godot-style — not fixed checkboxes. Each attached effect shows an **enable
+toggle**, its params, and a **Remove** control; the built-in effects come from a
+registry (`core:*`) and can be extended with `user:*` effects later. One instance
+of each type per mesh (v1). Effects are injected into the standard PBR material
+via `onBeforeCompile` and `#ifdef`-gated on `material.defines`, so a disabled
+effect costs zero GPU and lighting/shadows/albedo/AO maps still apply.
+
+Attached effects contribute their params to the node's schema **per instance**
+(as `fx.<effect>.<param>`), so each param — and each effect's `enabled` flag — is
+individually **keyframe-animatable** from the timeline. Animate the numeric
+params rather than the enable toggles (a toggle flip recompiles the shader; cheap
+after the first compile, which three caches per variant).
+
+| Effect (`type`) | Params | What it does |
+|--------|--------|--------------|
+| Dissolve (`core:dissolve`) | `amount` (0-1), `scale`, `edgeWidth`, `edgeColor` | Noise-thresholded `discard` with an emissive glowing edge; drive `amount` 0→1 to dissolve away |
+| Rim Light (`core:rim`) | `color`, `intensity` (0-5), `power` | Fresnel-based emissive rim, brightest at grazing angles |
+| UV Scroll (`core:uv-scroll`) | `speed` (uv/s) | Scrolls the albedo map. **Play-mode only** (accumulated per tick); static in the edit viewport. Needs `material.map` |
+| Flash Tint (`core:flash`) | `color`, `amount` (0-1) | Blends the final lit color toward a flat color; a hit/damage flash |
+
+Serialized under `material.effects` as an ordered array of `{ type, enabled,
+params }` (only non-default params are written).
+
+**Geometry Types & `size` semantics:**
+
+`size` is a single `[x, y, z]` vector reinterpreted per shape, so one editable
+field works for every primitive:
+
+| Type | `size` meaning |
+|------|----------------|
+| `box` | Full extents: width `x`, height `y`, depth `z` |
+| `sphere` | Diameter `x` (y, z ignored) |
+| `plane` | A horizontal floor `x` by `z` (lies in the XZ plane) |
+| `cylinder` | Diameter `x`, height `y` |
+| `cone` | Base diameter `x`, height `y` |
+| `torus` | Outer diameter `x`; tube thickness scales with `y` |
+
+**Usage Notes:**
+- Changing `geometry` or `size` in the inspector rebuilds the mesh live.
+- Material uses PBR (Physically Based Rendering).
+- Roughness: 0 = glossy, 1 = matte. Metalness: 0 = non-metal, 1 = metal.
+- Material color/roughness/metalness edits persist through save and play mode
+  (the live material is serialized, not a stale authored snapshot).
+- Node opacity does **not** currently fade a GeometryMesh (its material isn't
+  registered for opacity blending).
+- Effects are attached from a registry-backed picker (see above), not fixed
+  checkboxes; their params surface per-instance as `fx.<effect>.<param>` schema
+  props so they remain keyframe-animatable.
+- A dissolving mesh still casts an intact shadow (the depth/shadow pass has no
+  `discard`); accepted for now.
+
+---
+
+### MeshInstance
+
+A node that loads and displays external 3D models in GLB or GLTF format.
+
+**Type String:** `MeshInstance`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `src` | string | null | Path to model file (res://) |
+
+**Usage Notes:**
+- Supports GLB (binary) and GLTF formats
+- Path uses `res://` protocol for project resources
+- Can contain multiple meshes, materials, and animations
+- Animations can be played via script components
+
+---
+
+### InstancedMesh3D
+
+A `THREE.InstancedMesh` wrapper for rendering many copies of one geometry/material in a single draw call — for large ECS-driven simulations (crowds, particles, tiles). Populate it in bulk from a script/system, not the inspector.
+
+**Type String:** `InstancedMesh3D`
+
+**Node-level (serialized) properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `maxInstances` | number | — | Buffer capacity (instance count ceiling); read-only in inspector |
+| `enablePerInstanceColor` | boolean | false | Allocate a per-instance color buffer |
+| `castShadow` | boolean | — | Forwarded to the underlying mesh |
+| `receiveShadow` | boolean | — | Forwarded to the underlying mesh |
+| `frustumCulled` | boolean | — | Forwarded to the underlying mesh |
+| `visibleInstanceCount` | number | — | How many instances currently draw (read-only display) |
+| `material.type` | enum | `standard` | Material family — `standard` (PBR) / `lambert` (mobile default) / `basic` (unlit); inspector: **Material Type** |
+| `material.color` | color | `#ffffff` | Colour every instance shares; a per-instance colour multiplies it |
+| `material.roughness` / `material.metalness` | number | 0.35 / 0.25 | `standard` only; dropped from the file for the other families |
+
+**Bulk API (call from a script/system, then `flush()`):**
+- `writeMatrices(data, options?)` — write raw N×16 `Float32Array` instance matrices.
+- `writeTransforms(data, options?)` — write position/rotation/scale transforms (composed to matrices for you).
+- `writeColors(data, options?)` — write per-instance colors (requires `enablePerInstanceColor`).
+- `flush()` — upload dirty buffers to the GPU. `SceneRunner` calls `flush()` on every `InstancedMesh3D` before each frame; call it yourself if you mutate outside the runner loop.
+- `setGeometry(geometry)` / `setMaterial(material)`; `getInstanceMatrixBuffer()` / `getInstanceColorBuffer()` for direct access.
+
+**Usage Notes:**
+- **Instance buffers are NOT serialized** — only the node-level config above is saved. Repopulate buffers at runtime.
+- The `material` block IS serialized, and is what makes an instanced mesh authorable: before it existed the loader built no material at all, so a scene-authored instanced mesh always rendered with a shared white PBR default — unreachable from the inspector and past the project's mobile material policy. A `material` handed to the constructor in code still wins over the authored block.
+- Raycasts against an instanced mesh return the hit `instanceId`.
+- Backed by `ECSService` for project-managed ECS worlds; runtime lives in `packages/pix3-runtime/src/nodes/3D/InstancedMesh3D.ts` + `core/ECSService.ts`.
+
+---
+
+### DirectionalLightNode
+
+A light source that emits parallel rays in a single direction, like the sun. Illuminates all objects from the same angle.
+
+**Type String:** `DirectionalLight`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `color` | color | #ffffff | Light color |
+| `intensity` | number | 1.0 | Light brightness |
+| `castShadow` | boolean | true | Enable shadow casting |
+
+**Usage Notes:**
+- Light direction is determined by node rotation
+- Good for outdoor lighting and sun simulation
+- Constant illumination regardless of distance
+- Shadow map size is auto-calculated
+
+---
+
+### PointLightNode
+
+A light source that emits rays in all directions from a single point. Like a light bulb.
+
+**Type String:** `PointLight`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `color` | color | #ffffff | Light color |
+| `intensity` | number | 1.0 | Light brightness |
+| `distance` | number | 0 | Maximum range (0 = infinite) |
+| `decay` | number | 2 | Falloff rate |
+| `castShadow` | boolean | true | Enable shadow casting |
+
+**Usage Notes:**
+- Intensity decreases with distance (inverse square law)
+- Use `distance` to limit effective range
+- Decay of 2 is physically accurate
+- Good for lamps, candles, torches
+
+---
+
+### SpotLightNode
+
+A light source that emits a cone of light in a specific direction. Like a flashlight or spotlight.
+
+**Type String:** `SpotLight`
+
+**Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `color` | color | #ffffff | Light color |
+| `intensity` | number | 1.0 | Light brightness |
+| `distance` | number | 0 | Maximum range (0 = infinite) |
+| `angle` | number | 60 | Cone angle (degrees) |
+| `penumbra` | number | 0 | Edge softness (0-1) |
+| `decay` | number | 2 | Falloff rate |
+| `castShadow` | boolean | true | Enable shadow casting |
+
+**Usage Notes:**
+- Penumbra creates soft edge transitions
+- Angle controls the cone width
+- Good for stage lights, flashlights, focused lighting
+- Target direction is determined by node rotation
+
+---
+
+### Particles3D
+
+A CPU-simulated particle emitter rendered as a single `InstancedMesh`. Supports
+billboarded planes, spheres or cubes, per-particle color/alpha/size ramps, an
+emitter shape (point/sphere/box), optional ribbon **trails**, and **sub-emitters**
+that burst a second emitter on particle death.
+
+**Type String:** `Particles3D`
+
+**Key Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `emissionRate` | number | 24 | Particles spawned per second |
+| `maxParticles` | number | 512 | Simulation pool size (also the instance cap) |
+| `lifetime` | number | 2 | Base particle lifetime (s), jittered ±15% |
+| `speed` / `speedSpread` | number | 2 / 0.5 | Initial speed and its random spread |
+| `gravity` | vector3 | (0,0,0) | Constant acceleration (sim-space vector) |
+| `startColor`/`endColor` | color | white/amber | Color ramp over life |
+| `startAlpha`/`endAlpha` | number | 1 / 0 | Alpha ramp over life |
+| `simulationSpace` | enum | `local` | `local` = particles follow the emitter; `world` = particles are emitted into world space and stay put |
+| `trailEnabled` | boolean | false | Draw a camera-facing ribbon behind each particle |
+| `trailLifetime` | number | 0.3 | How long (s) a trail sample survives |
+| `trailWidth` | number | 0.05 | Ribbon width at the head |
+| `trailSegments` | number | 16 | Ribbon resolution (clamped 2–64) |
+| `trailFade` | number | 1 | Alpha falloff along the ribbon (0 = solid, 1 = fade to transparent) |
+| `subEmitterId` | node | — | Another `Particles3D` fired as a burst at each particle death |
+| `subEmitterBurstCount` | number | 8 | Particles spawned per death (0–128) |
+| `subEmitterInheritVelocity` | number | 0 | Fraction of the dead particle's velocity passed to the burst (0–1) |
+
+**Simulation space (behavior change):** `simulationSpace` was persisted since it
+shipped but was previously **ignored** — every emitter simulated in `local` space
+regardless of the value. It now works: in `world` mode already-spawned particles
+keep their world position when the emitter moves (trails, exhaust, muzzle smoke),
+implemented by neutralizing the emitter's ancestor transform each frame
+(`renderRoot.matrix = matrixWorld⁻¹`). Any externally-authored scene that set
+`simulationSpace: world` will change from the old (buggy) local-follow to true
+world-space; there is no migration — the field finally does what its label says.
+
+**Usage Notes:**
+- Trails are best with `simulationSpace: world`; in `local` mode on a moving
+  emitter the whole ribbon rides with the node.
+- Trails allocate `maxParticles × trailSegments` samples — keep `maxParticles`
+  moderate when trails are enabled (buffers exist only while `trailEnabled`).
+- The sub-emitter target is a normal `Particles3D`, typically authored with
+  `emissionRate: 0` so it only fires from bursts. Bursts are deferred to after the
+  simulation loop, so self-reference and any tick order are safe (≤1 frame latency).
+- Trail material is additive and untextured in v1.
+- All new fields are flat scalars, so they are keyframe-animatable from the timeline.
+
+---
+
+## Audio
+
+### AudioPlayer
+
+A node that plays an audio clip through the runtime mixer. Attach it anywhere in
+the scene; drive it via `autoplay`, from a script (`node.play()`), or from an
+`AnimationPlayer` audio track.
+
+**Type String:** `AudioPlayer`
+
+**Key Properties:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `audioTrack` | string | — | Asset URL (`res://…`, `data:audio/…`, or absolute URL) |
+| `autoplay` | boolean | false | Play automatically on the first tick |
+| `loop` | boolean | false | Loop the clip |
+| `volume` | number | 1 | Per-clip volume (0–1), before the bus gain |
+| `bus` | enum | `sfx` | Mixer bus: `master`, `music`, or `sfx` |
+| `pitchVariation` | number | 0 | Random ± playback-rate spread per play (0–1) |
+| `volumeVariation` | number | 0 | Random ± volume spread per play (0–1) |
+
+`bus`, `pitchVariation` and `volumeVariation` are also available on the
+`core:PlaySound` behavior (`PlaySoundBehavior`), with identical semantics.
+
+### Buses, snapshots & `scene.audio`
+
+The runtime mixer routes every playback through three fixed buses:
+
+```
+sound → sfx  ┐
+       music ┼→ master → output
+```
+
+Each bus has a volume and a permanently-wired (transparent) lowpass filter, so
+mixing and snapshot transitions are click-free `AudioParam` ramps. Scripts reach
+the mixer through `this.scene.audio`:
+
+```ts
+// One-shot playback (loads + caches via the AssetLoader)
+this.scene.audio.play('res://sfx/hit.ogg', { bus: 'sfx', pitchVariation: 0.1 });
+
+// Mixer volume (e.g. from a settings menu)
+this.scene.audio.setBusVolume('music', 0.5);
+
+// Snapshots — named per-bus lowpass + volume-scale states
+this.scene.audio.registerSnapshot({ name: 'underwater', lowpassHz: { master: 500 } });
+this.scene.audio.applySnapshot('underwater');
+this.scene.audio.resetSnapshot();               // back to 'default'
+```
+
+**Built-in snapshots:** `'default'` (fully open) and `'muffled'`
+(`master` lowpass 700 Hz, volume ×0.85). A snapshot's volume scale composes *on
+top of* the user's bus volume, so entering/leaving a snapshot never forgets the
+authored mix.
+
+**Slow-motion auto-muffle:** while `scene.time` is in slow motion the mixer
+automatically blends to `'muffled'` and back on return to normal speed. This is
+driven by the slow-mo base scale, **not** the frozen scale — a `hitstop(…)`
+freeze does **not** muffle audio (otherwise every micro-freeze would pump the
+filter).
+
+---
+
+## Choosing the Right Node
+
+### For 2D Projects:
+
+1. **Start with a Group2D** as your scene root (the game viewport size comes from project settings; use anchor layout for responsiveness)
+2. Add **Sprite2D** for images and graphics
+3. Use **Button2D**, **Slider2D**, **Joystick2D** for UI controls
+4. Use **Node2D** as containers to group related elements
+
+### For 3D Projects:
+
+1. Add a **Camera3D** to define your viewpoint
+2. Use **GeometryMesh** for simple shapes
+3. Use **MeshInstance** for imported 3D models
+4. Add **DirectionalLightNode** for overall lighting
+5. Add **PointLightNode** or **SpotLightNode** for localized lighting
+6. For cinematics / dynamic framing, add **VirtualCamera3D** nodes and a **Camera Brain** (`core:CameraBrain`) on the Camera3D to blend between them by priority
+
+---
+
+## Node Properties Quick Reference
+
+| Node Type | Key Properties |
+|-----------|----------------|
+| NodeBase | id, name, type, visible, locked |
+| Node2D | position (Vector2), rotation, scale (Vector2) |
+| Node3D | position (Vector3), rotation (Euler), scale (Vector3) |
+| Sprite2D | texturePath, width, height, color |
+| SpineSkeleton2D | skeletonPath, atlasPath, animation, loop, skin, timeScale, defaultMix (optional Spine runtime) |
+| Camera2D | priority, zoom, offset, followTargetId, limitsEnabled, shakeAmplitude |
+| CanvasLayer2D | width, height (fixed HUD overlay; renders after post) |
+| Camera3D | projection, fov, near, far |
+| VirtualCamera3D | priority, followTargetId, lookAtTargetId, blendDuration, fov |
+| GeometryMesh | geometry, size, material |
+| MeshInstance | src |
+| InstancedMesh3D | maxInstances, enablePerInstanceColor, visibleInstanceCount (bulk write*/flush), material.type/color |
+| DirectionalLightNode | color, intensity, castShadow |
+| PointLightNode | color, intensity, distance, decay |
+| SpotLightNode | color, intensity, distance, angle, penumbra |
+| Button2D | width, height, backgroundColor, buttonAction |
+| Slider2D | width, minValue, maxValue, value |
+| Joystick2D | enabled, radius, floating, axisHorizontal, axisVertical |
+| Checkbox2D | width, checked |
+| Bar2D | width, value, maxValue |
+| InventorySlot2D | width, itemCount |
+| AudioPlayer | audioTrack, autoplay, loop, volume, bus, pitchVariation, volumeVariation |

@@ -1,0 +1,22 @@
+{
+  "shot-05.webp": {
+    "role": "style",
+    "origin": "user"
+  },
+  "shot-04.webp": {
+    "role": "style",
+    "origin": "user"
+  },
+  "shot-03.webp": {
+    "role": "style",
+    "origin": "user"
+  },
+  "shot-02.webp": {
+    "role": "style",
+    "origin": "user"
+  },
+  "shot-01.webp": {
+    "origin": "user",
+    "role": "style"
+  }
+}

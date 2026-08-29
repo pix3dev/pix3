@@ -4,6 +4,10 @@ pix3-status-bar .status-bar {
   justify-content: space-between;
   padding: 0 14px;
   height: 28px;
+  /* A long log line must never widen the shell: `overflow: hidden` also drops this row's
+     min-content contribution to zero, so the grid track above can't be stretched by it. */
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-1);
   border-top: 1px solid var(--line-1);
   color: var(--fg-2);
@@ -19,6 +23,7 @@ pix3-status-bar .status-left {
   gap: 12px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -27,6 +32,8 @@ pix3-status-bar .status-right {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  /* The pills carry fixed readouts — squeeze the message on the left instead of them. */
+  flex: none;
 }
 
 pix3-status-bar collab-status-bar {
@@ -34,9 +41,12 @@ pix3-status-bar collab-status-bar {
   align-items: center;
 }
 
+/* Block, not inline-flex: `text-overflow: ellipsis` only applies to a block container, and a flex
+   item's automatic minimum size would keep the full sentence at max-content width. */
 pix3-status-bar .status-message {
-  display: inline-flex;
-  align-items: center;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -166,6 +176,10 @@ pix3-status-bar .status-version {
 
 pix3-status-bar .status-project {
   color: var(--fg-3);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes slideIn {

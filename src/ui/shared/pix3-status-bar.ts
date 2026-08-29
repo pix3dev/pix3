@@ -274,7 +274,10 @@ export class Pix3StatusBar extends ComponentBase {
         <div class="status-left">
           ${this.currentMessage
             ? html`
-                <span class="status-message ${this.currentMessage.type}">
+                <span
+                  class="status-message ${this.currentMessage.type}"
+                  title=${this.currentMessage.text}
+                >
                   ${this.currentMessage.text}
                 </span>
               `

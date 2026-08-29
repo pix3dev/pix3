@@ -1,0 +1,12 @@
+# Dependencies (created by "Build Project" / npm install)
+node_modules/
+
+# Build outputs
+dist/
+
+# Pix3 remote preview session (ephemeral, contains the agent token)
+.pix3/preview-session.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

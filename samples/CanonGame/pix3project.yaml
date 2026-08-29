@@ -1,0 +1,16 @@
+version: 1.0.0
+viewportBaseSize:
+  width: 1080
+  height: 1920
+ambientOcclusion: baked
+textureFiltering: linear
+projectType: 3d
+targetPlatform: mobile
+quality:
+  antialias: false
+  shadows: false
+  maxPixelRatio: 2
+metadata:
+  projectName: Smash Figesh
+  templateId: empty-3d
+autoloads: []
