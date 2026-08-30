@@ -89,6 +89,11 @@ export type GeometryMeshEffectsConfig = ShaderEffectEntry[];
 export interface GeometryMeshProps extends Omit<Node3DProps, 'type'> {
   geometry?: string;
   size?: [number, number, number];
+  /** Whether the mesh casts shadows. Defaults to true (what every scene authored
+   * before this was exposed already renders as). */
+  castShadow?: boolean;
+  /** Whether the mesh receives shadows cast by others. Defaults to true. */
+  receiveShadow?: boolean;
   material?: {
     /** Material family (see {@link GEOMETRY_MATERIAL_TYPES}). Defaults to `standard`. */
     type?: string;
@@ -177,8 +182,14 @@ export class GeometryMesh
     this.installEffectComposer(material);
 
     const mesh = new Mesh(geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    // Shadow flags are authored on the node (an Object3D of its own) and mirrored onto the child
+    // mesh that actually renders — the node is an empty group, so only the mesh's copy is read by
+    // the shadow map. Both default to true: that is what this node did before the flags were
+    // exposed, and flipping it would re-light every existing scene.
+    this.castShadow = props.castShadow ?? true;
+    this.receiveShadow = props.receiveShadow ?? true;
+    mesh.castShadow = this.castShadow;
+    mesh.receiveShadow = this.receiveShadow;
     mesh.name = `${this.name}-Mesh`;
     this.add(mesh);
 
@@ -580,8 +591,20 @@ export class GeometryMesh
     return {
       geometry: this._geometryKind,
       size: [this._size[0], this._size[1], this._size[2]],
+      castShadow: this.castShadow,
+      receiveShadow: this.receiveShadow,
       material,
     };
+  }
+
+  /** Push the node's authored shadow flags onto the child mesh the renderer actually sees. */
+  private applyShadowFlags(): void {
+    const mesh = this._mesh;
+    if (!mesh) {
+      return;
+    }
+    mesh.castShadow = this.castShadow;
+    mesh.receiveShadow = this.receiveShadow;
   }
 
   private get _mesh(): Mesh | undefined {
@@ -707,6 +730,32 @@ export class GeometryMesh
             (n as GeometryMesh).aoMapIntensity = Number(v);
           },
         }),
+        defineProperty('castShadow', 'boolean', {
+          ui: {
+            label: 'Cast Shadow',
+            description: 'Whether this mesh casts shadows in the scene',
+            group: 'Rendering',
+          },
+          getValue: (n: unknown) => (n as GeometryMesh).castShadow,
+          setValue: (n: unknown, v: unknown) => {
+            const node = n as GeometryMesh;
+            node.castShadow = Boolean(v);
+            node.applyShadowFlags();
+          },
+        }),
+        defineProperty('receiveShadow', 'boolean', {
+          ui: {
+            label: 'Receive Shadow',
+            description: 'Whether this mesh receives shadows cast by other objects',
+            group: 'Rendering',
+          },
+          getValue: (n: unknown) => (n as GeometryMesh).receiveShadow,
+          setValue: (n: unknown, v: unknown) => {
+            const node = n as GeometryMesh;
+            node.receiveShadow = Boolean(v);
+            node.applyShadowFlags();
+          },
+        }),
         defineProperty('map', 'object', {
           ui: {
             label: 'Albedo Map',
@@ -725,6 +774,11 @@ export class GeometryMesh
       groups: {
         Geometry: { label: 'Geometry', expanded: true },
         Material: { label: 'Material', expanded: true },
+        Rendering: {
+          label: 'Rendering',
+          description: 'Shadow and rendering properties',
+          expanded: true,
+        },
       },
     };
 

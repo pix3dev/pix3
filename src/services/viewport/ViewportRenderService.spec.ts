@@ -1640,3 +1640,58 @@ describe('ViewportRendererService — hidden workspace', () => {
     expect(renderFrame).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ViewportRendererService — framing bounds across the 2D/3D split', () => {
+  afterEach(() => {
+    resetAppState();
+  });
+
+  /**
+   * "Frame All" hands `computeFramingBounds` every scene root, 2D and 3D alike. The two layers
+   * share a world space but not a scale, so a HUD root must not be allowed into the 3D box —
+   * see the comment on the 3D branch for the measurement that motivated this.
+   */
+  const boundsOf = (service: ViewportRendererService, nodes: unknown[]) =>
+    (
+      service as unknown as {
+        computeFramingBounds(n: unknown[]): { bounds: THREE.Box3; dim: '2d' | '3d' } | null;
+      }
+    ).computeFramingBounds(nodes);
+
+  it('leaves a 2D root out of the 3D box instead of letting it swallow the scene', () => {
+    resetAppState();
+    appState.ui.navigationMode = '3d';
+    const service = new ViewportRendererService();
+
+    const gameRoot = new Node3D({ id: 'game-root', name: 'Game Root' });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4));
+    gameRoot.add(box);
+
+    // A HUD laid out in screen-sized units — hundreds across, where the game is a handful.
+    const hudRoot = new Group2D({ id: 'hud-root', name: 'HUD Root' });
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(900, 1100));
+    hudRoot.add(label);
+
+    const withHud = boundsOf(service, [gameRoot, hudRoot]);
+    const withoutHud = boundsOf(service, [gameRoot]);
+
+    expect(withHud?.dim).toBe('3d');
+    const withHudSize = withHud!.bounds.getSize(new THREE.Vector3());
+    const withoutHudSize = withoutHud!.bounds.getSize(new THREE.Vector3());
+    // The 3D box is the same whether or not the HUD came along.
+    expect(withHudSize.x).toBeCloseTo(withoutHudSize.x, 5);
+    expect(withHudSize.y).toBeCloseTo(withoutHudSize.y, 5);
+    expect(withHudSize.x).toBeLessThan(100);
+  });
+
+  it('still frames a 2D-only selection through the 2D branch', () => {
+    resetAppState();
+    appState.ui.navigationMode = '2d';
+    const service = new ViewportRendererService();
+
+    const hudRoot = new Group2D({ id: 'hud-only', name: 'HUD Root' });
+    hudRoot.add(new THREE.Mesh(new THREE.PlaneGeometry(200, 100)));
+
+    expect(boundsOf(service, [hudRoot])?.dim).toBe('2d');
+  });
+});

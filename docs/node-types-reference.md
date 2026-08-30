@@ -579,6 +579,8 @@ properties.
 | `material.map` | texture | — | Albedo (diffuse) texture (res://); required for UV Scroll to be visible |
 | `material.aoMap` | texture | — | Baked ambient-occlusion map (set by the AO baker) |
 | `material.aoMapIntensity` | number | 1 | Strength of the baked AO map (0 = off) |
+| `castShadow` | boolean | true | Whether the mesh casts shadows |
+| `receiveShadow` | boolean | true | Whether the mesh receives shadows cast by others |
 
 **Shader Effects (attached list):**
 
@@ -633,6 +635,11 @@ field works for every primitive:
   props so they remain keyframe-animatable.
 - A dissolving mesh still casts an intact shadow (the depth/shadow pass has no
   `discard`); accepted for now.
+- `castShadow`/`receiveShadow` (Inspector → **Rendering**) are authored on the
+  node and mirrored onto the child render mesh; both default to **true**, which is
+  what this node hardcoded before they were exposed, so existing scenes are
+  unchanged. Turn `receiveShadow` off for a mesh that should stay evenly lit
+  (unlit-looking floors, UI-ish props) without touching the light itself.
 
 ---
 
@@ -912,7 +919,7 @@ filter).
 | CanvasLayer2D | width, height (fixed HUD overlay; renders after post) |
 | Camera3D | projection, fov, near, far |
 | VirtualCamera3D | priority, followTargetId, lookAtTargetId, blendDuration, fov |
-| GeometryMesh | geometry, size, material |
+| GeometryMesh | geometry, size, material, castShadow, receiveShadow |
 | MeshInstance | src |
 | InstancedMesh3D | maxInstances, enablePerInstanceColor, visibleInstanceCount (bulk write*/flush), material.type/color |
 | DirectionalLightNode | color, intensity, castShadow |

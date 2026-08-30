@@ -108,6 +108,8 @@ export interface SceneDocument {
 export interface GeometryMeshProperties {
   geometry?: string;
   size?: [number, number, number];
+  castShadow?: boolean;
+  receiveShadow?: boolean;
   material?: {
     color?: string;
     roughness?: number;
@@ -1663,6 +1665,10 @@ export class SceneLoader {
         const propsRec = baseProps.properties as Record<string, unknown>;
         const geometry = this.asString(propsRec.geometry) ?? 'box';
         const size = this.readVector3(propsRec.size, UNIT_VECTOR3);
+        // Both default to true — the value this node hardcoded before the flags were authorable.
+        const castShadow = typeof propsRec.castShadow === 'boolean' ? propsRec.castShadow : true;
+        const receiveShadow =
+          typeof propsRec.receiveShadow === 'boolean' ? propsRec.receiveShadow : true;
         const material = this.asRecord(propsRec.material);
         const materialColor = this.asString(material?.color) ?? '#4e8df5';
         const materialConfig: {
@@ -1711,6 +1717,8 @@ export class SceneLoader {
           scale: parsed.scale,
           geometry,
           size: [size.x, size.y, size.z],
+          castShadow,
+          receiveShadow,
           material: materialConfig,
         });
         if (aoMapSrc) {

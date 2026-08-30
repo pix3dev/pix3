@@ -1454,7 +1454,16 @@ export class ViewportRendererService {
       }
     } else {
       // 3D: box each passed target's subtree (setFromObject already spans descendants).
+      //
+      // 2D targets are skipped, mirroring the filter the 2D branch above already applies. Both
+      // layers live in the same world space but at wildly different scales, so a 2D root dragged
+      // into a 3D box does not widen it, it replaces it: measured on a portrait mobile scene, the
+      // 3D content spanned 16 x 3.2 x 16 units and the HUD root spanned 970 x 1194 — "Frame All"
+      // pulled the camera back to fit the HUD and the whole game became a grey dot three pixels
+      // across. That framed screenshot is one of the first things an agent reaches for when a
+      // scene looks wrong, and it was answering with a blank.
       for (const node of nodes) {
+        if (node instanceof Node2D) continue;
         const nodeBounds = new THREE.Box3().setFromObject(node);
         if (!nodeBounds.isEmpty()) bounds.union(nodeBounds);
       }

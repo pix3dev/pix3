@@ -155,6 +155,44 @@ describe('GeometryMesh material persistence', () => {
     expect(loadedMesh.geometry.getAttribute('uv1')).toBeTruthy();
   });
 
+  it('round-trips castShadow/receiveShadow and mirrors them onto the render mesh', async () => {
+    const mesh = new GeometryMesh({
+      id: 'shadow-box',
+      name: 'Shadow Box',
+      geometry: 'box',
+      size: [1, 1, 1],
+      material: { color: '#ffffff' },
+    });
+    // Default is true on both, matching what the node hardcoded before the flags existed.
+    expect(getProp(mesh, 'castShadow')).toBe(true);
+    expect(getProp(mesh, 'receiveShadow')).toBe(true);
+
+    setProp(mesh, 'receiveShadow', false);
+    const renderMesh = mesh.children.find(c => (c as { isMesh?: boolean }).isMesh) as unknown as {
+      castShadow: boolean;
+      receiveShadow: boolean;
+    };
+    // The node's flag is meaningless on its own — the child Mesh is what the shadow map reads.
+    expect(renderMesh.receiveShadow).toBe(false);
+    expect(renderMesh.castShadow).toBe(true);
+
+    const yaml = serialize(mesh);
+    expect(yaml).toContain('receiveShadow: false');
+
+    const graph = await makeLoader().parseScene(yaml, {
+      filePath: 'res://scenes/main.pix3scene',
+    });
+    const loaded = graph.rootNodes[0] as GeometryMesh;
+    expect(getProp(loaded, 'receiveShadow')).toBe(false);
+    expect(getProp(loaded, 'castShadow')).toBe(true);
+    const loadedMesh = loaded.children.find(c => (c as { isMesh?: boolean }).isMesh) as unknown as {
+      castShadow: boolean;
+      receiveShadow: boolean;
+    };
+    expect(loadedMesh.receiveShadow).toBe(false);
+    expect(loadedMesh.castShadow).toBe(true);
+  });
+
   it('packs a box lightmap UV into six non-overlapping atlas cells', () => {
     const mesh = new GeometryMesh({
       id: 'ao-box2',
