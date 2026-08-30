@@ -96,6 +96,25 @@ export class EditorTabComponent extends ComponentBase {
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId: string = '';
 
+  /**
+   * Tab-less mode: this viewport is the only one on screen and owns the shared canvas outright.
+   *
+   * Vibe (`pix3-flow-scene-view`) has no Golden Layout, no tabs and therefore no entry in
+   * `appState.tabs` — every "am I the active tab?" gate would answer `false` there and the surface
+   * would ignore every pointer, wheel and key event. Standalone answers `true` instead, and drops
+   * the top toolbar (there is no room for editor chrome on the Vibe stage).
+   */
+  @property({ type: Boolean })
+  standalone = false;
+
+  /**
+   * Whether this viewport is the one the user is driving. The shared canvas, the navigation lock
+   * and the input handlers all key off it, so background Studio tabs never fight over them.
+   */
+  private get isActiveTab(): boolean {
+    return this.standalone || appState.tabs.activeTabId === this.tabId;
+  }
+
   @state()
   private transformMode: TransformMode = 'select';
 
@@ -124,6 +143,13 @@ export class EditorTabComponent extends ComponentBase {
   private editorCameraProjection: EditorCameraProjection = 'perspective';
 
   private canvasHost?: HTMLElement;
+  /**
+   * Whether the standalone viewport has framed its scene once (see `syncActiveState`). Not reset on
+   * re-attach: framing is a first-impression fix, not something to redo behind the user's back.
+   */
+  private hasFramedStandalone = false;
+  /** Last observed workspace, so the `appState.ui` subscription can spot the Vibe→Studio switch. */
+  private lastWorkspaceMode = appState.ui.workspaceMode;
   private disposeUiSubscription?: () => void;
   private disposeTabsSubscription?: () => void;
   private disposeScenesSubscription?: () => void;
@@ -221,7 +247,19 @@ export class EditorTabComponent extends ComponentBase {
     this.syncAlignmentToolbarState();
     this.syncSceneLayerCapabilities();
 
+    this.lastWorkspaceMode = appState.ui.workspaceMode;
+
     this.disposeUiSubscription = subscribe(appState.ui, () => {
+      if (appState.ui.workspaceMode !== this.lastWorkspaceMode) {
+        this.lastWorkspaceMode = appState.ui.workspaceMode;
+        // Coming back to Studio: the shared canvas is still parented into Vibe's scene view, whose
+        // host was just torn out of the DOM with the Flow shell. Nothing mutates `appState.tabs` on
+        // a workspace switch, so without this reclaim the Studio viewport stays empty until the
+        // next tab change.
+        if (appState.ui.workspaceMode === 'studio') {
+          this.syncActiveState();
+        }
+      }
       this.showGrid = appState.ui.showGrid;
       this.showAxisGizmo = appState.ui.showAxisGizmo;
       this.snapToGrid = appState.ui.snapToGrid;
@@ -328,14 +366,9 @@ export class EditorTabComponent extends ComponentBase {
 
   protected render() {
     const tab = appState.tabs.tabs.find(t => t.id === this.tabId);
-    const isSceneTab = tab?.type === 'scene';
-    const {
-      items: previewCameraItems,
-      label: previewCameraLabel,
-      isActive: isPreviewCameraActive,
-    } = this.getPreviewCameraDropdownState();
-    const localePreview = this.getPreviewLocaleDropdownState();
-    const showAlignmentTools = isSceneTab && this.has2DSelection;
+    // Standalone has no tab to classify: it exists only to edit the active scene, so it is always
+    // a scene viewport — without this the transform overlay and the zoom controls would be gone.
+    const isSceneTab = this.standalone || tab?.type === 'scene';
 
     return html`
       <section
@@ -349,48 +382,7 @@ export class EditorTabComponent extends ComponentBase {
         @drop=${this.handleDrop}
         @dragleave=${this.handleDragLeave}
       >
-        <div class="viewport-toolbar-shell">
-          ${renderViewportToolbar(
-            {
-              transformMode: isSceneTab ? this.transformMode : null,
-              showGrid: this.showGrid,
-              showAxisGizmo: this.showAxisGizmo,
-              snapToGrid: this.snapToGrid,
-              showLighting: this.showLighting,
-              navigationMode: this.navigationMode,
-              showLayer3D: this.showLayer3D,
-              showLayer2D: this.showLayer2D,
-              canToggleLayerVisibility: this.sceneHas2D && this.sceneHas3D,
-              canToggleNavigationMode: this.sceneHas2D && this.sceneHas3D,
-              previewCameraLabel,
-              previewCameraItems,
-              isPreviewCameraActive,
-              editorCameraProjection: this.editorCameraProjection,
-              showAlignmentTools,
-              canAlignToContainer: isSceneTab && this.canAlignToContainer,
-              canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
-              canDistributeSelection: isSceneTab && this.canDistributeSelection,
-              showLocalePreview: isSceneTab && localePreview.show,
-              previewLocaleLabel: localePreview.label,
-              previewLocaleItems: localePreview.items,
-            },
-            {
-              onTransformModeChange: m => this.handleTransformModeChange(m),
-              onToggleNavigationMode: () => this.toggleNavigationMode(),
-              onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
-              onToggleGrid: () => this.toggleGrid(),
-              onToggleAxisGizmo: () => this.toggleAxisGizmo(),
-              onToggleSnapToGrid: () => this.toggleSnapToGrid(),
-              onToggleLighting: () => this.toggleLighting(),
-              onToggleLayer3D: () => this.toggleLayer3D(),
-              onToggleLayer2D: () => this.toggleLayer2D(),
-              onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
-              onRunAlignmentAction: action => this.handleAlignmentAction(action),
-              onSelectPreviewLocale: localeId => this.handlePreviewLocaleSelect(localeId),
-            },
-            this.iconService
-          )}
-        </div>
+        ${this.standalone ? null : this.renderToolbarShell(isSceneTab)}
 
         <div
           class="viewport-host"
@@ -427,6 +419,70 @@ export class EditorTabComponent extends ComponentBase {
             : null}
         </div>
       </section>
+    `;
+  }
+
+  /**
+   * The top chrome bar: transform modes, grid/snap/lighting toggles, layer and camera pickers, the
+   * alignment cluster and the locale preview.
+   *
+   * Standalone renders none of it. Vibe's scene view is a small stage beside a chat column with no
+   * room for a toolbar, and every switch in here has a Studio home; what standalone keeps are the
+   * overlays painted INSIDE the canvas (transform modes, zoom, the marquee), which is what you
+   * actually need to navigate and pick.
+   */
+  private renderToolbarShell(isSceneTab: boolean) {
+    const {
+      items: previewCameraItems,
+      label: previewCameraLabel,
+      isActive: isPreviewCameraActive,
+    } = this.getPreviewCameraDropdownState();
+    const localePreview = this.getPreviewLocaleDropdownState();
+    const showAlignmentTools = isSceneTab && this.has2DSelection;
+
+    return html`
+      <div class="viewport-toolbar-shell">
+        ${renderViewportToolbar(
+          {
+            transformMode: isSceneTab ? this.transformMode : null,
+            showGrid: this.showGrid,
+            showAxisGizmo: this.showAxisGizmo,
+            snapToGrid: this.snapToGrid,
+            showLighting: this.showLighting,
+            navigationMode: this.navigationMode,
+            showLayer3D: this.showLayer3D,
+            showLayer2D: this.showLayer2D,
+            canToggleLayerVisibility: this.sceneHas2D && this.sceneHas3D,
+            canToggleNavigationMode: this.sceneHas2D && this.sceneHas3D,
+            previewCameraLabel,
+            previewCameraItems,
+            isPreviewCameraActive,
+            editorCameraProjection: this.editorCameraProjection,
+            showAlignmentTools,
+            canAlignToContainer: isSceneTab && this.canAlignToContainer,
+            canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
+            canDistributeSelection: isSceneTab && this.canDistributeSelection,
+            showLocalePreview: isSceneTab && localePreview.show,
+            previewLocaleLabel: localePreview.label,
+            previewLocaleItems: localePreview.items,
+          },
+          {
+            onTransformModeChange: m => this.handleTransformModeChange(m),
+            onToggleNavigationMode: () => this.toggleNavigationMode(),
+            onSelectPreviewCamera: itemId => this.handlePreviewCameraSelect(itemId),
+            onToggleGrid: () => this.toggleGrid(),
+            onToggleAxisGizmo: () => this.toggleAxisGizmo(),
+            onToggleSnapToGrid: () => this.toggleSnapToGrid(),
+            onToggleLighting: () => this.toggleLighting(),
+            onToggleLayer3D: () => this.toggleLayer3D(),
+            onToggleLayer2D: () => this.toggleLayer2D(),
+            onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
+            onRunAlignmentAction: action => this.handleAlignmentAction(action),
+            onSelectPreviewLocale: localeId => this.handlePreviewLocaleSelect(localeId),
+          },
+          this.iconService
+        )}
+      </div>
     `;
   }
 
@@ -656,9 +712,22 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private syncActiveState(): void {
-    if (!this.tabId) return;
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    // Standalone has no tab id by design — the check is "do I know which tab I am?", and standalone
+    // knows it is the only one.
+    if (!this.standalone && !this.tabId) return;
+    if (!this.isActiveTab) return;
     if (!this.canvasHost) return;
+    // Arbitration for the ONE shared canvas: while Vibe's scene view is on screen it owns it.
+    // A Studio tab would otherwise reclaim the canvas on any `appState.tabs` mutation — including
+    // the offscreen Studio branch an agent mounts for screenshots — and leave the user's visible
+    // viewport blank. Screenshots do not suffer: it is the same canvas either way.
+    if (
+      !this.standalone &&
+      appState.ui.workspaceMode === 'flow' &&
+      appState.ui.flowSceneViewVisible
+    ) {
+      return;
+    }
 
     this.viewportRenderer.attachToHost(this.canvasHost);
 
@@ -682,6 +751,15 @@ export class EditorTabComponent extends ComponentBase {
       } else {
         this.viewportRenderer.resize(rect.width, rect.height);
       }
+    }
+
+    // A scene reached through Vibe never went through a tab, so no editor-camera context was ever
+    // saved or restored for it: the default camera can be aimed at empty space and the user's first
+    // impression of the scene view is a blank canvas. Frame it once, on the first attach only —
+    // re-framing on every re-attach would throw away wherever they navigated to.
+    if (this.standalone && !this.hasFramedStandalone) {
+      this.hasFramedStandalone = true;
+      this.zoomAll();
     }
   }
 
@@ -742,7 +820,7 @@ export class EditorTabComponent extends ComponentBase {
 
     // Only the active viewport enforces the navigation lock, so background tabs
     // never fight over the shared navigation mode.
-    if (appState.tabs.activeTabId !== this.tabId) {
+    if (!this.isActiveTab) {
       return;
     }
 
@@ -913,14 +991,14 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private handleWheel = (event: WheelEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) {
+    if (!this.isActiveTab) {
       return;
     }
     this.navigation2D.handleWheel(event);
   };
 
   private handleCanvasPointerDown = (event: PointerEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
 
     const isToolbar = this.isToolbarInteraction(event);
     if (isToolbar) return;
@@ -1035,7 +1113,7 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private handleCanvasPointerMove = (event: PointerEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
 
     const canvas = this.viewportRenderer.getCanvasElement();
     const rect = canvas?.getBoundingClientRect() ?? this.getBoundingClientRect();
@@ -1183,7 +1261,7 @@ export class EditorTabComponent extends ComponentBase {
   };
 
   private handleCanvasPointerUp = (event: PointerEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
 
     if (event.pointerType === 'touch') {
       this.releasePointerSafely(event.pointerId);
@@ -1294,7 +1372,7 @@ export class EditorTabComponent extends ComponentBase {
   };
 
   private handleCanvasPointerCancel = (event: PointerEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
 
     if (event.pointerType === 'touch') {
       this.releasePointerSafely(event.pointerId);
@@ -1387,7 +1465,7 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private handleCanvasKeyDown = (event: KeyboardEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
 
     // Space enables the "grab tool": while held, a left-drag pans the 2D camera.
     // Only in 2D nav mode, and never while typing into a field. preventDefault
@@ -1431,7 +1509,7 @@ export class EditorTabComponent extends ComponentBase {
   };
 
   private handleCanvasKeyUp = (event: KeyboardEvent): void => {
-    if (appState.tabs.activeTabId !== this.tabId) return;
+    if (!this.isActiveTab) return;
     if (event.code === 'Space') {
       this.spaceHeld = false;
       // If a pan drag is still in flight, leave the grabbing cursor until

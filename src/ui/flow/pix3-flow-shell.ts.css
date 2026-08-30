@@ -320,9 +320,17 @@ pix3-flow-shell .flow-view__option[data-current='true'] {
   cursor: default;
 }
 
-pix3-flow-shell .flow-view__option[data-current='false']:hover {
+pix3-flow-shell .flow-view__option[data-current='false']:hover:not([disabled]) {
   background: var(--bg-2);
   color: var(--fg-0);
+}
+
+/* Offered but not yet usable: in Vibe a scene only exists once the game has been started once.
+   The `title` says why — the greying is only the hint that there is a reason. */
+pix3-flow-shell .flow-view__option[disabled] {
+  color: var(--fg-3);
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 pix3-flow-shell .flow-view__option:focus-visible {
@@ -341,13 +349,33 @@ pix3-flow-shell .flow-view__divider {
    `.flow-stage` and `.flow-doc` set their own `display`, so it has to be said again — and it has to
    be `display: none` rather than `visibility: hidden` so the hidden view claims no grid track. */
 pix3-flow-shell .flow-stage[hidden],
+pix3-flow-shell .flow-scene[hidden],
 pix3-flow-shell .flow-doc[hidden] {
   display: none;
 }
 
+/* The edit-mode viewport column. Unlike `.flow-stage` it is NOT letterboxed: this is an editing
+   surface, and cropping it to the game's aspect would hide the off-screen objects you open it to
+   find. It gets the whole column and lets the viewport size itself to it. */
+pix3-flow-shell .flow-scene {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+pix3-flow-shell .flow-scene pix3-flow-scene-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 pix3-flow-shell .flow-stage {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  /* Controls first, game second — the bar sits above the frame, in the same corner as the scene
+     view's strip, so Play does not move when the view does. */
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
   /* The host is sized in px by fitStage; clipping keeps a stale measurement inside the column
@@ -418,8 +446,11 @@ pix3-flow-shell .flow-stage__overlay--error {
 pix3-flow-shell .flow-stage__bar {
   display: flex;
   align-items: center;
+  /* Right-aligned, ending on the buttons: the status is the label, the buttons are the thing you
+     reach for, and the scene view's strip puts its Play in the same place. */
+  justify-content: flex-end;
   gap: 6px;
-  padding: 6px 16px 10px;
+  padding: 8px 16px;
   color: var(--fg-3);
   font-size: 11px;
 }

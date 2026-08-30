@@ -316,6 +316,18 @@ export interface UIState {
   theme: ThemeName;
   /** Active shell. Golden Layout is only initialized once this reaches `studio`. */
   workspaceMode: WorkspaceMode;
+  /**
+   * True while Vibe's edit-mode scene view is the stage on screen.
+   *
+   * The editor viewport is a single shared canvas, and Flow normally suppresses it outright (see
+   * `ViewportRendererService.isWorkspaceHidden`) because nobody there can see it. This flag is how
+   * the one Flow surface that CAN see it says so — without it the Vibe viewport renders black.
+   *
+   * Session UI state, written directly by the view that owns it: the Command/Operation gateway
+   * covers scene and project mutation (the things that belong in undo history), not a transient
+   * "is this stage on screen" flag that must neither survive a reload nor be undoable.
+   */
+  flowSceneViewVisible: boolean;
   isLayoutReady: boolean;
   focusedPanelId: string | null;
   commandPaletteOpen: boolean;
@@ -579,6 +591,7 @@ export const createInitialAppState = (): AppState => ({
   ui: {
     theme: DEFAULT_THEME,
     workspaceMode: 'studio',
+    flowSceneViewVisible: false,
     isLayoutReady: false,
     focusedPanelId: null,
     commandPaletteOpen: false,

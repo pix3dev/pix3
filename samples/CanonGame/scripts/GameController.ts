@@ -1,5 +1,5 @@
 import { Script, type NodeBase } from '@pix3/runtime';
-import { Vector3 } from 'three';
+import { Vector3, Vector2, Raycaster } from 'three';
 import { registerGameDebug } from '@pix3/runtime';
 
 interface Body {
@@ -61,6 +61,7 @@ export class GameController extends Script {
   private accumulator = 0;
   private loseTimer = 0;
   private disposeDebug: (() => void) | null = null;
+  private raycaster = new Raycaster();
 
   onStart(): void {
     // Gather block bodies for each level.
@@ -220,7 +221,7 @@ export class GameController extends Script {
     this.accumulator = 0;
 
     this.setOverlay(false);
-    this.setLabel('HintLabel', 'Тапни, чтобы выстрелить', true);
+    this.setLabel('HintLabel', 'Тапни по конструкции — прицел наведётся сам', true);
     this.updateHud();
   }
 
@@ -253,25 +254,27 @@ export class GameController extends Script {
     const ball = this.balls.find(b => !b.inPlay);
     if (!ball) return;
 
-    const w = Math.max(1, this.input?.width ?? 1080);
-    const h = Math.max(1, this.input?.height ?? 1920);
-    const nx = px / w; // 0..1 left→right
-    const ny = py / h; // 0..1 top→bottom
-
-    const yaw = (nx - 0.5) * 1.2; // radians
-    const t = 1 - ny; // top of screen = 1
-    const pitch = (15 + t * 55) * (Math.PI / 180);
-
     const cp = this.cannon ? this.cannon.position : new Vector3(0, 1, -3.6);
-    ball.node.position.set(cp.x, cp.y + 0.3, cp.z + 0.4);
+    const start = new Vector3(cp.x, cp.y + 0.3, cp.z + 0.4);
+    ball.node.position.copy(start);
     ball.node.rotation.set(0, 0, 0);
-    const cosP = Math.cos(pitch);
-    ball.vel.set(
-      Math.sin(yaw) * cosP * BALL_SPEED,
-      Math.sin(pitch) * BALL_SPEED,
-      Math.cos(yaw) * cosP * BALL_SPEED
-    );
+
+    // Auto-aim: raycast the tapped screen point onto the tapped block (or the
+    // ground), then fire the ball straight at that point.
+    const target = this.aimPoint(px, py);
+    const dir = target ? target.clone().sub(start) : new Vector3(0, 0.35, 1);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0.35, 1);
+    dir.normalize();
+    // Slight upward bias so a flat shot still clears the cannon lip.
+    dir.y += 0.05;
+    dir.normalize();
+    ball.vel.copy(dir.multiplyScalar(BALL_SPEED));
     ball.ang.set(0, 0, 0);
+
+    // Turn the cannon to face the shot for feedback.
+    if (this.cannon) {
+      this.cannon.rotation.y = Math.atan2(dir.x, dir.z);
+    }
     ball.active = true;
     ball.inPlay = true;
     ball.life = 0;
@@ -284,7 +287,67 @@ export class GameController extends Script {
     this.updateHud();
   }
 
+  /** Raycast a tapped screen point onto the nearest live block, else the ground. */
+  private aimPoint(px: number, py: number): Vector3 | null {
+    const camNode = this.findNode('Main Camera') as unknown as { camera?: unknown } | null;
+    const cam = camNode?.camera as
+      | (import('three').Camera & { isCamera: boolean })
+      | undefined;
+    if (!cam) return null;
+
+    const w = Math.max(1, this.input?.width ?? 1080);
+    const h = Math.max(1, this.input?.height ?? 1920);
+    const ndc = new Vector2((px / w) * 2 - 1, -((py / h) * 2 - 1));
+    this.raycaster.setFromCamera(ndc, cam);
+
+    let best: Vector3 | null = null;
+    let bestDist = Infinity;
+    for (const b of this.curBlocks) {
+      if (b.knocked) continue;
+      const hits = this.raycaster.intersectObject(b.node as unknown as import('three').Object3D, true);
+      if (hits.length && hits[0].distance < bestDist) {
+        bestDist = hits[0].distance;
+        best = hits[0].point.clone();
+      }
+    }
+    if (best) return best;
+
+    // Fallback: intersect the ground plane at y=0.5 (block centre height).
+    const origin = this.raycaster.ray.origin;
+    const dir = this.raycaster.ray.direction;
+    if (Math.abs(dir.y) > 1e-4) {
+      const t = (0.5 - origin.y) / dir.y;
+      if (t > 0) return origin.clone().add(dir.clone().multiplyScalar(t));
+    }
+    return null;
+  }
+
+  /** Wake any sleeping block that has lost its support (nothing solid beneath it). */
+  private applySupportCheck(): void {
+    for (const b of this.curBlocks) {
+      if (b.active || b.isBall) continue;
+      if (!this.isSupported(b)) this.wake(b);
+    }
+  }
+
+  private isSupported(b: Body): boolean {
+    // Resting on the ground.
+    if (b.node.position.y - b.hy <= 0.06) return true;
+    const bx = b.node.position.x, by = b.node.position.y, bz = b.node.position.z;
+    const bottomB = by - b.hy;
+    for (const o of this.curBlocks) {
+      if (o === b || o.active) continue; // an active (falling) block is no support
+      const topO = o.node.position.y + o.hy;
+      if (topO < bottomB - 0.15 || topO > bottomB + 0.2) continue; // not directly beneath
+      if (Math.abs(o.node.position.x - bx) >= b.hx + o.hx) continue;
+      if (Math.abs(o.node.position.z - bz) >= b.hz + o.hz) continue;
+      return true;
+    }
+    return false;
+  }
+
   private step(dt: number): void {
+    this.applySupportCheck();
     const bodies: Body[] = [];
     for (const b of this.curBlocks) bodies.push(b);
     for (const b of this.balls) if (b.inPlay) bodies.push(b);
@@ -443,7 +506,7 @@ export class GameController extends Script {
     if (newKingDown) {
       this.kingsLeft = this.curBlocks.filter(b => b.isKing && !b.knocked).length;
       this.scene?.audio.sfx('explosion');
-      this.scene?.juice.shake('camera', { amplitude: 10, duration: 250 });
+      this.scene?.juice.shake('camera', { amplitude: 0.25, duration: 0.25, frequency: 28 });
       this.updateHud();
     }
     this.destroyedPct =

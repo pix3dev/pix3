@@ -1,0 +1,86 @@
+/* Vibe's edit-mode scene view: a selection strip over a full-bleed editor viewport.
+   Deliberately NOT letterboxed like the game stage — this is an editing surface, and cropping it
+   to the game's aspect would hide exactly the off-screen objects you open it to find. */
+
+pix3-flow-scene-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+pix3-flow-scene-view pix3-editor-tab {
+  display: block;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+pix3-flow-scene-view .flow-scene__strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-block-end: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+pix3-flow-scene-view .flow-scene__strip[data-empty='true'] {
+  color: var(--fg-3);
+  font-weight: 500;
+}
+
+pix3-flow-scene-view .flow-scene__strip svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+pix3-flow-scene-view .flow-scene__strip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one control the prototyping loop always needs, in the one view where the stage's own
+   Play/Restart bar is hidden. Pushed to the far end so the strip reads name-first. */
+pix3-flow-scene-view .flow-scene__play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-start: auto;
+  /* Same metrics as `.flow-stage__button`: this button and the game bar's Play are the same control
+     seen from two views, so switching views must not resize it under the cursor. */
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+pix3-flow-scene-view .flow-scene__play svg {
+  width: 14px;
+  height: 14px;
+}
+
+pix3-flow-scene-view .flow-scene__play:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-flow-scene-view .flow-scene__play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

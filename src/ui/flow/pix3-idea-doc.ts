@@ -160,12 +160,29 @@ export class Pix3IdeaDoc extends ComponentBase {
 
   protected willUpdate(changed: PropertyValues): void {
     if (changed.has('docPath') && changed.get('docPath') !== undefined) {
+      // Everything below belonged to the previous file: a chip anchored to its line numbers, and a
+      // draft of its source. The shell asks {@link confirmLeave} before it gets here, so a draft
+      // still standing at this point is one the user agreed to drop.
+      this.retractSelection();
+      this.editing = false;
+      this.draft = '';
       void this.reload();
     }
   }
 
   protected updated(): void {
     this.makeImagesExpandable();
+  }
+
+  /**
+   * Whether this element may be pointed at another document. Asked by the shell before it swaps
+   * `docPath`: source edits live in {@link draft} until Save, so an unguarded swap would throw away
+   * typed text — the same loss {@link onCancel} refuses to take silently.
+   */
+  async confirmLeave(): Promise<boolean> {
+    return this.confirmDiscardDraft(
+      'The document has unsaved changes. Discard them and open the other document?'
+    );
   }
 
   /**
@@ -512,20 +529,28 @@ export class Pix3IdeaDoc extends ComponentBase {
 
   private async onCancel(): Promise<void> {
     // Never drop typed text silently: leaving source mode with a dirty draft asks first.
-    if (this.draft !== this.source) {
-      const discard = await this.dialogService.showConfirmation({
-        title: 'Discard source edits?',
-        message: 'The document has unsaved changes. Discard them and go back to the preview?',
-        confirmLabel: 'Discard',
-        cancelLabel: 'Keep editing',
-        isDangerous: true,
-      });
-      if (!discard) {
-        return;
-      }
+    const discard = await this.confirmDiscardDraft(
+      'The document has unsaved changes. Discard them and go back to the preview?'
+    );
+    if (!discard) {
+      return;
     }
     this.editing = false;
     this.draft = '';
+  }
+
+  /** `true` when there is nothing to lose, or when the user said the draft may go. */
+  private async confirmDiscardDraft(message: string): Promise<boolean> {
+    if (!this.editing || this.draft === this.source) {
+      return true;
+    }
+    return this.dialogService.showConfirmation({
+      title: 'Discard source edits?',
+      message,
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      isDangerous: true,
+    });
   }
 
   protected render() {
@@ -641,7 +666,8 @@ export class Pix3IdeaDoc extends ComponentBase {
    * would be chrome that teaches the user to ignore the section.
    */
   private renderDecisions() {
-    if (this.decisions.length === 0) {
+    // Under the decision log itself the list would be the file's own contents, twice over.
+    if (this.decisions.length === 0 || this.docPath === DECISIONS_PATH) {
       return null;
     }
     return html`

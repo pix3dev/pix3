@@ -24,6 +24,7 @@ interface SidePanel extends HTMLElement {
   plan: FlowPlan;
   agentRunning: boolean;
   activeTool: string | null;
+  activeDoc: string | null;
 }
 
 const item = (over: Partial<FlowReferenceItem> & { name: string }): FlowReferenceItem => ({
@@ -299,6 +300,69 @@ describe('Pix3FlowSidePanel — files tab', () => {
 
     expect(dispatcher.execute).toHaveBeenCalledTimes(1);
     expect(dispatcher.execute.mock.calls[0][0].metadata.id).toBe('flow.delete-reference');
+  });
+
+  /**
+   * A document is read and edited in the Idea view, so the click has to land there — the lightbox
+   * is a look at a file, not a place to work in it.
+   */
+  it('reports a document click to the shell instead of opening the lightbox', async () => {
+    references.list = vi.fn(async () =>
+      listWith({
+        design: [
+          item({
+            name: 'decisions.md',
+            path: 'design/decisions.md',
+            group: 'design',
+            kind: 'markdown',
+            role: null,
+            origin: 'agent',
+          }),
+        ],
+      })
+    );
+    const panel = await mountPanel('idea');
+    const opened: string[] = [];
+    panel.addEventListener('document-open', event => {
+      opened.push((event as CustomEvent<{ path: string }>).detail.path);
+    });
+
+    const decisions = [...panel.querySelectorAll('.ref-card')].find(card =>
+      card.textContent?.includes('decisions.md')
+    );
+    decisions?.querySelector<HTMLButtonElement>('.ref-card__body')?.click();
+    // The lightbox path is async; give it the task it would have needed to open.
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(opened).toEqual(['design/decisions.md']);
+    expect(lightbox.open).not.toHaveBeenCalled();
+  });
+
+  it('marks the document the stage is showing, and only that one', async () => {
+    references.list = vi.fn(async () =>
+      listWith({
+        design: [
+          item({
+            name: 'decisions.md',
+            path: 'design/decisions.md',
+            group: 'design',
+            kind: 'markdown',
+            role: null,
+          }),
+        ],
+      })
+    );
+    const panel = await mountPanel('idea');
+    panel.activeDoc = 'design/decisions.md';
+    await panel.updateComplete;
+
+    const byName = (name: string) =>
+      [...panel.querySelectorAll('.ref-card')].find(card => card.textContent?.includes(name));
+
+    expect(byName('decisions.md')?.classList.contains('ref-card--active')).toBe(true);
+    // The pinned document is still pinned — it is just not what is on screen.
+    expect(byName('gdd.md')?.classList.contains('ref-card--active')).toBe(false);
+    expect(byName('gdd.md')?.classList.contains('ref-card--pinned')).toBe(true);
   });
 
   it('expands into the lightbox with the same-kind siblings behind it', async () => {

@@ -18,6 +18,9 @@ import { PrototypeBootstrapService } from '@/services/flow/PrototypeBootstrapSer
 vi.mock('@/ui/agent-chat/pix3-agent-chat-panel', () => ({}));
 vi.mock('@/ui/shared/pix3-mode-switch', () => ({}));
 vi.mock('./pix3-flow-side-panel', () => ({}));
+// The scene view mounts the shared WebGL viewport; the shell's job is only to decide WHEN it is on
+// screen, so it stays an inert tag here and is asserted on by tag.
+vi.mock('./pix3-flow-scene-view', () => ({}));
 
 type TestShell = HTMLElement & { updateComplete: Promise<unknown> };
 
@@ -120,6 +123,9 @@ const mountShell = async (
 
   appState.project.status = 'ready';
   appState.project.id = 'project-1';
+  // In Vibe a scene exists only after something loads one; most cases here want the Scene view
+  // offered, so give them one. The "no scene yet" case clears it explicitly.
+  appState.scenes.activeSceneId = 'main';
   appState.project.projectName = 'Ant Wars';
   appState.project.manifest = { ...manifestWith(metadata), ...manifestOverrides };
 
@@ -305,14 +311,71 @@ describe('Pix3FlowShell — prototype stage', () => {
     expect(panel?.stage).toBe('prototype');
   });
 
-  it('offers the Game / Idea switch, with the game showing', async () => {
+  /**
+   * The controls sit ABOVE the game, in the corner the scene view puts its own Play in. Under the
+   * game they read as a caption of something that just ended, and they moved across the column
+   * every time the view changed — the button you press next must not be the one you hunt for.
+   */
+  it('puts the stage controls above the game frame', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    const stage = shell.querySelector('.flow-stage');
+    const bar = shell.querySelector('.flow-stage__bar');
+    const frame = shell.querySelector('.flow-stage__frame');
+
+    expect(bar).not.toBeNull();
+    expect(frame).not.toBeNull();
+    expect(stage?.firstElementChild).toBe(bar);
+    expect(bar!.compareDocumentPosition(frame!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('offers the view switch, with the game showing', async () => {
     const { shell } = await mountShell({ projectName: 'Ant Wars' });
     const options = shell.querySelectorAll<HTMLButtonElement>('.flow-view__option');
 
-    expect(options.length).toBe(2);
+    expect(options.length).toBe(3);
     expect(options[0].dataset.view).toBe('game');
     expect(options[0].dataset.current).toBe('true');
+    // Both alternatives are lazy: nothing but the game is mounted until it is asked for.
     expect(shell.querySelector('pix3-idea-doc')).toBeNull();
+    expect(shell.querySelector('pix3-flow-scene-view')).toBeNull();
+  });
+
+  /**
+   * The third view. A stopped game leaves the stage with nothing on it and no way to point at an
+   * object, which is the gap this closes: the scene is loaded the whole time, it just had no
+   * surface in Vibe.
+   */
+  it('offers Scene between Game and Idea', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    const options = shell.querySelectorAll<HTMLButtonElement>('.flow-view__option');
+
+    expect([...options].map(option => option.dataset.view)).toEqual(['game', 'scene', 'idea']);
+    expect(options[1].disabled).toBe(false);
+  });
+
+  it('disables Scene until a scene has actually been loaded', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    appState.scenes.activeSceneId = null;
+    await settle(shell);
+
+    const scene = shell.querySelector<HTMLButtonElement>('.flow-view__option[data-view="scene"]');
+    expect(scene?.disabled).toBe(true);
+    // A greyed-out control that does not say why is a control the user retries.
+    expect(scene?.title).toContain('Play the game once');
+  });
+
+  it('shows the scene view on Scene while KEEPING the runtime host mounted', async () => {
+    const { shell, playSession } = await mountShell({ projectName: 'Ant Wars' });
+
+    shell.querySelector<HTMLButtonElement>('.flow-view__option[data-view="scene"]')?.click();
+    await settle(shell);
+
+    expect(shell.querySelector('pix3-flow-scene-view')).not.toBeNull();
+    expect(shell.querySelector<HTMLElement>('.flow-stage')?.hidden).toBe(true);
+    // Same rule as the Idea half: the runtime host must survive the swap, or coming back to Game
+    // would be a fresh game with the user's score gone.
+    expect(shell.querySelector('.flow-stage__host')).not.toBeNull();
+    expect(playSession.unregisterTabHost).not.toHaveBeenCalled();
   });
 
   it('shows the document on Idea while KEEPING the runtime host mounted', async () => {
@@ -336,5 +399,140 @@ describe('Pix3FlowShell — prototype stage', () => {
     expect(shell.querySelector<HTMLElement>('.flow-stage')?.hidden).toBe(false);
     expect(shell.querySelector<HTMLElement>('.flow-doc')?.hidden).toBe(true);
     expect(playSession.registerTabHost).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The Files column lists every design document, so clicking one has to put it where documents are
+ * read — the Idea view — rather than leave the click looking like it did nothing.
+ */
+describe('Pix3FlowShell — opening a document from the sidebar', () => {
+  const openDocument = async (shell: TestShell, path: string): Promise<void> => {
+    shell
+      .querySelector('pix3-flow-side-panel')
+      ?.dispatchEvent(
+        new CustomEvent('document-open', { detail: { path }, bubbles: true, composed: true })
+      );
+    await settle(shell);
+  };
+
+  it('shows the clicked document and brings the Idea view forward', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    expect(shell.querySelector('pix3-idea-doc')).toBeNull();
+
+    await openDocument(shell, 'design/decisions.md');
+
+    expect(shell.querySelector('pix3-idea-doc')?.getAttribute('doc-path')).toBe(
+      'design/decisions.md'
+    );
+    expect(shell.querySelector<HTMLElement>('.flow-doc')?.hidden).toBe(false);
+    expect(
+      shell.querySelector<HTMLButtonElement>('.flow-view__option[data-view="idea"]')?.dataset
+        .current
+    ).toBe('true');
+    // The column is told which document is on screen, so its row is the one marked.
+    const panel = shell.querySelector('pix3-flow-side-panel') as HTMLElement & {
+      activeDoc?: string;
+    };
+    expect(panel.activeDoc).toBe('design/decisions.md');
+  });
+
+  it('swaps the document at the idea stage, where there is no view to switch', async () => {
+    const { shell } = await mountShell({ flowStage: 'idea' });
+    expect(shell.querySelector('pix3-idea-doc')?.getAttribute('doc-path')).toBe('design/gdd.md');
+
+    await openDocument(shell, 'design/plan.md');
+
+    expect(shell.querySelector('pix3-idea-doc')?.getAttribute('doc-path')).toBe('design/plan.md');
+  });
+});
+
+/**
+ * The view follows the play state, because the two answers to "what is worth looking at" are
+ * exactly opposite: a running game is the thing, and a stopped one leaves an empty box where the
+ * scene the user can navigate and click should be.
+ */
+describe('Pix3FlowShell — the view follows play state', () => {
+  const currentView = (shell: TestShell): string | undefined =>
+    shell.querySelector<HTMLButtonElement>('.flow-view__option[data-current="true"]')?.dataset.view;
+
+  it('switches to Scene when the game stops', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    appState.ui.isPlaying = true;
+    await settle(shell);
+    expect(currentView(shell)).toBe('game');
+
+    appState.ui.isPlaying = false;
+    await settle(shell);
+
+    expect(currentView(shell)).toBe('scene');
+  });
+
+  it('switches back to Game when it starts again', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    appState.ui.isPlaying = true;
+    await settle(shell);
+    appState.ui.isPlaying = false;
+    await settle(shell);
+    expect(currentView(shell)).toBe('scene');
+
+    appState.ui.isPlaying = true;
+    await settle(shell);
+
+    expect(currentView(shell)).toBe('game');
+  });
+
+  /**
+   * Reading the design document while the game is stopped is a place people deliberately go.
+   * Yanking it out from under them the moment a background restart lands would be a bug.
+   */
+  it('never moves the user off the Idea view', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    appState.ui.isPlaying = true;
+    await settle(shell);
+    shell.querySelector<HTMLButtonElement>('.flow-view__option[data-view="idea"]')?.click();
+    await settle(shell);
+    expect(currentView(shell)).toBe('idea');
+
+    appState.ui.isPlaying = false;
+    await settle(shell);
+    expect(currentView(shell)).toBe('idea');
+
+    appState.ui.isPlaying = true;
+    await settle(shell);
+    expect(currentView(shell)).toBe('idea');
+  });
+
+  it('stays on Game when no scene has been loaded to switch to', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    appState.scenes.activeSceneId = null;
+    appState.ui.isPlaying = true;
+    await settle(shell);
+
+    appState.ui.isPlaying = false;
+    await settle(shell);
+
+    expect(currentView(shell)).toBe('game');
+  });
+
+  /**
+   * The entry-scene replay stops the game and immediately starts it again. Following play state
+   * through that would flash the Scene view in the middle of a run the user asked for.
+   */
+  it('does not flash the Scene view during the entry-scene replay', async () => {
+    const { shell } = await mountShell(
+      { projectName: 'Ant Wars' },
+      { defaultExportScenePath: 'scenes/menu.pix3scene' }
+    );
+    appState.ui.isPlaying = true;
+    await settle(shell);
+
+    const secondary = shell.querySelector<HTMLButtonElement>('.flow-stage__button--secondary');
+    secondary?.click();
+    // The stop half of the replay, observed exactly as the commands would produce it.
+    appState.ui.isPlaying = false;
+    await settle(shell);
+
+    expect(currentView(shell)).toBe('game');
   });
 });

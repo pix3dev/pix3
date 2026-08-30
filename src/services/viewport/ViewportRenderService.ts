@@ -1881,6 +1881,9 @@ export class ViewportRendererService {
    * or a hidden tab where rAF never fires), the frame is rendered
    * synchronously instead so on-demand consumers (resize, collab updates,
    * agent-driven edits in a background tab) still get a fresh canvas.
+   *
+   * Nothing paints while the canvas is off screen (Studio behind Vibe, with Vibe's own scene view
+   * closed) — the dirty flag simply waits, see {@link isWorkspaceHidden}.
    */
   requestRender(): void {
     this.renderRequested = true;
@@ -1890,17 +1893,23 @@ export class ViewportRendererService {
   }
 
   /**
-   * True while the Studio workspace is off screen — i.e. Vibe is on. Golden Layout cannot survive
-   * having its host re-created, so Studio keeps its whole DOM (viewport included) and is merely
-   * `display:none`. Nothing else would stop this service from painting a canvas nobody can see, at
-   * the cost of frames the game on the Vibe stage wants.
+   * True while nobody can see the editor canvas — i.e. Vibe is on AND its scene view is not.
+   *
+   * Golden Layout cannot survive having its host re-created, so Studio keeps its whole DOM
+   * (viewport included) and is merely `display:none` while Vibe is on screen. Nothing else would
+   * stop this service from painting a canvas nobody can see, at the cost of frames the game on the
+   * Vibe stage wants.
+   *
+   * The exception is `flowSceneViewVisible`: Vibe's scene view mounts the SAME shared canvas as a
+   * real, visible surface, so suppressing there would hand the user a black viewport. A Flow
+   * session that never opens that view still costs nothing — the flag is false and this stays true.
    *
    * Painting is suppressed rather than deferred: the dirty flag survives, so the frame lands the
-   * moment Studio comes back, and explicit captures (`captureScreenshot`) call `renderFrame`
-   * directly, so agent screenshots keep working from either workspace.
+   * moment the viewport is visible again, and explicit captures (`captureScreenshot`) call
+   * `renderFrame` directly, so agent screenshots keep working from either workspace.
    */
   private isWorkspaceHidden(): boolean {
-    return appState.ui.workspaceMode === 'flow';
+    return appState.ui.workspaceMode === 'flow' && !appState.ui.flowSceneViewVisible;
   }
 
   /** Every reason to stop painting: the workspace is hidden, or the window lost focus. */
@@ -1923,8 +1932,8 @@ export class ViewportRendererService {
       cancelAnimationFrame(this.animationId);
       this.animationId = undefined;
     }
-    // …but not when the reason we are parking is that nobody can see the canvas (Vibe): the dirty
-    // flag simply waits for Studio to come back.
+    // …but not when the reason we are parking is that nobody can see the canvas (Vibe with its
+    // scene view closed): the dirty flag simply waits until a visible surface owns the canvas.
     if (this.renderRequested && !this.isWorkspaceHidden()) {
       this.renderFrame();
     }

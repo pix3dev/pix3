@@ -68,6 +68,8 @@ export interface EngineSearchResult {
   /** True when the cap cut the list short — the answer is "there are more", not "that is all". */
   truncated: boolean;
   filesSearched: number;
+  /** Off-package topics the query touched — see {@link OFF_PACKAGE_TOPICS}. Omitted when empty. */
+  notes?: string[];
 }
 
 export interface EngineReadResult {
@@ -169,6 +171,52 @@ export function resolveEnginePath(
   };
 }
 
+/**
+ * A capability that lives OUTSIDE `@pix3/runtime/src` and therefore cannot be found by searching it.
+ *
+ * A search is only ground truth about the tree it searches. When the thing being looked for is
+ * wired by the *editor* instead — shipped in the bundle and handed to project scripts through the
+ * runtime import map — a silent result reads as "the engine does not have this", which is exactly
+ * backwards. That misreading is not hypothetical: one session searched `rigidbody`, then `physics`,
+ * then `rapier`, took the absence as an answer, and hand-wrote a 505-line box solver.
+ *
+ * So the search answers those queries with a note instead of leaving a silence to interpret. Two
+ * details are deliberate: the note rides *alongside* whatever matches exist rather than replacing
+ * them, and it fires on the **query**, not on the match count — the failure above did get hits
+ * (comment mentions), so "zero matches" would have been too narrow a trigger.
+ */
+export interface OffPackageTopic {
+  id: string;
+  /** Tested against the raw query. Must not carry the `g` flag: these are reused across calls. */
+  pattern: RegExp;
+  note: string;
+}
+
+export const OFF_PACKAGE_TOPICS: readonly OffPackageTopic[] = [
+  {
+    id: 'rapier-physics',
+    // `gravity` is deliberately absent: Particles3D has its own, so it would fire as pure noise.
+    pattern: /rigid.?bod|\bphysics\b|\brapier\b|\bcollider|\bsolver\b/i,
+    note:
+      'Rigid-body physics is NOT in `@pix3/runtime/src`, so this search cannot see it — an empty ' +
+      'or comment-only result here is not evidence the engine has none. Rapier ships inside the ' +
+      'editor and reaches project scripts through the runtime import map: ' +
+      "`import RAPIER from '@dimforge/rapier3d-compat'`, then `await RAPIER.init()` (a resolved " +
+      'stub in the editor, real init in an export) and ' +
+      '`new RAPIER.World({ x: 0, y: -9.81, z: 0 })`. It is lazy-loaded (nothing downloads until a ' +
+      'compiled bundle mentions the module) and the single-file playable export vendors it, so a ' +
+      'game built on it still exports. Use it for 3D rigid bodies only: 2D games stay on the ' +
+      "engine's own `Collision2DService` + the `core:Hitbox2D` behaviour, which the editor and the " +
+      'verification tools already understand. Do NOT hand-write a solver. Full detail: ' +
+      "read_skill('game-prototype', 'Rapier').",
+  },
+];
+
+/** Notes for every off-package topic a query touches. Exported so a spec can drive the table. */
+export function matchOffPackageNotes(query: string): string[] {
+  return OFF_PACKAGE_TOPICS.filter(topic => topic.pattern.test(query)).map(topic => topic.note);
+}
+
 export interface EngineSearchOptions {
   query: string;
   /** Treat `query` as a JS regular expression instead of a literal substring. */
@@ -239,7 +287,14 @@ export function searchEngineSources(
       });
     }
   }
-  return { matches, matchCount, truncated: matchCount > matches.length, filesSearched };
+  const notes = matchOffPackageNotes(query);
+  return {
+    matches,
+    matchCount,
+    truncated: matchCount > matches.length,
+    filesSearched,
+    ...(notes.length > 0 ? { notes } : {}),
+  };
 }
 
 /** Read a slice of one engine source file. `offset` is a 1-based line number. */

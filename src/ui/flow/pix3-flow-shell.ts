@@ -8,6 +8,7 @@ import { IconService, IconSize } from '@/services/editor/IconService';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { FlowPlanService, type FlowPlan } from '@/services/flow/FlowPlanService';
 import { FlowStageService, type FlowStage } from '@/services/flow/FlowStageService';
+import { IDEA_DOC_PATH } from '@/services/flow/FlowReferencesService';
 import {
   PrototypeBootstrapService,
   type PrototypeBootstrapPhase,
@@ -15,6 +16,7 @@ import {
 import '@/ui/agent-chat/pix3-agent-chat-panel';
 import '@/ui/shared/pix3-mode-switch';
 import './pix3-flow-side-panel';
+import './pix3-flow-scene-view';
 import './pix3-idea-doc';
 import './pix3-flow-shell.ts.css';
 
@@ -136,6 +138,16 @@ export class Pix3FlowShell extends ComponentBase {
   @state()
   private stageView: StageView = 'game';
 
+  /**
+   * Which document the Idea view is showing. The design document by default — it is the one the
+   * project came from — and any other `design/*.md` the user clicks in the Files column.
+   *
+   * The shell owns it rather than the document element, because two things read it: the view that
+   * renders it and the file list that marks the row.
+   */
+  @state()
+  private docPath = IDEA_DOC_PATH;
+
   /** Phase of a transition this shell started, mirrored from the bootstrap status stream. */
   @state()
   private transitionPhase: PrototypeBootstrapPhase | null = null;
@@ -172,16 +184,37 @@ export class Pix3FlowShell extends ComponentBase {
    * an unmount/remount cycle would throw away the scroll position and a half-typed source edit.
    */
   private ideaDocMounted = false;
+  /**
+   * Same lazy-then-permanent rule as `ideaDocMounted`, for the same reason and one more: the scene
+   * view owns `appState.ui.flowSceneViewVisible`, and unmounting it is what clears that flag — so
+   * it must be a real unmount that happens only when the whole shell goes away, never a view swap.
+   */
+  private sceneViewMounted = false;
+  /**
+   * Suppresses the play-state view switch for the duration of a deliberate stop-then-start.
+   * Cleared on a timer rather than inline: valtio notifies subscribers on a microtask, so the
+   * `isPlaying` flips a replay causes land after the awaits that caused them have resolved.
+   */
+  private suppressPlayViewSwitch = false;
+  private disposeScenes?: () => void;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.stage = this.stageService.getStage();
 
     this.disposeUi = subscribe(appState.ui, () => {
+      const wasPlaying = this.isPlaying;
       this.isPlaying = appState.ui.isPlaying;
       this.stageError = appState.ui.playModeError?.message ?? null;
+      if (wasPlaying !== this.isPlaying) {
+        this.syncViewToPlayState(wasPlaying);
+      }
       this.fitStage();
     });
+
+    // The Scene option is offered only once a scene exists, and in Vibe one appears out of band
+    // (the first `game.start` loads it) — so this shell has to hear about it.
+    this.disposeScenes = subscribe(appState.scenes, () => this.requestUpdate());
 
     this.disposeProject = subscribe(appState.project, () => {
       void this.onProjectChanged();
@@ -222,6 +255,8 @@ export class Pix3FlowShell extends ComponentBase {
     this.disposeProject = undefined;
     this.disposeBootstrap?.();
     this.disposeBootstrap = undefined;
+    this.disposeScenes?.();
+    this.disposeScenes = undefined;
   }
 
   protected firstUpdated(): void {
@@ -446,6 +481,10 @@ export class Pix3FlowShell extends ComponentBase {
    */
   private async startFromEntryScene(): Promise<void> {
     this.stageError = null;
+    // This crosses the play state twice on purpose, and the view follows play state — so without
+    // the guard the column would flash to Scene on the stop and back on the start, in the middle
+    // of a replay the user asked for. The stage they are watching must not blink.
+    this.suppressPlayViewSwitch = true;
     try {
       // The stage auto-starts on mount, so this button is almost always clicked while a game
       // is already running — and the play commands refuse to start a second one. Stopping
@@ -458,6 +497,13 @@ export class Pix3FlowShell extends ComponentBase {
       }
     } catch (error) {
       this.stageError = error instanceof Error ? error.message : String(error);
+    } finally {
+      // A macrotask, not a microtask: valtio's notifications are microtasks queued when the play
+      // state actually flipped, so they are all guaranteed to have run — and been ignored — by the
+      // time this lands. Clearing inline would let the restart's own flip through.
+      setTimeout(() => {
+        this.suppressPlayViewSwitch = false;
+      }, 0);
     }
   }
 
@@ -557,25 +603,62 @@ export class Pix3FlowShell extends ComponentBase {
    */
   private renderPrototypeView() {
     const showDoc = this.stageView === 'idea';
+    const showScene = this.stageView === 'scene';
     return html`
       <div class="flow-view">
-        ${this.renderViewSwitch()} ${this.renderStage(showDoc)}
+        ${this.renderViewSwitch()} ${this.renderStage(showDoc || showScene)}
+        ${this.sceneViewMounted ? this.renderSceneView(!showScene) : null}
         ${this.ideaDocMounted ? this.renderIdeaDoc(!showDoc) : null}
       </div>
     `;
   }
 
+  /**
+   * The edit-mode viewport. Hidden rather than unmounted for the same reason the stage is: the
+   * `pix3-editor-tab` inside owns the shared editor canvas and the visibility flag that lets the
+   * renderer paint it at all, so a view swap must not tear it down and rebuild it.
+   */
+  private renderSceneView(hidden = false) {
+    return html`
+      <main class="flow-scene" aria-label="Scene view" ?hidden=${hidden}>
+        <pix3-flow-scene-view .active=${!hidden}></pix3-flow-scene-view>
+      </main>
+    `;
+  }
+
   private renderViewSwitch() {
+    // A scene graph exists in Vibe only once something has loaded one, and the only thing that does
+    // is the first `game.start` (there are no tabs to open one). Offering the view before that
+    // would hand the user an empty canvas and no way to tell why.
+    const hasScene = appState.scenes.activeSceneId !== null;
     return html`
       <div class="flow-view__switch" role="group" aria-label="Prototype view">
         ${this.renderViewOption('game', 'Game', 'gamepad', 'the live game')}
+        <span class="flow-view__divider" aria-hidden="true"></span>
+        ${this.renderViewOption(
+          'scene',
+          'Scene',
+          'edit-3',
+          'the scene, to look around and pick objects',
+          hasScene ? null : 'Play the game once — that is what loads the scene'
+        )}
         <span class="flow-view__divider" aria-hidden="true"></span>
         ${this.renderViewOption('idea', 'Idea', 'file-text', 'the design document')}
       </div>
     `;
   }
 
-  private renderViewOption(view: StageView, label: string, icon: string, hint: string) {
+  /**
+   * One segment of the view switch. `disabledReason` both disables the option and replaces its
+   * tooltip — a greyed-out control that does not say why is a control the user retries.
+   */
+  private renderViewOption(
+    view: StageView,
+    label: string,
+    icon: string,
+    hint: string,
+    disabledReason: string | null = null
+  ) {
     const isCurrent = this.stageView === view;
     return html`
       <button
@@ -583,13 +666,43 @@ export class Pix3FlowShell extends ComponentBase {
         type="button"
         data-view=${view}
         data-current=${isCurrent ? 'true' : 'false'}
+        ?disabled=${disabledReason !== null}
         aria-pressed=${isCurrent}
-        title=${isCurrent ? `Showing ${hint}` : `Show ${hint}`}
+        title=${disabledReason ?? (isCurrent ? `Showing ${hint}` : `Show ${hint}`)}
         @click=${() => this.selectView(view)}
       >
         ${this.icons.getIcon(icon, IconSize.SMALL)}<span class="flow-view__label">${label}</span>
       </button>
     `;
+  }
+
+  /**
+   * A document was clicked in the Files column: show it, and bring the Idea view forward if some
+   * other view is on the stage. Opening a document the user cannot see would be a click that looks
+   * like it did nothing.
+   */
+  private readonly onDocumentOpen = (event: Event): void => {
+    const path = (event as CustomEvent<{ path?: string }>).detail?.path;
+    if (typeof path === 'string' && path) {
+      void this.showDocument(path);
+    }
+  };
+
+  private async showDocument(path: string): Promise<void> {
+    if (path !== this.docPath) {
+      // The element holds an unsaved source draft in its own state, so it gets a say before the
+      // path under it changes.
+      const doc = this.querySelector('pix3-idea-doc');
+      if (doc && !(await doc.confirmLeave())) {
+        return;
+      }
+      this.docPath = path;
+    }
+    // At the idea stage the document IS the stage — there is no switch to move.
+    if (this.stage !== 'idea') {
+      this.ideaDocMounted = true;
+      this.selectView('idea');
+    }
   }
 
   private selectView(view: StageView): void {
@@ -599,20 +712,47 @@ export class Pix3FlowShell extends ComponentBase {
     if (view === 'idea') {
       this.ideaDocMounted = true;
     }
+    if (view === 'scene') {
+      this.sceneViewMounted = true;
+    }
     this.stageView = view;
     // Coming back to the game re-shows an element that was `display: none`, so its frame has to be
     // re-measured — the letterbox was computed against a collapsed box while it was hidden.
     void this.updateComplete.then(() => this.fitStage());
   }
 
+  /**
+   * Follow the play state with the view, but only between Game and Scene.
+   *
+   * Stopping leaves the stage with nothing on it, and the scene the user can navigate and click is
+   * the useful thing to put there; starting again means they want to watch it. The Idea view is
+   * never touched either way — reading the design document while the game is stopped is a place
+   * people deliberately go, and yanking it out from under them would be a bug, not a convenience.
+   */
+  private syncViewToPlayState(wasPlaying: boolean): void {
+    if (this.suppressPlayViewSwitch) {
+      return;
+    }
+    if (wasPlaying && !this.isPlaying && this.stageView === 'game') {
+      // Only where the Scene option itself is offered — switching to a view whose own switch is
+      // greyed out would strand the user on an empty canvas they cannot leave by clicking Scene.
+      if (appState.scenes.activeSceneId === null) {
+        return;
+      }
+      this.selectView('scene');
+    } else if (!wasPlaying && this.isPlaying && this.stageView === 'scene') {
+      this.selectView('game');
+    }
+  }
+
   private renderStage(hidden = false) {
     return html`
       <main class="flow-stage" aria-label="Game stage" ?hidden=${hidden}>
+        ${this.renderStageBar()}
         <div class="flow-stage__frame">
           <div class="flow-stage__host"></div>
           ${this.renderStageOverlay()}
         </div>
-        ${this.renderStageBar()}
       </main>
     `;
   }
@@ -629,7 +769,7 @@ export class Pix3FlowShell extends ComponentBase {
   private renderIdeaDoc(hidden = false) {
     return html`
       <main class="flow-doc" aria-label="Design document" ?hidden=${hidden}>
-        <pix3-idea-doc doc-path="design/gdd.md"></pix3-idea-doc>
+        <pix3-idea-doc doc-path=${this.docPath}></pix3-idea-doc>
       </main>
     `;
   }
@@ -716,7 +856,9 @@ export class Pix3FlowShell extends ComponentBase {
         .plan=${this.plan}
         .agentRunning=${this.isAgentRunning}
         .activeTool=${this.activeTool}
+        .activeDoc=${this.docPath}
         @panel-resize=${this.onPanelResize}
+        @document-open=${this.onDocumentOpen}
       ></pix3-flow-side-panel>
     `;
   }
@@ -818,10 +960,25 @@ export class Pix3FlowShell extends ComponentBase {
     this.fitStage();
   };
 
+  /**
+   * Play / Restart / status, above the game and pushed to the right.
+   *
+   * Deliberately the same corner as the scene view's own strip: those are the same controls for the
+   * same loop, and a Play button that jumps from the bottom-left to the top-right when the view
+   * changes is one the eye has to hunt for twice. Under the game they also read as a caption of
+   * something that just ended, which is exactly wrong for the control you press next.
+   */
   private renderStageBar() {
     const toolLabel = this.activeTool ? this.activeTool.replace(/_/g, ' ') : null;
     return html`
       <div class="flow-stage__bar">
+        <span class="flow-stage__status">
+          ${this.isAgentRunning && toolLabel
+            ? html`<span class="flow-plan__spinner"></span><span>${toolLabel}</span>`
+            : this.isPlaying
+              ? html`<span>Live</span>`
+              : html`<span>Stopped</span>`}
+        </span>
         <button
           class="flow-stage__button"
           type="button"
@@ -850,13 +1007,6 @@ export class Pix3FlowShell extends ComponentBase {
               ${this.icons.getIcon('skip-back', IconSize.SMALL)}
             </button>`
           : null}
-        <span class="flow-stage__status">
-          ${this.isAgentRunning && toolLabel
-            ? html`<span class="flow-plan__spinner"></span><span>${toolLabel}</span>`
-            : this.isPlaying
-              ? html`<span>Live</span>`
-              : html`<span>Stopped</span>`}
-        </span>
       </div>
     `;
   }
@@ -879,8 +1029,11 @@ export class Pix3FlowShell extends ComponentBase {
   }
 }
 
-/** Which half of the prototype stage the column shows (design §2.5). */
-type StageView = 'game' | 'idea';
+/**
+ * Which view the prototype column shows. `scene` is the edit-mode viewport — the one place in Vibe
+ * where a stopped game is still something to look at, navigate and click.
+ */
+type StageView = 'game' | 'scene' | 'idea';
 
 /**
  * What the user reads while the transition runs. Phase names are pipeline vocabulary; these are

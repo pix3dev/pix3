@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ENGINE_PATH_PREFIX,
+  OFF_PACKAGE_TOPICS,
   loadEngineSources,
+  matchOffPackageNotes,
   readEngineSource,
   resolveEnginePath,
   searchEngineSources,
@@ -106,6 +108,42 @@ describe('engine source search', () => {
       '  amplitude?: number;',
       '  duration?: number;',
     ]);
+  });
+});
+
+describe('off-package notes', () => {
+  it('answers a physics query with a note even when the search does find lines', () => {
+    // The recorded failure did not get an empty result — it got comment mentions and read them as
+    // "no physics here". So the note has to fire on the query, not on an empty match list.
+    const shipped = new Map([
+      ['@pix3/runtime/src/core/physics-debug-overlay.ts', ' * Physics lives in the game.'],
+    ]);
+    const result = searchEngineSources(shipped, { query: 'physics' });
+    expect('matches' in result).toBe(true);
+    if (!('matches' in result)) return;
+    expect(result.matches).toHaveLength(1);
+    expect(result.notes?.[0]).toContain('@dimforge/rapier3d-compat');
+  });
+
+  it('stays quiet on queries that are answered by the package itself', () => {
+    const result = searchEngineSources(sources, { query: 'amplitude' });
+    expect('matches' in result && result.notes).toBeUndefined();
+
+    // `gravity` is a real Particles3D property. A physics note here would be noise on a query the
+    // search already answers correctly, which is how a helpful note turns into an ignored one.
+    expect(matchOffPackageNotes('gravity')).toEqual([]);
+  });
+
+  it('covers the spellings an agent actually reaches for', () => {
+    for (const query of ['rigidbody', 'rigid body', 'RigidBody', 'rapier', 'collider', 'solver']) {
+      expect(matchOffPackageNotes(query)).toHaveLength(1);
+    }
+  });
+
+  it('uses stateless patterns — a `g` flag would make every other call miss', () => {
+    for (const topic of OFF_PACKAGE_TOPICS) {
+      expect(topic.pattern.global).toBe(false);
+    }
   });
 });
 

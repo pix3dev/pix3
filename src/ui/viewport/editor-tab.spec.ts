@@ -597,6 +597,121 @@ describe('EditorTabComponent', () => {
   });
 });
 
+/**
+ * Standalone is the mode Vibe's scene view mounts: no Golden Layout, no tabs, therefore no entry in
+ * `appState.tabs` at all. Every "am I the active tab?" gate answers `false` in that world, so
+ * without the standalone escape the surface silently ignores every wheel, pointer and key event —
+ * a viewport that renders and cannot be used.
+ */
+describe('EditorTabComponent — standalone (tab-less) mode', () => {
+  const wheelEvent = (): Event => {
+    const event = new Event('wheel', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'deltaY', { value: 100, configurable: true });
+    Object.defineProperty(event, 'clientX', { value: 40, configurable: true });
+    Object.defineProperty(event, 'clientY', { value: 40, configurable: true });
+    return event;
+  };
+
+  it('handles viewport input with no tabs at all', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.standalone = true;
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(appState.tabs.tabs).toHaveLength(0);
+    panel.dispatchEvent(wheelEvent());
+
+    expect(services.navigation2D.handleWheel).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores the same input when it is an ordinary, inactive tab', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    panel.dispatchEvent(wheelEvent());
+
+    expect(services.navigation2D.handleWheel).not.toHaveBeenCalled();
+  });
+
+  it('drops the top toolbar but keeps the in-canvas overlays', async () => {
+    const panel = new EditorTabComponent();
+    stubPanelServices(panel);
+    panel.standalone = true;
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    const root = panel.shadowRoot;
+    // No room for grid / layer / camera / locale chrome beside a chat column — and every one of
+    // those switches has a Studio home.
+    expect(root?.querySelector('.viewport-toolbar-shell')).toBeNull();
+    // What you actually need to navigate and pick stays: it is painted inside the canvas.
+    expect(root?.querySelector('.transform-overlay')).not.toBeNull();
+    expect(root?.querySelector('.zoom-overlay')).not.toBeNull();
+  });
+
+  it('claims the shared canvas even though no tab is active', async () => {
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.standalone = true;
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(services.viewportRenderer.attachToHost).toHaveBeenCalled();
+    // A Flow-loaded scene has no saved editor-camera context, so the default camera can be aimed at
+    // nothing. Frame once, on the first attach.
+    expect(services.commandDispatcher.executeById).toHaveBeenCalledWith('view.zoom-all');
+  });
+
+  /**
+   * The canvas is shared and has exactly one host. An agent's offscreen Studio mount reacts to the
+   * same `appState.tabs` mutations the user's viewport does, so without this gate it would take the
+   * canvas back and leave the visible Vibe viewport blank — while its own screenshots kept working,
+   * which is what makes the bug so hard to see.
+   */
+  it('does not let a Studio tab reclaim the canvas while the Vibe scene view is up', async () => {
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = true;
+    appState.tabs.tabs = [
+      { id: 'tab-1', title: 'Main', type: 'scene', resourceId: 'main', isDirty: false },
+    ];
+    appState.tabs.activeTabId = 'tab-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.tabId = 'tab-1';
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(services.viewportRenderer.attachToHost).not.toHaveBeenCalled();
+  });
+
+  it('hands the canvas back to the active Studio tab once the scene view is gone', async () => {
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = false;
+    appState.tabs.tabs = [
+      { id: 'tab-1', title: 'Main', type: 'scene', resourceId: 'main', isDirty: false },
+    ];
+    appState.tabs.activeTabId = 'tab-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.tabId = 'tab-1';
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+
+    expect(services.viewportRenderer.attachToHost).toHaveBeenCalled();
+  });
+});
+
 function graphOf(...nodes: NodeBase[]): SceneGraph {
   return {
     rootNodes: nodes,
@@ -667,20 +782,22 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
     configurable: true,
   });
 
+  const navigation2D = {
+    startPan: vi.fn(),
+    endPan: vi.fn(),
+    updatePan: vi.fn(),
+    clearTouchState: vi.fn(),
+    handleWheel: vi.fn(),
+    isTouchGestureActive: vi.fn(() => false),
+    isTouchPointerTracked: vi.fn(() => false),
+    startTouchPointer: vi.fn(),
+    updateTouchPointer: vi.fn(() => false),
+    endTouchPointer: vi.fn(() => false),
+    updateTouchPan: vi.fn(),
+  };
+
   Object.defineProperty(panel, 'navigation2D', {
-    value: {
-      startPan: vi.fn(),
-      endPan: vi.fn(),
-      updatePan: vi.fn(),
-      clearTouchState: vi.fn(),
-      handleWheel: vi.fn(),
-      isTouchGestureActive: vi.fn(() => false),
-      isTouchPointerTracked: vi.fn(() => false),
-      startTouchPointer: vi.fn(),
-      updateTouchPointer: vi.fn(() => false),
-      endTouchPointer: vi.fn(() => false),
-      updateTouchPan: vi.fn(),
-    },
+    value: navigation2D,
     configurable: true,
   });
 
@@ -693,6 +810,7 @@ function stubPanelServices(panel: InstanceType<typeof EditorTabComponent>) {
     commandDispatcher,
     viewportRenderer,
     sceneManager,
+    navigation2D,
   };
 }
 

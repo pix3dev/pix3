@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { OFF_PACKAGE_TOPICS } from '@/core/engine-source';
+
 import { AgentSkillsService } from './AgentSkillsService';
 
 describe('AgentSkillsService', () => {
@@ -44,5 +46,20 @@ describe('AgentSkillsService', () => {
 
   it('returns null for an unknown section', () => {
     expect(service.read('verify-and-fix', 'no such heading here')).toBeNull();
+  });
+
+  it('honours the section pointer `engine_search` hands out for off-package topics', () => {
+    // `engine_search` answers physics queries with a note ending in
+    // `read_skill('game-prototype', 'Rapier')`. Renaming that heading would break the pointer
+    // silently — the agent would get a null and be back where the note was written to rescue it.
+    for (const topic of OFF_PACKAGE_TOPICS) {
+      const pointer = /read_skill\('([^']+)', '([^']+)'\)/.exec(topic.note);
+      expect(pointer, `topic ${topic.id} has no read_skill pointer`).not.toBeNull();
+      if (!pointer) continue;
+      expect(
+        service.read(pointer[1], pointer[2]),
+        `${topic.id} points at a dead section`
+      ).toBeTruthy();
+    }
   });
 });

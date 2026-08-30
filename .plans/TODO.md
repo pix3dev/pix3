@@ -82,6 +82,7 @@
 
 ## Рантайм (Runtime)
 
+- [ ] **встроенная 2D-физика: `core:PhysicsBody2D` + `core:Collider2D` + `scene.physics2d`** (Сложность: L) — _спека [physics-engine.md](physics-engine.md), одобрена 2026-08-30, реализация отложена. Солвер **рукописный** (импульсный, круги + OBB, сенсоры, swept-CCD), Rapier в 2D-путь не заходит: его ~2 МБ wasm больше всего playable-экспорта. 3D физика остаётся game-level (Rapier в пользовательских скриптах, как в DeepCore). Ноль байт для игр без физики через `STRIPPABLE_RUNTIME_MODULES` по прецеденту `NetworkService`; шаг — в существующий `SceneRunner.runFixedUpdates`. `core:Hitbox2D` остаётся как query-only слой_
 - [x] **выпустить `@pix3/runtime` 1.3.0 в npm** (Сложность: S) — _сделано 2026-08-04: тег `runtime-v1.3.0` (первый `runtime-v*` в репозитории) → `publish-packages.yml` через OIDC → npm `latest = 1.3.0`. Открыло потребителям пер-кадровый anchor/`sizeMode`/`sourceSize` (R1) и `getFramePoint`/`core:PointAttachment` (R2). DeepCore подтянул обычным `npm update` (спека `^1.2.0` разрешилась в 1.3.0, package.json править не пришлось), собирается чисто_
 - [x] add remote preview to check the game on device (Сложность: L) — _relay + player.html + `PreviewHostService`; см. [done/rapid-prototyping-design.md](done/rapid-prototyping-design.md)_
 - [x] implement cinematic camera module, that will allow control camera more flexibly (Сложность: L) — _P0.1 vcams (3D) + Cutscene Director; Camera2D осознанно отложена_

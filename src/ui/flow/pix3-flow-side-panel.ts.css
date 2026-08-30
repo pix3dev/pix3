@@ -294,7 +294,13 @@ pix3-flow-side-panel .ref-card:hover {
   border-color: var(--line-2);
 }
 
+/* The anchor of the list, but a quiet one: the accent below means "this is what you are reading". */
 pix3-flow-side-panel .ref-card--pinned {
+  background: var(--bg-3);
+}
+
+/* The document currently open in the Idea view. */
+pix3-flow-side-panel .ref-card--active {
   background: var(--accent-soft);
   border-color: var(--accent-line);
 }

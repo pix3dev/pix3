@@ -1628,6 +1628,37 @@ describe('ViewportRendererService — hidden workspace', () => {
     expect(internals.renderRequested).toBe(true);
   });
 
+  /**
+   * Vibe's scene view mounts the SAME shared canvas as a real, visible surface. Suppressing there
+   * is what used to make it render black, so the flag it raises has to reach the renderer.
+   */
+  it('paints in Flow once the scene view is the surface on screen', () => {
+    const { service, renderFrame, internals } = makeService();
+    internals.isPaused = false;
+    internals.isWindowFocused = true;
+    internals.animationId = undefined;
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = true;
+
+    service.requestRender();
+
+    expect(renderFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it('goes back to suppressing when the scene view is closed again', () => {
+    const { service, renderFrame, internals } = makeService();
+    internals.isPaused = false;
+    internals.isWindowFocused = true;
+    internals.animationId = undefined;
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = false;
+
+    service.requestRender();
+
+    expect(renderFrame).not.toHaveBeenCalled();
+    expect(internals.renderRequested).toBe(true);
+  });
+
   it('still paints on demand once Studio is back', () => {
     const { service, renderFrame, internals } = makeService();
     internals.isPaused = false;

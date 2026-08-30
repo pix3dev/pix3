@@ -141,6 +141,16 @@ export class Pix3FlowSidePanel extends ComponentBase {
   @property({ type: String, attribute: 'active-tool' })
   activeTool: string | null = null;
 
+  /**
+   * Path of the document the stage's Idea view is showing, owned by the shell.
+   *
+   * The list marks it rather than deciding it: which document is open is a property of the stage,
+   * and two components each keeping their own answer is how a highlight ends up on a document the
+   * user is not reading.
+   */
+  @property({ type: String, attribute: 'active-doc' })
+  activeDoc: string | null = null;
+
   /** Reflected so the panel's collapsed width lives in CSS rather than in an inline style. */
   @property({ type: Boolean, reflect: true })
   collapsed = !loadPanelOpen();
@@ -408,6 +418,26 @@ export class Pix3FlowSidePanel extends ComponentBase {
     );
   }
 
+  /**
+   * Report that a document card was clicked. The shell owns which document the Idea view shows —
+   * this column only says which one the user asked for.
+   *
+   * Documents go to that view rather than into the lightbox because they are read AND edited
+   * there: the overlay is a look at a file, the Idea view is the place the file is worked on.
+   */
+  private onOpenDocument(item: FlowReferenceItem): void {
+    if (item.missing) {
+      return;
+    }
+    this.dispatchEvent(
+      new CustomEvent('document-open', {
+        detail: { path: item.path },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   /** Open the lightbox on this item, with the same-kind siblings behind the arrow keys. */
   private async onExpand(item: FlowReferenceItem): Promise<void> {
     if (item.missing) {
@@ -630,14 +660,26 @@ export class Pix3FlowSidePanel extends ComponentBase {
 
   private renderCard(item: FlowReferenceItem) {
     const caption = item.caption ?? item.previewLine;
+    const isDocument = isReadableDocument(item);
+    const isActive = isDocument && this.activeDoc === item.path;
     return html`
-      <div class="ref-card ${item.pinned ? 'ref-card--pinned' : ''}" role="listitem">
+      <div
+        class="ref-card ${item.pinned ? 'ref-card--pinned' : ''} ${isActive
+          ? 'ref-card--active'
+          : ''}"
+        role="listitem"
+      >
         <button
           class="ref-card__body"
           type="button"
           ?disabled=${item.missing}
-          title=${item.missing ? `${item.path} does not exist yet` : `Open ${item.path}`}
-          @click=${() => void this.onExpand(item)}
+          aria-current=${isActive ? 'true' : 'false'}
+          title=${item.missing
+            ? `${item.path} does not exist yet`
+            : isDocument
+              ? `Show ${item.path} in the Idea view`
+              : `Open ${item.path}`}
+          @click=${() => (isDocument ? this.onOpenDocument(item) : void this.onExpand(item))}
         >
           <span class="ref-card__thumb">${this.renderThumb(item)}</span>
           <span class="ref-card__text">
@@ -730,6 +772,13 @@ export class Pix3FlowSidePanel extends ComponentBase {
 
 const allItems = (list: FlowReferenceList | null): readonly FlowReferenceItem[] =>
   list ? [list.document, ...list.design, ...list.references, ...list.sources] : [];
+
+/**
+ * Whether the Idea view can show this file. Markdown only: that view renders through
+ * `markdown-lite` and offers a source editor, so a csv or a zip opened there would be a
+ * plain-text editor over a file nobody meant to edit — those keep the lightbox preview.
+ */
+const isReadableDocument = (item: FlowReferenceItem): boolean => item.kind === 'markdown';
 
 /** Feather name for a file the panel cannot show a picture of. Vector always, never a glyph. */
 const kindIcon = (item: FlowReferenceItem): string => {
