@@ -14,6 +14,16 @@ import { SceneManager, type SceneGraph } from '@pix3/runtime';
 // stays an undefined custom element — an inert tag in the tree.
 vi.mock('@/ui/viewport/editor-tab', () => ({}));
 
+// The properties drawer imports the real Inspector on first open — a whole feature with its own
+// service graph. What this file checks is the drawer's own behaviour (lazy import, toggle,
+// remembered posture), so the module is stubbed to a bare custom element.
+vi.mock('@/ui/object-inspector/inspector-panel', () => {
+  if (!customElements.get('pix3-inspector-panel')) {
+    customElements.define('pix3-inspector-panel', class extends HTMLElement {});
+  }
+  return {};
+});
+
 interface SceneViewElement extends HTMLElement {
   updateComplete: Promise<unknown>;
   active: boolean;
@@ -387,5 +397,100 @@ describe('pix3-flow-scene-view — the write-back', () => {
     await vi.advanceTimersByTimeAsync(SAVED_RECEIPT_MS + 50);
     await element.updateComplete;
     expect(element.textContent).not.toContain('Saved');
+  });
+});
+
+/**
+ * The properties drawer — the last missing piece of Vibe's scene view. Selection and the gizmo
+ * worked and edits persisted, but a value could not be TYPED: there was no inspector and no tree.
+ * The drawer mounts the same `pix3-inspector-panel` Studio docks, so what is asserted here is the
+ * drawer's own contract rather than the inspector's.
+ */
+describe('pix3-flow-scene-view — properties drawer', () => {
+  const toggle = (element: SceneViewElement): HTMLButtonElement => {
+    const button = element.querySelector<HTMLButtonElement>('.flow-scene__properties');
+    if (!button) throw new Error('no properties toggle in the strip');
+    return button;
+  };
+
+  /** The panel arrives after a dynamic import, which takes more than one settle to resolve. */
+  const settleInspector = async (element: SceneViewElement): Promise<void> => {
+    for (let i = 0; i < 10 && !element.querySelector('pix3-inspector-panel'); i++) {
+      await settle(element);
+    }
+  };
+
+  it('starts closed and imports nothing until it is opened', async () => {
+    const element = await mount();
+
+    expect(toggle(element).getAttribute('aria-pressed')).toBe('false');
+    expect(element.querySelector('.flow-scene__inspector')).toBeNull();
+    expect(element.querySelector('.flow-scene__body')?.getAttribute('data-inspector')).toBe(
+      'closed'
+    );
+  });
+
+  it('opens on the toggle and mounts the shared inspector panel', async () => {
+    const element = await mount();
+
+    toggle(element).click();
+    await settleInspector(element);
+
+    expect(toggle(element).getAttribute('aria-pressed')).toBe('true');
+    expect(element.querySelector('.flow-scene__body')?.getAttribute('data-inspector')).toBe('open');
+    expect(element.querySelector('pix3-inspector-panel')).not.toBeNull();
+  });
+
+  it('closes again on a second press', async () => {
+    const element = await mount();
+
+    toggle(element).click();
+    await settleInspector(element);
+    toggle(element).click();
+    await settle(element);
+
+    expect(toggle(element).getAttribute('aria-pressed')).toBe('false');
+    expect(element.querySelector('.flow-scene__inspector')).toBeNull();
+  });
+
+  it('remembers the open drawer across a remount — the view is rebuilt on every stage switch', async () => {
+    const first = await mount();
+    toggle(first).click();
+    await settleInspector(first);
+    first.remove();
+
+    const second = await mount();
+    await settleInspector(second);
+
+    expect(toggle(second).getAttribute('aria-pressed')).toBe('true');
+    expect(second.querySelector('pix3-inspector-panel')).not.toBeNull();
+  });
+
+  it('refreshes the strip when a selected node is renamed — the drawer makes that reachable', async () => {
+    const element = await mount();
+    scenes().graph = graphOf([{ id: 'n1', name: 'Coin', type: 'Sprite2D' }]);
+    appState.selection.nodeIds = ['n1'];
+    await settle(element);
+    expect(element.querySelector('.flow-scene__strip-text')?.textContent).toContain(
+      'Coin (Sprite2D)'
+    );
+
+    // A rename changes no node id, so the strip's id-keyed cache would keep the old name.
+    scenes().graph = graphOf([{ id: 'n1', name: 'Gold Coin', type: 'Sprite2D' }]);
+    appState.scenes.nodeDataChangeSignal += 1;
+    await settle(element);
+
+    expect(element.querySelector('.flow-scene__strip-text')?.textContent).toContain(
+      'Gold Coin (Sprite2D)'
+    );
+  });
+
+  it('keeps the viewport mounted while the drawer is open', async () => {
+    const element = await mount();
+
+    toggle(element).click();
+    await settleInspector(element);
+
+    expect(element.querySelector('pix3-editor-tab')).not.toBeNull();
   });
 });

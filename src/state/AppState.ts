@@ -328,6 +328,14 @@ export interface UIState {
    * "is this stage on screen" flag that must neither survive a reload nor be undoable.
    */
   flowSceneViewVisible: boolean;
+  /**
+   * Whether Vibe's scene view shows its properties drawer.
+   *
+   * Session UI state for the same reasons as {@link flowSceneViewVisible}: the view is remounted on
+   * every stage switch, so a per-component flag would close the drawer each time the user went to
+   * the game and back. Not persisted — it is a working posture, not a preference.
+   */
+  flowInspectorOpen: boolean;
   isLayoutReady: boolean;
   focusedPanelId: string | null;
   commandPaletteOpen: boolean;
@@ -592,6 +600,7 @@ export const createInitialAppState = (): AppState => ({
     theme: DEFAULT_THEME,
     workspaceMode: 'studio',
     flowSceneViewVisible: false,
+    flowInspectorOpen: false,
     isLayoutReady: false,
     focusedPanelId: null,
     commandPaletteOpen: false,

@@ -455,13 +455,26 @@ export class EditorTabService {
       // from another project before session ownership was tracked. Restoring those would reopen a
       // permanently broken tab on every launch, so drop them (and heal the stored session below).
       const tabsToRestore: typeof candidates = [];
+      // Did any existence check fail for a reason OTHER than "the file is gone"? Storage that is
+      // not pointed at the freshly opened directory yet throws, and treating that as "deleted"
+      // used to erase the whole saved session permanently — one transient read and the user's
+      // tabs were gone for good, with nothing to recover from.
+      let hadInconclusiveCheck = false;
       for (const tabData of candidates) {
-        if (await this.isMissingProjectResource(tabData.resourceId)) {
+        const presence = await this.resolveResourcePresence(tabData.resourceId);
+        if (presence === 'missing') {
           console.warn(
             '[EditorTabService] Dropping restored tab, resource no longer exists:',
             tabData.resourceId
           );
           continue;
+        }
+        if (presence === 'unknown') {
+          hadInconclusiveCheck = true;
+          console.warn(
+            '[EditorTabService] Could not check whether this resource still exists; keeping the tab:',
+            tabData.resourceId
+          );
         }
         tabsToRestore.push(tabData);
       }
@@ -472,9 +485,11 @@ export class EditorTabService {
       });
 
       // Nothing survived the existence check: drop the stored session outright, otherwise the same
-      // dead entries would be re-examined (and re-warned about) on every launch.
+      // dead entries would be re-examined (and re-warned about) on every launch. Only when every
+      // check was CONCLUSIVE — an inconclusive one means we may be discarding a session whose
+      // files are all perfectly fine.
       if (tabsToRestore.length === 0) {
-        if (candidates.length > 0) {
+        if (candidates.length > 0 && !hadInconclusiveCheck) {
           localStorage.removeItem(`pix3.projectTabs:${projectId}`);
         }
         return false;
@@ -630,15 +645,21 @@ export class EditorTabService {
   }
 
   /**
-   * True when a `res://` resource can no longer be read from the project. Non-`res://` ids
-   * (collab scenes, synthetic editor ids) have no backing file and are always treated as present.
+   * Whether a `res://` resource still exists in the project. Non-`res://` ids (collab scenes,
+   * synthetic editor ids) have no backing file and are always `present`.
+   *
+   * Three-valued on purpose. `unknown` (the read threw) is NOT the same as `missing`: storage that
+   * is not pointed at the newly opened project directory yet throws, and collapsing the two let a
+   * transient failure delete the user's saved session for good.
    */
-  private async isMissingProjectResource(resourceId: string): Promise<boolean> {
-    if (!resourceId.startsWith('res://')) return false;
+  private async resolveResourcePresence(
+    resourceId: string
+  ): Promise<'present' | 'missing' | 'unknown'> {
+    if (!resourceId.startsWith('res://')) return 'present';
     try {
-      return (await this.storage.getLastModified(resourceId)) === null;
+      return (await this.storage.getLastModified(resourceId)) === null ? 'missing' : 'present';
     } catch {
-      return true;
+      return 'unknown';
     }
   }
 

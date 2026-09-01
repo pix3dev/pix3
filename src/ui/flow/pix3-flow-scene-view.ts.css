@@ -11,11 +11,52 @@ pix3-flow-scene-view {
   background: var(--bg-0);
 }
 
+/* Viewport and (optionally) the properties drawer, side by side. One column while the drawer is
+   closed, so a Vibe session that never opens it has exactly the layout it had before. */
+pix3-flow-scene-view .flow-scene__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The floor is measured, not guessed: the Inspector's vector rows put two number fields side by
+   side, and below 320px a realistic value (`-1234.56`) loses its last characters to an ellipsis —
+   a properties panel that hides the property is worse than no panel. */
+pix3-flow-scene-view .flow-scene__body[data-inspector='open'] {
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 28%, 380px);
+}
+
 pix3-flow-scene-view pix3-editor-tab {
   display: block;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+/* The drawer holds the same `pix3-inspector-panel` Studio docks — see renderInspectorDrawer for
+   why it is the same component and not a second, smaller inspector. */
+pix3-flow-scene-view .flow-scene__inspector {
+  display: block;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-inline-start: 1px solid var(--line-2);
+  background: var(--bg-1);
+}
+
+pix3-flow-scene-view .flow-scene__inspector pix3-inspector-panel {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+pix3-flow-scene-view .flow-scene__inspector-loading {
+  padding: 12px;
+  color: var(--fg-3);
+  font-size: 11px;
 }
 
 pix3-flow-scene-view .flow-scene__strip {
@@ -67,6 +108,42 @@ pix3-flow-scene-view .flow-scene__save {
 
 pix3-flow-scene-view .flow-scene__save[data-state='saved'] {
   color: var(--fg-2);
+}
+
+/* Same metrics as the Play button beside it: two controls in one strip must not differ in size.
+   `aria-pressed` carries the open/closed state, so the styling only has to make it legible. */
+pix3-flow-scene-view .flow-scene__properties {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+pix3-flow-scene-view .flow-scene__properties svg {
+  width: 14px;
+  height: 14px;
+}
+
+pix3-flow-scene-view .flow-scene__properties:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-flow-scene-view .flow-scene__properties[aria-pressed='true'] {
+  border-color: var(--pix3-accent-color);
+  color: var(--fg-0);
+}
+
+pix3-flow-scene-view .flow-scene__properties:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* The one control the prototyping loop always needs, in the one view where the stage's own

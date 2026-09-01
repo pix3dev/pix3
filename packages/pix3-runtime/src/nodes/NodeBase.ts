@@ -3,7 +3,12 @@ import type { PropertySchema } from '../fw/property-schema';
 import type { ComponentDefinition } from '../core/component-hydration';
 import type { ScriptComponent } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
-import { describeThrown, reportScriptError, type ScriptErrorPhase } from '../core/game-debug';
+import {
+  describeThrown,
+  reportScriptError,
+  reportSignalEmit,
+  type ScriptErrorPhase,
+} from '../core/game-debug';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../core/shared-quad-geometry';
 
 export interface NodeMetadata {
@@ -424,6 +429,16 @@ export class NodeBase extends Object3D {
 
   emit(name: string, ...args: unknown[]): void {
     const connections = this._signals.get(name);
+    // Reported BEFORE the early return: a signal that fires into nothing is the case worth seeing,
+    // and it is indistinguishable from one that never fired without this. No sink = one property
+    // read (see reportSignalEmit).
+    reportSignalEmit({
+      nodeId: this.nodeId,
+      nodeName: this.name,
+      signal: name,
+      listenerCount: connections?.size ?? 0,
+      args,
+    });
     if (!connections || connections.size === 0) {
       return;
     }

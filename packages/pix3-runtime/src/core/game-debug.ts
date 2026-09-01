@@ -350,6 +350,64 @@ export function getScriptErrorSink(): ScriptErrorSink | null {
   return store[SCRIPT_ERROR_SINK_GLOBAL_KEY] ?? null;
 }
 
+/** One `NodeBase.emit` call, as seen by an observer. */
+export interface SignalEmitInfo {
+  readonly nodeId: string;
+  readonly nodeName: string;
+  readonly signal: string;
+  /** How many listeners were connected. `0` is the interesting case: nothing is wired to it. */
+  readonly listenerCount: number;
+  readonly args: readonly unknown[];
+}
+
+export type SignalEmitSink = (info: SignalEmitInfo) => void;
+
+/**
+ * Well-known global key for the **signal-emit sink**. Signals are the runtime's main way for one
+ * part of a game to tell another that something happened, and until this existed they were
+ * completely invisible: a signal that fired into nothing looked exactly like a signal that never
+ * fired. The editor registers a sink that writes them to the Logs panel; exported builds register
+ * none and reporting costs one property read. Stored on `globalThis` for the same reason as the
+ * script-error sink — in-editor user scripts resolve `@pix3/runtime` through a separate import map.
+ */
+export const SIGNAL_EMIT_SINK_GLOBAL_KEY = '__PIX3_SIGNAL_EMIT_SINK__';
+
+type SignalEmitSinkGlobal = Record<string, SignalEmitSink | null | undefined>;
+
+/** Register (or clear, with `null`) the signal-emit sink; returns a disposer. */
+export function registerSignalEmitSink(sink: SignalEmitSink | null): () => void {
+  const store = globalThis as unknown as SignalEmitSinkGlobal;
+  store[SIGNAL_EMIT_SINK_GLOBAL_KEY] = sink ?? undefined;
+  return () => {
+    if (store[SIGNAL_EMIT_SINK_GLOBAL_KEY] === sink) {
+      delete store[SIGNAL_EMIT_SINK_GLOBAL_KEY];
+    }
+  };
+}
+
+/** The registered signal-emit sink, if any. */
+export function getSignalEmitSink(): SignalEmitSink | null {
+  const store = globalThis as unknown as SignalEmitSinkGlobal;
+  return store[SIGNAL_EMIT_SINK_GLOBAL_KEY] ?? null;
+}
+
+/**
+ * Report a signal emission to the registered sink, if any. Same contract as
+ * {@link reportScriptError}: no sink is a no-op, and a throwing sink is swallowed — observing the
+ * game must never be able to change it.
+ */
+export function reportSignalEmit(info: SignalEmitInfo): void {
+  const sink = getSignalEmitSink();
+  if (!sink) {
+    return;
+  }
+  try {
+    sink(info);
+  } catch {
+    // A broken sink must not take down the runtime.
+  }
+}
+
 /**
  * Report a script/lifecycle failure to the registered sink, if any. A missing
  * sink is a no-op, and a sink that itself throws is swallowed — reporting an

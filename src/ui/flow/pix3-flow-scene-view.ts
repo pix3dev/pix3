@@ -92,6 +92,27 @@ export class Pix3FlowSceneView extends ComponentBase {
   @state()
   private saveState: 'idle' | 'saving' | 'saved' = 'idle';
 
+  /**
+   * Whether the properties drawer is showing. Mirrors `appState.ui.flowInspectorOpen`, which is
+   * where it lives so the posture survives the remount every stage switch causes.
+   */
+  @state()
+  private inspectorOpen = appState.ui.flowInspectorOpen;
+
+  /**
+   * Whether `pix3-inspector-panel` has been imported. The Inspector pulls in the property editors,
+   * the resource pickers and the library inspector — a real chunk, and Vibe's whole premise is that
+   * it does not build the editor it is not showing. So it is imported on first open, never on load.
+   *
+   * Seeded from the custom-element registry rather than `false`, because that registry is the
+   * global truth: once any part of the session has imported the panel, a fresh instance of this
+   * view must not pretend it is still loading.
+   */
+  @state()
+  private inspectorLoaded = customElements.get('pix3-inspector-panel') !== undefined;
+
+  private inspectorLoading = false;
+
   private disposeSelection?: () => void;
   private disposeScenes?: () => void;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +126,8 @@ export class Pix3FlowSceneView extends ComponentBase {
    * dozens of times a second for a selection that never changed.
    */
   private stagedSelection: string | null = null;
+  /** Last `scenes.nodeDataChangeSignal` this view acted on — see {@link onScenesChanged}. */
+  private lastNodeDataSignal = appState.scenes.nodeDataChangeSignal;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -112,6 +135,12 @@ export class Pix3FlowSceneView extends ComponentBase {
     this.disposeScenes = subscribe(appState.scenes, () => this.onScenesChanged());
     this.syncSelection();
     this.syncVisibility();
+    if (this.inspectorOpen) {
+      // Remounted with the drawer already open (the posture outlives the stage switch that
+      // rebuilt this view). Nobody pressed the toggle, so nothing else would load the panel and
+      // the drawer would sit on "Loading properties…" forever.
+      void this.ensureInspectorLoaded();
+    }
   }
 
   disconnectedCallback(): void {
@@ -168,6 +197,12 @@ export class Pix3FlowSceneView extends ComponentBase {
   private onScenesChanged(): void {
     if (!this.isConnected || !this.active) {
       return;
+    }
+    // Node data changed without the hierarchy changing — a property edit, including a rename made
+    // in the drawer right below the strip.
+    if (appState.scenes.nodeDataChangeSignal !== this.lastNodeDataSignal) {
+      this.lastNodeDataSignal = appState.scenes.nodeDataChangeSignal;
+      this.refreshSelectionLabels();
     }
     if (!this.dirtySceneId()) {
       return;
@@ -302,11 +337,7 @@ export class Pix3FlowSceneView extends ComponentBase {
 
     const graph = this.sceneManager.getActiveSceneGraph();
     const listed = ids.slice(0, SELECTION_LIST_LIMIT);
-    this.selectionLabels = listed.map(id => {
-      const node = graph?.nodeMap.get(id);
-      return node ? `${node.name} (${node.type})` : id;
-    });
-    this.selectionExtra = ids.length - listed.length;
+    this.refreshSelectionLabels();
 
     const detailed = listed.map(id => {
       const node = graph?.nodeMap.get(id);
@@ -322,6 +353,29 @@ export class Pix3FlowSceneView extends ComponentBase {
     });
   }
 
+  /**
+   * Re-read the names of the currently selected nodes.
+   *
+   * Split out of {@link syncSelection} because the strip caches on the selected node IDS, and a
+   * rename changes none of them: with the properties drawer a node can now be renamed from inside
+   * this very view, and the strip above it went on showing the old name.
+   */
+  private refreshSelectionLabels(): void {
+    const ids = [...appState.selection.nodeIds];
+    if (ids.length === 0) {
+      this.selectionLabels = [];
+      this.selectionExtra = 0;
+      return;
+    }
+    const graph = this.sceneManager.getActiveSceneGraph();
+    const listed = ids.slice(0, SELECTION_LIST_LIMIT);
+    this.selectionLabels = listed.map(id => {
+      const node = graph?.nodeMap.get(id);
+      return node ? `${node.name} (${node.type})` : id;
+    });
+    this.selectionExtra = ids.length - listed.length;
+  }
+
   private retractSelectionChip(): void {
     if (this.stagedSelection === null || this.stagedSelection === '') {
       return;
@@ -333,8 +387,59 @@ export class Pix3FlowSceneView extends ComponentBase {
   protected render() {
     return html`
       ${this.renderSelectionStrip()}
-      <pix3-editor-tab standalone></pix3-editor-tab>
+      <div class="flow-scene__body" data-inspector=${this.inspectorOpen ? 'open' : 'closed'}>
+        <pix3-editor-tab standalone></pix3-editor-tab>
+        ${this.renderInspectorDrawer()}
+      </div>
     `;
+  }
+
+  /**
+   * The typed-value surface Vibe was missing.
+   *
+   * It mounts the SAME `pix3-inspector-panel` Studio docks, rather than a second, smaller
+   * inspector: the panel already reads `appState.selection` on its own and routes every edit
+   * through `UpdateObjectPropertyCommand`, so reusing it costs no plumbing and — more importantly —
+   * makes it impossible for Vibe's inspector to drift from Studio's as node schemas change.
+   */
+  private renderInspectorDrawer() {
+    if (!this.inspectorOpen) {
+      return nothing;
+    }
+    return html`
+      <aside class="flow-scene__inspector" aria-label="Properties">
+        ${this.inspectorLoaded
+          ? html`<pix3-inspector-panel></pix3-inspector-panel>`
+          : html`<div class="flow-scene__inspector-loading">Loading properties…</div>`}
+      </aside>
+    `;
+  }
+
+  private readonly toggleInspector = (): void => {
+    this.inspectorOpen = !this.inspectorOpen;
+    appState.ui.flowInspectorOpen = this.inspectorOpen;
+    if (this.inspectorOpen) {
+      void this.ensureInspectorLoaded();
+    }
+  };
+
+  private async ensureInspectorLoaded(): Promise<void> {
+    if (this.inspectorLoaded || this.inspectorLoading) {
+      return;
+    }
+    this.inspectorLoading = true;
+    try {
+      await import('@/ui/object-inspector/inspector-panel');
+      this.inspectorLoaded = true;
+    } catch (error) {
+      // A drawer that cannot load is a missing feature, not a broken stage: leave it closed and
+      // say so, rather than taking the viewport down with it.
+      console.error('[Pix3FlowSceneView] Failed to load the properties panel:', error);
+      this.inspectorOpen = false;
+      appState.ui.flowInspectorOpen = false;
+    } finally {
+      this.inspectorLoading = false;
+    }
   }
 
   private renderSelectionStrip() {
@@ -355,6 +460,16 @@ export class Pix3FlowSceneView extends ComponentBase {
             : 'Click an object to select it — the chat sees your selection.'}</span
         >
         ${this.renderSaveState()}
+        <button
+          class="flow-scene__properties"
+          type="button"
+          aria-pressed=${this.inspectorOpen ? 'true' : 'false'}
+          title=${this.inspectorOpen ? 'Hide properties' : 'Show properties'}
+          aria-label=${this.inspectorOpen ? 'Hide properties' : 'Show properties'}
+          @click=${this.toggleInspector}
+        >
+          ${this.icons.getIcon('sliders', IconSize.SMALL)}
+        </button>
         <button
           class="flow-scene__play"
           type="button"

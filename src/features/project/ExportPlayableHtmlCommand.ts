@@ -97,6 +97,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
         title: projectName,
         entryScenePath: selection.scenePath,
         compress: selection.compress,
+        compressImages: selection.compressImages,
       });
 
       const allWarnings = [...artifact.warnings, ...artifact.bundleWarnings];
@@ -179,6 +180,7 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       title: string;
       entryScenePath: string;
       compress: boolean;
+      compressImages: boolean;
     }
   ): Promise<PlayableHtmlBuildArtifact> {
     this.playableExportProgressDialogService.showDialog({
@@ -239,6 +241,9 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
       scenePaths: uniqueScenePaths,
       selectedScenePath: initialSelection,
       offerCompression: true,
+      // Only the single-file HTML base64s its art into the file being budgeted; the zip ships real
+      // image files, where a `.png` name holding WebP bytes would be a lie on disk.
+      offerImageCompression: true,
     });
   }
 

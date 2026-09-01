@@ -31,6 +31,7 @@ import {
 import { PreviewPlayerClient, type PreviewConnectionState } from './PreviewPlayerClient';
 import { RemoteResourceManager } from './RemoteResourceManager';
 import { CURRENT_EDITOR_VERSION } from '@/version';
+import { stringifyLogArgument } from '@/core/log-argument';
 
 installRuntimeImportMap();
 registerSpineModuleLoader();
@@ -688,20 +689,6 @@ class PreviewPlayerApp {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function stringifyLogArgument(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value instanceof Error) {
-    return `${value.name}: ${value.message}`;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /**

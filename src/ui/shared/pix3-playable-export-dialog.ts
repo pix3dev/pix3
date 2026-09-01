@@ -15,6 +15,9 @@ export class Pix3PlayableExportDialog extends ComponentBase {
   @property({ type: Boolean })
   public offerCompression: boolean = false;
 
+  @property({ type: Boolean })
+  public offerImageCompression: boolean = false;
+
   @state()
   private draftScenePath: string = '';
 
@@ -25,6 +28,14 @@ export class Pix3PlayableExportDialog extends ComponentBase {
    */
   @state()
   private draftCompress: boolean = true;
+
+  /**
+   * On by default. It is lossy, but the export only keeps a re-encoded image when it came out
+   * smaller, and a playable's art is base64 inside the file being budgeted. Turned off for art
+   * that must survive byte-exact — pixel art at 1:1, or a sprite sheet with hard colour keys.
+   */
+  @state()
+  private draftCompressImages: boolean = true;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -93,6 +104,25 @@ export class Pix3PlayableExportDialog extends ComponentBase {
                 </div>
               `
             : null}
+          ${this.offerImageCompression
+            ? html`
+                <div class="dialog-field">
+                  <label class="dialog-toggle-row">
+                    <input
+                      type="checkbox"
+                      .checked=${this.draftCompressImages}
+                      @change=${this.onCompressImagesChange}
+                    />
+                    <span>Re-encode images as WebP (lossy)</span>
+                  </label>
+                  <div class="dialog-hint">
+                    Typically quarters each PNG, and an image is only replaced when the result is
+                    actually smaller. Turn it off for art that has to stay byte-exact — pixel art at
+                    1:1, or sprites with hard colour keys.
+                  </div>
+                </div>
+              `
+            : null}
 
           <div class="dialog-actions">
             <button class="btn-secondary" @click=${this.dispatchCancel}>Cancel</button>
@@ -123,6 +153,10 @@ export class Pix3PlayableExportDialog extends ComponentBase {
     this.draftCompress = (event.currentTarget as HTMLInputElement).checked;
   }
 
+  private onCompressImagesChange(event: Event): void {
+    this.draftCompressImages = (event.currentTarget as HTMLInputElement).checked;
+  }
+
   private onDialogKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -147,6 +181,7 @@ export class Pix3PlayableExportDialog extends ComponentBase {
           dialogId: this.dialogId,
           scenePath,
           compress: this.offerCompression && this.draftCompress,
+          compressImages: this.offerImageCompression && this.draftCompressImages,
         },
         bubbles: true,
         composed: true,

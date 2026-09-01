@@ -38,6 +38,8 @@ const createBuildArtifact = (
       uncompressedBundleBytes: 0,
       compressedBundleBytes: 0,
       compressionSavedBytes: 0,
+      imageCompressionSavedBytes: 0,
+      imagesRecompressed: 0,
       strippedModulePaths: [],
       codeAndWrapperBytes: 340,
       assetEntries: [
@@ -169,12 +171,14 @@ describe('ExportPlayableHtmlCommand', () => {
       selectedScenePath: 'scenes/main.pix3scene',
       // The single-file HTML export is the one path where compression pays off.
       offerCompression: true,
+      offerImageCompression: true,
     });
     expect(buildService.buildPlayableHtml).toHaveBeenCalledWith(context, {
       title: 'Demo Project',
       entryScenePath: 'scenes/main.pix3scene',
       // Whatever the dialog returned, verbatim — the command never decides this itself.
       compress: false,
+      compressImages: undefined,
     });
     expect(playableExportProgressDialogService.showDialog).toHaveBeenCalledWith({
       title: 'Building Playable HTML',
@@ -518,6 +522,7 @@ describe('ExportPlayableHtmlCommand', () => {
 
     expect(playableExportDialogService.showDialog).toHaveBeenCalledWith({
       offerCompression: true,
+      offerImageCompression: true,
       scenePaths: ['scenes/default.pix3scene', 'scenes/main.pix3scene'],
       selectedScenePath: 'scenes/default.pix3scene',
     });

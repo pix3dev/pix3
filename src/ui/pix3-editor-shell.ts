@@ -259,7 +259,7 @@ export class Pix3EditorShell extends ComponentBase {
   private readonly scriptExecutionService!: ScriptExecutionService;
 
   @inject(ProjectScriptLoaderService)
-  private readonly _projectScriptLoader!: ProjectScriptLoaderService; // Injected to ensure service initialization
+  private readonly projectScriptLoader!: ProjectScriptLoaderService;
 
   @inject(ScriptCompilerService)
   private readonly _scriptCompiler!: ScriptCompilerService; // Injected to ensure service initialization
@@ -383,7 +383,11 @@ export class Pix3EditorShell extends ComponentBase {
   private hashChangeHandler?: () => void;
   private watchedSceneIds = new Set<string>();
   private watchedScenePaths = new Map<string, string>();
-  private tabsInitialized = false;
+  /**
+   * Project whose saved tabs were already restored. A boolean here was a bug: the welcome screen
+   * lives in this component, so the flag survived closing one project and opening the next.
+   */
+  private tabsRestoredForProjectId: string | null = null;
   /** Golden Layout is built at most once per session, the first time Studio is on screen. */
   private layoutInitStarted = false;
   /** Project id whose remembered workspace mode has already been applied. */
@@ -600,7 +604,7 @@ export class Pix3EditorShell extends ComponentBase {
       });
 
     // Touch injected services to avoid unused var lint error (they are singletons for side-effects)
-    void this._projectScriptLoader;
+    void this.projectScriptLoader;
     void this._scriptCompiler;
     void this._autoloadService;
 
@@ -1046,30 +1050,48 @@ export class Pix3EditorShell extends ComponentBase {
       // Returning from Flow. The layout kept its DOM but was measured at zero size while hidden,
       // so re-measure now that it is back on screen.
       this.layoutManager.refreshSize();
-      return;
+    } else {
+      // The host only exists after the Studio branch of render() has run.
+      await this.updateComplete;
+      const host = this.renderRoot.querySelector<HTMLDivElement>('.layout-host');
+      if (!host) {
+        return;
+      }
+      this.layoutInitStarted = true;
+      this.studioLayoutMounted = true;
+      await this.layoutManager.initialize(host);
+      this.shellReady = true;
+      this.requestUpdate();
     }
-    // The host only exists after the Studio branch of render() has run.
-    await this.updateComplete;
-    const host = this.renderRoot.querySelector<HTMLDivElement>('.layout-host');
-    if (!host) {
-      return;
-    }
-    this.layoutInitStarted = true;
-    this.studioLayoutMounted = true;
-    await this.layoutManager.initialize(host);
-    this.shellReady = true;
-    this.requestUpdate();
 
-    if (this.tabsInitialized) {
+    // Deliberately OUTSIDE the "layout was just built" branch. The welcome screen renders inside
+    // this same component, so opening a second project in one page load finds the layout already
+    // built — and the session restore used to sit behind that early return, never running. Its
+    // tabs had meanwhile been cleared by `discardTabsOnProjectSwitch`, which is exactly the
+    // reported symptom: an empty workspace and no scene tree for every project after the first.
+    await this.ensureProjectSessionRestored();
+  }
+
+  /**
+   * Reopen the current project's saved tabs, once per project rather than once per page load.
+   * Keyed by project id: a second `ensureStudioLayout` for the same project is a no-op, a
+   * different project restores its own session.
+   */
+  private async ensureProjectSessionRestored(): Promise<void> {
+    const projectId = appState.project.id;
+    if (!projectId || this.tabsRestoredForProjectId === projectId) {
       return;
     }
-    this.tabsInitialized = true;
-    if (appState.project.id) {
-      // Wait for project scripts to compile before restoring the session, so custom components
-      // are already in the ScriptRegistry when the scene tabs reopen.
-      await this.waitForScripts();
-      await this.editorTabService.restoreProjectSession(appState.project.id);
+    this.tabsRestoredForProjectId = projectId;
+    // Wait for project scripts to compile before restoring the session, so custom components are
+    // already in the ScriptRegistry when the scene tabs reopen.
+    await this.waitForScripts();
+    // The project can change while we wait (the user went back to welcome and opened another one);
+    // restoring the previous project's tabs into it would be worse than restoring nothing.
+    if (appState.project.id !== projectId) {
+      return;
     }
+    await this.editorTabService.restoreProjectSession(projectId);
     if (appState.tabs.tabs.length === 0) {
       const pending = appState.scenes.pendingScenePaths[0];
       if (pending) {
@@ -1846,6 +1868,7 @@ export class Pix3EditorShell extends ComponentBase {
           .scenePaths=${this.activePlayableExportDialog.scenePaths}
           .selectedScenePath=${this.activePlayableExportDialog.selectedScenePath}
           .offerCompression=${this.activePlayableExportDialog.offerCompression === true}
+          .offerImageCompression=${this.activePlayableExportDialog.offerImageCompression === true}
         ></pix3-playable-export-dialog>
       </div>
     `;
@@ -1890,17 +1913,22 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   private onPlayableExportConfirmed(e: CustomEvent): void {
-    const { dialogId, scenePath, compress } = e.detail as {
+    const { dialogId, scenePath, compress, compressImages } = e.detail as {
       dialogId?: string;
       scenePath?: string;
       compress?: boolean;
+      compressImages?: boolean;
     };
 
     if (typeof dialogId !== 'string' || typeof scenePath !== 'string') {
       return;
     }
 
-    this.playableExportDialogService.confirm(dialogId, { scenePath, compress: compress === true });
+    this.playableExportDialogService.confirm(dialogId, {
+      scenePath,
+      compress: compress === true,
+      compressImages: compressImages === true,
+    });
   }
 
   private onPlayableExportCancelled(e: CustomEvent): void {
@@ -1913,24 +1941,16 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   /**
-   * Waits for project scripts to reach 'ready' or 'error' state.
+   * Wait for project scripts to reach 'ready' or 'error'.
+   *
+   * Delegates to the loader rather than watching `scriptsStatus` directly, because the local copy
+   * could wait forever: `syncAndBuild` returns without touching the status when the page is not
+   * visible/focused — and picking a project directory is precisely a focus-losing interaction — so
+   * the restore that follows this call never ran. `ensureReady` forces the build in that case,
+   * re-checks the project the status belongs to, and gives up after 15 s.
    */
   private async waitForScripts(): Promise<void> {
-    if (appState.project.scriptsStatus === 'ready' || appState.project.scriptsStatus === 'error') {
-      return;
-    }
-
-    return new Promise(resolve => {
-      const unsub = subscribe(appState.project, () => {
-        if (
-          appState.project.scriptsStatus === 'ready' ||
-          appState.project.scriptsStatus === 'error'
-        ) {
-          unsub();
-          resolve();
-        }
-      });
-    });
+    await this.projectScriptLoader.ensureReady();
   }
 
   private onDialogSecondary(e: CustomEvent): void {

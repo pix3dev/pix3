@@ -205,6 +205,40 @@ describe('EditorTabService (code tabs)', () => {
     expect(localStorage.getItem('pix3.projectTabs:project-a')).toBeNull();
   });
 
+  it('keeps a stored session when the existence check could not be made', async () => {
+    // Storage that is not pointed at the freshly opened project directory yet THROWS. Reading that
+    // as "the file is gone" used to erase the saved session permanently — one transient failure on
+    // the welcome → open path and the user's tabs were unrecoverable.
+    const { service } = createService();
+    appState.project.id = 'project-a';
+    Object.defineProperty(service, 'storage', {
+      value: {
+        getLastModified: vi.fn(async () => {
+          throw new Error('project directory not ready');
+        }),
+      },
+    });
+
+    localStorage.setItem(
+      'pix3.projectTabs:project-a',
+      JSON.stringify({
+        tabs: [{ resourceId: 'res://scenes/castle.pix3scene', type: 'scene', title: 'castle' }],
+        activeTabId: 'scene:res://scenes/castle.pix3scene',
+      })
+    );
+
+    await service.restoreProjectSession('project-a');
+
+    // The tab is restored rather than dropped, and the session survives either way.
+    expect(appState.tabs.tabs.map(tab => tab.resourceId)).toEqual([
+      'res://scenes/castle.pix3scene',
+    ]);
+    // Re-persisted after the restore, but never removed — the scene is still named in it.
+    expect(localStorage.getItem('pix3.projectTabs:project-a')).toContain(
+      'res://scenes/castle.pix3scene'
+    );
+  });
+
   /**
    * §9.8 — double-clicking a second image used to spawn a *second* editor beside
    * the first. There is one Sprite Editor; it gets pointed at the new image.

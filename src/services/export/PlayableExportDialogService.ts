@@ -9,12 +9,19 @@ export interface PlayableExportDialogOptions {
    * only cost base64 overhead.
    */
   readonly offerCompression?: boolean;
+  /**
+   * Offer the WebP image re-encode. Same audience as {@link offerCompression} — the single-file
+   * HTML, where every sprite is base64 inside the file being measured.
+   */
+  readonly offerImageCompression?: boolean;
 }
 
 export interface PlayableExportDialogResult {
   readonly scenePath: string;
   /** Only meaningful when {@link PlayableExportDialogOptions.offerCompression} was set. */
   readonly compress: boolean;
+  /** Only meaningful when {@link PlayableExportDialogOptions.offerImageCompression} was set. */
+  readonly compressImages: boolean;
 }
 
 export interface PlayableExportDialogInstance extends PlayableExportDialogOptions {

@@ -17,6 +17,7 @@ import {
   type VirtualBundleOptions,
   type VirtualFileLoadContext,
 } from '@/services/scripting/ScriptCompilerService';
+import { compressImageBlob } from '@/services/image-gen/image-ops';
 
 export interface PlayableHtmlBuildOptions extends ProjectBuildOptions {
   readonly title?: string;
@@ -36,7 +37,27 @@ export interface PlayableHtmlBuildOptions extends ProjectBuildOptions {
    * Hence an option, and not one the publish flow turns on.
    */
   readonly compress?: boolean;
+  /**
+   * Re-encode embedded PNG/JPEG assets as WebP (quality {@link WEBP_EXPORT_QUALITY}).
+   *
+   * Lossy, and worth it where bytes are the product: a playable's art is base64'd into the file,
+   * so `sprites/ph-bg.png` at 52.9 KiB becomes ~12–15 KiB. Two properties keep it safe to leave on:
+   * an asset is only replaced when the re-encode actually came out **smaller**, and the stored key
+   * keeps its original `.png` name — the runtime's embedded-asset map is an exact-string lookup and
+   * the image decoder sniffs bytes, not extensions, so nothing that names the path has to change.
+   */
+  readonly compressImages?: boolean;
 }
+
+/**
+ * Quality for the export-time WebP re-encode. 0.85 is where WebP stops being visibly lossy on
+ * typical game art while still roughly quartering a PNG; it is also the default
+ * {@link compressImageBlob} already uses elsewhere in the editor.
+ */
+const WEBP_EXPORT_QUALITY = 0.85;
+
+/** Source formats worth re-encoding. WebP is already there; SVG and GIF are not raster stills. */
+const RECOMPRESSIBLE_IMAGE_RE = /\.(png|jpe?g)$/i;
 
 export interface PlayableHtmlAssetSizeEntry {
   readonly path: string;
@@ -57,6 +78,10 @@ export interface PlayableHtmlBundleSizeReport {
   readonly compressedBundleBytes: number;
   /** What compression saved on the output file — `0` when the export was not compressed. */
   readonly compressionSavedBytes: number;
+  /** Raw bytes the WebP re-encode saved; `0` when it was off or never beat the source. */
+  readonly imageCompressionSavedBytes: number;
+  /** How many images the re-encode replaced. */
+  readonly imagesRecompressed: number;
   /** Runtime modules left out because nothing in the project mentioned them. */
   readonly strippedModulePaths: readonly string[];
 }
@@ -99,6 +124,10 @@ interface EmbeddedAssetsBuildStats {
   readonly entries: PlayableHtmlAssetSizeEntry[];
   readonly rawTotalBytes: number;
   readonly base64TotalBytes: number;
+  /** Bytes saved by the WebP re-encode, before base64 expansion; `0` when it was off or never won. */
+  readonly imageCompressionSavedBytes: number;
+  /** How many assets the re-encode actually replaced. */
+  readonly imagesRecompressed: number;
 }
 
 interface PreparedBundlerFiles {
@@ -316,7 +345,9 @@ export class PlayableHtmlBuildService {
   ): Promise<PlayableHtmlBuildArtifact> {
     const model = await this.projectBuildService.buildRuntimeProjectModel(context, options);
     const usage = this.resolveRuntimeUsage(model);
-    const prepared = await this.prepareBundlerFiles(model, usage);
+    const prepared = await this.prepareBundlerFiles(model, usage, {
+      compressImages: options.compressImages === true,
+    });
     const compress = options.compress === true;
     const compileOptions = this.createCompileOptions(usage, prepared.scenesAreJson, compress);
     const compilation = await this.scriptCompiler.bundleVirtualProject(prepared.files, {
@@ -437,7 +468,7 @@ export class PlayableHtmlBuildService {
   private async prepareBundlerFiles(
     model: RuntimeProjectBuildModel,
     usage: RuntimeUsage,
-    options: { embedAssets?: boolean } = {}
+    options: { embedAssets?: boolean; compressImages?: boolean } = {}
   ): Promise<PreparedBundlerFiles> {
     const files = new Map(model.files);
     const warnings: string[] = [];
@@ -454,9 +485,13 @@ export class PlayableHtmlBuildService {
               entries: [],
               rawTotalBytes: 0,
               base64TotalBytes: 0,
+              imageCompressionSavedBytes: 0,
+              imagesRecompressed: 0,
             } as EmbeddedAssetsBuildStats,
           }
-        : await this.buildEmbeddedAssetsModule(model.assetPaths, sceneConversion.texts, warnings);
+        : await this.buildEmbeddedAssetsModule(model.assetPaths, sceneConversion.texts, warnings, {
+            compressImages: options.compressImages === true,
+          });
 
     files.set(
       REGISTER_PROJECT_SCRIPTS_PATH,
@@ -721,25 +756,37 @@ export class PlayableHtmlBuildService {
   private async buildEmbeddedAssetsModule(
     assetPaths: readonly string[],
     convertedSceneTexts: ReadonlyMap<string, string>,
-    warnings: string[]
+    warnings: string[],
+    options: { compressImages?: boolean } = {}
   ): Promise<{
     readonly moduleSource: string;
     readonly stats: EmbeddedAssetsBuildStats;
   }> {
     const embeddedAssets: Record<string, { base64: string; mimeType: string }> = {};
     const entries: PlayableHtmlAssetSizeEntry[] = [];
+    let imageCompressionSavedBytes = 0;
+    let imagesRecompressed = 0;
 
     for (const assetPath of assetPaths) {
       try {
         const converted = convertedSceneTexts.get(assetPath);
-        const blob =
+        const source =
           converted === undefined
             ? await this.storage.readBlob(assetPath)
             : new Blob([converted], { type: 'text/plain;charset=utf-8' });
+        const blob =
+          options.compressImages === true && converted === undefined
+            ? await this.recompressImageForExport(assetPath, source)
+            : source;
+        if (blob !== source) {
+          imageCompressionSavedBytes += source.size - blob.size;
+          imagesRecompressed += 1;
+        }
         const base64 = await this.encodeBlobToBase64(blob);
 
         embeddedAssets[assetPath] = {
           base64,
+          // Derived from the BLOB, so a `.png` key holding WebP bytes still announces image/webp.
           mimeType: this.resolveMimeType(assetPath, blob),
         };
         entries.push({
@@ -758,8 +805,34 @@ export class PlayableHtmlBuildService {
         entries,
         rawTotalBytes: entries.reduce((sum, entry) => sum + entry.rawBytes, 0),
         base64TotalBytes: entries.reduce((sum, entry) => sum + entry.base64Bytes, 0),
+        imageCompressionSavedBytes,
+        imagesRecompressed,
       },
     };
+  }
+
+  /**
+   * Re-encode one embedded image as WebP, returning the ORIGINAL blob unless the result is
+   * genuinely smaller.
+   *
+   * Keeping the original on a loss is what makes the option safe to leave on: WebP loses to PNG on
+   * small flat images often enough that an unconditional swap would grow some exports while
+   * degrading them. A failed encode is likewise not an export failure — it just ships the source
+   * bytes. Note the path keeps its `.png`/`.jpg` name on purpose (see `compressImages`).
+   */
+  private async recompressImageForExport(assetPath: string, source: Blob): Promise<Blob> {
+    if (!RECOMPRESSIBLE_IMAGE_RE.test(assetPath)) {
+      return source;
+    }
+    try {
+      const { blob } = await compressImageBlob(source, {
+        mimeType: 'image/webp',
+        quality: WEBP_EXPORT_QUALITY,
+      });
+      return blob.size > 0 && blob.size < source.size ? blob : source;
+    } catch {
+      return source;
+    }
   }
 
   private buildBundleSizeReport(
@@ -794,6 +867,8 @@ export class PlayableHtmlBuildService {
       compressionSavedBytes: compressed
         ? Math.max(0, uncompressedOutputBytes - outputHtmlBytes)
         : 0,
+      imageCompressionSavedBytes: embeddedAssetsStats.imageCompressionSavedBytes,
+      imagesRecompressed: embeddedAssetsStats.imagesRecompressed,
       strippedModulePaths: bundle.strippedModulePaths,
       assetEntries: [...embeddedAssetsStats.entries].sort((left, right) => {
         if (right.rawBytes !== left.rawBytes) {
