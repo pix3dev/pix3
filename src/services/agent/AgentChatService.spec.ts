@@ -53,6 +53,10 @@ interface Fakes {
   resetSessions?: ReturnType<typeof vi.fn>;
   /** Fake for `AgentToolRegistry.recordDecision()` — the auto-filed `ask_user` answer. */
   recordDecision?: ReturnType<typeof vi.fn>;
+  /** Temporary debug edits outstanding at the end of the turn. Defaults to none. */
+  listTemporaryEdits?: () => string[];
+  /** Fake for `AgentToolRegistry.revertTemporaryEdits()` — the turn-end debug-value restore. */
+  revertTemporaryEdits?: ReturnType<typeof vi.fn>;
 }
 
 /** Build a service with fake dependencies injected in place of the DI-resolved ones. */
@@ -102,6 +106,9 @@ const buildService = (fakes: Fakes): AgentChatService => {
       specs: () => [],
       execute: fakes.execute,
       recordDecision: fakes.recordDecision ?? vi.fn(async () => ({ ok: true })),
+      listTemporaryEdits: fakes.listTemporaryEdits ?? (() => []),
+      revertTemporaryEdits:
+        fakes.revertTemporaryEdits ?? vi.fn(async () => ({ reverted: [], failed: [] })),
     },
     advisorService: {
       resolveAdvisor: async () =>
@@ -318,6 +325,49 @@ describe('AgentChatService', () => {
 
     expect(chat).toHaveBeenCalledTimes(3);
     expect(service.getState().status).toBe('idle');
+  });
+
+  it('restores temporary debug values when the turn is force-stopped at the iteration cap', async () => {
+    // The measured failure: a Flow turn hit the 60-iteration cap mid-experiment and shipped a game
+    // with debug gravity and debug touch rules still applied. The revert cannot depend on the model
+    // having iterations left, so the harness runs it however the turn ends.
+    let outstanding = ['player-controller.gravity', 'touch-rules.rules'];
+    const revertTemporaryEdits = vi.fn(async () => {
+      const reverted = outstanding;
+      outstanding = [];
+      return { reverted, failed: [] };
+    });
+    let n = 0;
+    const chat = vi.fn(async () => toolCallResult('scene_tree', `c${n++}`));
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({})),
+      put: vi.fn(async () => undefined),
+      maxToolIterations: 2,
+      listTemporaryEdits: () => outstanding,
+      revertTemporaryEdits,
+    });
+
+    await service.send('tune it');
+
+    expect(revertTemporaryEdits).toHaveBeenCalledTimes(1);
+    // The user is told — a value quietly changing back is worse than one that never changed.
+    expect(service.getState().notice).toContain('player-controller.gravity');
+    expect(service.getState().notice).toContain('touch-rules.rules');
+  });
+
+  it('names temporary values it could not restore so they are not shipped unnoticed', async () => {
+    const service = buildService({
+      chat: vi.fn(async () => textResult('done')),
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      listTemporaryEdits: () => ['boss.hp'],
+      revertTemporaryEdits: vi.fn(async () => ({ reverted: [], failed: ['boss.hp'] })),
+    });
+
+    await service.send('go');
+
+    expect(service.getState().notice).toContain('Could NOT restore: boss.hp');
   });
 
   it('warns the model to wrap up when 2 or fewer tool iterations remain', async () => {

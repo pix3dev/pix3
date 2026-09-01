@@ -5,7 +5,7 @@ import { appState } from '@/state';
 import { Script } from '@pix3/runtime';
 import type { ScriptComponent } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
-import { ScriptRegistry } from '@pix3/runtime';
+import { ScriptRegistry, SceneManager } from '@pix3/runtime';
 import type { PropertySchemaProvider } from '@pix3/runtime';
 import { ScriptCompilerService } from '@/services/scripting/ScriptCompilerService';
 import type { CompilationError } from '@/services/scripting/ScriptCompilerService';
@@ -36,6 +36,9 @@ export class ProjectScriptLoaderService {
 
   @inject(ScriptRegistry)
   private readonly scriptRegistry!: ScriptRegistry;
+
+  @inject(SceneManager)
+  private readonly sceneManager!: SceneManager;
 
   @inject(ScriptCompilerService)
   private readonly compiler!: ScriptCompilerService;
@@ -299,6 +302,13 @@ export class ProjectScriptLoaderService {
       // Step 4: Load the compiled bundle
       await this.loadBundle(compilationResult.code);
 
+      // Step 5: scenes open before their scripts finish compiling (nothing gates a scene load on
+      // `scriptsStatus`, and recipe projects open a scene immediately), so `user:*` components in
+      // those scenes were unresolved at load time and are parked on their nodes. Now that the types
+      // exist, attach them — otherwise they stay invisible and the next save writes the scene file
+      // without them.
+      this.attachPendingSceneComponents();
+
       // Notify UI that scripts have been updated
       appState.project.scriptRefreshSignal++;
       appState.project.scriptsStatus = 'ready';
@@ -441,6 +451,23 @@ export class ProjectScriptLoaderService {
       this.scriptRegistry.unregisterComponent(scriptId);
     }
     this.registeredScriptIds.clear();
+  }
+
+  /**
+   * Attach scene components that were parked because their script type was not registered when the
+   * scene loaded. Best-effort: a failure here must not fail the compile that succeeded.
+   */
+  private attachPendingSceneComponents(): void {
+    try {
+      const attached = this.sceneManager.resolvePendingComponents();
+      if (attached > 0) {
+        this.logger.info(
+          `Attached ${attached} scene component(s) that were waiting for their script type`
+        );
+      }
+    } catch (error) {
+      this.logger.error('Failed to attach pending scene components', error);
+    }
   }
 
   /**

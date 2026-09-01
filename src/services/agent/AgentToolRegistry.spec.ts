@@ -50,7 +50,10 @@ const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegist
 };
 
 /** A sceneManager stub with an active graph, for tools gated by ensureActiveScene(). */
-const activeSceneManager = () => ({ getActiveSceneGraph: () => ({ nodeMap: new Map() }) });
+const activeSceneManager = () => ({
+  getActiveSceneGraph: () => ({ nodeMap: new Map() }),
+  resolvePendingComponents: () => 0,
+});
 
 /** A minimal valid trace, for the store-backed `game_trace` cases. */
 const makeStoredTrace = (name: string): GameInputTrace => ({
@@ -2384,6 +2387,177 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  describe('temporary debug edits', () => {
+    /**
+     * A turn that is force-stopped at the iteration cap must not ship the debug values it was
+     * about to undo. Measured in the Flow eval: a capped turn left `touch-rules.rules` and
+     * `player-controller.gravity` at debug values, which the agent reported honestly and had no
+     * iterations left to fix. The undo therefore lives in the harness, not the model's budget.
+     */
+    const makeTunableNode = (gravity: number): NodeBase => {
+      const node = Object.create(NodeBase.prototype) as Record<string, unknown>;
+      let value = gravity;
+      Object.assign(node, { nodeId: 'player', type: 'Sprite2D', name: 'Player' });
+      Object.defineProperty(node, 'constructor', {
+        value: {
+          getPropertySchema: () => ({
+            nodeType: 'FakeNode2D',
+            properties: [
+              {
+                name: 'gravity',
+                type: 'number',
+                ui: {},
+                getValue: () => value,
+                setValue: (_n: unknown, next: unknown) => {
+                  value = next as number;
+                },
+              },
+            ],
+          }),
+        },
+        configurable: true,
+      });
+      return node as unknown as NodeBase;
+    };
+
+    const buildTunableRegistry = (node: NodeBase) => {
+      // A dispatcher that actually applies the write, so the revert is checked against real state.
+      const dispatcher = {
+        execute: vi.fn(async (cmd: unknown) => {
+          const params = (cmd as { params?: { propertyPath?: string; value?: unknown } }).params;
+          if (params?.propertyPath === 'gravity') {
+            const schema = (
+              node.constructor as unknown as {
+                getPropertySchema: () => { properties: Array<Record<string, unknown>> };
+              }
+            ).getPropertySchema();
+            const prop = schema.properties[0] as {
+              getValue: () => unknown;
+              setValue: (n: unknown, v: unknown) => void;
+            };
+            if (prop.getValue() === params.value) {
+              return false; // the editor reports "unchanged" as a non-mutation
+            }
+            prop.setValue(node, params.value);
+          }
+          return true;
+        }),
+        executeById: vi.fn(),
+      };
+      const registry = buildRegistry({
+        dispatcher,
+        sceneManager: {
+          getActiveSceneGraph: () => ({ nodeMap: new Map([['player', node]]) }),
+          resolvePendingComponents: () => 0,
+        },
+      });
+      const readGravity = () =>
+        (
+          node.constructor as unknown as {
+            getPropertySchema: () => { properties: Array<{ getValue: () => unknown }> };
+          }
+        )
+          .getPropertySchema()
+          .properties[0].getValue();
+      return { registry, dispatcher, readGravity };
+    };
+
+    it('journals the pre-write value and restores it on revert', async () => {
+      const node = makeTunableNode(9.8);
+      const { registry, readGravity } = buildTunableRegistry(node);
+
+      const result = (await registry.execute('set_property', {
+        nodeId: 'player',
+        propertyPath: 'gravity',
+        value: 100,
+        temporary: true,
+      })) as { ok: boolean; temporaryNote?: string };
+
+      expect(result.ok).toBe(true);
+      expect(result.temporaryNote).toContain('put back automatically');
+      expect(readGravity()).toBe(100);
+      expect(registry.listTemporaryEdits()).toEqual(['Player.gravity']);
+
+      expect(await registry.revertTemporaryEdits()).toEqual({
+        reverted: ['Player.gravity'],
+        failed: [],
+      });
+      expect(readGravity()).toBe(9.8);
+      expect(registry.listTemporaryEdits()).toEqual([]);
+    });
+
+    it('keeps the ORIGINAL value across repeated temporary writes to the same target', async () => {
+      const node = makeTunableNode(9.8);
+      const { registry, readGravity } = buildTunableRegistry(node);
+
+      for (const value of [50, 100, 200]) {
+        await registry.execute('set_property', {
+          nodeId: 'player',
+          propertyPath: 'gravity',
+          value,
+          temporary: true,
+        });
+      }
+      expect(registry.listTemporaryEdits()).toEqual(['Player.gravity']);
+
+      await registry.revertTemporaryEdits();
+      expect(readGravity()).toBe(9.8);
+    });
+
+    it('leaves an ordinary (non-temporary) edit alone', async () => {
+      const node = makeTunableNode(9.8);
+      const { registry, readGravity } = buildTunableRegistry(node);
+
+      await registry.execute('set_property', {
+        nodeId: 'player',
+        propertyPath: 'gravity',
+        value: 12,
+      });
+
+      expect(registry.listTemporaryEdits()).toEqual([]);
+      await registry.revertTemporaryEdits();
+      expect(readGravity()).toBe(12);
+    });
+
+    it('treats a value the agent already put back itself as reverted, not failed', async () => {
+      const node = makeTunableNode(9.8);
+      const { registry } = buildTunableRegistry(node);
+
+      await registry.execute('set_property', {
+        nodeId: 'player',
+        propertyPath: 'gravity',
+        value: 100,
+        temporary: true,
+      });
+      await registry.execute('set_property', {
+        nodeId: 'player',
+        propertyPath: 'gravity',
+        value: 9.8,
+      });
+
+      // The revert write is a no-op the editor reports as "did not mutate" — that is not a failure.
+      expect(await registry.revertTemporaryEdits()).toEqual({ reverted: [], failed: [] });
+      expect(registry.listTemporaryEdits()).toEqual([]);
+    });
+
+    it('revert_temporary_edits reports when there is nothing outstanding', async () => {
+      const node = makeTunableNode(9.8);
+      const { registry, dispatcher } = buildTunableRegistry(node);
+
+      const result = (await registry.execute('revert_temporary_edits', {})) as {
+        ok: boolean;
+        reverted: string[];
+        note?: string;
+      };
+      expect(result).toEqual({
+        ok: true,
+        reverted: [],
+        note: 'No temporary edits are outstanding.',
+      });
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+  });
+
   describe('component tools', () => {
     const makeScriptRegistry = () => ({
       getAllComponentTypes: () => [
@@ -2433,6 +2607,30 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(true);
       expect(typeof result.componentId).toBe('string');
       expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(AddComponentCommand);
+    });
+
+    it('add_component returns the parked component instead of adding a duplicate', async () => {
+      // A scene that opened before its project scripts compiled parks its components; once the
+      // type registers they attach by themselves. The model must not be told to add a second one —
+      // re-attaching by hand was the measured tax of this bug.
+      const dispatcher = { execute: vi.fn(async (_cmd: unknown) => true), executeById: vi.fn() };
+      const node = { components: [{ id: 'game-rules', type: 'core:Rotate' }] };
+      const registry = buildRegistry({
+        dispatcher,
+        scriptRegistry: makeScriptRegistry(),
+        sceneManager: {
+          getActiveSceneGraph: () => ({ nodeMap: new Map([['n1', node]]) }),
+          resolvePendingComponents: () => 1,
+        },
+      });
+      const result = (await registry.execute('add_component', {
+        nodeId: 'n1',
+        componentType: 'core:Rotate',
+      })) as { ok: boolean; componentId?: string; note?: string };
+      expect(result.ok).toBe(true);
+      expect(result.componentId).toBe('game-rules');
+      expect(result.note).toContain('already authored');
+      expect(dispatcher.execute).not.toHaveBeenCalled();
     });
 
     it('add_component rejects an unknown component type without dispatching', async () => {

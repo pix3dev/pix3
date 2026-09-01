@@ -49,6 +49,12 @@ import { Node2D, type Node2DLayoutConfig } from '../nodes/Node2D';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
 import { ScriptRegistry } from './ScriptRegistry';
+import {
+  attachComponentDefinitions,
+  collectComponentDefinitions,
+  resolvePendingComponents,
+  type ComponentDefinition,
+} from './component-hydration';
 import { coerceTextureResource, type TextureResourceRef } from './TextureResource';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import type { PropertyDefinition } from '../fw/property-schema';
@@ -69,12 +75,7 @@ export class SceneValidationError extends Error {
   }
 }
 
-export interface ComponentDefinition {
-  id?: string;
-  type: string;
-  enabled?: boolean;
-  config?: Record<string, unknown>;
-}
+export type { ComponentDefinition };
 
 export interface SceneNodeDefinition {
   id: string;
@@ -375,42 +376,8 @@ export class SceneLoader {
     }
     index.set(node.nodeId, node);
 
-    // Load components
-    if (definition.components) {
-      for (const componentDef of definition.components) {
-        const componentId =
-          componentDef.id || `${definition.id}-${componentDef.type}-${Date.now()}`;
-        const component = this.scriptRegistry.createComponent(componentDef.type, componentId);
-
-        if (component) {
-          component.enabled = componentDef.enabled ?? true;
-
-          const configData = componentDef.config ?? {};
-          // MERGE over the class defaults, never replace them. A scene stores only the values that
-          // were authored/edited, so a wholesale replace silently wiped every default the script's
-          // constructor set — a field added to a script after the scene was written came back
-          // `undefined` (and numeric defaults collapsed to 0/1), with no error anywhere. Measured
-          // twice in one session: a grid size of 100 became 1 and a prefab path became "".
-          component.config = { ...component.config, ...configData };
-
-          // Set config values using PropertySchema if available
-          const properties = this.getComponentSchemaProperties(componentDef.type);
-          if (properties && configData) {
-            for (const prop of properties) {
-              if (configData[prop.name] !== undefined) {
-                prop.setValue(component, configData[prop.name]);
-              }
-            }
-          }
-
-          node.addComponent(component);
-        } else {
-          console.warn(
-            `[SceneLoader] Failed to create component "${componentDef.type}" for node "${definition.id}"`
-          );
-        }
-      }
-    }
+    // Load components (unresolved types are parked, never dropped — see component-hydration).
+    attachComponentDefinitions(node, definition.components, this.scriptRegistry);
 
     if (parent) {
       parent.adoptChild(node);
@@ -604,12 +571,7 @@ export class SceneLoader {
       metadata: {
         ...sourceNode.metadata,
       },
-      components: sourceNode.components.map(component => ({
-        id: component.id,
-        type: component.type,
-        enabled: component.enabled,
-        config: { ...(component.config ?? {}) },
-      })),
+      components: collectComponentDefinitions(sourceNode),
     };
 
     const marker = this.createPrefabMarker({
@@ -672,75 +634,15 @@ export class SceneLoader {
     node: NodeBase,
     componentDefinitions: ComponentDefinition[]
   ): void {
-    for (const componentDef of componentDefinitions) {
-      const componentId = componentDef.id || `${node.nodeId}-${componentDef.type}-${Date.now()}`;
-      const component = this.scriptRegistry.createComponent(componentDef.type, componentId);
-      if (!component) {
-        continue;
-      }
-
-      component.enabled = componentDef.enabled ?? true;
-      const configData = componentDef.config ?? {};
-      // Merge over the class defaults — see the note in the sibling loader path above.
-      component.config = { ...component.config, ...configData };
-
-      const properties = this.getComponentSchemaProperties(componentDef.type);
-      if (properties && configData) {
-        for (const prop of properties) {
-          if (configData[prop.name] !== undefined) {
-            prop.setValue(component, configData[prop.name]);
-          }
-        }
-      }
-
-      node.addComponent(component);
-    }
+    attachComponentDefinitions(node, componentDefinitions, this.scriptRegistry);
   }
 
   /**
-   * Resolve a component's editable properties from its registered schema,
-   * guarding against malformed schemas. A component whose static
-   * `getPropertySchema()` returns an object without a `properties` array (a
-   * common mistake in user-authored scripts — e.g. forgetting `properties: []`)
-   * must not abort the entire scene load. Returns `null` when there is no usable
-   * schema, warning and naming the offending component type in that case.
+   * Attach parked components whose script type has since been registered — see
+   * {@link resolvePendingComponents}.
    */
-  private getComponentSchemaProperties(componentType: string): PropertyDefinition[] | null {
-    const schema = this.scriptRegistry.getComponentPropertySchema(componentType);
-    if (!schema) {
-      return null;
-    }
-
-    if (!Array.isArray(schema.properties)) {
-      console.warn(
-        `[SceneLoader] Component "${componentType}" has a malformed property schema: ` +
-          `getPropertySchema() must return an object with a "properties" array. ` +
-          `Skipping config application for this component.`
-      );
-      return null;
-    }
-
-    // Each entry must expose a callable setValue(node, value) closure — that is what config
-    // application uses. Hand- or AI-authored project scripts sometimes return bare
-    // `{ name, type, defaultValue }` entries (no closures); a single malformed entry must not
-    // abort the whole scene load, so skip it with a warning and keep the well-formed properties.
-    const rawProperties = schema.properties as ReadonlyArray<
-      { name?: unknown; getValue?: unknown; setValue?: unknown } | null | undefined
-    >;
-    const usable: PropertyDefinition[] = [];
-    for (const prop of rawProperties) {
-      if (prop && typeof prop.setValue === 'function' && typeof prop.name === 'string') {
-        usable.push(prop as unknown as PropertyDefinition);
-        continue;
-      }
-      const label = prop && typeof prop.name === 'string' ? `"${prop.name}"` : '(unnamed)';
-      console.warn(
-        `[SceneLoader] Component "${componentType}" has a malformed property definition ${label}: ` +
-          `each property must expose a setValue(node, value) function. Skipping this property.`
-      );
-    }
-
-    return usable;
+  resolvePendingComponents(roots: Iterable<NodeBase>): number {
+    return resolvePendingComponents(roots, this.scriptRegistry);
   }
 
   private generateUniqueRuntimeNodeId(

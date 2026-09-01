@@ -37,6 +37,7 @@ import { Particles3D } from '../nodes/3D/Particles3D';
 import type { SceneGraph } from './SceneManager';
 import type { SceneNodeDefinition, InstanceOverrides } from './SceneLoader';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
+import { collectComponentDefinitions } from './component-hydration';
 
 interface SceneDocument {
   version: string;
@@ -160,12 +161,13 @@ export class SceneSaver {
       definition.type = 'HemisphereLightNode';
     }
 
-    // Serialize components
-    if (node.components.length > 0) {
-      definition.components = node.components.map(c => ({
-        id: c.id,
-        type: c.type,
-        enabled: c.enabled,
+    // Serialize components. `pendingComponents` are authored entries whose script type was not
+    // registered when the scene loaded (project scripts compile asynchronously); they ride along so
+    // a save never deletes a component the author wrote — see `core/component-hydration.ts`.
+    const componentDefinitions = collectComponentDefinitions(node);
+    if (componentDefinitions.length > 0) {
+      definition.components = componentDefinitions.map(c => ({
+        ...c,
         config: c.config && Object.keys(c.config).length > 0 ? c.config : undefined,
       }));
     }

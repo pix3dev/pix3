@@ -5,6 +5,7 @@ export * from './core/AudioService';
 export * from './core/ScriptRegistry';
 export * from './core/ScriptComponent';
 export * from './core/ProjectManifest';
+export * from './core/component-hydration';
 export * from './core/SceneLoader';
 export * from './core/node-type-registry';
 export * from './core/renderability-lint';

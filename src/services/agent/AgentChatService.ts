@@ -777,7 +777,42 @@ export class AgentChatService {
       }
     } finally {
       this.abortController = null;
+      await this.revertTemporaryEdits();
       this.persist();
+    }
+  }
+
+  /**
+   * Put back every value the agent wrote with `temporary: true` — the guarantee that makes a debug
+   * experiment safe to start near the iteration cap. It runs on EVERY way a turn ends (finished,
+   * force-stopped at the cap, aborted by the user, provider error), because the case that hurt was
+   * exactly the one where the model had no iterations left to clean up after itself: a capped Flow
+   * turn shipped a game with debug gravity and debug touch rules still in the scene.
+   *
+   * The user is told, since a value silently changing back is worse than a value that never
+   * changed. A revert that itself fails degrades into a warning naming the targets — never a
+   * thrown error, which would turn a useful turn into a failed one.
+   */
+  private async revertTemporaryEdits(): Promise<void> {
+    if (this.toolRegistry.listTemporaryEdits().length === 0) {
+      return;
+    }
+    try {
+      const { reverted, failed } = await this.toolRegistry.revertTemporaryEdits();
+      const parts: string[] = [];
+      if (reverted.length > 0) {
+        parts.push(`Restored ${reverted.length} temporary debug value(s): ${reverted.join(', ')}.`);
+      }
+      if (failed.length > 0) {
+        parts.push(
+          `Could NOT restore: ${failed.join(', ')} — check these before shipping the game.`
+        );
+      }
+      if (parts.length > 0) {
+        this.setState({ notice: [this.state.notice, ...parts].filter(Boolean).join(' ') });
+      }
+    } catch (error) {
+      console.warn('[AgentChatService] Reverting temporary edits failed:', error);
     }
   }
 
@@ -1363,7 +1398,7 @@ export class AgentChatService {
       if (remaining > 0 && remaining <= 2) {
         resultContent.push({
           type: 'text',
-          text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors; if you keep design/progress.md, fs_write the updated checklist so the next turn can resume; then reply with a short summary of what is done and what remains. Do not start new rewrites.`,
+          text: `[Pix3] Only ${remaining} tool iteration${remaining === 1 ? '' : 's'} left before this turn is force-stopped. Wrap up now: if the game is running, call read_errors; if you keep design/progress.md, fs_write the updated checklist so the next turn can resume; then reply with a short summary of what is done and what remains. Do not start new rewrites. Do not spend an iteration undoing values you set with temporary:true — those are restored for you when the turn ends; anything else you changed for debugging, say so plainly in your summary.`,
         });
       }
 
@@ -1793,6 +1828,7 @@ export class AgentChatService {
       '- For custom logic, write a Script subclass with fs_write under scripts/, run compile_scripts, then attach it with add_component using its "user:<ExportName>" type.',
       '- After editing scripts with fs_write, run compile_scripts: it builds, registers AND type-checks in one call, returning any type diagnostics itself. Never chase it with check_scripts.',
       '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
+      '- Debugging by changing a value you do not want to keep (cranking gravity, disabling a rule, widening a hitbox)? Pass `temporary: true` to set_property / set_component_property. The old value is journalled and restored when the turn ends — even if the turn is force-stopped at the iteration cap — so you can experiment right up to the last iteration without shipping debug values. Call revert_temporary_edits when the experiment is over if you want them back sooner.',
       '- File paths are relative to the project root.',
       "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",
       '- Budget your exploration: read what you need in order to act, then act, then verify. Do not spend iterations surveying the project — a cheap model burned ~15 iterations on reconnaissance and hit the cap before changing anything. Prefer one targeted read over a directory sweep, and stop reading as soon as you can make the change.',

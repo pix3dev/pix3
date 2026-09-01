@@ -17,6 +17,7 @@ import {
 import { renderMarkdownLite } from '@/ui/agent-chat/markdown-lite';
 import { ensureLightboxHost } from '@/ui/shared/pix3-lightbox';
 import './pix3-idea-doc.ts.css';
+import { ideaTimeline } from '@/services/flow/idea-timeline';
 
 /** Tool names whose success means the document on screen is out of date. */
 const DOC_TOUCHING_TOOLS = new Set(['fs_write', 'str_replace', 'record_decision']);
@@ -172,6 +173,11 @@ export class Pix3IdeaDoc extends ComponentBase {
 
   protected updated(): void {
     this.makeImagesExpandable();
+    // The end of the idea-path stopwatch: the design document is on screen, which is exactly the
+    // signal the gap measurement timed by hand. No-op unless a run is in flight.
+    if (this.source) {
+      ideaTimeline.complete();
+    }
   }
 
   /**

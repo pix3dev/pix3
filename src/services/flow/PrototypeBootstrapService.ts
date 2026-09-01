@@ -33,6 +33,7 @@ import {
   type TunableResolution,
 } from '@/services/flow/recipe-contract';
 import { FlowReferencesService } from '@/services/flow/FlowReferencesService';
+import { ideaTimeline } from '@/services/flow/idea-timeline';
 import { FlowStageService } from '@/services/flow/FlowStageService';
 import {
   attachmentProjectPath,
@@ -451,6 +452,9 @@ export class PrototypeBootstrapService {
       throw new Error('A prototype is already being created.');
     }
     this.running = true;
+    // Times prompt → design document on screen. This span has no LLM call in it and was measured at
+    // 10–16 s, so it is instrumented rather than guessed at — see `idea-timeline.ts`.
+    ideaTimeline.begin();
     const notes: string[] = [];
     let references: PrototypeBriefReference[] = [];
     try {
@@ -459,7 +463,9 @@ export class PrototypeBootstrapService {
 
       // OPFS is the anonymous user's storage and browsers may evict it under pressure.
       try {
-        await this.browserStore.requestPersistence();
+        await ideaTimeline.phase('requestPersistence', () =>
+          this.browserStore.requestPersistence()
+        );
       } catch {
         // Best effort — a project that cannot be made persistent is still a working project.
       }
@@ -475,11 +481,19 @@ export class PrototypeBootstrapService {
           beforeActivate: async () => {
             // Attachments become project files FIRST: a reference that lives only in the
             // conversation is gone the moment the context is compacted (design §5.7).
-            references = await this.persistAttachments(attachments, notes);
-            await this.writeIdeaDocs(title, request.prompt, request, references, notes);
+            references = await ideaTimeline.phase('persistAttachments', () =>
+              this.persistAttachments(attachments, notes)
+            );
+            await ideaTimeline.phase('writeIdeaDocs', () =>
+              this.writeIdeaDocs(title, request.prompt, request, references, notes)
+            );
           },
         }
       );
+
+      // The new project is open: from here a design document on screen is THIS project's, so the
+      // stopwatch may be stopped by it (see armCompletion for the trap this closes).
+      ideaTimeline.armCompletion();
 
       // A project born in Flow reopens in Flow after a reload.
       this.workspaceMode.remember('flow');

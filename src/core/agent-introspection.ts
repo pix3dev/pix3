@@ -105,6 +105,12 @@ export interface NodeDTO {
   childCount?: number;
   /** Present only on single-node inspection (`node(id)`). */
   components?: ComponentDTO[];
+  /**
+   * Authored component types the scene file still carries but that could not be instantiated —
+   * their script class is not registered (not compiled yet, or it failed to compile). They are
+   * preserved on save and attach by themselves once the type appears.
+   */
+  pendingComponents?: string[];
 }
 
 export interface NodeSummary {
@@ -144,6 +150,14 @@ export function nodeToDTO(node: NodeBase, depth: number): NodeDTO {
     componentCount: node.components.length,
     properties: safeSerialize(node.properties, 2),
   };
+  // Surface parked components: a model that cannot see them re-attaches a component the scene
+  // already has (measured in Flow eval runs) or concludes the engine dropped its script.
+  // Optional-guarded because this also runs against nodes from a consumer project's own (possibly
+  // older) @pix3/runtime copy, where the field does not exist.
+  const pending = node.pendingComponents ?? [];
+  if (pending.length > 0) {
+    dto.pendingComponents = pending.map(def => def.type);
+  }
   if (childNodes.length === 0) return dto;
   if (depth > 0) {
     dto.children = childNodes.map(child => nodeToDTO(child, depth - 1));

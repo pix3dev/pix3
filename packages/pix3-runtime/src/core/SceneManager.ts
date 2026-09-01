@@ -40,6 +40,22 @@ export class SceneManager {
     return await this.sceneLoader.instantiatePrefab(instancePath, instanceId);
   }
 
+  /**
+   * Attach every component that could not be instantiated when its scene loaded because the script
+   * type was not registered yet. The editor calls this after project scripts compile — that is the
+   * moment `user:*` types appear, and before this existed the scene had already dropped them (and
+   * the next save wrote the loss to disk).
+   *
+   * @returns how many components were attached across all open scenes.
+   */
+  resolvePendingComponents(): number {
+    let attached = 0;
+    for (const graph of this.sceneGraphs.values()) {
+      attached += this.sceneLoader.resolvePendingComponents(graph.rootNodes);
+    }
+    return attached;
+  }
+
   async parseScene(sceneText: string, options: ParseSceneOptions = {}): Promise<SceneGraph> {
     return await this.sceneLoader.parseScene(sceneText, options);
   }

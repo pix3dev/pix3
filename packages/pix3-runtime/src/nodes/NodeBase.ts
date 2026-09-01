@@ -1,5 +1,6 @@
 import { Object3D, type BufferGeometry, type Material } from 'three';
 import type { PropertySchema } from '../fw/property-schema';
+import type { ComponentDefinition } from '../core/component-hydration';
 import type { ScriptComponent } from '../core/ScriptComponent';
 import type { SceneService } from '../core/SceneService';
 import { describeThrown, reportScriptError, type ScriptErrorPhase } from '../core/game-debug';
@@ -36,6 +37,13 @@ export class NodeBase extends Object3D {
   isContainer: boolean = true;
   /** Script components attached to this node */
   readonly components: ScriptComponent[] = [];
+  /**
+   * Authored components whose script type was not registered when this node was built — parked
+   * here instead of dropped, so a later save cannot delete them from the scene file and
+   * `resolvePendingComponents` can attach them once the type appears. See
+   * `core/component-hydration.ts`.
+   */
+  readonly pendingComponents: ComponentDefinition[] = [];
   /** Groups associated with this node */
   readonly groups: Set<string> = new Set();
   private readonly _signals: Map<string, Set<SignalConnection>> = new Map();

@@ -385,6 +385,61 @@ const STRINGLIKE_PROPERTY_TYPES = new Set(['string', 'color', 'enum', 'select', 
  * Tools that produce pixels (`viewport_screenshot`, `generate_asset`) return their images under
  * {@link AGENT_TOOL_IMAGES_KEY}; the chat loop turns those into real image blocks for the model.
  */
+const TEMPORARY_EDIT_ARG_DESCRIPTION =
+  'Mark this a DEBUG value that must not outlive the turn (e.g. cranking gravity to see a collision). The previous value is journalled and put back automatically when the turn ends — including when the turn is force-stopped at the iteration cap — so you never have to spend your last iterations undoing it. Use revert_temporary_edits to put everything back sooner.';
+
+/**
+ * Detach a schema value from the live scene before parking it in the journal: three.js vectors and
+ * colors are mutable references, so keeping one would "remember" whatever the debug write did to it.
+ */
+function snapshotPropertyValue(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  const vector = value as { x?: unknown; y?: unknown; z?: unknown; w?: unknown };
+  if (typeof vector.x === 'number' && typeof vector.y === 'number') {
+    return {
+      x: vector.x,
+      y: vector.y,
+      ...(typeof vector.z === 'number' ? { z: vector.z } : {}),
+      ...(typeof vector.w === 'number' ? { w: vector.w } : {}),
+    };
+  }
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
+}
+
+/** Shallow structural equality, enough to tell "already back at the original value" from "still debug". */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(key =>
+    Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])
+  );
+}
+
+/**
+ * One property the agent deliberately changed **for the duration of a turn only** — a debug value
+ * it intends to put back. See {@link AgentToolRegistry.revertTemporaryEdits}.
+ */
+interface TemporaryEdit {
+  /** `node` = a node property, `component` = one property of an attached component. */
+  readonly kind: 'node' | 'component';
+  readonly nodeId: string;
+  readonly componentId?: string;
+  readonly propertyPath: string;
+  /** The value that was in place BEFORE the first temporary write to this target. */
+  readonly previousValue: unknown;
+  /** Human-readable target, e.g. `player-controller.gravity`. */
+  readonly label: string;
+}
+
 @injectable()
 export class AgentToolRegistry {
   @inject(ProjectStorageService)
@@ -682,20 +737,26 @@ export class AgentToolRegistry {
       {
         name: 'set_property',
         description:
-          'Set a property on a node (undoable). While playing, hot-reloads onto the running scene.',
+          'Set a property on a node (undoable). While playing, hot-reloads onto the running scene. Pass `temporary: true` for a debug value you intend to put back.',
         inputSchema: {
           type: 'object',
           properties: {
             nodeId: { type: 'string' },
             propertyPath: { type: 'string' },
             value: {},
+            temporary: { type: 'boolean', description: TEMPORARY_EDIT_ARG_DESCRIPTION },
           },
           required: ['nodeId', 'propertyPath'],
           additionalProperties: false,
         },
         handler: async args => {
           await this.ensureActiveScene();
-          return this.setProperty(asString(args.nodeId), asString(args.propertyPath), args.value);
+          return this.setProperty(
+            asString(args.nodeId),
+            asString(args.propertyPath),
+            args.value,
+            args.temporary === true
+          );
         },
       },
       {
@@ -852,7 +913,7 @@ export class AgentToolRegistry {
       {
         name: 'set_component_property',
         description:
-          'Set one property on a component already attached to a node (undoable). Identify the component by the componentId from node_inspect or add_component.',
+          'Set one property on a component already attached to a node (undoable). Identify the component by the componentId from node_inspect or add_component. Pass `temporary: true` for a debug value you intend to put back.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -860,6 +921,7 @@ export class AgentToolRegistry {
             componentId: { type: 'string' },
             propertyName: { type: 'string' },
             value: {},
+            temporary: { type: 'boolean', description: TEMPORARY_EDIT_ARG_DESCRIPTION },
           },
           required: ['nodeId', 'componentId', 'propertyName'],
           additionalProperties: false,
@@ -870,8 +932,22 @@ export class AgentToolRegistry {
             asString(args.nodeId),
             asString(args.componentId),
             asString(args.propertyName),
-            args.value
+            args.value,
+            args.temporary === true
           );
+        },
+      },
+      {
+        name: 'revert_temporary_edits',
+        description:
+          'Put back every value written with `temporary: true` this turn and save. Call it as soon as a debug experiment is over. You do not have to: the same revert runs automatically when the turn ends, so a turn cut off at the iteration cap still ships clean values.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        handler: async () => {
+          const pending = this.listTemporaryEdits();
+          if (pending.length === 0) {
+            return { ok: true, reverted: [], note: 'No temporary edits are outstanding.' };
+          }
+          return { ok: true, ...(await this.revertTemporaryEdits()) };
         },
       },
       {
@@ -2220,8 +2296,9 @@ export class AgentToolRegistry {
   private async setProperty(
     nodeId: string,
     propertyPath: string,
-    value: unknown
-  ): Promise<{ ok: boolean; error?: string }> {
+    value: unknown,
+    temporary = false
+  ): Promise<{ ok: boolean; error?: string; temporaryNote?: string }> {
     // Guard the value SHAPE before dispatch. The schema setters assume an exact shape (a vector2
     // wants {x,y}); a wrong shape like the array [x,y] slips straight through as a silent no-op,
     // which misleads models into concluding "the engine ignores this property" (observed in eval:
@@ -2230,12 +2307,22 @@ export class AgentToolRegistry {
     if ('error' in coerced) {
       return { ok: false, error: coerced.error };
     }
+    // Journal BEFORE the write — after it the original value is gone.
+    if (temporary) {
+      this.recordTemporaryNodeEdit(nodeId, propertyPath);
+    }
     const ok = await this.dispatcher.execute(
       new UpdateObjectPropertyCommand({ nodeId, propertyPath, value: coerced.value })
     );
     if (ok) {
       await this.saveActiveSceneBestEffort();
-      return { ok };
+      return temporary
+        ? {
+            ok,
+            temporaryNote:
+              'Journalled as temporary — it is put back automatically when this turn ends, even if the turn is force-stopped.',
+          }
+        : { ok };
     }
     // A bare `{ok:false}` teaches the model nothing, so it guesses — measured: it retried the same
     // call, then went looking for a scene file to hand-edit. Say which of the two things went
@@ -2582,6 +2669,179 @@ export class AgentToolRegistry {
    * re-attach the same components turn after turn without understanding why. Best-effort: a failed
    * save must never fail the mutation that succeeded.
    */
+  /**
+   * Debug values the agent asked to hold only for this turn, oldest first. A turn that is cut off
+   * mid-task (the tool-iteration cap, an abort, a provider error) used to leave them on the scene:
+   * measured in the Flow eval, one capped turn shipped a game with `touch-rules.rules` and
+   * `player-controller.gravity` still at their debug values — the agent said so honestly and simply
+   * had no iterations left to undo them. So the undo cannot live in the model's remaining budget:
+   * {@link revertTemporaryEdits} is called by the chat service when the turn ends, whatever ended it.
+   */
+  private readonly temporaryEdits: TemporaryEdit[] = [];
+
+  /** Targets currently held at a temporary value, for the wrap-up notice. */
+  listTemporaryEdits(): string[] {
+    return this.temporaryEdits.map(edit => edit.label);
+  }
+
+  /**
+   * Put every temporary edit back, newest first, and save. Best-effort per entry: one target that
+   * can no longer be written (its node was deleted meanwhile) must not strand the rest. Entries
+   * that fail stay in the journal so the next turn's end tries again.
+   */
+  async revertTemporaryEdits(): Promise<{ reverted: string[]; failed: string[] }> {
+    const reverted: string[] = [];
+    const failed: string[] = [];
+    const pending = this.temporaryEdits.splice(0, this.temporaryEdits.length).reverse();
+    for (const edit of pending) {
+      try {
+        const ok =
+          edit.kind === 'node'
+            ? await this.dispatcher.execute(
+                new UpdateObjectPropertyCommand({
+                  nodeId: edit.nodeId,
+                  propertyPath: edit.propertyPath,
+                  value: edit.previousValue,
+                })
+              )
+            : await this.dispatcher.execute(
+                new UpdateComponentPropertyCommand({
+                  nodeId: edit.nodeId,
+                  componentId: edit.componentId ?? '',
+                  propertyName: edit.propertyPath,
+                  value: edit.previousValue,
+                })
+              );
+        if (ok) {
+          reverted.push(edit.label);
+          continue;
+        }
+        // A refused write is not automatically a failure: the command also reports `false` when the
+        // value is already what we are writing (the agent put it back itself) and when the target no
+        // longer exists (the node was deleted this turn). Neither needs a retry.
+        const current = this.readCurrentValue(edit);
+        if (current === undefined || valuesEqual(current, edit.previousValue)) {
+          continue;
+        }
+        failed.push(edit.label);
+        this.temporaryEdits.push(edit);
+      } catch (error) {
+        console.warn('[AgentToolRegistry] Reverting a temporary edit failed:', error);
+        failed.push(edit.label);
+        this.temporaryEdits.push(edit);
+      }
+    }
+    if (reverted.length > 0) {
+      await this.saveActiveSceneBestEffort();
+    }
+    return { reverted, failed };
+  }
+
+  /** Snapshot a node property before a temporary write. First value wins — it is the pre-turn one. */
+  private recordTemporaryNodeEdit(nodeId: string, propertyPath: string): void {
+    if (
+      this.temporaryEdits.some(
+        e => e.kind === 'node' && e.nodeId === nodeId && e.propertyPath === propertyPath
+      )
+    ) {
+      return;
+    }
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    if (!(node instanceof NodeBase)) {
+      return;
+    }
+    let propDef;
+    try {
+      propDef = getNodePropertySchema(node).properties.find(p => p.name === propertyPath);
+    } catch {
+      return;
+    }
+    if (!propDef) {
+      return;
+    }
+    this.temporaryEdits.push({
+      kind: 'node',
+      nodeId,
+      propertyPath,
+      previousValue: snapshotPropertyValue(propDef.getValue(node)),
+      label: `${node.name || nodeId}.${propertyPath}`,
+    });
+  }
+
+  /** Snapshot a component property before a temporary write. First value wins. */
+  private recordTemporaryComponentEdit(
+    nodeId: string,
+    componentId: string,
+    propertyName: string
+  ): void {
+    if (
+      this.temporaryEdits.some(
+        e =>
+          e.kind === 'component' &&
+          e.nodeId === nodeId &&
+          e.componentId === componentId &&
+          e.propertyPath === propertyName
+      )
+    ) {
+      return;
+    }
+    const component = this.findComponent(nodeId, componentId);
+    if (!component) {
+      return;
+    }
+    let propDef;
+    try {
+      propDef = this.scriptRegistry
+        .getComponentPropertySchema(component.type)
+        ?.properties.find(p => p.name === propertyName);
+    } catch {
+      return;
+    }
+    if (!propDef) {
+      return;
+    }
+    this.temporaryEdits.push({
+      kind: 'component',
+      nodeId,
+      componentId,
+      propertyPath: propertyName,
+      previousValue: snapshotPropertyValue(propDef.getValue(component)),
+      label: `${componentId}.${propertyName}`,
+    });
+  }
+
+  private findComponent(nodeId: string, componentId: string) {
+    const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(nodeId);
+    if (!(node instanceof NodeBase)) {
+      return null;
+    }
+    return node.components.find(component => component.id === componentId) ?? null;
+  }
+
+  /** Current value of an edit's target, or `undefined` when the target is gone. */
+  private readCurrentValue(edit: TemporaryEdit): unknown {
+    try {
+      if (edit.kind === 'component') {
+        const component = edit.componentId
+          ? this.findComponent(edit.nodeId, edit.componentId)
+          : null;
+        if (!component) return undefined;
+        const propDef = this.scriptRegistry
+          .getComponentPropertySchema(component.type)
+          ?.properties.find(p => p.name === edit.propertyPath);
+        return propDef ? snapshotPropertyValue(propDef.getValue(component)) : undefined;
+      }
+      const node = this.sceneManager.getActiveSceneGraph()?.nodeMap.get(edit.nodeId);
+      if (!(node instanceof NodeBase)) return undefined;
+      const propDef = getNodePropertySchema(node).properties.find(
+        p => p.name === edit.propertyPath
+      );
+      return propDef ? snapshotPropertyValue(propDef.getValue(node)) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async saveActiveSceneBestEffort(): Promise<void> {
     try {
       await this.dispatcher.execute(new SaveSceneCommand());
@@ -2621,7 +2881,7 @@ export class AgentToolRegistry {
 
   private async addComponent(
     args: Record<string, unknown>
-  ): Promise<{ ok: boolean; componentId?: string; error?: string }> {
+  ): Promise<{ ok: boolean; componentId?: string; error?: string; note?: string }> {
     const nodeId = asString(args.nodeId);
     const componentType = asString(args.componentType);
     if (!this.scriptRegistry.getComponentType(componentType)) {
@@ -2633,6 +2893,24 @@ export class AgentToolRegistry {
         ok: false,
         error: `Unknown component type "${componentType}". Call list_component_types first. Available: ${available || '(none registered)'}`,
       };
+    }
+    // A scene that opened before its project scripts compiled parks its `user:*` components
+    // instead of dropping them (see component-hydration). Attach anything that can attach now, so
+    // the model does not add a second copy of a component the scene already declares — that was
+    // the observed tax: the components looked gone, and every run re-attached them by hand.
+    const attachedPending = this.sceneManager.resolvePendingComponents();
+    if (attachedPending > 0) {
+      const existing = this.sceneManager
+        .getActiveSceneGraph()
+        ?.nodeMap.get(nodeId)
+        ?.components.find(component => component.type === componentType);
+      if (existing) {
+        return {
+          ok: true,
+          componentId: existing.id,
+          note: `"${componentType}" was already authored on this node — it was waiting for its script type to compile and is now attached. Nothing was added.`,
+        };
+      }
     }
     const config =
       args.config && typeof args.config === 'object' && !Array.isArray(args.config)
@@ -2660,8 +2938,13 @@ export class AgentToolRegistry {
     nodeId: string,
     componentId: string,
     propertyName: string,
-    value: unknown
-  ): Promise<{ ok: boolean; error?: string }> {
+    value: unknown,
+    temporary = false
+  ): Promise<{ ok: boolean; error?: string; temporaryNote?: string }> {
+    // Journal BEFORE the write — after it the original value is gone.
+    if (temporary) {
+      this.recordTemporaryComponentEdit(nodeId, componentId, propertyName);
+    }
     const ok = await this.dispatcher.execute(
       new UpdateComponentPropertyCommand({ nodeId, componentId, propertyName, value })
     );
@@ -2669,7 +2952,15 @@ export class AgentToolRegistry {
       await this.saveActiveSceneBestEffort();
     }
     return ok
-      ? { ok: true }
+      ? {
+          ok: true,
+          ...(temporary
+            ? {
+                temporaryNote:
+                  'Journalled as temporary — it is put back automatically when this turn ends, even if the turn is force-stopped.',
+              }
+            : {}),
+        }
       : {
           ok: false,
           error:

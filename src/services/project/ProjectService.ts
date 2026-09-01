@@ -35,6 +35,7 @@ import { CURRENT_EDITOR_VERSION } from '@/version';
 import type * as Y from 'yjs';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CollaborationService } from '@/services/collab/CollaborationService';
+import { ideaTimeline } from '@/services/flow/idea-timeline';
 
 const RECENTS_KEY = 'pix3.recentProjects:v1';
 const PROJECT_MANIFEST_PATH = 'pix3project.yaml';
@@ -698,7 +699,9 @@ export class ProjectService {
       let id: string;
       if (backend === 'browser') {
         id = this.createProjectSessionId();
-        handle = await this.browserStore.createProjectDirectory(id);
+        handle = await ideaTimeline.phase('createProjectDirectory', () =>
+          this.browserStore.createProjectDirectory(id)
+        );
         this.fs.setProjectDirectory(handle);
       } else {
         handle = await this.fs.requestProjectDirectory('readwrite');
@@ -796,24 +799,32 @@ export class ProjectService {
     ]);
 
     const ensuredDirectories = new Set<string>();
-    for (const dir of directories) {
-      await this.ensureDirectoryPath(dir, ensuredDirectories);
-    }
+    await ideaTimeline.phase('templateDirectories', async () => {
+      for (const dir of directories) {
+        await this.ensureDirectoryPath(dir, ensuredDirectories);
+      }
+    });
 
-    await this.saveProjectManifest(manifest);
+    await ideaTimeline.phase('saveManifest', () => this.saveProjectManifest(manifest));
 
     const projectName = name.trim() || 'Pix3 Project';
-    const templateTextFiles = await templateService.getTemplateTextFiles(template.id);
-    for (const [relativePath, contents] of templateTextFiles) {
-      if (isSkipped(relativePath)) {
-        continue;
+    // Split from the writes below on purpose: the template's text lives in lazily-imported chunks,
+    // so "reading" it can be a network round-trip in dev and a chunk load in production.
+    const templateTextFiles = await ideaTimeline.phase('readTemplateText', () =>
+      templateService.getTemplateTextFiles(template.id)
+    );
+    await ideaTimeline.phase('writeTemplateText', async () => {
+      for (const [relativePath, contents] of templateTextFiles) {
+        if (isSkipped(relativePath)) {
+          continue;
+        }
+        await this.ensureParentDirectories(relativePath, ensuredDirectories);
+        await this.storage.writeTextFile(
+          relativePath,
+          this.renderTemplateText(contents, projectName)
+        );
       }
-      await this.ensureParentDirectories(relativePath, ensuredDirectories);
-      await this.storage.writeTextFile(
-        relativePath,
-        this.renderTemplateText(contents, projectName)
-      );
-    }
+    });
 
     // Companion layer (design/, agent skills, template metadata): the project
     // must still open if any of this fails — the chosen folder is no longer
@@ -845,26 +856,34 @@ export class ProjectService {
       }
     }
 
-    for (const [relativePath, contents] of await templateService.getAgentOverlayFiles()) {
-      await writeCompanionFile(relativePath, this.renderTemplateText(contents, projectName));
-    }
+    // ~94 KB of engine reference docs ride in here, imported lazily — worth its own number.
+    const agentOverlayFiles = await ideaTimeline.phase('readAgentOverlay', () =>
+      templateService.getAgentOverlayFiles()
+    );
+    await ideaTimeline.phase('writeAgentOverlay', async () => {
+      for (const [relativePath, contents] of agentOverlayFiles) {
+        await writeCompanionFile(relativePath, this.renderTemplateText(contents, projectName));
+      }
+    });
 
-    for (const [relativePath, url] of template.binaryFiles) {
-      if (isSkipped(relativePath)) {
-        continue;
-      }
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+    await ideaTimeline.phase('writeTemplateBinaries', async () => {
+      for (const [relativePath, url] of template.binaryFiles) {
+        if (isSkipped(relativePath)) {
+          continue;
         }
-        await this.ensureParentDirectories(relativePath, ensuredDirectories);
-        await this.storage.writeBinaryFile(relativePath, await response.arrayBuffer());
-      } catch (error) {
-        companionWarnings.push(relativePath);
-        console.error(`[ProjectService] Failed to copy template asset "${relativePath}":`, error);
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          await this.ensureParentDirectories(relativePath, ensuredDirectories);
+          await this.storage.writeBinaryFile(relativePath, await response.arrayBuffer());
+        } catch (error) {
+          companionWarnings.push(relativePath);
+          console.error(`[ProjectService] Failed to copy template asset "${relativePath}":`, error);
+        }
       }
-    }
+    });
 
     await writeCompanionFile(
       '.pix3/template.json',
