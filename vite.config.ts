@@ -29,6 +29,15 @@ export default defineConfig(async ({ mode }) => {
 
   return {
     resolve: {
+      /**
+       * One three.js, not two — see the same note in `vitest.config.ts`.
+       *
+       * npm installs a second copy under `packages/pix3-runtime/node_modules/three` (the workspace
+       * declares `three` as both a peer and a dev dependency), and without this the editor's modules
+       * bundle the root copy while every runtime node bundles the nested one: ~500 KiB of duplicate
+       * three in the output, and an `instanceof` seam running right through the scene graph.
+       */
+      dedupe: ['three'],
       alias: {
         '@': resolve(__dirname, 'src'),
         '@/core': resolve(__dirname, 'src/core'),

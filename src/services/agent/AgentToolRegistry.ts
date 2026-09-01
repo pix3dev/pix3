@@ -2958,6 +2958,7 @@ export class AgentToolRegistry {
         totalLines: number;
         context?: { startLine: number; endLine: number; text: string };
         reloadedScene?: string;
+        note?: string;
       }
     | { ok: false; error: string }
   > {
@@ -2981,7 +2982,22 @@ export class AgentToolRegistry {
     } catch {
       return { ok: false, error: `File not found: ${safe}. Use fs_write to create it.` };
     }
-    const count = countOccurrences(content, oldString);
+    let count = countOccurrences(content, oldString);
+    // The anchor is only re-punctuated when it MISSED, so an exact match stays byte-for-byte and the
+    // ordinary LF path is untouched. See `toFileLineEndings` for why the miss happens at all.
+    let adaptedLineEndings = false;
+    if (count === 0) {
+      const adapted = toFileLineEndings(oldString, content);
+      if (adapted !== oldString) {
+        const adaptedCount = countOccurrences(content, adapted);
+        if (adaptedCount > 0) {
+          oldString = adapted;
+          newString = toFileLineEndings(newString, content);
+          count = adaptedCount;
+          adaptedLineEndings = true;
+        }
+      }
+    }
     if (count === 0) {
       return {
         ok: false,
@@ -3010,6 +3026,11 @@ export class AgentToolRegistry {
       totalLines: updated.split('\n').length,
       ...(context ? { context } : {}),
       ...(reloadedScene ? { reloadedScene } : {}),
+      ...(adaptedLineEndings
+        ? {
+            note: `This file uses CRLF line endings and your anchor used LF (or the reverse) — the anchor was matched, and the replacement written, with the file's own endings. Nothing to change on your side; the returned context is verbatim as always.`,
+          }
+        : {}),
     };
   }
 
@@ -4693,6 +4714,34 @@ const countOccurrences = (haystack: string, needle: string): number => {
     index = haystack.indexOf(needle, index + needle.length);
   }
   return count;
+};
+
+/**
+ * Re-punctuate `text` with the line endings `content` actually uses.
+ *
+ * A model writes `\n`. A file checked out on Windows (and every `.pix3scene` written by an editor
+ * running there) holds `\r\n`, so a multi-line anchor never matches and `str_replace` refuses the
+ * edit — measured live: the agent gave up on targeted edits and rewrote a whole `main.pix3scene`
+ * instead, which is exactly the blind full-file rewrite `str_replace` exists to prevent.
+ *
+ * The conversion runs both ways (an anchor copied out of a CRLF file into an LF file has the same
+ * problem mirrored) and is decided by the file, never by the anchor: whatever the file uses is what
+ * the replacement is written with, so a targeted edit can never leave a line ending behind that
+ * differs from the rest of the file.
+ */
+const toFileLineEndings = (text: string, content: string): string => {
+  if (!text.includes('\n')) {
+    return text;
+  }
+  const crlf = countOccurrences(content, '\r\n');
+  // A file with no newline at all (a one-line scene, a fresh script) has no convention to honour —
+  // leave the text as the caller wrote it rather than guessing.
+  const lf = countOccurrences(content, '\n');
+  if (lf === 0) {
+    return text;
+  }
+  const normalized = text.replace(/\r\n/g, '\n');
+  return crlf > lf - crlf ? normalized.replace(/\n/g, '\r\n') : normalized;
 };
 
 /**

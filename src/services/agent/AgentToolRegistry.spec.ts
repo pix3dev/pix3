@@ -1615,6 +1615,66 @@ describe('AgentToolRegistry', () => {
       expect(result.context).toBeUndefined();
     });
 
+    /**
+     * A model writes `\n`; a file checked out on Windows holds `\r\n`. Measured live (P3 of the
+     * vibe-vs-chat gap run): every multi-line anchor missed, and the agent fell back to rewriting a
+     * whole `main.pix3scene` — the blind full-file rewrite this tool exists to prevent.
+     */
+    it('str_replace matches a multi-line LF anchor against a CRLF file', async () => {
+      const storage = makeStorage();
+      storage.files.set(
+        'scenes/main.pix3scene',
+        'nodes:\r\n  - type: Sprite2D\r\n    name: Player\r\n    position: [0, 0]\r\n'
+      );
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('str_replace', {
+        path: 'scenes/main.pix3scene',
+        old_string: '    name: Player\n    position: [0, 0]',
+        new_string: '    name: Player\n    position: [0, 64]',
+      })) as Record<string, unknown>;
+
+      expect(result).toMatchObject({ ok: true, replacements: 1 });
+      // The replacement is written with the FILE's endings, so a targeted edit never leaves a lone
+      // LF behind in an otherwise-CRLF file.
+      expect(storage.files.get('scenes/main.pix3scene')).toBe(
+        'nodes:\r\n  - type: Sprite2D\r\n    name: Player\r\n    position: [0, 64]\r\n'
+      );
+      expect(String(result.note)).toMatch(/line endings/);
+    });
+
+    it('str_replace matches a CRLF anchor against an LF file', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/car.ts', 'const a = 1;\nconst b = 2;\n');
+      const registry = buildRegistry({ storage });
+
+      const result = await registry.execute('str_replace', {
+        path: 'scripts/car.ts',
+        old_string: 'const a = 1;\r\nconst b = 2;',
+        new_string: 'const a = 3;\r\nconst b = 4;',
+      });
+
+      expect(result).toMatchObject({ ok: true, replacements: 1 });
+      expect(storage.files.get('scripts/car.ts')).toBe('const a = 3;\nconst b = 4;\n');
+    });
+
+    /** The fallback is a rescue for a MISS, not a normalizer: an exact match stays byte-for-byte. */
+    it('str_replace leaves a mixed-ending file exactly as it found it on an exact match', async () => {
+      const storage = makeStorage();
+      storage.files.set('scripts/mixed.ts', 'a = 1;\r\nb = 2;\nc = 3;\r\n');
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('str_replace', {
+        path: 'scripts/mixed.ts',
+        old_string: 'b = 2;',
+        new_string: 'b = 9;',
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(result.note).toBeUndefined();
+      expect(storage.files.get('scripts/mixed.ts')).toBe('a = 1;\r\nb = 9;\nc = 3;\r\n');
+    });
+
     it('str_replace refuses (no write) when old_string is not found', async () => {
       const storage = makeStorage();
       const registry = buildRegistry({ storage });

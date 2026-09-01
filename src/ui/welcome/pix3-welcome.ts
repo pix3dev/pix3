@@ -760,7 +760,6 @@ export class Pix3Welcome extends ComponentBase {
               <span>${status.error ?? status.message}</span>
             </div>`
           : null}
-
         ${this.renderRecipeCards()}
       </section>
     `;

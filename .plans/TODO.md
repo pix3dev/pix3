@@ -6,7 +6,8 @@
 **Статусы перепроверены по исходникам:** commit `1afac13`, 2026-08-01; выборочно — 2026-08-28
 (инертная нода, `InstancedMesh3D`-материал, FPS-поле Sprite Editor: закрыты; фаза 2
 [done/flow-blank-recipe-and-current-scene-play.md](done/flow-blank-recipe-and-current-scene-play.md)
-закрыта целиком).
+закрыта целиком); 2026-09-01 — «camera/light target-гизмо» (статус был просрочен, гизмо таскаются)
+и `str_replace` на CRLF (починен).
 
 ## all
 
@@ -69,8 +70,12 @@
   остановлены на 60 итерациях; один (P3) оставил игру в сломанном отладочном состоянии —
   `touch-rules.rules` и `player-controller.gravity` с отладочными значениями, о чём агент честно
   написал, но откатить не успел. Как минимум: откат отладочных правок должен переживать обрыв_
-- [ ] **`str_replace` ломается на файлах с CRLF** (Сложность: S) — _многострочные совпадения не
-  находятся; в P3 агент был вынужден переписать `main.pix3scene` целиком вместо точечных правок_
+- [x] **`str_replace` ломается на файлах с CRLF** (Сложность: S) — _закрыто 2026-09-01: анкер
+  переразмечается переводами строк **самого файла** (`toFileLineEndings`), и только после промаха —
+  точное совпадение остаётся байт-в-байт, файл со смешанными концовками не нормализуется. Замена
+  пишется концовками файла, так что точечная правка не оставляет одинокий LF в CRLF-файле; в ответе
+  появляется `note`, объясняющая, что произошло. Работает в обе стороны (LF-анкер в CRLF-файле и
+  наоборот), три теста в `AgentToolRegistry.spec.ts`_
 - [ ] **перекрывающиеся контролы ловят один физический тап оба** (Сложность: M) — _у движка нет
   глобального пикинг-прохода (это записано в описании `game_controls`). Практическое следствие,
   найденное живьём: в P1 победный тап зажигает и монету, и появившуюся под пальцем кнопку RETRY,
@@ -101,8 +106,9 @@
 - [x] improve UX of controls on Object inspector (dragging numbers, compact) (Сложность: M) — _`pix3-number-field` (drag-to-scrub, Shift = точнее ×0.1, Ctrl = грубее ×10, клик = ввод текстом) теперь стоит на **всех** числовых полях инспектора: transform/vector/size/rotation, скалярные свойства нод и числовые поля компонентов-скриптов; сырых `<input type="number">` в панели не осталось. Компактный summary-layout сделан раньше_
 - [x] drag-to-scrub в FPS-поле Sprite Editor (Сложность: XS) — _перепроверено 2026-08-28 по исходникам: поле уже `pix3-number-field` (`sprite-timeline.ts` `renderClipTiming`, `@commit-change` → `controller.updateClipFps`, min 1 / max 240 / precision 0). Пункт висел просроченным. `sprite-editor-panel.ts` (custom max px при сохранении) — разовый ввод, скраб не нужен_
 - [x] allow to preview animations in assets panel (Сложность: M) — _`.pix3anim` получил `previewType: 'animation'`: карточка/строка показывают первый кадр и `клип · fps · кадры`, play/stop (и Space на выделенном) проигрывает клип с учётом loop/ping-pong и per-frame duration. Первый кадр грузится при скане папки, остальные — лениво по нажатию play (`requestAnimationFrames`); sheet-клипы кроп по UV-подпрямоугольнику_
-- [ ] better control of camera and light directions (Сложность: S) — _partial: target-гизмо рендерятся, но не таскаются_
+- [x] better control of camera and light directions (Сложность: S) — _статус был просрочен: перепроверено 2026-09-01 по исходникам, target-гизмо **таскаются** целиком. Цепочка: `ViewportPicking.raycastTargetSphere` → `setActiveTargetSelection` → в translate-режиме TransformControls аттачится к самой сфере, а не к ноде (`ViewportRenderService.attachTransformControlsForSelection`) → `updateTargetTransformFromControl` пишет `setTargetPosition` на каждом `objectChange` → `handleTransformCompleted` закрывает `TargetTransformOperation` (undo + `descriptor.isDirty`). `setTargetPosition` есть у Camera3D / DirectionalLightNode / SpotLightNode_
 - [ ] remove game tab and keep only popup window mode (Сложность: S) — _partial: живут оба хоста_
+- [ ] инспектор свойств во Vibe (Сложность: M) — _единственный незакрытый пункт [done/vibe-scene-view.md](done/vibe-scene-view.md): в Scene-виде объект выбирается и таскается гизмо, но значение ввести нельзя — ни инспектора, ни дерева. Правки уже персистятся (write-back в `pix3-flow-scene-view.ts`), так что не хватает ровно поверхности ввода_
 - [x] add color picker for color values in Object inspector (Сложность: M)
 - [x] make a node picker for properties with node type (Сложность: M)
 - [x] allow to preview glb models from asset browser (Сложность: M)

@@ -69,7 +69,7 @@ netstat -ano | grep LISTENING | grep -E ":8123|:8484"   # 8123 = vite, 8484 = ag
 
 Always check the command line first (`Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"`): both are plain `node.exe`, and this machine usually has several unrelated ones.
 
-Note: `vitest.config.ts` runs every `*.spec.ts` under `src/` and `packages/pix3-runtime/src/` — there is no exclude list. (An older exclude block named three specs that no longer exist and has been removed.)
+Note: `vitest.config.ts` runs every `*.spec.ts` under `src/`, `packages/pix3-runtime/src/` and `packages/pix3-collab-server/src/` — there is no exclude list. (An older exclude block named three specs that no longer exist and has been removed.) The collab-server specs opt out of happy-dom per file with `// @vitest-environment node`, and they need `better-sqlite3`'s native binding built for the local Node — if a whole batch of them fails at `new Database(...)` with "Could not locate the bindings file", run `npm rebuild better-sqlite3` rather than reading it as a code regression.
 
 ## Repository topology
 
@@ -88,6 +88,8 @@ After changing `pix3-runtime`, publish to consumers with `cd packages/pix3-runti
 ### Path aliases (use these, never deep relative paths)
 
 `@/` → `src/`, plus `@/core`, `@/services`, `@/state`, `@/fw`. And `@pix3/runtime` → `packages/pix3-runtime/src`. Defined in `tsconfig.json`, `vite.config.ts`, and `vitest.config.ts` — keep all three in sync when adding an alias.
+
+**`three` must be deduped, and both configs say so.** `packages/pix3-runtime` declares `three` as *both* a peer and a dev dependency, so npm installs a second copy under `packages/pix3-runtime/node_modules/three` — same version, different module identity. Without `resolve.dedupe: ['three']` (present in `vite.config.ts` and `vitest.config.ts`) the editor's own modules resolve the root copy while every runtime node resolves the nested one, and **`instanceof` stops working across the seam**: `material instanceof THREE.MeshLambertMaterial` was false for a material the runtime had just built, and `play_status` counted zero visible meshes in a scene with two. In a build it would also mean ~500 KiB of duplicate three in the output. If a `three`-related `instanceof` ever reads as impossible, check for a nested install first (`ls packages/*/node_modules/three`).
 
 ## Architecture essentials
 

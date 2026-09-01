@@ -45,19 +45,37 @@ pix3-flow-scene-view .flow-scene__strip svg {
 }
 
 pix3-flow-scene-view .flow-scene__strip-text {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The write-back receipt. Muted while in flight, accent-free when done: it reports, it does not
+   ask for attention — and it is absent from the DOM the rest of the time, so the strip does not
+   reserve a gap for a label that is usually not there. */
+pix3-flow-scene-view .flow-scene__save {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--fg-3);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+pix3-flow-scene-view .flow-scene__save[data-state='saved'] {
+  color: var(--fg-2);
+}
+
 /* The one control the prototyping loop always needs, in the one view where the stage's own
-   Play/Restart bar is hidden. Pushed to the far end so the strip reads name-first. */
+   Play/Restart bar is hidden. Last in the strip so it reads name-first; the name column takes the
+   slack (`flex: 1`) rather than an auto margin here, which would fight the save receipt for it. */
 pix3-flow-scene-view .flow-scene__play {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-inline-start: auto;
   /* Same metrics as `.flow-stage__button`: this button and the game bar's Play are the same control
      seen from two views, so switching views must not resize it under the cursor. */
   width: 26px;

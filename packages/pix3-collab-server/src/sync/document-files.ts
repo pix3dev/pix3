@@ -42,6 +42,27 @@ export function normalizeStoredScenePath(filePath: string): string {
   return normalized.endsWith('.pix3scene') ? normalized : `${normalized}.pix3scene`;
 }
 
+/**
+ * Whether a document-supplied scene path is an ABSOLUTE path, judged before normalization.
+ *
+ * Normalization strips leading separators as punctuation (`res:///scenes/x` is a legal way to write
+ * a project path), and on POSIX that quietly turns `/etc/passwd.pix3scene` into a *contained*
+ * `etc/passwd.pix3scene` — no escape, but a scene silently RE-ROOTED into the project, which is the
+ * "relocated instead of skipped" behaviour this module refuses to do. Windows never showed it: an
+ * absolute path there carries a drive letter or a UNC prefix that survives the strip, so containment
+ * rejected it and the test for that passed on Windows and only there.
+ *
+ * A value carrying the `res://` scheme is exempt: the scheme already says "inside this project", so
+ * its leading slash is punctuation rather than a root. Both platforms' rules are checked regardless
+ * of the host, because the client that wrote the document is not necessarily on this one.
+ */
+function isAbsoluteRequest(filePath: string): boolean {
+  if (/^res:\/\//i.test(filePath)) {
+    return false;
+  }
+  return path.posix.isAbsolute(filePath) || path.win32.isAbsolute(filePath);
+}
+
 export function deriveSceneId(resourcePath: string): string {
   const withoutExtension = resourcePath.replace(/\.[^./]+$/i, '');
   const normalized = withoutExtension
@@ -143,7 +164,9 @@ export function persistDocumentToDisk(projectDir: string, document: Y.Doc): Pers
       typeof filePathValue === 'string' && filePathValue.trim()
         ? filePathValue
         : `${sceneId}.pix3scene`;
-    const fullPath = resolveContainedPath(projectDir, normalizeStoredScenePath(requestedPath));
+    const fullPath = isAbsoluteRequest(requestedPath)
+      ? null
+      : resolveContainedPath(projectDir, normalizeStoredScenePath(requestedPath));
     if (fullPath === null) {
       rejected.push({ kind: 'scene', requestedPath });
       continue;

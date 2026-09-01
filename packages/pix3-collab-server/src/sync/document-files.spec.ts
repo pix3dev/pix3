@@ -90,6 +90,22 @@ describe('persistDocumentToDisk — containment', () => {
 
     expect(result.rejected).toHaveLength(1);
     expect(fs.existsSync(absolute)).toBe(false);
+    // And not re-rooted either. Normalization strips leading separators as punctuation, so on POSIX
+    // `/tmp/…/absolute.pix3scene` used to land INSIDE the project as `tmp/…/absolute.pix3scene`:
+    // contained, but silently relocated — the one thing this module promises never to do. Windows hid
+    // it, because a drive letter survives the strip and containment rejected the path there.
+    expect(walk(projectDir)).toEqual([]);
+  });
+
+  /** The other half of that rule: a leading slash AFTER `res://` is punctuation, not a root. */
+  it('accepts a res:// path written with a leading slash', () => {
+    const doc = docWithScene('menu', 'res:///scenes/menu.pix3scene', 'version: 1');
+
+    const result = persistDocumentToDisk(projectDir, doc);
+
+    expect(result.rejected).toEqual([]);
+    expect(result.scenesWritten).toBe(1);
+    expect(walk(projectDir)).toEqual(['projects/project-1/scenes/menu.pix3scene']);
   });
 
   it('refuses a script key that climbs out of the scripts directory', () => {

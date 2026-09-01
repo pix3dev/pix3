@@ -1,11 +1,13 @@
-import type { PropertyValues } from 'lit';
+import { nothing, type PropertyValues } from 'lit';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
 import { AgentChatService } from '@/services/agent/AgentChatService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { OperationService } from '@/services/core/OperationService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { SaveSceneOperation } from '@/features/scene/SaveSceneOperation';
 import { SceneManager } from '@pix3/runtime';
 import '@/ui/viewport/editor-tab';
 import './pix3-flow-scene-view.ts.css';
@@ -18,6 +20,18 @@ const SELECTION_SLOT_KEY = 'vibe-selection';
 
 /** How many nodes the strip and the chip name before falling back to "+N more". */
 const SELECTION_LIST_LIMIT = 4;
+
+/**
+ * How long an edit made here sits in memory before it is written back to the `.pix3scene`.
+ *
+ * Short on purpose. The dirty flag is raised on gizmo mouse-UP (not per frame of a drag), so this is
+ * a settling delay for a burst of edits rather than a throttle for a stream — and every extra
+ * hundred milliseconds is time in which a reload or a Download HTML would ship the stale file.
+ */
+export const AUTOSAVE_DEBOUNCE_MS = 1200;
+
+/** How long the strip keeps saying "Saved" after a write lands. */
+export const SAVED_RECEIPT_MS = 2000;
 
 /**
  * Vibe's third stage view: the edit-mode viewport.
@@ -36,6 +50,10 @@ const SELECTION_LIST_LIMIT = 4;
  *  - **Selection reaches the agent for free.** `AgentChatService.buildSystemPrompt` already puts
  *    `appState.selection.nodeIds` into the live project-context block, so no plumbing is added here.
  *    The composer chip exists only so the user can SEE that the agent knows.
+ *  - **Nothing else here saves.** Vibe has no Ctrl+S, no tab and no dirty marker, and Download HTML
+ *    builds from the FILES — so an edit made with the gizmo lives only in memory and dies on the next
+ *    reload. The agent saves after its own mutations; a person editing here had nobody, which is why
+ *    this view carries the debounced write-back (see `armSceneSave`).
  */
 @customElement('pix3-flow-scene-view')
 export class Pix3FlowSceneView extends ComponentBase {
@@ -54,6 +72,9 @@ export class Pix3FlowSceneView extends ComponentBase {
   @inject(CommandDispatcher)
   private readonly commandDispatcher!: CommandDispatcher;
 
+  @inject(OperationService)
+  private readonly operations!: OperationService;
+
   /**
    * Whether this view is the stage on screen. The shell keeps it MOUNTED and merely hides it (same
    * rule as the idea document), so "visible" cannot be read from the DOM — it is handed down.
@@ -67,7 +88,17 @@ export class Pix3FlowSceneView extends ComponentBase {
   @state()
   private selectionExtra = 0;
 
+  /** What the strip says about the write-back: nothing, in flight, or "just landed". */
+  @state()
+  private saveState: 'idle' | 'saving' | 'saved' = 'idle';
+
   private disposeSelection?: () => void;
+  private disposeScenes?: () => void;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private savedReceiptTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveInFlight = false;
+  /** An edit that arrived while a write was in flight — the file has to be written again. */
+  private saveAgain = false;
   /**
    * Node ids the chip currently stands for, joined. `appState.selection` also carries the hovered
    * node, which changes on every pointer move — without this the composer would be re-raised
@@ -78,6 +109,7 @@ export class Pix3FlowSceneView extends ComponentBase {
   connectedCallback(): void {
     super.connectedCallback();
     this.disposeSelection = subscribe(appState.selection, () => this.syncSelection());
+    this.disposeScenes = subscribe(appState.scenes, () => this.onScenesChanged());
     this.syncSelection();
     this.syncVisibility();
   }
@@ -85,6 +117,14 @@ export class Pix3FlowSceneView extends ComponentBase {
   disconnectedCallback(): void {
     this.disposeSelection?.();
     this.disposeSelection = undefined;
+    this.disposeScenes?.();
+    this.disposeScenes = undefined;
+    // Leaving Vibe (or the whole shell unmounting) must not be the moment an edit is dropped.
+    this.flushSceneSave();
+    if (this.savedReceiptTimer !== null) {
+      clearTimeout(this.savedReceiptTimer);
+      this.savedReceiptTimer = null;
+    }
     this.retractSelectionChip();
     this.setVisible(false);
     super.disconnectedCallback();
@@ -93,6 +133,11 @@ export class Pix3FlowSceneView extends ComponentBase {
   protected updated(changed: PropertyValues): void {
     if (changed.has('active')) {
       this.syncVisibility();
+      if (!this.active) {
+        // The stage switching to Game is the hand-off: whatever is still pending goes out now, so a
+        // Download HTML or a reload from the other view cannot ship a file the user has moved past.
+        this.flushSceneSave();
+      }
     }
   }
 
@@ -110,6 +155,127 @@ export class Pix3FlowSceneView extends ComponentBase {
       // viewport would stay black until the 500 ms idle heartbeat happened to fire.
       this.viewportRenderer.requestRender();
     }
+  }
+
+  /**
+   * Arm the write-back whenever the active scene goes dirty.
+   *
+   * The trigger is the descriptor's own `isDirty`, not `appState.history`: a save clears the flag,
+   * so a cleared flag can never re-arm the timer, and the loop a history subscription would create
+   * (save → history entry → save) cannot happen. Only the VISIBLE view arms — the agent saves after
+   * its own mutations, and a hidden view arming as well would just race it for the same file.
+   */
+  private onScenesChanged(): void {
+    if (!this.isConnected || !this.active) {
+      return;
+    }
+    if (!this.dirtySceneId()) {
+      return;
+    }
+    this.armSceneSave();
+  }
+
+  /**
+   * The scene id that has unsaved edits and can actually be written, or null.
+   *
+   * The three refusals mirror `SaveSceneCommand.preconditions`, and the cloud one is the load-bearing
+   * one: a collab project synchronizes through Yjs, so writing its file from here would fight the
+   * sync instead of persisting anything.
+   */
+  private dirtySceneId(): string | null {
+    if (appState.project.status !== 'ready' || appState.project.backend === 'cloud') {
+      return null;
+    }
+    const sceneId = appState.scenes.activeSceneId;
+    if (!sceneId) {
+      return null;
+    }
+    const descriptor = appState.scenes.descriptors[sceneId];
+    if (!descriptor?.isDirty || !descriptor.filePath?.startsWith('res://')) {
+      return null;
+    }
+    return sceneId;
+  }
+
+  private armSceneSave(): void {
+    if (this.saveTimer !== null) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      void this.saveDirtyScene(true);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Write a pending edit out NOW, without waiting for the debounce.
+   *
+   * Announces nothing: a flush happens exactly when this view stops being on screen, so there is
+   * nobody to read a receipt — and writing one would be a reactive update raised from inside Lit's
+   * own update cycle (`updated`), which Lit rightly complains about.
+   */
+  private flushSceneSave(): void {
+    if (this.saveTimer === null) {
+      return;
+    }
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    void this.saveDirtyScene(false);
+  }
+
+  /**
+   * Write the dirty scene back to its file, best-effort.
+   *
+   * Deliberately `OperationService.invoke` and not `SaveSceneCommand`: the command pushes the save
+   * onto the undo stack, and Vibe has the ordinary Ctrl+Z. One entry per autosave would mean every
+   * gizmo edit costs TWO undos — the second one being a save that restores a dirty flag and nothing
+   * a user can see. The preconditions the command would have checked are in `dirtySceneId`.
+   */
+  private async saveDirtyScene(announce: boolean): Promise<void> {
+    if (this.saveInFlight) {
+      this.saveAgain = true;
+      return;
+    }
+    const sceneId = this.dirtySceneId();
+    if (!sceneId) {
+      return;
+    }
+    this.saveInFlight = true;
+    if (announce) {
+      this.saveState = 'saving';
+    }
+    try {
+      await this.operations.invoke(new SaveSceneOperation({ sceneId }));
+      if (announce) {
+        this.showSavedReceipt();
+      }
+    } catch (error) {
+      // A failed autosave is not worth a dialog over a prototyping session, but it must not read as
+      // a success either — the strip drops back to silence and the reason goes to the console.
+      console.warn('[Pix3FlowSceneView] Auto-save of the scene edit failed:', error);
+      if (announce) {
+        this.saveState = 'idle';
+      }
+    } finally {
+      this.saveInFlight = false;
+    }
+    if (this.saveAgain) {
+      this.saveAgain = false;
+      void this.saveDirtyScene(announce);
+    }
+  }
+
+  private showSavedReceipt(): void {
+    this.saveState = 'saved';
+    if (this.savedReceiptTimer !== null) {
+      clearTimeout(this.savedReceiptTimer);
+    }
+    this.savedReceiptTimer = setTimeout(() => {
+      this.savedReceiptTimer = null;
+      if (this.saveState === 'saved') {
+        this.saveState = 'idle';
+      }
+    }, SAVED_RECEIPT_MS);
   }
 
   /**
@@ -188,6 +354,7 @@ export class Pix3FlowSceneView extends ComponentBase {
             ? `${names}${extra}`
             : 'Click an object to select it — the chat sees your selection.'}</span
         >
+        ${this.renderSaveState()}
         <button
           class="flow-scene__play"
           type="button"
@@ -198,6 +365,26 @@ export class Pix3FlowSceneView extends ComponentBase {
           ${this.icons.getIcon('play', IconSize.SMALL)}
         </button>
       </div>
+    `;
+  }
+
+  /**
+   * The receipt for the write-back.
+   *
+   * Small, and only while it says something: the save is automatic, so the question this answers is
+   * not "did I save" but "is my change in the file yet" — asked exactly once, right after an edit,
+   * by a user who is about to hit Download HTML.
+   */
+  private renderSaveState() {
+    if (this.saveState === 'idle') {
+      return nothing;
+    }
+    const saving = this.saveState === 'saving';
+    return html`
+      <span class="flow-scene__save" data-state=${this.saveState}>
+        ${this.icons.getIcon(saving ? 'save' : 'check', IconSize.SMALL)}
+        <span>${saving ? 'Saving…' : 'Saved'}</span>
+      </span>
     `;
   }
 

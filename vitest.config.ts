@@ -22,6 +22,17 @@ export default defineConfig({
     maxWorkers: 4,
   },
   resolve: {
+    /**
+     * One three.js, not two.
+     *
+     * `packages/pix3-runtime` declares `three` as BOTH a peer and a dev dependency, and npm answers
+     * that by installing a second copy under `packages/pix3-runtime/node_modules/three` — same
+     * version, different module identity. The editor's own modules then resolve the root copy while
+     * every runtime node resolves the nested one, so `mesh instanceof THREE.Mesh` is false across
+     * the seam: five specs failed with "expected MeshLambertMaterial to be an instance of
+     * MeshLambertMaterial", and `play_status` counted zero visible meshes in a scene that had two.
+     */
+    dedupe: ['three'],
     alias: {
       '@': resolve(__dirname, 'src'),
       '@/components': resolve(__dirname, 'src/components'),
