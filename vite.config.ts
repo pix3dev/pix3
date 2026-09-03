@@ -136,8 +136,10 @@ export default defineConfig(async ({ mode }) => {
           maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
           // The editor app shell handles its own routing; API/collab traffic must not be cached.
           // player.html carries session query params, so navigation to it must
-          // not fall back to the editor shell.
-          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/tripo-proxy/, /^\/tripo-download/, /^\/player\.html/],
+          // not fall back to the editor shell. `/tools/*` are the standalone tool pages
+          // (UI Kit Forge): real HTML files, precached, and the `#uikit` route frames the same
+          // URL — the navigation route would otherwise hand back the editor shell instead.
+          navigateFallbackDenylist: [/^\/api\//, /^\/collaboration/, /^\/preview/, /^\/openai-proxy/, /^\/zen-proxy/, /^\/cerebras-proxy/, /^\/tripo-proxy/, /^\/tripo-download/, /^\/player\.html/, /^\/tools\//],
         },
       }),
       ...analyzePlugins,

@@ -7,6 +7,7 @@ import { ProjectService } from '@/services/project/ProjectService';
 import { CollabJoinService } from '@/services/collab/CollabJoinService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { isToolRouteHash } from '@/core/tool-routes';
 
 @injectable()
 export class RouterService {
@@ -83,6 +84,9 @@ export class RouterService {
     // being on screen instead, or a Flow session would never get its project into the URL.
     const shellReady = appState.ui.workspaceMode === 'flow' || appState.ui.isLayoutReady;
     if (!shellReady || appState.project.status !== 'ready') return;
+    // A standalone tool owns the URL while it is on screen: rewriting the hash back to `#editor`
+    // here would yank the user out of the tool on the next scene or selection change.
+    if (isToolRouteHash(window.location.hash)) return;
 
     this.isUpdatingUrl = true;
     try {

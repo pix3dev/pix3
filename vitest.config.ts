@@ -4,6 +4,15 @@ import { resolve } from 'path';
 export default defineConfig({
   test: {
     environment: 'happy-dom',
+    // happy-dom fetches an iframe's `src` for real, over the network, the moment one is attached
+    // to the document. Nothing under test wants a loaded frame — a spec that renders one cares
+    // about the element — and the request only fails noisily against a host the runner never
+    // serves, so child-frame navigation is off for every spec rather than per file. Note the
+    // non-deprecated spelling: the older `disableIframePageLoading` throws a DOMException into
+    // stderr instead of quietly leaving the frame empty.
+    environmentOptions: {
+      happyDOM: { settings: { navigation: { disableChildFrameNavigation: true } } },
+    },
     // Repairs the ambient `localStorage` when the Node build hands us an unusable one — see the
     // file for why this is global setup and not a per-spec stub.
     setupFiles: ['./vitest.setup.ts'],

@@ -2,6 +2,7 @@ import { ComponentBase, customElement, html, inject, state, subscribe } from '@/
 import './pix3-welcome.ts.css';
 import { ProjectService } from '@/services/project/ProjectService';
 import { IconService, IconSize } from '@/services/editor/IconService';
+import { UIKIT_FORGE_HASH } from '@/core/tool-routes';
 import { CloudProjectService } from '@/services/cloud/CloudProjectService';
 import { DialogService } from '@/services/editor/DialogService';
 import type { ApiProject } from '@/services/cloud/ApiClient';
@@ -308,6 +309,14 @@ export class Pix3Welcome extends ComponentBase {
   private onOpenAiSettings = (): void => {
     // Reflect whatever the user changed in the dialog the moment it closes.
     void this.editorSettingsService.showSettings('agent').then(() => this.probeBridge());
+  };
+
+  /**
+   * UI Kit Forge needs no project, so the welcome screen is its natural entry point — a plain hash
+   * navigation, the same URL a bookmark or a shared link would carry.
+   */
+  private onOpenUiKitForge = (): void => {
+    window.location.hash = UIKIT_FORGE_HASH;
   };
 
   private onOpenEditorSettings = (): void => {
@@ -913,6 +922,16 @@ export class Pix3Welcome extends ComponentBase {
           @click=${this.onRecheckBridge}
         >
           ${this.iconService.getIcon('refresh-cw', IconSize.SMALL)}
+        </button>
+
+        <button
+          class="welcome-tool"
+          type="button"
+          title="UI Kit Forge — generate game UI sprites (no project needed)"
+          aria-label="Open UI Kit Forge"
+          @click=${this.onOpenUiKitForge}
+        >
+          ${this.iconService.getIcon('grid', IconSize.SMALL)}
         </button>
 
         <button

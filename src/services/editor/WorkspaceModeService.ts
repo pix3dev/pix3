@@ -1,6 +1,7 @@
 import { injectable } from '@/fw/di';
 import { appState } from '@/state';
 import type { WorkspaceMode } from '@/state/AppState';
+import { isToolRouteHash } from '@/core/tool-routes';
 
 /** Per-project workspace-mode memory, so a reload reopens the shell the user was last in. */
 const STORAGE_KEY = 'pix3.workspaceMode:v1';
@@ -147,6 +148,9 @@ export class WorkspaceModeService {
   private syncHash(mode: WorkspaceMode): void {
     if (typeof window === 'undefined') return;
     const hash = window.location.hash;
+    // Same reason as in `RouterService.syncStateToUrl`: a standalone tool route stays put until the
+    // user leaves it, even if a project finishes opening underneath.
+    if (isToolRouteHash(hash)) return;
     const query = hash.includes('?') ? `?${hash.split('?')[1]}` : '';
     const next = `${mode === 'flow' ? FLOW_HASH : '#editor'}${query}`;
     if (hash === next) return;

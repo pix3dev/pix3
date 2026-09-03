@@ -1,0 +1,73 @@
+/* Full-window tool route: covers the editor shell entirely rather than docking into the workspace,
+   because the tool brings its own two-pane layout and needs the whole viewport to be usable. */
+pix3-uikit-forge {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pix3-z-modal);
+  display: block;
+}
+
+pix3-uikit-forge .uikit-forge {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  block-size: 100%;
+  background: var(--bg-0);
+}
+
+pix3-uikit-forge .uikit-forge__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border-block-end: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: rgba(245, 247, 250, 0.9);
+}
+
+pix3-uikit-forge .uikit-forge__title {
+  flex: 1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+pix3-uikit-forge .uikit-forge__back,
+pix3-uikit-forge .uikit-forge__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.25rem;
+  background: rgba(10, 13, 15, 0.6);
+  color: rgba(245, 247, 250, 0.9);
+  font-size: 0.75rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+pix3-uikit-forge .uikit-forge__back:hover,
+pix3-uikit-forge .uikit-forge__link:hover {
+  border-color: rgba(var(--pix3-accent-rgb), 0.6);
+  color: var(--pix3-accent-color);
+}
+
+pix3-uikit-forge .uikit-forge__back:focus-visible,
+pix3-uikit-forge .uikit-forge__link:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-uikit-forge .uikit-forge__back svg,
+pix3-uikit-forge .uikit-forge__link svg {
+  display: block;
+  inline-size: 0.85rem;
+  block-size: 0.85rem;
+}
+
+pix3-uikit-forge .uikit-forge__frame {
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  display: block;
+}

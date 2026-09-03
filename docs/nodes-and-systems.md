@@ -253,6 +253,36 @@ Add a `PostProcess` node to enable an EffectComposer pass (bloom / vignette /
 chromatic aberration / AO modes). **Use:** drop one `PostProcess` node; configure
 its properties. Pure-2D scenes can opt 2D in via `affect2D`.
 
+### 2D UI kit generation (UI Kit Forge — editor authoring)
+Editor-side tool that generates a **coherent set of game-UI sprites** — buttons,
+hex/square icon buttons, toggles, checkboxes, radios, sliders, progress and
+segment bars, shields, level bars, resource counters, panels, tab bars — from one
+theme (hue / saturation / lightness shift, corner radius, bevel, outline, skew,
+gloss, gradient, drop shadow, font and text outline, dark tone — plus style
+presets and a randomizer). Everything is drawn as SVG in the browser, so output is
+resolution-independent; exports are per-component SVG/PNG, a bulk SVG dump into a
+picked folder, an HTML contact sheet, and a packed **atlas PNG +
+TexturePacker-style JSON hash** for other tools — Pix3 itself does not read that
+manifest (project textures are atlased automatically at play time by
+`TextureAtlasService`), so for a Pix3 project the per-sprite export is the one to
+take. **Every PNG export is rendered without its label text** (single component
+and atlas alike): the baked-in caption is preview only, and the string belongs to
+the engine at runtime — a `Button2D`/`UIControl2D` label over the skin, which is
+also what makes one sprite reusable across states and localizations. SVG exports
+and the HTML sheet keep the text. The theme round-trips as JSON (older themes
+carrying a single `shadowOff` are migrated to the `shadowDx`/`shadowDy` pair on
+paste), so a kit can be reproduced or handed on.
+**Use (editor):** Tools → UI Kit Forge, or the grid button on the welcome screen,
+or the URL directly — `<editor>/#uikit`. It needs **no open project**: a cold load
+of that hash lands straight in the tool, and it takes over the whole window rather
+than docking as a panel. Saving into a project is manual for now (export, then
+import the files) — nothing wires the output back into the asset tree yet.
+**Where it lives:** the tool is a self-contained page at
+`public/tools/uikit-forge.html`, reachable on its own at `/tools/uikit-forge.html`
+and embedded by the route as a same-origin iframe (`src/ui/tools/`); the route
+constants are `src/core/tool-routes.ts` and the menu entry is
+`OpenUiKitForgeCommand`.
+
 ### 3D model generation (Model Lab — editor authoring)
 Editor-side tool that reconstructs a hard-surface 3D model **procedurally by
 code** from a reference image (NOT neural image-to-mesh): vision assess → sculpt

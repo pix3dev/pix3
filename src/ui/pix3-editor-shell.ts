@@ -93,6 +93,8 @@ import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsC
 import { SwitchWorkspaceModeCommand } from '@/features/editor/SwitchWorkspaceModeCommand';
 import { OpenSpriteEditorCommand } from '@/features/editor/OpenSpriteEditorCommand';
 import { OpenModelLabCommand } from '@/features/editor/OpenModelLabCommand';
+import { OpenUiKitForgeCommand } from '@/features/editor/OpenUiKitForgeCommand';
+import { isUiKitForgeHash } from '@/core/tool-routes';
 import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
 import { OpenProjectHomeCommand } from '@/features/editor/OpenProjectHomeCommand';
 import { BakeAmbientOcclusionCommand } from '@/features/render/BakeAmbientOcclusionCommand';
@@ -160,6 +162,7 @@ import './collab/collab-participants-strip';
 import './collab/pix3-share-dialog';
 import './welcome/pix3-welcome';
 import './flow/pix3-flow-shell';
+import './tools/pix3-uikit-forge';
 import './auth/pix3-auth-screen';
 import './logs-view/logs-panel';
 import './profiler/profiler-panel';
@@ -439,6 +442,7 @@ export class Pix3EditorShell extends ComponentBase {
     const switchWorkspaceModeCommand = new SwitchWorkspaceModeCommand();
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
     const openModelLabCommand = new OpenModelLabCommand();
+    const openUiKitForgeCommand = new OpenUiKitForgeCommand();
     const openAgentChatCommand = new OpenAgentChatCommand();
     const openProjectHomeCommand = new OpenProjectHomeCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
@@ -498,6 +502,7 @@ export class Pix3EditorShell extends ComponentBase {
       switchWorkspaceModeCommand,
       openSpriteEditorCommand,
       openModelLabCommand,
+      openUiKitForgeCommand,
       openAgentChatCommand,
       openProjectHomeCommand,
       bakeAOCommand,
@@ -1211,7 +1216,7 @@ export class Pix3EditorShell extends ComponentBase {
         <!-- Shared by both shells: Vibe needs the same "is the bridge up / is a key set / what
              version am I on" readout Studio has, so the bar lives outside the Studio branch. -->
         <pix3-status-bar></pix3-status-bar>
-        ${this.renderWorkspaceOverlay()}
+        ${this.renderWorkspaceOverlay()} ${this.renderUiKitForge()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}
         ${this.renderScriptCreatorHost()} ${this.renderProjectSettingsHost()}
@@ -1340,7 +1345,25 @@ export class Pix3EditorShell extends ComponentBase {
     await this.projectLifecycleService.logout();
   };
 
+  /**
+   * UI Kit Forge sits above the whole shell rather than replacing it: an open project keeps its
+   * Golden Layout alive (the shell only ever builds it once — see `render()`), so the tool can be
+   * opened and closed mid-session without stranding the workspace in a detached tree.
+   */
+  private renderUiKitForge() {
+    if (!isUiKitForgeHash(this.currentHash)) {
+      return html``;
+    }
+    return html`<pix3-uikit-forge></pix3-uikit-forge>`;
+  }
+
   private renderWorkspaceOverlay() {
+    // The tool route covers the window on its own; rendering the welcome screen underneath would
+    // only mean an invisible cloud-project fetch on every cold `#uikit` load.
+    if (isUiKitForgeHash(this.currentHash)) {
+      return html``;
+    }
+
     if (appState.project.status === 'opening') {
       const progress = appState.project.openProgress;
       const progressValue =
